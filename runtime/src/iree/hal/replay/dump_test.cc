@@ -8,6 +8,7 @@
 
 #include <cstdint>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "iree/hal/api.h"
@@ -82,6 +83,216 @@ static iree_const_byte_span_t MakeReplayFileContents(
       reinterpret_cast<const iree_hal_replay_file_header_t*>(storage.data());
   return iree_make_const_byte_span(
       storage.data(), static_cast<iree_host_size_t>(file_header->file_length));
+}
+
+class ReplayFileBuilder {
+ public:
+  explicit ReplayFileBuilder(iree_host_size_t capacity)
+      : storage_(capacity, 0) {
+    iree_io_file_handle_t* file_handle = nullptr;
+    IREE_CHECK_OK(iree_io_file_handle_wrap_host_allocation(
+        IREE_IO_FILE_ACCESS_READ | IREE_IO_FILE_ACCESS_WRITE,
+        iree_make_byte_span(storage_.data(), storage_.size()),
+        iree_io_file_handle_release_callback_null(), iree_allocator_system(),
+        &file_handle));
+    IREE_CHECK_OK(iree_hal_replay_file_writer_create(
+        file_handle, iree_allocator_system(), &writer_));
+    iree_io_file_handle_release(file_handle);
+  }
+
+  ~ReplayFileBuilder() {
+    if (writer_) {
+      iree_hal_replay_file_writer_free(writer_);
+    }
+  }
+
+  void Append(const iree_hal_replay_file_record_metadata_t& metadata,
+              iree_host_size_t payload_count,
+              const iree_const_byte_span_t* payloads) {
+    IREE_CHECK_OK(iree_hal_replay_file_writer_append_record(
+        writer_, &metadata, payload_count, payloads, nullptr));
+  }
+
+  template <typename T>
+  void Append(const iree_hal_replay_file_record_metadata_t& metadata,
+              const T& payload) {
+    iree_const_byte_span_t payload_span =
+        iree_make_const_byte_span(&payload, sizeof(payload));
+    Append(metadata, 1, &payload_span);
+  }
+
+  std::vector<uint8_t> Finish() {
+    IREE_CHECK_OK(iree_hal_replay_file_writer_close(writer_));
+    iree_hal_replay_file_writer_free(writer_);
+    writer_ = nullptr;
+    return std::move(storage_);
+  }
+
+ private:
+  // Mutable file storage retained through writer closure.
+  std::vector<uint8_t> storage_;
+  // Replay writer targeting storage_.
+  iree_hal_replay_file_writer_t* writer_ = nullptr;
+};
+
+static iree_hal_replay_file_record_metadata_t MakeAtomicRecordMetadata(
+    uint64_t sequence_ordinal, iree_hal_replay_object_type_t object_type,
+    iree_hal_replay_payload_type_t payload_type,
+    iree_hal_replay_operation_code_t operation_code) {
+  iree_hal_replay_file_record_metadata_t metadata = {};
+  metadata.sequence_ordinal = sequence_ordinal;
+  metadata.record_type = IREE_HAL_REPLAY_FILE_RECORD_TYPE_OPERATION;
+  metadata.object_type = object_type;
+  metadata.object_id =
+      object_type == IREE_HAL_REPLAY_OBJECT_TYPE_DEVICE ? 200 : 100;
+  metadata.payload_type = payload_type;
+  metadata.operation_code = operation_code;
+  return metadata;
+}
+
+template <typename T>
+static void AppendQueueAtomicRecord(
+    ReplayFileBuilder* builder,
+    const iree_hal_replay_file_record_metadata_t& metadata, const T& payload,
+    const iree_hal_replay_semaphore_timepoint_payload_t& wait_timepoint,
+    const iree_hal_replay_semaphore_timepoint_payload_t& signal_timepoint) {
+  iree_const_byte_span_t payloads[] = {
+      iree_make_const_byte_span(&payload, sizeof(payload)),
+      iree_make_const_byte_span(&wait_timepoint, sizeof(wait_timepoint)),
+      iree_make_const_byte_span(&signal_timepoint, sizeof(signal_timepoint)),
+  };
+  builder->Append(metadata, IREE_ARRAYSIZE(payloads), payloads);
+}
+
+static std::vector<uint8_t> MakeAtomicReplayFileStorage() {
+  ReplayFileBuilder builder(/*capacity=*/16384);
+
+  iree_hal_replay_command_buffer_atomic_wait_payload_t command_wait = {};
+  command_wait.target_ref.buffer_id = 7;
+  command_wait.target_ref.offset = 8;
+  command_wait.target_ref.length = 8;
+  command_wait.source_stage_mask = IREE_HAL_EXECUTION_STAGE_DISPATCH;
+  command_wait.target_stage_mask = IREE_HAL_EXECUTION_STAGE_ATOMIC;
+  command_wait.params.value = 17;
+  command_wait.params.mask = 255;
+  command_wait.params.flags = IREE_HAL_ATOMIC_FLAGS_KNOWN;
+  command_wait.params.width = IREE_HAL_ATOMIC_WIDTH_64;
+  command_wait.params.condition = IREE_HAL_ATOMIC_WAIT_CONDITION_NOT_EQUAL;
+  builder.Append(MakeAtomicRecordMetadata(
+                     0, IREE_HAL_REPLAY_OBJECT_TYPE_COMMAND_BUFFER,
+                     IREE_HAL_REPLAY_PAYLOAD_TYPE_COMMAND_BUFFER_ATOMIC_WAIT,
+                     IREE_HAL_REPLAY_OPERATION_CODE_COMMAND_BUFFER_ATOMIC_WAIT),
+                 command_wait);
+
+  iree_hal_replay_command_buffer_atomic_store_payload_t command_store = {};
+  command_store.target_ref.offset = 16;
+  command_store.target_ref.length = 4;
+  command_store.target_ref.buffer_slot = 3;
+  command_store.source_stage_mask = IREE_HAL_EXECUTION_STAGE_ATOMIC;
+  command_store.target_stage_mask = IREE_HAL_EXECUTION_STAGE_DISPATCH;
+  command_store.params.value = 34;
+  command_store.params.flags = IREE_HAL_ATOMIC_FLAGS_KNOWN;
+  command_store.params.width = IREE_HAL_ATOMIC_WIDTH_32;
+  builder.Append(
+      MakeAtomicRecordMetadata(
+          1, IREE_HAL_REPLAY_OBJECT_TYPE_COMMAND_BUFFER,
+          IREE_HAL_REPLAY_PAYLOAD_TYPE_COMMAND_BUFFER_ATOMIC_STORE,
+          IREE_HAL_REPLAY_OPERATION_CODE_COMMAND_BUFFER_ATOMIC_STORE),
+      command_store);
+
+  iree_hal_replay_command_buffer_atomic_rmw_payload_t command_rmw = {};
+  command_rmw.target_ref.buffer_id = 8;
+  command_rmw.target_ref.offset = 24;
+  command_rmw.target_ref.length = 8;
+  command_rmw.source_stage_mask = IREE_HAL_EXECUTION_STAGE_DISPATCH;
+  command_rmw.target_stage_mask = IREE_HAL_EXECUTION_STAGE_ATOMIC;
+  command_rmw.params.operand = 51;
+  command_rmw.params.flags = IREE_HAL_ATOMIC_FLAGS_KNOWN;
+  command_rmw.params.width = IREE_HAL_ATOMIC_WIDTH_64;
+  command_rmw.params.operation = IREE_HAL_ATOMIC_RMW_OPERATION_XOR;
+  builder.Append(MakeAtomicRecordMetadata(
+                     2, IREE_HAL_REPLAY_OBJECT_TYPE_COMMAND_BUFFER,
+                     IREE_HAL_REPLAY_PAYLOAD_TYPE_COMMAND_BUFFER_ATOMIC_RMW,
+                     IREE_HAL_REPLAY_OPERATION_CODE_COMMAND_BUFFER_ATOMIC_RMW),
+                 command_rmw);
+
+  iree_hal_replay_device_queue_atomic_wait_payload_t queue_wait = {};
+  queue_wait.target_ref.buffer_id = 10;
+  queue_wait.target_ref.offset = 4;
+  queue_wait.target_ref.length = 4;
+  queue_wait.queue_affinity = 2;
+  queue_wait.wait_semaphore_count = 1;
+  queue_wait.signal_semaphore_count = 1;
+  queue_wait.params.value = 68;
+  queue_wait.params.mask = 255;
+  queue_wait.params.flags = IREE_HAL_ATOMIC_FLAGS_KNOWN;
+  queue_wait.params.width = IREE_HAL_ATOMIC_WIDTH_32;
+  queue_wait.params.condition =
+      IREE_HAL_ATOMIC_WAIT_CONDITION_UNSIGNED_GREATER_EQUAL;
+  iree_hal_replay_semaphore_timepoint_payload_t queue_wait_wait = {};
+  queue_wait_wait.semaphore_id = 41;
+  queue_wait_wait.value = 5;
+  iree_hal_replay_semaphore_timepoint_payload_t queue_wait_signal = {};
+  queue_wait_signal.semaphore_id = 51;
+  queue_wait_signal.value = 6;
+  AppendQueueAtomicRecord(
+      &builder,
+      MakeAtomicRecordMetadata(
+          3, IREE_HAL_REPLAY_OBJECT_TYPE_DEVICE,
+          IREE_HAL_REPLAY_PAYLOAD_TYPE_DEVICE_QUEUE_ATOMIC_WAIT,
+          IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_QUEUE_ATOMIC_WAIT),
+      queue_wait, queue_wait_wait, queue_wait_signal);
+
+  iree_hal_replay_device_queue_atomic_store_payload_t queue_store = {};
+  queue_store.target_ref.buffer_id = 11;
+  queue_store.target_ref.offset = 8;
+  queue_store.target_ref.length = 8;
+  queue_store.queue_affinity = 4;
+  queue_store.wait_semaphore_count = 1;
+  queue_store.signal_semaphore_count = 1;
+  queue_store.params.value = 85;
+  queue_store.params.flags = IREE_HAL_ATOMIC_FLAGS_KNOWN;
+  queue_store.params.width = IREE_HAL_ATOMIC_WIDTH_64;
+  iree_hal_replay_semaphore_timepoint_payload_t queue_store_wait = {};
+  queue_store_wait.semaphore_id = 42;
+  queue_store_wait.value = 7;
+  iree_hal_replay_semaphore_timepoint_payload_t queue_store_signal = {};
+  queue_store_signal.semaphore_id = 52;
+  queue_store_signal.value = 8;
+  AppendQueueAtomicRecord(
+      &builder,
+      MakeAtomicRecordMetadata(
+          4, IREE_HAL_REPLAY_OBJECT_TYPE_DEVICE,
+          IREE_HAL_REPLAY_PAYLOAD_TYPE_DEVICE_QUEUE_ATOMIC_STORE,
+          IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_QUEUE_ATOMIC_STORE),
+      queue_store, queue_store_wait, queue_store_signal);
+
+  iree_hal_replay_device_queue_atomic_rmw_payload_t queue_rmw = {};
+  queue_rmw.target_ref.buffer_id = 12;
+  queue_rmw.target_ref.offset = 16;
+  queue_rmw.target_ref.length = 8;
+  queue_rmw.queue_affinity = 8;
+  queue_rmw.wait_semaphore_count = 1;
+  queue_rmw.signal_semaphore_count = 1;
+  queue_rmw.params.operand = 102;
+  queue_rmw.params.flags = IREE_HAL_ATOMIC_FLAGS_KNOWN;
+  queue_rmw.params.width = IREE_HAL_ATOMIC_WIDTH_64;
+  queue_rmw.params.operation = IREE_HAL_ATOMIC_RMW_OPERATION_SUBTRACT;
+  iree_hal_replay_semaphore_timepoint_payload_t queue_rmw_wait = {};
+  queue_rmw_wait.semaphore_id = 43;
+  queue_rmw_wait.value = 9;
+  iree_hal_replay_semaphore_timepoint_payload_t queue_rmw_signal = {};
+  queue_rmw_signal.semaphore_id = 53;
+  queue_rmw_signal.value = 10;
+  AppendQueueAtomicRecord(
+      &builder,
+      MakeAtomicRecordMetadata(
+          5, IREE_HAL_REPLAY_OBJECT_TYPE_DEVICE,
+          IREE_HAL_REPLAY_PAYLOAD_TYPE_DEVICE_QUEUE_ATOMIC_RMW,
+          IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_QUEUE_ATOMIC_RMW),
+      queue_rmw, queue_rmw_wait, queue_rmw_signal);
+
+  return builder.Finish();
 }
 
 static std::vector<uint8_t> MakeScopeReplayFileStorage() {
@@ -943,6 +1154,153 @@ TEST(ReplayDumpTest, EmitsCommandBufferTransferRanges) {
               HasSubstr("\"payload_type\":\"command_buffer_update_buffer\""));
   EXPECT_THAT(json_output, HasSubstr("\"pattern_range\""));
   EXPECT_THAT(json_output, HasSubstr("\"data_range\""));
+}
+
+TEST(ReplayDumpTest, EmitsAtomicOperations) {
+  std::vector<uint8_t> storage = MakeAtomicReplayFileStorage();
+
+  iree_hal_replay_dump_options_t text_options =
+      iree_hal_replay_dump_options_default();
+  std::string text_output;
+  IREE_ASSERT_OK(DumpReplayToString(MakeReplayFileContents(storage),
+                                    &text_options, &text_output));
+  EXPECT_THAT(text_output, HasSubstr("payload=command_buffer_atomic_wait"));
+  EXPECT_THAT(text_output,
+              HasSubstr("value=0x0000000000000011 mask=0x00000000000000ff "
+                        "flags=0x00000007 width=64 condition=not_equal(1)"));
+  EXPECT_THAT(text_output, HasSubstr("payload=command_buffer_atomic_store"));
+  EXPECT_THAT(text_output,
+              HasSubstr("value=0x0000000000000022 flags=0x00000007 width=32"));
+  EXPECT_THAT(text_output,
+              HasSubstr("target_ref={buffer_id=0 offset=16 length=4 slot=3}"));
+  EXPECT_THAT(text_output, HasSubstr("payload=command_buffer_atomic_rmw"));
+  EXPECT_THAT(text_output,
+              HasSubstr("operand=0x0000000000000033 flags=0x00000007 width=64 "
+                        "operation=xor(4)"));
+  EXPECT_THAT(text_output, HasSubstr("payload=device_queue_atomic_wait"));
+  EXPECT_THAT(text_output,
+              HasSubstr("value=0x0000000000000044 mask=0x00000000000000ff "
+                        "flags=0x00000007 width=32 "
+                        "condition=unsigned_greater_equal(2)"));
+  EXPECT_THAT(text_output,
+              HasSubstr("wait_semaphores=[{semaphore_id=41 value=5}]"));
+  EXPECT_THAT(text_output,
+              HasSubstr("signal_semaphores=[{semaphore_id=51 value=6}]"));
+  EXPECT_THAT(text_output, HasSubstr("payload=device_queue_atomic_store"));
+  EXPECT_THAT(text_output,
+              HasSubstr("value=0x0000000000000055 flags=0x00000007 width=64"));
+  EXPECT_THAT(text_output, HasSubstr("payload=device_queue_atomic_rmw"));
+  EXPECT_THAT(text_output,
+              HasSubstr("operand=0x0000000000000066 flags=0x00000007 width=64 "
+                        "operation=subtract(1)"));
+  EXPECT_THAT(text_output,
+              HasSubstr("wait_semaphores=[{semaphore_id=43 value=9}]"));
+  EXPECT_THAT(text_output,
+              HasSubstr("signal_semaphores=[{semaphore_id=53 value=10}]"));
+
+  iree_hal_replay_dump_options_t json_options =
+      iree_hal_replay_dump_options_default();
+  json_options.format = IREE_HAL_REPLAY_DUMP_FORMAT_JSONL;
+  std::string json_output;
+  IREE_ASSERT_OK(DumpReplayToString(MakeReplayFileContents(storage),
+                                    &json_options, &json_output));
+  EXPECT_THAT(json_output,
+              HasSubstr("\"payload_type\":\"command_buffer_atomic_wait\""));
+  EXPECT_THAT(json_output,
+              HasSubstr("\"value\":17,\"mask\":255,\"flags\":7,\"width\":64,"));
+  EXPECT_THAT(json_output,
+              HasSubstr("\"condition\":1,\"condition_name\":\"not_equal\""));
+  EXPECT_THAT(json_output,
+              HasSubstr("\"payload_type\":\"command_buffer_atomic_store\""));
+  EXPECT_THAT(json_output,
+              HasSubstr("\"target_ref\":{\"buffer_id\":0,\"offset\":16,"
+                        "\"length\":4,\"buffer_slot\":3}"));
+  EXPECT_THAT(json_output,
+              HasSubstr("\"payload_type\":\"command_buffer_atomic_rmw\""));
+  EXPECT_THAT(json_output,
+              HasSubstr("\"operand\":51,\"flags\":7,\"width\":64,"
+                        "\"operation\":4,\"operation_name\":\"xor\""));
+  EXPECT_THAT(json_output,
+              HasSubstr("\"payload_type\":\"device_queue_atomic_wait\""));
+  EXPECT_THAT(json_output,
+              HasSubstr("\"queue_affinity\":2,\"wait_semaphore_count\":1,"
+                        "\"signal_semaphore_count\":1"));
+  EXPECT_THAT(json_output, HasSubstr("\"condition\":2,\"condition_name\":"
+                                     "\"unsigned_greater_equal\""));
+  EXPECT_THAT(json_output,
+              HasSubstr("\"wait_semaphores\":[{\"semaphore_id\":41,"
+                        "\"value\":5}]"));
+  EXPECT_THAT(json_output,
+              HasSubstr("\"signal_semaphores\":[{\"semaphore_id\":51,"
+                        "\"value\":6}]"));
+  EXPECT_THAT(json_output,
+              HasSubstr("\"payload_type\":\"device_queue_atomic_store\""));
+  EXPECT_THAT(json_output, HasSubstr("\"value\":85,\"flags\":7,\"width\":64"));
+  EXPECT_THAT(json_output,
+              HasSubstr("\"target_ref\":{\"buffer_id\":11,\"offset\":8,"
+                        "\"length\":8,\"buffer_slot\":0}"));
+  EXPECT_THAT(json_output,
+              HasSubstr("\"payload_type\":\"device_queue_atomic_rmw\""));
+  EXPECT_THAT(json_output,
+              HasSubstr("\"operand\":102,\"flags\":7,\"width\":64,"
+                        "\"operation\":1,\"operation_name\":\"subtract\""));
+  EXPECT_THAT(json_output, HasSubstr("\"wait_semaphores_range\""));
+  EXPECT_THAT(json_output, HasSubstr("\"signal_semaphores_range\""));
+}
+
+TEST(ReplayDumpTest, RejectsMalformedAtomicPayloadLayouts) {
+  ReplayFileBuilder command_builder(/*capacity=*/4096);
+  iree_hal_replay_command_buffer_atomic_store_payload_t command_payload = {};
+  const uint8_t extra_byte = 0;
+  iree_const_byte_span_t command_payloads[] = {
+      iree_make_const_byte_span(&command_payload, sizeof(command_payload)),
+      iree_make_const_byte_span(&extra_byte, sizeof(extra_byte)),
+  };
+  command_builder.Append(
+      MakeAtomicRecordMetadata(
+          0, IREE_HAL_REPLAY_OBJECT_TYPE_COMMAND_BUFFER,
+          IREE_HAL_REPLAY_PAYLOAD_TYPE_COMMAND_BUFFER_ATOMIC_STORE,
+          IREE_HAL_REPLAY_OPERATION_CODE_COMMAND_BUFFER_ATOMIC_STORE),
+      IREE_ARRAYSIZE(command_payloads), command_payloads);
+  std::vector<uint8_t> malformed_command_storage = command_builder.Finish();
+
+  iree_hal_replay_dump_options_t options =
+      iree_hal_replay_dump_options_default();
+  std::string output;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_DATA_LOSS,
+      DumpReplayToString(MakeReplayFileContents(malformed_command_storage),
+                         &options, &output));
+  options.format = IREE_HAL_REPLAY_DUMP_FORMAT_JSONL;
+  output.clear();
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_DATA_LOSS,
+      DumpReplayToString(MakeReplayFileContents(malformed_command_storage),
+                         &options, &output));
+
+  ReplayFileBuilder queue_builder(/*capacity=*/4096);
+  iree_hal_replay_device_queue_atomic_wait_payload_t queue_payload = {};
+  queue_payload.wait_semaphore_count = 1;
+  queue_builder.Append(
+      MakeAtomicRecordMetadata(
+          0, IREE_HAL_REPLAY_OBJECT_TYPE_DEVICE,
+          IREE_HAL_REPLAY_PAYLOAD_TYPE_DEVICE_QUEUE_ATOMIC_WAIT,
+          IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_QUEUE_ATOMIC_WAIT),
+      queue_payload);
+  std::vector<uint8_t> malformed_queue_storage = queue_builder.Finish();
+
+  options.format = IREE_HAL_REPLAY_DUMP_FORMAT_TEXT;
+  output.clear();
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_DATA_LOSS,
+      DumpReplayToString(MakeReplayFileContents(malformed_queue_storage),
+                         &options, &output));
+  options.format = IREE_HAL_REPLAY_DUMP_FORMAT_JSONL;
+  output.clear();
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_DATA_LOSS,
+      DumpReplayToString(MakeReplayFileContents(malformed_queue_storage),
+                         &options, &output));
 }
 
 }  // namespace

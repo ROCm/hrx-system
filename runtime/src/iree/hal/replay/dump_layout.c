@@ -64,6 +64,38 @@ const char* iree_hal_replay_dump_file_validation_type_string(
   }
 }
 
+const char* iree_hal_replay_dump_atomic_wait_condition_string(
+    iree_hal_atomic_wait_condition_t condition) {
+  switch (condition) {
+    case IREE_HAL_ATOMIC_WAIT_CONDITION_EQUAL:
+      return "equal";
+    case IREE_HAL_ATOMIC_WAIT_CONDITION_NOT_EQUAL:
+      return "not_equal";
+    case IREE_HAL_ATOMIC_WAIT_CONDITION_UNSIGNED_GREATER_EQUAL:
+      return "unsigned_greater_equal";
+    default:
+      return "unknown";
+  }
+}
+
+const char* iree_hal_replay_dump_atomic_rmw_operation_string(
+    iree_hal_atomic_rmw_operation_t operation) {
+  switch (operation) {
+    case IREE_HAL_ATOMIC_RMW_OPERATION_ADD:
+      return "add";
+    case IREE_HAL_ATOMIC_RMW_OPERATION_SUBTRACT:
+      return "subtract";
+    case IREE_HAL_ATOMIC_RMW_OPERATION_AND:
+      return "and";
+    case IREE_HAL_ATOMIC_RMW_OPERATION_OR:
+      return "or";
+    case IREE_HAL_ATOMIC_RMW_OPERATION_XOR:
+      return "xor";
+    default:
+      return "unknown";
+  }
+}
+
 iree_hal_replay_file_range_t iree_hal_replay_dump_payload_subrange(
     const iree_hal_replay_file_range_t* payload_range,
     iree_host_size_t payload_offset, iree_host_size_t payload_length) {
@@ -285,56 +317,12 @@ iree_status_t iree_hal_replay_dump_queue_execute_layout(
   return iree_ok_status();
 }
 
-iree_status_t iree_hal_replay_dump_queue_alloca_layout(
-    const iree_hal_replay_file_record_t* record,
-    const iree_hal_replay_device_queue_alloca_payload_t* payload,
-    iree_host_size_t* out_wait_payloads_offset,
-    iree_host_size_t* out_wait_payloads_size,
-    iree_host_size_t* out_signal_payloads_offset,
-    iree_host_size_t* out_signal_payloads_size) {
-  iree_host_size_t wait_payloads_size = 0;
-  iree_host_size_t signal_payloads_size = 0;
-  if (payload->wait_semaphore_count > IREE_HOST_SIZE_MAX ||
-      payload->signal_semaphore_count > IREE_HOST_SIZE_MAX ||
-      !iree_host_size_checked_mul(
-          (iree_host_size_t)payload->wait_semaphore_count,
-          sizeof(iree_hal_replay_semaphore_timepoint_payload_t),
-          &wait_payloads_size) ||
-      !iree_host_size_checked_mul(
-          (iree_host_size_t)payload->signal_semaphore_count,
-          sizeof(iree_hal_replay_semaphore_timepoint_payload_t),
-          &signal_payloads_size)) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "replay queue alloca payload count overflow");
-  }
-
-  iree_host_size_t offset = sizeof(*payload);
-  *out_wait_payloads_offset = offset;
-  *out_wait_payloads_size = wait_payloads_size;
-  if (!iree_host_size_checked_add(offset, wait_payloads_size, &offset)) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "replay queue alloca payload length overflow");
-  }
-  *out_signal_payloads_offset = offset;
-  *out_signal_payloads_size = signal_payloads_size;
-  if (!iree_host_size_checked_add(offset, signal_payloads_size, &offset) ||
-      offset != record->payload.data_length) {
-    return iree_make_status(IREE_STATUS_DATA_LOSS,
-                            "replay queue alloca payload length mismatch");
-  }
-  return iree_ok_status();
-}
-
 iree_status_t iree_hal_replay_dump_queue_payload_layout(
     const iree_hal_replay_file_record_t* record, iree_host_size_t header_size,
     uint64_t wait_semaphore_count, uint64_t signal_semaphore_count,
     uint64_t trailing_payload_length,
-    iree_host_size_t* out_wait_payloads_offset,
-    iree_host_size_t* out_wait_payloads_size,
-    iree_host_size_t* out_signal_payloads_offset,
-    iree_host_size_t* out_signal_payloads_size,
-    iree_host_size_t* out_trailing_payload_offset,
-    iree_host_size_t* out_trailing_payload_size) {
+    iree_hal_replay_dump_queue_payload_layout_t* out_layout) {
+  memset(out_layout, 0, sizeof(*out_layout));
   iree_host_size_t wait_payloads_size = 0;
   iree_host_size_t signal_payloads_size = 0;
   if (wait_semaphore_count > IREE_HOST_SIZE_MAX ||
@@ -349,24 +337,24 @@ iree_status_t iree_hal_replay_dump_queue_payload_layout(
           sizeof(iree_hal_replay_semaphore_timepoint_payload_t),
           &signal_payloads_size)) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "replay queue payload count overflow");
+                            "replay queue payload size overflow");
   }
 
   iree_host_size_t offset = header_size;
-  *out_wait_payloads_offset = offset;
-  *out_wait_payloads_size = wait_payloads_size;
+  out_layout->wait_payloads_offset = offset;
+  out_layout->wait_payloads_size = wait_payloads_size;
   if (!iree_host_size_checked_add(offset, wait_payloads_size, &offset)) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "replay queue payload length overflow");
   }
-  *out_signal_payloads_offset = offset;
-  *out_signal_payloads_size = signal_payloads_size;
+  out_layout->signal_payloads_offset = offset;
+  out_layout->signal_payloads_size = signal_payloads_size;
   if (!iree_host_size_checked_add(offset, signal_payloads_size, &offset)) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "replay queue payload length overflow");
   }
-  *out_trailing_payload_offset = offset;
-  *out_trailing_payload_size = (iree_host_size_t)trailing_payload_length;
+  out_layout->trailing_payload_offset = offset;
+  out_layout->trailing_payload_size = (iree_host_size_t)trailing_payload_length;
   if (!iree_host_size_checked_add(
           offset, (iree_host_size_t)trailing_payload_length, &offset) ||
       offset != record->payload.data_length) {

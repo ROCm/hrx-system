@@ -93,6 +93,7 @@ iree_cc_library(
     ::file_reader
     ::format
     iree::base
+    iree::hal
   PUBLIC
 )
 

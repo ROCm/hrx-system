@@ -83,6 +83,7 @@ iree_runtime_cc_library(
         ":file_reader",
         ":format",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
     ],
 )
 
