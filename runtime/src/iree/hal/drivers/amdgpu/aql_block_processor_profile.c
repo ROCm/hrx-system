@@ -8,6 +8,7 @@
 
 #include <string.h>
 
+#include "iree/hal/drivers/amdgpu/aql_atomic.h"
 #include "iree/hal/drivers/amdgpu/aql_buffer_ref.h"
 #include "iree/hal/drivers/amdgpu/device/blit.h"
 #include "iree/hal/drivers/amdgpu/device/dispatch.h"
@@ -1183,6 +1184,45 @@ static iree_status_t iree_hal_amdgpu_aql_block_processor_profile_emit_dispatch(
       processor, dispatch_command, state);
 }
 
+static iree_status_t iree_hal_amdgpu_aql_block_processor_profile_emit_atomic(
+    const iree_hal_amdgpu_aql_block_processor_profile_t* processor,
+    const iree_hal_amdgpu_command_buffer_command_header_t* command,
+    iree_hal_amdgpu_aql_block_processor_profile_state_t* state) {
+  const uint32_t packet_index = state->packets.emitted;
+  iree_hal_amdgpu_host_queue_command_buffer_packet_flags_t packet_flags =
+      iree_hal_amdgpu_aql_block_processor_profile_command_packet_flags(command);
+  if (iree_hal_amdgpu_aql_block_processor_profile_is_block_final(
+          processor, state, /*recorded_packet_count=*/1) &&
+      !iree_any_bit_set(
+          processor->flags,
+          IREE_HAL_AMDGPU_AQL_BLOCK_PROCESSOR_PROFILE_FLAG_DISPATCH_PACKETS |
+              IREE_HAL_AMDGPU_AQL_BLOCK_PROCESSOR_PROFILE_FLAG_QUEUE_DEVICE_EVENT)) {
+    packet_flags |= IREE_HAL_AMDGPU_HOST_QUEUE_COMMAND_BUFFER_PACKET_FLAG_FINAL;
+  }
+  iree_hal_amdgpu_aql_packet_t* packet =
+      iree_hal_amdgpu_aql_block_processor_profile_packet(processor,
+                                                         packet_index);
+
+  iree_status_t status = iree_hal_amdgpu_aql_atomic_emplace_command(
+      processor->queue->transfer_context->kernels, processor->command_buffer,
+      processor->bindings.table, command, &packet->dispatch,
+      processor->kernargs.blocks[state->kernargs.block].data);
+  if (iree_status_is_ok(status)) {
+    processor->packets.headers[packet_index] = iree_hal_amdgpu_aql_make_header(
+        IREE_HSA_PACKET_TYPE_KERNEL_DISPATCH,
+        iree_hal_amdgpu_aql_block_processor_profile_packet_control(
+            processor, packet_index,
+            iree_hal_amdgpu_aql_block_processor_profile_payload_acquire_scope(
+                processor, state, packet_index, command, packet_flags),
+            packet_flags));
+    processor->packets.setups[packet_index] = packet->dispatch.setup;
+    ++state->packets.emitted;
+    ++state->packets.recorded;
+    ++state->kernargs.block;
+  }
+  return status;
+}
+
 static iree_status_t iree_hal_amdgpu_aql_block_processor_profile_emit_transfer(
     const iree_hal_amdgpu_aql_block_processor_profile_t* processor,
     const iree_hal_amdgpu_command_buffer_command_header_t* command,
@@ -1300,6 +1340,12 @@ iree_status_t iree_hal_amdgpu_aql_block_processor_profile_invoke(
       case IREE_HAL_AMDGPU_COMMAND_BUFFER_OPCODE_COPY:
       case IREE_HAL_AMDGPU_COMMAND_BUFFER_OPCODE_UPDATE:
         status = iree_hal_amdgpu_aql_block_processor_profile_emit_transfer(
+            processor, command, &state);
+        break;
+      case IREE_HAL_AMDGPU_COMMAND_BUFFER_OPCODE_ATOMIC_WAIT:
+      case IREE_HAL_AMDGPU_COMMAND_BUFFER_OPCODE_ATOMIC_STORE:
+      case IREE_HAL_AMDGPU_COMMAND_BUFFER_OPCODE_ATOMIC_RMW:
+        status = iree_hal_amdgpu_aql_block_processor_profile_emit_atomic(
             processor, command, &state);
         break;
       case IREE_HAL_AMDGPU_COMMAND_BUFFER_OPCODE_RETURN:

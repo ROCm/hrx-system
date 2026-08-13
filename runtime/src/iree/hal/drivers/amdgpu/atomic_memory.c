@@ -234,6 +234,25 @@ iree_hal_amdgpu_atomic_memory_select_import_cells(
   return cell_flags;
 }
 
+iree_hal_amdgpu_atomic_memory_cell_flags_t
+iree_hal_amdgpu_atomic_memory_required_cell(
+    iree_hal_atomic_width_t width, iree_hal_atomic_flags_t atomic_flags) {
+  const bool system_scope =
+      iree_any_bit_set(atomic_flags, IREE_HAL_ATOMIC_FLAG_SYSTEM_SCOPE);
+  switch (width) {
+    case IREE_HAL_ATOMIC_WIDTH_32:
+      return system_scope
+                 ? IREE_HAL_AMDGPU_ATOMIC_MEMORY_CELL_FLAG_SYSTEM_SCOPE_32
+                 : IREE_HAL_AMDGPU_ATOMIC_MEMORY_CELL_FLAG_DEVICE_SCOPE_32;
+    case IREE_HAL_ATOMIC_WIDTH_64:
+      return system_scope
+                 ? IREE_HAL_AMDGPU_ATOMIC_MEMORY_CELL_FLAG_SYSTEM_SCOPE_64
+                 : IREE_HAL_AMDGPU_ATOMIC_MEMORY_CELL_FLAG_DEVICE_SCOPE_64;
+    default:
+      return IREE_HAL_AMDGPU_ATOMIC_MEMORY_CELL_FLAG_NONE;
+  }
+}
+
 iree_hal_atomic_operation_capabilities_t
 iree_hal_amdgpu_atomic_memory_expand_capabilities(
     iree_hal_amdgpu_atomic_memory_cell_flags_t cell_flags) {

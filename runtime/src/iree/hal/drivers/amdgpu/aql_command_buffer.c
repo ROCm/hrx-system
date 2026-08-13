@@ -11,6 +11,7 @@
 
 #include "iree/base/alignment.h"
 #include "iree/hal/drivers/amdgpu/abi/queue.h"
+#include "iree/hal/drivers/amdgpu/aql_atomic.h"
 #include "iree/hal/drivers/amdgpu/aql_command_buffer_profile.h"
 #include "iree/hal/drivers/amdgpu/barrier.h"
 #include "iree/hal/drivers/amdgpu/buffer.h"
@@ -1158,40 +1159,9 @@ static iree_status_t iree_hal_amdgpu_aql_command_buffer_execution_barrier(
   barrier->acquire_scope = (uint8_t)scopes.acquire;
   barrier->release_scope = (uint8_t)scopes.release;
   barrier->barrier_flags = (uint16_t)flags;
-  iree_hal_amdgpu_aql_program_builder_set_pending_barrier_scopes(
+  iree_hal_amdgpu_aql_program_builder_add_execution_dependency(
       &command_buffer->builder, barrier->acquire_scope, barrier->release_scope);
   return iree_ok_status();
-}
-
-static iree_status_t iree_hal_amdgpu_aql_command_buffer_atomic_wait(
-    iree_hal_command_buffer_t* base_command_buffer,
-    iree_hal_execution_stage_t source_stage_mask,
-    iree_hal_execution_stage_t target_stage_mask,
-    iree_hal_buffer_ref_t target_ref, iree_hal_atomic_wait_params_t params) {
-  return iree_make_status(
-      IREE_STATUS_UNIMPLEMENTED,
-      "AMDGPU AQL command buffers do not yet support atomic waits");
-}
-
-static iree_status_t iree_hal_amdgpu_aql_command_buffer_atomic_store(
-    iree_hal_command_buffer_t* base_command_buffer,
-    iree_hal_execution_stage_t source_stage_mask,
-    iree_hal_execution_stage_t target_stage_mask,
-    iree_hal_buffer_ref_t target_ref, iree_hal_atomic_store_params_t params) {
-  return iree_make_status(
-      IREE_STATUS_UNIMPLEMENTED,
-      "AMDGPU AQL command buffers do not yet support atomic stores");
-}
-
-static iree_status_t iree_hal_amdgpu_aql_command_buffer_atomic_rmw(
-    iree_hal_command_buffer_t* base_command_buffer,
-    iree_hal_execution_stage_t source_stage_mask,
-    iree_hal_execution_stage_t target_stage_mask,
-    iree_hal_buffer_ref_t target_ref, iree_hal_atomic_rmw_params_t params) {
-  return iree_make_status(
-      IREE_STATUS_UNIMPLEMENTED,
-      "AMDGPU AQL command buffers do not yet support atomic "
-      "read-modify-write");
 }
 
 static iree_status_t iree_hal_amdgpu_aql_command_buffer_signal_event(
@@ -1297,7 +1267,7 @@ static iree_status_t iree_hal_amdgpu_aql_command_buffer_record_buffer_ref(
   *out_kind = IREE_HAL_AMDGPU_COMMAND_BUFFER_BINDING_KIND_INVALID;
   *out_ordinal = 0;
   *out_offset = 0;
-  *out_length = 0;
+  if (out_length) *out_length = 0;
 
   if (!buffer_ref.buffer) {
     if (IREE_UNLIKELY(buffer_ref.buffer_slot == UINT32_MAX)) {
@@ -1312,7 +1282,7 @@ static iree_status_t iree_hal_amdgpu_aql_command_buffer_record_buffer_ref(
     *out_kind = IREE_HAL_AMDGPU_COMMAND_BUFFER_BINDING_KIND_DYNAMIC;
     *out_ordinal = buffer_ref.buffer_slot;
     *out_offset = buffer_ref.offset;
-    *out_length = buffer_ref.length;
+    if (out_length) *out_length = buffer_ref.length;
     return iree_ok_status();
   }
 
@@ -1330,8 +1300,66 @@ static iree_status_t iree_hal_amdgpu_aql_command_buffer_record_buffer_ref(
   *out_kind = IREE_HAL_AMDGPU_COMMAND_BUFFER_BINDING_KIND_STATIC;
   *out_ordinal = ordinal;
   *out_offset = resolved_offset;
-  *out_length = resolved_length;
+  if (out_length) *out_length = resolved_length;
   return iree_ok_status();
+}
+
+//===----------------------------------------------------------------------===//
+// Atomic Recording
+//===----------------------------------------------------------------------===//
+
+static iree_status_t iree_hal_amdgpu_aql_command_buffer_record_atomic_target(
+    iree_hal_amdgpu_aql_command_buffer_t* command_buffer,
+    iree_hal_buffer_ref_t target_ref,
+    iree_hal_amdgpu_command_buffer_atomic_target_t* out_target) {
+  return iree_hal_amdgpu_aql_command_buffer_record_buffer_ref(
+      command_buffer, target_ref, &out_target->kind, &out_target->ordinal,
+      &out_target->offset, /*out_length=*/NULL);
+}
+
+static iree_status_t iree_hal_amdgpu_aql_command_buffer_atomic_wait(
+    iree_hal_command_buffer_t* base_command_buffer,
+    iree_hal_execution_stage_t source_stage_mask,
+    iree_hal_execution_stage_t target_stage_mask,
+    iree_hal_buffer_ref_t target_ref, iree_hal_atomic_wait_params_t params) {
+  iree_hal_amdgpu_aql_command_buffer_t* command_buffer =
+      iree_hal_amdgpu_aql_command_buffer_cast(base_command_buffer);
+  iree_hal_amdgpu_command_buffer_atomic_target_t target = {0};
+  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_aql_command_buffer_record_atomic_target(
+      command_buffer, target_ref, &target));
+  return iree_hal_amdgpu_aql_atomic_record_wait(
+      &command_buffer->builder, source_stage_mask, target_stage_mask, target,
+      params);
+}
+
+static iree_status_t iree_hal_amdgpu_aql_command_buffer_atomic_store(
+    iree_hal_command_buffer_t* base_command_buffer,
+    iree_hal_execution_stage_t source_stage_mask,
+    iree_hal_execution_stage_t target_stage_mask,
+    iree_hal_buffer_ref_t target_ref, iree_hal_atomic_store_params_t params) {
+  iree_hal_amdgpu_aql_command_buffer_t* command_buffer =
+      iree_hal_amdgpu_aql_command_buffer_cast(base_command_buffer);
+  iree_hal_amdgpu_command_buffer_atomic_target_t target = {0};
+  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_aql_command_buffer_record_atomic_target(
+      command_buffer, target_ref, &target));
+  return iree_hal_amdgpu_aql_atomic_record_store(
+      &command_buffer->builder, source_stage_mask, target_stage_mask, target,
+      params);
+}
+
+static iree_status_t iree_hal_amdgpu_aql_command_buffer_atomic_rmw(
+    iree_hal_command_buffer_t* base_command_buffer,
+    iree_hal_execution_stage_t source_stage_mask,
+    iree_hal_execution_stage_t target_stage_mask,
+    iree_hal_buffer_ref_t target_ref, iree_hal_atomic_rmw_params_t params) {
+  iree_hal_amdgpu_aql_command_buffer_t* command_buffer =
+      iree_hal_amdgpu_aql_command_buffer_cast(base_command_buffer);
+  iree_hal_amdgpu_command_buffer_atomic_target_t target = {0};
+  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_aql_command_buffer_record_atomic_target(
+      command_buffer, target_ref, &target));
+  return iree_hal_amdgpu_aql_atomic_record_rmw(
+      &command_buffer->builder, source_stage_mask, target_stage_mask, target,
+      params);
 }
 
 //===----------------------------------------------------------------------===//

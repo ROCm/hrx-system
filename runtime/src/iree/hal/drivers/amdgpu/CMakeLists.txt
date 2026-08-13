@@ -210,6 +210,8 @@ iree_cc_library(
   SRCS
     "allocator.c"
     "allocator.h"
+    "aql_atomic.c"
+    "aql_atomic.h"
     "aql_block_processor.c"
     "aql_block_processor.h"
     "aql_block_processor_profile.c"
@@ -336,6 +338,7 @@ iree_cc_library(
     iree::base::threading::thread
     iree::hal
     iree::hal::drivers::amdgpu::abi
+    iree::hal::drivers::amdgpu::device::atomic
     iree::hal::drivers::amdgpu::device::binaries::toc
     iree::hal::drivers::amdgpu::device::blit
     iree::hal::drivers::amdgpu::device::dispatch
@@ -380,6 +383,7 @@ iree_cc_library(
     headers
   HDRS
     "api.h"
+    "aql_atomic.h"
     "aql_block_processor.h"
     "aql_block_processor_profile.h"
     "aql_block_processor_timestamp.h"
@@ -441,6 +445,7 @@ iree_cc_library(
     iree::base::threading
     iree::hal
     iree::hal::drivers::amdgpu::abi
+    iree::hal::drivers::amdgpu::device::atomic
     iree::hal::drivers::amdgpu::device::binaries::toc
     iree::hal::drivers::amdgpu::device::dispatch
     iree::hal::drivers::amdgpu::device::headers
@@ -707,6 +712,36 @@ iree_cc_test(
     iree::base
     iree::base::internal::arena
     iree::hal::drivers::amdgpu::abi
+    iree::testing::gtest
+    iree::testing::gtest_main
+  LABELS
+    "iree-build-requirement=runtime.hal.amdgpu"
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+  RESOURCE_GROUP
+    iree-hal-drivers-amdgpu-tests
+)
+endif()
+
+if(IREE_HAL_DRIVER_AMDGPU)
+iree_cc_test(
+  NAME
+    host_queue_atomic_test
+  SRCS
+    "host_queue_atomic_test.cc"
+    "host_queue_command_buffer_packet.h"
+    "host_queue_command_buffer_test_util.h"
+  DEPS
+    ::amdgpu
+    ::atomic_memory
+    ::headers
+    ::queue_affinity
+    iree::base
+    iree::hal
+    iree::hal::cts::util::registry
+    iree::hal::cts::util::test_base
+    iree::hal::drivers::amdgpu::util::packet
+    iree::hal::executable::amdgpu::executable_target
     iree::testing::gtest
     iree::testing::gtest_main
   LABELS

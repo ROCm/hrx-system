@@ -620,14 +620,11 @@ iree_status_t iree_hal_amdgpu_aql_program_builder_append_command(
   return iree_ok_status();
 }
 
-void iree_hal_amdgpu_aql_program_builder_set_pending_barrier_scopes(
+void iree_hal_amdgpu_aql_program_builder_add_execution_dependency(
     iree_hal_amdgpu_aql_program_builder_t* builder, uint8_t acquire_scope,
     uint8_t release_scope) {
-  if (!iree_any_bit_set(
-          builder->current_block.flags,
-          IREE_HAL_AMDGPU_AQL_PROGRAM_BUILDER_FLAG_HAS_PENDING_EXECUTION_BARRIER)) {
-    return;
-  }
+  builder->current_block.flags |=
+      IREE_HAL_AMDGPU_AQL_PROGRAM_BUILDER_FLAG_HAS_PENDING_EXECUTION_BARRIER;
   if (builder->last_payload_command) {
     const uint8_t current_acquire_scope =
         iree_hal_amdgpu_command_buffer_command_flags_acquire_scope(

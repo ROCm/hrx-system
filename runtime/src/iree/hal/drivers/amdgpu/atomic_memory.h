@@ -113,6 +113,12 @@ iree_hal_amdgpu_atomic_memory_cell_flags_t
 iree_hal_amdgpu_atomic_memory_select_import_cells(
     const iree_hal_amdgpu_atomic_memory_import_selection_t* selection);
 
+// Returns the one memory cell required by |width| and |atomic_flags|.
+// Invalid widths return no cell.
+iree_hal_amdgpu_atomic_memory_cell_flags_t
+iree_hal_amdgpu_atomic_memory_required_cell(
+    iree_hal_atomic_width_t width, iree_hal_atomic_flags_t atomic_flags);
+
 // Expands compact memory cells into the public all-operations capability
 // matrix.
 iree_hal_atomic_operation_capabilities_t

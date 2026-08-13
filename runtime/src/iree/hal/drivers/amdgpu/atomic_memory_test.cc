@@ -186,6 +186,25 @@ TEST(AtomicMemoryTest, ImportedReadOnlyOrUnknownMemorySupportsNoCells) {
             IREE_HAL_AMDGPU_ATOMIC_MEMORY_CELL_FLAG_NONE);
 }
 
+TEST(AtomicMemoryTest, SelectsRequiredWidthAndScopeCell) {
+  EXPECT_EQ(iree_hal_amdgpu_atomic_memory_required_cell(
+                IREE_HAL_ATOMIC_WIDTH_32, IREE_HAL_ATOMIC_FLAG_NONE),
+            IREE_HAL_AMDGPU_ATOMIC_MEMORY_CELL_FLAG_DEVICE_SCOPE_32);
+  EXPECT_EQ(iree_hal_amdgpu_atomic_memory_required_cell(
+                IREE_HAL_ATOMIC_WIDTH_64,
+                IREE_HAL_ATOMIC_FLAG_ACQUIRE | IREE_HAL_ATOMIC_FLAG_RELEASE),
+            IREE_HAL_AMDGPU_ATOMIC_MEMORY_CELL_FLAG_DEVICE_SCOPE_64);
+  EXPECT_EQ(iree_hal_amdgpu_atomic_memory_required_cell(
+                IREE_HAL_ATOMIC_WIDTH_32, IREE_HAL_ATOMIC_FLAG_SYSTEM_SCOPE),
+            IREE_HAL_AMDGPU_ATOMIC_MEMORY_CELL_FLAG_SYSTEM_SCOPE_32);
+  EXPECT_EQ(iree_hal_amdgpu_atomic_memory_required_cell(
+                IREE_HAL_ATOMIC_WIDTH_64, IREE_HAL_ATOMIC_FLAG_SYSTEM_SCOPE),
+            IREE_HAL_AMDGPU_ATOMIC_MEMORY_CELL_FLAG_SYSTEM_SCOPE_64);
+  EXPECT_EQ(iree_hal_amdgpu_atomic_memory_required_cell(
+                /*width=*/16, IREE_HAL_ATOMIC_FLAG_NONE),
+            IREE_HAL_AMDGPU_ATOMIC_MEMORY_CELL_FLAG_NONE);
+}
+
 TEST(AtomicMemoryTest, ExpandsCellsToCompleteOperationFamilies) {
   const iree_hal_atomic_operation_capabilities_t capabilities =
       iree_hal_amdgpu_atomic_memory_expand_capabilities(
