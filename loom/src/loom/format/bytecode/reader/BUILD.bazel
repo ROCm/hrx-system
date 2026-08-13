@@ -69,7 +69,7 @@ loom_cc_library(
         ":attribute",
         ":decoder",
         ":module_view",
-        ":symbol",
+        ":symbol_materializer",
         ":type",
         "//loom/src/loom/error:error_defs",
         "//loom/src/loom/format:low_repr",
@@ -163,16 +163,45 @@ loom_cc_test(
 )
 
 loom_cc_library(
-    name = "symbol",
-    srcs = [
-        "symbol.c",
-        "symbol_materializer.c",
-        "symbol_schema.c",
+    name = "symbol_schema",
+    srcs = ["symbol_schema.c"],
+    hdrs = ["symbol_schema.h"],
+    visibility = ["//loom/src/loom/format/bytecode:__pkg__"],
+    deps = [
+        ":decoder",
+        ":module_view",
+        "//loom/src/loom/error:error_defs",
+        "//loom/src/loom/ops:op_defs",
+        "//runtime/src/iree/base",
     ],
-    hdrs = [
-        "symbol.h",
-        "symbol_schema.h",
+)
+
+loom_cc_library(
+    name = "symbol_validator",
+    srcs = ["symbol.c"],
+    hdrs = ["symbol_validator.h"],
+    visibility = ["//loom/src/loom/format/bytecode:__pkg__"],
+    deps = [
+        ":attribute",
+        ":decoder",
+        ":module_view",
+        ":source_trivia",
+        ":symbol_schema",
+        "//loom/src/loom/error:error_defs",
+        "//loom/src/loom/format/bytecode:format",
+        "//loom/src/loom/format/bytecode:index",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ir:symbol_map",
+        "//loom/src/loom/ops:op_defs",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
     ],
+)
+
+loom_cc_library(
+    name = "symbol_materializer",
+    srcs = ["symbol_materializer.c"],
+    hdrs = ["symbol_materializer.h"],
     visibility = ["//loom/src/loom/format/bytecode:__pkg__"],
     deps = [
         ":attribute",
@@ -180,12 +209,12 @@ loom_cc_library(
         ":decoder",
         ":module_view",
         ":source_trivia",
+        ":symbol_schema",
         "//loom/src/loom/error:error_defs",
         "//loom/src/loom/format:low_repr",
         "//loom/src/loom/format/bytecode:format",
         "//loom/src/loom/format/bytecode:index",
         "//loom/src/loom/ir",
-        "//loom/src/loom/ir:symbol_map",
         "//loom/src/loom/ops:op_defs",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",

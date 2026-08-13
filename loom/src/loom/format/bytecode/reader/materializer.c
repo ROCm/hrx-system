@@ -10,7 +10,7 @@
 
 #include "loom/error/error_catalog.h"
 #include "loom/format/bytecode/reader/attribute.h"
-#include "loom/format/bytecode/reader/symbol.h"
+#include "loom/format/bytecode/reader/symbol_materializer.h"
 #include "loom/format/bytecode/reader/type.h"
 #include "loom/ops/module/ops.h"
 

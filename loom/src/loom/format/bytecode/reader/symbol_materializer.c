@@ -4,13 +4,14 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+#include "loom/format/bytecode/reader/symbol_materializer.h"
+
 #include <string.h>
 
 #include "loom/error/error_catalog.h"
 #include "loom/format/bytecode/index.h"
 #include "loom/format/bytecode/reader/attribute.h"
 #include "loom/format/bytecode/reader/source_trivia.h"
-#include "loom/format/bytecode/reader/symbol.h"
 #include "loom/format/bytecode/reader/symbol_schema.h"
 #include "loom/ops/op_defs.h"
 

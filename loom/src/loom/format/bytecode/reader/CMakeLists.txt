@@ -73,7 +73,7 @@ loom_cc_library(
     ::attribute
     ::decoder
     ::module_view
-    ::symbol
+    ::symbol_materializer
     ::type
     iree::base
     iree::base::internal::arena
@@ -176,20 +176,58 @@ loom_cc_test(
 
 loom_cc_library(
   NAME
-    symbol
+    symbol_schema
   HDRS
-    "symbol.h"
     "symbol_schema.h"
   SRCS
-    "symbol.c"
-    "symbol_materializer.c"
     "symbol_schema.c"
+  DEPS
+    ::decoder
+    ::module_view
+    iree::base
+    loom::error::error_defs
+    loom::ops::op_defs
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
+    symbol_validator
+  HDRS
+    "symbol_validator.h"
+  SRCS
+    "symbol.c"
+  DEPS
+    ::attribute
+    ::decoder
+    ::module_view
+    ::source_trivia
+    ::symbol_schema
+    iree::base
+    iree::base::internal::arena
+    loom::error::error_defs
+    loom::format::bytecode::format
+    loom::format::bytecode::index
+    loom::ir
+    loom::ir::symbol_map
+    loom::ops::op_defs
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
+    symbol_materializer
+  HDRS
+    "symbol_materializer.h"
+  SRCS
+    "symbol_materializer.c"
   DEPS
     ::attribute
     ::body
     ::decoder
     ::module_view
     ::source_trivia
+    ::symbol_schema
     iree::base
     iree::base::internal::arena
     loom::error::error_defs
@@ -197,7 +235,6 @@ loom_cc_library(
     loom::format::bytecode::index
     loom::format::low_repr
     loom::ir
-    loom::ir::symbol_map
     loom::ops::op_defs
   PUBLIC
 )
