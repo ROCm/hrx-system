@@ -8,7 +8,8 @@ invocation did not provide.
 ## Inputs and libraries
 
 Positional inputs are primary modules. Repeated `--library=path` options add
-provider modules searched after the primary inputs:
+provider modules searched after the primary inputs. Every supplied path
+publishes its exact string as an opaque `module.import` provider key:
 
 ```shell
 loom-link root.loom \
@@ -23,11 +24,13 @@ Inputs may mix `.loom` text and `.loombc` bytecode. `--from=auto`, the default,
 detects their encoding independently. `--to=text|bc` controls the one linked
 module written to `--output` or standard output.
 
-Primary versus library is a lookup priority, not a reachability rule. A symbol
-becomes live because it is a root or reachable dependency, not because it came
-from a primary input. Provider module order also does not override template
-matching: contracts, signatures, facts, requirements, and explicit provider
-priority decide which template is eligible.
+The provider key is an exact string match. `loom-link` does not canonicalize the
+path or search for imported files. Build systems embedding Loom may bind other
+logical keys through the LoomC API. Primary versus library is a lookup priority,
+not a reachability rule: a symbol becomes live because it is a root or reachable
+dependency, not because it came from a primary input. Provider module order also
+does not override template matching; contracts, signatures, facts,
+requirements, and explicit provider priority decide which template is eligible.
 
 ## Inspect before linking
 
@@ -141,12 +144,26 @@ that module contains the compatible definition or declaration. Libraries may
 satisfy those declared dependencies when linked. They may not retroactively
 make an undeclared call valid.
 
-Selective linking resolves declarations that the supplied modules can satisfy
-and preserves unresolved declarations in a valid partial result. For example, a
-root that declares dependencies from `module_a` and `module_b`, linked with only
-`module_a`, retains the `module_b` declaration. The linker does not chase a
-filesystem import graph or silently add the missing module. A later closed
-artifact boundary must supply or reject that dependency.
+Selective linking resolves declarations whose named provider libraries were
+supplied. A strict link rejects reachable imports that remain unresolved. Add
+`--allow-unresolved` to produce a reusable partial artifact instead:
+
+```shell
+loom-link root.loom \
+  --library=module_a.loombc \
+  --root=@entry \
+  --allow-unresolved \
+  --to=bc \
+  --output=partial.loombc
+```
+
+If the root imports declarations from `module_a.loombc` and
+`module_b.loombc`, this invocation consumes the satisfied `module_a.loombc`
+import and retains the `module_b.loombc` declaration and import. Imports reached
+through the selected `module_a.loombc` implementation are retained as well. A
+later invocation can use `partial.loombc` as its positional input and supply the
+remaining paths with `--library`. The linker does not chase a filesystem import
+graph or silently add a missing module.
 
 `func.apply` follows the parallel contract-provider model. A library makes
 provider candidates visible; specialization selects an eligible provider from

@@ -15,7 +15,8 @@
             "--root=@entry",
             "--print-plan",
             "--list-symbols",
-            "--strip-check"
+            "--strip-check",
+            "--allow-unresolved"
           ]
         }
       }
@@ -145,6 +146,114 @@
               "func.def @unused",
               "func.decl @identity"
             ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "relinks partial provider bytecode",
+      "steps": [
+        {
+          "name": "write-root",
+          "write": {
+            "path": "{tmp}/root.loom",
+            "text": "module.import \"{tmp}/provider-a.loom\" [@a]\nmodule.import \"{tmp}/provider-b.loom\" [@b]\n\nfunc.decl @a(%x: i32) -> (i32)\nfunc.decl @b(%x: i32) -> (i32)\n\nfunc.def public @entry(%x: i32) -> (i32) {\n  %a = func.call @a(%x) : (i32) -> (i32)\n  %b = func.call @b(%a) : (i32) -> (i32)\n  func.return %b : i32\n}\n"
+          }
+        },
+        {
+          "name": "write-provider-a",
+          "write": {
+            "path": "{tmp}/provider-a.loom",
+            "text": "module.import \"{tmp}/provider-c.loom\" [@c]\n\nfunc.decl @c(%x: i32) -> (i32)\n\nfunc.def @a(%x: i32) -> (i32) {\n  %helper = func.call @a_helper(%x) : (i32) -> (i32)\n  %c = func.call @c(%helper) : (i32) -> (i32)\n  func.return %c : i32\n}\n\nfunc.def @a_helper(%x: i32) -> (i32) {\n  func.return %x : i32\n}\n"
+          }
+        },
+        {
+          "name": "write-provider-b",
+          "write": {
+            "path": "{tmp}/provider-b.loom",
+            "text": "func.def @b(%x: i32) -> (i32) {\n  func.return %x : i32\n}\n"
+          }
+        },
+        {
+          "name": "write-provider-c",
+          "write": {
+            "path": "{tmp}/provider-c.loom",
+            "text": "func.def @c(%x: i32) -> (i32) {\n  func.return %x : i32\n}\n"
+          }
+        },
+        {
+          "name": "link-partial",
+          "run": {
+            "tool": "loom-link",
+            "args": [
+              "{tmp}/root.loom",
+              "{tmp}/provider-a.loom",
+              "--root=@entry",
+              "--allow-unresolved",
+              "--to=bc",
+              "--output={tmp}/partial.loombc"
+            ]
+          },
+          "files": [
+            {
+              "path": "{tmp}/partial.loombc",
+              "non_empty": true
+            }
+          ]
+        },
+        {
+          "name": "show-partial",
+          "run": {
+            "tool": "loom-format",
+            "args": ["{tmp}/partial.loombc"]
+          },
+          "stdout": {
+            "contains": {
+              "unordered": [
+                "module.import \"{tmp}/provider-b.loom\" [@b]",
+                "module.import \"{tmp}/provider-c.loom\" [@c]",
+                "func.def @a(",
+                "func.def @a_helper("
+              ]
+            },
+            "not_contains": ["provider-a.loom\" [@a]"]
+          }
+        },
+        {
+          "name": "reject-incomplete-final-link",
+          "run": {
+            "tool": "loom-link",
+            "args": ["{tmp}/partial.loombc", "--root=@entry"]
+          },
+          "exit": {
+            "nonzero": true
+          },
+          "stderr": {
+            "contains": ["has no available concrete definition"]
+          }
+        },
+        {
+          "name": "finish-link",
+          "run": {
+            "tool": "loom-link",
+            "args": [
+              "{tmp}/partial.loombc",
+              "{tmp}/provider-b.loom",
+              "--library={tmp}/provider-c.loom",
+              "--root=@entry"
+            ]
+          },
+          "stdout": {
+            "contains": {
+              "unordered": [
+                "func.def public retain @entry(",
+                "func.def @a(",
+                "func.def @a_helper(",
+                "func.def @b(",
+                "func.def @c("
+              ]
+            },
+            "not_contains": ["module.import", "func.decl"]
           }
         }
       ]

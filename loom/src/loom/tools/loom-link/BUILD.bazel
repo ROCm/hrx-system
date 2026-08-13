@@ -30,6 +30,7 @@ loom_cc_binary(
         "//loom/src/loom/link:module_index",
         "//loom/src/loom/link:plan_projection",
         "//loom/src/loom/link:planner",
+        "//loom/src/loom/link:provider_resolver",
         "//loom/src/loom/target:provider",
         "//loom/src/loom/target/configured:provider",
         "//loom/src/loom/tooling/cli:help",
