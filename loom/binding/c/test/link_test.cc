@@ -9,6 +9,7 @@
 #include <cstdio>
 #include <cstring>
 #include <fstream>
+#include <initializer_list>
 #include <iterator>
 #include <memory>
 #include <string>
@@ -371,10 +372,18 @@ void FinishIndex(loomc_link_index_builder_t* builder,
 
 void AddSource(loomc_link_index_builder_t* builder, loomc_source_t* source,
                const char* provider_name,
-               loomc_link_provider_role_t provider_role) {
+               loomc_link_provider_role_t provider_role,
+               std::initializer_list<const char*> import_keys = {}) {
+  std::vector<loomc_string_view_t> import_key_views;
+  import_key_views.reserve(import_keys.size());
+  for (const char* import_key : import_keys) {
+    import_key_views.push_back(loomc_make_cstring_view(import_key));
+  }
   loomc_link_index_source_options_t options = {
       /*.provider_name=*/loomc_make_cstring_view(provider_name),
       /*.role=*/provider_role,
+      /*.import_keys=*/import_key_views.data(),
+      /*.import_key_count=*/import_key_views.size(),
   };
   LOOMC_ASSERT_OK(
       loomc_link_index_builder_add_source(builder, source, &options, nullptr));
@@ -397,6 +406,68 @@ ModulePtr LinkIndex(loomc_linker_t* linker, loomc_workspace_t* workspace,
   LOOMC_EXPECT_OK(status);
   *out_result = ResultPtr(result);
   return ModulePtr(module);
+}
+
+struct ProviderSourceSpec {
+  // Opaque module.import key supplied by this provider.
+  const char* import_key;
+  // Authored Loom source text.
+  const char* source_text;
+};
+
+struct ProviderLinkArtifact {
+  // Link result carrying diagnostics and success state.
+  ResultPtr result;
+  // Standalone bytecode output when linking succeeded.
+  SourcePtr bytecode;
+  // Canonical text output when linking succeeded.
+  std::string text;
+};
+
+ProviderLinkArtifact LinkProviderSourcesToBytecode(
+    loomc_source_t* input_source,
+    std::initializer_list<ProviderSourceSpec> providers,
+    loomc_link_flags_t flags) {
+  ContextPtr context = CreateContext();
+  BuilderPtr builder = CreateBuilder(context.get());
+  AddSource(builder.get(), input_source, "input-diagnostics",
+            LOOMC_LINK_PROVIDER_ROLE_INPUT);
+
+  std::vector<SourcePtr> provider_sources;
+  provider_sources.reserve(providers.size());
+  for (const ProviderSourceSpec& provider : providers) {
+    provider_sources.push_back(
+        CreateTextSource(provider.import_key, provider.source_text));
+    AddSource(builder.get(), provider_sources.back().get(), provider.import_key,
+              LOOMC_LINK_PROVIDER_ROLE_LIBRARY, {provider.import_key});
+  }
+
+  LinkIndexPtr link_index;
+  FinishIndex(builder.get(), &link_index);
+  LinkerPtr linker = CreateLinker(context.get());
+  WorkspacePtr workspace = CreateWorkspace();
+  const loomc_string_view_t roots[] = {
+      loomc_make_cstring_view("@entry"),
+  };
+  const loomc_link_options_t options = {
+      /*.type=*/LOOMC_STRUCTURE_TYPE_NONE,
+      /*.structure_size=*/0,
+      /*.next=*/nullptr,
+      /*.link_index=*/nullptr,
+      /*.module_name=*/loomc_string_view_empty(),
+      /*.root_symbols=*/roots,
+      /*.root_symbol_count=*/IREE_ARRAYSIZE(roots),
+      /*.flags=*/flags,
+  };
+  ProviderLinkArtifact artifact;
+  ModulePtr module = LinkIndex(linker.get(), workspace.get(), link_index.get(),
+                               &options, &artifact.result);
+  if (module) {
+    artifact.text = SerializeModuleToText(module.get());
+    artifact.bytecode = SerializeModuleToSource(
+        module.get(), LOOMC_SOURCE_FORMAT_BYTECODE, "partial.loombc");
+  }
+  return artifact;
 }
 
 bool ModuleHasSymbol(const loom_module_t* module, const char* name) {
@@ -665,6 +736,124 @@ func.def public @unused_library(%x: i32) -> (i32) {
       context.get(), workspace.get(), bytecode_path.path());
   VerifyLinkedCallerModule(bytecode_path_module.get());
   EXPECT_TRUE(bytecode_path.Remove());
+}
+
+TEST(LinkTest, PartialProviderImportsAreReusableAndOrderInvariant) {
+  static constexpr char kRootSource[] = R"(
+module.import "provider-a" [@a]
+module.import "provider-b" [@b]
+
+func.decl @a(%x: i32) -> (i32)
+func.decl @b(%x: i32) -> (i32)
+
+func.def public @entry(%x: i32) -> (i32) {
+  %a = func.call @a(%x) : (i32) -> (i32)
+  %b = func.call @b(%a) : (i32) -> (i32)
+  func.return %b : i32
+}
+)";
+  static constexpr char kProviderASource[] = R"(
+module.import "provider-c" [@c]
+
+func.decl @c(%x: i32) -> (i32)
+
+func.def @a(%x: i32) -> (i32) {
+  %helper = func.call @a_helper(%x) : (i32) -> (i32)
+  %c = func.call @c(%helper) : (i32) -> (i32)
+  func.return %c : i32
+}
+
+func.def @a_helper(%x: i32) -> (i32) {
+  func.return %x : i32
+}
+)";
+  static constexpr char kProviderBSource[] = R"(
+func.def @b(%x: i32) -> (i32) {
+  func.return %x : i32
+}
+)";
+  static constexpr char kProviderCSource[] = R"(
+func.def @c(%x: i32) -> (i32) {
+  func.return %x : i32
+}
+)";
+
+  SourcePtr root = CreateTextSource("root.loom", kRootSource);
+  ProviderLinkArtifact partial_a = LinkProviderSourcesToBytecode(
+      root.get(), {{"provider-a", kProviderASource}},
+      LOOMC_LINK_FLAG_ALLOW_UNRESOLVED_SYMBOLS);
+  ASSERT_TRUE(loomc_result_succeeded(partial_a.result.get()));
+  ASSERT_NE(partial_a.bytecode.get(), nullptr);
+  EXPECT_EQ(partial_a.text.find("provider-a"), std::string::npos);
+  EXPECT_NE(partial_a.text.find("module.import \"provider-b\" [@b]"),
+            std::string::npos);
+  EXPECT_NE(partial_a.text.find("module.import \"provider-c\" [@c]"),
+            std::string::npos);
+  EXPECT_NE(partial_a.text.find("func.def @a"), std::string::npos);
+  EXPECT_NE(partial_a.text.find("func.def @a_helper"), std::string::npos);
+  EXPECT_NE(partial_a.text.find("func.decl @b"), std::string::npos);
+  EXPECT_NE(partial_a.text.find("func.decl @c"), std::string::npos);
+
+  ProviderLinkArtifact unresolved = LinkProviderSourcesToBytecode(
+      partial_a.bytecode.get(), /*providers=*/{}, /*flags=*/0);
+  EXPECT_EQ(unresolved.bytecode.get(), nullptr);
+  ExpectFailedResultCode(unresolved.result.get(), "LINK/PLAN");
+
+  ProviderLinkArtifact final_ab =
+      LinkProviderSourcesToBytecode(partial_a.bytecode.get(),
+                                    {
+                                        {"provider-b", kProviderBSource},
+                                        {"provider-c", kProviderCSource},
+                                    },
+                                    /*flags=*/0);
+  ASSERT_TRUE(loomc_result_succeeded(final_ab.result.get()));
+  ASSERT_NE(final_ab.bytecode.get(), nullptr);
+  EXPECT_EQ(final_ab.text.find("module.import"), std::string::npos)
+      << final_ab.text;
+  EXPECT_EQ(final_ab.text.find("func.decl @a"), std::string::npos);
+  EXPECT_EQ(final_ab.text.find("func.decl @b"), std::string::npos);
+  EXPECT_EQ(final_ab.text.find("func.decl @c"), std::string::npos);
+
+  ProviderLinkArtifact partial_b = LinkProviderSourcesToBytecode(
+      root.get(), {{"provider-b", kProviderBSource}},
+      LOOMC_LINK_FLAG_ALLOW_UNRESOLVED_SYMBOLS);
+  ASSERT_TRUE(loomc_result_succeeded(partial_b.result.get()));
+  ASSERT_NE(partial_b.bytecode.get(), nullptr);
+  EXPECT_NE(partial_b.text.find("module.import \"provider-a\" [@a]"),
+            std::string::npos);
+  EXPECT_EQ(partial_b.text.find("provider-b"), std::string::npos);
+  EXPECT_EQ(partial_b.text.find("provider-c"), std::string::npos);
+
+  ProviderLinkArtifact final_ba =
+      LinkProviderSourcesToBytecode(partial_b.bytecode.get(),
+                                    {
+                                        {"provider-a", kProviderASource},
+                                        {"provider-c", kProviderCSource},
+                                    },
+                                    /*flags=*/0);
+  ASSERT_TRUE(loomc_result_succeeded(final_ba.result.get()));
+  ASSERT_NE(final_ba.bytecode.get(), nullptr);
+  EXPECT_EQ(final_ba.text, final_ab.text);
+
+  ContextPtr context = CreateContext();
+  WorkspacePtr workspace = CreateWorkspace();
+  ModulePtr final_ab_module = DeserializeModuleFromSource(
+      context.get(), workspace.get(), final_ab.bytecode.get());
+  ModulePtr final_ba_module = DeserializeModuleFromSource(
+      context.get(), workspace.get(), final_ba.bytecode.get());
+  const loom_module_t* final_ab_internal =
+      loomc_module_const_loom_module(final_ab_module.get());
+  const loom_module_t* final_ba_internal =
+      loomc_module_const_loom_module(final_ba_module.get());
+  ASSERT_NE(final_ab_internal, nullptr);
+  ASSERT_NE(final_ba_internal, nullptr);
+  VerifyModule(final_ab_internal);
+  VerifyModule(final_ba_internal);
+  EXPECT_TRUE(ModuleHasSymbol(final_ab_internal, "entry"));
+  EXPECT_TRUE(ModuleHasSymbol(final_ab_internal, "a"));
+  EXPECT_TRUE(ModuleHasSymbol(final_ab_internal, "a_helper"));
+  EXPECT_TRUE(ModuleHasSymbol(final_ab_internal, "b"));
+  EXPECT_TRUE(ModuleHasSymbol(final_ab_internal, "c"));
 }
 
 TEST(LinkTest, SelectiveRootPullsBytecodeApplyProviders) {
