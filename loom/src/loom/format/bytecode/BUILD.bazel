@@ -103,6 +103,7 @@ loom_cc_library(
         "//loom/src/loom/format/bytecode/reader:symbol_materializer",
         "//loom/src/loom/format/bytecode/reader:symbol_validator",
         "//loom/src/loom/format/bytecode/reader:type",
+        "//loom/src/loom/format/bytecode/reader:type_validator",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:op_defs",
         "//loom/src/loom/verify",

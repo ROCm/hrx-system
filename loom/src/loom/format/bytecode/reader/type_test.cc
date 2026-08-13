@@ -10,6 +10,7 @@
 #include "iree/testing/status_matchers.h"
 #include "loom/format/bytecode/format.h"
 #include "loom/format/bytecode/reader/module_view.h"
+#include "loom/format/bytecode/reader/type_validator.h"
 
 namespace loom {
 namespace {

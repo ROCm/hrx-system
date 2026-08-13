@@ -16,7 +16,7 @@
 #include "loom/format/bytecode/reader/module_view.h"
 #include "loom/format/bytecode/reader/source_trivia.h"
 #include "loom/format/bytecode/reader/symbol_validator.h"
-#include "loom/format/bytecode/reader/type.h"
+#include "loom/format/bytecode/reader/type_validator.h"
 #include "loom/ir/module.h"
 #include "loom/ops/op_defs.h"
 #include "loom/verify/verify.h"

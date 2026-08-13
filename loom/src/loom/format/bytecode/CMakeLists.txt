@@ -119,6 +119,7 @@ loom_cc_library(
     loom::format::bytecode::reader::symbol_materializer
     loom::format::bytecode::reader::symbol_validator
     loom::format::bytecode::reader::type
+    loom::format::bytecode::reader::type_validator
     loom::format::low_repr
     loom::ir
     loom::ops::op_defs

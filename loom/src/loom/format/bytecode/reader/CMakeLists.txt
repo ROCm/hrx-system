@@ -113,6 +113,26 @@ loom_cc_library(
 
 loom_cc_library(
   NAME
+    type_validator
+  HDRS
+    "type_validator.h"
+  SRCS
+    "type_validator.c"
+  DEPS
+    ::attribute
+    ::decoder
+    ::module_view
+    ::type_plan
+    iree::base
+    iree::base::internal::arena
+    loom::error::error_defs
+    loom::ir
+    loom::ops::type_registry
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
     type
   HDRS
     "type.h"
@@ -127,7 +147,6 @@ loom_cc_library(
     iree::base::internal::arena
     loom::error::error_defs
     loom::ir
-    loom::ops::type_registry
   PUBLIC
 )
 
@@ -139,6 +158,7 @@ loom_cc_test(
   DEPS
     ::module_view
     ::type
+    ::type_validator
     iree::base::internal::arena
     iree::testing::gtest
     iree::testing::gtest_main

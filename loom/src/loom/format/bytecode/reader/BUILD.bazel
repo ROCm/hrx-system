@@ -106,9 +106,9 @@ loom_cc_library(
 )
 
 loom_cc_library(
-    name = "type",
-    srcs = ["type.c"],
-    hdrs = ["type.h"],
+    name = "type_validator",
+    srcs = ["type_validator.c"],
+    hdrs = ["type_validator.h"],
     visibility = ["//loom/src/loom/format/bytecode:__pkg__"],
     deps = [
         ":attribute",
@@ -123,12 +123,30 @@ loom_cc_library(
     ],
 )
 
+loom_cc_library(
+    name = "type",
+    srcs = ["type.c"],
+    hdrs = ["type.h"],
+    visibility = ["//loom/src/loom/format/bytecode:__pkg__"],
+    deps = [
+        ":attribute",
+        ":decoder",
+        ":module_view",
+        ":type_plan",
+        "//loom/src/loom/error:error_defs",
+        "//loom/src/loom/ir",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
 loom_cc_test(
     name = "type_test",
     srcs = ["type_test.cc"],
     deps = [
         ":module_view",
         ":type",
+        ":type_validator",
         "//loom/src/loom/format/bytecode:format",
         "//loom/src/loom/ir",
         "//runtime/src/iree/base/internal:arena",
