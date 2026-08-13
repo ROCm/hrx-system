@@ -2591,7 +2591,9 @@ static iree_status_t loom_module_make_canonical_attr_dict_entries(
                                 "duplicate dict attribute key '%.*s'",
                                 (int)key_name.size, key_name.data);
       }
-      if (comparison > 0) break;
+      if (comparison > 0) {
+        break;
+      }
 
       canonical_entries[insert_index] = canonical_entries[insert_index - 1];
       --insert_index;
@@ -3095,6 +3097,13 @@ static iree_status_t loom_module_canonicalize_attr_value(
   return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                           "attribute value has unknown kind %u",
                           (unsigned)value.kind);
+}
+
+iree_status_t loom_module_make_canonical_attribute(
+    loom_module_t* module, const loom_attr_descriptor_t* descriptor,
+    loom_attribute_t value, loom_attribute_t* out_value) {
+  return loom_module_canonicalize_attr_value(module, descriptor, value,
+                                             /*depth=*/0, out_value);
 }
 
 iree_status_t loom_module_make_canonical_attr_dict(

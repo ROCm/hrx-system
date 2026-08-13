@@ -379,6 +379,16 @@ iree_status_t loom_module_try_make_symbol_set(
     loom_module_t* module, loom_symbol_ref_array_t refs,
     loom_symbol_ref_t* out_duplicate_ref, loom_attribute_t* out_attr);
 
+// Canonicalizes one attribute value into module-owned storage.
+//
+// Pointer-backed payloads in |value| may use temporary storage and are copied
+// recursively. String, type, encoding, symbol, and SSA value references must
+// already use |module| identities. |descriptor| supplies the field contract
+// for descriptor-backed kinds and may be NULL for a generic attribute value.
+iree_status_t loom_module_make_canonical_attribute(
+    loom_module_t* module, const loom_attr_descriptor_t* descriptor,
+    loom_attribute_t value, loom_attribute_t* out_value);
+
 // Builds a canonical DICT attribute in |module| from |entries|.
 //
 // The input entries may be in any order and may point to temporary storage.

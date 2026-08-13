@@ -1833,6 +1833,43 @@ TEST_F(ModuleTest, MakeCanonicalAttrDictSortsByKeySpellingAndCopiesEntries) {
   loom_module_free(module);
 }
 
+TEST_F(ModuleTest, MakeCanonicalAttributeCopiesTemporaryNestedPayloads) {
+  loom_module_t* module = NULL;
+  IREE_ASSERT_OK(loom_module_allocate(&context_, IREE_SV("test"), &block_pool_,
+                                      NULL, iree_allocator_system(), &module));
+
+  loom_string_id_t key_id = LOOM_STRING_ID_INVALID;
+  IREE_ASSERT_OK(loom_module_intern_string(module, IREE_SV("key"), &key_id));
+  int64_t temporary_values[] = {3, 5, 8};
+  loom_named_attr_t temporary_entries[] = {
+      {
+          /*.name_id=*/key_id,
+          /*.reserved=*/{},
+          /*.value=*/
+          loom_attr_i64_array(temporary_values,
+                              IREE_ARRAYSIZE(temporary_values)),
+      },
+  };
+  loom_attribute_t canonical = loom_attr_absent();
+  IREE_ASSERT_OK(loom_module_make_canonical_attribute(
+      module, /*descriptor=*/NULL,
+      loom_make_canonical_attr_dict(temporary_entries,
+                                    IREE_ARRAYSIZE(temporary_entries)),
+      &canonical));
+
+  temporary_values[0] = 99;
+  temporary_entries[0].value = loom_attr_i64(42);
+  ASSERT_EQ(canonical.kind, LOOM_ATTR_DICT);
+  ASSERT_EQ(canonical.count, 1u);
+  ASSERT_EQ(canonical.dict_entries[0].value.kind, LOOM_ATTR_I64_ARRAY);
+  ASSERT_EQ(canonical.dict_entries[0].value.count, 3u);
+  EXPECT_EQ(canonical.dict_entries[0].value.i64_array[0], 3);
+  EXPECT_EQ(canonical.dict_entries[0].value.i64_array[1], 5);
+  EXPECT_EQ(canonical.dict_entries[0].value.i64_array[2], 8);
+
+  loom_module_free(module);
+}
+
 TEST_F(ModuleTest, MakeCanonicalAttrDictRecursivelyCanonicalizesNestedDicts) {
   loom_module_t* module = NULL;
   IREE_ASSERT_OK(loom_module_allocate(&context_, IREE_SV("test"), &block_pool_,
