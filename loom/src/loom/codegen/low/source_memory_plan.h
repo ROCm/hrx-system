@@ -195,6 +195,10 @@ typedef struct loom_low_source_memory_access_plan_t {
   // |dynamic_view_base_value_id|. Zero when that value is a recovered dynamic
   // term instead of the authored complete view-base expression.
   int64_t dynamic_view_base_value_static_byte_offset;
+  // Facts for the complete dynamic view-base byte contribution, excluding
+  // |static_view_base_byte_offset|. Unknown when only independent canonical
+  // term facts are available.
+  loom_value_facts_t dynamic_view_base_byte_facts;
   // Minimum provable byte alignment of the final accessed address.
   uint32_t minimum_alignment;
   // Dynamic address terms. The first |dynamic_view_base_term_count| entries
@@ -269,8 +273,9 @@ static inline bool loom_low_source_memory_dynamic_term_fits_unsigned_bit_count(
 }
 
 // Returns facts for the complete dynamic byte offset plus
-// |static_byte_offset|. Exact affine realizations retain relational bounds
-// that cannot be represented independently on their canonical terms.
+// |static_byte_offset|. Aggregate view-base facts and exact indexed
+// realizations retain relational bounds that cannot be represented
+// independently on their canonical terms.
 loom_value_facts_t loom_low_source_memory_dynamic_offset_facts(
     const loom_low_source_memory_access_plan_t* plan,
     int64_t static_byte_offset);

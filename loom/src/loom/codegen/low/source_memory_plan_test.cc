@@ -686,6 +686,77 @@ TEST_F(SourceMemoryPlanTest, DynamicDenseLoadFactorsScaledViewBase) {
   EXPECT_EQ(plan.dynamic_terms[0].byte_shift, 2u);
 }
 
+TEST_F(SourceMemoryPlanTest,
+       DynamicDenseLoadPreservesConstrainedAffineViewBaseWithStaticSuffix) {
+  loom_value_id_t buffer = DefineBufferArg();
+  loom_value_id_t base = DefineIndexArg();
+  loom_value_id_t local = DefineIndexArg();
+  loom_value_id_t layout = BuildDenseLayout();
+  loom_op_t* sum_op = nullptr;
+  IREE_ASSERT_OK(loom_index_add_build(&builder_, base, local,
+                                      loom_type_scalar(LOOM_SCALAR_TYPE_INDEX),
+                                      LOOM_LOCATION_UNKNOWN, &sum_op));
+  const loom_value_id_t bounded_sum =
+      BuildIndexAssumeRange(loom_index_add_result(sum_op), 0, 1023);
+  const loom_value_id_t byte_stride =
+      loom_index_constant_result(BuildOffsetConstant(4));
+  loom_op_t* byte_offset_op = nullptr;
+  IREE_ASSERT_OK(
+      loom_index_scale_build(&builder_, bounded_sum, byte_stride,
+                             loom_type_scalar(LOOM_SCALAR_TYPE_OFFSET),
+                             LOOM_LOCATION_UNKNOWN, &byte_offset_op));
+  const loom_value_id_t byte_offset = loom_index_scale_result(byte_offset_op);
+  const loom_value_id_t header =
+      loom_index_constant_result(BuildOffsetConstant(16));
+  loom_op_t* payload_offset_op = nullptr;
+  IREE_ASSERT_OK(loom_index_add_build(
+      &builder_, byte_offset, header, loom_type_scalar(LOOM_SCALAR_TYPE_OFFSET),
+      LOOM_LOCATION_UNKNOWN, &payload_offset_op));
+  const loom_value_id_t payload_offset =
+      loom_index_add_result(payload_offset_op);
+
+  loom_op_t* view_op = nullptr;
+  IREE_ASSERT_OK(
+      loom_buffer_view_build(&builder_, buffer, payload_offset,
+                             ViewType1D(LOOM_SCALAR_TYPE_I32, 1, layout),
+                             LOOM_LOCATION_UNKNOWN, &view_op));
+  int64_t static_indices[] = {0};
+  loom_op_t* load_op = nullptr;
+  IREE_ASSERT_OK(loom_view_load_build(
+      &builder_, 0, loom_buffer_view_result(view_op), nullptr, 0,
+      static_indices, IREE_ARRAYSIZE(static_indices), 0, 0,
+      loom_type_scalar(LOOM_SCALAR_TYPE_I32), LOOM_LOCATION_UNKNOWN, &load_op));
+
+  loom_value_fact_table_t facts = {0};
+  ComputeFacts(&facts);
+  loom_low_source_memory_access_plan_t plan = {};
+  loom_low_source_memory_access_diagnostic_t diagnostic = {0};
+  ASSERT_TRUE(BuildPlan(&facts, load_op, &plan, &diagnostic));
+  EXPECT_EQ(plan.static_byte_offset, 16);
+  EXPECT_EQ(plan.dynamic_view_base_value_id, payload_offset);
+  EXPECT_EQ(plan.dynamic_view_base_value_static_byte_offset, 16);
+  ASSERT_EQ(plan.dynamic_term_count, 2u);
+  EXPECT_EQ(plan.dynamic_view_base_term_count, 2u);
+  EXPECT_EQ(plan.dynamic_terms[0].index, base);
+  EXPECT_EQ(plan.dynamic_terms[0].byte_stride, 4);
+  EXPECT_EQ(plan.dynamic_terms[1].index, local);
+  EXPECT_EQ(plan.dynamic_terms[1].byte_stride, 4);
+  EXPECT_FALSE(loom_low_source_memory_dynamic_term_fits_unsigned_bit_count(
+      &plan.dynamic_terms[0], 13));
+  EXPECT_FALSE(loom_low_source_memory_dynamic_term_fits_unsigned_bit_count(
+      &plan.dynamic_terms[1], 13));
+  EXPECT_EQ(plan.dynamic_realization_count, 0u);
+  EXPECT_EQ(plan.dynamic_view_base_byte_facts.range_lo, 0);
+  EXPECT_EQ(plan.dynamic_view_base_byte_facts.range_hi, 4092);
+  const loom_value_facts_t offset_facts =
+      loom_low_source_memory_dynamic_offset_facts(&plan,
+                                                  plan.static_byte_offset);
+  EXPECT_EQ(offset_facts.range_lo, 16);
+  EXPECT_EQ(offset_facts.range_hi, 4108);
+  EXPECT_TRUE(loom_low_source_memory_dynamic_offset_fits_unsigned_bit_count(
+      &plan, plan.static_byte_offset, 13));
+}
+
 TEST_F(SourceMemoryPlanTest, DynamicDenseLoadTracksMaterializedI32ViewBase) {
   loom_value_id_t buffer = DefineBufferArg();
   loom_value_id_t layout = BuildDenseLayout();

@@ -656,6 +656,12 @@ loom_value_facts_t loom_low_source_memory_dynamic_offset_facts(
   loom_value_facts_t offset_facts =
       loom_value_facts_exact_i64(static_byte_offset);
   uint8_t term_ordinal = 0;
+  if (plan->dynamic_view_base_term_count != 0 &&
+      !loom_value_facts_is_unknown(plan->dynamic_view_base_byte_facts)) {
+    loom_value_facts_addi(&offset_facts, &plan->dynamic_view_base_byte_facts,
+                          &offset_facts);
+    term_ordinal = plan->dynamic_view_base_term_count;
+  }
   uint8_t realization_ordinal = 0;
   while (term_ordinal < plan->dynamic_term_count) {
     const loom_low_source_memory_dynamic_realization_t* realization = NULL;
@@ -942,7 +948,8 @@ static bool loom_low_source_memory_access_add_view_region_expression_terms(
     const loom_symbolic_expr_t* expression,
     loom_low_source_memory_access_plan_t* plan,
     loom_low_source_memory_access_diagnostic_t* diagnostic,
-    iree_host_size_t* inout_dynamic_term_count) {
+    iree_host_size_t* inout_dynamic_term_count,
+    loom_value_facts_t* inout_combined_byte_facts) {
   if (!expression || !loom_symbolic_expr_is_linear(expression)) {
     diagnostic->rejection_bits |=
         LOOM_LOW_SOURCE_MEMORY_ACCESS_REJECTION_VIEW_BASE;
@@ -984,6 +991,10 @@ static bool loom_low_source_memory_access_add_view_region_expression_terms(
                                                            diagnostic)) {
       return false;
     }
+    if (inout_combined_byte_facts != NULL) {
+      loom_value_facts_addi(inout_combined_byte_facts, &term.byte_facts,
+                            inout_combined_byte_facts);
+    }
     *inout_dynamic_term_count += 1;
   }
   return true;
@@ -1015,13 +1026,29 @@ static bool loom_low_source_memory_access_add_view_region_byte_offset(
 
   const iree_host_size_t dynamic_view_base_begin = plan->dynamic_term_count;
   iree_host_size_t dynamic_view_base_count = 0;
+  // Multi-term bases can carry relational bounds in the analyzed complete
+  // expression that independent canonical terms cannot represent. Accumulate
+  // canonical facts during construction so taking the tighter range requires
+  // neither source rediscovery nor another term traversal.
+  const bool can_refine_dynamic_view_base_facts =
+      view_region->base_begin_byte_offset.term_count +
+              view_region->projection_byte_offset.term_count >=
+          2 &&
+      !loom_value_facts_is_unknown(view_region->begin_byte_offset.facts);
+  loom_value_facts_t canonical_view_base_byte_facts;
+  loom_value_facts_t* combined_view_base_byte_facts = NULL;
+  if (can_refine_dynamic_view_base_facts) {
+    canonical_view_base_byte_facts = loom_value_facts_exact_i64(0);
+    combined_view_base_byte_facts = &canonical_view_base_byte_facts;
+  }
   if (!loom_low_source_memory_access_add_view_region_expression_terms(
           fact_table, /*vector_access=*/NULL,
           &view_region->base_begin_byte_offset, plan, diagnostic,
-          &dynamic_view_base_count) ||
+          &dynamic_view_base_count, combined_view_base_byte_facts) ||
       !loom_low_source_memory_access_add_view_region_expression_terms(
           fact_table, vector_access, &view_region->projection_byte_offset, plan,
-          diagnostic, &dynamic_view_base_count)) {
+          diagnostic, &dynamic_view_base_count,
+          combined_view_base_byte_facts)) {
     return false;
   }
   if (dynamic_view_base_count > UINT8_MAX) {
@@ -1032,6 +1059,24 @@ static bool loom_low_source_memory_access_add_view_region_byte_offset(
   plan->dynamic_view_base_term_count = (uint8_t)dynamic_view_base_count;
   if (view_region->base_view_value_id != LOOM_VALUE_ID_INVALID) {
     plan->base_view_value_id = view_region->base_view_value_id;
+  }
+  if (can_refine_dynamic_view_base_facts) {
+    // The canonical static contribution is already represented separately in
+    // the access plan, so retain only the analyzed dynamic contribution.
+    loom_value_facts_t analyzed_view_base_byte_facts =
+        view_region->begin_byte_offset.facts;
+    const loom_value_facts_t static_view_base_byte_facts =
+        loom_value_facts_exact_i64(plan->static_view_base_byte_offset);
+    loom_value_facts_subi(&analyzed_view_base_byte_facts,
+                          &static_view_base_byte_facts,
+                          &analyzed_view_base_byte_facts);
+    const loom_value_facts_t refined_view_base_byte_facts =
+        loom_low_source_memory_access_intersect_index_facts(
+            canonical_view_base_byte_facts, analyzed_view_base_byte_facts);
+    if (loom_low_source_memory_facts_are_stronger(
+            refined_view_base_byte_facts, canonical_view_base_byte_facts)) {
+      plan->dynamic_view_base_byte_facts = refined_view_base_byte_facts;
+    }
   }
   if (dynamic_view_base_count != 0 &&
       view_region->begin_value_id != LOOM_VALUE_ID_INVALID) {
@@ -1362,6 +1407,7 @@ static bool loom_low_source_memory_access_plan_from_components(
       .root_minimum_alignment = 1,
       .alias_scope_id = LOOM_VALUE_FACT_ALIAS_SCOPE_ID_NONE,
       .dynamic_view_base_value_id = LOOM_VALUE_ID_INVALID,
+      .dynamic_view_base_byte_facts = loom_value_facts_unknown(),
       .minimum_alignment = 1,
       .cache_policy = cache_policy,
   };
