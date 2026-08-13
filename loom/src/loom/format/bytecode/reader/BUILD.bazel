@@ -114,6 +114,35 @@ loom_cc_test(
 )
 
 loom_cc_library(
+    name = "location",
+    srcs = ["location.c"],
+    hdrs = ["location.h"],
+    visibility = ["//loom/src/loom/format/bytecode:__pkg__"],
+    deps = [
+        ":decoder",
+        ":module_view",
+        "//loom/src/loom/error:error_defs",
+        "//loom/src/loom/format/bytecode:index",
+        "//loom/src/loom/ir",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_test(
+    name = "location_test",
+    srcs = ["location_test.cc"],
+    deps = [
+        ":location",
+        "//loom/src/loom/format/bytecode:format",
+        "//loom/src/loom/ir",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
     name = "materializer",
     srcs = ["materializer.c"],
     hdrs = ["materializer.h"],
@@ -121,6 +150,7 @@ loom_cc_library(
     deps = [
         ":decoder",
         ":encoding",
+        ":location",
         ":module_view",
         ":symbol_materializer",
         ":type",
@@ -157,6 +187,7 @@ loom_cc_library(
     deps = [
         ":decoder",
         ":encoding",
+        ":location",
         ":module_view",
         ":source_trivia",
         ":symbol_validator",

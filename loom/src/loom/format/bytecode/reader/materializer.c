@@ -10,6 +10,7 @@
 
 #include "loom/error/error_catalog.h"
 #include "loom/format/bytecode/reader/encoding.h"
+#include "loom/format/bytecode/reader/location.h"
 #include "loom/format/bytecode/reader/symbol_materializer.h"
 #include "loom/format/bytecode/reader/type.h"
 #include "loom/ops/module/ops.h"
@@ -73,230 +74,6 @@ static iree_status_t loom_bytecode_module_materialize_sources(
         &reader->source_ids[i]));
   }
   return iree_ok_status();
-}
-
-static iree_status_t loom_bytecode_module_read_location_coordinate(
-    loom_bytecode_module_materialization_t* reader,
-    loom_bytecode_reader_cursor_t* cursor, uint64_t location_index,
-    iree_string_view_t field_name, uint16_t* out_value) {
-  uint64_t offset = loom_bytecode_reader_cursor_absolute_position(cursor);
-  uint64_t value = 0;
-  IREE_RETURN_IF_ERROR(
-      loom_bytecode_reader_read_uvarint(&reader->decoder, cursor, &value));
-  if (value > UINT16_MAX) {
-    return loom_bytecode_reader_emit_invalid_field(
-        &reader->decoder, IREE_SV("LOCATIONS"), IREE_SV("location"),
-        location_index, field_name, offset,
-        IREE_SV("file_location_coordinate_exceeds_runtime_field_width"));
-  }
-  *out_value = (uint16_t)value;
-  return iree_ok_status();
-}
-
-static iree_status_t loom_bytecode_module_read_source_ref(
-    loom_bytecode_module_materialization_t* reader,
-    loom_bytecode_reader_cursor_t* cursor, loom_source_id_t* out_source_id) {
-  uint64_t offset = loom_bytecode_reader_cursor_absolute_position(cursor);
-  uint64_t source_index = 0;
-  IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_uvarint(
-      &reader->decoder, cursor, &source_index));
-  if (source_index >= reader->view.sources.count || !reader->source_ids) {
-    return loom_bytecode_reader_emit_table_ref(
-        &reader->decoder, IREE_SV("SOURCES"), source_index,
-        reader->view.sources.count, offset);
-  }
-  *out_source_id = reader->source_ids[source_index];
-  return iree_ok_status();
-}
-
-static iree_status_t loom_bytecode_module_materialize_locations(
-    loom_bytecode_module_materialization_t* reader,
-    const loom_bytecode_reader_section_t* section) {
-  loom_bytecode_reader_cursor_t cursor;
-  loom_bytecode_reader_cursor_initialize(
-      section->bytes.data, section->bytes.data_length, section->absolute_offset,
-      IREE_SV("LOCATIONS"), &cursor);
-
-  uint64_t count = 0;
-  uint64_t count_offset =
-      loom_bytecode_reader_cursor_absolute_position(&cursor);
-  IREE_RETURN_IF_ERROR(
-      loom_bytecode_reader_read_uvarint(&reader->decoder, &cursor, &count));
-  if (count != reader->view.locations.count) {
-    return loom_bytecode_reader_emit_invalid_field(
-        &reader->decoder, IREE_SV("LOCATIONS"), IREE_SV("location"), 0,
-        IREE_SV("count"), count_offset,
-        IREE_SV("location_count_changed_between_validation_and_materialize"));
-  }
-
-  for (uint64_t i = 0; i < count; ++i) {
-    uint8_t kind = 0;
-    uint8_t flags = 0;
-    uint64_t kind_offset =
-        loom_bytecode_reader_cursor_absolute_position(&cursor);
-    IREE_RETURN_IF_ERROR(
-        loom_bytecode_reader_read_u8(&reader->decoder, &cursor, &kind));
-    IREE_RETURN_IF_ERROR(
-        loom_bytecode_reader_read_u8(&reader->decoder, &cursor, &flags));
-    if (flags & ~LOOM_LOCATION_FLAG_SYNTHETIC) {
-      return loom_bytecode_reader_emit_invalid_field(
-          &reader->decoder, IREE_SV("LOCATIONS"), IREE_SV("location"), i,
-          IREE_SV("flags"), kind_offset + 1,
-          IREE_SV("location_has_unsupported_flag_bits"));
-    }
-
-    loom_location_entry_t entry = {
-        .kind = (loom_location_kind_t)kind,
-        .flags = flags,
-    };
-    switch (kind) {
-      case LOOM_LOCATION_NONE:
-        if (i != 0 || flags != 0) {
-          return loom_bytecode_reader_emit_invalid_field(
-              &reader->decoder, IREE_SV("LOCATIONS"), IREE_SV("location"), i,
-              IREE_SV("kind"), kind_offset,
-              IREE_SV("only_location_0_may_be_the_unflagged_none_location"));
-        }
-        continue;
-      case LOOM_LOCATION_FILE: {
-        IREE_RETURN_IF_ERROR(loom_bytecode_module_read_source_ref(
-            reader, &cursor, &entry.file.source_id));
-        IREE_RETURN_IF_ERROR(loom_bytecode_module_read_location_coordinate(
-            reader, &cursor, i, IREE_SV("start_line"), &entry.file.start_line));
-        IREE_RETURN_IF_ERROR(loom_bytecode_module_read_location_coordinate(
-            reader, &cursor, i, IREE_SV("start_col"), &entry.file.start_col));
-        IREE_RETURN_IF_ERROR(loom_bytecode_module_read_location_coordinate(
-            reader, &cursor, i, IREE_SV("end_line"), &entry.file.end_line));
-        IREE_RETURN_IF_ERROR(loom_bytecode_module_read_location_coordinate(
-            reader, &cursor, i, IREE_SV("end_col"), &entry.file.end_col));
-        break;
-      }
-      case LOOM_LOCATION_FUSED: {
-        uint64_t child_count_offset =
-            loom_bytecode_reader_cursor_absolute_position(&cursor);
-        uint64_t child_count = 0;
-        IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_uvarint(
-            &reader->decoder, &cursor, &child_count));
-        if (child_count > UINT32_MAX || child_count > IREE_HOST_SIZE_MAX) {
-          return loom_bytecode_reader_emit_count_exceeds(
-              &reader->decoder, IREE_SV("location_children"), child_count,
-              UINT32_MAX, child_count_offset);
-        }
-        loom_location_id_t* children = NULL;
-        if (child_count > 0) {
-          IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-              &reader->output_module->arena, (iree_host_size_t)child_count,
-              sizeof(loom_location_id_t), (void**)&children));
-        }
-        for (uint64_t child_index = 0; child_index < child_count;
-             ++child_index) {
-          uint64_t child_offset =
-              loom_bytecode_reader_cursor_absolute_position(&cursor);
-          uint64_t child = 0;
-          IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_uvarint(
-              &reader->decoder, &cursor, &child));
-          if (child >= i) {
-            return loom_bytecode_reader_emit_table_ref(
-                &reader->decoder, IREE_SV("LOCATIONS"), child, i, child_offset);
-          }
-          children[child_index] = (loom_location_id_t)child;
-        }
-        entry.fused.count = (uint32_t)child_count;
-        entry.fused.children = children;
-        break;
-      }
-      case LOOM_LOCATION_OPAQUE: {
-        IREE_RETURN_IF_ERROR(loom_bytecode_module_read_source_ref(
-            reader, &cursor, &entry.opaque.source_id));
-        uint64_t data_length_offset =
-            loom_bytecode_reader_cursor_absolute_position(&cursor);
-        uint64_t data_length = 0;
-        IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_uvarint(
-            &reader->decoder, &cursor, &data_length));
-        if (data_length > UINT32_MAX || data_length > IREE_HOST_SIZE_MAX) {
-          return loom_bytecode_reader_emit_count_exceeds(
-              &reader->decoder, IREE_SV("opaque_location_data"), data_length,
-              UINT32_MAX, data_length_offset);
-        }
-        iree_const_byte_span_t data_span = iree_const_byte_span_empty();
-        IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_span(
-            &reader->decoder, &cursor, data_length, &data_span));
-        uint8_t* data = NULL;
-        if (data_span.data_length > 0) {
-          IREE_RETURN_IF_ERROR(
-              iree_arena_allocate(&reader->output_module->arena,
-                                  data_span.data_length, (void**)&data));
-          memcpy(data, data_span.data, data_span.data_length);
-        }
-        entry.opaque.data_length = (uint32_t)data_span.data_length;
-        entry.opaque.data = data;
-        break;
-      }
-      case LOOM_LOCATION_TAGGED: {
-        uint64_t tag_offset =
-            loom_bytecode_reader_cursor_absolute_position(&cursor);
-        uint64_t tag = 0;
-        IREE_RETURN_IF_ERROR(
-            loom_bytecode_reader_read_uvarint(&reader->decoder, &cursor, &tag));
-        if (tag == LOOM_LOCATION_TAG_INVALID || tag > UINT16_MAX) {
-          return loom_bytecode_reader_emit_invalid_field(
-              &reader->decoder, IREE_SV("LOCATIONS"), IREE_SV("location"), i,
-              IREE_SV("tag"), tag_offset,
-              IREE_SV("tagged location tag must be in [1, 65535]"));
-        }
-        uint64_t child_offset =
-            loom_bytecode_reader_cursor_absolute_position(&cursor);
-        uint64_t child = 0;
-        IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_uvarint(
-            &reader->decoder, &cursor, &child));
-        if (child >= i) {
-          return loom_bytecode_reader_emit_table_ref(
-              &reader->decoder, IREE_SV("LOCATIONS"), child, i, child_offset);
-        }
-        uint64_t data_length_offset =
-            loom_bytecode_reader_cursor_absolute_position(&cursor);
-        uint64_t data_length = 0;
-        IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_uvarint(
-            &reader->decoder, &cursor, &data_length));
-        if (data_length > UINT32_MAX || data_length > IREE_HOST_SIZE_MAX) {
-          return loom_bytecode_reader_emit_count_exceeds(
-              &reader->decoder, IREE_SV("tagged_location_data"), data_length,
-              UINT32_MAX, data_length_offset);
-        }
-        iree_const_byte_span_t data_span = iree_const_byte_span_empty();
-        IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_span(
-            &reader->decoder, &cursor, data_length, &data_span));
-        uint8_t* data = NULL;
-        if (data_span.data_length > 0) {
-          IREE_RETURN_IF_ERROR(
-              iree_arena_allocate(&reader->output_module->arena,
-                                  data_span.data_length, (void**)&data));
-          memcpy(data, data_span.data, data_span.data_length);
-        }
-        entry.tagged.tag = (loom_location_tag_t)tag;
-        entry.tagged.child = (loom_location_id_t)child;
-        entry.tagged.data_length = (uint32_t)data_span.data_length;
-        entry.tagged.data = data;
-        break;
-      }
-      default:
-        return loom_bytecode_reader_emit_enum_value(
-            &reader->decoder, IREE_SV("location_kind"), kind,
-            LOOM_LOCATION_COUNT_, kind_offset);
-    }
-
-    loom_location_id_t location_id = LOOM_LOCATION_UNKNOWN;
-    IREE_RETURN_IF_ERROR(
-        loom_module_add_location(reader->output_module, entry, &location_id));
-    if (location_id != i) {
-      return loom_bytecode_reader_emit_invalid_field(
-          &reader->decoder, IREE_SV("LOCATIONS"), IREE_SV("location"), i,
-          IREE_SV("location_id"), kind_offset,
-          IREE_SV("location_table_must_preserve_bytecode_location_ids"));
-    }
-  }
-  return loom_bytecode_reader_expect_empty(&reader->decoder, &cursor,
-                                           IREE_SV("LOCATIONS"));
 }
 
 static iree_status_t loom_bytecode_module_materialize_provider_imports(
@@ -402,8 +179,14 @@ static iree_status_t loom_bytecode_module_materialize_tables(
   };
   IREE_RETURN_IF_ERROR(loom_bytecode_type_materialize(&type_materializer));
   if (reader->view.sections.locations) {
-    IREE_RETURN_IF_ERROR(loom_bytecode_module_materialize_locations(
-        reader, reader->view.sections.locations));
+    loom_bytecode_location_materializer_t location_materializer = {
+        .decoder = &reader->decoder,
+        .module_view = &reader->view,
+        .source_ids = reader->source_ids,
+        .output_module = reader->output_module,
+    };
+    IREE_RETURN_IF_ERROR(loom_bytecode_location_table_materialize(
+        &location_materializer, reader->view.sections.locations));
   }
   return loom_bytecode_symbols_materialize(&symbol_materializer,
                                            reader->view.sections.symbols,

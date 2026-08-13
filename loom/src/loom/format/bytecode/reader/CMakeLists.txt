@@ -122,6 +122,38 @@ loom_cc_test(
 
 loom_cc_library(
   NAME
+    location
+  HDRS
+    "location.h"
+  SRCS
+    "location.c"
+  DEPS
+    ::decoder
+    ::module_view
+    iree::base
+    iree::base::internal::arena
+    loom::error::error_defs
+    loom::format::bytecode::index
+    loom::ir
+  PUBLIC
+)
+
+loom_cc_test(
+  NAME
+    location_test
+  SRCS
+    "location_test.cc"
+  DEPS
+    ::location
+    iree::base::internal::arena
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::format::bytecode::format
+    loom::ir
+)
+
+loom_cc_library(
+  NAME
     materializer
   HDRS
     "materializer.h"
@@ -130,6 +162,7 @@ loom_cc_library(
   DEPS
     ::decoder
     ::encoding
+    ::location
     ::module_view
     ::symbol_materializer
     ::type
@@ -169,6 +202,7 @@ loom_cc_library(
   DEPS
     ::decoder
     ::encoding
+    ::location
     ::module_view
     ::source_trivia
     ::symbol_validator
