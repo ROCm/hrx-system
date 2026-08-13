@@ -96,57 +96,22 @@ func.def public @entry(%arg: i32) -> (i32) {
 
 // ====
 
-// Independently archived libraries may carry renamed copies of one private
-// provider closure. They remain one implementation choice when both the
-// provider and its private dependencies are structurally equivalent.
-// RUN: pass select-templates
+// Equal-priority providers remain distinct choices even when their bodies are
+// structurally identical. Only explicit provider metadata affects selection.
+// RUN: pass select-templates{mode=final}
 
-func.def @identity_a(%m: index, %value: tensor<[%m]xf32>) -> (tensor<[%m]xf32>) {
-  func.return %value : tensor<[%m]xf32>
+func.template<demo.identical_tie> @provider_a(%value: i32) -> (i32) {
+  func.return %value : i32
 }
 
-func.def @identity_b(%m: index, %value: tensor<[%m]xf32>) -> (tensor<[%m]xf32>) {
-  func.return %value : tensor<[%m]xf32>
+func.template<demo.identical_tie> @provider_b(%value: i32) -> (i32) {
+  func.return %value : i32
 }
 
-func.template<demo.archived_duplicate> @provider_a(%m: index, %value: tensor<[%m]xf32>) -> (tensor<[%m]xf32>) where [mul(%m, 16)] {
-  %result = func.call @identity_a(%m, %value) : (index, tensor<[%m]xf32>) -> (tensor<[%m]xf32>)
-  func.return %result : tensor<[%m]xf32>
-}
-
-func.template<demo.archived_duplicate> @provider_b(%m: index, %value: tensor<[%m]xf32>) -> (tensor<[%m]xf32>) where [mul(%m, 16)] {
-  %result = func.call @identity_b(%m, %value) : (index, tensor<[%m]xf32>) -> (tensor<[%m]xf32>)
-  func.return %result : tensor<[%m]xf32>
-}
-
-func.def public @entry_a(%n: index, %arg: tensor<[%n]xf32>) -> (tensor<[%n]xf32>) where [mul(%n, 16)] {
-  %result = func.apply<demo.archived_duplicate>(%n, %arg) : (index, tensor<[%n]xf32>) -> (tensor<[%n]xf32>)
-  func.return %result : tensor<[%n]xf32>
-}
-
-func.def public @entry_b(%n: index, %arg: tensor<[%n]xf32>) -> (tensor<[%n]xf32>) where [mul(%n, 16)] {
-  %result = func.apply<demo.archived_duplicate>(%n, %arg) : (index, tensor<[%n]xf32>) -> (tensor<[%n]xf32>)
-  func.return %result : tensor<[%n]xf32>
-}
-
-// ----
-func.def @identity_a(%m: index, %value: tensor<[%m]xf32>) -> (tensor<[%m]xf32>) {
-  func.return %value : tensor<[%m]xf32>
-}
-
-func.template<demo.archived_duplicate> @provider_a(%m: index, %value: tensor<[%m]xf32>) -> (tensor<[%m]xf32>) where [mul(%m, 16)] {
-  %result = func.call @identity_a(%m, %value) : (index, tensor<[%m]xf32>) -> (tensor<[%m]xf32>)
-  func.return %result : tensor<[%m]xf32>
-}
-
-func.def public @entry_a(%n: index, %arg: tensor<[%n]xf32>) -> (tensor<[%n]xf32>) where [mul(%n, 16)] {
-  %result = func.call inline @provider_a(%n, %arg) : (index, tensor<[%n]xf32>) -> (tensor<[%n]xf32>)
-  func.return %result : tensor<[%n]xf32>
-}
-
-func.def public @entry_b(%n: index, %arg: tensor<[%n]xf32>) -> (tensor<[%n]xf32>) where [mul(%n, 16)] {
-  %result = func.call inline @provider_a(%n, %arg) : (index, tensor<[%n]xf32>) -> (tensor<[%n]xf32>)
-  func.return %result : tensor<[%n]xf32>
+func.def public @entry(%arg: i32) -> (i32) {
+  // ERROR@+1: LOWERING/045 {op_name="func.apply", phase_name="select-templates", contract_key="demo.identical_tie", failure_code="ambiguous"}
+  %result = func.apply<demo.identical_tie>(%arg) : (i32) -> (i32)
+  func.return %result : i32
 }
 
 // ====
@@ -617,15 +582,15 @@ kernel.def @implicit_export() {
 
 // ====
 
-// RUN: pass select-templates{mode=final}
+// RUN: pass select-templates{mode=final},inline-callables
 
 func.template<demo.workgroup_reduce> @reduce_provider(%value: f32) -> (f32) {
+  // ERROR@+1: STRUCTURE/029 "kernel.workgroup.reduce" "required" "kernel.def" "func.def"
   %sum = kernel.workgroup.reduce<addf> %value : f32
   func.return %sum : f32
 }
 
 func.def public @entry(%value: f32) -> (f32) {
-  // ERROR@+1: LOWERING/045 {op_name="func.apply", phase_name="select-templates", contract_key="demo.workgroup_reduce", failure_code="all_rejected"}
   %sum = func.apply<demo.workgroup_reduce>(%value) : (f32) -> (f32)
   func.return %sum : f32
 }

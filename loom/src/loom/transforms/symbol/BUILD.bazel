@@ -13,26 +13,10 @@ package(
 )
 
 loom_cc_library(
-    name = "symbol_equivalence",
-    srcs = ["symbol_equivalence.c"],
-    hdrs = ["symbol_equivalence.h"],
-    visibility = ["//visibility:private"],
-    deps = [
-        "//loom/src/loom/ir",
-        "//loom/src/loom/link:symbol_policy",
-        "//loom/src/loom/ops:op_defs",
-        "//loom/src/loom/rewrite:remap",
-        "//runtime/src/iree/base",
-        "//runtime/src/iree/base/internal:arena",
-    ],
-)
-
-loom_cc_library(
     name = "template_selection",
     srcs = ["template_selection.c"],
     hdrs = ["template_selection.h"],
     deps = [
-        ":symbol_equivalence",
         ":symbol_pruning",
         "//loom/src/loom/analysis:condition_facts",
         "//loom/src/loom/analysis:func_provider_catalog",

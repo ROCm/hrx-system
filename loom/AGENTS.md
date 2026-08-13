@@ -88,6 +88,21 @@ not receive target-opcode special cases. Target emission may intentionally
 erase a zero-cost hint only after the readable low assembly form has been
 preserved and tested.
 
+## Function Template Applicability
+
+A function template's applicability is defined only by its explicit provider
+metadata: implementation contract, signature, target binding, `requires` and
+`where` constraints, and priority. Selection never inspects a template body to
+accept, reject, rank, or deduplicate a provider. Structurally identical
+definitions are distinct providers unless they carry the same explicit
+provider identity.
+
+Template bodies may contain operations whose structural placement cannot be
+verified until the selected definition is materialized and inlined. That
+verification is deliberately deferred to the resulting program. An invalid
+selected body fails verification there; its contents never retroactively alter
+which template was applicable.
+
 ## Reviewable Pipeline Changes
 
 A pull request boundary is an architectural cut, not a file-count or

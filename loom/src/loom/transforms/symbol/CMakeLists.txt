@@ -11,30 +11,12 @@ iree_add_all_subdirs()
 
 loom_cc_library(
   NAME
-    symbol_equivalence
-  HDRS
-    "symbol_equivalence.h"
-  SRCS
-    "symbol_equivalence.c"
-  DEPS
-    iree::base
-    iree::base::internal::arena
-    loom::ir
-    loom::link::symbol_policy
-    loom::ops::op_defs
-    loom::rewrite::remap
-  PUBLIC
-)
-
-loom_cc_library(
-  NAME
     template_selection
   HDRS
     "template_selection.h"
   SRCS
     "template_selection.c"
   DEPS
-    ::symbol_equivalence
     ::symbol_pruning
     iree::base
     iree::base::internal::arena

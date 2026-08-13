@@ -205,7 +205,6 @@ loom_cc_library(
     loom::ops::func_symbol_facts
     loom::ops::op_defs
     loom::util::adaptive_sort
-    loom::util::walk
   PUBLIC
 )
 
@@ -223,7 +222,6 @@ loom_cc_test(
     loom::format::text::parser
     loom::ir
     loom::ops::func
-    loom::ops::kernel
     loom::ops::op_defs
     loom::ops::target
     loom::ops::test

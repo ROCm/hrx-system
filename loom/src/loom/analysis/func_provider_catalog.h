@@ -10,7 +10,7 @@
 // providers keyed by implementation contract. Local providers are discovered
 // from the module symbol table and summarized through func symbol facts.
 // Selection plans own per-apply match state; this catalog only owns provider
-// availability.
+// availability. Provider bodies never contribute applicability facts.
 
 #ifndef LOOM_ANALYSIS_FUNC_PROVIDER_CATALOG_H_
 #define LOOM_ANALYSIS_FUNC_PROVIDER_CATALOG_H_
@@ -124,18 +124,6 @@ typedef struct loom_func_provider_summary_t {
 
   // Borrowed resolved target-condition conjunction.
   const loom_target_condition_t* target_conditions;
-
-  // Ancestor kinds that must be supplied by each provider application site.
-  const loom_op_kind_t* required_caller_ancestors;
-
-  // Ancestor kinds that must be absent from each provider application site.
-  const loom_op_kind_t* forbidden_caller_ancestors;
-
-  // Number of entries in |required_caller_ancestors|.
-  uint16_t required_caller_ancestor_count;
-
-  // Number of entries in |forbidden_caller_ancestors|.
-  uint16_t forbidden_caller_ancestor_count;
 } loom_func_provider_summary_t;
 
 // Borrowed provider result range.

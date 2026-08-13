@@ -13,7 +13,6 @@
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
 #include "loom/ops/func/ops.h"
-#include "loom/ops/kernel/ops.h"
 #include "loom/ops/op_defs.h"
 #include "loom/ops/target/ops.h"
 #include "loom/ops/test/ops.h"
@@ -35,9 +34,6 @@ class FuncProviderCatalogTest : public ::testing::Test {
         loom_func_dialect_vtables(&vtable_count);
     IREE_ASSERT_OK(loom_context_register_dialect(
         &context_, LOOM_DIALECT_FUNC, vtables, (uint16_t)vtable_count));
-    vtables = loom_kernel_dialect_vtables(&vtable_count);
-    IREE_ASSERT_OK(loom_context_register_dialect(
-        &context_, LOOM_DIALECT_KERNEL, vtables, (uint16_t)vtable_count));
     vtables = loom_test_dialect_vtables(&vtable_count);
     IREE_ASSERT_OK(loom_context_register_dialect(
         &context_, LOOM_DIALECT_TEST, vtables, (uint16_t)vtable_count));
@@ -169,23 +165,6 @@ func.template<qwen.q4.matmul> public priority(10) @fast(%arg0: i32) -> (i32) {
   loom_func_provider_slice_t missing =
       loom_func_provider_catalog_lookup_key(&catalog_, IREE_SV("missing"));
   EXPECT_EQ(missing.count, 0u);
-}
-
-TEST_F(FuncProviderCatalogTest, CapturesCallerAncestorRequirements) {
-  ModulePtr module = ParseModule(R"(
-func.template<demo.workgroup_reduce> @reduce(%value: f32) -> (f32) {
-  %sum = kernel.workgroup.reduce<addf> %value : f32
-  func.return %sum : f32
-}
-)");
-
-  loom_func_provider_slice_t providers =
-      RebuildAndLookup(module.get(), IREE_SV("demo.workgroup_reduce"));
-  ASSERT_EQ(providers.count, 1u);
-  ASSERT_EQ(providers.providers[0].required_caller_ancestor_count, 1u);
-  EXPECT_EQ(providers.providers[0].required_caller_ancestors[0],
-            LOOM_OP_KERNEL_DEF);
-  EXPECT_EQ(providers.providers[0].forbidden_caller_ancestor_count, 0u);
 }
 
 TEST_F(FuncProviderCatalogTest, RebuildDropsErasedProvider) {
