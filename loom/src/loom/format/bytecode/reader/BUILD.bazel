@@ -143,6 +143,36 @@ loom_cc_test(
 )
 
 loom_cc_library(
+    name = "operation",
+    srcs = ["operation.c"],
+    hdrs = ["operation.h"],
+    visibility = ["//loom/src/loom/format/bytecode:__pkg__"],
+    deps = [
+        ":decoder",
+        ":module_view",
+        "//loom/src/loom/error:error_defs",
+        "//loom/src/loom/format/bytecode:index",
+        "//loom/src/loom/ir",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_test(
+    name = "operation_test",
+    srcs = ["operation_test.cc"],
+    deps = [
+        ":operation",
+        "//loom/src/loom/format/bytecode:format",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/module",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
     name = "materializer",
     srcs = ["materializer.c"],
     hdrs = ["materializer.h"],
@@ -189,6 +219,7 @@ loom_cc_library(
         ":encoding",
         ":location",
         ":module_view",
+        ":operation",
         ":source_trivia",
         ":symbol_validator",
         ":type_validator",
