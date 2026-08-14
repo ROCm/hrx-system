@@ -246,7 +246,6 @@ class Pm4CommandBufferBenchmark : public benchmark::Fixture {
     options.command_buffer_mode = command_buffer_mode;
     options.host_queues.upload_capacity = upload_capacity;
     if (command_buffer_mode == IREE_HAL_AMDGPU_COMMAND_BUFFER_MODE_PM4) {
-      options.enable_experimental_pm4_command_buffers = true;
       if (strcmp(FLAG_pm4_publication_mode, "host-copy") == 0) {
         options.pm4_command_buffer_publication_mode =
             IREE_HAL_AMDGPU_PM4_COMMAND_BUFFER_PUBLICATION_MODE_HOST_COPY;

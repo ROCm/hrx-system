@@ -1737,8 +1737,6 @@ static void iree_hal_amdgpu_logical_device_translate_physical_options(
   out_options->file_staging.force_fine_host_memory =
       options->file_staging.force_fine_host_memory;
   out_options->force_wait_barrier_defer = options->force_wait_barrier_defer;
-  out_options->enable_experimental_pm4_command_buffers =
-      options->enable_experimental_pm4_command_buffers;
   out_options->suppress_device_fine_memory =
       options->suppress_device_fine_memory;
 }

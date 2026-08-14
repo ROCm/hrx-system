@@ -341,11 +341,6 @@ typedef struct iree_hal_amdgpu_logical_device_options_t {
   // conservative host-only fallback path.
   uint64_t force_wait_barrier_defer : 1;
 
-  // Enables PM4 dispatch command-buffer capabilities on unvalidated gfx9-gfx12
-  // targets. This is an explicit hardware bring-up override; automatic PM4
-  // selection remains limited to validated GPU ISAs when this is unset.
-  uint64_t enable_experimental_pm4_command_buffers : 1;
-
   // Suppresses fine-grained GPU-local memory pools even if the HSA agent
   // reports them. This is a hardware bring-up and compatibility testing
   // override for validating the coarse-grained device-local memory path used on
