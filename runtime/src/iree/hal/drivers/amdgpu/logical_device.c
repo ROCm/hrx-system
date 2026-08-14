@@ -2737,7 +2737,8 @@ static bool iree_hal_amdgpu_logical_device_can_auto_select_pm4_command_buffer(
     return false;
   }
   const iree_hal_command_category_t supported_categories =
-      IREE_HAL_COMMAND_CATEGORY_DISPATCH | IREE_HAL_COMMAND_CATEGORY_ATOMIC;
+      IREE_HAL_COMMAND_CATEGORY_DISPATCH | IREE_HAL_COMMAND_CATEGORY_ATOMIC |
+      IREE_HAL_COMMAND_CATEGORY_TRANSFER;
   if (command_categories == 0 ||
       iree_any_bit_set(command_categories, ~supported_categories)) {
     return false;
@@ -2804,6 +2805,8 @@ static iree_status_t iree_hal_amdgpu_logical_device_create_pm4_command_buffer(
       physical_device->host_queue_count, flags,
       physical_device->vendor_packet_capabilities,
       &physical_device->atomic_pm4_context,
+      &physical_device->buffer_transfer_context,
+      &physical_device->transfer_pm4_context,
       physical_device->pm4_timestamp_strategy,
       physical_device->pm4_command_buffer_resident_pool,
       iree_hal_amdgpu_physical_device_hostcall_buffer(physical_device),

@@ -14,6 +14,7 @@
 #include "iree/hal/drivers/amdgpu/abi/timestamp.h"
 #include "iree/hal/drivers/amdgpu/atomic_memory.h"
 #include "iree/hal/drivers/amdgpu/device/atomic_pm4.h"
+#include "iree/hal/drivers/amdgpu/device/blit_pm4.h"
 #include "iree/hal/drivers/amdgpu/pm4_command_program_set.h"
 #include "iree/hal/drivers/amdgpu/profile_metadata.h"
 #include "iree/hal/drivers/amdgpu/util/libhsa.h"
@@ -127,19 +128,20 @@ void iree_hal_amdgpu_pm4_command_buffer_resident_pool_trim(
 
 // Creates a host-recorded PM4 command buffer.
 //
-// The PM4 command-buffer path records dispatch-only HAL commands directly into
-// a resident PM4 indirect buffer. Static dispatches reference resident kernarg
-// templates; dynamic dispatches reference resident kernarg templates patched by
-// a queue_execute binding-table fixup dispatch before the PM4 IB runs. The
-// command buffer borrows |resident_pool| and |resource_set_block_pool|; callers
-// must keep them live until all created command buffers are destroyed.
+// The PM4 command-buffer path records dispatch, atomic, and transfer HAL
+// commands directly into a resident PM4 indirect buffer. Static operations
+// reference resident kernarg templates; dynamic operations reference resident
+// templates patched by a queue_execute binding-table fixup dispatch before the
+// PM4 IB runs. The command buffer borrows |resident_pool| and
+// |resource_set_block_pool|; callers must keep them live until all created
+// command buffers are destroyed.
 //
 // |hostcall_buffer| is an optional opaque device address copied into every
 // implicit-argument template. The allocation it references must remain valid
 // for the command buffer lifetime.
 //
-// |atomic_context| is borrowed immutable fallback launch metadata and must
-// remain valid for the command buffer lifetime.
+// All device builtin contexts are borrowed immutable planning and launch
+// metadata and must remain valid for the command buffer lifetime.
 iree_status_t iree_hal_amdgpu_pm4_command_buffer_create(
     iree_hal_allocator_t* device_allocator, iree_hal_command_buffer_mode_t mode,
     iree_hal_command_category_t command_categories,
@@ -148,6 +150,10 @@ iree_status_t iree_hal_amdgpu_pm4_command_buffer_create(
     iree_hal_amdgpu_pm4_command_buffer_flags_t flags,
     iree_hal_amdgpu_vendor_packet_capability_flags_t vendor_packet_capabilities,
     const iree_hal_amdgpu_device_atomic_pm4_context_t* atomic_context,
+    const iree_hal_amdgpu_device_buffer_transfer_context_t*
+        buffer_transfer_context,
+    const iree_hal_amdgpu_device_buffer_transfer_pm4_context_t*
+        buffer_transfer_pm4_context,
     iree_hal_amdgpu_pm4_timestamp_strategy_t pm4_timestamp_strategy,
     iree_hal_amdgpu_pm4_command_buffer_resident_pool_t* resident_pool,
     void* hostcall_buffer,

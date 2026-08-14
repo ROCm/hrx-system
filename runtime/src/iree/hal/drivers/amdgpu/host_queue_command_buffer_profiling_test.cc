@@ -306,7 +306,7 @@ TEST_F(HostQueueCommandBufferProfilingTest,
 }
 
 TEST_F(HostQueueCommandBufferProfilingTest,
-       Pm4ProfileProgramPreservesAtomicThenDispatchOrdering) {
+       Pm4ProfileProgramPreservesMixedCommandOrdering) {
   iree_hal_amdgpu_logical_device_options_t options;
   iree_hal_amdgpu_logical_device_options_initialize(&options);
   options.command_buffer_mode = IREE_HAL_AMDGPU_COMMAND_BUFFER_MODE_PM4;
@@ -342,7 +342,8 @@ TEST_F(HostQueueCommandBufferProfilingTest,
   IREE_ASSERT_OK(iree_hal_command_buffer_create(
       test_device.base_device(),
       IREE_HAL_COMMAND_BUFFER_MODE_RETAIN_PROFILE_METADATA,
-      IREE_HAL_COMMAND_CATEGORY_ATOMIC | IREE_HAL_COMMAND_CATEGORY_DISPATCH,
+      IREE_HAL_COMMAND_CATEGORY_ATOMIC | IREE_HAL_COMMAND_CATEGORY_DISPATCH |
+          IREE_HAL_COMMAND_CATEGORY_TRANSFER,
       IREE_HAL_QUEUE_AFFINITY_ANY, /*binding_capacity=*/0,
       fixture.command_buffer.out()));
   IREE_ASSERT_OK(iree_hal_command_buffer_begin(fixture.command_buffer));
@@ -357,6 +358,43 @@ TEST_F(HostQueueCommandBufferProfilingTest,
               IREE_HAL_ATOMIC_FLAG_SYSTEM_SCOPE,
           /*.width=*/IREE_HAL_ATOMIC_WIDTH_32,
       }));
+  const uint32_t fill_value = 7;
+  IREE_ASSERT_OK(iree_hal_command_buffer_fill_buffer(
+      fixture.command_buffer,
+      iree_hal_make_buffer_ref(fixture.input_buffer, sizeof(uint32_t),
+                               sizeof(fill_value)),
+      &fill_value, sizeof(fill_value), IREE_HAL_FILL_FLAG_NONE));
+  const uint32_t update_value = 11;
+  IREE_ASSERT_OK(iree_hal_command_buffer_update_buffer(
+      fixture.command_buffer, &update_value, /*source_offset=*/0,
+      iree_hal_make_buffer_ref(fixture.input_buffer, 2 * sizeof(uint32_t),
+                               sizeof(update_value)),
+      IREE_HAL_UPDATE_FLAG_NONE));
+  const iree_hal_memory_barrier_t transfer_to_transfer_barrier = {
+      /*.source_scope=*/IREE_HAL_ACCESS_SCOPE_TRANSFER_WRITE,
+      /*.target_scope=*/IREE_HAL_ACCESS_SCOPE_TRANSFER_READ,
+  };
+  IREE_ASSERT_OK(iree_hal_command_buffer_execution_barrier(
+      fixture.command_buffer, IREE_HAL_EXECUTION_STAGE_TRANSFER,
+      IREE_HAL_EXECUTION_STAGE_TRANSFER, IREE_HAL_EXECUTION_BARRIER_FLAG_NONE,
+      /*memory_barrier_count=*/1, &transfer_to_transfer_barrier,
+      /*buffer_barrier_count=*/0, /*buffer_barriers=*/nullptr));
+  IREE_ASSERT_OK(iree_hal_command_buffer_copy_buffer(
+      fixture.command_buffer,
+      iree_hal_make_buffer_ref(fixture.input_buffer, 2 * sizeof(uint32_t),
+                               sizeof(uint32_t)),
+      iree_hal_make_buffer_ref(fixture.input_buffer, 3 * sizeof(uint32_t),
+                               sizeof(uint32_t)),
+      IREE_HAL_COPY_FLAG_NONE));
+  const iree_hal_memory_barrier_t transfer_to_dispatch_barrier = {
+      /*.source_scope=*/IREE_HAL_ACCESS_SCOPE_TRANSFER_WRITE,
+      /*.target_scope=*/IREE_HAL_ACCESS_SCOPE_DISPATCH_READ,
+  };
+  IREE_ASSERT_OK(iree_hal_command_buffer_execution_barrier(
+      fixture.command_buffer, IREE_HAL_EXECUTION_STAGE_TRANSFER,
+      IREE_HAL_EXECUTION_STAGE_DISPATCH, IREE_HAL_EXECUTION_BARRIER_FLAG_NONE,
+      /*memory_barrier_count=*/1, &transfer_to_dispatch_barrier,
+      /*buffer_barrier_count=*/0, /*buffer_barriers=*/nullptr));
   IREE_ASSERT_OK(AppendTwoDispatchOperations(&fixture));
   IREE_ASSERT_OK(iree_hal_command_buffer_end(fixture.command_buffer));
 
@@ -383,18 +421,24 @@ TEST_F(HostQueueCommandBufferProfilingTest,
   IREE_ASSERT_OK(iree_hal_device_profiling_flush(test_device.base_device()));
   IREE_ASSERT_OK(profiling.End());
 
-  const uint32_t expected_values[4] = {25, 16, 19, 22};
+  const uint32_t expected_values[4] = {25, 31, 43, 43};
   ExpectTwoDispatchOutputs(fixture, expected_values);
-  ASSERT_EQ(3u, sink.command_operations.size());
+  ASSERT_EQ(6u, sink.command_operations.size());
   EXPECT_EQ(IREE_HAL_PROFILE_COMMAND_OPERATION_TYPE_ATOMIC_STORE,
             sink.command_operations[0].type);
-  EXPECT_EQ(IREE_HAL_PROFILE_COMMAND_OPERATION_TYPE_DISPATCH,
+  EXPECT_EQ(IREE_HAL_PROFILE_COMMAND_OPERATION_TYPE_FILL,
             sink.command_operations[1].type);
-  EXPECT_EQ(IREE_HAL_PROFILE_COMMAND_OPERATION_TYPE_DISPATCH,
+  EXPECT_EQ(IREE_HAL_PROFILE_COMMAND_OPERATION_TYPE_UPDATE,
             sink.command_operations[2].type);
+  EXPECT_EQ(IREE_HAL_PROFILE_COMMAND_OPERATION_TYPE_COPY,
+            sink.command_operations[3].type);
+  EXPECT_EQ(IREE_HAL_PROFILE_COMMAND_OPERATION_TYPE_DISPATCH,
+            sink.command_operations[4].type);
+  EXPECT_EQ(IREE_HAL_PROFILE_COMMAND_OPERATION_TYPE_DISPATCH,
+            sink.command_operations[5].type);
   ASSERT_EQ(2u, sink.dispatch_events.size());
-  EXPECT_EQ(1u, sink.dispatch_events[0].command_index);
-  EXPECT_EQ(2u, sink.dispatch_events[1].command_index);
+  EXPECT_EQ(4u, sink.dispatch_events[0].command_index);
+  EXPECT_EQ(5u, sink.dispatch_events[1].command_index);
 }
 
 TEST_F(HostQueueCommandBufferProfilingTest,

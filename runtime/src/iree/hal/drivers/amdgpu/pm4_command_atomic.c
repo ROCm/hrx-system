@@ -82,7 +82,7 @@ static iree_status_t iree_hal_amdgpu_pm4_atomic_measure_barrier(
 
 static void iree_hal_amdgpu_pm4_atomic_record_initialize(
     iree_hal_amdgpu_pm4_command_record_opcode_t opcode,
-    iree_hal_amdgpu_pm4_atomic_target_record_t target, uint32_t command_index,
+    iree_hal_amdgpu_pm4_buffer_ref_record_t target, uint32_t command_index,
     iree_hal_amdgpu_pm4_atomic_record_flags_t flags,
     iree_hsa_fence_scope_t barrier_acquire_scope,
     iree_hsa_fence_scope_t barrier_release_scope,
@@ -98,7 +98,7 @@ static void iree_hal_amdgpu_pm4_atomic_record_initialize(
 }
 
 void iree_hal_amdgpu_pm4_atomic_record_initialize_wait(
-    iree_hal_amdgpu_pm4_atomic_target_record_t target,
+    iree_hal_amdgpu_pm4_buffer_ref_record_t target,
     iree_hal_atomic_wait_params_t params, uint32_t command_index,
     iree_hal_amdgpu_pm4_atomic_record_flags_t flags,
     iree_hsa_fence_scope_t barrier_acquire_scope,
@@ -112,7 +112,7 @@ void iree_hal_amdgpu_pm4_atomic_record_initialize_wait(
 }
 
 void iree_hal_amdgpu_pm4_atomic_record_initialize_store(
-    iree_hal_amdgpu_pm4_atomic_target_record_t target,
+    iree_hal_amdgpu_pm4_buffer_ref_record_t target,
     iree_hal_atomic_store_params_t params, uint32_t command_index,
     iree_hal_amdgpu_pm4_atomic_record_flags_t flags,
     iree_hsa_fence_scope_t barrier_acquire_scope,
@@ -126,7 +126,7 @@ void iree_hal_amdgpu_pm4_atomic_record_initialize_store(
 }
 
 void iree_hal_amdgpu_pm4_atomic_record_initialize_rmw(
-    iree_hal_amdgpu_pm4_atomic_target_record_t target,
+    iree_hal_amdgpu_pm4_buffer_ref_record_t target,
     iree_hal_atomic_rmw_params_t params, uint32_t command_index,
     iree_hal_amdgpu_pm4_atomic_record_flags_t flags,
     iree_hsa_fence_scope_t barrier_acquire_scope,
@@ -165,7 +165,7 @@ iree_status_t iree_hal_amdgpu_pm4_atomic_record_measure(
     iree_host_size_t current_template_byte_length,
     bool has_previous_launch_state,
     const iree_hal_amdgpu_pm4_dispatch_launch_state_t* previous_launch_state,
-    iree_hal_amdgpu_pm4_atomic_record_measurement_t* out_measurement) {
+    iree_hal_amdgpu_pm4_command_record_measurement_t* out_measurement) {
   memset(out_measurement, 0, sizeof(*out_measurement));
   iree_hal_amdgpu_pm4_atomic_fallback_layout_t layout;
   IREE_RETURN_IF_ERROR(iree_hal_amdgpu_pm4_atomic_record_fallback_layout(
@@ -255,7 +255,7 @@ iree_status_t iree_hal_amdgpu_pm4_atomic_record_measure(
 static iree_status_t iree_hal_amdgpu_pm4_atomic_append_fixup(
     iree_hal_amdgpu_pm4_fixup_entry_builder_t* fixup_builder,
     iree_host_size_t target_offset,
-    const iree_hal_amdgpu_pm4_atomic_target_record_t* target) {
+    const iree_hal_amdgpu_pm4_buffer_ref_record_t* target) {
   if (IREE_UNLIKELY(target_offset > UINT32_MAX)) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "PM4 atomic fixup target offset overflows");
@@ -296,14 +296,15 @@ static iree_status_t iree_hal_amdgpu_pm4_atomic_initialize_template(
 
 iree_status_t iree_hal_amdgpu_pm4_atomic_record_materialize(
     const iree_hal_amdgpu_pm4_atomic_record_t* record,
-    iree_hal_amdgpu_pm4_atomic_materialization_state_t* state,
-    iree_hal_amdgpu_pm4_atomic_materialization_stats_t* out_stats) {
-  iree_hal_amdgpu_pm4_atomic_materialization_stats_t stats = {0};
+    const iree_hal_amdgpu_device_atomic_pm4_context_t* atomic_context,
+    iree_hal_amdgpu_pm4_command_materialization_state_t* state,
+    iree_hal_amdgpu_pm4_command_materialization_stats_t* out_stats) {
+  iree_hal_amdgpu_pm4_command_materialization_stats_t stats = {0};
   const bool is_profile = iree_any_bit_set(
-      state->flags, IREE_HAL_AMDGPU_PM4_ATOMIC_MATERIALIZATION_FLAG_PROFILE);
+      state->flags, IREE_HAL_AMDGPU_PM4_COMMAND_MATERIALIZATION_FLAG_PROFILE);
   iree_hal_amdgpu_pm4_atomic_fallback_layout_t layout;
   IREE_RETURN_IF_ERROR(iree_hal_amdgpu_pm4_atomic_record_fallback_layout(
-      record, state->atomic_context, &layout));
+      record, atomic_context, &layout));
 
   if (iree_any_bit_set(
           record->flags,

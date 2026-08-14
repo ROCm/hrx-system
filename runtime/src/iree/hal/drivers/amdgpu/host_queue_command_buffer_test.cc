@@ -1193,8 +1193,10 @@ TEST_F(HostQueueCommandBufferTest,
       test_device.base_device(), IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT,
       IREE_HAL_COMMAND_CATEGORY_TRANSFER, IREE_HAL_QUEUE_AFFINITY_ANY,
       /*binding_capacity=*/0, transfer_command_buffer.out()));
-  EXPECT_TRUE(iree_hal_amdgpu_aql_command_buffer_isa(transfer_command_buffer));
-  EXPECT_FALSE(iree_hal_amdgpu_pm4_command_buffer_isa(transfer_command_buffer));
+  EXPECT_EQ(pm4_supported,
+            iree_hal_amdgpu_pm4_command_buffer_isa(transfer_command_buffer));
+  EXPECT_NE(pm4_supported,
+            iree_hal_amdgpu_aql_command_buffer_isa(transfer_command_buffer));
 }
 
 TEST_F(HostQueueCommandBufferTest,
@@ -1327,7 +1329,7 @@ TEST_F(HostQueueCommandBufferTest,
 }
 
 TEST_F(HostQueueCommandBufferTest,
-       ExplicitPm4CommandBufferModeRejectsUnsupportedCategories) {
+       ExplicitPm4CommandBufferModeRejectsEmptyCategories) {
   iree_hal_amdgpu_logical_device_options_t options;
   iree_hal_amdgpu_logical_device_options_initialize(&options);
   options.command_buffer_mode = IREE_HAL_AMDGPU_COMMAND_BUFFER_MODE_PM4;
@@ -1348,11 +1350,252 @@ TEST_F(HostQueueCommandBufferTest,
   iree_hal_command_buffer_t* command_buffer = nullptr;
   iree_status_t status = iree_hal_command_buffer_create(
       test_device.base_device(), IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT,
-      IREE_HAL_COMMAND_CATEGORY_TRANSFER, IREE_HAL_QUEUE_AFFINITY_ANY,
+      /*command_categories=*/0, IREE_HAL_QUEUE_AFFINITY_ANY,
       /*binding_capacity=*/0, &command_buffer);
   EXPECT_EQ(iree_status_code(status), IREE_STATUS_UNIMPLEMENTED);
   iree_status_free(status);
   iree_hal_command_buffer_release(command_buffer);
+}
+
+TEST_F(HostQueueCommandBufferTest,
+       Pm4TransferCommandsExecuteStaticAndDynamicBindings) {
+  // Dynamic references carry alignment 1, selecting the unaligned block-copy
+  // kernel across a transfer large enough to exercise its grid-stride loop.
+  constexpr iree_device_size_t kBufferLength = 2 * 1024 * 1024 + 36;
+  constexpr iree_device_size_t kDynamicFillOffset = 5;
+  constexpr iree_device_size_t kDynamicFillLength = 123;
+  constexpr iree_device_size_t kDynamicHalfwordFillOffset = 202;
+  constexpr iree_device_size_t kDynamicHalfwordFillLength = 26;
+  constexpr iree_device_size_t kStaticUpdateOffset = 31;
+  constexpr iree_device_size_t kDynamicUpdateOffset = 47;
+  constexpr iree_host_size_t kUpdateSourceOffset = 7;
+  constexpr iree_device_size_t kUpdateLength = 37;
+
+  iree_hal_amdgpu_logical_device_options_t options;
+  iree_hal_amdgpu_logical_device_options_initialize(&options);
+  options.command_buffer_mode = IREE_HAL_AMDGPU_COMMAND_BUFFER_MODE_PM4;
+  options.preallocate_pools = 0;
+
+  TestLogicalDevice test_device;
+  IREE_ASSERT_OK(
+      test_device.Initialize(&options, &libhsa_, &topology_, host_allocator_));
+  iree_hal_amdgpu_physical_device_t* physical_device =
+      test_device.logical_device()->physical_devices[0];
+  if (!iree_hal_amdgpu_vendor_packet_capabilities_support_pm4_dispatch_command_buffers(
+          physical_device->vendor_packet_capabilities)) {
+    GTEST_SKIP() << "PM4 dispatch command buffers are not supported on this "
+                    "physical device";
+  }
+
+  Ref<iree_hal_buffer_t> static_source;
+  Ref<iree_hal_buffer_t> static_target;
+  IREE_ASSERT_OK(CreateHostVisibleTransferBuffer(
+      test_device.allocator(), kBufferLength, static_source.out()));
+  IREE_ASSERT_OK(CreateHostVisibleTransferBuffer(
+      test_device.allocator(), kBufferLength, static_target.out()));
+  Ref<iree_hal_buffer_t> dynamic_sources[2];
+  Ref<iree_hal_buffer_t> dynamic_targets[2];
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(dynamic_sources); ++i) {
+    IREE_ASSERT_OK(CreateHostVisibleTransferBuffer(
+        test_device.allocator(), kBufferLength, dynamic_sources[i].out()));
+    IREE_ASSERT_OK(CreateHostVisibleTransferBuffer(
+        test_device.allocator(), kBufferLength, dynamic_targets[i].out()));
+  }
+  Ref<iree_hal_buffer_t> maximum_update_target;
+  IREE_ASSERT_OK(CreateHostVisibleTransferBuffer(
+      test_device.allocator(), IREE_HAL_COMMAND_BUFFER_MAX_UPDATE_SIZE,
+      maximum_update_target.out()));
+
+  const uint32_t static_fill_pattern = 0x44332211u;
+  const uint8_t dynamic_fill_pattern = 0xA5u;
+  const uint16_t dynamic_halfword_fill_pattern = 0x5AA5u;
+  uint8_t update_source[64];
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(update_source); ++i) {
+    update_source[i] = (uint8_t)(0x80u + i);
+  }
+  std::vector<uint8_t> expected_update(
+      update_source + kUpdateSourceOffset,
+      update_source + kUpdateSourceOffset + kUpdateLength);
+  std::vector<uint8_t> maximum_update_source(
+      IREE_HAL_COMMAND_BUFFER_MAX_UPDATE_SIZE);
+  for (iree_host_size_t i = 0; i < maximum_update_source.size(); ++i) {
+    maximum_update_source[i] = (uint8_t)(i * 29u + 3u);
+  }
+  const std::vector<uint8_t> expected_maximum_update = maximum_update_source;
+
+  Ref<iree_hal_command_buffer_t> command_buffer;
+  IREE_ASSERT_OK(iree_hal_command_buffer_create(
+      test_device.base_device(), IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT,
+      IREE_HAL_COMMAND_CATEGORY_TRANSFER, IREE_HAL_QUEUE_AFFINITY_ANY,
+      /*binding_capacity=*/2, command_buffer.out()));
+  IREE_ASSERT_OK(iree_hal_command_buffer_begin(command_buffer));
+  IREE_ASSERT_OK(iree_hal_command_buffer_fill_buffer(
+      command_buffer,
+      iree_hal_make_indirect_buffer_ref(
+          /*buffer_slot=*/0, kDynamicFillOffset, kDynamicFillLength),
+      &dynamic_fill_pattern, sizeof(dynamic_fill_pattern),
+      IREE_HAL_FILL_FLAG_NONE));
+  IREE_ASSERT_OK(iree_hal_command_buffer_fill_buffer(
+      command_buffer,
+      iree_hal_make_indirect_buffer_ref(/*buffer_slot=*/0,
+                                        kDynamicHalfwordFillOffset,
+                                        kDynamicHalfwordFillLength),
+      &dynamic_halfword_fill_pattern, sizeof(dynamic_halfword_fill_pattern),
+      IREE_HAL_FILL_FLAG_NONE));
+  IREE_ASSERT_OK(iree_hal_command_buffer_fill_buffer(
+      command_buffer,
+      iree_hal_make_buffer_ref(static_source, /*offset=*/0, kBufferLength),
+      &static_fill_pattern, sizeof(static_fill_pattern),
+      IREE_HAL_FILL_FLAG_NONE));
+
+  const iree_hal_memory_barrier_t transfer_barrier = {
+      /*.source_scope=*/IREE_HAL_ACCESS_SCOPE_TRANSFER_WRITE,
+      /*.target_scope=*/IREE_HAL_ACCESS_SCOPE_TRANSFER_READ |
+          IREE_HAL_ACCESS_SCOPE_TRANSFER_WRITE,
+  };
+  IREE_ASSERT_OK(iree_hal_command_buffer_execution_barrier(
+      command_buffer, IREE_HAL_EXECUTION_STAGE_TRANSFER,
+      IREE_HAL_EXECUTION_STAGE_TRANSFER, IREE_HAL_EXECUTION_BARRIER_FLAG_NONE,
+      /*memory_barrier_count=*/1, &transfer_barrier,
+      /*buffer_barrier_count=*/0, /*buffer_barriers=*/nullptr));
+  IREE_ASSERT_OK(iree_hal_command_buffer_copy_buffer(
+      command_buffer,
+      iree_hal_make_buffer_ref(static_source, /*offset=*/0, kBufferLength),
+      iree_hal_make_buffer_ref(static_target, /*offset=*/0, kBufferLength),
+      IREE_HAL_COPY_FLAG_NONE));
+  IREE_ASSERT_OK(iree_hal_command_buffer_copy_buffer(
+      command_buffer,
+      iree_hal_make_indirect_buffer_ref(/*buffer_slot=*/0, /*offset=*/0,
+                                        kBufferLength),
+      iree_hal_make_indirect_buffer_ref(/*buffer_slot=*/1, /*offset=*/0,
+                                        kBufferLength),
+      IREE_HAL_COPY_FLAG_NONE));
+  IREE_ASSERT_OK(iree_hal_command_buffer_execution_barrier(
+      command_buffer, IREE_HAL_EXECUTION_STAGE_TRANSFER,
+      IREE_HAL_EXECUTION_STAGE_TRANSFER, IREE_HAL_EXECUTION_BARRIER_FLAG_NONE,
+      /*memory_barrier_count=*/1, &transfer_barrier,
+      /*buffer_barrier_count=*/0, /*buffer_barriers=*/nullptr));
+  IREE_ASSERT_OK(iree_hal_command_buffer_update_buffer(
+      command_buffer, update_source, kUpdateSourceOffset,
+      iree_hal_make_buffer_ref(static_target, kStaticUpdateOffset,
+                               kUpdateLength),
+      IREE_HAL_UPDATE_FLAG_NONE));
+  IREE_ASSERT_OK(iree_hal_command_buffer_update_buffer(
+      command_buffer, update_source, kUpdateSourceOffset,
+      iree_hal_make_indirect_buffer_ref(
+          /*buffer_slot=*/1, kDynamicUpdateOffset, kUpdateLength),
+      IREE_HAL_UPDATE_FLAG_NONE));
+  IREE_ASSERT_OK(iree_hal_command_buffer_update_buffer(
+      command_buffer, maximum_update_source.data(), /*source_offset=*/0,
+      iree_hal_make_buffer_ref(maximum_update_target, /*offset=*/0,
+                               IREE_HAL_COMMAND_BUFFER_MAX_UPDATE_SIZE),
+      IREE_HAL_UPDATE_FLAG_NONE));
+  IREE_ASSERT_OK(iree_hal_command_buffer_end(command_buffer));
+
+  memset(update_source, 0, sizeof(update_source));
+  std::fill(maximum_update_source.begin(), maximum_update_source.end(), 0);
+  ASSERT_TRUE(iree_hal_amdgpu_pm4_command_buffer_isa(command_buffer));
+  const iree_hal_amdgpu_pm4_command_buffer_fixup_plan_t* fixup_plan =
+      iree_hal_amdgpu_pm4_command_buffer_fixup_plan(command_buffer);
+  ASSERT_NE(fixup_plan->entries, nullptr);
+  EXPECT_GE(fixup_plan->entry_count, 4u);
+
+  Ref<iree_hal_semaphore_t> signal;
+  IREE_ASSERT_OK(CreateSemaphore(test_device.base_device(), signal.out()));
+  iree_hal_semaphore_t* signal_ptr = signal.get();
+  for (iree_host_size_t replay = 0; replay < IREE_ARRAYSIZE(dynamic_sources);
+       ++replay) {
+    std::vector<uint8_t> source_values(kBufferLength);
+    for (iree_host_size_t i = 0; i < source_values.size(); ++i) {
+      source_values[i] = (uint8_t)(i * 13u + replay * 17u);
+    }
+    IREE_ASSERT_OK(
+        iree_hal_buffer_map_write(dynamic_sources[replay], /*target_offset=*/0,
+                                  source_values.data(), source_values.size()));
+    IREE_ASSERT_OK(iree_hal_buffer_map_zero(
+        dynamic_targets[replay], /*offset=*/0, IREE_HAL_WHOLE_BUFFER));
+    IREE_ASSERT_OK(iree_hal_buffer_map_zero(static_target, /*offset=*/0,
+                                            IREE_HAL_WHOLE_BUFFER));
+    IREE_ASSERT_OK(iree_hal_buffer_map_zero(maximum_update_target, /*offset=*/0,
+                                            IREE_HAL_WHOLE_BUFFER));
+
+    iree_hal_buffer_binding_t bindings[2] = {
+        {
+            /*.buffer=*/dynamic_sources[replay].get(),
+            /*.offset=*/0,
+            /*.length=*/IREE_HAL_WHOLE_BUFFER,
+        },
+        {
+            /*.buffer=*/dynamic_targets[replay].get(),
+            /*.offset=*/0,
+            /*.length=*/IREE_HAL_WHOLE_BUFFER,
+        },
+    };
+    const iree_hal_buffer_binding_table_t binding_table = {
+        /*.count=*/IREE_ARRAYSIZE(bindings),
+        /*.bindings=*/bindings,
+    };
+    uint64_t signal_value = replay + 1;
+    const iree_hal_semaphore_list_t signal_list = {
+        /*.count=*/1,
+        /*.semaphores=*/&signal_ptr,
+        /*.payload_values=*/&signal_value,
+    };
+    IREE_ASSERT_OK(iree_hal_device_queue_execute(
+        test_device.base_device(), IREE_HAL_QUEUE_AFFINITY_ANY,
+        iree_hal_semaphore_list_empty(), signal_list, command_buffer,
+        binding_table, IREE_HAL_EXECUTE_FLAG_NONE));
+    IREE_ASSERT_OK(iree_hal_semaphore_wait(signal, signal_value,
+                                           iree_infinite_timeout(),
+                                           IREE_ASYNC_WAIT_FLAG_NONE));
+
+    std::fill(source_values.begin() + kDynamicFillOffset,
+              source_values.begin() + kDynamicFillOffset + kDynamicFillLength,
+              dynamic_fill_pattern);
+    const uint8_t* dynamic_halfword_fill_pattern_bytes =
+        reinterpret_cast<const uint8_t*>(&dynamic_halfword_fill_pattern);
+    for (iree_device_size_t i = 0; i < kDynamicHalfwordFillLength; ++i) {
+      source_values[kDynamicHalfwordFillOffset + i] =
+          dynamic_halfword_fill_pattern_bytes
+              [i % sizeof(dynamic_halfword_fill_pattern)];
+    }
+    std::vector<uint8_t> actual_source_values(kBufferLength);
+    IREE_ASSERT_OK(iree_hal_buffer_map_read(
+        dynamic_sources[replay], /*source_offset=*/0,
+        actual_source_values.data(), actual_source_values.size()));
+    EXPECT_EQ(actual_source_values, source_values)
+        << "dynamic source replay " << replay;
+
+    std::copy(expected_update.begin(), expected_update.end(),
+              source_values.begin() + kDynamicUpdateOffset);
+    std::vector<uint8_t> actual_values(kBufferLength);
+    IREE_ASSERT_OK(
+        iree_hal_buffer_map_read(dynamic_targets[replay], /*source_offset=*/0,
+                                 actual_values.data(), actual_values.size()));
+    EXPECT_EQ(actual_values, source_values)
+        << "dynamic target replay " << replay;
+
+    std::vector<uint8_t> expected_static(kBufferLength);
+    const uint8_t* static_pattern_bytes =
+        reinterpret_cast<const uint8_t*>(&static_fill_pattern);
+    for (iree_host_size_t i = 0; i < expected_static.size(); ++i) {
+      expected_static[i] =
+          static_pattern_bytes[i % sizeof(static_fill_pattern)];
+    }
+    std::copy(expected_update.begin(), expected_update.end(),
+              expected_static.begin() + kStaticUpdateOffset);
+    IREE_ASSERT_OK(iree_hal_buffer_map_read(static_target, /*source_offset=*/0,
+                                            actual_values.data(),
+                                            actual_values.size()));
+    EXPECT_EQ(actual_values, expected_static);
+
+    std::vector<uint8_t> actual_maximum_update(
+        IREE_HAL_COMMAND_BUFFER_MAX_UPDATE_SIZE);
+    IREE_ASSERT_OK(iree_hal_buffer_map_read(
+        maximum_update_target, /*source_offset=*/0,
+        actual_maximum_update.data(), actual_maximum_update.size()));
+    EXPECT_EQ(actual_maximum_update, expected_maximum_update);
+  }
 }
 
 TEST_F(HostQueueCommandBufferTest,
@@ -1414,13 +1657,29 @@ TEST_F(HostQueueCommandBufferTest,
   Ref<iree_hal_command_buffer_t> command_buffer;
   IREE_ASSERT_OK(iree_hal_command_buffer_create(
       test_device.base_device(), IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT,
-      IREE_HAL_COMMAND_CATEGORY_DISPATCH, IREE_HAL_QUEUE_AFFINITY_ANY,
+      IREE_HAL_COMMAND_CATEGORY_DISPATCH | IREE_HAL_COMMAND_CATEGORY_TRANSFER,
+      IREE_HAL_QUEUE_AFFINITY_ANY,
       /*binding_capacity=*/4, command_buffer.out()));
   IREE_ASSERT_OK(iree_hal_command_buffer_begin(command_buffer));
   IREE_ASSERT_OK(iree_hal_command_buffer_dispatch(
       command_buffer, executable, iree_hal_executable_function_from_index(0),
       iree_hal_make_static_dispatch_config(1, 1, 1), constants,
       dispatch_bindings, IREE_HAL_DISPATCH_FLAG_NONE));
+  const iree_hal_memory_barrier_t dispatch_to_transfer_barrier = {
+      /*.source_scope=*/IREE_HAL_ACCESS_SCOPE_DISPATCH_WRITE,
+      /*.target_scope=*/IREE_HAL_ACCESS_SCOPE_TRANSFER_WRITE,
+  };
+  IREE_ASSERT_OK(iree_hal_command_buffer_execution_barrier(
+      command_buffer, IREE_HAL_EXECUTION_STAGE_DISPATCH,
+      IREE_HAL_EXECUTION_STAGE_TRANSFER, IREE_HAL_EXECUTION_BARRIER_FLAG_NONE,
+      /*memory_barrier_count=*/1, &dispatch_to_transfer_barrier,
+      /*buffer_barrier_count=*/0, /*buffer_barriers=*/nullptr));
+  const uint32_t fill_pattern = 0xA1B2C3D4u;
+  IREE_ASSERT_OK(iree_hal_command_buffer_fill_buffer(
+      command_buffer,
+      iree_hal_make_indirect_buffer_ref(/*buffer_slot=*/3, /*offset=*/0,
+                                        sizeof(fill_pattern)),
+      &fill_pattern, sizeof(fill_pattern), IREE_HAL_FILL_FLAG_NONE));
   IREE_ASSERT_OK(iree_hal_command_buffer_end(command_buffer));
 
   ASSERT_TRUE(iree_hal_amdgpu_pm4_command_buffer_isa(command_buffer));
@@ -1471,7 +1730,7 @@ TEST_F(HostQueueCommandBufferTest,
   uint32_t output_values[4] = {0, 0, 0, 0};
   IREE_ASSERT_OK(iree_hal_buffer_map_read(
       output_buffer, /*offset=*/0, output_values, sizeof(output_values)));
-  const uint32_t expected_values[4] = {13, 16, 19, 22};
+  const uint32_t expected_values[4] = {fill_pattern, 16, 19, 22};
   EXPECT_EQ(0, memcmp(output_values, expected_values, sizeof(expected_values)));
 
   iree_hal_executable_release(executable);
