@@ -960,7 +960,7 @@ TEST_F(PhysicalDeviceCapabilitiesTest, SelectsCdnaPm4FamilyCapabilities) {
     EXPECT_FALSE(iree_any_bit_set(
         capabilities,
         IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_ACQUIRE_MEM_GFX10));
-    EXPECT_TRUE(
+    EXPECT_FALSE(
         iree_hal_amdgpu_vendor_packet_capabilities_support_pm4_dispatch_command_buffers(
             capabilities));
   }
@@ -977,7 +977,7 @@ TEST_F(PhysicalDeviceCapabilitiesTest, SelectsCdnaBarrierValueIndependently) {
     EXPECT_TRUE(iree_any_bit_set(
         capabilities,
         IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_AQL_BARRIER_VALUE));
-    EXPECT_TRUE(
+    EXPECT_FALSE(
         iree_hal_amdgpu_vendor_packet_capabilities_support_pm4_dispatch_command_buffers(
             capabilities));
   }
@@ -993,7 +993,7 @@ TEST_F(PhysicalDeviceCapabilitiesTest, SelectsCdnaBarrierValueIndependently) {
     EXPECT_FALSE(iree_any_bit_set(
         capabilities,
         IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_AQL_BARRIER_VALUE));
-    EXPECT_TRUE(
+    EXPECT_FALSE(
         iree_hal_amdgpu_vendor_packet_capabilities_support_pm4_dispatch_command_buffers(
             capabilities));
   }

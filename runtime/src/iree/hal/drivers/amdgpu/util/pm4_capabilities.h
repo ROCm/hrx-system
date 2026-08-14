@@ -139,28 +139,24 @@ iree_hal_amdgpu_vendor_packet_capabilities_support_pm4_compute_dispatch_indirect
           IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_COMPUTE_DISPATCH_INDIRECT);
 }
 
-// Returns true if the device can run the initial dispatch-only PM4
-// command-buffer path with conservative in-stream barriers.
+// Returns true if the device can run resident PM4 command buffers with
+// qualified in-stream execution barriers.
+//
+// CDNA retains its individual PM4 packet capabilities for small isolated IBs,
+// but its gfx9 CS_PARTIAL_FLUSH sequence is not a qualified command-buffer
+// execution barrier. RDNA uses the gfx10+ ACQUIRE_MEM layout and is the only
+// architecture family currently qualified for general PM4 command buffers.
 static inline bool
 iree_hal_amdgpu_vendor_packet_capabilities_support_pm4_dispatch_command_buffers(
     iree_hal_amdgpu_vendor_packet_capability_flags_t capabilities) {
-  if (!iree_all_bits_set(
-          capabilities,
-          IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_AQL_PM4_IB |
-              IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_EVENT_WRITE |
-              IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_SET_SH_REG |
-              IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_ACQUIRE_MEM |
-              IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_COMPUTE_DISPATCH_DIRECT)) {
-    return false;
-  }
-  const iree_hal_amdgpu_vendor_packet_capability_flags_t acquire_mem_layouts =
-      capabilities &
-      (IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_ACQUIRE_MEM_GFX9 |
-       IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_ACQUIRE_MEM_GFX10);
-  return acquire_mem_layouts ==
-             IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_ACQUIRE_MEM_GFX9 ||
-         acquire_mem_layouts ==
-             IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_ACQUIRE_MEM_GFX10;
+  return iree_all_bits_set(
+      capabilities,
+      IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_AQL_PM4_IB |
+          IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_EVENT_WRITE |
+          IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_SET_SH_REG |
+          IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_ACQUIRE_MEM |
+          IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_ACQUIRE_MEM_GFX10 |
+          IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_COMPUTE_DISPATCH_DIRECT);
 }
 
 // Returns true if the device can emit the gfx10+ packet families needed for
