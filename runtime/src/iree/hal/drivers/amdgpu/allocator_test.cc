@@ -1061,6 +1061,78 @@ TEST_F(AllocatorTest, QueryMemoryHeapsReportsHsaLimits) {
   }
 }
 
+TEST_F(AllocatorTest, QueryMemoryHeapCountRequiresDeviceFineDirectHostAccess) {
+  TestLogicalDevice test_device;
+  IREE_ASSERT_OK(test_device.Initialize(&libhsa_, &topology_, host_allocator_));
+
+  bool all_device_fine_pools_available = true;
+  for (iree_host_size_t i = 0;
+       i < test_device.logical_device()->physical_device_count; ++i) {
+    iree_hal_amdgpu_physical_device_t* physical_device =
+        test_device.logical_device()->physical_devices[i];
+    all_device_fine_pools_available &=
+        physical_device->memory_system.device_local.fine_host_visible;
+    physical_device->memory_system.svm.direct_host_access = 1;
+  }
+
+  std::array<iree_hal_allocator_memory_heap_t, 4> heaps;
+  iree_host_size_t direct_access_heap_count = 0;
+  IREE_ASSERT_OK(iree_hal_allocator_query_memory_heaps(
+      test_device.allocator(), heaps.size(), heaps.data(),
+      &direct_access_heap_count));
+
+  test_device.logical_device()
+      ->physical_devices[0]
+      ->memory_system.svm.direct_host_access = 0;
+  iree_host_size_t restricted_access_heap_count = 0;
+  IREE_ASSERT_OK(iree_hal_allocator_query_memory_heaps(
+      test_device.allocator(), heaps.size(), heaps.data(),
+      &restricted_access_heap_count));
+  EXPECT_EQ(direct_access_heap_count,
+            restricted_access_heap_count +
+                (all_device_fine_pools_available ? 1u : 0u));
+}
+
+TEST_F(AllocatorTest, AdvertisedMemoryHeapsAreAllocatable) {
+  TestLogicalDevice test_device;
+  IREE_ASSERT_OK(test_device.Initialize(&libhsa_, &topology_, host_allocator_));
+  for (iree_host_size_t i = 0;
+       i < test_device.logical_device()->physical_device_count; ++i) {
+    test_device.logical_device()
+        ->physical_devices[i]
+        ->memory_system.svm.direct_host_access = 0;
+  }
+
+  std::array<iree_hal_allocator_memory_heap_t, 4> heaps;
+  iree_host_size_t heap_count = 0;
+  IREE_ASSERT_OK(iree_hal_allocator_query_memory_heaps(
+      test_device.allocator(), heaps.size(), heaps.data(), &heap_count));
+  for (iree_host_size_t heap_index = 0; heap_index < heap_count; ++heap_index) {
+    const iree_hal_allocator_memory_heap_t& heap = heaps[heap_index];
+    ASSERT_TRUE(
+        iree_all_bits_set(heap.allowed_usage, IREE_HAL_BUFFER_USAGE_TRANSFER));
+    for (iree_host_size_t device_index = 0;
+         device_index < test_device.logical_device()->physical_device_count;
+         ++device_index) {
+      iree_hal_buffer_params_t params = {0};
+      params.type = heap.type;
+      params.usage = IREE_HAL_BUFFER_USAGE_TRANSFER;
+      params.queue_affinity = ((iree_hal_queue_affinity_t)1) << device_index;
+      params.min_alignment = heap.min_alignment;
+      iree_hal_buffer_params_t resolved_params = {0};
+      iree_device_size_t resolved_allocation_size = 0;
+      const iree_hal_buffer_compatibility_t compatibility =
+          iree_hal_allocator_query_buffer_compatibility(
+              test_device.allocator(), params, heap.min_alignment,
+              &resolved_params, &resolved_allocation_size);
+      EXPECT_TRUE(iree_all_bits_set(compatibility,
+                                    IREE_HAL_BUFFER_COMPATIBILITY_ALLOCATABLE))
+          << "heap " << heap_index << " is not allocatable by queue "
+          << device_index;
+    }
+  }
+}
+
 TEST_F(AllocatorTest, DirectHostAccessDoesNotImplyUnifiedMemory) {
   TestLogicalDevice test_device;
   IREE_ASSERT_OK(test_device.Initialize(&libhsa_, &topology_, host_allocator_));

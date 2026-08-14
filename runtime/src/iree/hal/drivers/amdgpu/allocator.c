@@ -148,6 +148,35 @@ static bool iree_hal_amdgpu_allocator_has_uniform_unified_memory(
   return true;
 }
 
+// Returns true when the selected device-fine pool supports direct host access.
+// VMM may grant host access separately and does not use this predicate.
+static bool iree_hal_amdgpu_allocator_supports_device_fine_direct_host_access(
+    const iree_hal_amdgpu_allocator_t* allocator,
+    iree_host_size_t physical_device_ordinal) {
+  const iree_hal_amdgpu_physical_device_t* physical_device =
+      allocator->logical_device->physical_devices[physical_device_ordinal];
+  return allocator->memory_pools.device_fine[physical_device_ordinal]
+             .memory_pool.handle &&
+         physical_device &&
+         physical_device->memory_system.svm.direct_host_access;
+}
+
+// Returns true when affinity-free device-fine heap declarations can be
+// allocated for every physical device queue.
+static bool
+iree_hal_amdgpu_allocator_has_uniform_device_fine_direct_host_access(
+    const iree_hal_amdgpu_allocator_t* allocator) {
+  if (allocator->logical_device->physical_device_count == 0) return false;
+  for (iree_host_size_t i = 0;
+       i < allocator->logical_device->physical_device_count; ++i) {
+    if (!iree_hal_amdgpu_allocator_supports_device_fine_direct_host_access(
+            allocator, i)) {
+      return false;
+    }
+  }
+  return true;
+}
+
 typedef struct iree_hal_amdgpu_imported_host_release_data_t {
   // Unowned libhsa handle used to unlock the imported host allocation.
   const iree_hal_amdgpu_libhsa_t* libhsa;
@@ -635,8 +664,8 @@ static bool iree_hal_amdgpu_allocator_resolve_placement(
       physical_device &&
       physical_device->memory_system.device_local.unified_memory;
   const bool device_fine_direct_host_access =
-      allocator->memory_pools.device_fine[device_ordinal].memory_pool.handle &&
-      physical_device && physical_device->memory_system.svm.direct_host_access;
+      iree_hal_amdgpu_allocator_supports_device_fine_direct_host_access(
+          allocator, device_ordinal);
   // VMM physical handles have no host pointer until access is granted for the
   // host agent. They can therefore use a fine-grained device pool even when
   // ordinary buffers cannot promise direct host mapping.
@@ -1027,7 +1056,9 @@ static iree_status_t iree_hal_amdgpu_allocator_query_memory_heaps(
           allocator->memory_pools.device_fine,
           allocator->topology->gpu_agent_count,
           &device_fine_max_allocation_size, &device_fine_min_alignment,
-          &device_fine_atomic_operations);
+          &device_fine_atomic_operations) &&
+      iree_hal_amdgpu_allocator_has_uniform_device_fine_direct_host_access(
+          allocator);
 
   iree_device_size_t device_uncached_max_allocation_size = 0;
   iree_device_size_t device_uncached_min_alignment = 0;
