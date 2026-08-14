@@ -252,6 +252,13 @@ iree_status_t iree_hal_remote_server_resolve_command_buffer_ref(
     uint64_t offset, uint64_t length, const char* command_name,
     iree_hal_buffer_ref_t* out_ref);
 
+// Resolves a direct buffer reference used by a queue operation. The resource is
+// borrowed from the session table and |buffer_id| must not be zero.
+iree_status_t iree_hal_remote_server_resolve_queue_buffer_ref(
+    iree_hal_remote_server_session_t* session_slot,
+    iree_hal_remote_resource_id_t buffer_id, uint64_t offset, uint64_t length,
+    const char* command_name, iree_hal_buffer_ref_t* out_ref);
+
 // Derives the local mode used to replay an uploaded reusable command buffer.
 // Peer-side validation and retention hints are ignored because the server owns
 // both contracts. Metadata retention hints are preserved for local profiling.

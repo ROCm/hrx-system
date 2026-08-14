@@ -92,6 +92,7 @@ typedef enum iree_hal_remote_queue_op_type_e {
   IREE_HAL_REMOTE_QUEUE_OP_ATOMIC_WAIT = 0x000F,
   IREE_HAL_REMOTE_QUEUE_OP_ATOMIC_STORE = 0x0010,
   IREE_HAL_REMOTE_QUEUE_OP_ATOMIC_RMW = 0x0011,
+  IREE_HAL_REMOTE_QUEUE_OP_QUEUE_TIMESTAMP = 0x0012,
 
   // ── Queue Control ───────────────────────────────────────────────────────
   IREE_HAL_REMOTE_QUEUE_OP_QUEUE_FLUSH = 0x000B,
@@ -311,21 +312,21 @@ typedef struct iree_hal_remote_command_buffer_execute_op_t {
 } iree_hal_remote_command_buffer_execute_op_t;
 static_assert(sizeof(iree_hal_remote_command_buffer_execute_op_t) == 32, "");
 
-// Buffer target shared by direct queue atomic operations.
-typedef struct iree_hal_remote_queue_atomic_target_t {
-  // Server buffer resource containing the atomic memory location.
+// Buffer target shared by direct queue operations.
+typedef struct iree_hal_remote_queue_buffer_target_t {
+  // Server buffer resource containing the target range.
   iree_hal_remote_resource_id_t buffer_id;
   // Absolute byte offset into the root buffer allocation.
   uint64_t offset;
   // Exact local device queue affinity requested by the client.
   uint64_t queue_affinity;
-} iree_hal_remote_queue_atomic_target_t;
-static_assert(sizeof(iree_hal_remote_queue_atomic_target_t) == 24, "");
+} iree_hal_remote_queue_buffer_target_t;
+static_assert(sizeof(iree_hal_remote_queue_buffer_target_t) == 24, "");
 
 // ATOMIC_WAIT: Wait until a device memory location satisfies a predicate.
 typedef struct iree_hal_remote_queue_atomic_wait_op_t {
   iree_hal_remote_queue_op_header_t header;
-  iree_hal_remote_queue_atomic_target_t target;
+  iree_hal_remote_queue_buffer_target_t target;
   iree_hal_remote_atomic_wait_params_t params;
 } iree_hal_remote_queue_atomic_wait_op_t;
 static_assert(sizeof(iree_hal_remote_queue_atomic_wait_op_t) == 56, "");
@@ -333,7 +334,7 @@ static_assert(sizeof(iree_hal_remote_queue_atomic_wait_op_t) == 56, "");
 // ATOMIC_STORE: Atomically replace a device memory location.
 typedef struct iree_hal_remote_queue_atomic_store_op_t {
   iree_hal_remote_queue_op_header_t header;
-  iree_hal_remote_queue_atomic_target_t target;
+  iree_hal_remote_queue_buffer_target_t target;
   iree_hal_remote_atomic_store_params_t params;
 } iree_hal_remote_queue_atomic_store_op_t;
 static_assert(sizeof(iree_hal_remote_queue_atomic_store_op_t) == 48, "");
@@ -342,10 +343,19 @@ static_assert(sizeof(iree_hal_remote_queue_atomic_store_op_t) == 48, "");
 // previous value.
 typedef struct iree_hal_remote_queue_atomic_rmw_op_t {
   iree_hal_remote_queue_op_header_t header;
-  iree_hal_remote_queue_atomic_target_t target;
+  iree_hal_remote_queue_buffer_target_t target;
   iree_hal_remote_atomic_rmw_params_t params;
 } iree_hal_remote_queue_atomic_rmw_op_t;
 static_assert(sizeof(iree_hal_remote_queue_atomic_rmw_op_t) == 48, "");
+
+// QUEUE_TIMESTAMP: Capture one device tick into an eight-byte buffer cell.
+typedef struct iree_hal_remote_queue_timestamp_op_t {
+  iree_hal_remote_queue_op_header_t header;
+  iree_hal_remote_queue_buffer_target_t target;
+  // iree_hal_timestamp_flags_t.
+  uint64_t flags;
+} iree_hal_remote_queue_timestamp_op_t;
+static_assert(sizeof(iree_hal_remote_queue_timestamp_op_t) == 40, "");
 
 // HOST_CALL_INVOKE: reserved for future explicit server-side named handlers.
 // HAL queue_host_call callbacks are client-local function pointers and are not

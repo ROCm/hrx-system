@@ -70,25 +70,12 @@ static_assert(sizeof(iree_hal_amdgpu_queue_timestamp_capture_args_t) <=
                   sizeof(iree_hal_amdgpu_kernarg_block_t),
               "timestamp capture kernargs must fit in one kernarg ring block");
 
-// Validates a timestamp-capture target and resolves the 8-byte-aligned target
-// device pointer the GPU clock tick is written to.
+// Resolves the backend allocation and verifies the actual device address after
+// the public HAL entry point validates the logical target range.
 static iree_status_t iree_hal_amdgpu_host_queue_prepare_timestamp_target(
     iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
     uint8_t** out_target_device_ptr) {
   *out_target_device_ptr = NULL;
-  if (IREE_UNLIKELY(!target_buffer)) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "target buffer must be non-null");
-  }
-  IREE_RETURN_IF_ERROR(iree_hal_buffer_validate_usage(
-      iree_hal_buffer_allowed_usage(target_buffer),
-      IREE_HAL_BUFFER_USAGE_TRANSFER_TARGET));
-  IREE_RETURN_IF_ERROR(iree_hal_buffer_validate_access(
-      iree_hal_buffer_allowed_access(target_buffer),
-      IREE_HAL_MEMORY_ACCESS_WRITE));
-  IREE_RETURN_IF_ERROR(iree_hal_buffer_validate_range(
-      target_buffer, target_offset, sizeof(uint64_t)));
-
   iree_hal_buffer_t* allocated_target_buffer =
       iree_hal_buffer_allocated_buffer(target_buffer);
   uint8_t* target_device_ptr =
@@ -189,10 +176,8 @@ iree_status_t iree_hal_amdgpu_host_queue_submit_timestamp(
   if (IREE_UNLIKELY(queue->is_shutting_down)) {
     return iree_make_status(IREE_STATUS_CANCELLED, "queue shutting down");
   }
-  if (IREE_UNLIKELY(flags != IREE_HAL_TIMESTAMP_FLAG_NONE)) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "unsupported timestamp flags: 0x%" PRIx64, flags);
-  }
+  // The public HAL entry point validates flags before selecting this queue.
+  (void)flags;
 
   uint8_t* target_device_ptr = NULL;
   IREE_RETURN_IF_ERROR(iree_hal_amdgpu_host_queue_prepare_timestamp_target(

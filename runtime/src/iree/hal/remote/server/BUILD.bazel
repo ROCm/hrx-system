@@ -145,6 +145,8 @@ iree_runtime_cc_library(
         "server.h",
         "session.c",
         "session.h",
+        "timestamp.c",
+        "timestamp.h",
     ],
     hdrs = [
         "api.h",
@@ -481,6 +483,7 @@ iree_runtime_cc_test(
         "server.h",
         "session.h",
         "session_test.cc",
+        "timestamp.h",
     ],
     deps = [
         ":epoch_semaphore_map",

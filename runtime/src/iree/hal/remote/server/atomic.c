@@ -102,20 +102,6 @@ static iree_status_t iree_hal_remote_server_validate_fixed_queue_op(
   return iree_ok_status();
 }
 
-static iree_status_t iree_hal_remote_server_resolve_queue_atomic_target(
-    iree_hal_remote_server_session_t* session_slot,
-    const iree_hal_remote_queue_atomic_target_t* target,
-    iree_hal_atomic_width_t width, const char* op_name,
-    iree_hal_buffer_ref_t* out_target_ref) {
-  if (target->buffer_id == 0) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "%s requires a direct target buffer", op_name);
-  }
-  return iree_hal_remote_server_resolve_command_buffer_ref(
-      session_slot, target->buffer_id, /*buffer_slot=*/0, target->offset,
-      iree_hal_atomic_width_byte_count(width), op_name, out_target_ref);
-}
-
 iree_status_t iree_hal_remote_server_queue_atomic_wait(
     iree_hal_remote_server_session_t* session_slot,
     iree_hal_device_t* local_device, iree_hal_semaphore_list_t wait_list,
@@ -130,8 +116,10 @@ iree_status_t iree_hal_remote_server_queue_atomic_wait(
       iree_hal_remote_server_atomic_wait_params_from_wire(&op->params);
   IREE_RETURN_IF_ERROR(iree_hal_atomic_wait_params_validate(params));
   iree_hal_buffer_ref_t target_ref;
-  IREE_RETURN_IF_ERROR(iree_hal_remote_server_resolve_queue_atomic_target(
-      session_slot, &op->target, params.width, "ATOMIC_WAIT", &target_ref));
+  IREE_RETURN_IF_ERROR(iree_hal_remote_server_resolve_queue_buffer_ref(
+      session_slot, op->target.buffer_id, op->target.offset,
+      iree_hal_atomic_width_byte_count(params.width), "ATOMIC_WAIT",
+      &target_ref));
   return iree_hal_device_queue_atomic_wait(
       local_device, (iree_hal_queue_affinity_t)op->target.queue_affinity,
       wait_list, signal_list, target_ref.buffer, target_ref.offset, params);
@@ -151,8 +139,10 @@ iree_status_t iree_hal_remote_server_queue_atomic_store(
       iree_hal_remote_server_atomic_store_params_from_wire(&op->params);
   IREE_RETURN_IF_ERROR(iree_hal_atomic_store_params_validate(params));
   iree_hal_buffer_ref_t target_ref;
-  IREE_RETURN_IF_ERROR(iree_hal_remote_server_resolve_queue_atomic_target(
-      session_slot, &op->target, params.width, "ATOMIC_STORE", &target_ref));
+  IREE_RETURN_IF_ERROR(iree_hal_remote_server_resolve_queue_buffer_ref(
+      session_slot, op->target.buffer_id, op->target.offset,
+      iree_hal_atomic_width_byte_count(params.width), "ATOMIC_STORE",
+      &target_ref));
   return iree_hal_device_queue_atomic_store(
       local_device, (iree_hal_queue_affinity_t)op->target.queue_affinity,
       wait_list, signal_list, target_ref.buffer, target_ref.offset, params);
@@ -172,8 +162,10 @@ iree_status_t iree_hal_remote_server_queue_atomic_rmw(
       iree_hal_remote_server_atomic_rmw_params_from_wire(&op->params);
   IREE_RETURN_IF_ERROR(iree_hal_atomic_rmw_params_validate(params));
   iree_hal_buffer_ref_t target_ref;
-  IREE_RETURN_IF_ERROR(iree_hal_remote_server_resolve_queue_atomic_target(
-      session_slot, &op->target, params.width, "ATOMIC_RMW", &target_ref));
+  IREE_RETURN_IF_ERROR(iree_hal_remote_server_resolve_queue_buffer_ref(
+      session_slot, op->target.buffer_id, op->target.offset,
+      iree_hal_atomic_width_byte_count(params.width), "ATOMIC_RMW",
+      &target_ref));
   return iree_hal_device_queue_atomic_rmw(
       local_device, (iree_hal_queue_affinity_t)op->target.queue_affinity,
       wait_list, signal_list, target_ref.buffer, target_ref.offset, params);

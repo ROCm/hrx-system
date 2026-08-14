@@ -14,6 +14,7 @@
 #include "iree/hal/remote/protocol/queue.h"
 #include "iree/hal/remote/server/atomic.h"
 #include "iree/hal/remote/server/server.h"
+#include "iree/hal/remote/server/timestamp.h"
 #include "iree/net/channel/queue/frame.h"
 #include "iree/net/channel/util/frame_sender.h"
 #include "iree/testing/gtest.h"
@@ -665,6 +666,58 @@ TEST(RemoteServerSessionTest, QueueAtomicRejectsMalformedRecords) {
       iree_hal_remote_server_queue_atomic_rmw(
           &session, /*local_device=*/nullptr, empty_list, empty_list,
           iree_make_const_byte_span(&rmw, sizeof(rmw))));
+}
+
+TEST(RemoteServerSessionTest, QueueTimestampRejectsMalformedRecords) {
+  iree_hal_remote_server_session_t session = {};
+  const iree_hal_semaphore_list_t empty_list = iree_hal_semaphore_list_empty();
+
+  iree_hal_remote_queue_timestamp_op_t timestamp = {};
+  timestamp.header.type = IREE_HAL_REMOTE_QUEUE_OP_QUEUE_TIMESTAMP;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      iree_hal_remote_server_queue_timestamp(
+          &session, /*local_device=*/nullptr, empty_list, empty_list,
+          iree_make_const_byte_span(&timestamp, sizeof(timestamp) - 1)));
+
+  timestamp.header.type = IREE_HAL_REMOTE_QUEUE_OP_ATOMIC_RMW;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      iree_hal_remote_server_queue_timestamp(
+          &session, /*local_device=*/nullptr, empty_list, empty_list,
+          iree_make_const_byte_span(&timestamp, sizeof(timestamp))));
+
+  timestamp.header.type = IREE_HAL_REMOTE_QUEUE_OP_QUEUE_TIMESTAMP;
+  timestamp.header.flags = 1;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      iree_hal_remote_server_queue_timestamp(
+          &session, /*local_device=*/nullptr, empty_list, empty_list,
+          iree_make_const_byte_span(&timestamp, sizeof(timestamp))));
+
+  timestamp.header.flags = 0;
+  timestamp.header.reserved = 1;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      iree_hal_remote_server_queue_timestamp(
+          &session, /*local_device=*/nullptr, empty_list, empty_list,
+          iree_make_const_byte_span(&timestamp, sizeof(timestamp))));
+
+  timestamp.header.reserved = 0;
+  timestamp.flags = 1;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      iree_hal_remote_server_queue_timestamp(
+          &session, /*local_device=*/nullptr, empty_list, empty_list,
+          iree_make_const_byte_span(&timestamp, sizeof(timestamp))));
+
+  timestamp.flags = IREE_HAL_TIMESTAMP_FLAG_NONE;
+  timestamp.target.buffer_id = 0;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      iree_hal_remote_server_queue_timestamp(
+          &session, /*local_device=*/nullptr, empty_list, empty_list,
+          iree_make_const_byte_span(&timestamp, sizeof(timestamp))));
 }
 
 TEST(RemoteServerSessionTest, QueueCommandBeforeFailedFileOpenSignalsAdvance) {

@@ -604,8 +604,8 @@ TEST_P(HostQueueTimestampTest, TickAdvancesAcrossWork) {
   EXPECT_GT(stop_tick, start_tick);
 }
 
-// Offset 4 plus 8 bytes fits the 16-byte buffer, so this exercises the
-// alignment check in prepare_timestamp_target rather than the range check.
+// Offset 4 plus 8 bytes fits the 16-byte buffer, isolating the public HAL
+// alignment contract from its range contract.
 TEST_P(HostQueueTimestampTest, RejectsMisalignedOffset) {
   TestLogicalDevice test_device;
   IREE_ASSERT_OK(InitializeDevice(&test_device));
@@ -629,8 +629,8 @@ TEST_P(HostQueueTimestampTest, RejectsMisalignedOffset) {
           IREE_HAL_TIMESTAMP_FLAG_NONE));
 }
 
-// iree_hal_buffer_validate_range reports OUT_OF_RANGE rather than
-// INVALID_ARGUMENT, and the seam forwards the code unchanged.
+// The public HAL range validation reports OUT_OF_RANGE rather than
+// INVALID_ARGUMENT.
 TEST_P(HostQueueTimestampTest, RejectsOutOfRangeOffset) {
   TestLogicalDevice test_device;
   IREE_ASSERT_OK(InitializeDevice(&test_device));
@@ -653,8 +653,8 @@ TEST_P(HostQueueTimestampTest, RejectsOutOfRangeOffset) {
           IREE_HAL_TIMESTAMP_FLAG_NONE));
 }
 
-// iree_hal_buffer_validate_usage reports PERMISSION_DENIED rather than
-// INVALID_ARGUMENT, and the seam forwards the code unchanged.
+// The public HAL usage validation reports PERMISSION_DENIED rather than
+// INVALID_ARGUMENT.
 TEST_P(HostQueueTimestampTest, RejectsBufferWithoutTransferTarget) {
   TestLogicalDevice test_device;
   IREE_ASSERT_OK(InitializeDevice(&test_device));
@@ -685,8 +685,7 @@ TEST_P(HostQueueTimestampTest, RejectsBufferWithoutTransferTarget) {
           IREE_HAL_TIMESTAMP_FLAG_NONE));
 }
 
-// An empty wait list keeps the immediate submit path, which validates flags
-// inline rather than at issue time.
+// Unsupported flags are rejected before queue selection.
 TEST_P(HostQueueTimestampTest, RejectsUnsupportedFlags) {
   TestLogicalDevice test_device;
   IREE_ASSERT_OK(InitializeDevice(&test_device));

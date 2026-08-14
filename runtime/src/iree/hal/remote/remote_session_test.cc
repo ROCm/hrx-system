@@ -2140,6 +2140,32 @@ TEST_F(RemoteBufferTest, RepeatedAllocateReleaseDoesNotExhaustRemoteTable) {
   }
 }
 
+TEST_F(RemoteBufferTest, QueueTimestampForwardsAsynchronousBackendFailure) {
+  iree_hal_buffer_t* target_buffer = nullptr;
+  AllocateMappableBuffer(/*allocation_size=*/16, &target_buffer);
+
+  iree_hal_semaphore_t* semaphore = nullptr;
+  IREE_ASSERT_OK(iree_hal_semaphore_create(
+      client_device_, IREE_HAL_QUEUE_AFFINITY_ANY, /*initial_value=*/0,
+      IREE_HAL_SEMAPHORE_FLAG_NONE, &semaphore));
+  SemaphoreListHelper signal(semaphore, 1);
+  IREE_ASSERT_OK(iree_hal_device_queue_timestamp(
+      client_device_, IREE_HAL_QUEUE_AFFINITY_ANY,
+      iree_hal_semaphore_list_empty(), signal.list, target_buffer,
+      /*target_offset=*/8, IREE_HAL_TIMESTAMP_FLAG_NONE));
+
+  // The local-task server rejects timestamp capture asynchronously. Releasing
+  // the target immediately also verifies that its server resource remains
+  // ordered after the submitted operation while the failure travels back.
+  iree_hal_buffer_release(target_buffer);
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_UNIMPLEMENTED,
+      iree_hal_semaphore_wait(semaphore, 1, iree_infinite_timeout(),
+                              IREE_ASYNC_WAIT_FLAG_NONE));
+
+  iree_hal_semaphore_release(semaphore);
+}
+
 TEST_F(RemoteBufferTest, QueueFillAndReadBack) {
   iree_hal_allocator_t* allocator = iree_hal_device_allocator(client_device_);
 

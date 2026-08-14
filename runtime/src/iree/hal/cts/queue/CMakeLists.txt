@@ -69,6 +69,19 @@ iree_cc_library(
 
 iree_cc_library(
   NAME
+    queue_timestamp_test
+  SRCS
+    "queue_timestamp_test.cc"
+  DEPS
+    iree::hal
+    iree::hal::cts::util::test_base
+  TESTONLY
+  ALWAYSLINK
+  PUBLIC
+)
+
+iree_cc_library(
+  NAME
     queue_transfer_test
   SRCS
     "queue_transfer_test.cc"
@@ -102,6 +115,7 @@ iree_cc_library(
     ::queue_atomic_test
     ::queue_dispatch_test
     ::queue_host_call_test
+    ::queue_timestamp_test
     ::queue_transfer_test
     ::semaphore_submission_test
   TESTONLY

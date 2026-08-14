@@ -22,6 +22,7 @@
 #include "iree/hal/remote/server/profile.h"
 #include "iree/hal/remote/server/profile_relay.h"
 #include "iree/hal/remote/server/server.h"
+#include "iree/hal/remote/server/timestamp.h"
 #include "iree/hal/remote/util/queue_header_pool.h"
 #include "iree/net/channel/bulk/bulk_channel.h"
 #include "iree/net/channel/control/frame.h"
@@ -1704,6 +1705,19 @@ iree_status_t iree_hal_remote_server_resolve_command_buffer_ref(
   return iree_ok_status();
 }
 
+iree_status_t iree_hal_remote_server_resolve_queue_buffer_ref(
+    iree_hal_remote_server_session_t* session_slot,
+    iree_hal_remote_resource_id_t buffer_id, uint64_t offset, uint64_t length,
+    const char* command_name, iree_hal_buffer_ref_t* out_ref) {
+  if (buffer_id == 0) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "%s requires a direct target buffer", command_name);
+  }
+  return iree_hal_remote_server_resolve_command_buffer_ref(
+      session_slot, buffer_id, /*buffer_slot=*/0, offset, length, command_name,
+      out_ref);
+}
+
 static iree_status_t iree_hal_remote_server_prepare_buffer_ref_list(
     iree_hal_remote_server_session_t* session_slot,
     iree_host_size_t binding_count,
@@ -2058,6 +2072,17 @@ static iree_status_t iree_hal_remote_server_submit_atomic_rmw(
   iree_hal_remote_server_op_context_t* context =
       (iree_hal_remote_server_op_context_t*)user_data;
   return iree_hal_remote_server_queue_atomic_rmw(
+      context->session_slot, local_device, wait_list, signal_list,
+      context->command_data);
+}
+
+static iree_status_t iree_hal_remote_server_submit_queue_timestamp(
+    void* user_data, iree_hal_device_t* local_device,
+    iree_hal_semaphore_list_t wait_list,
+    iree_hal_semaphore_list_t signal_list) {
+  iree_hal_remote_server_op_context_t* context =
+      (iree_hal_remote_server_op_context_t*)user_data;
+  return iree_hal_remote_server_queue_timestamp(
       context->session_slot, local_device, wait_list, signal_list,
       context->command_data);
 }
@@ -5433,6 +5458,11 @@ iree_status_t iree_hal_remote_server_on_queue_command(
         status = iree_hal_remote_server_submit_command(
             session_slot, wait_frontier, signal_frontier,
             iree_hal_remote_server_submit_atomic_rmw, &op_context);
+        break;
+      case IREE_HAL_REMOTE_QUEUE_OP_QUEUE_TIMESTAMP:
+        status = iree_hal_remote_server_submit_command(
+            session_slot, wait_frontier, signal_frontier,
+            iree_hal_remote_server_submit_queue_timestamp, &op_context);
         break;
       default:
         status = iree_make_status(IREE_STATUS_UNIMPLEMENTED,

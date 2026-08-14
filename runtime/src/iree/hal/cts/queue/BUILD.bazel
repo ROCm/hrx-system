@@ -65,6 +65,17 @@ iree_runtime_cc_library(
 )
 
 iree_runtime_cc_library(
+    name = "queue_timestamp_test",
+    testonly = True,
+    srcs = ["queue_timestamp_test.cc"],
+    deps = [
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/cts/util:test_base",
+    ],
+    alwayslink = True,
+)
+
+iree_runtime_cc_library(
     name = "queue_transfer_test",
     testonly = True,
     srcs = ["queue_transfer_test.cc"],
@@ -96,6 +107,7 @@ iree_runtime_cc_library(
         ":queue_atomic_test",
         ":queue_dispatch_test",
         ":queue_host_call_test",
+        ":queue_timestamp_test",
         ":queue_transfer_test",
         ":semaphore_submission_test",
     ],

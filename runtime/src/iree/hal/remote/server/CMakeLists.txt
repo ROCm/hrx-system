@@ -168,6 +168,8 @@ iree_cc_library(
     "server.h"
     "session.c"
     "session.h"
+    "timestamp.c"
+    "timestamp.h"
   DEPS
     ::binding_storage
     ::bulk_staging_pool
@@ -495,6 +497,7 @@ iree_cc_test(
     "server.h"
     "session.h"
     "session_test.cc"
+    "timestamp.h"
   DEPS
     ::epoch_semaphore_map
     ::resource_table

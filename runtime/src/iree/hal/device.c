@@ -642,14 +642,14 @@ IREE_API_EXPORT iree_status_t iree_hal_device_queue_execute(
   return status;
 }
 
-static iree_status_t iree_hal_device_validate_atomic_target(
+static iree_status_t iree_hal_device_validate_queue_buffer_target(
     iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
-    iree_hal_atomic_width_t width, iree_hal_buffer_usage_t usage,
-    iree_hal_memory_access_t access) {
-  const iree_device_size_t byte_count = iree_hal_atomic_width_byte_count(width);
+    iree_device_size_t byte_count, iree_hal_buffer_usage_t usage,
+    iree_hal_memory_access_t access, const char* operation_name) {
   if (IREE_UNLIKELY(target_offset > IREE_DEVICE_SIZE_MAX - byte_count)) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "atomic target range overflows device size");
+                            "%s target range overflows device size",
+                            operation_name);
   }
   IREE_RETURN_IF_ERROR(
       iree_hal_buffer_validate_range(target_buffer, target_offset, byte_count));
@@ -664,10 +664,10 @@ static iree_status_t iree_hal_device_validate_atomic_target(
       iree_hal_buffer_byte_offset(target_buffer) + target_offset;
   if (IREE_UNLIKELY((absolute_offset % byte_count) != 0)) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "atomic target address is not naturally aligned "
+                            "%s target address is not naturally aligned "
                             "(absolute_offset=%" PRIdsz ", alignment=%" PRIdsz
                             ")",
-                            absolute_offset, byte_count);
+                            operation_name, absolute_offset, byte_count);
   }
   return iree_ok_status();
 }
@@ -697,9 +697,11 @@ IREE_API_EXPORT iree_status_t iree_hal_device_queue_atomic_wait(
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
       z0, iree_hal_atomic_wait_params_validate(params));
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_hal_device_validate_atomic_target(
-              target_buffer, target_offset, params.width,
-              IREE_HAL_BUFFER_USAGE_STORAGE_READ, IREE_HAL_MEMORY_ACCESS_READ));
+      z0, iree_hal_device_validate_queue_buffer_target(
+              target_buffer, target_offset,
+              iree_hal_atomic_width_byte_count(params.width),
+              IREE_HAL_BUFFER_USAGE_STORAGE_READ, IREE_HAL_MEMORY_ACCESS_READ,
+              "atomic"));
   iree_status_t status = _VTABLE_DISPATCH(device, queue_atomic_wait)(
       device, queue_affinity, wait_semaphore_list, signal_semaphore_list,
       target_buffer, target_offset, params);
@@ -725,10 +727,11 @@ IREE_API_EXPORT iree_status_t iree_hal_device_queue_atomic_store(
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
       z0, iree_hal_atomic_store_params_validate(params));
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0,
-      iree_hal_device_validate_atomic_target(
-          target_buffer, target_offset, params.width,
-          IREE_HAL_BUFFER_USAGE_STORAGE_WRITE, IREE_HAL_MEMORY_ACCESS_WRITE));
+      z0, iree_hal_device_validate_queue_buffer_target(
+              target_buffer, target_offset,
+              iree_hal_atomic_width_byte_count(params.width),
+              IREE_HAL_BUFFER_USAGE_STORAGE_WRITE, IREE_HAL_MEMORY_ACCESS_WRITE,
+              "atomic"));
   iree_status_t status = _VTABLE_DISPATCH(device, queue_atomic_store)(
       device, queue_affinity, wait_semaphore_list, signal_semaphore_list,
       target_buffer, target_offset, params);
@@ -754,10 +757,12 @@ IREE_API_EXPORT iree_status_t iree_hal_device_queue_atomic_rmw(
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
       z0, iree_hal_atomic_rmw_params_validate(params));
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_hal_device_validate_atomic_target(
-              target_buffer, target_offset, params.width,
+      z0, iree_hal_device_validate_queue_buffer_target(
+              target_buffer, target_offset,
+              iree_hal_atomic_width_byte_count(params.width),
               IREE_HAL_BUFFER_USAGE_STORAGE,
-              IREE_HAL_MEMORY_ACCESS_READ | IREE_HAL_MEMORY_ACCESS_WRITE));
+              IREE_HAL_MEMORY_ACCESS_READ | IREE_HAL_MEMORY_ACCESS_WRITE,
+              "atomic"));
   iree_status_t status = _VTABLE_DISPATCH(device, queue_atomic_rmw)(
       device, queue_affinity, wait_semaphore_list, signal_semaphore_list,
       target_buffer, target_offset, params);
@@ -780,6 +785,17 @@ IREE_API_EXPORT iree_status_t iree_hal_device_queue_timestamp(
                         signal_semaphore_list.payload_values));
   IREE_ASSERT_ARGUMENT(target_buffer);
   IREE_TRACE_ZONE_BEGIN(z0);
+  if (IREE_UNLIKELY(flags != IREE_HAL_TIMESTAMP_FLAG_NONE)) {
+    IREE_RETURN_AND_END_ZONE_IF_ERROR(
+        z0,
+        iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                         "unsupported timestamp flags: 0x%016" PRIx64, flags));
+  }
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_hal_device_validate_queue_buffer_target(
+              target_buffer, target_offset, sizeof(uint64_t),
+              IREE_HAL_BUFFER_USAGE_TRANSFER_TARGET,
+              IREE_HAL_MEMORY_ACCESS_WRITE, "timestamp"));
   iree_status_t status = _VTABLE_DISPATCH(device, queue_timestamp)(
       device, queue_affinity, wait_semaphore_list, signal_semaphore_list,
       target_buffer, target_offset, flags);
