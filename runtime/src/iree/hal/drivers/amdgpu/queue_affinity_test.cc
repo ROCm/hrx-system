@@ -61,6 +61,22 @@ TEST(QueueAffinityTest, ResolveOrdinalMapsPhysicalDeviceAndQueue) {
   EXPECT_EQ(resolved.physical_queue_ordinal, 1);
 }
 
+TEST(QueueAffinityTest, PhysicalQueueAffinityBuildsSingleton) {
+  iree_hal_queue_affinity_t queue_affinity = 0;
+  IREE_ASSERT_OK(iree_hal_amdgpu_queue_affinity_for_physical_queue(
+      TwoDeviceDomain(), /*physical_device_ordinal=*/1,
+      /*physical_queue_ordinal=*/0, &queue_affinity));
+  EXPECT_EQ(queue_affinity, 0x4ull);
+}
+
+TEST(QueueAffinityTest, PhysicalQueueAffinityRejectsOutOfRangeQueue) {
+  iree_hal_queue_affinity_t queue_affinity = 0;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_OUT_OF_RANGE,
+                        iree_hal_amdgpu_queue_affinity_for_physical_queue(
+                            TwoDeviceDomain(), /*physical_device_ordinal=*/0,
+                            /*physical_queue_ordinal=*/2, &queue_affinity));
+}
+
 TEST(QueueAffinityTest, ResolveOrdinalRejectsOutOfRangeDevice) {
   iree_hal_amdgpu_queue_affinity_resolved_t resolved;
   IREE_EXPECT_STATUS_IS(IREE_STATUS_OUT_OF_RANGE,

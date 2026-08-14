@@ -73,6 +73,13 @@ iree_status_t iree_hal_amdgpu_queue_affinity_resolve_ordinal(
     iree_host_size_t queue_ordinal,
     iree_hal_amdgpu_queue_affinity_resolved_t* out_resolved);
 
+// Builds the singleton affinity for one physical queue in |domain|.
+iree_status_t iree_hal_amdgpu_queue_affinity_for_physical_queue(
+    iree_hal_amdgpu_queue_affinity_domain_t domain,
+    iree_host_size_t physical_device_ordinal,
+    iree_host_size_t physical_queue_ordinal,
+    iree_hal_queue_affinity_t* out_queue_affinity);
+
 // Resolves |requested_affinity| to the deterministic first selected queue.
 iree_status_t iree_hal_amdgpu_queue_affinity_resolve(
     iree_hal_amdgpu_queue_affinity_domain_t domain,

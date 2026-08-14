@@ -2011,38 +2011,6 @@ static bool iree_hal_amdgpu_aql_dispatch_plan_uses_tsan_shadow_slot(
 }
 
 static iree_status_t
-iree_hal_amdgpu_aql_command_buffer_queue_affinity_for_physical_queue(
-    const iree_hal_amdgpu_aql_command_buffer_t* command_buffer,
-    uint32_t physical_queue_ordinal,
-    iree_hal_queue_affinity_t* out_queue_affinity) {
-  *out_queue_affinity = 0;
-  iree_host_size_t first_queue_ordinal = 0;
-  if (IREE_UNLIKELY(!iree_host_size_checked_mul(
-                        command_buffer->device_ordinal,
-                        command_buffer->queue_count_per_physical_device,
-                        &first_queue_ordinal) ||
-                    physical_queue_ordinal >
-                        IREE_HOST_SIZE_MAX - first_queue_ordinal)) {
-    return iree_make_status(
-        IREE_STATUS_OUT_OF_RANGE,
-        "command-buffer queue ordinal calculation overflowed");
-  }
-  const iree_host_size_t queue_ordinal =
-      first_queue_ordinal + physical_queue_ordinal;
-  const iree_hal_amdgpu_queue_affinity_domain_t domain = {
-      .supported_affinity = IREE_HAL_QUEUE_AFFINITY_ANY,
-      .physical_device_count = command_buffer->device_ordinal + 1,
-      .queue_count_per_physical_device =
-          command_buffer->queue_count_per_physical_device,
-  };
-  iree_hal_amdgpu_queue_affinity_resolved_t resolved;
-  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_queue_affinity_resolve_ordinal(
-      domain, queue_ordinal, &resolved));
-  *out_queue_affinity = resolved.queue_affinity;
-  return iree_ok_status();
-}
-
-static iree_status_t
 iree_hal_amdgpu_aql_command_buffer_record_queue_kernel_objects(
     iree_hal_amdgpu_aql_command_buffer_t* command_buffer,
     const iree_hal_amdgpu_aql_dispatch_inputs_t* inputs,
@@ -2069,9 +2037,15 @@ iree_hal_amdgpu_aql_command_buffer_record_queue_kernel_objects(
        iree_status_is_ok(status);
        ++physical_queue_ordinal) {
     iree_hal_queue_affinity_t queue_affinity = 0;
-    status =
-        iree_hal_amdgpu_aql_command_buffer_queue_affinity_for_physical_queue(
-            command_buffer, physical_queue_ordinal, &queue_affinity);
+    status = iree_hal_amdgpu_queue_affinity_for_physical_queue(
+        (iree_hal_amdgpu_queue_affinity_domain_t){
+            .supported_affinity = IREE_HAL_QUEUE_AFFINITY_ANY,
+            .physical_device_count = command_buffer->device_ordinal + 1,
+            .queue_count_per_physical_device =
+                command_buffer->queue_count_per_physical_device,
+        },
+        command_buffer->device_ordinal, physical_queue_ordinal,
+        &queue_affinity);
     if (!iree_status_is_ok(status)) break;
     const iree_hal_amdgpu_executable_dispatch_descriptor_t* descriptor = NULL;
     status = iree_hal_amdgpu_executable_lookup_dispatch_descriptor_for_queue(

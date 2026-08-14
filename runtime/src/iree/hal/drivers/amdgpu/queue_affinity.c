@@ -122,6 +122,42 @@ iree_status_t iree_hal_amdgpu_queue_affinity_resolve_ordinal(
   return iree_ok_status();
 }
 
+iree_status_t iree_hal_amdgpu_queue_affinity_for_physical_queue(
+    iree_hal_amdgpu_queue_affinity_domain_t domain,
+    iree_host_size_t physical_device_ordinal,
+    iree_host_size_t physical_queue_ordinal,
+    iree_hal_queue_affinity_t* out_queue_affinity) {
+  *out_queue_affinity = 0;
+  if (IREE_UNLIKELY(physical_device_ordinal >= domain.physical_device_count)) {
+    return iree_make_status(
+        IREE_STATUS_OUT_OF_RANGE,
+        "physical device ordinal %" PRIhsz " exceeds device count %" PRIhsz,
+        physical_device_ordinal, domain.physical_device_count);
+  }
+  if (IREE_UNLIKELY(physical_queue_ordinal >=
+                    domain.queue_count_per_physical_device)) {
+    return iree_make_status(
+        IREE_STATUS_OUT_OF_RANGE,
+        "physical queue ordinal %" PRIhsz " exceeds queue count %" PRIhsz,
+        physical_queue_ordinal, domain.queue_count_per_physical_device);
+  }
+
+  iree_host_size_t first_queue_ordinal = 0;
+  if (IREE_UNLIKELY(
+          !iree_host_size_checked_mul(physical_device_ordinal,
+                                      domain.queue_count_per_physical_device,
+                                      &first_queue_ordinal) ||
+          physical_queue_ordinal > IREE_HOST_SIZE_MAX - first_queue_ordinal)) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "physical queue ordinal calculation overflowed");
+  }
+  iree_hal_amdgpu_queue_affinity_resolved_t resolved;
+  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_queue_affinity_resolve_ordinal(
+      domain, first_queue_ordinal + physical_queue_ordinal, &resolved));
+  *out_queue_affinity = resolved.queue_affinity;
+  return iree_ok_status();
+}
+
 iree_status_t iree_hal_amdgpu_queue_affinity_resolve(
     iree_hal_amdgpu_queue_affinity_domain_t domain,
     iree_hal_queue_affinity_t requested_affinity,
