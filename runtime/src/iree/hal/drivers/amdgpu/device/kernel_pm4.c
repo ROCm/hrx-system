@@ -36,13 +36,6 @@ iree_status_t iree_hal_amdgpu_device_kernel_pm4_launch_initialize(
   const iree_hal_amdgpu_kernel_descriptor_t* descriptor = NULL;
   IREE_RETURN_IF_ERROR(iree_hal_amdgpu_loaded_code_object_query_host_address(
       libhsa, kernel_args->kernel_object, (const void**)&descriptor));
-  if (IREE_UNLIKELY(!iree_hal_amdgpu_pm4_dispatch_launch_state_is_supported(
-          gfxip_version, descriptor, kernel_args->kernel_object, workgroup_size,
-          IREE_HAL_AMDGPU_PM4_DISPATCH_LAUNCH_FLAG_NONE))) {
-    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "builtin kernel cannot be launched through PM4");
-  }
-
   out_launch->kernel_args = *kernel_args;
   memcpy(out_launch->kernel_args.workgroup_size, workgroup_size,
          sizeof(out_launch->kernel_args.workgroup_size));

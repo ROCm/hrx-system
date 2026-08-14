@@ -80,11 +80,36 @@ static uint32_t iree_hal_amdgpu_pm4_dispatch_allowed_kernel_code_properties(
     iree_hal_amdgpu_gfxip_version_t gfxip_version) {
   uint32_t allowed_properties =
       IREE_HAL_AMDGPU_KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR;
+  if (gfxip_version.major <= 10) {
+    allowed_properties |=
+        IREE_HAL_AMDGPU_KERNEL_CODE_PROPERTY_ENABLE_SGPR_PRIVATE_SEGMENT_BUFFER;
+  }
   if (gfxip_version.major >= 10) {
     allowed_properties |=
         IREE_HAL_AMDGPU_KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32;
   }
   return allowed_properties;
+}
+
+static uint32_t iree_hal_amdgpu_pm4_kernel_descriptor_kernarg_user_data_offset(
+    const iree_hal_amdgpu_kernel_descriptor_t* descriptor) {
+  uint32_t offset = 0;
+  if (iree_any_bit_set(
+          descriptor->kernel_code_properties,
+          IREE_HAL_AMDGPU_KERNEL_CODE_PROPERTY_ENABLE_SGPR_PRIVATE_SEGMENT_BUFFER)) {
+    offset += 4;
+  }
+  if (iree_any_bit_set(
+          descriptor->kernel_code_properties,
+          IREE_HAL_AMDGPU_KERNEL_CODE_PROPERTY_ENABLE_SGPR_DISPATCH_PTR)) {
+    offset += 2;
+  }
+  if (iree_any_bit_set(
+          descriptor->kernel_code_properties,
+          IREE_HAL_AMDGPU_KERNEL_CODE_PROPERTY_ENABLE_SGPR_QUEUE_PTR)) {
+    offset += 2;
+  }
+  return offset;
 }
 
 static uint32_t iree_hal_amdgpu_pm4_kernel_descriptor_user_data_prefix_count(
@@ -455,6 +480,9 @@ iree_status_t iree_hal_amdgpu_pm4_dispatch_launch_state_initialize(
   out_state->start_and_threads[7] = 0;
   out_state->user_data_dword_count =
       iree_hal_amdgpu_pm4_kernel_descriptor_user_sgpr_count(descriptor);
+  out_state->kernarg_user_data_offset =
+      iree_hal_amdgpu_pm4_kernel_descriptor_kernarg_user_data_offset(
+          descriptor);
   out_state->kernarg_preload_dword_offset =
       iree_hal_amdgpu_pm4_kernel_descriptor_kernarg_preload_offset(descriptor);
   out_state->kernarg_preload_dword_count =
@@ -535,8 +563,16 @@ iree_status_t iree_hal_amdgpu_pm4_dispatch_emit_user_data(
   }
   uint32_t user_data[IREE_HAL_AMDGPU_PM4_DISPATCH_USER_DATA_DWORD_CAPACITY] = {
       0};
-  user_data[0] = (uint32_t)kernarg_address;
-  user_data[1] = (uint32_t)(kernarg_address >> 32);
+  if (IREE_UNLIKELY(state->kernarg_user_data_offset >
+                        state->user_data_dword_count ||
+                    2u > state->user_data_dword_count -
+                             state->kernarg_user_data_offset)) {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "PM4 dispatch kernarg pointer exceeds userdata");
+  }
+  user_data[state->kernarg_user_data_offset] = (uint32_t)kernarg_address;
+  user_data[state->kernarg_user_data_offset + 1] =
+      (uint32_t)(kernarg_address >> 32);
   if (state->kernarg_preload_dword_count != 0) {
     if (IREE_UNLIKELY(!kernarg_preload_data)) {
       return iree_make_status(

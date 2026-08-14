@@ -6,6 +6,7 @@
 
 #include "iree/hal/drivers/amdgpu/device/blit_pm4.h"
 
+#include <inttypes.h>
 #include <string.h>
 
 iree_status_t iree_hal_amdgpu_device_buffer_transfer_pm4_context_initialize(
@@ -27,11 +28,15 @@ iree_status_t iree_hal_amdgpu_device_buffer_transfer_pm4_context_initialize(
        i < IREE_HAL_AMDGPU_DEVICE_BUFFER_TRANSFER_KERNEL_COUNT; ++i) {
     const iree_hal_amdgpu_device_buffer_transfer_kernel_t kernel =
         (iree_hal_amdgpu_device_buffer_transfer_kernel_t)i;
-    IREE_RETURN_IF_ERROR(iree_hal_amdgpu_device_kernel_pm4_launch_initialize(
+    iree_status_t status = iree_hal_amdgpu_device_kernel_pm4_launch_initialize(
         libhsa, gfxip_version,
         iree_hal_amdgpu_device_buffer_transfer_kernel_args(transfer_context,
                                                            kernel),
-        workgroup_size, &out_context->launches[i]));
+        workgroup_size, &out_context->launches[i]);
+    if (!iree_status_is_ok(status)) {
+      return iree_status_annotate_f(status, "transfer kernel ordinal %" PRIhsz,
+                                    i);
+    }
   }
   return iree_ok_status();
 }

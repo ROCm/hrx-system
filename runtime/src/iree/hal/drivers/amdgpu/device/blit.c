@@ -7,7 +7,6 @@
 #include "iree/hal/drivers/amdgpu/device/blit.h"
 
 #include "iree/hal/drivers/amdgpu/device/support/common.h"
-#include "iree/hal/drivers/amdgpu/device/support/kernel.h"
 
 //===----------------------------------------------------------------------===//
 // Blit kernel utilities
@@ -57,6 +56,8 @@ typedef struct IREE_AMDGPU_ATTRIBUTE_PACKED {
 // Maximum alignment that changes builtin blit kernel selection.
 #define IREE_HAL_AMDGPU_BLIT_MAX_ALIGNMENT 16
 
+#if !defined(IREE_AMDGPU_TARGET_DEVICE)
+
 void iree_hal_amdgpu_device_buffer_transfer_context_initialize(
     const iree_hal_amdgpu_device_kernels_t* kernels,
     uint32_t compute_unit_count, uint32_t wavefront_size,
@@ -77,20 +78,24 @@ void iree_hal_amdgpu_device_buffer_transfer_context_initialize(
   };
 }
 
+#endif  // !IREE_AMDGPU_TARGET_DEVICE
+
 #if defined(IREE_AMDGPU_TARGET_DEVICE)
 
 static inline IREE_AMDGPU_ATTRIBUTE_ALWAYS_INLINE uint64_t
-iree_hal_amdgpu_blit_linear_id(void) {
-  const uint64_t id_x = iree_hal_amdgpu_device_global_id_x();
-  const uint64_t id_y = iree_hal_amdgpu_device_global_id_y();
-  return id_y * iree_amdgcn_dispatch_ptr()->grid_size[0] + id_x;
+iree_hal_amdgpu_blit_linear_id(const uint32_t grid_size_x,
+                               const uint32_t workgroup_size_x) {
+  const uint64_t id_x =
+      (uint64_t)__builtin_amdgcn_workgroup_id_x() * workgroup_size_x +
+      __builtin_amdgcn_workitem_id_x();
+  const uint64_t id_y = __builtin_amdgcn_workgroup_id_y();
+  return id_y * grid_size_x + id_x;
 }
 
 static inline IREE_AMDGPU_ATTRIBUTE_ALWAYS_INLINE uint64_t
-iree_hal_amdgpu_blit_grid_size(void) {
-  const iree_hsa_kernel_dispatch_packet_t* IREE_AMDGPU_RESTRICT dispatch_ptr =
-      iree_amdgcn_dispatch_ptr();
-  return (uint64_t)dispatch_ptr->grid_size[0] * dispatch_ptr->grid_size[1];
+iree_hal_amdgpu_blit_grid_size(const uint32_t grid_size_x,
+                               const uint32_t grid_size_y) {
+  return (uint64_t)grid_size_x * grid_size_y;
 }
 
 static inline IREE_AMDGPU_ATTRIBUTE_ALWAYS_INLINE bool
@@ -168,31 +173,44 @@ iree_hal_amdgpu_blit_pattern_byte(const uint64_t pattern,
 
 IREE_AMDGPU_ATTRIBUTE_KERNEL void iree_hal_amdgpu_device_buffer_fill_x1(
     uint8_t* IREE_AMDGPU_RESTRICT target_ptr, const uint64_t element_length,
-    const uint8_t pattern) {
-  const uint64_t element_stride = iree_hal_amdgpu_blit_grid_size();
-  for (uint64_t element_offset = iree_hal_amdgpu_blit_linear_id();
+    const uint64_t pattern, const uint32_t grid_size_x,
+    const uint32_t grid_size_y, const uint32_t workgroup_size_x) {
+  const uint8_t pattern_x1 = (uint8_t)pattern;
+  const uint64_t element_stride =
+      iree_hal_amdgpu_blit_grid_size(grid_size_x, grid_size_y);
+  for (uint64_t element_offset =
+           iree_hal_amdgpu_blit_linear_id(grid_size_x, workgroup_size_x);
        element_offset < element_length;) {
-    target_ptr[element_offset] = pattern;
+    target_ptr[element_offset] = pattern_x1;
     if (!iree_hal_amdgpu_blit_advance(&element_offset, element_stride)) break;
   }
 }
 
 IREE_AMDGPU_ATTRIBUTE_KERNEL void iree_hal_amdgpu_device_buffer_fill_x2(
     uint16_t* IREE_AMDGPU_RESTRICT target_ptr, const uint64_t element_length,
-    const uint16_t pattern) {
-  const uint64_t element_stride = iree_hal_amdgpu_blit_grid_size();
-  for (uint64_t element_offset = iree_hal_amdgpu_blit_linear_id();
+    const uint64_t pattern, const uint32_t grid_size_x,
+    const uint32_t grid_size_y, const uint32_t workgroup_size_x) {
+  const uint16_t pattern_x2 = (uint16_t)pattern;
+  const uint64_t element_stride =
+      iree_hal_amdgpu_blit_grid_size(grid_size_x, grid_size_y);
+  for (uint64_t element_offset =
+           iree_hal_amdgpu_blit_linear_id(grid_size_x, workgroup_size_x);
        element_offset < element_length;) {
-    target_ptr[element_offset] = pattern;
+    target_ptr[element_offset] = pattern_x2;
     if (!iree_hal_amdgpu_blit_advance(&element_offset, element_stride)) break;
   }
 }
 
 IREE_AMDGPU_ATTRIBUTE_KERNEL void iree_hal_amdgpu_device_buffer_fill_x4(
     uint32_t* IREE_AMDGPU_RESTRICT target_ptr, const uint64_t element_length,
-    const uint32_t pattern) {
-  const uint64_t block_stride = iree_hal_amdgpu_blit_grid_size();
-  for (uint64_t block_id = iree_hal_amdgpu_blit_linear_id();;) {
+    const uint64_t pattern, const uint32_t grid_size_x,
+    const uint32_t grid_size_y, const uint32_t workgroup_size_x) {
+  const uint32_t pattern_x4 = (uint32_t)pattern;
+  const uint64_t block_stride =
+      iree_hal_amdgpu_blit_grid_size(grid_size_x, grid_size_y);
+  for (uint64_t block_id =
+           iree_hal_amdgpu_blit_linear_id(grid_size_x, workgroup_size_x);
+       ;) {
     const uint64_t element_offset =
         block_id * IREE_HAL_AMDGPU_FILL_BLOCK_X4_COUNT;
     if (IREE_AMDGPU_UNLIKELY(element_offset >= element_length)) return;
@@ -202,11 +220,11 @@ IREE_AMDGPU_ATTRIBUTE_KERNEL void iree_hal_amdgpu_device_buffer_fill_x4(
                            IREE_HAL_AMDGPU_FILL_BLOCK_X4_COUNT)) {
 #pragma unroll
       for (size_t i = 0; i < IREE_HAL_AMDGPU_FILL_BLOCK_X4_COUNT; ++i) {
-        target_ptr[element_offset + i] = pattern;
+        target_ptr[element_offset + i] = pattern_x4;
       }
     } else {
       for (size_t i = 0; i < element_count; ++i) {
-        target_ptr[element_offset + i] = pattern;
+        target_ptr[element_offset + i] = pattern_x4;
       }
     }
     if (!iree_hal_amdgpu_blit_advance(&block_id, block_stride)) return;
@@ -215,9 +233,12 @@ IREE_AMDGPU_ATTRIBUTE_KERNEL void iree_hal_amdgpu_device_buffer_fill_x4(
 
 IREE_AMDGPU_ATTRIBUTE_KERNEL void iree_hal_amdgpu_device_buffer_fill_x8(
     uint64_t* IREE_AMDGPU_RESTRICT target_ptr, const uint64_t element_length,
-    const uint64_t pattern) {
-  const uint64_t element_stride = iree_hal_amdgpu_blit_grid_size();
-  for (uint64_t element_offset = iree_hal_amdgpu_blit_linear_id();
+    const uint64_t pattern, const uint32_t grid_size_x,
+    const uint32_t grid_size_y, const uint32_t workgroup_size_x) {
+  const uint64_t element_stride =
+      iree_hal_amdgpu_blit_grid_size(grid_size_x, grid_size_y);
+  for (uint64_t element_offset =
+           iree_hal_amdgpu_blit_linear_id(grid_size_x, workgroup_size_x);
        element_offset < element_length;) {
     target_ptr[element_offset] = pattern;
     if (!iree_hal_amdgpu_blit_advance(&element_offset, element_stride)) break;
@@ -229,10 +250,15 @@ IREE_AMDGPU_ATTRIBUTE_KERNEL void iree_hal_amdgpu_device_buffer_fill_x8(
 // |length|.
 IREE_AMDGPU_ATTRIBUTE_KERNEL void iree_hal_amdgpu_device_buffer_fill_block_x16(
     iree_amdgpu_uint64x2_t* IREE_AMDGPU_RESTRICT target_ptr,
-    const uint64_t element_length, const uint64_t pattern) {
-  const uint64_t block_stride = iree_hal_amdgpu_blit_grid_size();
+    const uint64_t element_length, const uint64_t pattern,
+    const uint32_t grid_size_x, const uint32_t grid_size_y,
+    const uint32_t workgroup_size_x) {
+  const uint64_t block_stride =
+      iree_hal_amdgpu_blit_grid_size(grid_size_x, grid_size_y);
   const iree_amdgpu_uint64x2_t pattern_x16 = {pattern, pattern};
-  for (uint64_t block_id = iree_hal_amdgpu_blit_linear_id();;) {
+  for (uint64_t block_id =
+           iree_hal_amdgpu_blit_linear_id(grid_size_x, workgroup_size_x);
+       ;) {
     const uint64_t element_offset = block_id * IREE_HAL_AMDGPU_FILL_BLOCK_COUNT;
     if (IREE_AMDGPU_UNLIKELY(element_offset >= element_length)) return;
     const uint64_t element_count = IREE_AMDGPU_MIN(
@@ -260,7 +286,9 @@ IREE_AMDGPU_ATTRIBUTE_KERNEL void iree_hal_amdgpu_device_buffer_fill_block_x16(
 IREE_AMDGPU_ATTRIBUTE_KERNEL void
 iree_hal_amdgpu_device_buffer_fill_block_unaligned_x16(
     iree_amdgpu_unaligned_uint64x2_t* IREE_AMDGPU_RESTRICT target_ptr,
-    const uint64_t element_length, const uint64_t pattern) {
+    const uint64_t element_length, const uint64_t pattern,
+    const uint32_t grid_size_x, const uint32_t grid_size_y,
+    const uint32_t workgroup_size_x) {
   const uint64_t full_element_count =
       element_length / IREE_HAL_AMDGPU_FILL_BLOCK_ELEMENT_SIZE;
   const uint64_t vector_block_count = IREE_AMDGPU_CEIL_DIV(
@@ -268,9 +296,12 @@ iree_hal_amdgpu_device_buffer_fill_block_unaligned_x16(
   const uint64_t tail_offset =
       full_element_count * IREE_HAL_AMDGPU_FILL_BLOCK_ELEMENT_SIZE;
   const uint64_t tail_length = element_length - tail_offset;
-  const uint64_t block_stride = iree_hal_amdgpu_blit_grid_size();
+  const uint64_t block_stride =
+      iree_hal_amdgpu_blit_grid_size(grid_size_x, grid_size_y);
   const iree_amdgpu_uint64x2_t pattern_x16 = {pattern, pattern};
-  for (uint64_t block_id = iree_hal_amdgpu_blit_linear_id();;) {
+  for (uint64_t block_id =
+           iree_hal_amdgpu_blit_linear_id(grid_size_x, workgroup_size_x);
+       ;) {
     if (IREE_AMDGPU_UNLIKELY(vector_block_count == 0)) {
       if (block_id == 0) {
         uint8_t* tail_ptr = (uint8_t*)target_ptr;
@@ -306,6 +337,8 @@ iree_hal_amdgpu_device_buffer_fill_block_unaligned_x16(
 }
 
 #endif  // IREE_AMDGPU_TARGET_DEVICE
+
+#if !defined(IREE_AMDGPU_TARGET_DEVICE)
 
 // Returns the bytes of |pattern| of length |pattern_length| splatted to
 // an 8-byte value.
@@ -401,7 +434,8 @@ static void iree_hal_amdgpu_blit_emplace_dispatch(
   dispatch_packet->completion_signal = iree_hsa_signal_null();
 }
 
-static uint64_t iree_hal_amdgpu_blit_pointer_alignment(const void* pointer) {
+uint64_t iree_hal_amdgpu_device_buffer_transfer_pointer_alignment(
+    const void* pointer) {
   const uintptr_t address = (uintptr_t)pointer;
   for (uint64_t alignment = IREE_HAL_AMDGPU_BLIT_MAX_ALIGNMENT; alignment > 1;
        alignment >>= 1) {
@@ -532,6 +566,7 @@ bool iree_hal_amdgpu_device_buffer_fill_plan(
   plan.grid_size[0] = grid_size_x;
   plan.grid_size[1] = grid_size_y;
   plan.grid_size[2] = 1;
+  plan.workgroup_size_x = context->workgroup_size_x;
   plan.element_length = element_count;
   plan.pattern = pattern;
   *out_plan = plan;
@@ -544,17 +579,25 @@ void iree_hal_amdgpu_device_buffer_fill_plan_emplace(
     const iree_hal_amdgpu_device_buffer_fill_plan_t* IREE_AMDGPU_RESTRICT plan,
     iree_hsa_kernel_dispatch_packet_t* IREE_AMDGPU_RESTRICT dispatch_packet,
     void* target_ptr, void* IREE_AMDGPU_RESTRICT kernarg_ptr) {
-  // Update kernargs (same API for all kernels).
-  iree_hal_amdgpu_device_buffer_fill_kernargs_t* kernargs =
-      (iree_hal_amdgpu_device_buffer_fill_kernargs_t*)kernarg_ptr;
-  kernargs->target_ptr = target_ptr;
-  kernargs->element_length = plan->element_length;
-  kernargs->pattern = plan->pattern;
+  iree_hal_amdgpu_device_buffer_fill_plan_initialize_kernargs(
+      plan, target_ptr,
+      (iree_hal_amdgpu_device_buffer_fill_kernargs_t*)kernarg_ptr);
 
   iree_hal_amdgpu_blit_emplace_dispatch(
       context,
       iree_hal_amdgpu_device_buffer_transfer_kernel_args(context, plan->kernel),
       dispatch_packet, plan->grid_size[0], plan->grid_size[1], kernarg_ptr);
+}
+
+void iree_hal_amdgpu_device_buffer_fill_plan_initialize_kernargs(
+    const iree_hal_amdgpu_device_buffer_fill_plan_t* plan, void* target_ptr,
+    iree_hal_amdgpu_device_buffer_fill_kernargs_t* out_kernargs) {
+  out_kernargs->target_ptr = target_ptr;
+  out_kernargs->element_length = plan->element_length;
+  out_kernargs->pattern = plan->pattern;
+  out_kernargs->grid_size_x = plan->grid_size[0];
+  out_kernargs->grid_size_y = plan->grid_size[1];
+  out_kernargs->workgroup_size_x = plan->workgroup_size_x;
 }
 
 bool iree_hal_amdgpu_device_buffer_fill_emplace(
@@ -565,14 +608,17 @@ bool iree_hal_amdgpu_device_buffer_fill_emplace(
     void* IREE_AMDGPU_RESTRICT kernarg_ptr) {
   iree_hal_amdgpu_device_buffer_fill_plan_t plan;
   if (IREE_AMDGPU_UNLIKELY(!iree_hal_amdgpu_device_buffer_fill_plan(
-          context, iree_hal_amdgpu_blit_pointer_alignment(target_ptr), length,
-          pattern, pattern_length, &plan))) {
+          context,
+          iree_hal_amdgpu_device_buffer_transfer_pointer_alignment(target_ptr),
+          length, pattern, pattern_length, &plan))) {
     return false;
   }
   iree_hal_amdgpu_device_buffer_fill_plan_emplace(
       context, &plan, dispatch_packet, target_ptr, kernarg_ptr);
   return true;
 }
+
+#endif  // !IREE_AMDGPU_TARGET_DEVICE
 
 //===----------------------------------------------------------------------===//
 // iree_hal_amdgpu_device_buffer_copy_*
@@ -613,9 +659,13 @@ bool iree_hal_amdgpu_device_buffer_fill_emplace(
 
 IREE_AMDGPU_ATTRIBUTE_KERNEL void iree_hal_amdgpu_device_buffer_copy_x1(
     const uint8_t* IREE_AMDGPU_RESTRICT source_ptr,
-    uint8_t* IREE_AMDGPU_RESTRICT target_ptr, const uint64_t element_length) {
-  const uint64_t element_stride = iree_hal_amdgpu_blit_grid_size();
-  for (uint64_t element_offset = iree_hal_amdgpu_blit_linear_id();
+    uint8_t* IREE_AMDGPU_RESTRICT target_ptr, const uint64_t element_length,
+    const uint32_t grid_size_x, const uint32_t grid_size_y,
+    const uint32_t workgroup_size_x) {
+  const uint64_t element_stride =
+      iree_hal_amdgpu_blit_grid_size(grid_size_x, grid_size_y);
+  for (uint64_t element_offset =
+           iree_hal_amdgpu_blit_linear_id(grid_size_x, workgroup_size_x);
        element_offset < element_length;) {
     target_ptr[element_offset] = source_ptr[element_offset];
     if (!iree_hal_amdgpu_blit_advance(&element_offset, element_stride)) break;
@@ -627,9 +677,14 @@ IREE_AMDGPU_ATTRIBUTE_KERNEL void iree_hal_amdgpu_device_buffer_copy_x1(
 // |source_ptr|, |target_ptr|, and |length|.
 IREE_AMDGPU_ATTRIBUTE_KERNEL void iree_hal_amdgpu_device_buffer_copy_block_x4(
     const uint32_t* IREE_AMDGPU_RESTRICT source_ptr,
-    uint32_t* IREE_AMDGPU_RESTRICT target_ptr, const uint64_t element_length) {
-  const uint64_t block_stride = iree_hal_amdgpu_blit_grid_size();
-  for (uint64_t block_id = iree_hal_amdgpu_blit_linear_id();;) {
+    uint32_t* IREE_AMDGPU_RESTRICT target_ptr, const uint64_t element_length,
+    const uint32_t grid_size_x, const uint32_t grid_size_y,
+    const uint32_t workgroup_size_x) {
+  const uint64_t block_stride =
+      iree_hal_amdgpu_blit_grid_size(grid_size_x, grid_size_y);
+  for (uint64_t block_id =
+           iree_hal_amdgpu_blit_linear_id(grid_size_x, workgroup_size_x);
+       ;) {
     const uint64_t element_offset =
         block_id * IREE_HAL_AMDGPU_COPY_BLOCK_X4_COUNT;
     if (IREE_AMDGPU_UNLIKELY(element_offset >= element_length)) return;
@@ -655,9 +710,14 @@ IREE_AMDGPU_ATTRIBUTE_KERNEL void iree_hal_amdgpu_device_buffer_copy_block_x4(
 // |source_ptr|, |target_ptr|, and |length|.
 IREE_AMDGPU_ATTRIBUTE_KERNEL void iree_hal_amdgpu_device_buffer_copy_block_x8(
     const uint64_t* IREE_AMDGPU_RESTRICT source_ptr,
-    uint64_t* IREE_AMDGPU_RESTRICT target_ptr, const uint64_t element_length) {
-  const uint64_t block_stride = iree_hal_amdgpu_blit_grid_size();
-  for (uint64_t block_id = iree_hal_amdgpu_blit_linear_id();;) {
+    uint64_t* IREE_AMDGPU_RESTRICT target_ptr, const uint64_t element_length,
+    const uint32_t grid_size_x, const uint32_t grid_size_y,
+    const uint32_t workgroup_size_x) {
+  const uint64_t block_stride =
+      iree_hal_amdgpu_blit_grid_size(grid_size_x, grid_size_y);
+  for (uint64_t block_id =
+           iree_hal_amdgpu_blit_linear_id(grid_size_x, workgroup_size_x);
+       ;) {
     const uint64_t element_offset =
         block_id * IREE_HAL_AMDGPU_COPY_BLOCK_X8_COUNT;
     if (IREE_AMDGPU_UNLIKELY(element_offset >= element_length)) return;
@@ -684,9 +744,13 @@ IREE_AMDGPU_ATTRIBUTE_KERNEL void iree_hal_amdgpu_device_buffer_copy_block_x8(
 IREE_AMDGPU_ATTRIBUTE_KERNEL void iree_hal_amdgpu_device_buffer_copy_block_x16(
     const iree_amdgpu_uint64x2_t* IREE_AMDGPU_RESTRICT source_ptr,
     iree_amdgpu_uint64x2_t* IREE_AMDGPU_RESTRICT target_ptr,
-    const uint64_t element_length) {
-  const uint64_t block_stride = iree_hal_amdgpu_blit_grid_size();
-  for (uint64_t block_id = iree_hal_amdgpu_blit_linear_id();;) {
+    const uint64_t element_length, const uint32_t grid_size_x,
+    const uint32_t grid_size_y, const uint32_t workgroup_size_x) {
+  const uint64_t block_stride =
+      iree_hal_amdgpu_blit_grid_size(grid_size_x, grid_size_y);
+  for (uint64_t block_id =
+           iree_hal_amdgpu_blit_linear_id(grid_size_x, workgroup_size_x);
+       ;) {
     const uint64_t element_offset = block_id * IREE_HAL_AMDGPU_COPY_BLOCK_COUNT;
     if (IREE_AMDGPU_UNLIKELY(element_offset >= element_length)) return;
     const uint64_t element_count = IREE_AMDGPU_MIN(
@@ -713,7 +777,8 @@ IREE_AMDGPU_ATTRIBUTE_KERNEL void
 iree_hal_amdgpu_device_buffer_copy_block_unaligned_x16(
     const iree_amdgpu_unaligned_uint64x2_t* IREE_AMDGPU_RESTRICT source_ptr,
     iree_amdgpu_unaligned_uint64x2_t* IREE_AMDGPU_RESTRICT target_ptr,
-    const uint64_t element_length) {
+    const uint64_t element_length, const uint32_t grid_size_x,
+    const uint32_t grid_size_y, const uint32_t workgroup_size_x) {
   const uint64_t full_element_count =
       element_length / IREE_HAL_AMDGPU_COPY_BLOCK_ELEMENT_SIZE;
   const uint64_t vector_block_count = IREE_AMDGPU_CEIL_DIV(
@@ -721,8 +786,11 @@ iree_hal_amdgpu_device_buffer_copy_block_unaligned_x16(
   const uint64_t tail_offset =
       full_element_count * IREE_HAL_AMDGPU_COPY_BLOCK_ELEMENT_SIZE;
   const uint64_t tail_length = element_length - tail_offset;
-  const uint64_t block_stride = iree_hal_amdgpu_blit_grid_size();
-  for (uint64_t block_id = iree_hal_amdgpu_blit_linear_id();;) {
+  const uint64_t block_stride =
+      iree_hal_amdgpu_blit_grid_size(grid_size_x, grid_size_y);
+  for (uint64_t block_id =
+           iree_hal_amdgpu_blit_linear_id(grid_size_x, workgroup_size_x);
+       ;) {
     if (IREE_AMDGPU_UNLIKELY(vector_block_count == 0)) {
       if (block_id == 0) {
         const uint8_t* source_tail_ptr = (const uint8_t*)source_ptr;
@@ -762,6 +830,8 @@ iree_hal_amdgpu_device_buffer_copy_block_unaligned_x16(
 }
 
 #endif  // IREE_AMDGPU_TARGET_DEVICE
+
+#if !defined(IREE_AMDGPU_TARGET_DEVICE)
 
 // Copies currently dispatch builtin blit kernels. SDMA emission belongs in a
 // queue-specific wrapper because it changes queue ownership and packet
@@ -838,6 +908,7 @@ bool iree_hal_amdgpu_device_buffer_copy_plan(
   plan.grid_size[0] = grid_size_x;
   plan.grid_size[1] = grid_size_y;
   plan.grid_size[2] = 1;
+  plan.workgroup_size_x = context->workgroup_size_x;
   plan.element_length = element_count;
   *out_plan = plan;
   return true;
@@ -850,17 +921,26 @@ void iree_hal_amdgpu_device_buffer_copy_plan_emplace(
     iree_hsa_kernel_dispatch_packet_t* IREE_AMDGPU_RESTRICT dispatch_packet,
     const void* source_ptr, void* target_ptr,
     void* IREE_AMDGPU_RESTRICT kernarg_ptr) {
-  // Update kernargs (same API for all kernels).
-  iree_hal_amdgpu_device_buffer_copy_kernargs_t* kernargs =
-      (iree_hal_amdgpu_device_buffer_copy_kernargs_t*)kernarg_ptr;
-  kernargs->source_ptr = source_ptr;
-  kernargs->target_ptr = target_ptr;
-  kernargs->element_length = plan->element_length;
+  iree_hal_amdgpu_device_buffer_copy_plan_initialize_kernargs(
+      plan, source_ptr, target_ptr,
+      (iree_hal_amdgpu_device_buffer_copy_kernargs_t*)kernarg_ptr);
 
   iree_hal_amdgpu_blit_emplace_dispatch(
       context,
       iree_hal_amdgpu_device_buffer_transfer_kernel_args(context, plan->kernel),
       dispatch_packet, plan->grid_size[0], plan->grid_size[1], kernarg_ptr);
+}
+
+void iree_hal_amdgpu_device_buffer_copy_plan_initialize_kernargs(
+    const iree_hal_amdgpu_device_buffer_copy_plan_t* plan,
+    const void* source_ptr, void* target_ptr,
+    iree_hal_amdgpu_device_buffer_copy_kernargs_t* out_kernargs) {
+  out_kernargs->source_ptr = source_ptr;
+  out_kernargs->target_ptr = target_ptr;
+  out_kernargs->element_length = plan->element_length;
+  out_kernargs->grid_size_x = plan->grid_size[0];
+  out_kernargs->grid_size_y = plan->grid_size[1];
+  out_kernargs->workgroup_size_x = plan->workgroup_size_x;
 }
 
 bool iree_hal_amdgpu_device_buffer_copy_emplace(
@@ -871,11 +951,15 @@ bool iree_hal_amdgpu_device_buffer_copy_emplace(
     void* IREE_AMDGPU_RESTRICT kernarg_ptr) {
   iree_hal_amdgpu_device_buffer_copy_plan_t plan;
   if (IREE_AMDGPU_UNLIKELY(!iree_hal_amdgpu_device_buffer_copy_plan(
-          context, iree_hal_amdgpu_blit_pointer_alignment(source_ptr),
-          iree_hal_amdgpu_blit_pointer_alignment(target_ptr), length, &plan))) {
+          context,
+          iree_hal_amdgpu_device_buffer_transfer_pointer_alignment(source_ptr),
+          iree_hal_amdgpu_device_buffer_transfer_pointer_alignment(target_ptr),
+          length, &plan))) {
     return false;
   }
   iree_hal_amdgpu_device_buffer_copy_plan_emplace(
       context, &plan, dispatch_packet, source_ptr, target_ptr, kernarg_ptr);
   return true;
 }
+
+#endif  // !IREE_AMDGPU_TARGET_DEVICE

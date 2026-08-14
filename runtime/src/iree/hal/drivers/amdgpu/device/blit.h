@@ -49,25 +49,79 @@ void iree_hal_amdgpu_device_buffer_transfer_context_initialize(
 
 // Kernel arguments for the `iree_hal_amdgpu_device_buffer_fill_*` family.
 typedef struct iree_hal_amdgpu_device_buffer_fill_kernargs_t {
+  // Device-visible target address.
   void* target_ptr;
+  // Number of elements processed by the selected kernel.
   uint64_t element_length;
+  // Pattern represented as expected by the selected kernel.
   uint64_t pattern;
+  // Dispatch grid X dimension in work-items.
+  uint32_t grid_size_x;
+  // Dispatch grid Y dimension in work-items.
+  uint32_t grid_size_y;
+  // Dispatch workgroup X dimension in work-items.
+  uint32_t workgroup_size_x;
 } iree_hal_amdgpu_device_buffer_fill_kernargs_t;
-#define IREE_HAL_AMDGPU_DEVICE_BUFFER_FILL_KERNARG_SIZE \
-  sizeof(iree_hal_amdgpu_device_buffer_fill_kernargs_t)
+// Byte length consumed by the code object. Excludes trailing C struct padding.
+#define IREE_HAL_AMDGPU_DEVICE_BUFFER_FILL_KERNARG_SIZE                \
+  (IREE_AMDGPU_OFFSETOF(iree_hal_amdgpu_device_buffer_fill_kernargs_t, \
+                        workgroup_size_x) +                            \
+   sizeof(uint32_t))
 #define IREE_HAL_AMDGPU_DEVICE_BUFFER_FILL_KERNARG_ALIGNMENT \
   IREE_AMDGPU_ALIGNOF(iree_hal_amdgpu_device_buffer_fill_kernargs_t)
+IREE_AMDGPU_STATIC_ASSERT(
+    IREE_AMDGPU_OFFSETOF(iree_hal_amdgpu_device_buffer_fill_kernargs_t,
+                         target_ptr) == 0 &&
+        IREE_AMDGPU_OFFSETOF(iree_hal_amdgpu_device_buffer_fill_kernargs_t,
+                             element_length) == 8 &&
+        IREE_AMDGPU_OFFSETOF(iree_hal_amdgpu_device_buffer_fill_kernargs_t,
+                             pattern) == 16 &&
+        IREE_AMDGPU_OFFSETOF(iree_hal_amdgpu_device_buffer_fill_kernargs_t,
+                             grid_size_x) == 24 &&
+        IREE_AMDGPU_OFFSETOF(iree_hal_amdgpu_device_buffer_fill_kernargs_t,
+                             grid_size_y) == 28 &&
+        IREE_AMDGPU_OFFSETOF(iree_hal_amdgpu_device_buffer_fill_kernargs_t,
+                             workgroup_size_x) == 32 &&
+        IREE_HAL_AMDGPU_DEVICE_BUFFER_FILL_KERNARG_SIZE == 36,
+    "fill kernargs must match the shared device kernel ABI");
 
 // Kernel arguments for the `iree_hal_amdgpu_device_buffer_copy_*` family.
 typedef struct iree_hal_amdgpu_device_buffer_copy_kernargs_t {
+  // Device-visible source address.
   const void* source_ptr;
+  // Device-visible target address.
   void* target_ptr;
+  // Number of elements processed by the selected kernel.
   uint64_t element_length;
+  // Dispatch grid X dimension in work-items.
+  uint32_t grid_size_x;
+  // Dispatch grid Y dimension in work-items.
+  uint32_t grid_size_y;
+  // Dispatch workgroup X dimension in work-items.
+  uint32_t workgroup_size_x;
 } iree_hal_amdgpu_device_buffer_copy_kernargs_t;
-#define IREE_HAL_AMDGPU_DEVICE_BUFFER_COPY_KERNARG_SIZE \
-  sizeof(iree_hal_amdgpu_device_buffer_copy_kernargs_t)
+// Byte length consumed by the code object. Excludes trailing C struct padding.
+#define IREE_HAL_AMDGPU_DEVICE_BUFFER_COPY_KERNARG_SIZE                \
+  (IREE_AMDGPU_OFFSETOF(iree_hal_amdgpu_device_buffer_copy_kernargs_t, \
+                        workgroup_size_x) +                            \
+   sizeof(uint32_t))
 #define IREE_HAL_AMDGPU_DEVICE_BUFFER_COPY_KERNARG_ALIGNMENT \
   IREE_AMDGPU_ALIGNOF(iree_hal_amdgpu_device_buffer_copy_kernargs_t)
+IREE_AMDGPU_STATIC_ASSERT(
+    IREE_AMDGPU_OFFSETOF(iree_hal_amdgpu_device_buffer_copy_kernargs_t,
+                         source_ptr) == 0 &&
+        IREE_AMDGPU_OFFSETOF(iree_hal_amdgpu_device_buffer_copy_kernargs_t,
+                             target_ptr) == 8 &&
+        IREE_AMDGPU_OFFSETOF(iree_hal_amdgpu_device_buffer_copy_kernargs_t,
+                             element_length) == 16 &&
+        IREE_AMDGPU_OFFSETOF(iree_hal_amdgpu_device_buffer_copy_kernargs_t,
+                             grid_size_x) == 24 &&
+        IREE_AMDGPU_OFFSETOF(iree_hal_amdgpu_device_buffer_copy_kernargs_t,
+                             grid_size_y) == 28 &&
+        IREE_AMDGPU_OFFSETOF(iree_hal_amdgpu_device_buffer_copy_kernargs_t,
+                             workgroup_size_x) == 32 &&
+        IREE_HAL_AMDGPU_DEVICE_BUFFER_COPY_KERNARG_SIZE == 36,
+    "copy kernargs must match the shared device kernel ABI");
 // Alignment used for host-staged update payloads consumed by copy kernels.
 #define IREE_HAL_AMDGPU_DEVICE_BUFFER_COPY_STAGED_SOURCE_ALIGNMENT 16
 // Byte offset to a host-staged update payload following copy kernargs.
@@ -98,6 +152,8 @@ typedef struct iree_hal_amdgpu_device_buffer_fill_plan_t {
   iree_hal_amdgpu_device_buffer_transfer_kernel_t kernel;
   // Dispatch grid dimensions in work-items.
   uint32_t grid_size[3];
+  // Dispatch workgroup X dimension in work-items.
+  uint32_t workgroup_size_x;
   // Number of elements passed to the selected kernel.
   uint64_t element_length;
   // Fill pattern represented as expected by the selected kernel.
@@ -110,6 +166,8 @@ typedef struct iree_hal_amdgpu_device_buffer_copy_plan_t {
   iree_hal_amdgpu_device_buffer_transfer_kernel_t kernel;
   // Dispatch grid dimensions in work-items.
   uint32_t grid_size[3];
+  // Dispatch workgroup X dimension in work-items.
+  uint32_t workgroup_size_x;
   // Number of elements passed to the selected kernel.
   uint64_t element_length;
 } iree_hal_amdgpu_device_buffer_copy_plan_t;
@@ -133,6 +191,11 @@ bool iree_hal_amdgpu_device_buffer_fill_plan(
     uint8_t pattern_length,
     iree_hal_amdgpu_device_buffer_fill_plan_t* out_plan);
 
+// Initializes fill kernargs for |plan| and |target_ptr|.
+void iree_hal_amdgpu_device_buffer_fill_plan_initialize_kernargs(
+    const iree_hal_amdgpu_device_buffer_fill_plan_t* plan, void* target_ptr,
+    iree_hal_amdgpu_device_buffer_fill_kernargs_t* out_kernargs);
+
 // Emplaces a planned builtin fill into already-reserved AQL storage.
 void iree_hal_amdgpu_device_buffer_fill_plan_emplace(
     const iree_hal_amdgpu_device_buffer_transfer_context_t* IREE_AMDGPU_RESTRICT
@@ -150,6 +213,16 @@ bool iree_hal_amdgpu_device_buffer_copy_plan(
     const iree_hal_amdgpu_device_buffer_transfer_context_t* context,
     uint64_t source_alignment, uint64_t target_alignment, uint64_t length,
     iree_hal_amdgpu_device_buffer_copy_plan_t* out_plan);
+
+// Initializes copy kernargs for |plan|, |source_ptr|, and |target_ptr|.
+void iree_hal_amdgpu_device_buffer_copy_plan_initialize_kernargs(
+    const iree_hal_amdgpu_device_buffer_copy_plan_t* plan,
+    const void* source_ptr, void* target_ptr,
+    iree_hal_amdgpu_device_buffer_copy_kernargs_t* out_kernargs);
+
+// Returns the maximum alignment up to 16 bytes guaranteed by |pointer|.
+uint64_t iree_hal_amdgpu_device_buffer_transfer_pointer_alignment(
+    const void* pointer);
 
 // Emplaces a planned builtin copy into already-reserved AQL storage.
 void iree_hal_amdgpu_device_buffer_copy_plan_emplace(

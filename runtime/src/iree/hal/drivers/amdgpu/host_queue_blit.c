@@ -389,7 +389,7 @@ iree_status_t iree_hal_amdgpu_host_queue_submit_fill(
           IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_FILL, length);
   iree_status_t status = iree_hal_amdgpu_host_queue_submit_dispatch_packet(
       queue, resolution, signal_semaphore_list, &dispatch_packet, &kernargs,
-      sizeof(kernargs), operation_resources,
+      IREE_HAL_AMDGPU_DEVICE_BUFFER_FILL_KERNARG_SIZE, operation_resources,
       IREE_ARRAYSIZE(operation_resources), IREE_HSA_FENCE_SCOPE_NONE,
       iree_hal_amdgpu_host_queue_buffer_release_scope(target_buffer),
       &profile_event_info, submission_flags, out_ready, &submission_id);
@@ -571,7 +571,7 @@ iree_status_t iree_hal_amdgpu_host_queue_submit_copy(
           profile_event_type, length);
   iree_status_t status = iree_hal_amdgpu_host_queue_submit_dispatch_packet(
       queue, resolution, signal_semaphore_list, &dispatch_packet, &kernargs,
-      sizeof(kernargs), operation_resources,
+      IREE_HAL_AMDGPU_DEVICE_BUFFER_COPY_KERNARG_SIZE, operation_resources,
       IREE_ARRAYSIZE(operation_resources), IREE_HSA_FENCE_SCOPE_NONE,
       iree_hal_amdgpu_host_queue_buffer_release_scope(target_buffer),
       &profile_event_info, submission_flags, out_ready, &submission_id);
@@ -652,7 +652,8 @@ iree_status_t iree_hal_amdgpu_host_queue_submit_copy_with_action(
       &profile_event_info, out_ready, &submission));
   if (!*out_ready) return iree_ok_status();
 
-  memcpy(submission.kernel.kernargs.blocks->data, &kernargs, sizeof(kernargs));
+  memcpy(submission.kernel.kernargs.blocks->data, &kernargs,
+         IREE_HAL_AMDGPU_DEVICE_BUFFER_COPY_KERNARG_SIZE);
   submission.dispatch_setup =
       iree_hal_amdgpu_host_queue_write_dispatch_packet_body(
           &submission.dispatch_slot->dispatch, &dispatch_packet,
@@ -844,7 +845,8 @@ iree_status_t iree_hal_amdgpu_host_queue_submit_update(
 
   uint8_t* staged_source_bytes =
       (uint8_t*)submission.kernel.kernargs.blocks + source_payload_offset;
-  memcpy(submission.kernel.kernargs.blocks->data, &kernargs, sizeof(kernargs));
+  memcpy(submission.kernel.kernargs.blocks->data, &kernargs,
+         IREE_HAL_AMDGPU_DEVICE_BUFFER_COPY_KERNARG_SIZE);
   ((iree_hal_amdgpu_device_buffer_copy_kernargs_t*)
        submission.kernel.kernargs.blocks->data)
       ->source_ptr = staged_source_bytes;
