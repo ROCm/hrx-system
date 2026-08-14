@@ -15,6 +15,7 @@
 #include "iree/hal/drivers/amdgpu/buffer.h"
 #include "iree/hal/drivers/amdgpu/host_queue_command_buffer_test_util.h"
 #include "iree/hal/drivers/amdgpu/pm4_command_buffer.h"
+#include "iree/hal/drivers/amdgpu/queue_affinity.h"
 #include "iree/hal/drivers/amdgpu/util/pm4_atomic.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
@@ -101,6 +102,24 @@ class HostQueueAtomicTest
     return iree_hal_allocator_import_buffer(test_device->allocator(), params,
                                             &external_buffer, release_callback,
                                             out_buffer);
+  }
+
+  static iree_status_t QueueAffinityForPhysicalQueue(
+      const TestLogicalDevice& test_device,
+      iree_host_size_t physical_device_ordinal,
+      iree_host_size_t physical_queue_ordinal,
+      iree_hal_queue_affinity_t* out_queue_affinity) {
+    iree_hal_amdgpu_logical_device_t* logical_device =
+        test_device.logical_device();
+    const iree_hal_amdgpu_queue_affinity_domain_t domain = {
+        /*.supported_affinity=*/logical_device->queue_affinity_mask,
+        /*.physical_device_count=*/logical_device->physical_device_count,
+        /*.queue_count_per_physical_device=*/
+        logical_device->system->topology.gpu_agent_queue_count,
+    };
+    return iree_hal_amdgpu_queue_affinity_for_physical_queue(
+        domain, physical_device_ordinal, physical_queue_ordinal,
+        out_queue_affinity);
   }
 
   static iree_status_t CreateReusableAtomicProgram(
@@ -236,6 +255,415 @@ TEST_F(HostQueueAtomicTest, AutoCommandBufferModeSelectsPm4) {
       IREE_HAL_COMMAND_CATEGORY_ATOMIC, queue_affinity,
       /*binding_capacity=*/0, command_buffer.out()));
   EXPECT_TRUE(iree_hal_amdgpu_pm4_command_buffer_isa(command_buffer));
+}
+
+TEST_F(HostQueueAtomicTest,
+       DirectQueueSupportsWidthsConditionsAndRmwOperations) {
+  iree_hal_amdgpu_logical_device_options_t options;
+  iree_hal_amdgpu_logical_device_options_initialize(&options);
+  TestLogicalDevice test_device;
+  IREE_ASSERT_OK(
+      test_device.Initialize(&options, &libhsa_, &topology_, host_allocator_));
+
+  iree_hal_queue_affinity_t queue_affinity = 0;
+  IREE_ASSERT_OK(QueueAffinityForPhysicalQueue(
+      test_device, /*physical_device_ordinal=*/0,
+      /*physical_queue_ordinal=*/0, &queue_affinity));
+  alignas(64) std::array<uint64_t, 8> storage = {};
+  ReleaseLatch release_latch(/*release_count=*/1);
+  Ref<iree_hal_buffer_t> buffer;
+  IREE_ASSERT_OK(ImportHostAtomicBuffer(
+      &test_device, queue_affinity, storage.data(), sizeof(storage),
+      IREE_HAL_MEMORY_ACCESS_NONE, /*minimum_alignment=*/64,
+      release_latch.callback(), buffer.out()));
+
+  Ref<iree_hal_semaphore_t> completion;
+  IREE_ASSERT_OK(CreateSemaphore(test_device.base_device(), completion.out()));
+  iree_hal_semaphore_t* completion_semaphore = completion.get();
+  uint64_t completion_value = 0;
+  auto signal_and_wait = [&](auto submit) -> iree_status_t {
+    ++completion_value;
+    const iree_hal_semaphore_list_t signal_list = {
+        /*.count=*/1,
+        /*.semaphores=*/&completion_semaphore,
+        /*.payload_values=*/&completion_value,
+    };
+    IREE_RETURN_IF_ERROR(submit(signal_list));
+    return iree_hal_semaphore_wait(completion, completion_value,
+                                   iree_infinite_timeout(),
+                                   IREE_ASYNC_WAIT_FLAG_NONE);
+  };
+  const iree_hal_atomic_flags_t atomic_flags =
+      IREE_HAL_ATOMIC_FLAG_ACQUIRE | IREE_HAL_ATOMIC_FLAG_RELEASE |
+      IREE_HAL_ATOMIC_FLAG_SYSTEM_SCOPE;
+  auto run_sequence = [&](iree_device_size_t target_offset,
+                          iree_hal_atomic_width_t width) -> iree_status_t {
+    const uint64_t wait_mask =
+        width == IREE_HAL_ATOMIC_WIDTH_32 ? UINT32_MAX : UINT64_MAX;
+    IREE_RETURN_IF_ERROR(
+        signal_and_wait([&](iree_hal_semaphore_list_t signal_list) {
+          return iree_hal_device_queue_atomic_store(
+              test_device.base_device(), queue_affinity,
+              iree_hal_semaphore_list_empty(), signal_list, buffer,
+              target_offset,
+              (iree_hal_atomic_store_params_t){
+                  /*.value=*/10,
+                  /*.flags=*/atomic_flags,
+                  /*.width=*/width,
+              });
+        }));
+    IREE_RETURN_IF_ERROR(
+        signal_and_wait([&](iree_hal_semaphore_list_t signal_list) {
+          return iree_hal_device_queue_atomic_rmw(
+              test_device.base_device(), queue_affinity,
+              iree_hal_semaphore_list_empty(), signal_list, buffer,
+              target_offset,
+              (iree_hal_atomic_rmw_params_t){
+                  /*.operand=*/5,
+                  /*.flags=*/atomic_flags,
+                  /*.width=*/width,
+                  /*.operation=*/IREE_HAL_ATOMIC_RMW_OPERATION_ADD,
+              });
+        }));
+
+    const iree_hal_atomic_wait_condition_t wait_conditions[] = {
+        IREE_HAL_ATOMIC_WAIT_CONDITION_EQUAL,
+        IREE_HAL_ATOMIC_WAIT_CONDITION_NOT_EQUAL,
+        IREE_HAL_ATOMIC_WAIT_CONDITION_UNSIGNED_GREATER_EQUAL,
+    };
+    const uint64_t wait_values[] = {15, 14, 15};
+    for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(wait_conditions); ++i) {
+      IREE_RETURN_IF_ERROR(
+          signal_and_wait([&](iree_hal_semaphore_list_t signal_list) {
+            return iree_hal_device_queue_atomic_wait(
+                test_device.base_device(), queue_affinity,
+                iree_hal_semaphore_list_empty(), signal_list, buffer,
+                target_offset,
+                (iree_hal_atomic_wait_params_t){
+                    /*.value=*/wait_values[i],
+                    /*.mask=*/wait_mask,
+                    /*.flags=*/atomic_flags,
+                    /*.width=*/width,
+                    /*.condition=*/wait_conditions[i],
+                });
+          }));
+    }
+
+    const iree_hal_atomic_rmw_operation_t rmw_operations[] = {
+        IREE_HAL_ATOMIC_RMW_OPERATION_SUBTRACT,
+        IREE_HAL_ATOMIC_RMW_OPERATION_AND,
+        IREE_HAL_ATOMIC_RMW_OPERATION_OR,
+        IREE_HAL_ATOMIC_RMW_OPERATION_XOR,
+    };
+    const uint64_t rmw_operands[] = {2, 0xFu, 0x10u, 0x1u};
+    for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(rmw_operations); ++i) {
+      IREE_RETURN_IF_ERROR(
+          signal_and_wait([&](iree_hal_semaphore_list_t signal_list) {
+            return iree_hal_device_queue_atomic_rmw(
+                test_device.base_device(), queue_affinity,
+                iree_hal_semaphore_list_empty(), signal_list, buffer,
+                target_offset,
+                (iree_hal_atomic_rmw_params_t){
+                    /*.operand=*/rmw_operands[i],
+                    /*.flags=*/atomic_flags,
+                    /*.width=*/width,
+                    /*.operation=*/rmw_operations[i],
+                });
+          }));
+    }
+    return iree_ok_status();
+  };
+
+  IREE_ASSERT_OK(run_sequence(/*target_offset=*/0, IREE_HAL_ATOMIC_WIDTH_32));
+  IREE_ASSERT_OK(run_sequence(/*target_offset=*/sizeof(uint64_t),
+                              IREE_HAL_ATOMIC_WIDTH_64));
+  EXPECT_EQ(static_cast<uint32_t>(storage[0]), 28u);
+  EXPECT_EQ(storage[1], 28u);
+
+  buffer.reset();
+  release_latch.Wait();
+}
+
+TEST_F(HostQueueAtomicTest, DirectWaitBeforeStoreOnIndependentQueue) {
+  iree_hal_amdgpu_logical_device_options_t options;
+  iree_hal_amdgpu_logical_device_options_initialize(&options);
+  TestLogicalDevice test_device;
+  IREE_ASSERT_OK(
+      test_device.Initialize(&options, &libhsa_, &topology_, host_allocator_));
+  if (test_device.logical_device()->system->topology.gpu_agent_queue_count <
+      2) {
+    GTEST_SKIP() << "test requires two physical queues on one GPU";
+  }
+
+  iree_hal_queue_affinity_t wait_queue_affinity = 0;
+  IREE_ASSERT_OK(QueueAffinityForPhysicalQueue(
+      test_device, /*physical_device_ordinal=*/0,
+      /*physical_queue_ordinal=*/0, &wait_queue_affinity));
+  iree_hal_queue_affinity_t store_queue_affinity = 0;
+  IREE_ASSERT_OK(QueueAffinityForPhysicalQueue(
+      test_device, /*physical_device_ordinal=*/0,
+      /*physical_queue_ordinal=*/1, &store_queue_affinity));
+  ASSERT_NE(wait_queue_affinity, store_queue_affinity);
+
+  alignas(64) std::array<uint32_t, 16> storage = {};
+  ReleaseLatch release_latch(/*release_count=*/1);
+  Ref<iree_hal_buffer_t> buffer;
+  IREE_ASSERT_OK(ImportHostAtomicBuffer(
+      &test_device, wait_queue_affinity | store_queue_affinity, storage.data(),
+      sizeof(storage), IREE_HAL_MEMORY_ACCESS_NONE,
+      /*minimum_alignment=*/64, release_latch.callback(), buffer.out()));
+
+  Ref<iree_hal_semaphore_t> wait_completion;
+  IREE_ASSERT_OK(
+      CreateSemaphore(test_device.base_device(), wait_completion.out()));
+  iree_hal_semaphore_t* wait_completion_semaphore = wait_completion.get();
+  uint64_t wait_completion_value = 1;
+  const iree_hal_semaphore_list_t wait_signal_list = {
+      /*.count=*/1,
+      /*.semaphores=*/&wait_completion_semaphore,
+      /*.payload_values=*/&wait_completion_value,
+  };
+  IREE_ASSERT_OK(iree_hal_device_queue_atomic_wait(
+      test_device.base_device(), wait_queue_affinity,
+      iree_hal_semaphore_list_empty(), wait_signal_list, buffer,
+      /*target_offset=*/0,
+      (iree_hal_atomic_wait_params_t){
+          /*.value=*/1,
+          /*.mask=*/UINT32_MAX,
+          /*.flags=*/IREE_HAL_ATOMIC_FLAG_ACQUIRE |
+              IREE_HAL_ATOMIC_FLAG_SYSTEM_SCOPE,
+          /*.width=*/IREE_HAL_ATOMIC_WIDTH_32,
+          /*.condition=*/IREE_HAL_ATOMIC_WAIT_CONDITION_EQUAL,
+      }));
+
+  Ref<iree_hal_semaphore_t> store_completion;
+  IREE_ASSERT_OK(
+      CreateSemaphore(test_device.base_device(), store_completion.out()));
+  iree_hal_semaphore_t* store_completion_semaphore = store_completion.get();
+  uint64_t store_completion_value = 1;
+  const iree_hal_semaphore_list_t store_signal_list = {
+      /*.count=*/1,
+      /*.semaphores=*/&store_completion_semaphore,
+      /*.payload_values=*/&store_completion_value,
+  };
+  IREE_ASSERT_OK(iree_hal_device_queue_atomic_store(
+      test_device.base_device(), store_queue_affinity,
+      iree_hal_semaphore_list_empty(), store_signal_list, buffer,
+      /*target_offset=*/0,
+      (iree_hal_atomic_store_params_t){
+          /*.value=*/1,
+          /*.flags=*/IREE_HAL_ATOMIC_FLAG_RELEASE |
+              IREE_HAL_ATOMIC_FLAG_SYSTEM_SCOPE,
+          /*.width=*/IREE_HAL_ATOMIC_WIDTH_32,
+      }));
+  buffer.reset();
+
+  IREE_ASSERT_OK(iree_hal_semaphore_wait(wait_completion, wait_completion_value,
+                                         iree_infinite_timeout(),
+                                         IREE_ASYNC_WAIT_FLAG_NONE));
+  IREE_ASSERT_OK(iree_hal_semaphore_wait(
+      store_completion, store_completion_value, iree_infinite_timeout(),
+      IREE_ASYNC_WAIT_FLAG_NONE));
+  release_latch.Wait();
+  EXPECT_EQ(storage[0], 1u);
+}
+
+TEST_F(HostQueueAtomicTest, DeferredDirectOperationsRetainTarget) {
+  iree_hal_amdgpu_logical_device_options_t options;
+  iree_hal_amdgpu_logical_device_options_initialize(&options);
+  TestLogicalDevice test_device;
+  IREE_ASSERT_OK(
+      test_device.Initialize(&options, &libhsa_, &topology_, host_allocator_));
+
+  iree_hal_queue_affinity_t queue_affinity = 0;
+  IREE_ASSERT_OK(QueueAffinityForPhysicalQueue(
+      test_device, /*physical_device_ordinal=*/0,
+      /*physical_queue_ordinal=*/0, &queue_affinity));
+  alignas(64) std::array<uint32_t, 16> storage = {};
+  storage[0] = 1;
+  storage[2] = 2;
+  ReleaseLatch release_latch(/*release_count=*/1);
+  Ref<iree_hal_buffer_t> buffer;
+  IREE_ASSERT_OK(ImportHostAtomicBuffer(
+      &test_device, queue_affinity, storage.data(), sizeof(storage),
+      IREE_HAL_MEMORY_ACCESS_NONE, /*minimum_alignment=*/64,
+      release_latch.callback(), buffer.out()));
+
+  Ref<iree_hal_semaphore_t> gate;
+  IREE_ASSERT_OK(CreateSemaphore(test_device.base_device(), gate.out()));
+  iree_hal_semaphore_t* gate_semaphore = gate.get();
+  uint64_t gate_value = 1;
+  const iree_hal_semaphore_list_t gate_wait_list = {
+      /*.count=*/1,
+      /*.semaphores=*/&gate_semaphore,
+      /*.payload_values=*/&gate_value,
+  };
+  std::array<Ref<iree_hal_semaphore_t>, 3> completions;
+  std::array<iree_hal_semaphore_t*, 3> completion_semaphores = {};
+  std::array<uint64_t, 3> completion_values = {1, 1, 1};
+  for (iree_host_size_t i = 0; i < completions.size(); ++i) {
+    IREE_ASSERT_OK(
+        CreateSemaphore(test_device.base_device(), completions[i].out()));
+    completion_semaphores[i] = completions[i].get();
+  }
+  const iree_hal_atomic_flags_t atomic_flags =
+      IREE_HAL_ATOMIC_FLAG_ACQUIRE | IREE_HAL_ATOMIC_FLAG_RELEASE |
+      IREE_HAL_ATOMIC_FLAG_SYSTEM_SCOPE;
+
+  const iree_hal_semaphore_list_t wait_signal_list = {
+      /*.count=*/1,
+      /*.semaphores=*/&completion_semaphores[0],
+      /*.payload_values=*/&completion_values[0],
+  };
+  IREE_ASSERT_OK(iree_hal_device_queue_atomic_wait(
+      test_device.base_device(), queue_affinity, gate_wait_list,
+      wait_signal_list, buffer, /*target_offset=*/0,
+      (iree_hal_atomic_wait_params_t){
+          /*.value=*/1,
+          /*.mask=*/UINT32_MAX,
+          /*.flags=*/atomic_flags,
+          /*.width=*/IREE_HAL_ATOMIC_WIDTH_32,
+          /*.condition=*/IREE_HAL_ATOMIC_WAIT_CONDITION_EQUAL,
+      }));
+  const iree_hal_semaphore_list_t store_signal_list = {
+      /*.count=*/1,
+      /*.semaphores=*/&completion_semaphores[1],
+      /*.payload_values=*/&completion_values[1],
+  };
+  IREE_ASSERT_OK(iree_hal_device_queue_atomic_store(
+      test_device.base_device(), queue_affinity, gate_wait_list,
+      store_signal_list, buffer, /*target_offset=*/sizeof(uint32_t),
+      (iree_hal_atomic_store_params_t){
+          /*.value=*/7,
+          /*.flags=*/atomic_flags,
+          /*.width=*/IREE_HAL_ATOMIC_WIDTH_32,
+      }));
+  const iree_hal_semaphore_list_t rmw_signal_list = {
+      /*.count=*/1,
+      /*.semaphores=*/&completion_semaphores[2],
+      /*.payload_values=*/&completion_values[2],
+  };
+  IREE_ASSERT_OK(iree_hal_device_queue_atomic_rmw(
+      test_device.base_device(), queue_affinity, gate_wait_list,
+      rmw_signal_list, buffer, /*target_offset=*/2 * sizeof(uint32_t),
+      (iree_hal_atomic_rmw_params_t){
+          /*.operand=*/3,
+          /*.flags=*/atomic_flags,
+          /*.width=*/IREE_HAL_ATOMIC_WIDTH_32,
+          /*.operation=*/IREE_HAL_ATOMIC_RMW_OPERATION_ADD,
+      }));
+
+  buffer.reset();
+  EXPECT_EQ(release_latch.remaining(), 1);
+  IREE_ASSERT_OK(
+      iree_hal_semaphore_signal(gate, gate_value, /*frontier=*/nullptr));
+  for (iree_host_size_t i = 0; i < completions.size(); ++i) {
+    IREE_ASSERT_OK(iree_hal_semaphore_wait(completions[i], completion_values[i],
+                                           iree_infinite_timeout(),
+                                           IREE_ASYNC_WAIT_FLAG_NONE));
+  }
+  release_latch.Wait();
+  EXPECT_EQ(storage[0], 1u);
+  EXPECT_EQ(storage[1], 7u);
+  EXPECT_EQ(storage[2], 5u);
+}
+
+TEST_F(HostQueueAtomicTest, DeferredDirectMisalignmentFailsAndQueueRecovers) {
+  iree_hal_amdgpu_logical_device_options_t options;
+  iree_hal_amdgpu_logical_device_options_initialize(&options);
+  TestLogicalDevice test_device;
+  IREE_ASSERT_OK(
+      test_device.Initialize(&options, &libhsa_, &topology_, host_allocator_));
+
+  iree_hal_queue_affinity_t queue_affinity = 0;
+  IREE_ASSERT_OK(QueueAffinityForPhysicalQueue(
+      test_device, /*physical_device_ordinal=*/0,
+      /*physical_queue_ordinal=*/0, &queue_affinity));
+  alignas(64) std::array<uint8_t, 65> misaligned_storage = {};
+  ReleaseLatch misaligned_release_latch(/*release_count=*/1);
+  Ref<iree_hal_buffer_t> misaligned_buffer;
+  IREE_ASSERT_OK(ImportHostAtomicBuffer(
+      &test_device, queue_affinity, misaligned_storage.data() + 1,
+      misaligned_storage.size() - 1, IREE_HAL_MEMORY_ACCESS_UNALIGNED,
+      /*minimum_alignment=*/1, misaligned_release_latch.callback(),
+      misaligned_buffer.out()));
+  ASSERT_NE(reinterpret_cast<uintptr_t>(misaligned_storage.data() + 1) %
+                alignof(uint32_t),
+            0u);
+
+  Ref<iree_hal_semaphore_t> gate;
+  IREE_ASSERT_OK(CreateSemaphore(test_device.base_device(), gate.out()));
+  iree_hal_semaphore_t* gate_semaphore = gate.get();
+  uint64_t gate_value = 1;
+  const iree_hal_semaphore_list_t wait_list = {
+      /*.count=*/1,
+      /*.semaphores=*/&gate_semaphore,
+      /*.payload_values=*/&gate_value,
+  };
+  Ref<iree_hal_semaphore_t> failed_completion;
+  IREE_ASSERT_OK(
+      CreateSemaphore(test_device.base_device(), failed_completion.out()));
+  iree_hal_semaphore_t* failed_completion_semaphore = failed_completion.get();
+  uint64_t failed_completion_value = 1;
+  const iree_hal_semaphore_list_t failed_signal_list = {
+      /*.count=*/1,
+      /*.semaphores=*/&failed_completion_semaphore,
+      /*.payload_values=*/&failed_completion_value,
+  };
+  IREE_ASSERT_OK(iree_hal_device_queue_atomic_store(
+      test_device.base_device(), queue_affinity, wait_list, failed_signal_list,
+      misaligned_buffer, /*target_offset=*/0,
+      (iree_hal_atomic_store_params_t){
+          /*.value=*/1,
+          /*.flags=*/IREE_HAL_ATOMIC_FLAG_RELEASE |
+              IREE_HAL_ATOMIC_FLAG_SYSTEM_SCOPE,
+          /*.width=*/IREE_HAL_ATOMIC_WIDTH_32,
+      }));
+  misaligned_buffer.reset();
+  EXPECT_EQ(misaligned_release_latch.remaining(), 1);
+  IREE_ASSERT_OK(
+      iree_hal_semaphore_signal(gate, gate_value, /*frontier=*/nullptr));
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_FAILED_PRECONDITION,
+      iree_hal_semaphore_wait(failed_completion, failed_completion_value,
+                              iree_infinite_timeout(),
+                              IREE_ASYNC_WAIT_FLAG_NONE));
+  misaligned_release_latch.Wait();
+
+  alignas(64) std::array<uint32_t, 16> valid_storage = {};
+  ReleaseLatch valid_release_latch(/*release_count=*/1);
+  Ref<iree_hal_buffer_t> valid_buffer;
+  IREE_ASSERT_OK(ImportHostAtomicBuffer(
+      &test_device, queue_affinity, valid_storage.data(), sizeof(valid_storage),
+      IREE_HAL_MEMORY_ACCESS_NONE, /*minimum_alignment=*/64,
+      valid_release_latch.callback(), valid_buffer.out()));
+  Ref<iree_hal_semaphore_t> valid_completion;
+  IREE_ASSERT_OK(
+      CreateSemaphore(test_device.base_device(), valid_completion.out()));
+  iree_hal_semaphore_t* valid_completion_semaphore = valid_completion.get();
+  uint64_t valid_completion_value = 1;
+  const iree_hal_semaphore_list_t valid_signal_list = {
+      /*.count=*/1,
+      /*.semaphores=*/&valid_completion_semaphore,
+      /*.payload_values=*/&valid_completion_value,
+  };
+  IREE_ASSERT_OK(iree_hal_device_queue_atomic_store(
+      test_device.base_device(), queue_affinity,
+      iree_hal_semaphore_list_empty(), valid_signal_list, valid_buffer,
+      /*target_offset=*/0,
+      (iree_hal_atomic_store_params_t){
+          /*.value=*/77,
+          /*.flags=*/IREE_HAL_ATOMIC_FLAG_RELEASE |
+              IREE_HAL_ATOMIC_FLAG_SYSTEM_SCOPE,
+          /*.width=*/IREE_HAL_ATOMIC_WIDTH_32,
+      }));
+  IREE_ASSERT_OK(iree_hal_semaphore_wait(
+      valid_completion, valid_completion_value, iree_infinite_timeout(),
+      IREE_ASYNC_WAIT_FLAG_NONE));
+  EXPECT_EQ(valid_storage[0], 77u);
+
+  valid_buffer.reset();
+  valid_release_latch.Wait();
 }
 
 TEST_P(HostQueueAtomicTest, ReusableProgramRetainsAndRebindsResources) {

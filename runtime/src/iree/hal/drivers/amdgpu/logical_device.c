@@ -3177,8 +3177,16 @@ static iree_status_t iree_hal_amdgpu_logical_device_queue_atomic_wait(
     const iree_hal_semaphore_list_t signal_semaphore_list,
     iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
     iree_hal_atomic_wait_params_t params) {
-  return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
-                          "AMDGPU devices do not yet support atomic waits");
+  iree_hal_amdgpu_logical_device_t* logical_device =
+      iree_hal_amdgpu_logical_device_cast(base_device);
+  IREE_RETURN_IF_ERROR(
+      iree_hal_amdgpu_logical_device_check_failure(logical_device));
+  iree_hal_amdgpu_virtual_queue_t* queue = NULL;
+  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_logical_device_select_host_queue(
+      logical_device, queue_affinity, &queue));
+  return queue->vtable->atomic_wait(queue, wait_semaphore_list,
+                                    signal_semaphore_list, target_buffer,
+                                    target_offset, params);
 }
 
 static iree_status_t iree_hal_amdgpu_logical_device_queue_atomic_store(
@@ -3187,8 +3195,16 @@ static iree_status_t iree_hal_amdgpu_logical_device_queue_atomic_store(
     const iree_hal_semaphore_list_t signal_semaphore_list,
     iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
     iree_hal_atomic_store_params_t params) {
-  return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
-                          "AMDGPU devices do not yet support atomic stores");
+  iree_hal_amdgpu_logical_device_t* logical_device =
+      iree_hal_amdgpu_logical_device_cast(base_device);
+  IREE_RETURN_IF_ERROR(
+      iree_hal_amdgpu_logical_device_check_failure(logical_device));
+  iree_hal_amdgpu_virtual_queue_t* queue = NULL;
+  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_logical_device_select_host_queue(
+      logical_device, queue_affinity, &queue));
+  return queue->vtable->atomic_store(queue, wait_semaphore_list,
+                                     signal_semaphore_list, target_buffer,
+                                     target_offset, params);
 }
 
 static iree_status_t iree_hal_amdgpu_logical_device_queue_atomic_rmw(
@@ -3197,9 +3213,16 @@ static iree_status_t iree_hal_amdgpu_logical_device_queue_atomic_rmw(
     const iree_hal_semaphore_list_t signal_semaphore_list,
     iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
     iree_hal_atomic_rmw_params_t params) {
-  return iree_make_status(
-      IREE_STATUS_UNIMPLEMENTED,
-      "AMDGPU devices do not yet support atomic read-modify-write");
+  iree_hal_amdgpu_logical_device_t* logical_device =
+      iree_hal_amdgpu_logical_device_cast(base_device);
+  IREE_RETURN_IF_ERROR(
+      iree_hal_amdgpu_logical_device_check_failure(logical_device));
+  iree_hal_amdgpu_virtual_queue_t* queue = NULL;
+  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_logical_device_select_host_queue(
+      logical_device, queue_affinity, &queue));
+  return queue->vtable->atomic_rmw(queue, wait_semaphore_list,
+                                   signal_semaphore_list, target_buffer,
+                                   target_offset, params);
 }
 
 static iree_status_t iree_hal_amdgpu_logical_device_queue_timestamp(

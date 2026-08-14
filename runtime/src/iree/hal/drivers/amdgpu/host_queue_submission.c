@@ -242,18 +242,20 @@ iree_hal_amdgpu_host_queue_final_barrier_packet_control(
 
 // Returns the packet control for a final PM4-IB payload packet. PM4 IB payloads
 // are host-populated memory consumed by the CP, so they carry the same minimum
-// AGENT acquire as dispatch packets. |minimum_release_scope| adds the
-// visibility the payload's own writes require, which the signal list cannot
-// express.
+// AGENT acquire as dispatch packets. The minimum scopes add operation-local
+// visibility that dependency and signal lists cannot express.
 static iree_hal_amdgpu_aql_packet_control_t
 iree_hal_amdgpu_host_queue_final_pm4_ib_packet_control(
     iree_hal_amdgpu_host_queue_t* queue,
     const iree_hal_amdgpu_wait_resolution_t* resolution,
     const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hsa_fence_scope_t minimum_acquire_scope,
     iree_hsa_fence_scope_t minimum_release_scope) {
   return iree_hal_amdgpu_aql_packet_control_barrier(
       iree_hal_amdgpu_host_queue_max_fence_scope(
-          IREE_HSA_FENCE_SCOPE_AGENT, resolution->inline_acquire_scope),
+          iree_hal_amdgpu_host_queue_max_fence_scope(
+              IREE_HSA_FENCE_SCOPE_AGENT, resolution->inline_acquire_scope),
+          minimum_acquire_scope),
       iree_hal_amdgpu_host_queue_max_fence_scope(
           iree_hal_amdgpu_host_queue_signal_list_release_scope(
               queue, signal_semaphore_list),
@@ -291,14 +293,17 @@ static void iree_hal_amdgpu_host_queue_publish_submission_profile_host_writes(
 
 // Returns the packet control for a non-final PM4-IB packet in a larger
 // submission. The final packet owns user-visible release and queue completion,
-// so this carries only |minimum_release_scope|.
+// while this packet carries only operation-local visibility requirements.
 static iree_hal_amdgpu_aql_packet_control_t
 iree_hal_amdgpu_host_queue_payload_pm4_ib_packet_control(
     const iree_hal_amdgpu_wait_resolution_t* resolution,
+    iree_hsa_fence_scope_t minimum_acquire_scope,
     iree_hsa_fence_scope_t minimum_release_scope) {
   return iree_hal_amdgpu_aql_packet_control_barrier(
       iree_hal_amdgpu_host_queue_max_fence_scope(
-          IREE_HSA_FENCE_SCOPE_AGENT, resolution->inline_acquire_scope),
+          iree_hal_amdgpu_host_queue_max_fence_scope(
+              IREE_HSA_FENCE_SCOPE_AGENT, resolution->inline_acquire_scope),
+          minimum_acquire_scope),
       minimum_release_scope);
 }
 
@@ -323,7 +328,7 @@ void iree_hal_amdgpu_host_queue_commit_queue_device_start_packet(
       &packet->pm4_ib, pm4_ib_slot,
       iree_hal_amdgpu_pm4_ib_builder_dword_count(&builder),
       iree_hal_amdgpu_host_queue_payload_pm4_ib_packet_control(
-          resolution, IREE_HSA_FENCE_SCOPE_NONE),
+          resolution, IREE_HSA_FENCE_SCOPE_NONE, IREE_HSA_FENCE_SCOPE_NONE),
       iree_hsa_signal_null(), &setup);
   iree_hal_amdgpu_aql_ring_commit(packet, header, setup);
 }
@@ -1191,9 +1196,11 @@ iree_status_t iree_hal_amdgpu_host_queue_finish_pm4_ib_submission(
       &submission->pm4_ib_packet_slot->pm4_ib, ib_dwords, ib_dword_count,
       queue_device_event
           ? iree_hal_amdgpu_host_queue_payload_pm4_ib_packet_control(
-                resolution, submission->minimum_release_scope)
+                resolution, submission->minimum_acquire_scope,
+                submission->minimum_release_scope)
           : iree_hal_amdgpu_host_queue_final_pm4_ib_packet_control(
                 queue, resolution, signal_semaphore_list,
+                submission->minimum_acquire_scope,
                 submission->minimum_release_scope),
       queue_device_event ? iree_hsa_signal_null()
                          : iree_hal_amdgpu_notification_ring_epoch_signal(
@@ -1484,10 +1491,11 @@ iree_status_t iree_hal_amdgpu_host_queue_submit_pm4_ib_with_binding_table_fixup(
             &pm4_slot->pm4_ib, ib_dwords, ib_dword_count,
             queue_device_event
                 ? iree_hal_amdgpu_host_queue_payload_pm4_ib_packet_control(
-                      resolution, IREE_HSA_FENCE_SCOPE_NONE)
+                      resolution, IREE_HSA_FENCE_SCOPE_NONE,
+                      IREE_HSA_FENCE_SCOPE_NONE)
                 : iree_hal_amdgpu_host_queue_final_pm4_ib_packet_control(
                       queue, resolution, signal_semaphore_list,
-                      IREE_HSA_FENCE_SCOPE_NONE),
+                      IREE_HSA_FENCE_SCOPE_NONE, IREE_HSA_FENCE_SCOPE_NONE),
             queue_device_event ? iree_hsa_signal_null()
                                : iree_hal_amdgpu_notification_ring_epoch_signal(
                                      &queue->notification_ring),

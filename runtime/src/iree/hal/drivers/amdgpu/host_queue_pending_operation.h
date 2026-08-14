@@ -8,6 +8,7 @@
 #define IREE_HAL_DRIVERS_AMDGPU_HOST_QUEUE_PENDING_OPERATION_H_
 
 #include "iree/base/threading/notification.h"
+#include "iree/hal/drivers/amdgpu/host_queue_atomic.h"
 #include "iree/hal/drivers/amdgpu/host_queue_pending.h"
 #include "iree/hal/utils/resource_set.h"
 
@@ -27,6 +28,7 @@ typedef enum iree_hal_amdgpu_pending_op_type_e {
   IREE_HAL_AMDGPU_PENDING_OP_UPDATE,
   IREE_HAL_AMDGPU_PENDING_OP_DISPATCH,
   IREE_HAL_AMDGPU_PENDING_OP_EXECUTE,
+  IREE_HAL_AMDGPU_PENDING_OP_ATOMIC,
   IREE_HAL_AMDGPU_PENDING_OP_ALLOCA,
   IREE_HAL_AMDGPU_PENDING_OP_DEALLOCA,
   IREE_HAL_AMDGPU_PENDING_OP_HOST_CALL,
@@ -174,6 +176,9 @@ struct iree_hal_amdgpu_pending_op_t {
       // HAL execute flags captured from queue_execute.
       iree_hal_execute_flags_t flags;
     } execute;
+
+    // Captured queue_atomic_wait/store/rmw payload.
+    iree_hal_amdgpu_host_queue_atomic_operation_t atomic;
 
     // Captured queue_alloca payload.
     struct {
