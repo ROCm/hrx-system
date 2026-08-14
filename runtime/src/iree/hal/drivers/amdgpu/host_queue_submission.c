@@ -16,6 +16,7 @@
 #include "iree/hal/drivers/amdgpu/profile_traces.h"
 #include "iree/hal/drivers/amdgpu/semaphore.h"
 #include "iree/hal/drivers/amdgpu/util/aql_emitter.h"
+#include "iree/hal/drivers/amdgpu/util/pm4_barrier.h"
 #include "iree/hal/drivers/amdgpu/util/pm4_emitter.h"
 
 // Returns true if |semaphore| has the strict private stream contract that lets
@@ -395,6 +396,35 @@ uint16_t iree_hal_amdgpu_host_queue_write_pm4_ib_packet_body(
   return iree_hal_amdgpu_aql_emit_pm4_ib_dwords(pm4_ib_packet, ib_dwords,
                                                 ib_dword_count, packet_control,
                                                 completion_signal, out_setup);
+}
+
+// Writes a queue-private IB that makes shader binding fixups visible before
+// the command processor fetches the following resident IB. The barrier cannot
+// live in the resident IB itself: later dwords may be prefetched before its
+// first packet executes.
+static uint16_t
+iree_hal_amdgpu_host_queue_write_pm4_binding_fixup_barrier_packet_body(
+    iree_hal_amdgpu_host_queue_t* queue,
+    const iree_hal_amdgpu_wait_resolution_t* resolution, uint64_t packet_id,
+    iree_hsa_amd_aql_pm4_ib_packet_t* pm4_ib_packet, uint16_t* out_setup) {
+  iree_hal_amdgpu_pm4_ib_slot_t* pm4_ib_slot =
+      &queue->pm4_ib_slots[packet_id & queue->aql_ring.mask];
+  memset(pm4_ib_slot, 0, sizeof(*pm4_ib_slot));
+  uint32_t barrier_dword_count = 0;
+  const bool did_emit = iree_hal_amdgpu_pm4_barrier_emit(
+      queue->vendor_packet_capabilities,
+      IREE_HAL_AMDGPU_PM4_BARRIER_FLAG_FIXUP_TO_IB, IREE_HSA_FENCE_SCOPE_NONE,
+      IREE_HSA_FENCE_SCOPE_NONE, IREE_HAL_AMDGPU_PM4_IB_SLOT_DWORD_CAPACITY,
+      pm4_ib_slot->dwords, &barrier_dword_count);
+  IREE_ASSERT(did_emit,
+              "dynamic PM4 command buffers require a fixup visibility "
+              "barrier");
+  (void)did_emit;
+  return iree_hal_amdgpu_host_queue_write_pm4_ib_packet_body(
+      pm4_ib_packet, pm4_ib_slot->dwords, barrier_dword_count,
+      iree_hal_amdgpu_host_queue_payload_pm4_ib_packet_control(
+          resolution, IREE_HSA_FENCE_SCOPE_NONE, IREE_HSA_FENCE_SCOPE_NONE),
+      iree_hsa_signal_null(), out_setup);
 }
 
 iree_status_t iree_hal_amdgpu_host_queue_try_begin_kernel_submission(
@@ -1425,7 +1455,7 @@ iree_status_t iree_hal_amdgpu_host_queue_submit_pm4_ib_with_binding_table_fixup(
   iree_hal_amdgpu_host_queue_kernel_submission_t submission;
   status = iree_hal_amdgpu_host_queue_try_begin_kernel_submission(
       queue, resolution, signal_semaphore_list, operation_resource_count,
-      /*payload_packet_count=*/2 + publication_packet_count +
+      /*payload_packet_count=*/3 + publication_packet_count +
           profile_queue_device_packet_count,
       /*kernarg_block_count=*/1, out_ready, &submission);
   if (!iree_status_is_ok(status) || !*out_ready) {
@@ -1482,7 +1512,17 @@ iree_status_t iree_hal_amdgpu_host_queue_submit_pm4_ib_with_binding_table_fixup(
         iree_hal_amdgpu_host_queue_payload_dispatch_packet_control(
             resolution, fixup_acquire_scope, IREE_HSA_FENCE_SCOPE_AGENT));
 
-    const uint64_t pm4_packet_id = fixup_packet_id + 1u;
+    const uint64_t fixup_barrier_packet_id = fixup_packet_id + 1u;
+    iree_hal_amdgpu_aql_packet_t* fixup_barrier_slot =
+        iree_hal_amdgpu_aql_ring_packet(&queue->aql_ring,
+                                        fixup_barrier_packet_id);
+    uint16_t fixup_barrier_setup = 0;
+    const uint16_t fixup_barrier_header =
+        iree_hal_amdgpu_host_queue_write_pm4_binding_fixup_barrier_packet_body(
+            queue, resolution, fixup_barrier_packet_id,
+            &fixup_barrier_slot->pm4_ib, &fixup_barrier_setup);
+
+    const uint64_t pm4_packet_id = fixup_barrier_packet_id + 1u;
     iree_hal_amdgpu_aql_packet_t* pm4_slot =
         iree_hal_amdgpu_aql_ring_packet(&queue->aql_ring, pm4_packet_id);
     uint16_t pm4_setup = 0;
@@ -1544,6 +1584,8 @@ iree_status_t iree_hal_amdgpu_host_queue_submit_pm4_ib_with_binding_table_fixup(
                                                        publication_signal);
     }
     iree_hal_amdgpu_aql_ring_commit(fixup_slot, fixup_header, fixup_setup);
+    iree_hal_amdgpu_aql_ring_commit(fixup_barrier_slot, fixup_barrier_header,
+                                    fixup_barrier_setup);
     iree_hal_amdgpu_aql_ring_commit(pm4_slot, pm4_header, pm4_setup);
     if (queue_device_event) {
       iree_hal_amdgpu_host_queue_commit_queue_device_end_packet(

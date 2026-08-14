@@ -287,24 +287,6 @@ static iree_status_t iree_hal_amdgpu_pm4_transfer_record_measure(
         record->barrier_acquire_scope, record->barrier_release_scope,
         &out_measurement->profile_program_dword_count));
   }
-  if (iree_any_bit_set(
-          record->flags,
-          IREE_HAL_AMDGPU_PM4_TRANSFER_RECORD_FLAG_FIXUP_BARRIER)) {
-    IREE_RETURN_IF_ERROR(iree_hal_amdgpu_pm4_transfer_measure_barrier(
-        vendor_packet_capabilities,
-        IREE_HAL_AMDGPU_PM4_BARRIER_FLAG_FIXUP_TO_IB, IREE_HSA_FENCE_SCOPE_NONE,
-        IREE_HSA_FENCE_SCOPE_NONE, &out_measurement->program_dword_count));
-  }
-  if (iree_any_bit_set(
-          record->flags,
-          IREE_HAL_AMDGPU_PM4_TRANSFER_RECORD_FLAG_PROFILE_FIXUP_BARRIER)) {
-    IREE_RETURN_IF_ERROR(iree_hal_amdgpu_pm4_transfer_measure_barrier(
-        vendor_packet_capabilities,
-        IREE_HAL_AMDGPU_PM4_BARRIER_FLAG_FIXUP_TO_IB, IREE_HSA_FENCE_SCOPE_NONE,
-        IREE_HSA_FENCE_SCOPE_NONE,
-        &out_measurement->profile_program_dword_count));
-  }
-
   for (uint32_t i = 0; i < layout.binding_count; ++i) {
     const iree_hal_amdgpu_pm4_transfer_binding_layout_t* binding =
         &layout.bindings[i];
@@ -347,25 +329,11 @@ static iree_status_t iree_hal_amdgpu_pm4_transfer_recorder_append_storage(
 
 static iree_hal_amdgpu_pm4_transfer_record_flags_t
 iree_hal_amdgpu_pm4_transfer_recorder_record_flags(
-    const iree_hal_amdgpu_pm4_transfer_recorder_t* recorder,
-    const iree_hal_amdgpu_pm4_buffer_ref_record_t* source,
-    const iree_hal_amdgpu_pm4_buffer_ref_record_t* target) {
-  const iree_hal_amdgpu_pm4_command_recording_state_t* recording_state =
-      recorder->recording_state;
+    const iree_hal_amdgpu_pm4_command_recording_state_t* recording_state) {
   iree_hal_amdgpu_pm4_transfer_record_flags_t flags =
       IREE_HAL_AMDGPU_PM4_TRANSFER_RECORD_FLAG_NONE;
   if (recording_state->barrier_state.pending) {
     flags |= IREE_HAL_AMDGPU_PM4_TRANSFER_RECORD_FLAG_EXECUTION_BARRIER;
-  }
-  const bool has_dynamic_binding =
-      (source && source->binding_slot != UINT32_MAX) ||
-      target->binding_slot != UINT32_MAX;
-  if (has_dynamic_binding && !recording_state->has_planned_fixup_barrier) {
-    flags |= IREE_HAL_AMDGPU_PM4_TRANSFER_RECORD_FLAG_FIXUP_BARRIER;
-  }
-  if (has_dynamic_binding && recorder->materializes_profile &&
-      !recording_state->profile.has_planned_fixup_barrier) {
-    flags |= IREE_HAL_AMDGPU_PM4_TRANSFER_RECORD_FLAG_PROFILE_FIXUP_BARRIER;
   }
   return flags;
 }
@@ -399,11 +367,6 @@ static iree_status_t iree_hal_amdgpu_pm4_transfer_recorder_commit(
           record, recorder->transfer_pm4_context);
   recording_state->previous_launch_state = launch->launch_state;
   recording_state->has_previous_launch_state = true;
-  recording_state->has_planned_fixup_barrier |= iree_any_bit_set(
-      record->flags, IREE_HAL_AMDGPU_PM4_TRANSFER_RECORD_FLAG_FIXUP_BARRIER);
-  recording_state->profile.has_planned_fixup_barrier |= iree_any_bit_set(
-      record->flags,
-      IREE_HAL_AMDGPU_PM4_TRANSFER_RECORD_FLAG_PROFILE_FIXUP_BARRIER);
   if (record->source.binding_slot != UINT32_MAX) {
     *recorder->binding_count =
         iree_max(*recorder->binding_count, record->source.binding_slot + 1u);
@@ -438,7 +401,7 @@ iree_status_t iree_hal_amdgpu_pm4_transfer_recorder_fill(
       recorder, sizeof(*record), &record_builder_base_length, &record));
   const iree_hal_amdgpu_pm4_transfer_record_flags_t record_flags =
       iree_hal_amdgpu_pm4_transfer_recorder_record_flags(
-          recorder, /*source=*/NULL, &target);
+          recorder->recording_state);
   iree_hal_amdgpu_pm4_transfer_record_initialize_fill(
       target, &plan, length, recorder->recording_state->record_command_count,
       record_flags, recorder->recording_state->barrier_state.acquire_scope,
@@ -469,7 +432,7 @@ iree_status_t iree_hal_amdgpu_pm4_transfer_recorder_update(
       recorder, record_length, &record_builder_base_length, &record));
   const iree_hal_amdgpu_pm4_transfer_record_flags_t record_flags =
       iree_hal_amdgpu_pm4_transfer_recorder_record_flags(
-          recorder, /*source=*/NULL, &target);
+          recorder->recording_state);
   iree_hal_amdgpu_pm4_transfer_record_initialize_update(
       target, &plan, source, recorder->recording_state->record_command_count,
       record_flags, recorder->recording_state->barrier_state.acquire_scope,
@@ -497,8 +460,8 @@ iree_status_t iree_hal_amdgpu_pm4_transfer_recorder_copy(
   IREE_RETURN_IF_ERROR(iree_hal_amdgpu_pm4_transfer_recorder_append_storage(
       recorder, sizeof(*record), &record_builder_base_length, &record));
   const iree_hal_amdgpu_pm4_transfer_record_flags_t record_flags =
-      iree_hal_amdgpu_pm4_transfer_recorder_record_flags(recorder, &source,
-                                                         &target);
+      iree_hal_amdgpu_pm4_transfer_recorder_record_flags(
+          recorder->recording_state);
   iree_hal_amdgpu_pm4_transfer_record_initialize_copy(
       source, target, &plan, length,
       recorder->recording_state->record_command_count, record_flags,
@@ -636,20 +599,6 @@ iree_status_t iree_hal_amdgpu_pm4_transfer_record_materialize(
     }
     IREE_RETURN_IF_ERROR(iree_hal_amdgpu_pm4_transfer_append_fixup(
         state->fixup_builder, target_offset, binding->buffer_ref));
-  }
-
-  const iree_hal_amdgpu_pm4_transfer_record_flags_t fixup_barrier_flag =
-      is_profile
-          ? IREE_HAL_AMDGPU_PM4_TRANSFER_RECORD_FLAG_PROFILE_FIXUP_BARRIER
-          : IREE_HAL_AMDGPU_PM4_TRANSFER_RECORD_FLAG_FIXUP_BARRIER;
-  if (iree_any_bit_set(record->flags, fixup_barrier_flag)) {
-    const uint32_t dword_count_before = state->dword_builder->dword_count;
-    IREE_RETURN_IF_ERROR(iree_hal_amdgpu_pm4_dword_builder_emit_barrier(
-        state->dword_builder, state->vendor_packet_capabilities,
-        IREE_HAL_AMDGPU_PM4_BARRIER_FLAG_FIXUP_TO_IB, IREE_HSA_FENCE_SCOPE_NONE,
-        IREE_HSA_FENCE_SCOPE_NONE));
-    stats.fixup_barrier_dwords =
-        state->dword_builder->dword_count - dword_count_before;
   }
 
   const iree_hal_amdgpu_pm4_dispatch_launch_state_t* launch_state =

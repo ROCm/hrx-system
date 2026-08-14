@@ -540,8 +540,6 @@ typedef struct iree_hal_amdgpu_pm4_materialization_state_t {
   iree_hal_amdgpu_pm4_dispatch_launch_state_t previous_launch_state;
   // Whether |previous_launch_state| contains a valid value.
   bool has_previous_launch_state;
-  // Whether the fixup-to-IB visibility barrier has been emitted.
-  bool has_emitted_fixup_barrier;
   // iree_hal_amdgpu_pm4_materialization_flag_bits_t mask.
   iree_hal_amdgpu_pm4_materialization_flags_t flags;
 } iree_hal_amdgpu_pm4_materialization_state_t;
@@ -1461,37 +1459,6 @@ static iree_status_t iree_hal_amdgpu_pm4_command_buffer_materialize_record(
     const iree_hal_amdgpu_pm4_command_record_header_t* record) {
   const bool is_profile = iree_any_bit_set(
       state->flags, IREE_HAL_AMDGPU_PM4_MATERIALIZATION_FLAG_PROFILE);
-  iree_hal_amdgpu_pm4_command_record_flags_t record_flags = 0;
-  switch ((iree_hal_amdgpu_pm4_command_record_opcode_t)record->opcode) {
-    case IREE_HAL_AMDGPU_PM4_COMMAND_RECORD_OPCODE_DISPATCH:
-      record_flags =
-          ((const iree_hal_amdgpu_pm4_dispatch_record_t*)record)->flags;
-      break;
-    case IREE_HAL_AMDGPU_PM4_COMMAND_RECORD_OPCODE_ATOMIC_WAIT:
-    case IREE_HAL_AMDGPU_PM4_COMMAND_RECORD_OPCODE_ATOMIC_STORE:
-    case IREE_HAL_AMDGPU_PM4_COMMAND_RECORD_OPCODE_ATOMIC_RMW:
-      record_flags =
-          ((const iree_hal_amdgpu_pm4_atomic_record_t*)record)->flags;
-      break;
-    case IREE_HAL_AMDGPU_PM4_COMMAND_RECORD_OPCODE_FILL:
-    case IREE_HAL_AMDGPU_PM4_COMMAND_RECORD_OPCODE_UPDATE:
-    case IREE_HAL_AMDGPU_PM4_COMMAND_RECORD_OPCODE_COPY:
-      record_flags =
-          ((const iree_hal_amdgpu_pm4_transfer_record_t*)record)->flags;
-      break;
-    default:
-      return iree_make_status(IREE_STATUS_INTERNAL,
-                              "unknown PM4 command record opcode %u",
-                              record->opcode);
-  }
-  const iree_hal_amdgpu_pm4_command_record_flags_t fixup_barrier_flag =
-      is_profile ? IREE_HAL_AMDGPU_PM4_COMMAND_RECORD_FLAG_PROFILE_FIXUP_BARRIER
-                 : IREE_HAL_AMDGPU_PM4_COMMAND_RECORD_FLAG_FIXUP_BARRIER;
-  if (iree_any_bit_set(record_flags, fixup_barrier_flag) &&
-      IREE_UNLIKELY(state->has_emitted_fixup_barrier)) {
-    return iree_make_status(IREE_STATUS_INTERNAL,
-                            "PM4 program contains multiple fixup barriers");
-  }
   iree_hal_amdgpu_pm4_command_materialization_state_t record_state = {
       .dword_builder = &state->builders.program,
       .template_builder = &state->builders.template,
@@ -1546,16 +1513,14 @@ static iree_status_t iree_hal_amdgpu_pm4_command_buffer_materialize_record(
       break;
     }
     default:
-      break;
+      return iree_make_status(IREE_STATUS_INTERNAL,
+                              "unknown PM4 command record opcode %u",
+                              record->opcode);
   }
   state->previous_launch_state = record_state.previous_launch_state;
   state->has_previous_launch_state = record_state.has_previous_launch_state;
-  state->has_emitted_fixup_barrier |=
-      iree_any_bit_set(record_flags, fixup_barrier_flag);
   command_buffer->publish_stats.execution_barrier_dwords +=
       stats.execution_barrier_dwords;
-  command_buffer->publish_stats.fixup_barrier_dwords +=
-      stats.fixup_barrier_dwords;
   command_buffer->publish_stats.dispatch_setup_dwords +=
       stats.dispatch_setup_dwords;
   command_buffer->publish_stats.dispatch_user_data_dwords +=
@@ -2324,8 +2289,6 @@ static iree_status_t iree_hal_amdgpu_pm4_command_buffer_begin(
       (iree_hal_amdgpu_pm4_dispatch_launch_state_t){0};
   command_buffer->last_retained_executable = NULL;
   command_buffer->recording.has_previous_launch_state = false;
-  command_buffer->recording.has_planned_fixup_barrier = false;
-  command_buffer->recording.profile.has_planned_fixup_barrier = false;
   command_buffer->recording.record_command_count = 0;
   command_buffer->recording_state =
       IREE_HAL_AMDGPU_PM4_COMMAND_BUFFER_RECORDING_STATE_RECORDING;
@@ -2630,15 +2593,6 @@ static iree_status_t iree_hal_amdgpu_pm4_command_buffer_prepare_atomic_record(
   const bool has_dynamic_target = out_target->binding_slot != UINT32_MAX;
   if (has_dynamic_target) {
     record_flags |= IREE_HAL_AMDGPU_PM4_ATOMIC_RECORD_FLAG_DYNAMIC_TARGET;
-    if (!command_buffer->recording.has_planned_fixup_barrier) {
-      record_flags |= IREE_HAL_AMDGPU_PM4_ATOMIC_RECORD_FLAG_FIXUP_BARRIER;
-    }
-    if (iree_hal_amdgpu_pm4_command_buffer_materializes_profile_dispatch_timestamps(
-            command_buffer) &&
-        !command_buffer->recording.profile.has_planned_fixup_barrier) {
-      record_flags |=
-          IREE_HAL_AMDGPU_PM4_ATOMIC_RECORD_FLAG_PROFILE_FIXUP_BARRIER;
-    }
   }
 
   *out_record_flags = record_flags;
@@ -2685,12 +2639,6 @@ static iree_status_t iree_hal_amdgpu_pm4_command_buffer_append_atomic_record(
     command_buffer->recording.previous_launch_state = launch->launch_state;
     command_buffer->recording.has_previous_launch_state = true;
   }
-  command_buffer->recording.has_planned_fixup_barrier |= iree_any_bit_set(
-      record->flags, IREE_HAL_AMDGPU_PM4_ATOMIC_RECORD_FLAG_FIXUP_BARRIER);
-  command_buffer->recording.profile.has_planned_fixup_barrier |=
-      iree_any_bit_set(
-          record->flags,
-          IREE_HAL_AMDGPU_PM4_ATOMIC_RECORD_FLAG_PROFILE_FIXUP_BARRIER);
   command_buffer->recording.barrier_state = target_barrier_state;
   if (iree_any_bit_set(record->flags,
                        IREE_HAL_AMDGPU_PM4_ATOMIC_RECORD_FLAG_DYNAMIC_TARGET)) {

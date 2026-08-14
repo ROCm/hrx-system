@@ -699,8 +699,6 @@ class Pm4CommandBufferBenchmark : public benchmark::Fixture {
             publish_stats->host_staging_allow_access_agent_count);
     state.counters["pm4_execution_barrier_dwords"] =
         static_cast<double>(publish_stats->execution_barrier_dwords);
-    state.counters["pm4_fixup_barrier_dwords"] =
-        static_cast<double>(publish_stats->fixup_barrier_dwords);
     state.counters["pm4_dispatch_setup_dwords"] =
         static_cast<double>(publish_stats->dispatch_setup_dwords);
     state.counters["pm4_dispatch_user_data_dwords"] =

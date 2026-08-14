@@ -267,23 +267,6 @@ iree_status_t iree_hal_amdgpu_pm4_atomic_record_measure(
         &out_measurement->profile_program_dword_count));
   }
   if (iree_any_bit_set(record->flags,
-                       IREE_HAL_AMDGPU_PM4_ATOMIC_RECORD_FLAG_FIXUP_BARRIER)) {
-    IREE_RETURN_IF_ERROR(iree_hal_amdgpu_pm4_atomic_measure_barrier(
-        vendor_packet_capabilities,
-        IREE_HAL_AMDGPU_PM4_BARRIER_FLAG_FIXUP_TO_IB, IREE_HSA_FENCE_SCOPE_NONE,
-        IREE_HSA_FENCE_SCOPE_NONE, &out_measurement->program_dword_count));
-  }
-  if (iree_any_bit_set(
-          record->flags,
-          IREE_HAL_AMDGPU_PM4_ATOMIC_RECORD_FLAG_PROFILE_FIXUP_BARRIER)) {
-    IREE_RETURN_IF_ERROR(iree_hal_amdgpu_pm4_atomic_measure_barrier(
-        vendor_packet_capabilities,
-        IREE_HAL_AMDGPU_PM4_BARRIER_FLAG_FIXUP_TO_IB, IREE_HSA_FENCE_SCOPE_NONE,
-        IREE_HSA_FENCE_SCOPE_NONE,
-        &out_measurement->profile_program_dword_count));
-  }
-
-  if (iree_any_bit_set(record->flags,
                        IREE_HAL_AMDGPU_PM4_ATOMIC_RECORD_FLAG_DYNAMIC_TARGET)) {
     out_measurement->fixup_entry_count = 1;
     out_measurement->profile_fixup_entry_count = 1;
@@ -453,19 +436,6 @@ iree_status_t iree_hal_amdgpu_pm4_atomic_record_materialize(
         IREE_HAL_AMDGPU_PM4_BARRIER_FLAG_EXECUTION,
         record->barrier_acquire_scope, record->barrier_release_scope));
     stats.execution_barrier_dwords =
-        state->dword_builder->dword_count - dword_count_before;
-  }
-
-  const iree_hal_amdgpu_pm4_atomic_record_flags_t fixup_barrier_flag =
-      is_profile ? IREE_HAL_AMDGPU_PM4_ATOMIC_RECORD_FLAG_PROFILE_FIXUP_BARRIER
-                 : IREE_HAL_AMDGPU_PM4_ATOMIC_RECORD_FLAG_FIXUP_BARRIER;
-  if (iree_any_bit_set(record->flags, fixup_barrier_flag)) {
-    const uint32_t dword_count_before = state->dword_builder->dword_count;
-    IREE_RETURN_IF_ERROR(iree_hal_amdgpu_pm4_dword_builder_emit_barrier(
-        state->dword_builder, state->vendor_packet_capabilities,
-        IREE_HAL_AMDGPU_PM4_BARRIER_FLAG_FIXUP_TO_IB, IREE_HSA_FENCE_SCOPE_NONE,
-        IREE_HSA_FENCE_SCOPE_NONE));
-    stats.fixup_barrier_dwords =
         state->dword_builder->dword_count - dword_count_before;
   }
 

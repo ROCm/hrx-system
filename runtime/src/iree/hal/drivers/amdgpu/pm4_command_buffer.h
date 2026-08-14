@@ -87,8 +87,6 @@ typedef struct iree_hal_amdgpu_pm4_command_buffer_publish_stats_t {
   uint64_t host_staging_allow_access_agent_count;
   // PM4 dwords used for non-terminal execution barriers.
   uint64_t execution_barrier_dwords;
-  // PM4 dwords used for fixup-to-IB visibility barriers.
-  uint64_t fixup_barrier_dwords;
   // PM4 dwords used for dispatch setup packets.
   uint64_t dispatch_setup_dwords;
   // PM4 dwords used for dispatch user-data packets.

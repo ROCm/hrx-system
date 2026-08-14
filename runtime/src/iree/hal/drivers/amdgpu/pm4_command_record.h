@@ -36,16 +36,12 @@ typedef struct iree_hal_amdgpu_pm4_command_record_header_t {
   uint16_t reserved0;
 } iree_hal_amdgpu_pm4_command_record_header_t;
 
-// Barrier and fixup properties shared by compact command records.
+// Barrier properties shared by compact command records.
 typedef uint32_t iree_hal_amdgpu_pm4_command_record_flags_t;
 typedef enum iree_hal_amdgpu_pm4_command_record_flag_bits_e {
   IREE_HAL_AMDGPU_PM4_COMMAND_RECORD_FLAG_NONE = 0u,
   // An execution/visibility barrier precedes the operation.
   IREE_HAL_AMDGPU_PM4_COMMAND_RECORD_FLAG_EXECUTION_BARRIER = 1u << 0,
-  // The normal program emits its first fixup-to-IB barrier before this op.
-  IREE_HAL_AMDGPU_PM4_COMMAND_RECORD_FLAG_FIXUP_BARRIER = 1u << 1,
-  // The profile program emits its first fixup-to-IB barrier before this op.
-  IREE_HAL_AMDGPU_PM4_COMMAND_RECORD_FLAG_PROFILE_FIXUP_BARRIER = 1u << 2,
 } iree_hal_amdgpu_pm4_command_record_flag_bits_t;
 
 // Static or dynamic buffer reference captured by a compact PM4 record.
@@ -110,8 +106,6 @@ typedef struct iree_hal_amdgpu_pm4_command_materialization_state_t {
 typedef struct iree_hal_amdgpu_pm4_command_materialization_stats_t {
   // Dwords emitted for execution/visibility barriers.
   uint32_t execution_barrier_dwords;
-  // Dwords emitted for fixup-to-IB barriers.
-  uint32_t fixup_barrier_dwords;
   // Dwords emitted for shader setup.
   uint32_t dispatch_setup_dwords;
   // Dwords emitted for user data.
@@ -151,16 +145,12 @@ typedef struct iree_hal_amdgpu_pm4_command_recording_state_t {
   iree_hal_amdgpu_pm4_dispatch_launch_state_t previous_launch_state;
   // True once |previous_launch_state| contains a valid value.
   bool has_previous_launch_state;
-  // True once a normal-program fixup barrier has been assigned to a record.
-  bool has_planned_fixup_barrier;
   // Profile-program planning state.
   struct {
     // Expected profile PM4 IB dword count computed while appending records.
     uint32_t record_program_dword_count;
     // Expected profile fixup entry count computed while appending records.
     uint32_t record_fixup_entry_count;
-    // True once a profile fixup barrier has been assigned to a record.
-    bool has_planned_fixup_barrier;
   } profile;
 } iree_hal_amdgpu_pm4_command_recording_state_t;
 
