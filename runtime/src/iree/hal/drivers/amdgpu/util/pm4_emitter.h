@@ -702,7 +702,9 @@ static inline uint32_t iree_hal_amdgpu_pm4_emit_wait_reg_mem64(
   dword[5] = (uint32_t)((uint64_t)compare_value >> 32);
   dword[6] = (uint32_t)mask;
   dword[7] = (uint32_t)((uint64_t)mask >> 32);
-  dword[8] = 4 | IREE_HAL_AMDGPU_PM4_WAIT_REG_MEM_OPTIMIZE_ACE_OFFLOAD_MODE;
+  // ACE offload can corrupt the low poll-address bits when WAIT_REG_MEM64 is
+  // executed from an AQL PM4-IB packet on gfx1151. Keep 64-bit waits on MEC.
+  dword[8] = 4;
   return 9;
 }
 

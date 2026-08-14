@@ -593,8 +593,7 @@ TEST(PM4EmitterTest, EmitsWaitRegMem64Packet) {
   EXPECT_EQ(slot.dwords[5], 0x11223344u);
   EXPECT_EQ(slot.dwords[6], 0xFFFFFFFFu);
   EXPECT_EQ(slot.dwords[7], 0x7FFFFFFFu);
-  EXPECT_EQ(slot.dwords[8],
-            4u | IREE_HAL_AMDGPU_PM4_WAIT_REG_MEM_OPTIMIZE_ACE_OFFLOAD_MODE);
+  EXPECT_EQ(slot.dwords[8], 4u);
 }
 
 TEST(PM4EmitterTest, TimestampControlsMatchAqlprofileFamilies) {

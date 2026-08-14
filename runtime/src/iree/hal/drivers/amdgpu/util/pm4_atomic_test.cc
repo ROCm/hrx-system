@@ -73,8 +73,7 @@ TEST(PM4AtomicTest, EmitsWaitPredicatesAtBothWidths) {
     EXPECT_EQ(dwords[5], 0x11223344u);
     EXPECT_EQ(dwords[6], 0xBBAA0099u);
     EXPECT_EQ(dwords[7], 0xFFEEDDCCu);
-    EXPECT_EQ(dwords[8],
-              4u | IREE_HAL_AMDGPU_PM4_WAIT_REG_MEM_OPTIMIZE_ACE_OFFLOAD_MODE);
+    EXPECT_EQ(dwords[8], 4u);
   }
 }
 
