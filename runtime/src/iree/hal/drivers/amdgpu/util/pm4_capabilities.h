@@ -92,8 +92,34 @@ enum iree_hal_amdgpu_vendor_packet_capability_bits_t {
   IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_ACQUIRE_MEM_GFX9 = 1u << 14,
   // PM4 ACQUIRE_MEM uses the gfx10+ GCR_CNTL packet layout.
   IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_ACQUIRE_MEM_GFX10 = 1u << 15,
+  // PM4 WAIT_REG_MEM/WAIT_REG_MEM64 can implement 32/64-bit HAL atomic waits.
+  IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_ATOMIC_WAIT = 1u << 16,
+  // PM4 ATOMIC_MEM swap can implement 32/64-bit HAL atomic stores.
+  IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_ATOMIC_STORE = 1u << 17,
 };
 typedef uint32_t iree_hal_amdgpu_vendor_packet_capability_flags_t;
+
+// Returns true if the device can emit native PM4 atomic waits at both HAL
+// widths.
+static inline bool
+iree_hal_amdgpu_vendor_packet_capabilities_support_pm4_atomic_wait(
+    iree_hal_amdgpu_vendor_packet_capability_flags_t capabilities) {
+  return iree_all_bits_set(
+      capabilities,
+      IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_AQL_PM4_IB |
+          IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_ATOMIC_WAIT);
+}
+
+// Returns true if the device can emit native PM4 atomic stores at both HAL
+// widths.
+static inline bool
+iree_hal_amdgpu_vendor_packet_capabilities_support_pm4_atomic_store(
+    iree_hal_amdgpu_vendor_packet_capability_flags_t capabilities) {
+  return iree_all_bits_set(
+      capabilities,
+      IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_AQL_PM4_IB |
+          IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_ATOMIC_STORE);
+}
 
 // Returns true if the device can emit queue-private PM4 WRITE_DATA memory
 // writes.

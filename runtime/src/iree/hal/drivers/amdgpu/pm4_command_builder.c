@@ -93,6 +93,32 @@ iree_status_t iree_hal_amdgpu_pm4_dword_builder_append(
   return iree_ok_status();
 }
 
+iree_status_t iree_hal_amdgpu_pm4_dword_builder_align_qword_fixup_target(
+    iree_hal_amdgpu_pm4_dword_builder_t* builder,
+    iree_host_size_t program_offset, uint32_t packet_target_dword_offset) {
+  if (IREE_UNLIKELY(program_offset % sizeof(uint64_t) != 0)) {
+    return iree_make_status(
+        IREE_STATUS_INTERNAL,
+        "PM4 program offset is not aligned for a 64-bit fixup");
+  }
+  const iree_host_size_t program_dword_offset =
+      program_offset / sizeof(uint32_t);
+  if (((program_dword_offset + builder->dword_count +
+        packet_target_dword_offset) &
+       1u) == 0) {
+    return iree_ok_status();
+  }
+
+  const uint32_t dword_count = 3;
+  uint32_t* nop_dwords = NULL;
+  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_pm4_dword_builder_append(
+      builder, dword_count, &nop_dwords));
+  nop_dwords[0] = iree_hal_amdgpu_pm4_make_header(
+      IREE_HAL_AMDGPU_PM4_HDR_IT_OPCODE_NOP, dword_count);
+  memset(nop_dwords + 1, 0, (dword_count - 1) * sizeof(nop_dwords[0]));
+  return iree_ok_status();
+}
+
 iree_status_t iree_hal_amdgpu_pm4_dword_builder_emit_barrier(
     iree_hal_amdgpu_pm4_dword_builder_t* builder,
     iree_hal_amdgpu_vendor_packet_capability_flags_t capabilities,

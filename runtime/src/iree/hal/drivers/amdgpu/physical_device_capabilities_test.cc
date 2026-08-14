@@ -963,6 +963,12 @@ TEST_F(PhysicalDeviceCapabilitiesTest, SelectsCdnaPm4FamilyCapabilities) {
     EXPECT_FALSE(
         iree_hal_amdgpu_vendor_packet_capabilities_support_pm4_dispatch_command_buffers(
             capabilities));
+    EXPECT_FALSE(
+        iree_hal_amdgpu_vendor_packet_capabilities_support_pm4_atomic_wait(
+            capabilities));
+    EXPECT_FALSE(
+        iree_hal_amdgpu_vendor_packet_capabilities_support_pm4_atomic_store(
+            capabilities));
   }
 }
 
@@ -1015,7 +1021,9 @@ TEST_F(PhysicalDeviceCapabilitiesTest, SelectsRdnaPm4FamilyCapabilities) {
           IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_ACQUIRE_MEM |
           IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_ACQUIRE_MEM_GFX10 |
           IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_COMPUTE_DISPATCH_DIRECT |
-          IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_COMPUTE_DISPATCH_INDIRECT;
+          IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_COMPUTE_DISPATCH_INDIRECT |
+          IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_ATOMIC_WAIT |
+          IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_ATOMIC_STORE;
   const char* processors[] = {
       "gfx1010", "gfx1011", "gfx1012", "gfx1013", "gfx1030", "gfx1031",
       "gfx1032", "gfx1033", "gfx1034", "gfx1035", "gfx1036", "gfx1100",
@@ -1031,6 +1039,12 @@ TEST_F(PhysicalDeviceCapabilitiesTest, SelectsRdnaPm4FamilyCapabilities) {
     EXPECT_EQ(capabilities, kExpectedCapabilities);
     EXPECT_TRUE(
         iree_hal_amdgpu_vendor_packet_capabilities_support_pm4_dispatch_command_buffers(
+            capabilities));
+    EXPECT_TRUE(
+        iree_hal_amdgpu_vendor_packet_capabilities_support_pm4_atomic_wait(
+            capabilities));
+    EXPECT_TRUE(
+        iree_hal_amdgpu_vendor_packet_capabilities_support_pm4_atomic_store(
             capabilities));
   }
 }

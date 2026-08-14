@@ -707,6 +707,8 @@ class Pm4CommandBufferBenchmark : public benchmark::Fixture {
         static_cast<double>(publish_stats->dispatch_user_data_dwords);
     state.counters["pm4_dispatch_dwords"] =
         static_cast<double>(publish_stats->dispatch_dwords);
+    state.counters["pm4_atomic_dwords"] =
+        static_cast<double>(publish_stats->atomic_dwords);
     state.counters["pm4_terminal_barrier_dwords"] =
         static_cast<double>(publish_stats->terminal_barrier_dwords);
   }

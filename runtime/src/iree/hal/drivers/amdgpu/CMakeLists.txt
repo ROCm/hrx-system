@@ -372,6 +372,7 @@ iree_cc_library(
     iree::hal::drivers::amdgpu::util::libhsa
     iree::hal::drivers::amdgpu::util::loaded_code_object
     iree::hal::drivers::amdgpu::util::packet
+    iree::hal::drivers::amdgpu::util::pm4_atomic
     iree::hal::drivers::amdgpu::util::pm4_dispatch
     iree::hal::drivers::amdgpu::util::pm4_program
     iree::hal::drivers::amdgpu::util::queue_primitives
@@ -755,6 +756,7 @@ iree_cc_test(
     iree::hal::cts::util::registry
     iree::hal::cts::util::test_base
     iree::hal::drivers::amdgpu::util::packet
+    iree::hal::drivers::amdgpu::util::pm4_atomic
     iree::hal::executable::amdgpu::executable_target
     iree::testing::gtest
     iree::testing::gtest_main

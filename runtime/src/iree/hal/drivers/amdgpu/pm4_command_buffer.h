@@ -95,6 +95,8 @@ typedef struct iree_hal_amdgpu_pm4_command_buffer_publish_stats_t {
   uint64_t dispatch_user_data_dwords;
   // PM4 dwords used for terminal dispatch packets and their alignment.
   uint64_t dispatch_dwords;
+  // PM4 dwords used for native atomic packets and their alignment.
+  uint64_t atomic_dwords;
   // PM4 dwords used for the terminal execution barrier.
   uint64_t terminal_barrier_dwords;
   // Resident PM4 IB byte length.

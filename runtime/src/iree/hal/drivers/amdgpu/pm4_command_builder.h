@@ -79,6 +79,11 @@ iree_status_t iree_hal_amdgpu_pm4_dword_builder_append(
     iree_hal_amdgpu_pm4_dword_builder_t* builder, uint32_t dword_count,
     uint32_t** out_dwords);
 
+// Pads |builder| so a 64-bit fixup target in the next packet is 8-byte aligned.
+iree_status_t iree_hal_amdgpu_pm4_dword_builder_align_qword_fixup_target(
+    iree_hal_amdgpu_pm4_dword_builder_t* builder,
+    iree_host_size_t program_offset, uint32_t packet_target_dword_offset);
+
 // Emits one execution or fixup barrier into |builder|.
 iree_status_t iree_hal_amdgpu_pm4_dword_builder_emit_barrier(
     iree_hal_amdgpu_pm4_dword_builder_t* builder,

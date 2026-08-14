@@ -671,40 +671,6 @@ static iree_status_t iree_hal_amdgpu_pm4_dispatch_append_preload_fixups(
   return iree_ok_status();
 }
 
-static iree_status_t iree_hal_amdgpu_pm4_dispatch_emit_nop(
-    iree_hal_amdgpu_pm4_dword_builder_t* builder, uint32_t dword_count) {
-  if (IREE_UNLIKELY(dword_count < 2)) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "PM4 NOP packet requires at least 2 dwords");
-  }
-  uint32_t* nop_dwords = NULL;
-  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_pm4_dword_builder_append(
-      builder, dword_count, &nop_dwords));
-  nop_dwords[0] = iree_hal_amdgpu_pm4_make_header(
-      IREE_HAL_AMDGPU_PM4_HDR_IT_OPCODE_NOP, dword_count);
-  memset(nop_dwords + 1, 0, (dword_count - 1) * sizeof(nop_dwords[0]));
-  return iree_ok_status();
-}
-
-static iree_status_t iree_hal_amdgpu_pm4_dispatch_align_qword_fixup_target(
-    iree_hal_amdgpu_pm4_dword_builder_t* builder,
-    iree_host_size_t program_offset, uint32_t packet_target_dword_offset) {
-  if (IREE_UNLIKELY(program_offset % sizeof(uint64_t) != 0)) {
-    return iree_make_status(
-        IREE_STATUS_INTERNAL,
-        "PM4 program offset is not aligned for a 64-bit fixup");
-  }
-  const iree_host_size_t program_dword_offset =
-      program_offset / sizeof(uint32_t);
-  const bool target_is_aligned = ((program_dword_offset + builder->dword_count +
-                                   packet_target_dword_offset) &
-                                  1u) == 0;
-  return target_is_aligned
-             ? iree_ok_status()
-             : iree_hal_amdgpu_pm4_dispatch_emit_nop(builder,
-                                                     /*dword_count=*/3);
-}
-
 static iree_status_t iree_hal_amdgpu_pm4_dispatch_emit_timestamp(
     iree_hal_amdgpu_pm4_dword_builder_t* builder,
     iree_hal_amdgpu_pm4_timestamp_strategy_t strategy, void* target,
@@ -773,9 +739,10 @@ static iree_status_t iree_hal_amdgpu_pm4_dispatch_emit_terminal_packet(
       &record->parameters.indirect;
   const bool requires_fixup = indirect_parameters->binding_slot != UINT32_MAX;
   if (requires_fixup) {
-    IREE_RETURN_IF_ERROR(iree_hal_amdgpu_pm4_dispatch_align_qword_fixup_target(
-        state->dword_builder, state->program_offset,
-        /*packet_target_dword_offset=*/1u));
+    IREE_RETURN_IF_ERROR(
+        iree_hal_amdgpu_pm4_dword_builder_align_qword_fixup_target(
+            state->dword_builder, state->program_offset,
+            /*packet_target_dword_offset=*/1u));
   }
   const uint32_t dispatch_initiator =
       launch_state->dispatch_initiator &
@@ -918,9 +885,10 @@ iree_status_t iree_hal_amdgpu_pm4_dispatch_record_materialize(
     const uint32_t timestamp_binding_slot =
         profile_context->timestamp_binding_base + record->command_index * 2u;
     uint32_t timestamp_target_dword_offset = 0;
-    IREE_RETURN_IF_ERROR(iree_hal_amdgpu_pm4_dispatch_align_qword_fixup_target(
-        state->dword_builder, state->program_offset,
-        /*packet_target_dword_offset=*/4u));
+    IREE_RETURN_IF_ERROR(
+        iree_hal_amdgpu_pm4_dword_builder_align_qword_fixup_target(
+            state->dword_builder, state->program_offset,
+            /*packet_target_dword_offset=*/4u));
     IREE_RETURN_IF_ERROR(iree_hal_amdgpu_pm4_dispatch_emit_timestamp(
         state->dword_builder, profile_context->timestamp_strategy,
         &profile_context->dummy_ticks->start_tick,
@@ -935,9 +903,10 @@ iree_status_t iree_hal_amdgpu_pm4_dispatch_record_materialize(
         IREE_HAL_AMDGPU_PM4_BARRIER_FLAG_EXECUTION, IREE_HSA_FENCE_SCOPE_NONE,
         IREE_HSA_FENCE_SCOPE_NONE));
 
-    IREE_RETURN_IF_ERROR(iree_hal_amdgpu_pm4_dispatch_align_qword_fixup_target(
-        state->dword_builder, state->program_offset,
-        /*packet_target_dword_offset=*/4u));
+    IREE_RETURN_IF_ERROR(
+        iree_hal_amdgpu_pm4_dword_builder_align_qword_fixup_target(
+            state->dword_builder, state->program_offset,
+            /*packet_target_dword_offset=*/4u));
     IREE_RETURN_IF_ERROR(iree_hal_amdgpu_pm4_dispatch_emit_timestamp(
         state->dword_builder, profile_context->timestamp_strategy,
         &profile_context->dummy_ticks->end_tick,

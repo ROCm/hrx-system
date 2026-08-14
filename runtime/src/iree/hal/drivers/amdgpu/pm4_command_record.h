@@ -118,6 +118,8 @@ typedef struct iree_hal_amdgpu_pm4_command_materialization_stats_t {
   uint32_t dispatch_user_data_dwords;
   // Dwords emitted for terminal dispatch packets and their alignment.
   uint32_t dispatch_dwords;
+  // Dwords emitted for native atomic packets and their alignment.
+  uint32_t atomic_dwords;
 } iree_hal_amdgpu_pm4_command_materialization_stats_t;
 
 // Pending execution/visibility barrier accumulated while recording.

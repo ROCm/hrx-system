@@ -1012,13 +1012,6 @@ iree_hal_amdgpu_pm4_command_buffer_prepare_resident_storage(
     uint8_t** out_materialization_base) {
   memset(out_layout, 0, sizeof(*out_layout));
   *out_materialization_base = NULL;
-  if (IREE_UNLIKELY(command_buffer->recording.record_template_byte_length ==
-                        0 &&
-                    command_buffer->recording.record_fixup_entry_count != 0)) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "PM4 command-buffer fixup entries require target storage");
-  }
 
   uint32_t profile_binding_count = 0;
   if (command_buffer->program_set.profile_plan_count != 0) {
@@ -1568,6 +1561,7 @@ static iree_status_t iree_hal_amdgpu_pm4_command_buffer_materialize_record(
   command_buffer->publish_stats.dispatch_user_data_dwords +=
       stats.dispatch_user_data_dwords;
   command_buffer->publish_stats.dispatch_dwords += stats.dispatch_dwords;
+  command_buffer->publish_stats.atomic_dwords += stats.atomic_dwords;
   return iree_ok_status();
 }
 
@@ -2665,6 +2659,7 @@ static iree_status_t iree_hal_amdgpu_pm4_command_buffer_append_atomic_record(
   IREE_RETURN_IF_ERROR(iree_hal_amdgpu_pm4_atomic_record_measure(
       record, command_buffer->atomic_context,
       command_buffer->vendor_packet_capabilities,
+      command_buffer->recording.record_ib_dword_count,
       command_buffer->recording.record_template_byte_length,
       command_buffer->recording.has_previous_launch_state,
       &command_buffer->recording.previous_launch_state, &measurement));
@@ -2686,8 +2681,10 @@ static iree_status_t iree_hal_amdgpu_pm4_command_buffer_append_atomic_record(
   const iree_hal_amdgpu_device_kernel_pm4_launch_t* launch =
       iree_hal_amdgpu_pm4_atomic_record_launch(record,
                                                command_buffer->atomic_context);
-  command_buffer->recording.previous_launch_state = launch->launch_state;
-  command_buffer->recording.has_previous_launch_state = true;
+  if (launch) {
+    command_buffer->recording.previous_launch_state = launch->launch_state;
+    command_buffer->recording.has_previous_launch_state = true;
+  }
   command_buffer->recording.has_planned_fixup_barrier |= iree_any_bit_set(
       record->flags, IREE_HAL_AMDGPU_PM4_ATOMIC_RECORD_FLAG_FIXUP_BARRIER);
   command_buffer->recording.profile.has_planned_fixup_barrier |=

@@ -8,6 +8,7 @@
 
 #include <inttypes.h>
 
+#include "iree/hal/drivers/amdgpu/util/pm4_atomic.h"
 #include "iree/hal/drivers/amdgpu/util/pm4_barrier.h"
 
 typedef struct iree_hal_amdgpu_pm4_atomic_fallback_layout_t {
@@ -57,6 +58,42 @@ static iree_status_t iree_hal_amdgpu_pm4_atomic_record_fallback_layout(
                               record->header.opcode);
   }
   return iree_ok_status();
+}
+
+static iree_hal_amdgpu_pm4_atomic_lowering_t
+iree_hal_amdgpu_pm4_atomic_record_select_lowering(
+    const iree_hal_amdgpu_pm4_atomic_record_t* record,
+    iree_hal_amdgpu_vendor_packet_capability_flags_t capabilities) {
+  switch (record->header.opcode) {
+    case IREE_HAL_AMDGPU_PM4_COMMAND_RECORD_OPCODE_ATOMIC_WAIT:
+      return iree_hal_amdgpu_vendor_packet_capabilities_support_pm4_atomic_wait(
+                 capabilities)
+                 ? IREE_HAL_AMDGPU_PM4_ATOMIC_LOWERING_NATIVE
+                 : IREE_HAL_AMDGPU_PM4_ATOMIC_LOWERING_FALLBACK;
+    case IREE_HAL_AMDGPU_PM4_COMMAND_RECORD_OPCODE_ATOMIC_STORE:
+      return iree_hal_amdgpu_vendor_packet_capabilities_support_pm4_atomic_store(
+                 capabilities)
+                 ? IREE_HAL_AMDGPU_PM4_ATOMIC_LOWERING_NATIVE
+                 : IREE_HAL_AMDGPU_PM4_ATOMIC_LOWERING_FALLBACK;
+    case IREE_HAL_AMDGPU_PM4_COMMAND_RECORD_OPCODE_ATOMIC_RMW:
+    default:
+      return IREE_HAL_AMDGPU_PM4_ATOMIC_LOWERING_FALLBACK;
+  }
+}
+
+static uint32_t iree_hal_amdgpu_pm4_atomic_record_native_dword_count(
+    const iree_hal_amdgpu_pm4_atomic_record_t* record) {
+  switch (record->header.opcode) {
+    case IREE_HAL_AMDGPU_PM4_COMMAND_RECORD_OPCODE_ATOMIC_WAIT:
+      return record->params.wait.width == IREE_HAL_ATOMIC_WIDTH_32
+                 ? IREE_HAL_AMDGPU_PM4_ATOMIC_WAIT32_DWORD_COUNT
+                 : IREE_HAL_AMDGPU_PM4_ATOMIC_WAIT64_DWORD_COUNT;
+    case IREE_HAL_AMDGPU_PM4_COMMAND_RECORD_OPCODE_ATOMIC_STORE:
+      return IREE_HAL_AMDGPU_PM4_ATOMIC_MEM_DWORD_COUNT;
+    case IREE_HAL_AMDGPU_PM4_COMMAND_RECORD_OPCODE_ATOMIC_RMW:
+    default:
+      return 0;
+  }
 }
 
 static iree_status_t iree_hal_amdgpu_pm4_atomic_measure_barrier(
@@ -143,6 +180,9 @@ const iree_hal_amdgpu_device_kernel_pm4_launch_t*
 iree_hal_amdgpu_pm4_atomic_record_launch(
     const iree_hal_amdgpu_pm4_atomic_record_t* record,
     const iree_hal_amdgpu_device_atomic_pm4_context_t* atomic_context) {
+  if (record->lowering == IREE_HAL_AMDGPU_PM4_ATOMIC_LOWERING_NATIVE) {
+    return NULL;
+  }
   switch (record->header.opcode) {
     case IREE_HAL_AMDGPU_PM4_COMMAND_RECORD_OPCODE_ATOMIC_WAIT:
       return iree_hal_amdgpu_device_atomic_pm4_context_select_wait(
@@ -162,46 +202,55 @@ iree_status_t iree_hal_amdgpu_pm4_atomic_record_measure(
     iree_hal_amdgpu_pm4_atomic_record_t* record,
     const iree_hal_amdgpu_device_atomic_pm4_context_t* atomic_context,
     iree_hal_amdgpu_vendor_packet_capability_flags_t vendor_packet_capabilities,
+    uint32_t current_program_dword_count,
     iree_host_size_t current_template_byte_length,
     bool has_previous_launch_state,
     const iree_hal_amdgpu_pm4_dispatch_launch_state_t* previous_launch_state,
     iree_hal_amdgpu_pm4_command_record_measurement_t* out_measurement) {
   memset(out_measurement, 0, sizeof(*out_measurement));
-  iree_hal_amdgpu_pm4_atomic_fallback_layout_t layout;
-  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_pm4_atomic_record_fallback_layout(
-      record, atomic_context, &layout));
-  if (IREE_UNLIKELY(layout.launch->launch_state.user_data_dword_count == 0)) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "PM4 atomic fallback has no kernarg user-data dwords");
-  }
+  record->lowering = iree_hal_amdgpu_pm4_atomic_record_select_lowering(
+      record, vendor_packet_capabilities);
+  uint32_t operation_dword_count = 0;
+  if (record->lowering == IREE_HAL_AMDGPU_PM4_ATOMIC_LOWERING_NATIVE) {
+    operation_dword_count =
+        iree_hal_amdgpu_pm4_atomic_record_native_dword_count(record);
+    out_measurement->template_byte_length = current_template_byte_length;
+  } else {
+    iree_hal_amdgpu_pm4_atomic_fallback_layout_t layout;
+    IREE_RETURN_IF_ERROR(iree_hal_amdgpu_pm4_atomic_record_fallback_layout(
+        record, atomic_context, &layout));
+    if (IREE_UNLIKELY(layout.launch->launch_state.user_data_dword_count == 0)) {
+      return iree_make_status(
+          IREE_STATUS_FAILED_PRECONDITION,
+          "PM4 atomic fallback has no kernarg user-data dwords");
+    }
 
-  if (IREE_UNLIKELY(current_template_byte_length >
-                    UINT32_MAX - (layout.kernarg_alignment - 1))) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "PM4 atomic template alignment overflows");
-  }
-  const iree_host_size_t template_offset =
-      iree_host_align(current_template_byte_length, layout.kernarg_alignment);
-  if (IREE_UNLIKELY(template_offset > UINT32_MAX ||
-                    layout.kernarg_length > UINT32_MAX - template_offset)) {
-    return iree_make_status(
-        IREE_STATUS_OUT_OF_RANGE,
-        "PM4 atomic template storage exceeds uint32_t fixup offsets");
-  }
-  record->template_offset = (uint32_t)template_offset;
-  out_measurement->template_byte_length =
-      template_offset + layout.kernarg_length;
+    if (IREE_UNLIKELY(current_template_byte_length >
+                      UINT32_MAX - (layout.kernarg_alignment - 1))) {
+      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "PM4 atomic template alignment overflows");
+    }
+    const iree_host_size_t template_offset =
+        iree_host_align(current_template_byte_length, layout.kernarg_alignment);
+    if (IREE_UNLIKELY(template_offset > UINT32_MAX ||
+                      layout.kernarg_length > UINT32_MAX - template_offset)) {
+      return iree_make_status(
+          IREE_STATUS_OUT_OF_RANGE,
+          "PM4 atomic template storage exceeds uint32_t fixup offsets");
+    }
+    record->template_offset = (uint32_t)template_offset;
+    out_measurement->template_byte_length =
+        template_offset + layout.kernarg_length;
 
-  uint32_t operation_dword_count =
-      IREE_HAL_AMDGPU_PM4_DISPATCH_DIRECT_DWORD_COUNT;
-  if (!has_previous_launch_state ||
-      memcmp(previous_launch_state, &layout.launch->launch_state,
-             sizeof(*previous_launch_state)) != 0) {
-    operation_dword_count += IREE_HAL_AMDGPU_PM4_DISPATCH_SETUP_DWORD_COUNT;
+    operation_dword_count = IREE_HAL_AMDGPU_PM4_DISPATCH_DIRECT_DWORD_COUNT;
+    if (!has_previous_launch_state ||
+        memcmp(previous_launch_state, &layout.launch->launch_state,
+               sizeof(*previous_launch_state)) != 0) {
+      operation_dword_count += IREE_HAL_AMDGPU_PM4_DISPATCH_SETUP_DWORD_COUNT;
+    }
+    operation_dword_count +=
+        2u + layout.launch->launch_state.user_data_dword_count;
   }
-  operation_dword_count +=
-      2u + layout.launch->launch_state.user_data_dword_count;
   out_measurement->program_dword_count = operation_dword_count;
   out_measurement->profile_program_dword_count = operation_dword_count;
 
@@ -238,15 +287,40 @@ iree_status_t iree_hal_amdgpu_pm4_atomic_record_measure(
                        IREE_HAL_AMDGPU_PM4_ATOMIC_RECORD_FLAG_DYNAMIC_TARGET)) {
     out_measurement->fixup_entry_count = 1;
     out_measurement->profile_fixup_entry_count = 1;
-    bool is_preloaded = false;
-    uint32_t preload_dword_offset = 0;
-    IREE_RETURN_IF_ERROR(
-        iree_hal_amdgpu_pm4_dispatch_kernarg_range_preload_offset(
-            &layout.launch->launch_state, /*kernarg_byte_offset=*/0,
-            sizeof(uint64_t), &is_preloaded, &preload_dword_offset));
-    if (is_preloaded) {
-      ++out_measurement->fixup_entry_count;
-      ++out_measurement->profile_fixup_entry_count;
+    if (record->lowering == IREE_HAL_AMDGPU_PM4_ATOMIC_LOWERING_FALLBACK) {
+      iree_hal_amdgpu_pm4_atomic_fallback_layout_t layout;
+      IREE_RETURN_IF_ERROR(iree_hal_amdgpu_pm4_atomic_record_fallback_layout(
+          record, atomic_context, &layout));
+      bool is_preloaded = false;
+      uint32_t preload_dword_offset = 0;
+      IREE_RETURN_IF_ERROR(
+          iree_hal_amdgpu_pm4_dispatch_kernarg_range_preload_offset(
+              &layout.launch->launch_state, /*kernarg_byte_offset=*/0,
+              sizeof(uint64_t), &is_preloaded, &preload_dword_offset));
+      if (is_preloaded) {
+        ++out_measurement->fixup_entry_count;
+        ++out_measurement->profile_fixup_entry_count;
+      }
+    } else {
+      const uint64_t address_target_dword_offset =
+          (uint64_t)current_program_dword_count +
+          out_measurement->program_dword_count - operation_dword_count +
+          IREE_HAL_AMDGPU_PM4_ATOMIC_TARGET_DWORD_OFFSET;
+      if (address_target_dword_offset & 1u) {
+        if (IREE_UNLIKELY(out_measurement->program_dword_count >
+                          UINT32_MAX - 3u)) {
+          return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                                  "native PM4 atomic dword count overflows");
+        }
+        out_measurement->program_dword_count += 3u;
+      }
+      if (IREE_UNLIKELY(out_measurement->profile_program_dword_count >
+                        UINT32_MAX - 3u)) {
+        return iree_make_status(
+            IREE_STATUS_OUT_OF_RANGE,
+            "native PM4 profile atomic dword count overflows");
+      }
+      out_measurement->profile_program_dword_count += 3u;
     }
   }
   return iree_ok_status();
@@ -294,6 +368,73 @@ static iree_status_t iree_hal_amdgpu_pm4_atomic_initialize_template(
   }
 }
 
+static iree_status_t iree_hal_amdgpu_pm4_atomic_record_materialize_native(
+    const iree_hal_amdgpu_pm4_atomic_record_t* record,
+    iree_hal_amdgpu_pm4_command_materialization_state_t* state,
+    iree_hal_amdgpu_pm4_command_materialization_stats_t* out_stats) {
+  const bool has_dynamic_target = iree_any_bit_set(
+      record->flags, IREE_HAL_AMDGPU_PM4_ATOMIC_RECORD_FLAG_DYNAMIC_TARGET);
+  const uint64_t target_address = has_dynamic_target ? 0 : record->target.value;
+  const uint32_t dword_count_before = state->dword_builder->dword_count;
+  if (has_dynamic_target) {
+    IREE_RETURN_IF_ERROR(
+        iree_hal_amdgpu_pm4_dword_builder_align_qword_fixup_target(
+            state->dword_builder, state->program_offset,
+            IREE_HAL_AMDGPU_PM4_ATOMIC_TARGET_DWORD_OFFSET));
+  }
+  const uint32_t packet_dword_offset = state->dword_builder->dword_count;
+  const uint32_t expected_dword_count =
+      iree_hal_amdgpu_pm4_atomic_record_native_dword_count(record);
+  uint32_t* packet_dwords = NULL;
+  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_pm4_dword_builder_append(
+      state->dword_builder, expected_dword_count, &packet_dwords));
+
+  uint32_t emitted_dword_count = 0;
+  bool did_emit = false;
+  switch (record->header.opcode) {
+    case IREE_HAL_AMDGPU_PM4_COMMAND_RECORD_OPCODE_ATOMIC_WAIT:
+      did_emit = iree_hal_amdgpu_pm4_atomic_wait_emit(
+          record->params.wait.width, record->params.wait.condition,
+          target_address, record->params.wait.value, record->params.wait.mask,
+          expected_dword_count, packet_dwords, &emitted_dword_count);
+      break;
+    case IREE_HAL_AMDGPU_PM4_COMMAND_RECORD_OPCODE_ATOMIC_STORE:
+      did_emit = iree_hal_amdgpu_pm4_atomic_store_emit(
+          record->params.store.width, target_address,
+          record->params.store.value, expected_dword_count, packet_dwords,
+          &emitted_dword_count);
+      break;
+    case IREE_HAL_AMDGPU_PM4_COMMAND_RECORD_OPCODE_ATOMIC_RMW:
+    default:
+      IREE_ASSERT_UNREACHABLE(
+          "native PM4 atomic lowering must be wait or store");
+  }
+  IREE_ASSERT(did_emit && emitted_dword_count == expected_dword_count,
+              "validated native PM4 atomic record must encode exactly");
+
+  if (has_dynamic_target) {
+    const iree_host_size_t target_dword_offset =
+        (iree_host_size_t)packet_dword_offset +
+        IREE_HAL_AMDGPU_PM4_ATOMIC_TARGET_DWORD_OFFSET;
+    iree_host_size_t target_offset = 0;
+    if (IREE_UNLIKELY(
+            target_dword_offset > UINT32_MAX / sizeof(uint32_t) ||
+            !iree_host_size_checked_add(state->program_offset,
+                                        target_dword_offset * sizeof(uint32_t),
+                                        &target_offset))) {
+      return iree_make_status(
+          IREE_STATUS_OUT_OF_RANGE,
+          "native PM4 atomic address fixup target offset overflows");
+    }
+    IREE_RETURN_IF_ERROR(iree_hal_amdgpu_pm4_atomic_append_fixup(
+        state->fixup_builder, target_offset, &record->target));
+  }
+
+  out_stats->atomic_dwords =
+      state->dword_builder->dword_count - dword_count_before;
+  return iree_ok_status();
+}
+
 iree_status_t iree_hal_amdgpu_pm4_atomic_record_materialize(
     const iree_hal_amdgpu_pm4_atomic_record_t* record,
     const iree_hal_amdgpu_device_atomic_pm4_context_t* atomic_context,
@@ -302,9 +443,6 @@ iree_status_t iree_hal_amdgpu_pm4_atomic_record_materialize(
   iree_hal_amdgpu_pm4_command_materialization_stats_t stats = {0};
   const bool is_profile = iree_any_bit_set(
       state->flags, IREE_HAL_AMDGPU_PM4_COMMAND_MATERIALIZATION_FLAG_PROFILE);
-  iree_hal_amdgpu_pm4_atomic_fallback_layout_t layout;
-  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_pm4_atomic_record_fallback_layout(
-      record, atomic_context, &layout));
 
   if (iree_any_bit_set(
           record->flags,
@@ -317,6 +455,30 @@ iree_status_t iree_hal_amdgpu_pm4_atomic_record_materialize(
     stats.execution_barrier_dwords =
         state->dword_builder->dword_count - dword_count_before;
   }
+
+  const iree_hal_amdgpu_pm4_atomic_record_flags_t fixup_barrier_flag =
+      is_profile ? IREE_HAL_AMDGPU_PM4_ATOMIC_RECORD_FLAG_PROFILE_FIXUP_BARRIER
+                 : IREE_HAL_AMDGPU_PM4_ATOMIC_RECORD_FLAG_FIXUP_BARRIER;
+  if (iree_any_bit_set(record->flags, fixup_barrier_flag)) {
+    const uint32_t dword_count_before = state->dword_builder->dword_count;
+    IREE_RETURN_IF_ERROR(iree_hal_amdgpu_pm4_dword_builder_emit_barrier(
+        state->dword_builder, state->vendor_packet_capabilities,
+        IREE_HAL_AMDGPU_PM4_BARRIER_FLAG_FIXUP_TO_IB, IREE_HSA_FENCE_SCOPE_NONE,
+        IREE_HSA_FENCE_SCOPE_NONE));
+    stats.fixup_barrier_dwords =
+        state->dword_builder->dword_count - dword_count_before;
+  }
+
+  if (record->lowering == IREE_HAL_AMDGPU_PM4_ATOMIC_LOWERING_NATIVE) {
+    IREE_RETURN_IF_ERROR(iree_hal_amdgpu_pm4_atomic_record_materialize_native(
+        record, state, &stats));
+    if (out_stats) *out_stats = stats;
+    return iree_ok_status();
+  }
+
+  iree_hal_amdgpu_pm4_atomic_fallback_layout_t layout;
+  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_pm4_atomic_record_fallback_layout(
+      record, atomic_context, &layout));
 
   uint8_t* template_bytes = NULL;
   if (is_profile) {
@@ -359,19 +521,6 @@ iree_status_t iree_hal_amdgpu_pm4_atomic_record_materialize(
     }
     IREE_RETURN_IF_ERROR(iree_hal_amdgpu_pm4_atomic_append_fixup(
         state->fixup_builder, target_offset, &record->target));
-  }
-
-  const iree_hal_amdgpu_pm4_atomic_record_flags_t fixup_barrier_flag =
-      is_profile ? IREE_HAL_AMDGPU_PM4_ATOMIC_RECORD_FLAG_PROFILE_FIXUP_BARRIER
-                 : IREE_HAL_AMDGPU_PM4_ATOMIC_RECORD_FLAG_FIXUP_BARRIER;
-  if (iree_any_bit_set(record->flags, fixup_barrier_flag)) {
-    const uint32_t dword_count_before = state->dword_builder->dword_count;
-    IREE_RETURN_IF_ERROR(iree_hal_amdgpu_pm4_dword_builder_emit_barrier(
-        state->dword_builder, state->vendor_packet_capabilities,
-        IREE_HAL_AMDGPU_PM4_BARRIER_FLAG_FIXUP_TO_IB, IREE_HSA_FENCE_SCOPE_NONE,
-        IREE_HSA_FENCE_SCOPE_NONE));
-    stats.fixup_barrier_dwords =
-        state->dword_builder->dword_count - dword_count_before;
   }
 
   const iree_hal_amdgpu_pm4_dispatch_launch_state_t* launch_state =
