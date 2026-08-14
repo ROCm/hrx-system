@@ -1124,11 +1124,6 @@ bool loom_op_may_write(const loom_module_t* module, const loom_op_t* op);
 bool loom_op_regions_have_hints(const loom_module_t* module,
                                 const loom_op_t* op);
 
-// Returns true if |value_id| is referenced by a live predicate-list attribute.
-// Type attributes are tracked by the module type-use table instead.
-bool loom_module_value_has_predicate_attribute_uses(const loom_module_t* module,
-                                                    loom_value_id_t value_id);
-
 // Replaces SSA references to |old_id| in attributes on live operations nested
 // under |region| with |new_id|. Operand and type references are unchanged.
 // Rewritten operations have their effective traits and direct effects
