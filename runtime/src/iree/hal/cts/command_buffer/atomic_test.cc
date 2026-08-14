@@ -190,13 +190,14 @@ class CommandBufferAtomicTest : public CtsTestBase<> {
     Status submission_status(iree_hal_device_queue_execute(
         device_, configuration.queue_affinity, empty_wait, signal,
         command_buffer, binding_table, IREE_HAL_EXECUTE_FLAG_NONE));
-    ASSERT_TRUE(submission_status.ok() ||
-                submission_status.code() == StatusCode::kFailedPrecondition)
-        << submission_status.ToString();
-    EXPECT_THAT(
-        Status(iree_hal_semaphore_list_wait(signal, iree_infinite_timeout(),
-                                            IREE_ASYNC_WAIT_FLAG_NONE)),
-        StatusIs(StatusCode::kFailedPrecondition));
+    if (submission_status.ok()) {
+      EXPECT_THAT(
+          Status(iree_hal_semaphore_list_wait(signal, iree_infinite_timeout(),
+                                              IREE_ASYNC_WAIT_FLAG_NONE)),
+          StatusIs(StatusCode::kFailedPrecondition));
+    } else {
+      EXPECT_THAT(submission_status, StatusIs(StatusCode::kFailedPrecondition));
+    }
 
     buffer.reset();
     command_buffer.reset();

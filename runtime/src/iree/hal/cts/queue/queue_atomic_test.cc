@@ -162,13 +162,14 @@ class QueueAtomicTest : public CtsTestBase<> {
     Status submission_status(iree_hal_device_queue_atomic_store(
         device_, configuration.queue_affinity, empty_wait, signal, buffer,
         /*target_offset=*/0, store_params));
-    ASSERT_TRUE(submission_status.ok() ||
-                submission_status.code() == StatusCode::kFailedPrecondition)
-        << submission_status.ToString();
-    EXPECT_THAT(
-        Status(iree_hal_semaphore_list_wait(signal, iree_infinite_timeout(),
-                                            IREE_ASYNC_WAIT_FLAG_NONE)),
-        StatusIs(StatusCode::kFailedPrecondition));
+    if (submission_status.ok()) {
+      EXPECT_THAT(
+          Status(iree_hal_semaphore_list_wait(signal, iree_infinite_timeout(),
+                                              IREE_ASYNC_WAIT_FLAG_NONE)),
+          StatusIs(StatusCode::kFailedPrecondition));
+    } else {
+      EXPECT_THAT(submission_status, StatusIs(StatusCode::kFailedPrecondition));
+    }
 
     buffer.reset();
     released_future.wait();
