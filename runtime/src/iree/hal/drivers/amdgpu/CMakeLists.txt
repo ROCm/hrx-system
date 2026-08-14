@@ -294,6 +294,8 @@ iree_cc_library(
     "pm4_command_buffer.h"
     "pm4_command_builder.c"
     "pm4_command_builder.h"
+    "pm4_command_dispatch.c"
+    "pm4_command_dispatch.h"
     "pm4_command_program_set.c"
     "pm4_command_program_set.h"
     "pm4_command_record.c"

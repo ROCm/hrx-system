@@ -82,7 +82,7 @@ typedef enum iree_hal_amdgpu_pm4_command_materialization_flag_bits_e {
   IREE_HAL_AMDGPU_PM4_COMMAND_MATERIALIZATION_FLAG_PROFILE = 1u << 0,
 } iree_hal_amdgpu_pm4_command_materialization_flag_bits_t;
 
-// Mutable PM4 program state shared by builtin command materializers.
+// Mutable PM4 program state shared by compact command materializers.
 typedef struct iree_hal_amdgpu_pm4_command_materialization_state_t {
   // Destination PM4 program builder.
   iree_hal_amdgpu_pm4_dword_builder_t* dword_builder;
