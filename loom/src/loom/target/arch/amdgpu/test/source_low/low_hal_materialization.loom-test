@@ -289,7 +289,7 @@ low.kernel.def target<amdgpu.rdna3.core>(@target) abi_layout({constant_count = 2
 
 amdgpu.target<gfx1100> @target
 
-low.kernel.def target<amdgpu.rdna3.core>(@target) workgroup_size(64, 1, 1) @direct_predicates(%token_count: reg<amdgpu.sgpr>, %capacity: reg<amdgpu.sgpr>) where [range(%token_count, 4, 2048), le(%token_count, %capacity), range(%capacity, 4, 4096)] {
+low.kernel.def target<amdgpu.rdna3.core>(@target) workgroup_size(64, 1, 1) @direct_predicates(%token_count: reg<amdgpu.sgpr>, %capacity: reg<amdgpu.sgpr>) where [le(%token_count, %capacity), range(%token_count, 4, 2048), range(%capacity, 4, 4096)] {
   %sum = low.op<amdgpu.s_add_u32>(%token_count, %capacity) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr>
   low.return
 }
@@ -302,9 +302,7 @@ low.kernel.def target<amdgpu.rdna3.core>(@target) abi_layout({constant_count = 2
   %4 = low.op<amdgpu.s_load_dwordx2_offset_only>(%kernarg) {offset = 0} : (reg<amdgpu.sgpr x2>) -> reg<amdgpu.sgpr x2>
   %5 = low.slice %4[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
   %6 = low.slice %4[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %7 = low.assume %5 [range(%5, 4, 2048)] : reg<amdgpu.sgpr>
-  %token_count, %9 = low.assume %7, %6 [le(%7, %6)] : reg<amdgpu.sgpr>, reg<amdgpu.sgpr>
-  %capacity = low.assume %9 [range(%9, 4, 4096)] : reg<amdgpu.sgpr>
+  %token_count, %capacity = low.assume %5, %6 [le(%5, %6), range(%5, 4, 2048), range(%6, 4, 4096)] : reg<amdgpu.sgpr>, reg<amdgpu.sgpr>
   %sum = low.op<amdgpu.s_add_u32>(%token_count, %capacity) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr>
   low.return
 }

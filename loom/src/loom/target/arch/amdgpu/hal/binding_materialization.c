@@ -722,12 +722,31 @@ static iree_status_t loom_amdgpu_hal_binding_transfer_function_predicates(
     const loom_amdgpu_hal_kernel_abi_layout_t* layout,
     const loom_block_t* entry_block, loom_predicate_t* predicates,
     uint16_t predicate_count, loom_value_id_t* materialized_values) {
+  if (predicate_count == 0) return iree_ok_status();
+
+  loom_predicate_t* transferred_predicates = NULL;
+  uint16_t* argument_indices = NULL;
+  loom_value_id_t* values = NULL;
+  loom_type_t* result_types = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      rewriter->arena, predicate_count, sizeof(*transferred_predicates),
+      (void**)&transferred_predicates));
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      rewriter->arena, layout->direct_arg_count, sizeof(*argument_indices),
+      (void**)&argument_indices));
+  IREE_RETURN_IF_ERROR(
+      iree_arena_allocate_array(rewriter->arena, layout->direct_arg_count,
+                                sizeof(*values), (void**)&values));
+  IREE_RETURN_IF_ERROR(
+      iree_arena_allocate_array(rewriter->arena, layout->direct_arg_count,
+                                sizeof(*result_types), (void**)&result_types));
+
   uint16_t retained_count = 0;
+  uint16_t transferred_count = 0;
+  uint16_t argument_count = 0;
   bool has_direct_predicate = false;
   for (uint16_t i = 0; i < predicate_count; ++i) {
     loom_predicate_t predicate = predicates[i];
-    uint16_t argument_indices[IREE_ARRAYSIZE(predicate.args)] = {0};
-    uint16_t argument_count = 0;
     bool references_direct_arg = false;
     bool is_transferable = true;
     for (uint8_t j = 0; j < predicate.arg_count; ++j) {
@@ -744,13 +763,6 @@ static iree_status_t loom_amdgpu_hal_binding_transfer_function_predicates(
       if (materialized_values[argument_index] == LOOM_VALUE_ID_INVALID) {
         is_transferable = false;
       }
-      bool already_listed = false;
-      for (uint16_t k = 0; k < argument_count; ++k) {
-        already_listed |= argument_indices[k] == argument_index;
-      }
-      if (!already_listed) {
-        argument_indices[argument_count++] = argument_index;
-      }
     }
 
     if (!references_direct_arg) {
@@ -764,13 +776,6 @@ static iree_status_t loom_amdgpu_hal_binding_transfer_function_predicates(
       continue;
     }
 
-    loom_value_id_t values[IREE_ARRAYSIZE(predicate.args)] = {0};
-    loom_type_t result_types[IREE_ARRAYSIZE(predicate.args)] = {0};
-    for (uint16_t j = 0; j < argument_count; ++j) {
-      const uint16_t argument_index = argument_indices[j];
-      values[j] = materialized_values[argument_index];
-      result_types[j] = loom_module_value_type(rewriter->module, values[j]);
-    }
     for (uint8_t j = 0; j < predicate.arg_count; ++j) {
       if (predicate.arg_tags[j] != LOOM_PRED_ARG_VALUE) continue;
       uint16_t argument_index = 0;
@@ -779,13 +784,27 @@ static iree_status_t loom_amdgpu_hal_binding_transfer_function_predicates(
           (loom_value_id_t)predicate.args[j], &argument_index);
       IREE_ASSERT(is_direct_arg);
       predicate.args[j] = materialized_values[argument_index];
+      bool already_listed = false;
+      for (uint16_t k = 0; k < argument_count; ++k) {
+        already_listed |= argument_indices[k] == argument_index;
+      }
+      if (!already_listed) {
+        argument_indices[argument_count] = argument_index;
+        values[argument_count] = materialized_values[argument_index];
+        result_types[argument_count] =
+            loom_module_value_type(rewriter->module, values[argument_count]);
+        ++argument_count;
+      }
     }
+    transferred_predicates[transferred_count++] = predicate;
+  }
 
+  if (transferred_count != 0) {
     loom_op_t* assume_op = NULL;
     IREE_RETURN_IF_ERROR(loom_low_assume_build(
-        &rewriter->builder, values, argument_count, &predicate,
-        /*predicates_count=*/1, result_types, argument_count,
-        function.op->location, &assume_op));
+        &rewriter->builder, values, argument_count, transferred_predicates,
+        transferred_count, result_types, argument_count, function.op->location,
+        &assume_op));
     const loom_value_slice_t results = loom_low_assume_results(assume_op);
     for (uint16_t j = 0; j < argument_count; ++j) {
       materialized_values[argument_indices[j]] = results.values[j];

@@ -73,7 +73,7 @@ low.kernel.def target<test.low.core>(@target) @assume_exact_fact(%value: reg<tes
 test.target<low_core> @target
 
 low.kernel.def target<test.low.core>(@target) @assume_relational_facts(%lhs: reg<test.i32>, %rhs: reg<test.i32>) {
-  %bounded_lhs, %bounded_rhs = low.assume %lhs, %rhs [range(%lhs, 32, 4096), range(%rhs, 1, 2048), lt(%lhs, %rhs)] : reg<test.i32>, reg<test.i32>
+  %bounded_lhs, %bounded_rhs = low.assume %lhs, %rhs [lt(%lhs, %rhs), range(%lhs, 32, 4096), range(%rhs, 1, 2048)] : reg<test.i32>, reg<test.i32>
   %lhs_hi = test.fact_all_equal_range_hi %bounded_lhs : reg<test.i32> -> i64
   %rhs_lo = test.fact_all_equal_range_lo %bounded_rhs : reg<test.i32> -> i64
   test.use %lhs_hi, %rhs_lo : i64, i64
