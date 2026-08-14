@@ -181,6 +181,30 @@ iree_status_t iree_hal_amdgpu_pm4_dword_builder_emit_dispatch_direct(
   return iree_ok_status();
 }
 
+iree_status_t iree_hal_amdgpu_pm4_dword_builder_emit_dispatch_indirect(
+    iree_hal_amdgpu_pm4_dword_builder_t* builder, uint64_t indirect_address,
+    uint32_t dispatch_initiator, uint32_t* out_address_dword_offset) {
+  *out_address_dword_offset = 0;
+  if (IREE_UNLIKELY(indirect_address % sizeof(uint32_t) != 0)) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "PM4 indirect dispatch address must be 4-byte aligned");
+  }
+  const uint32_t packet_dword_offset = builder->dword_count;
+  uint32_t* dispatch_dwords = NULL;
+  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_pm4_dword_builder_append(
+      builder, IREE_HAL_AMDGPU_PM4_DISPATCH_INDIRECT_MEC_DWORD_COUNT,
+      &dispatch_dwords));
+  dispatch_dwords[0] = iree_hal_amdgpu_pm4_make_compute_header(
+      IREE_HAL_AMDGPU_PM4_HDR_IT_OPCODE_DISPATCH_INDIRECT,
+      IREE_HAL_AMDGPU_PM4_DISPATCH_INDIRECT_MEC_DWORD_COUNT);
+  dispatch_dwords[1] = (uint32_t)indirect_address;
+  dispatch_dwords[2] = (uint32_t)(indirect_address >> 32);
+  dispatch_dwords[3] = dispatch_initiator;
+  *out_address_dword_offset = packet_dword_offset + 1u;
+  return iree_ok_status();
+}
+
 iree_status_t iree_hal_amdgpu_pm4_dispatch_kernarg_range_preload_offset(
     const iree_hal_amdgpu_pm4_dispatch_launch_state_t* launch_state,
     uint32_t kernarg_byte_offset, uint32_t kernarg_byte_length,

@@ -1307,13 +1307,25 @@ static bool iree_hal_amdgpu_dispatch_config_has_workgroup_size_override(
 
 static iree_status_t iree_hal_amdgpu_pm4_command_buffer_check_dispatch_flags(
     iree_hal_dispatch_flags_t flags) {
-  if (iree_hal_dispatch_uses_indirect_arguments(flags) ||
-      iree_hal_dispatch_uses_indirect_parameters(flags)) {
+  if (iree_hal_dispatch_uses_indirect_arguments(flags)) {
     return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
-                            "PM4 command-buffer indirect dispatch is not "
-                            "implemented");
+                            "PM4 command-buffer indirect dispatch arguments "
+                            "are not implemented");
+  }
+  const iree_hal_dispatch_flags_t indirect_parameter_flags =
+      flags & (IREE_HAL_DISPATCH_FLAG_DYNAMIC_INDIRECT_PARAMETERS |
+               IREE_HAL_DISPATCH_FLAG_STATIC_INDIRECT_PARAMETERS);
+  if (IREE_UNLIKELY(iree_all_bits_set(
+          indirect_parameter_flags,
+          IREE_HAL_DISPATCH_FLAG_DYNAMIC_INDIRECT_PARAMETERS |
+              IREE_HAL_DISPATCH_FLAG_STATIC_INDIRECT_PARAMETERS))) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "PM4 dispatch cannot use both static and dynamic indirect parameters");
   }
   const iree_hal_dispatch_flags_t supported_flags =
+      IREE_HAL_DISPATCH_FLAG_DYNAMIC_INDIRECT_PARAMETERS |
+      IREE_HAL_DISPATCH_FLAG_STATIC_INDIRECT_PARAMETERS |
       IREE_HAL_DISPATCH_FLAG_ALLOW_INLINE_EXECUTION |
       IREE_HAL_DISPATCH_FLAG_BORROW_RESOURCE_LIFETIMES;
   if (IREE_UNLIKELY(iree_any_bit_set(flags, ~supported_flags))) {
@@ -1326,17 +1338,49 @@ static iree_status_t iree_hal_amdgpu_pm4_command_buffer_check_dispatch_flags(
 
 static iree_status_t iree_hal_amdgpu_pm4_command_buffer_validate_dispatch_shape(
     const iree_hal_amdgpu_executable_dispatch_descriptor_t* descriptor,
-    const iree_hal_dispatch_config_t config) {
-  for (iree_host_size_t i = 0; i < 3; ++i) {
-    if (IREE_UNLIKELY(config.workgroup_count[i] >
-                      descriptor->maximum_workgroup_count[i])) {
-      return iree_make_status(
-          IREE_STATUS_OUT_OF_RANGE,
-          "dispatch grid dimension %" PRIhsz
-          " overflows uint32_t (workgroup_count=%u, workgroup_size=%u)",
-          i, config.workgroup_count[i],
-          descriptor->kernel_args.workgroup_size[i]);
+    const iree_hal_dispatch_config_t config, iree_hal_dispatch_flags_t flags) {
+  const bool uses_indirect_parameters =
+      iree_hal_dispatch_uses_indirect_parameters(flags);
+  if (iree_hal_amdgpu_dispatch_config_has_workgroup_size_override(config)) {
+    IREE_RETURN_IF_ERROR(
+        iree_hal_amdgpu_executable_dispatch_limits_validate_workgroup_size(
+            &descriptor->limits, config.workgroup_size));
+    for (iree_host_size_t i = 0; i < 3; ++i) {
+      if (!uses_indirect_parameters) {
+        const uint64_t grid_size =
+            (uint64_t)config.workgroup_count[i] * config.workgroup_size[i];
+        if (IREE_UNLIKELY(grid_size > UINT32_MAX)) {
+          return iree_make_status(
+              IREE_STATUS_OUT_OF_RANGE,
+              "dispatch grid dimension %" PRIhsz
+              " overflows uint32_t (workgroup_count=%u, workgroup_size=%u)",
+              i, config.workgroup_count[i], config.workgroup_size[i]);
+        }
+      }
     }
+  } else if (!uses_indirect_parameters) {
+    for (iree_host_size_t i = 0; i < 3; ++i) {
+      if (IREE_UNLIKELY(config.workgroup_count[i] >
+                        descriptor->maximum_workgroup_count[i])) {
+        return iree_make_status(
+            IREE_STATUS_OUT_OF_RANGE,
+            "dispatch grid dimension %" PRIhsz
+            " overflows uint32_t (workgroup_count=%u, workgroup_size=%u)",
+            i, config.workgroup_count[i],
+            descriptor->kernel_args.workgroup_size[i]);
+      }
+    }
+  }
+  if (IREE_UNLIKELY(
+          config.dynamic_workgroup_local_memory >
+          descriptor->limits.maximum_dynamic_workgroup_local_memory_size)) {
+    return iree_make_status(
+        IREE_STATUS_OUT_OF_RANGE,
+        "dispatch dynamic workgroup-local memory size %u exceeds maximum %u "
+        "(fixed=%u)",
+        config.dynamic_workgroup_local_memory,
+        descriptor->limits.maximum_dynamic_workgroup_local_memory_size,
+        descriptor->kernel_args.group_segment_size);
   }
   return iree_ok_status();
 }
@@ -1395,7 +1439,9 @@ static iree_status_t iree_hal_amdgpu_pm4_command_buffer_retain_resource_once(
 
 static iree_status_t iree_hal_amdgpu_pm4_command_buffer_retain_dispatch(
     iree_hal_amdgpu_pm4_command_buffer_t* command_buffer,
-    iree_hal_executable_t* executable, iree_hal_buffer_ref_list_t bindings) {
+    iree_hal_executable_t* executable,
+    iree_hal_buffer_t* indirect_parameters_buffer,
+    iree_hal_buffer_ref_list_t bindings) {
   IREE_RETURN_IF_ERROR(
       iree_hal_amdgpu_pm4_command_buffer_ensure_resource_set(command_buffer));
   if (!command_buffer->resource_set) return iree_ok_status();
@@ -1406,6 +1452,8 @@ static iree_status_t iree_hal_amdgpu_pm4_command_buffer_retain_dispatch(
             command_buffer, (iree_hal_resource_t*)executable));
     command_buffer->last_retained_executable = executable;
   }
+  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_pm4_command_buffer_retain_resource_once(
+      command_buffer, (iree_hal_resource_t*)indirect_parameters_buffer));
   for (iree_host_size_t i = 0; i < bindings.count; ++i) {
     IREE_RETURN_IF_ERROR(
         iree_hal_amdgpu_pm4_command_buffer_retain_resource_once(
@@ -1519,8 +1567,7 @@ static iree_status_t iree_hal_amdgpu_pm4_command_buffer_materialize_record(
       stats.dispatch_setup_dwords;
   command_buffer->publish_stats.dispatch_user_data_dwords +=
       stats.dispatch_user_data_dwords;
-  command_buffer->publish_stats.dispatch_direct_dwords +=
-      stats.dispatch_direct_dwords;
+  command_buffer->publish_stats.dispatch_dwords += stats.dispatch_dwords;
   return iree_ok_status();
 }
 
@@ -1802,6 +1849,16 @@ static iree_status_t iree_hal_amdgpu_pm4_command_buffer_record_dispatch(
         IREE_STATUS_UNIMPLEMENTED,
         "PM4 command-buffer dispatch requires executable-load PM4 metadata");
   }
+  const bool uses_indirect_parameters =
+      iree_hal_dispatch_uses_indirect_parameters(flags);
+  if (uses_indirect_parameters &&
+      iree_any_bit_set(
+          descriptor->kernarg_layout->flags,
+          IREE_HAL_AMDGPU_KERNARG_LAYOUT_FLAG_USES_IMPLICIT_BLOCK_COUNT)) {
+    return iree_make_status(
+        IREE_STATUS_UNIMPLEMENTED,
+        "PM4 indirect dispatch cannot populate implicit block-count kernargs");
+  }
   if (IREE_UNLIKELY(iree_hal_amdgpu_dispatch_config_has_workgroup_size_override(
           config))) {
     return iree_make_status(
@@ -1814,8 +1871,8 @@ static iree_status_t iree_hal_amdgpu_pm4_command_buffer_record_dispatch(
       iree_hal_amdgpu_pm4_command_buffer_validates(command_buffer);
   if (validates) {
     IREE_RETURN_IF_ERROR(
-        iree_hal_amdgpu_pm4_command_buffer_validate_dispatch_shape(descriptor,
-                                                                   config));
+        iree_hal_amdgpu_pm4_command_buffer_validate_dispatch_shape(
+            descriptor, config, flags));
     const iree_host_size_t expected_constant_length =
         descriptor->kernarg_layout->constant_byte_length;
     if (IREE_UNLIKELY(constants.data_length != expected_constant_length)) {
@@ -1845,13 +1902,16 @@ static iree_status_t iree_hal_amdgpu_pm4_command_buffer_record_dispatch(
         "PM4 command-buffer dynamic LDS is not implemented");
   }
 
-  if (config.workgroup_count[0] == 0 || config.workgroup_count[1] == 0 ||
-      config.workgroup_count[2] == 0) {
+  if (!uses_indirect_parameters &&
+      (config.workgroup_count[0] == 0 || config.workgroup_count[1] == 0 ||
+       config.workgroup_count[2] == 0)) {
     return iree_ok_status();
   }
 
   IREE_RETURN_IF_ERROR(iree_hal_amdgpu_pm4_command_buffer_retain_dispatch(
-      command_buffer, executable, bindings));
+      command_buffer, executable,
+      uses_indirect_parameters ? config.workgroup_count_ref.buffer : NULL,
+      bindings));
   if (IREE_UNLIKELY(descriptor->pm4_group_segment_fixed_size !=
                     descriptor->kernel_args.group_segment_size)) {
     return iree_make_status(
@@ -1871,10 +1931,10 @@ static iree_status_t iree_hal_amdgpu_pm4_command_buffer_record_dispatch(
           iree_hal_amdgpu_pm4_command_buffer_materializes_profile_dispatch_timestamps(
               command_buffer),
   };
-  return iree_hal_amdgpu_pm4_dispatch_recorder_record_direct(
+  return iree_hal_amdgpu_pm4_dispatch_recorder_record(
       &recorder, descriptor, iree_hal_amdgpu_executable_id(executable),
       iree_hal_executable_function_index(export_ordinal), config, constants,
-      bindings);
+      bindings, flags);
 }
 
 //===----------------------------------------------------------------------===//
@@ -1922,8 +1982,8 @@ static iree_status_t iree_hal_amdgpu_pm4_command_buffer_verify_create(
     return iree_make_status(
         IREE_STATUS_UNIMPLEMENTED,
         "PM4 command buffers require PM4-IB, EVENT_WRITE, SET_SH_REG, "
-        "ACQUIRE_MEM with a supported packet layout, and DISPATCH_DIRECT "
-        "capabilities");
+        "ACQUIRE_MEM with a supported packet layout, DISPATCH_DIRECT, and "
+        "DISPATCH_INDIRECT capabilities");
   }
   if (IREE_UNLIKELY(!resident_pool)) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,

@@ -79,29 +79,54 @@ TEST(PM4CapabilitiesTest, ComputeDispatchDirectRequiresPM4IBSetShRegAndPacket) {
           IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_COMPUTE_DISPATCH_DIRECT));
 }
 
-TEST(PM4CapabilitiesTest, DispatchCommandBuffersRequireBarrierPacketFamilies) {
+TEST(PM4CapabilitiesTest,
+     ComputeDispatchIndirectRequiresPM4IBSetShRegAndPacket) {
+  EXPECT_TRUE(
+      iree_hal_amdgpu_vendor_packet_capabilities_support_pm4_compute_dispatch_indirect(
+          IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_AQL_PM4_IB |
+          IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_SET_SH_REG |
+          IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_COMPUTE_DISPATCH_INDIRECT));
+  EXPECT_FALSE(
+      iree_hal_amdgpu_vendor_packet_capabilities_support_pm4_compute_dispatch_indirect(
+          IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_AQL_PM4_IB |
+          IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_COMPUTE_DISPATCH_INDIRECT));
+  EXPECT_FALSE(
+      iree_hal_amdgpu_vendor_packet_capabilities_support_pm4_compute_dispatch_indirect(
+          IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_SET_SH_REG |
+          IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_COMPUTE_DISPATCH_INDIRECT));
+}
+
+TEST(PM4CapabilitiesTest, DispatchCommandBuffersRequireRdnaPacketFamilies) {
   iree_hal_amdgpu_vendor_packet_capability_flags_t capabilities =
       IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_AQL_PM4_IB |
       IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_EVENT_WRITE |
       IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_SET_SH_REG |
       IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_ACQUIRE_MEM |
       IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_ACQUIRE_MEM_GFX10 |
-      IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_COMPUTE_DISPATCH_DIRECT;
+      IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_COMPUTE_DISPATCH_DIRECT |
+      IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_COMPUTE_DISPATCH_INDIRECT;
   EXPECT_TRUE(
       iree_hal_amdgpu_vendor_packet_capabilities_support_pm4_dispatch_command_buffers(
           capabilities));
+  capabilities &=
+      ~IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_COMPUTE_DISPATCH_INDIRECT;
+  EXPECT_FALSE(
+      iree_hal_amdgpu_vendor_packet_capabilities_support_pm4_dispatch_command_buffers(
+          capabilities));
+  capabilities |=
+      IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_COMPUTE_DISPATCH_INDIRECT;
   capabilities &=
       ~IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_ACQUIRE_MEM_GFX10;
   EXPECT_FALSE(
       iree_hal_amdgpu_vendor_packet_capabilities_support_pm4_dispatch_command_buffers(
           capabilities));
   capabilities |= IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_ACQUIRE_MEM_GFX9;
-  EXPECT_TRUE(
+  EXPECT_FALSE(
       iree_hal_amdgpu_vendor_packet_capabilities_support_pm4_dispatch_command_buffers(
           capabilities));
   capabilities |=
       IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_ACQUIRE_MEM_GFX10;
-  EXPECT_FALSE(
+  EXPECT_TRUE(
       iree_hal_amdgpu_vendor_packet_capabilities_support_pm4_dispatch_command_buffers(
           capabilities));
   capabilities &=

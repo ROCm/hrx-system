@@ -718,7 +718,7 @@ iree_status_t iree_hal_amdgpu_pm4_transfer_record_materialize(
   IREE_RETURN_IF_ERROR(iree_hal_amdgpu_pm4_dword_builder_emit_dispatch_direct(
       state->dword_builder, layout.grid_size,
       launch_state->dispatch_initiator));
-  stats.dispatch_direct_dwords =
+  stats.dispatch_dwords =
       state->dword_builder->dword_count - dword_count_before;
   if (out_stats) *out_stats = stats;
   return iree_ok_status();

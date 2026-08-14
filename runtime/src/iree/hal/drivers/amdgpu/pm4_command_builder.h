@@ -104,6 +104,12 @@ iree_status_t iree_hal_amdgpu_pm4_dword_builder_emit_dispatch_direct(
     iree_hal_amdgpu_pm4_dword_builder_t* builder,
     const uint32_t dispatch_thread_count[3], uint32_t dispatch_initiator);
 
+// Emits one indirect dispatch reading workgroup counts from |indirect_address|.
+// Returns the dword offset of the 64-bit address for optional binding fixup.
+iree_status_t iree_hal_amdgpu_pm4_dword_builder_emit_dispatch_indirect(
+    iree_hal_amdgpu_pm4_dword_builder_t* builder, uint64_t indirect_address,
+    uint32_t dispatch_initiator, uint32_t* out_address_dword_offset);
+
 // Resolves whether a kernarg range is copied into preloaded user-data SGPRs.
 iree_status_t iree_hal_amdgpu_pm4_dispatch_kernarg_range_preload_offset(
     const iree_hal_amdgpu_pm4_dispatch_launch_state_t* launch_state,

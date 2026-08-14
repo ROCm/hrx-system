@@ -28,6 +28,8 @@ typedef enum iree_hal_amdgpu_pm4_dispatch_record_flag_bits_e {
       IREE_HAL_AMDGPU_PM4_COMMAND_RECORD_FLAG_FIXUP_BARRIER,
   IREE_HAL_AMDGPU_PM4_DISPATCH_RECORD_FLAG_PROFILE_FIXUP_BARRIER =
       IREE_HAL_AMDGPU_PM4_COMMAND_RECORD_FLAG_PROFILE_FIXUP_BARRIER,
+  // Workgroup counts are fetched from device memory at execution time.
+  IREE_HAL_AMDGPU_PM4_DISPATCH_RECORD_FLAG_INDIRECT_PARAMETERS = 1u << 3,
 } iree_hal_amdgpu_pm4_dispatch_record_flag_bits_t;
 
 // Compact dispatch record replayed into resident normal and profile programs.
@@ -38,10 +40,18 @@ typedef struct iree_hal_amdgpu_pm4_dispatch_record_t {
   const iree_hal_amdgpu_executable_dispatch_descriptor_t* descriptor;
   // Session-local executable identifier, or 0 when unavailable.
   uint64_t executable_id;
-  // Dispatch workgroup counts.
+  // Static dispatch workgroup counts, or zeros for indirect dispatch.
   uint32_t workgroup_count[3];
-  // DISPATCH_DIRECT thread dimensions.
-  uint32_t dispatch_thread_count[3];
+  // Terminal dispatch packet parameters.
+  union {
+    // Parameters for a direct dispatch packet.
+    struct {
+      // DISPATCH_DIRECT thread dimensions.
+      uint32_t thread_count[3];
+    } direct;
+    // Static address or dynamic binding reference for DISPATCH_INDIRECT.
+    iree_hal_amdgpu_pm4_buffer_ref_record_t indirect;
+  } parameters;
   // HAL command ordinal within this command buffer.
   uint32_t command_index;
   // Executable export ordinal dispatched by this command.
@@ -87,13 +97,13 @@ typedef struct iree_hal_amdgpu_pm4_dispatch_profile_context_t {
   uint32_t operation_count;
 } iree_hal_amdgpu_pm4_dispatch_profile_context_t;
 
-// Appends one direct dispatch after executable and resource validation.
-iree_status_t iree_hal_amdgpu_pm4_dispatch_recorder_record_direct(
+// Appends one direct or indirect dispatch after executable/resource validation.
+iree_status_t iree_hal_amdgpu_pm4_dispatch_recorder_record(
     iree_hal_amdgpu_pm4_dispatch_recorder_t* recorder,
     const iree_hal_amdgpu_executable_dispatch_descriptor_t* descriptor,
     uint64_t executable_id, uint32_t export_ordinal,
     iree_hal_dispatch_config_t config, iree_const_byte_span_t constants,
-    iree_hal_buffer_ref_list_t bindings);
+    iree_hal_buffer_ref_list_t bindings, iree_hal_dispatch_flags_t flags);
 
 // Materializes |record| into the selected PM4 program and fixup builders.
 // |profile_context| is required exactly when |state| selects profile output.

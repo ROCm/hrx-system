@@ -275,6 +275,12 @@ static void iree_hal_amdgpu_host_queue_initialize_pm4_dispatch_event(
   event->event_id = event_id;
   event->command_buffer_id = operation->command_buffer_id;
   event->executable_id = operation->executable_id;
+  if (iree_any_bit_set(
+          operation->flags,
+          IREE_HAL_PROFILE_COMMAND_OPERATION_FLAG_INDIRECT_PARAMETERS)) {
+    event->flags |=
+        IREE_HAL_AMDGPU_PROFILE_DISPATCH_EVENT_FLAG_INDIRECT_PARAMETERS;
+  }
   event->command_index = operation->command_index;
   event->function_ordinal = operation->function_ordinal;
   memcpy(event->workgroup_count, operation->workgroup_count,
