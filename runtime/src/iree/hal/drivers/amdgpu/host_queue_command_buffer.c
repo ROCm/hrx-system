@@ -336,8 +336,9 @@ iree_hal_amdgpu_host_queue_submit_profiled_pm4_command_buffer(
         selection,
     iree_arena_allocator_t* scratch_arena, bool* out_ready) {
   const iree_hal_amdgpu_pm4_command_buffer_profile_plan_t* profile_plan =
-      iree_hal_amdgpu_pm4_command_buffer_profile_plan(command_buffer);
-  if (IREE_UNLIKELY(!profile_plan->program.dwords ||
+      iree_hal_amdgpu_pm4_command_buffer_profile_plan(
+          command_buffer, (uint32_t)queue->physical_queue_ordinal);
+  if (IREE_UNLIKELY(!profile_plan || !profile_plan->program.dwords ||
                     profile_plan->program.dword_count == 0 ||
                     !profile_plan->entries || profile_plan->entry_count == 0 ||
                     !profile_plan->target_base || !profile_plan->dummy_ticks)) {

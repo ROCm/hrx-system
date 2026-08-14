@@ -294,6 +294,8 @@ iree_cc_library(
     "pm4_command_buffer.h"
     "pm4_command_builder.c"
     "pm4_command_builder.h"
+    "pm4_command_program_set.c"
+    "pm4_command_program_set.h"
     "pm4_command_record.h"
     "profile_aqlprofile.c"
     "profile_aqlprofile.h"
@@ -1171,6 +1173,30 @@ iree_cc_test(
     iree::hal
     iree::hal::cts::util::test_base
     iree::hal::drivers::amdgpu::util::topology
+    iree::testing::gtest
+    iree::testing::gtest_main
+  LABELS
+    "iree-build-requirement=runtime.hal.amdgpu"
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+  RESOURCE_GROUP
+    iree-hal-drivers-amdgpu-tests
+)
+endif()
+
+if(IREE_HAL_DRIVER_AMDGPU)
+iree_cc_test(
+  NAME
+    pm4_command_program_set_test
+  SRCS
+    "pm4_command_program_set.h"
+    "pm4_command_program_set_test.cc"
+  DEPS
+    ::amdgpu
+    iree::base
+    iree::hal
+    iree::hal::drivers::amdgpu::abi
+    iree::hal::drivers::amdgpu::util::pm4_program
     iree::testing::gtest
     iree::testing::gtest_main
   LABELS

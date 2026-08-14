@@ -247,6 +247,8 @@ iree_runtime_cc_library(
         "pm4_command_buffer.h",
         "pm4_command_builder.c",
         "pm4_command_builder.h",
+        "pm4_command_program_set.c",
+        "pm4_command_program_set.h",
         "pm4_command_record.h",
         "profile_aqlprofile.c",
         "profile_aqlprofile.h",
@@ -896,6 +898,23 @@ iree_runtime_cc_test(
         "//runtime/src/iree/hal",
         "//runtime/src/iree/hal/cts/util:test_base",
         "//runtime/src/iree/hal/drivers/amdgpu/util:topology",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "pm4_command_program_set_test",
+    srcs = [
+        "pm4_command_program_set.h",
+        "pm4_command_program_set_test.cc",
+    ],
+    deps = [
+        ":amdgpu",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/drivers/amdgpu/abi",
+        "//runtime/src/iree/hal/drivers/amdgpu/util:pm4_program",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],

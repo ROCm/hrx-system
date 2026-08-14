@@ -9,6 +9,7 @@
 #include <inttypes.h>
 #include <string.h>
 
+#include "iree/base/internal/math.h"
 #include "iree/base/threading/mutex.h"
 #include "iree/hal/drivers/amdgpu/abi/kernel_descriptor.h"
 #include "iree/hal/drivers/amdgpu/atomic_memory.h"
@@ -572,6 +573,47 @@ typedef struct iree_hal_amdgpu_pm4_barrier_state_t {
   iree_hsa_fence_scope_t release_scope;
 } iree_hal_amdgpu_pm4_barrier_state_t;
 
+typedef enum iree_hal_amdgpu_pm4_materialization_flag_bits_e {
+  IREE_HAL_AMDGPU_PM4_MATERIALIZATION_FLAG_NONE = 0u,
+  // Emits the dispatch-attributed profiling program for the active queue.
+  IREE_HAL_AMDGPU_PM4_MATERIALIZATION_FLAG_PROFILE = 1u << 0,
+  // Reuses templates already populated by the first normal program variant.
+  IREE_HAL_AMDGPU_PM4_MATERIALIZATION_FLAG_REUSE_TEMPLATES = 1u << 1,
+} iree_hal_amdgpu_pm4_materialization_flag_bits_t;
+
+typedef uint32_t iree_hal_amdgpu_pm4_materialization_flags_t;
+
+// Mutable state scoped to one finalize-time replay of compact command records.
+typedef struct iree_hal_amdgpu_pm4_materialization_state_t {
+  // Resident PM4 program being populated by this replay.
+  iree_hal_amdgpu_pm4_program_t* program;
+  // Shared normal fixup and template plan.
+  iree_hal_amdgpu_pm4_command_buffer_fixup_plan_t* fixup;
+  // Profile plan being populated, or NULL for normal execution.
+  iree_hal_amdgpu_pm4_command_buffer_profile_plan_t* profile;
+  // Borrowed views over the resident regions populated by this replay.
+  struct {
+    // Destination PM4 program builder.
+    iree_hal_amdgpu_pm4_dword_builder_t program;
+    // Shared resident kernarg-template builder.
+    iree_hal_amdgpu_pm4_byte_builder_t template;
+    // Destination dynamic binding fixup builder.
+    iree_hal_amdgpu_pm4_fixup_entry_builder_t fixup;
+  } builders;
+  // Byte offset of the destination program from the resident allocation base.
+  iree_host_size_t program_offset;
+  // PM4 packet-family capabilities for barrier emission.
+  iree_hal_amdgpu_vendor_packet_capability_flags_t vendor_packet_capabilities;
+  // Most recent shader launch state emitted into this program.
+  iree_hal_amdgpu_pm4_dispatch_launch_state_t previous_launch_state;
+  // Whether |previous_launch_state| contains a valid value.
+  bool has_previous_launch_state;
+  // Whether the fixup-to-IB visibility barrier has been emitted.
+  bool has_emitted_fixup_barrier;
+  // iree_hal_amdgpu_pm4_materialization_flag_bits_t mask.
+  iree_hal_amdgpu_pm4_materialization_flags_t flags;
+} iree_hal_amdgpu_pm4_materialization_state_t;
+
 typedef struct iree_hal_amdgpu_pm4_command_buffer_t {
   // Base HAL command-buffer resource.
   iree_hal_command_buffer_t base;
@@ -624,8 +666,6 @@ typedef struct iree_hal_amdgpu_pm4_command_buffer_t {
   bool has_previous_launch_state;
   // True once a normal-program fixup barrier has been assigned to a record.
   bool has_planned_fixup_barrier;
-  // True once the fixup-to-IB visibility barrier has been emitted.
-  bool has_emitted_fixup_barrier;
   // Per-binding atomic memory cells required at queue submission, or NULL
   // when no dynamic atomic targets were recorded.
   iree_hal_amdgpu_atomic_memory_cell_flags_t* atomic_binding_requirements;
@@ -642,34 +682,17 @@ typedef struct iree_hal_amdgpu_pm4_command_buffer_t {
     iree_hal_profile_command_operation_record_t* operations;
     // Number of entries in |operations|.
     uint32_t operation_count;
-    // Expected profile PM4 IB dword count computed while appending records.
+    // Reserved profile PM4 IB dword capacity computed while appending records.
+    // Timestamp alignment NOPs make the emitted length depend on the resident
+    // program address and may leave part of this capacity unused.
     uint32_t record_program_dword_count;
     // Expected profile fixup entry count computed while appending records.
     uint32_t record_fixup_entry_count;
     // True once a profile-program fixup barrier has been assigned to a record.
     bool has_planned_fixup_barrier;
-    // Byte offset of the profile PM4 IB within the resident allocation.
-    iree_host_size_t program_offset;
-    // Byte offset of dummy timestamp storage within the resident allocation.
-    iree_host_size_t dummy_ticks_offset;
-    // PM4 dwords materialized from compact records for profiling.
-    iree_hal_amdgpu_pm4_dword_builder_t dword_builder;
-    // Dynamic binding and timestamp fixup entries for the profile PM4 IB.
-    iree_hal_amdgpu_pm4_fixup_entry_builder_t fixup_builder;
-    // Resident profile program and fixup plan produced by end().
-    iree_hal_amdgpu_pm4_command_buffer_profile_plan_t plan;
-    // Allocated byte length of |plan.entries|.
-    iree_host_size_t entry_byte_length;
   } profile;
   // Compact host command records accumulated while recording.
   iree_hal_amdgpu_pm4_byte_builder_t record_builder;
-  // PM4 dwords materialized from compact records during end().
-  iree_hal_amdgpu_pm4_dword_builder_t dword_builder;
-  // Kernarg-template bytes materialized from compact records during end().
-  iree_hal_amdgpu_pm4_byte_builder_t template_builder;
-  // Dynamic binding fixup entries materialized from compact records during
-  // end().
-  iree_hal_amdgpu_pm4_fixup_entry_builder_t fixup_builder;
   // Expected resident PM4 IB dword count computed while appending records.
   uint32_t record_ib_dword_count;
   // Expected resident kernarg-template byte length computed while appending
@@ -681,15 +704,10 @@ typedef struct iree_hal_amdgpu_pm4_command_buffer_t {
   iree_host_size_t resident_template_offset;
   // Finalize-time publication stats.
   iree_hal_amdgpu_pm4_command_buffer_publish_stats_t publish_stats;
-  // Resident immutable PM4 indirect buffer produced by end().
-  iree_hal_amdgpu_pm4_program_t program;
-  // Resident command-buffer fixup plan produced by end().
-  struct {
-    // Device-visible resident template and fixup plan.
-    iree_hal_amdgpu_pm4_command_buffer_fixup_plan_t plan;
-    // Allocated byte length of |plan.entries|.
-    iree_host_size_t entry_byte_length;
-  } fixup;
+  // Shared execution and queue-indexed profile plans produced by end().
+  iree_hal_amdgpu_pm4_command_program_set_t program_set;
+  // Total byte length of the resident allocation backing |program_set|.
+  iree_host_size_t resident_byte_length;
 } iree_hal_amdgpu_pm4_command_buffer_t;
 
 static iree_hal_amdgpu_pm4_command_buffer_t*
@@ -946,38 +964,12 @@ static void iree_hal_amdgpu_pm4_recording_builders_initialize(
       &command_buffer->retained_resources);
   iree_hal_amdgpu_pm4_byte_builder_initialize(command_buffer->host_allocator,
                                               &command_buffer->record_builder);
-  iree_hal_amdgpu_pm4_dword_builder_initialize(command_buffer->host_allocator,
-                                               &command_buffer->dword_builder);
-  iree_hal_amdgpu_pm4_byte_builder_initialize(
-      command_buffer->host_allocator, &command_buffer->template_builder);
-  iree_hal_amdgpu_pm4_fixup_entry_builder_initialize(
-      command_buffer->host_allocator, &command_buffer->fixup_builder);
-  if (iree_hal_amdgpu_pm4_command_buffer_materializes_profile_dispatch_timestamps(
-          command_buffer)) {
-    iree_hal_amdgpu_pm4_dword_builder_initialize(
-        command_buffer->host_allocator, &command_buffer->profile.dword_builder);
-    iree_hal_amdgpu_pm4_fixup_entry_builder_initialize(
-        command_buffer->host_allocator, &command_buffer->profile.fixup_builder);
-  }
 }
 
 static void iree_hal_amdgpu_pm4_recording_builders_deinitialize(
     iree_hal_amdgpu_pm4_command_buffer_t* command_buffer) {
   iree_hal_amdgpu_pm4_retained_resource_table_deinitialize(
       command_buffer->host_allocator, &command_buffer->retained_resources);
-  if (iree_hal_amdgpu_pm4_command_buffer_materializes_profile_dispatch_timestamps(
-          command_buffer)) {
-    iree_hal_amdgpu_pm4_fixup_entry_builder_deinitialize(
-        &command_buffer->profile.fixup_builder);
-    iree_hal_amdgpu_pm4_dword_builder_deinitialize(
-        &command_buffer->profile.dword_builder);
-  }
-  iree_hal_amdgpu_pm4_fixup_entry_builder_deinitialize(
-      &command_buffer->fixup_builder);
-  iree_hal_amdgpu_pm4_byte_builder_deinitialize(
-      &command_buffer->template_builder);
-  iree_hal_amdgpu_pm4_dword_builder_deinitialize(
-      &command_buffer->dword_builder);
   iree_hal_amdgpu_pm4_byte_builder_deinitialize(
       &command_buffer->record_builder);
   if (!iree_hal_amdgpu_pm4_command_buffer_has_pending_publication(
@@ -990,8 +982,6 @@ static void iree_hal_amdgpu_pm4_recording_builders_deinitialize(
   command_buffer->resident_template_offset = 0;
   command_buffer->profile.record_program_dword_count = 0;
   command_buffer->profile.record_fixup_entry_count = 0;
-  command_buffer->profile.program_offset = 0;
-  command_buffer->profile.dummy_ticks_offset = 0;
 }
 
 //===----------------------------------------------------------------------===//
@@ -1080,121 +1070,96 @@ static iree_status_t iree_hal_amdgpu_pm4_dword_builder_emit_timestamp(
 // Resident storage publication
 //===----------------------------------------------------------------------===//
 
-static void iree_hal_amdgpu_pm4_command_buffer_fixup_reset(
+static void iree_hal_amdgpu_pm4_command_buffer_reset_resident_plans(
     iree_hal_amdgpu_pm4_command_buffer_t* command_buffer) {
-  memset(&command_buffer->fixup, 0, sizeof(command_buffer->fixup));
+  memset(&command_buffer->program_set.program, 0,
+         sizeof(command_buffer->program_set.program));
+  memset(&command_buffer->program_set.fixup, 0,
+         sizeof(command_buffer->program_set.fixup));
+  if (command_buffer->program_set.profile_plans) {
+    memset(command_buffer->program_set.profile_plans, 0,
+           command_buffer->program_set.physical_queue_count *
+               sizeof(command_buffer->program_set.profile_plans[0]));
+  }
+  command_buffer->resident_byte_length = 0;
 }
 
-static void iree_hal_amdgpu_pm4_command_buffer_profile_plan_reset(
-    iree_hal_amdgpu_pm4_command_buffer_t* command_buffer) {
-  memset(&command_buffer->profile.plan, 0,
-         sizeof(command_buffer->profile.plan));
-  command_buffer->profile.entry_byte_length = 0;
-}
+static void iree_hal_amdgpu_pm4_command_buffer_bind_resident_plans(
+    iree_hal_amdgpu_pm4_command_buffer_t* command_buffer,
+    const iree_hal_amdgpu_pm4_command_program_layout_t* layout,
+    uint8_t* resident_base, uint32_t profile_binding_count) {
+  uint8_t* const template_base = layout->template_byte_length != 0
+                                     ? resident_base + layout->template_offset
+                                     : NULL;
+  command_buffer->program_set.program = (iree_hal_amdgpu_pm4_program_t){
+      .libhsa = command_buffer->libhsa,
+      .memory_pool = command_buffer->resident_pool->memory_pool,
+      .dwords = (uint32_t*)(resident_base + layout->program_offset),
+      .dword_count = (uint32_t)(layout->program_byte_length / sizeof(uint32_t)),
+      .byte_length = layout->program_byte_length,
+  };
+  command_buffer->program_set
+      .fixup = (iree_hal_amdgpu_pm4_command_buffer_fixup_plan_t){
+      .entries =
+          layout->fixup_byte_length != 0
+              ? (const iree_hal_amdgpu_command_buffer_pm4_fixup_entry_t*)(resident_base +
+                                                                          layout
+                                                                              ->fixup_offset)
+              : NULL,
+      .entry_count = command_buffer->record_fixup_entry_count,
+      .target_base = resident_base,
+      .target_byte_length = layout->total_byte_length,
+      .template_base = template_base,
+      .template_byte_length = layout->template_byte_length,
+  };
 
-typedef struct iree_hal_amdgpu_pm4_resident_layout_t {
-  // Total byte length of the resident allocation.
-  iree_host_size_t total_byte_length;
-  // Byte length of the normal execution PM4 IB.
-  iree_host_size_t program_byte_length;
-  // Byte offset of the profiling PM4 IB, or 0 when absent.
-  iree_host_size_t profile_program_offset;
-  // Byte length of the profiling PM4 IB, or 0 when absent.
-  iree_host_size_t profile_program_byte_length;
-  // Capacity of the profiling PM4 IB in dwords.
-  uint32_t profile_program_dword_count;
-  // Byte offset of shared kernarg template storage.
-  iree_host_size_t template_offset;
-  // Byte offset of normal execution fixup entries.
-  iree_host_size_t fixup_offset;
-  // Byte length of normal execution fixup entries.
-  iree_host_size_t entry_byte_length;
-  // Byte offset of profiling fixup entries, or 0 when absent.
-  iree_host_size_t profile_fixup_offset;
-  // Byte length of profiling fixup entries, or 0 when absent.
-  iree_host_size_t profile_entry_byte_length;
-  // Byte offset of dummy profiling timestamp storage, or 0 when absent.
-  iree_host_size_t dummy_ticks_offset;
-} iree_hal_amdgpu_pm4_resident_layout_t;
-
-static iree_status_t iree_hal_amdgpu_pm4_align_host_size(
-    iree_host_size_t value, iree_host_size_t alignment,
-    iree_host_size_t* out_aligned_value) {
-  *out_aligned_value = 0;
-  if (IREE_UNLIKELY(!iree_host_size_is_power_of_two(alignment))) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "PM4 resident alignment must be a power-of-two");
+  for (uint32_t profile_plan_ordinal = 0;
+       profile_plan_ordinal < command_buffer->program_set.profile_plan_count;
+       ++profile_plan_ordinal) {
+    const iree_host_size_t profile_program_offset =
+        iree_hal_amdgpu_pm4_command_program_layout_profile_program_offset(
+            layout, profile_plan_ordinal);
+    const iree_host_size_t profile_fixup_offset =
+        iree_hal_amdgpu_pm4_command_program_layout_profile_fixup_offset(
+            layout, profile_plan_ordinal);
+    const iree_host_size_t dummy_ticks_offset =
+        iree_hal_amdgpu_pm4_command_program_layout_dummy_ticks_offset(
+            layout, profile_plan_ordinal);
+    command_buffer->program_set.profile_plans
+        [profile_plan_ordinal] = (iree_hal_amdgpu_pm4_command_buffer_profile_plan_t){
+        .program =
+            {
+                .libhsa = command_buffer->libhsa,
+                .memory_pool = command_buffer->resident_pool->memory_pool,
+                .dwords = (uint32_t*)(resident_base + profile_program_offset),
+                .dword_count = (uint32_t)(layout->profile_program_byte_length /
+                                          sizeof(uint32_t)),
+                .byte_length = layout->profile_program_byte_length,
+            },
+        .entries =
+            layout->profile_fixup_byte_length != 0
+                ? (const iree_hal_amdgpu_command_buffer_pm4_fixup_entry_t*)(resident_base +
+                                                                            profile_fixup_offset)
+                : NULL,
+        .entry_count = command_buffer->profile.record_fixup_entry_count,
+        .timestamp_binding_base = command_buffer->base.binding_count,
+        .binding_count = profile_binding_count,
+        .operation_count = command_buffer->record_command_count,
+        .target_base = resident_base,
+        .dummy_ticks = (iree_hal_amdgpu_timestamp_range_t*)(resident_base +
+                                                            dummy_ticks_offset),
+    };
   }
-  if (IREE_UNLIKELY(value > UINTPTR_MAX - (alignment - 1))) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "PM4 resident layout alignment overflows");
-  }
-  *out_aligned_value = iree_host_align(value, alignment);
-  return iree_ok_status();
 }
 
 static iree_status_t
-iree_hal_amdgpu_pm4_command_buffer_allocate_host_staging_storage(
+iree_hal_amdgpu_pm4_command_buffer_prepare_resident_storage(
     iree_hal_amdgpu_pm4_command_buffer_t* command_buffer,
-    uint32_t resident_dword_count,
-    const iree_hal_amdgpu_pm4_resident_layout_t* layout) {
-  command_buffer->publish_stats.host_staging_bytes = layout->total_byte_length;
-  const bool collect_timings =
-      iree_hal_amdgpu_pm4_command_buffer_collects_finalize_timings(
-          command_buffer);
-  iree_hal_amdgpu_pm4_command_buffer_resident_allocation_t* allocation = NULL;
-  iree_status_t status =
-      iree_hal_amdgpu_pm4_command_buffer_resident_pool_acquire_staging(
-          command_buffer->resident_pool, layout->total_byte_length,
-          collect_timings, &command_buffer->publish_stats, &allocation);
-  if (iree_status_is_ok(status)) {
-    command_buffer->host_staging_allocation = allocation;
-    uint8_t* staging_base = allocation->base;
-    iree_hal_amdgpu_pm4_dword_builder_borrow_storage(
-        &command_buffer->dword_builder, (uint32_t*)staging_base,
-        resident_dword_count);
-    if (layout->profile_program_dword_count > 0) {
-      iree_hal_amdgpu_pm4_dword_builder_borrow_storage(
-          &command_buffer->profile.dword_builder,
-          (uint32_t*)(staging_base + layout->profile_program_offset),
-          layout->profile_program_dword_count);
-    }
-    iree_hal_amdgpu_pm4_byte_builder_borrow_storage(
-        &command_buffer->template_builder,
-        staging_base + layout->template_offset,
-        command_buffer->record_template_byte_length);
-    iree_hal_amdgpu_pm4_fixup_entry_builder_borrow_storage(
-        &command_buffer->fixup_builder,
-        layout->entry_byte_length > 0
-            ? (iree_hal_amdgpu_command_buffer_pm4_fixup_entry_t*)(staging_base +
-                                                                  layout
-                                                                      ->fixup_offset)
-            : NULL,
-        command_buffer->record_fixup_entry_count);
-    if (layout->profile_entry_byte_length > 0) {
-      iree_hal_amdgpu_pm4_fixup_entry_builder_borrow_storage(
-          &command_buffer->profile.fixup_builder,
-          (iree_hal_amdgpu_command_buffer_pm4_fixup_entry_t*)(staging_base +
-                                                              layout
-                                                                  ->profile_fixup_offset),
-          command_buffer->profile.record_fixup_entry_count);
-    }
-    if (layout->dummy_ticks_offset > 0) {
-      memset(staging_base + layout->dummy_ticks_offset, 0,
-             sizeof(iree_hal_amdgpu_timestamp_range_t));
-    }
-  }
-  return status;
-}
-
-static iree_status_t
-iree_hal_amdgpu_pm4_command_buffer_allocate_resident_storage(
-    iree_hal_amdgpu_pm4_command_buffer_t* command_buffer,
-    uint32_t resident_dword_count) {
-  if (IREE_UNLIKELY(resident_dword_count == 0)) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "PM4 command-buffer resident program is empty");
-  }
+    uint32_t program_dword_count,
+    iree_hal_amdgpu_pm4_command_program_layout_t* out_layout,
+    uint8_t** out_materialization_base) {
+  memset(out_layout, 0, sizeof(*out_layout));
+  *out_materialization_base = NULL;
   if (IREE_UNLIKELY(command_buffer->record_template_byte_length == 0 &&
                     command_buffer->record_fixup_entry_count != 0)) {
     return iree_make_status(
@@ -1202,103 +1167,31 @@ iree_hal_amdgpu_pm4_command_buffer_allocate_resident_storage(
         "PM4 command-buffer fixup entries require target storage");
   }
 
-  iree_hal_amdgpu_pm4_resident_layout_t layout = {0};
-  IREE_RETURN_IF_ERROR(IREE_STRUCT_LAYOUT(
-      0, &layout.program_byte_length,
-      IREE_STRUCT_FIELD(resident_dword_count, uint32_t, NULL)));
-  command_buffer->publish_stats.program_bytes = layout.program_byte_length;
+  uint32_t profile_binding_count = 0;
+  if (command_buffer->program_set.profile_plan_count != 0) {
+    if (IREE_UNLIKELY(command_buffer->record_command_count >
+                      (UINT32_MAX - command_buffer->base.binding_count) / 2u)) {
+      return iree_make_status(
+          IREE_STATUS_OUT_OF_RANGE,
+          "PM4 profile timestamp binding count exceeds uint32_t storage");
+    }
+    profile_binding_count = command_buffer->base.binding_count +
+                            2u * command_buffer->record_command_count;
+  }
+
+  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_pm4_command_program_layout_calculate(
+      &command_buffer->program_set, program_dword_count,
+      command_buffer->profile.record_program_dword_count,
+      command_buffer->record_template_byte_length,
+      command_buffer->record_fixup_entry_count,
+      command_buffer->profile.record_fixup_entry_count, out_layout));
+  command_buffer->publish_stats.program_bytes = out_layout->program_byte_length;
   command_buffer->publish_stats.template_bytes =
-      command_buffer->record_template_byte_length;
-
-  iree_host_size_t layout_cursor = layout.program_byte_length;
-  if (command_buffer->profile.record_program_dword_count > 0) {
-    IREE_RETURN_IF_ERROR(iree_hal_amdgpu_pm4_align_host_size(
-        layout_cursor, sizeof(uint64_t), &layout.profile_program_offset));
-    layout.profile_program_dword_count =
-        command_buffer->profile.record_program_dword_count;
-    IREE_RETURN_IF_ERROR(IREE_STRUCT_LAYOUT(
-        0, &layout.profile_program_byte_length,
-        IREE_STRUCT_FIELD(layout.profile_program_dword_count, uint32_t, NULL)));
-    if (!iree_host_size_checked_add(layout.profile_program_offset,
-                                    layout.profile_program_byte_length,
-                                    &layout_cursor)) {
-      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                              "PM4 resident profile IB layout overflows");
-    }
-  }
-
-  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_pm4_align_host_size(
-      layout_cursor, iree_max_align_t, &layout.template_offset));
-
-  iree_host_size_t template_end = 0;
-  if (!iree_host_size_checked_add(layout.template_offset,
-                                  command_buffer->record_template_byte_length,
-                                  &template_end)) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "PM4 resident template layout overflows");
-  }
-  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_pm4_align_host_size(
-      template_end,
-      iree_alignof(iree_hal_amdgpu_command_buffer_pm4_fixup_entry_t),
-      &layout.fixup_offset));
-
-  if (command_buffer->record_fixup_entry_count > 0) {
-    IREE_RETURN_IF_ERROR(IREE_STRUCT_LAYOUT(
-        0, &layout.entry_byte_length,
-        IREE_STRUCT_FIELD(command_buffer->record_fixup_entry_count,
-                          iree_hal_amdgpu_command_buffer_pm4_fixup_entry_t,
-                          NULL)));
-  }
-  command_buffer->publish_stats.fixup_entry_bytes = layout.entry_byte_length;
-
-  if (!iree_host_size_checked_add(layout.fixup_offset, layout.entry_byte_length,
-                                  &layout_cursor)) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "PM4 resident allocation size overflows");
-  }
-  if (command_buffer->profile.record_fixup_entry_count > 0) {
-    IREE_RETURN_IF_ERROR(iree_hal_amdgpu_pm4_align_host_size(
-        layout_cursor,
-        iree_alignof(iree_hal_amdgpu_command_buffer_pm4_fixup_entry_t),
-        &layout.profile_fixup_offset));
-    IREE_RETURN_IF_ERROR(IREE_STRUCT_LAYOUT(
-        0, &layout.profile_entry_byte_length,
-        IREE_STRUCT_FIELD(command_buffer->profile.record_fixup_entry_count,
-                          iree_hal_amdgpu_command_buffer_pm4_fixup_entry_t,
-                          NULL)));
-    if (!iree_host_size_checked_add(layout.profile_fixup_offset,
-                                    layout.profile_entry_byte_length,
-                                    &layout_cursor)) {
-      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                              "PM4 resident profile fixup layout overflows");
-    }
-  }
-  if (command_buffer->profile.record_program_dword_count > 0) {
-    IREE_RETURN_IF_ERROR(iree_hal_amdgpu_pm4_align_host_size(
-        layout_cursor, sizeof(iree_hal_amdgpu_timestamp_range_t),
-        &layout.dummy_ticks_offset));
-    if (!iree_host_size_checked_add(layout.dummy_ticks_offset,
-                                    sizeof(iree_hal_amdgpu_timestamp_range_t),
-                                    &layout_cursor)) {
-      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                              "PM4 resident profile dummy tick layout "
-                              "overflows");
-    }
-  }
-  layout.total_byte_length = layout_cursor;
-
-  if (IREE_UNLIKELY((command_buffer->record_fixup_entry_count > 0 ||
-                     command_buffer->profile.record_fixup_entry_count > 0) &&
-                    layout.total_byte_length > UINT32_MAX)) {
-    return iree_make_status(
-        IREE_STATUS_OUT_OF_RANGE,
-        "PM4 resident allocation fixup target offsets exceed uint32_t "
-        "storage");
-  }
-  command_buffer->publish_stats.resident_bytes = layout.total_byte_length;
-  command_buffer->resident_template_offset = layout.template_offset;
-  command_buffer->profile.program_offset = layout.profile_program_offset;
-  command_buffer->profile.dummy_ticks_offset = layout.dummy_ticks_offset;
+      out_layout->template_byte_length;
+  command_buffer->publish_stats.fixup_entry_bytes =
+      out_layout->fixup_byte_length;
+  command_buffer->publish_stats.resident_bytes = out_layout->total_byte_length;
+  command_buffer->resident_template_offset = out_layout->template_offset;
 
   const bool collect_timings =
       iree_hal_amdgpu_pm4_command_buffer_collects_finalize_timings(
@@ -1307,156 +1200,136 @@ iree_hal_amdgpu_pm4_command_buffer_allocate_resident_storage(
       resident_allocation = NULL;
   iree_status_t status =
       iree_hal_amdgpu_pm4_command_buffer_resident_pool_acquire(
-          command_buffer->resident_pool, layout.total_byte_length,
+          command_buffer->resident_pool, out_layout->total_byte_length,
           collect_timings, &command_buffer->publish_stats,
           &resident_allocation);
-  uint8_t* resident_base =
-      iree_status_is_ok(status) ? resident_allocation->base : NULL;
-
+  uint8_t* materialization_base = NULL;
   if (iree_status_is_ok(status)) {
     command_buffer->resident_allocation = resident_allocation;
-    command_buffer->program.libhsa = command_buffer->libhsa;
-    command_buffer->program.memory_pool =
-        command_buffer->resident_pool->memory_pool;
-    command_buffer->program.dwords = (uint32_t*)resident_base;
-    command_buffer->program.dword_count = resident_dword_count;
-    command_buffer->program.byte_length = layout.total_byte_length;
-    command_buffer->fixup.plan.entries =
-        layout.entry_byte_length > 0
-            ? (const iree_hal_amdgpu_command_buffer_pm4_fixup_entry_t*)(resident_base +
-                                                                        layout
-                                                                            .fixup_offset)
-            : NULL;
-    command_buffer->fixup.plan.entry_count =
-        command_buffer->record_fixup_entry_count;
-    command_buffer->fixup.plan.reserved0 = 0;
-    command_buffer->fixup.plan.target_base = resident_base;
-    command_buffer->fixup.plan.target_byte_length = layout.total_byte_length;
-    command_buffer->fixup.plan.template_base =
-        command_buffer->record_template_byte_length > 0
-            ? resident_base + layout.template_offset
-            : NULL;
-    command_buffer->fixup.plan.template_byte_length =
-        command_buffer->record_template_byte_length;
-    command_buffer->fixup.entry_byte_length = layout.entry_byte_length;
-    if (layout.profile_program_dword_count > 0) {
-      command_buffer->profile.plan.program.libhsa = command_buffer->libhsa;
-      command_buffer->profile.plan.program.memory_pool =
-          command_buffer->resident_pool->memory_pool;
-      command_buffer->profile.plan.program.dwords =
-          (uint32_t*)(resident_base + layout.profile_program_offset);
-      command_buffer->profile.plan.program.dword_count =
-          layout.profile_program_dword_count;
-      command_buffer->profile.plan.program.byte_length =
-          layout.profile_program_byte_length;
-      command_buffer->profile.plan.entries =
-          layout.profile_entry_byte_length > 0
-              ? (const iree_hal_amdgpu_command_buffer_pm4_fixup_entry_t*)(resident_base +
-                                                                          layout
-                                                                              .profile_fixup_offset)
-              : NULL;
-      command_buffer->profile.plan.entry_count =
-          command_buffer->profile.record_fixup_entry_count;
-      command_buffer->profile.plan.timestamp_binding_base =
-          command_buffer->base.binding_count;
-      if (IREE_UNLIKELY(command_buffer->record_command_count >
-                        (UINT32_MAX - command_buffer->base.binding_count) /
-                            2u)) {
-        status = iree_make_status(
-            IREE_STATUS_OUT_OF_RANGE,
-            "PM4 profile timestamp binding count exceeds uint32_t storage");
-      } else {
-        command_buffer->profile.plan.binding_count =
-            command_buffer->base.binding_count +
-            2u * command_buffer->record_command_count;
+    command_buffer->resident_byte_length = out_layout->total_byte_length;
+    iree_hal_amdgpu_pm4_command_buffer_bind_resident_plans(
+        command_buffer, out_layout, resident_allocation->base,
+        profile_binding_count);
+
+    if (iree_hal_amdgpu_pm4_command_buffer_uses_host_async_copy(
+            command_buffer)) {
+      command_buffer->publish_stats.host_staging_bytes =
+          out_layout->total_byte_length;
+      iree_hal_amdgpu_pm4_command_buffer_resident_allocation_t*
+          staging_allocation = NULL;
+      status = iree_hal_amdgpu_pm4_command_buffer_resident_pool_acquire_staging(
+          command_buffer->resident_pool, out_layout->total_byte_length,
+          collect_timings, &command_buffer->publish_stats, &staging_allocation);
+      if (iree_status_is_ok(status)) {
+        command_buffer->host_staging_allocation = staging_allocation;
+        materialization_base = staging_allocation->base;
       }
-      command_buffer->profile.plan.operation_count =
-          command_buffer->record_command_count;
-      command_buffer->profile.plan.target_base = resident_base;
-      command_buffer->profile.plan.dummy_ticks =
-          (iree_hal_amdgpu_timestamp_range_t*)(resident_base +
-                                               layout.dummy_ticks_offset);
-      command_buffer->profile.entry_byte_length =
-          layout.profile_entry_byte_length;
-    }
-    if (iree_status_is_ok(status)) {
-      if (iree_hal_amdgpu_pm4_command_buffer_uses_host_async_copy(
-              command_buffer)) {
-        status =
-            iree_hal_amdgpu_pm4_command_buffer_allocate_host_staging_storage(
-                command_buffer, resident_dword_count, &layout);
-      } else if (iree_hal_amdgpu_pm4_command_buffer_materializes_to_host(
-                     command_buffer)) {
-        status = iree_hal_amdgpu_pm4_dword_builder_reserve(
-            &command_buffer->dword_builder, resident_dword_count);
-        if (iree_status_is_ok(status) &&
-            layout.profile_program_dword_count > 0) {
-          status = iree_hal_amdgpu_pm4_dword_builder_reserve(
-              &command_buffer->profile.dword_builder,
-              layout.profile_program_dword_count);
-        }
-        if (iree_status_is_ok(status)) {
-          status = iree_hal_amdgpu_pm4_byte_builder_reserve(
-              &command_buffer->template_builder,
-              command_buffer->record_template_byte_length);
-        }
-        if (iree_status_is_ok(status)) {
-          status = iree_hal_amdgpu_pm4_fixup_entry_builder_reserve(
-              &command_buffer->fixup_builder,
-              command_buffer->record_fixup_entry_count);
-        }
-        if (iree_status_is_ok(status) && layout.profile_entry_byte_length > 0) {
-          status = iree_hal_amdgpu_pm4_fixup_entry_builder_reserve(
-              &command_buffer->profile.fixup_builder,
-              command_buffer->profile.record_fixup_entry_count);
-        }
-      } else {
-        iree_hal_amdgpu_pm4_dword_builder_borrow_storage(
-            &command_buffer->dword_builder, (uint32_t*)resident_base,
-            resident_dword_count);
-        if (layout.profile_program_dword_count > 0) {
-          iree_hal_amdgpu_pm4_dword_builder_borrow_storage(
-              &command_buffer->profile.dword_builder,
-              (uint32_t*)(resident_base + layout.profile_program_offset),
-              layout.profile_program_dword_count);
-        }
-        iree_hal_amdgpu_pm4_byte_builder_borrow_storage(
-            &command_buffer->template_builder,
-            command_buffer->fixup.plan.template_base,
-            command_buffer->record_template_byte_length);
-        iree_hal_amdgpu_pm4_fixup_entry_builder_borrow_storage(
-            &command_buffer->fixup_builder,
-            (iree_hal_amdgpu_command_buffer_pm4_fixup_entry_t*)
-                command_buffer->fixup.plan.entries,
-            command_buffer->record_fixup_entry_count);
-        if (layout.profile_entry_byte_length > 0) {
-          iree_hal_amdgpu_pm4_fixup_entry_builder_borrow_storage(
-              &command_buffer->profile.fixup_builder,
-              (iree_hal_amdgpu_command_buffer_pm4_fixup_entry_t*)
-                  command_buffer->profile.plan.entries,
-              command_buffer->profile.record_fixup_entry_count);
-        }
-        if (layout.dummy_ticks_offset > 0) {
-          memset(resident_base + layout.dummy_ticks_offset, 0,
-                 sizeof(iree_hal_amdgpu_timestamp_range_t));
-        }
+    } else if (iree_hal_amdgpu_pm4_command_buffer_materializes_to_host(
+                   command_buffer)) {
+      command_buffer->publish_stats.host_staging_bytes =
+          out_layout->total_byte_length;
+      const iree_time_t time_start = collect_timings ? iree_time_now() : 0;
+      status = iree_allocator_malloc(command_buffer->host_allocator,
+                                     out_layout->total_byte_length,
+                                     (void**)&materialization_base);
+      if (collect_timings) {
+        command_buffer->publish_stats.host_staging_allocate_ns +=
+            iree_time_now() - time_start;
       }
+    } else {
+      materialization_base = resident_allocation->base;
     }
   }
-
-  if (!iree_status_is_ok(status) && resident_allocation) {
+  if (iree_status_is_ok(status)) {
+    memset(materialization_base, 0, out_layout->total_byte_length);
+    *out_materialization_base = materialization_base;
+  } else if (resident_allocation) {
+    if (materialization_base &&
+        iree_hal_amdgpu_pm4_command_buffer_materializes_to_host(
+            command_buffer) &&
+        !iree_hal_amdgpu_pm4_command_buffer_uses_host_async_copy(
+            command_buffer)) {
+      iree_allocator_free(command_buffer->host_allocator, materialization_base);
+    }
+    iree_hal_amdgpu_pm4_command_buffer_host_staging_reset(command_buffer);
     iree_hal_amdgpu_pm4_command_buffer_resident_pool_release(
         command_buffer->resident_pool, resident_allocation);
     command_buffer->resident_allocation = NULL;
-    memset(&command_buffer->program, 0, sizeof(command_buffer->program));
-    memset(&command_buffer->fixup, 0, sizeof(command_buffer->fixup));
-    iree_hal_amdgpu_pm4_command_buffer_profile_plan_reset(command_buffer);
+    iree_hal_amdgpu_pm4_command_buffer_reset_resident_plans(command_buffer);
   }
   return status;
 }
 
+static void iree_hal_amdgpu_pm4_command_buffer_initialize_materialization_state(
+    iree_hal_amdgpu_pm4_command_buffer_t* command_buffer,
+    const iree_hal_amdgpu_pm4_command_program_layout_t* layout,
+    uint8_t* materialization_base, uint32_t profile_plan_ordinal,
+    iree_hal_amdgpu_pm4_materialization_flags_t flags,
+    iree_hal_amdgpu_pm4_materialization_state_t* out_state) {
+  const bool is_profile =
+      iree_any_bit_set(flags, IREE_HAL_AMDGPU_PM4_MATERIALIZATION_FLAG_PROFILE);
+  const iree_host_size_t program_offset =
+      is_profile
+          ? iree_hal_amdgpu_pm4_command_program_layout_profile_program_offset(
+                layout, profile_plan_ordinal)
+          : layout->program_offset;
+  const iree_host_size_t fixup_offset =
+      is_profile
+          ? iree_hal_amdgpu_pm4_command_program_layout_profile_fixup_offset(
+                layout, profile_plan_ordinal)
+          : layout->fixup_offset;
+  const uint32_t program_dword_count =
+      (uint32_t)((is_profile ? layout->profile_program_byte_length
+                             : layout->program_byte_length) /
+                 sizeof(uint32_t));
+  const uint32_t fixup_entry_count =
+      is_profile ? command_buffer->profile.record_fixup_entry_count
+                 : command_buffer->record_fixup_entry_count;
+
+  *out_state = (iree_hal_amdgpu_pm4_materialization_state_t){
+      .program = is_profile ? &command_buffer->program_set
+                                   .profile_plans[profile_plan_ordinal]
+                                   .program
+                            : &command_buffer->program_set.program,
+      .fixup = &command_buffer->program_set.fixup,
+      .profile =
+          is_profile
+              ? &command_buffer->program_set.profile_plans[profile_plan_ordinal]
+              : NULL,
+      .program_offset = program_offset,
+      .vendor_packet_capabilities = command_buffer->vendor_packet_capabilities,
+      .flags = flags,
+  };
+  iree_hal_amdgpu_pm4_dword_builder_initialize(command_buffer->host_allocator,
+                                               &out_state->builders.program);
+  iree_hal_amdgpu_pm4_dword_builder_borrow_storage(
+      &out_state->builders.program,
+      (uint32_t*)(materialization_base + program_offset), program_dword_count);
+  iree_hal_amdgpu_pm4_byte_builder_initialize(command_buffer->host_allocator,
+                                              &out_state->builders.template);
+  iree_hal_amdgpu_pm4_byte_builder_borrow_storage(
+      &out_state->builders.template,
+      layout->template_byte_length != 0
+          ? materialization_base + layout->template_offset
+          : NULL,
+      layout->template_byte_length);
+  if (iree_any_bit_set(
+          flags, IREE_HAL_AMDGPU_PM4_MATERIALIZATION_FLAG_REUSE_TEMPLATES)) {
+    out_state->builders.template.length = layout->template_byte_length;
+  }
+  iree_hal_amdgpu_pm4_fixup_entry_builder_initialize(
+      command_buffer->host_allocator, &out_state->builders.fixup);
+  iree_hal_amdgpu_pm4_fixup_entry_builder_borrow_storage(
+      &out_state->builders.fixup,
+      fixup_entry_count != 0
+          ? (iree_hal_amdgpu_command_buffer_pm4_fixup_entry_t*)(materialization_base +
+                                                                fixup_offset)
+          : NULL,
+      fixup_entry_count);
+}
+
 static iree_status_t
-iree_hal_amdgpu_pm4_command_buffer_copy_materialized_segment_sync(
+iree_hal_amdgpu_pm4_command_buffer_copy_materialized_image_sync(
     iree_hal_amdgpu_pm4_command_buffer_t* command_buffer, void* target,
     const void* source, iree_host_size_t byte_length) {
   if (byte_length == 0) return iree_ok_status();
@@ -1467,7 +1340,7 @@ iree_hal_amdgpu_pm4_command_buffer_copy_materialized_segment_sync(
 }
 
 static iree_status_t
-iree_hal_amdgpu_pm4_command_buffer_launch_materialized_segment_async(
+iree_hal_amdgpu_pm4_command_buffer_launch_materialized_image_async(
     iree_hal_amdgpu_pm4_command_buffer_t* command_buffer, void* target,
     const void* source, iree_host_size_t byte_length,
     hsa_signal_t* out_completion_signal) {
@@ -1496,12 +1369,12 @@ iree_hal_amdgpu_pm4_command_buffer_launch_materialized_segment_async(
 }
 
 static iree_status_t
-iree_hal_amdgpu_pm4_command_buffer_copy_materialized_segment_async(
+iree_hal_amdgpu_pm4_command_buffer_copy_materialized_image_async(
     iree_hal_amdgpu_pm4_command_buffer_t* command_buffer, void* target,
     const void* source, iree_host_size_t byte_length) {
   hsa_signal_t completion_signal = {0};
   iree_status_t status =
-      iree_hal_amdgpu_pm4_command_buffer_launch_materialized_segment_async(
+      iree_hal_amdgpu_pm4_command_buffer_launch_materialized_image_async(
           command_buffer, target, source, byte_length, &completion_signal);
   if (iree_status_is_ok(status) && completion_signal.handle) {
     const hsa_signal_value_t completion_value = iree_hsa_signal_wait_scacquire(
@@ -1526,31 +1399,21 @@ iree_hal_amdgpu_pm4_command_buffer_copy_materialized_segment_async(
 }
 
 static iree_status_t
-iree_hal_amdgpu_pm4_command_buffer_copy_materialized_segment(
-    iree_hal_amdgpu_pm4_command_buffer_t* command_buffer, void* target,
-    const void* source, iree_host_size_t byte_length) {
-  if (iree_hal_amdgpu_pm4_command_buffer_uses_host_async_copy(command_buffer)) {
-    return iree_hal_amdgpu_pm4_command_buffer_copy_materialized_segment_async(
-        command_buffer, target, source, byte_length);
-  }
-  return iree_hal_amdgpu_pm4_command_buffer_copy_materialized_segment_sync(
-      command_buffer, target, source, byte_length);
-}
-
-static iree_status_t
 iree_hal_amdgpu_pm4_command_buffer_copy_materialized_storage(
-    iree_hal_amdgpu_pm4_command_buffer_t* command_buffer) {
+    iree_hal_amdgpu_pm4_command_buffer_t* command_buffer,
+    const uint8_t* materialization_base) {
   IREE_TRACE_ZONE_BEGIN(z0);
+  void* const resident_base = command_buffer->resident_allocation->base;
+  const iree_host_size_t byte_length = command_buffer->resident_byte_length;
+  iree_status_t status = iree_ok_status();
   if (iree_hal_amdgpu_pm4_command_buffer_uses_host_async_copy(command_buffer)) {
-    iree_status_t status = iree_ok_status();
     if (iree_hal_amdgpu_pm4_command_buffer_uses_nonblocking_publication(
             command_buffer)) {
       hsa_signal_t completion_signal = {0};
       status =
-          iree_hal_amdgpu_pm4_command_buffer_launch_materialized_segment_async(
-              command_buffer, command_buffer->program.dwords,
-              command_buffer->host_staging_allocation->base,
-              command_buffer->program.byte_length, &completion_signal);
+          iree_hal_amdgpu_pm4_command_buffer_launch_materialized_image_async(
+              command_buffer, resident_base, materialization_base, byte_length,
+              &completion_signal);
       if (iree_status_is_ok(status) && completion_signal.handle) {
         iree_slim_mutex_lock(&command_buffer->publication_mutex);
         IREE_ASSERT(iree_hsa_signal_is_null(command_buffer->publication_signal),
@@ -1560,68 +1423,15 @@ iree_hal_amdgpu_pm4_command_buffer_copy_materialized_storage(
                     "references");
         command_buffer->publication_signal = completion_signal;
         iree_slim_mutex_unlock(&command_buffer->publication_mutex);
-        command_buffer->publish_stats.resident_copy_bytes +=
-            command_buffer->program.byte_length;
+        command_buffer->publish_stats.resident_copy_bytes += byte_length;
       }
     } else {
-      status =
-          iree_hal_amdgpu_pm4_command_buffer_copy_materialized_segment_async(
-              command_buffer, command_buffer->program.dwords,
-              command_buffer->host_staging_allocation->base,
-              command_buffer->program.byte_length);
+      status = iree_hal_amdgpu_pm4_command_buffer_copy_materialized_image_async(
+          command_buffer, resident_base, materialization_base, byte_length);
     }
-    IREE_TRACE_ZONE_END(z0);
-    return status;
-  }
-
-  const iree_host_size_t program_byte_length =
-      (iree_host_size_t)command_buffer->dword_builder.dword_count *
-      sizeof(command_buffer->dword_builder.dwords[0]);
-  iree_status_t status =
-      iree_hal_amdgpu_pm4_command_buffer_copy_materialized_segment(
-          command_buffer, command_buffer->program.dwords,
-          command_buffer->dword_builder.dwords, program_byte_length);
-  if (iree_status_is_ok(status)) {
-    status = iree_hal_amdgpu_pm4_command_buffer_copy_materialized_segment(
-        command_buffer, command_buffer->fixup.plan.template_base,
-        command_buffer->template_builder.bytes,
-        command_buffer->template_builder.length);
-  }
-  const iree_host_size_t fixup_entry_byte_length =
-      (iree_host_size_t)command_buffer->fixup_builder.count *
-      sizeof(command_buffer->fixup_builder.entries[0]);
-  if (iree_status_is_ok(status)) {
-    status = iree_hal_amdgpu_pm4_command_buffer_copy_materialized_segment(
-        command_buffer,
-        (iree_hal_amdgpu_command_buffer_pm4_fixup_entry_t*)
-            command_buffer->fixup.plan.entries,
-        command_buffer->fixup_builder.entries, fixup_entry_byte_length);
-  }
-  const iree_host_size_t profile_program_byte_length =
-      (iree_host_size_t)command_buffer->profile.dword_builder.dword_count *
-      sizeof(command_buffer->profile.dword_builder.dwords[0]);
-  if (iree_status_is_ok(status) && profile_program_byte_length > 0) {
-    status = iree_hal_amdgpu_pm4_command_buffer_copy_materialized_segment(
-        command_buffer, command_buffer->profile.plan.program.dwords,
-        command_buffer->profile.dword_builder.dwords,
-        profile_program_byte_length);
-  }
-  const iree_host_size_t profile_entry_byte_length =
-      (iree_host_size_t)command_buffer->profile.fixup_builder.count *
-      sizeof(command_buffer->profile.fixup_builder.entries[0]);
-  if (iree_status_is_ok(status) && profile_entry_byte_length > 0) {
-    status = iree_hal_amdgpu_pm4_command_buffer_copy_materialized_segment(
-        command_buffer,
-        (iree_hal_amdgpu_command_buffer_pm4_fixup_entry_t*)
-            command_buffer->profile.plan.entries,
-        command_buffer->profile.fixup_builder.entries,
-        profile_entry_byte_length);
-  }
-  if (iree_status_is_ok(status) && command_buffer->profile.plan.dummy_ticks) {
-    const iree_hal_amdgpu_timestamp_range_t zero_ticks = {0};
-    status = iree_hal_amdgpu_pm4_command_buffer_copy_materialized_segment(
-        command_buffer, command_buffer->profile.plan.dummy_ticks, &zero_ticks,
-        sizeof(zero_ticks));
+  } else {
+    status = iree_hal_amdgpu_pm4_command_buffer_copy_materialized_image_sync(
+        command_buffer, resident_base, materialization_base, byte_length);
   }
   IREE_TRACE_ZONE_END(z0);
   return status;
@@ -1630,6 +1440,22 @@ iree_hal_amdgpu_pm4_command_buffer_copy_materialized_storage(
 static uint64_t iree_hal_amdgpu_pm4_command_buffer_host_record_bytes(
     const iree_hal_amdgpu_pm4_command_buffer_t* command_buffer) {
   return command_buffer->record_builder.length;
+}
+
+static iree_status_t iree_hal_amdgpu_pm4_align_host_size(
+    iree_host_size_t value, iree_host_size_t alignment,
+    iree_host_size_t* out_aligned_value) {
+  *out_aligned_value = 0;
+  if (IREE_UNLIKELY(!iree_host_size_is_power_of_two(alignment))) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "PM4 alignment must be a power-of-two");
+  }
+  if (IREE_UNLIKELY(value > UINTPTR_MAX - (alignment - 1))) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "PM4 alignment overflows host size");
+  }
+  *out_aligned_value = iree_host_align(value, alignment);
+  return iree_ok_status();
 }
 
 //===----------------------------------------------------------------------===//
@@ -1730,7 +1556,8 @@ static iree_status_t iree_hal_amdgpu_pm4_command_buffer_resolve_buffer_ref(
 }
 
 static iree_status_t iree_hal_amdgpu_pm4_command_buffer_write_template(
-    iree_hal_amdgpu_pm4_command_buffer_t* command_buffer,
+    iree_hal_amdgpu_pm4_fixup_entry_builder_t* fixup_builder,
+    iree_host_size_t resident_template_offset,
     const iree_hal_amdgpu_device_kernel_args_t* kernel_args,
     const iree_hal_amdgpu_kernarg_layout_t* layout, uint32_t template_offset,
     const iree_hal_dispatch_config_t config, iree_const_byte_span_t constants,
@@ -1751,18 +1578,17 @@ static iree_status_t iree_hal_amdgpu_pm4_command_buffer_write_template(
     }
     if (iree_any_bit_set(binding_record->flags,
                          IREE_HAL_AMDGPU_PM4_BINDING_RECORD_FLAG_DYNAMIC)) {
-      if (IREE_UNLIKELY(command_buffer->resident_template_offset >
+      if (IREE_UNLIKELY(resident_template_offset >
                         UINT32_MAX - binding_record->target_offset)) {
         return iree_make_status(
             IREE_STATUS_OUT_OF_RANGE,
             "PM4 command-buffer dynamic template fixup offset overflows");
       }
       IREE_RETURN_IF_ERROR(iree_hal_amdgpu_pm4_fixup_entry_builder_append(
-          &command_buffer->fixup_builder,
+          fixup_builder,
           (iree_hal_amdgpu_command_buffer_pm4_fixup_entry_t){
-              .target_offset =
-                  (uint32_t)command_buffer->resident_template_offset +
-                  binding_record->target_offset,
+              .target_offset = (uint32_t)resident_template_offset +
+                               binding_record->target_offset,
               .binding_slot = binding_record->binding_slot,
               .binding_offset = binding_record->value,
           }));
@@ -2238,6 +2064,7 @@ static iree_status_t iree_hal_amdgpu_pm4_command_buffer_append_dispatch_record(
 
 static iree_status_t iree_hal_amdgpu_pm4_command_buffer_materialize_dispatch(
     iree_hal_amdgpu_pm4_command_buffer_t* command_buffer,
+    iree_hal_amdgpu_pm4_materialization_state_t* state,
     const iree_hal_amdgpu_pm4_dispatch_record_t* record) {
   const iree_hal_amdgpu_executable_dispatch_descriptor_t* descriptor =
       record->descriptor;
@@ -2258,67 +2085,77 @@ static iree_status_t iree_hal_amdgpu_pm4_command_buffer_materialize_dispatch(
   if (iree_any_bit_set(
           record->flags,
           IREE_HAL_AMDGPU_PM4_DISPATCH_RECORD_FLAG_EXECUTION_BARRIER)) {
-    const uint32_t dword_count_before =
-        command_buffer->dword_builder.dword_count;
+    const uint32_t dword_count_before = state->builders.program.dword_count;
     IREE_RETURN_IF_ERROR(iree_hal_amdgpu_pm4_dword_builder_emit_barrier(
-        &command_buffer->dword_builder,
-        command_buffer->vendor_packet_capabilities,
+        &state->builders.program, state->vendor_packet_capabilities,
         IREE_HAL_AMDGPU_PM4_BARRIER_FLAG_EXECUTION,
         record->barrier_acquire_scope, record->barrier_release_scope));
     command_buffer->publish_stats.execution_barrier_dwords +=
-        command_buffer->dword_builder.dword_count - dword_count_before;
+        state->builders.program.dword_count - dword_count_before;
   }
 
   uint8_t* template_bytes = NULL;
-  uint32_t template_offset = 0;
-  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_pm4_byte_builder_append_aligned(
-      &command_buffer->template_builder, layout->kernarg_alignment,
-      layout->kernarg_byte_length, &template_offset, &template_bytes));
-  if (IREE_UNLIKELY(template_offset != record->template_offset)) {
-    return iree_make_status(IREE_STATUS_INTERNAL,
-                            "PM4 template materialization offset changed");
+  if (iree_any_bit_set(
+          state->flags,
+          IREE_HAL_AMDGPU_PM4_MATERIALIZATION_FLAG_REUSE_TEMPLATES)) {
+    if (IREE_UNLIKELY(
+            record->template_offset > state->builders.template.length ||
+            layout->kernarg_byte_length >
+                state->builders.template.length - record->template_offset)) {
+      return iree_make_status(
+          IREE_STATUS_INTERNAL,
+          "PM4 dispatch template lies outside populated resident storage");
+    }
+    template_bytes = state->builders.template.bytes + record->template_offset;
+  } else {
+    uint32_t template_offset = 0;
+    IREE_RETURN_IF_ERROR(iree_hal_amdgpu_pm4_byte_builder_append_aligned(
+        &state->builders.template, layout->kernarg_alignment,
+        layout->kernarg_byte_length, &template_offset, &template_bytes));
+    if (IREE_UNLIKELY(template_offset != record->template_offset)) {
+      return iree_make_status(IREE_STATUS_INTERNAL,
+                              "PM4 template materialization offset changed");
+    }
+    IREE_RETURN_IF_ERROR(iree_hal_amdgpu_pm4_command_buffer_write_template(
+        &state->builders.fixup, command_buffer->resident_template_offset,
+        kernel_args, layout, record->template_offset, config, constants,
+        binding_records, record->binding_record_count,
+        command_buffer->hostcall_buffer, template_bytes));
   }
-  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_pm4_command_buffer_write_template(
-      command_buffer, kernel_args, layout, record->template_offset, config,
-      constants, binding_records, record->binding_record_count,
-      command_buffer->hostcall_buffer, template_bytes));
 
   if (iree_any_bit_set(
           record->flags,
           IREE_HAL_AMDGPU_PM4_DISPATCH_RECORD_FLAG_FIXUP_BARRIER)) {
-    if (IREE_UNLIKELY(command_buffer->has_emitted_fixup_barrier)) {
+    if (IREE_UNLIKELY(state->has_emitted_fixup_barrier)) {
       return iree_make_status(IREE_STATUS_INTERNAL,
                               "PM4 program contains multiple fixup barriers");
     }
-    const uint32_t dword_count_before =
-        command_buffer->dword_builder.dword_count;
+    const uint32_t dword_count_before = state->builders.program.dword_count;
     IREE_RETURN_IF_ERROR(iree_hal_amdgpu_pm4_dword_builder_emit_barrier(
-        &command_buffer->dword_builder,
-        command_buffer->vendor_packet_capabilities,
+        &state->builders.program, state->vendor_packet_capabilities,
         IREE_HAL_AMDGPU_PM4_BARRIER_FLAG_FIXUP_TO_IB, IREE_HSA_FENCE_SCOPE_NONE,
         IREE_HSA_FENCE_SCOPE_NONE));
     command_buffer->publish_stats.fixup_barrier_dwords +=
-        command_buffer->dword_builder.dword_count - dword_count_before;
-    command_buffer->has_emitted_fixup_barrier = true;
+        state->builders.program.dword_count - dword_count_before;
+    state->has_emitted_fixup_barrier = true;
   }
 
   const iree_hal_amdgpu_pm4_dispatch_launch_state_t* launch_state =
       &descriptor->pm4_launch_state;
-  if (!command_buffer->has_previous_launch_state ||
-      memcmp(&command_buffer->previous_launch_state, launch_state,
+  if (!state->has_previous_launch_state ||
+      memcmp(&state->previous_launch_state, launch_state,
              sizeof(*launch_state)) != 0) {
-    const uint32_t dword_count_before =
-        command_buffer->dword_builder.dword_count;
+    const uint32_t dword_count_before = state->builders.program.dword_count;
     IREE_RETURN_IF_ERROR(iree_hal_amdgpu_pm4_dword_builder_emit_dispatch_setup(
-        &command_buffer->dword_builder, descriptor->pm4_setup_dwords,
+        &state->builders.program, descriptor->pm4_setup_dwords,
         descriptor->pm4_setup_dword_count));
     command_buffer->publish_stats.dispatch_setup_dwords +=
-        command_buffer->dword_builder.dword_count - dword_count_before;
-    command_buffer->previous_launch_state = *launch_state;
-    command_buffer->has_previous_launch_state = true;
+        state->builders.program.dword_count - dword_count_before;
+    state->previous_launch_state = *launch_state;
+    state->has_previous_launch_state = true;
   }
 
-  if (IREE_UNLIKELY(!command_buffer->fixup.plan.template_base)) {
+  if (IREE_UNLIKELY(!state->fixup->template_base)) {
     return iree_make_status(
         IREE_STATUS_FAILED_PRECONDITION,
         "PM4 command-buffer dispatch requires resident kernarg storage");
@@ -2329,63 +2166,63 @@ static iree_status_t iree_hal_amdgpu_pm4_command_buffer_materialize_dispatch(
         "PM4 command-buffer dispatch has no kernarg user-data dwords");
   }
   const uintptr_t kernarg_address =
-      (uintptr_t)command_buffer->fixup.plan.template_base +
-      record->template_offset;
-  uint32_t dword_count_before = command_buffer->dword_builder.dword_count;
+      (uintptr_t)state->fixup->template_base + record->template_offset;
+  uint32_t dword_count_before = state->builders.program.dword_count;
   const uint32_t user_data_program_dword_offset =
-      command_buffer->dword_builder.dword_count;
+      state->builders.program.dword_count;
   const uint8_t* kernarg_preload_data =
       launch_state->kernarg_preload_dword_count != 0
           ? template_bytes +
                 launch_state->kernarg_preload_dword_offset * sizeof(uint32_t)
           : NULL;
   IREE_RETURN_IF_ERROR(iree_hal_amdgpu_pm4_dword_builder_emit_user_data(
-      &command_buffer->dword_builder, launch_state, kernarg_address,
+      &state->builders.program, launch_state, kernarg_address,
       kernarg_preload_data));
   command_buffer->publish_stats.dispatch_user_data_dwords +=
-      command_buffer->dword_builder.dword_count - dword_count_before;
+      state->builders.program.dword_count - dword_count_before;
   IREE_RETURN_IF_ERROR(
       iree_hal_amdgpu_pm4_command_buffer_append_preloaded_binding_fixups(
-          &command_buffer->fixup_builder, /*program_offset=*/0, launch_state,
+          &state->builders.fixup, state->program_offset, launch_state,
           binding_records, record->binding_record_count,
           record->template_offset, user_data_program_dword_offset));
-  dword_count_before = command_buffer->dword_builder.dword_count;
+  dword_count_before = state->builders.program.dword_count;
   IREE_RETURN_IF_ERROR(iree_hal_amdgpu_pm4_dword_builder_emit_dispatch_direct(
-      &command_buffer->dword_builder, record->dispatch_thread_count,
+      &state->builders.program, record->dispatch_thread_count,
       launch_state->dispatch_initiator));
   command_buffer->publish_stats.dispatch_direct_dwords +=
-      command_buffer->dword_builder.dword_count - dword_count_before;
+      state->builders.program.dword_count - dword_count_before;
   return iree_ok_status();
 }
 
 static iree_status_t iree_hal_amdgpu_pm4_command_buffer_materialize_atomic(
     iree_hal_amdgpu_pm4_command_buffer_t* command_buffer,
+    iree_hal_amdgpu_pm4_materialization_state_t* state,
     const iree_hal_amdgpu_pm4_atomic_record_t* record) {
   if (iree_any_bit_set(record->flags,
                        IREE_HAL_AMDGPU_PM4_ATOMIC_RECORD_FLAG_FIXUP_BARRIER) &&
-      IREE_UNLIKELY(command_buffer->has_emitted_fixup_barrier)) {
+      IREE_UNLIKELY(state->has_emitted_fixup_barrier)) {
     return iree_make_status(IREE_STATUS_INTERNAL,
                             "PM4 program contains multiple fixup barriers");
   }
-  iree_hal_amdgpu_pm4_atomic_materialization_state_t state = {
-      .dword_builder = &command_buffer->dword_builder,
-      .template_builder = &command_buffer->template_builder,
-      .fixup_builder = &command_buffer->fixup_builder,
+  iree_hal_amdgpu_pm4_atomic_materialization_state_t atomic_state = {
+      .dword_builder = &state->builders.program,
+      .template_builder = &state->builders.template,
+      .fixup_builder = &state->builders.fixup,
       .atomic_context = command_buffer->atomic_context,
-      .template_base = command_buffer->fixup.plan.template_base,
+      .template_base = state->fixup->template_base,
       .resident_template_offset = command_buffer->resident_template_offset,
-      .program_offset = 0,
-      .vendor_packet_capabilities = command_buffer->vendor_packet_capabilities,
-      .previous_launch_state = command_buffer->previous_launch_state,
-      .has_previous_launch_state = command_buffer->has_previous_launch_state,
+      .program_offset = state->program_offset,
+      .vendor_packet_capabilities = state->vendor_packet_capabilities,
+      .previous_launch_state = state->previous_launch_state,
+      .has_previous_launch_state = state->has_previous_launch_state,
       .flags = IREE_HAL_AMDGPU_PM4_ATOMIC_MATERIALIZATION_FLAG_NONE,
   };
   iree_hal_amdgpu_pm4_atomic_materialization_stats_t stats = {0};
-  IREE_RETURN_IF_ERROR(
-      iree_hal_amdgpu_pm4_atomic_record_materialize(record, &state, &stats));
-  command_buffer->previous_launch_state = state.previous_launch_state;
-  command_buffer->has_previous_launch_state = state.has_previous_launch_state;
-  command_buffer->has_emitted_fixup_barrier |= iree_any_bit_set(
+  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_pm4_atomic_record_materialize(
+      record, &atomic_state, &stats));
+  state->previous_launch_state = atomic_state.previous_launch_state;
+  state->has_previous_launch_state = atomic_state.has_previous_launch_state;
+  state->has_emitted_fixup_barrier |= iree_any_bit_set(
       record->flags, IREE_HAL_AMDGPU_PM4_ATOMIC_RECORD_FLAG_FIXUP_BARRIER);
   command_buffer->publish_stats.execution_barrier_dwords +=
       stats.execution_barrier_dwords;
@@ -2403,6 +2240,7 @@ static iree_status_t iree_hal_amdgpu_pm4_command_buffer_materialize_atomic(
 static iree_status_t
 iree_hal_amdgpu_pm4_command_buffer_append_profile_template_fixups(
     iree_hal_amdgpu_pm4_command_buffer_t* command_buffer,
+    iree_hal_amdgpu_pm4_materialization_state_t* state,
     const iree_hal_amdgpu_pm4_binding_record_t* binding_records,
     uint32_t binding_record_count) {
   for (uint32_t i = 0; i < binding_record_count; ++i) {
@@ -2420,7 +2258,7 @@ iree_hal_amdgpu_pm4_command_buffer_append_profile_template_fixups(
           "overflows");
     }
     IREE_RETURN_IF_ERROR(iree_hal_amdgpu_pm4_fixup_entry_builder_append(
-        &command_buffer->profile.fixup_builder,
+        &state->builders.fixup,
         (iree_hal_amdgpu_command_buffer_pm4_fixup_entry_t){
             .target_offset =
                 (uint32_t)command_buffer->resident_template_offset +
@@ -2434,12 +2272,12 @@ iree_hal_amdgpu_pm4_command_buffer_append_profile_template_fixups(
 
 static iree_status_t
 iree_hal_amdgpu_pm4_command_buffer_append_profile_timestamp_fixup(
-    iree_hal_amdgpu_pm4_command_buffer_t* command_buffer,
+    iree_hal_amdgpu_pm4_materialization_state_t* state,
     uint32_t target_dword_offset, uint32_t binding_slot) {
   iree_host_size_t target_byte_offset = 0;
   if (IREE_UNLIKELY(
           !iree_host_size_checked_add(
-              command_buffer->profile.program_offset,
+              state->program_offset,
               (iree_host_size_t)target_dword_offset * sizeof(uint32_t),
               &target_byte_offset) ||
           target_byte_offset > UINT32_MAX)) {
@@ -2448,7 +2286,7 @@ iree_hal_amdgpu_pm4_command_buffer_append_profile_timestamp_fixup(
         "PM4 profile timestamp fixup target offset exceeds uint32_t storage");
   }
   return iree_hal_amdgpu_pm4_fixup_entry_builder_append(
-      &command_buffer->profile.fixup_builder,
+      &state->builders.fixup,
       (iree_hal_amdgpu_command_buffer_pm4_fixup_entry_t){
           .target_offset = (uint32_t)target_byte_offset,
           .binding_slot = binding_slot,
@@ -2459,6 +2297,7 @@ iree_hal_amdgpu_pm4_command_buffer_append_profile_timestamp_fixup(
 static iree_status_t
 iree_hal_amdgpu_pm4_command_buffer_materialize_profile_dispatch(
     iree_hal_amdgpu_pm4_command_buffer_t* command_buffer,
+    iree_hal_amdgpu_pm4_materialization_state_t* state,
     const iree_hal_amdgpu_pm4_dispatch_record_t* record) {
   const iree_hal_amdgpu_executable_dispatch_descriptor_t* descriptor =
       record->descriptor;
@@ -2471,42 +2310,41 @@ iree_hal_amdgpu_pm4_command_buffer_materialize_profile_dispatch(
           record->flags,
           IREE_HAL_AMDGPU_PM4_DISPATCH_RECORD_FLAG_EXECUTION_BARRIER)) {
     IREE_RETURN_IF_ERROR(iree_hal_amdgpu_pm4_dword_builder_emit_barrier(
-        &command_buffer->profile.dword_builder,
-        command_buffer->vendor_packet_capabilities,
+        &state->builders.program, state->vendor_packet_capabilities,
         IREE_HAL_AMDGPU_PM4_BARRIER_FLAG_EXECUTION,
         record->barrier_acquire_scope, record->barrier_release_scope));
   }
   IREE_RETURN_IF_ERROR(
       iree_hal_amdgpu_pm4_command_buffer_append_profile_template_fixups(
-          command_buffer, binding_records, record->binding_record_count));
+          command_buffer, state, binding_records,
+          record->binding_record_count));
 
   if (iree_any_bit_set(
           record->flags,
           IREE_HAL_AMDGPU_PM4_DISPATCH_RECORD_FLAG_PROFILE_FIXUP_BARRIER)) {
-    if (IREE_UNLIKELY(command_buffer->has_emitted_fixup_barrier)) {
+    if (IREE_UNLIKELY(state->has_emitted_fixup_barrier)) {
       return iree_make_status(
           IREE_STATUS_INTERNAL,
           "PM4 profile program contains multiple fixup barriers");
     }
     IREE_RETURN_IF_ERROR(iree_hal_amdgpu_pm4_dword_builder_emit_barrier(
-        &command_buffer->profile.dword_builder,
-        command_buffer->vendor_packet_capabilities,
+        &state->builders.program, state->vendor_packet_capabilities,
         IREE_HAL_AMDGPU_PM4_BARRIER_FLAG_FIXUP_TO_IB, IREE_HSA_FENCE_SCOPE_NONE,
         IREE_HSA_FENCE_SCOPE_NONE));
-    command_buffer->has_emitted_fixup_barrier = true;
+    state->has_emitted_fixup_barrier = true;
   }
 
-  if (!command_buffer->has_previous_launch_state ||
-      memcmp(&command_buffer->previous_launch_state, launch_state,
+  if (!state->has_previous_launch_state ||
+      memcmp(&state->previous_launch_state, launch_state,
              sizeof(*launch_state)) != 0) {
     IREE_RETURN_IF_ERROR(iree_hal_amdgpu_pm4_dword_builder_emit_dispatch_setup(
-        &command_buffer->profile.dword_builder, descriptor->pm4_setup_dwords,
+        &state->builders.program, descriptor->pm4_setup_dwords,
         descriptor->pm4_setup_dword_count));
-    command_buffer->previous_launch_state = *launch_state;
-    command_buffer->has_previous_launch_state = true;
+    state->previous_launch_state = *launch_state;
+    state->has_previous_launch_state = true;
   }
 
-  if (IREE_UNLIKELY(!command_buffer->fixup.plan.template_base)) {
+  if (IREE_UNLIKELY(!state->fixup->template_base)) {
     return iree_make_status(
         IREE_STATUS_FAILED_PRECONDITION,
         "PM4 profile command-buffer dispatch requires resident kernarg "
@@ -2518,111 +2356,99 @@ iree_hal_amdgpu_pm4_command_buffer_materialize_profile_dispatch(
         "PM4 profile command-buffer dispatch has no kernarg user-data dwords");
   }
   const uintptr_t kernarg_address =
-      (uintptr_t)command_buffer->fixup.plan.template_base +
-      record->template_offset;
+      (uintptr_t)state->fixup->template_base + record->template_offset;
   const uint32_t user_data_program_dword_offset =
-      command_buffer->profile.dword_builder.dword_count;
+      state->builders.program.dword_count;
   const uint8_t* template_bytes =
-      command_buffer->template_builder.bytes + record->template_offset;
+      state->builders.template.bytes + record->template_offset;
   const uint8_t* kernarg_preload_data =
       launch_state->kernarg_preload_dword_count != 0
           ? template_bytes +
                 launch_state->kernarg_preload_dword_offset * sizeof(uint32_t)
           : NULL;
   IREE_RETURN_IF_ERROR(iree_hal_amdgpu_pm4_dword_builder_emit_user_data(
-      &command_buffer->profile.dword_builder, launch_state, kernarg_address,
+      &state->builders.program, launch_state, kernarg_address,
       kernarg_preload_data));
   IREE_RETURN_IF_ERROR(
       iree_hal_amdgpu_pm4_command_buffer_append_preloaded_binding_fixups(
-          &command_buffer->profile.fixup_builder,
-          command_buffer->profile.program_offset, launch_state, binding_records,
-          record->binding_record_count, record->template_offset,
-          user_data_program_dword_offset));
+          &state->builders.fixup, state->program_offset, launch_state,
+          binding_records, record->binding_record_count,
+          record->template_offset, user_data_program_dword_offset));
 
-  if (IREE_UNLIKELY(record->command_index >=
-                    command_buffer->profile.plan.operation_count)) {
+  if (IREE_UNLIKELY(record->command_index >= state->profile->operation_count)) {
     return iree_make_status(
         IREE_STATUS_INTERNAL,
         "PM4 profile command index exceeds retained dispatch count");
   }
   const uint32_t timestamp_binding_slot =
-      command_buffer->profile.plan.timestamp_binding_base +
-      record->command_index * 2u;
+      state->profile->timestamp_binding_base + record->command_index * 2u;
   uint32_t timestamp_target_dword_offset = 0;
   IREE_RETURN_IF_ERROR(iree_hal_amdgpu_pm4_dword_builder_align_timestamp_target(
-      &command_buffer->profile.dword_builder,
-      command_buffer->profile.program_offset));
+      &state->builders.program, state->program_offset));
   IREE_RETURN_IF_ERROR(iree_hal_amdgpu_pm4_dword_builder_emit_timestamp(
-      &command_buffer->profile.dword_builder,
-      command_buffer->pm4_timestamp_strategy,
-      &command_buffer->profile.plan.dummy_ticks->start_tick,
+      &state->builders.program, command_buffer->pm4_timestamp_strategy,
+      &state->profile->dummy_ticks->start_tick,
       &timestamp_target_dword_offset));
   IREE_RETURN_IF_ERROR(
       iree_hal_amdgpu_pm4_command_buffer_append_profile_timestamp_fixup(
-          command_buffer, timestamp_target_dword_offset,
-          timestamp_binding_slot));
+          state, timestamp_target_dword_offset, timestamp_binding_slot));
 
   IREE_RETURN_IF_ERROR(iree_hal_amdgpu_pm4_dword_builder_emit_dispatch_direct(
-      &command_buffer->profile.dword_builder, record->dispatch_thread_count,
+      &state->builders.program, record->dispatch_thread_count,
       launch_state->dispatch_initiator));
   IREE_RETURN_IF_ERROR(iree_hal_amdgpu_pm4_dword_builder_emit_barrier(
-      &command_buffer->profile.dword_builder,
-      command_buffer->vendor_packet_capabilities,
+      &state->builders.program, state->vendor_packet_capabilities,
       IREE_HAL_AMDGPU_PM4_BARRIER_FLAG_EXECUTION, IREE_HSA_FENCE_SCOPE_NONE,
       IREE_HSA_FENCE_SCOPE_NONE));
 
   IREE_RETURN_IF_ERROR(iree_hal_amdgpu_pm4_dword_builder_align_timestamp_target(
-      &command_buffer->profile.dword_builder,
-      command_buffer->profile.program_offset));
+      &state->builders.program, state->program_offset));
   IREE_RETURN_IF_ERROR(iree_hal_amdgpu_pm4_dword_builder_emit_timestamp(
-      &command_buffer->profile.dword_builder,
-      command_buffer->pm4_timestamp_strategy,
-      &command_buffer->profile.plan.dummy_ticks->end_tick,
-      &timestamp_target_dword_offset));
+      &state->builders.program, command_buffer->pm4_timestamp_strategy,
+      &state->profile->dummy_ticks->end_tick, &timestamp_target_dword_offset));
   return iree_hal_amdgpu_pm4_command_buffer_append_profile_timestamp_fixup(
-      command_buffer, timestamp_target_dword_offset,
-      timestamp_binding_slot + 1u);
+      state, timestamp_target_dword_offset, timestamp_binding_slot + 1u);
 }
 
 static iree_status_t
 iree_hal_amdgpu_pm4_command_buffer_materialize_profile_atomic(
     iree_hal_amdgpu_pm4_command_buffer_t* command_buffer,
+    iree_hal_amdgpu_pm4_materialization_state_t* state,
     const iree_hal_amdgpu_pm4_atomic_record_t* record) {
   if (iree_any_bit_set(
           record->flags,
           IREE_HAL_AMDGPU_PM4_ATOMIC_RECORD_FLAG_PROFILE_FIXUP_BARRIER) &&
-      IREE_UNLIKELY(command_buffer->has_emitted_fixup_barrier)) {
+      IREE_UNLIKELY(state->has_emitted_fixup_barrier)) {
     return iree_make_status(
         IREE_STATUS_INTERNAL,
         "PM4 profile program contains multiple fixup barriers");
   }
-  iree_hal_amdgpu_pm4_atomic_materialization_state_t state = {
-      .dword_builder = &command_buffer->profile.dword_builder,
-      .template_builder = &command_buffer->template_builder,
-      .fixup_builder = &command_buffer->profile.fixup_builder,
+  iree_hal_amdgpu_pm4_atomic_materialization_state_t atomic_state = {
+      .dword_builder = &state->builders.program,
+      .template_builder = &state->builders.template,
+      .fixup_builder = &state->builders.fixup,
       .atomic_context = command_buffer->atomic_context,
-      .template_base = command_buffer->fixup.plan.template_base,
+      .template_base = state->fixup->template_base,
       .resident_template_offset = command_buffer->resident_template_offset,
-      .program_offset = command_buffer->profile.program_offset,
-      .vendor_packet_capabilities = command_buffer->vendor_packet_capabilities,
-      .previous_launch_state = command_buffer->previous_launch_state,
-      .has_previous_launch_state = command_buffer->has_previous_launch_state,
+      .program_offset = state->program_offset,
+      .vendor_packet_capabilities = state->vendor_packet_capabilities,
+      .previous_launch_state = state->previous_launch_state,
+      .has_previous_launch_state = state->has_previous_launch_state,
       .flags = IREE_HAL_AMDGPU_PM4_ATOMIC_MATERIALIZATION_FLAG_PROFILE,
   };
   IREE_RETURN_IF_ERROR(iree_hal_amdgpu_pm4_atomic_record_materialize(
-      record, &state, /*out_stats=*/NULL));
-  command_buffer->previous_launch_state = state.previous_launch_state;
-  command_buffer->has_previous_launch_state = state.has_previous_launch_state;
-  command_buffer->has_emitted_fixup_barrier |= iree_any_bit_set(
+      record, &atomic_state, /*out_stats=*/NULL));
+  state->previous_launch_state = atomic_state.previous_launch_state;
+  state->has_previous_launch_state = atomic_state.has_previous_launch_state;
+  state->has_emitted_fixup_barrier |= iree_any_bit_set(
       record->flags,
       IREE_HAL_AMDGPU_PM4_ATOMIC_RECORD_FLAG_PROFILE_FIXUP_BARRIER);
   return iree_ok_status();
 }
 
 static iree_status_t iree_hal_amdgpu_pm4_command_buffer_materialize_records(
-    iree_hal_amdgpu_pm4_command_buffer_t* command_buffer) {
-  command_buffer->has_previous_launch_state = false;
-  command_buffer->has_emitted_fixup_barrier = false;
+    iree_hal_amdgpu_pm4_command_buffer_t* command_buffer,
+    iree_hal_amdgpu_pm4_materialization_state_t* state) {
   const uint8_t* cursor = command_buffer->record_builder.bytes;
   const uint8_t* const end = cursor + command_buffer->record_builder.length;
   while (cursor < end) {
@@ -2642,7 +2468,7 @@ static iree_status_t iree_hal_amdgpu_pm4_command_buffer_materialize_records(
       case IREE_HAL_AMDGPU_PM4_COMMAND_RECORD_OPCODE_DISPATCH: {
         IREE_RETURN_IF_ERROR(
             iree_hal_amdgpu_pm4_command_buffer_materialize_dispatch(
-                command_buffer,
+                command_buffer, state,
                 (const iree_hal_amdgpu_pm4_dispatch_record_t*)cursor));
         break;
       }
@@ -2651,7 +2477,7 @@ static iree_status_t iree_hal_amdgpu_pm4_command_buffer_materialize_records(
       case IREE_HAL_AMDGPU_PM4_COMMAND_RECORD_OPCODE_ATOMIC_RMW: {
         IREE_RETURN_IF_ERROR(
             iree_hal_amdgpu_pm4_command_buffer_materialize_atomic(
-                command_buffer,
+                command_buffer, state,
                 (const iree_hal_amdgpu_pm4_atomic_record_t*)cursor));
         break;
       }
@@ -2667,13 +2493,12 @@ static iree_status_t iree_hal_amdgpu_pm4_command_buffer_materialize_records(
 
 static iree_status_t
 iree_hal_amdgpu_pm4_command_buffer_materialize_profile_records(
-    iree_hal_amdgpu_pm4_command_buffer_t* command_buffer) {
+    iree_hal_amdgpu_pm4_command_buffer_t* command_buffer,
+    iree_hal_amdgpu_pm4_materialization_state_t* state) {
   if (command_buffer->profile.record_program_dword_count == 0) {
     return iree_ok_status();
   }
 
-  command_buffer->has_previous_launch_state = false;
-  command_buffer->has_emitted_fixup_barrier = false;
   const uint8_t* cursor = command_buffer->record_builder.bytes;
   const uint8_t* const end = cursor + command_buffer->record_builder.length;
   while (cursor < end) {
@@ -2693,7 +2518,7 @@ iree_hal_amdgpu_pm4_command_buffer_materialize_profile_records(
       case IREE_HAL_AMDGPU_PM4_COMMAND_RECORD_OPCODE_DISPATCH: {
         IREE_RETURN_IF_ERROR(
             iree_hal_amdgpu_pm4_command_buffer_materialize_profile_dispatch(
-                command_buffer,
+                command_buffer, state,
                 (const iree_hal_amdgpu_pm4_dispatch_record_t*)cursor));
         break;
       }
@@ -2702,7 +2527,7 @@ iree_hal_amdgpu_pm4_command_buffer_materialize_profile_records(
       case IREE_HAL_AMDGPU_PM4_COMMAND_RECORD_OPCODE_ATOMIC_RMW: {
         IREE_RETURN_IF_ERROR(
             iree_hal_amdgpu_pm4_command_buffer_materialize_profile_atomic(
-                command_buffer,
+                command_buffer, state,
                 (const iree_hal_amdgpu_pm4_atomic_record_t*)cursor));
         break;
       }
@@ -2714,19 +2539,89 @@ iree_hal_amdgpu_pm4_command_buffer_materialize_profile_records(
     cursor += header->length;
   }
   IREE_RETURN_IF_ERROR(iree_hal_amdgpu_pm4_dword_builder_emit_barrier(
-      &command_buffer->profile.dword_builder,
-      command_buffer->vendor_packet_capabilities,
+      &state->builders.program, state->vendor_packet_capabilities,
       IREE_HAL_AMDGPU_PM4_BARRIER_FLAG_EXECUTION,
       command_buffer->barrier_state.acquire_scope,
       command_buffer->barrier_state.release_scope));
-  if (IREE_UNLIKELY(command_buffer->profile.dword_builder.dword_count >
-                    command_buffer->profile.plan.program.dword_count)) {
+  if (IREE_UNLIKELY(state->builders.program.dword_count >
+                    state->profile->program.dword_count)) {
     return iree_make_status(
         IREE_STATUS_INTERNAL,
         "PM4 profile IB materialization exceeded reserved capacity");
   }
-  command_buffer->profile.plan.program.dword_count =
-      command_buffer->profile.dword_builder.dword_count;
+  state->profile->program.dword_count = state->builders.program.dword_count;
+  return iree_ok_status();
+}
+
+static iree_status_t iree_hal_amdgpu_pm4_command_buffer_materialize_program_set(
+    iree_hal_amdgpu_pm4_command_buffer_t* command_buffer,
+    const iree_hal_amdgpu_pm4_command_program_layout_t* layout,
+    uint8_t* materialization_base) {
+  iree_hal_amdgpu_pm4_materialization_state_t state;
+  iree_hal_amdgpu_pm4_command_buffer_initialize_materialization_state(
+      command_buffer, layout, materialization_base,
+      /*profile_plan_ordinal=*/0, IREE_HAL_AMDGPU_PM4_MATERIALIZATION_FLAG_NONE,
+      &state);
+  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_pm4_command_buffer_materialize_records(
+      command_buffer, &state));
+  if (IREE_UNLIKELY(state.builders.template.length !=
+                    command_buffer->record_template_byte_length)) {
+    return iree_make_status(IREE_STATUS_INTERNAL,
+                            "PM4 template materialization produced %" PRIhsz
+                            " bytes, expected %" PRIhsz,
+                            state.builders.template.length,
+                            command_buffer->record_template_byte_length);
+  }
+  if (IREE_UNLIKELY(state.builders.fixup.count !=
+                    command_buffer->record_fixup_entry_count)) {
+    return iree_make_status(
+        IREE_STATUS_INTERNAL,
+        "PM4 fixup materialization produced %u entries, expected %u",
+        state.builders.fixup.count, command_buffer->record_fixup_entry_count);
+  }
+  if (IREE_UNLIKELY(state.builders.program.dword_count !=
+                    command_buffer->record_ib_dword_count)) {
+    return iree_make_status(
+        IREE_STATUS_INTERNAL,
+        "PM4 IB materialization produced %u dwords, expected %u",
+        state.builders.program.dword_count,
+        command_buffer->record_ib_dword_count);
+  }
+  const uint32_t dword_count_before = state.builders.program.dword_count;
+  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_pm4_dword_builder_emit_barrier(
+      &state.builders.program, state.vendor_packet_capabilities,
+      IREE_HAL_AMDGPU_PM4_BARRIER_FLAG_EXECUTION,
+      command_buffer->barrier_state.acquire_scope,
+      command_buffer->barrier_state.release_scope));
+  command_buffer->publish_stats.terminal_barrier_dwords +=
+      state.builders.program.dword_count - dword_count_before;
+  if (IREE_UNLIKELY(state.builders.program.dword_count !=
+                    state.program->dword_count)) {
+    return iree_make_status(
+        IREE_STATUS_INTERNAL, "PM4 resident IB contains %u dwords, expected %u",
+        state.builders.program.dword_count, state.program->dword_count);
+  }
+
+  for (uint32_t profile_plan_ordinal = 0;
+       profile_plan_ordinal < command_buffer->program_set.profile_plan_count;
+       ++profile_plan_ordinal) {
+    iree_hal_amdgpu_pm4_command_buffer_initialize_materialization_state(
+        command_buffer, layout, materialization_base, profile_plan_ordinal,
+        IREE_HAL_AMDGPU_PM4_MATERIALIZATION_FLAG_PROFILE |
+            IREE_HAL_AMDGPU_PM4_MATERIALIZATION_FLAG_REUSE_TEMPLATES,
+        &state);
+    IREE_RETURN_IF_ERROR(
+        iree_hal_amdgpu_pm4_command_buffer_materialize_profile_records(
+            command_buffer, &state));
+    if (IREE_UNLIKELY(state.builders.fixup.count !=
+                      command_buffer->profile.record_fixup_entry_count)) {
+      return iree_make_status(
+          IREE_STATUS_INTERNAL,
+          "PM4 profile fixup materialization produced %u entries, expected %u",
+          state.builders.fixup.count,
+          command_buffer->profile.record_fixup_entry_count);
+    }
+  }
   return iree_ok_status();
 }
 
@@ -3119,7 +3014,7 @@ iree_status_t iree_hal_amdgpu_pm4_command_buffer_create(
     iree_hal_allocator_t* device_allocator, iree_hal_command_buffer_mode_t mode,
     iree_hal_command_category_t command_categories,
     iree_hal_queue_affinity_t queue_affinity, iree_host_size_t binding_capacity,
-    iree_host_size_t device_ordinal,
+    iree_host_size_t device_ordinal, iree_host_size_t physical_queue_count,
     iree_hal_amdgpu_pm4_command_buffer_flags_t flags,
     iree_hal_amdgpu_vendor_packet_capability_flags_t vendor_packet_capabilities,
     const iree_hal_amdgpu_device_atomic_pm4_context_t* atomic_context,
@@ -3148,14 +3043,31 @@ iree_status_t iree_hal_amdgpu_pm4_command_buffer_create(
                             " exceeds uint32_t storage",
                             device_ordinal);
   }
+  if (IREE_UNLIKELY(physical_queue_count == 0 ||
+                    physical_queue_count > IREE_HAL_MAX_QUEUES)) {
+    return iree_make_status(
+        IREE_STATUS_OUT_OF_RANGE,
+        "PM4 physical queue count %" PRIhsz " must be in [1, %" PRIhsz "]",
+        physical_queue_count, (iree_host_size_t)IREE_HAL_MAX_QUEUES);
+  }
 
   iree_host_size_t total_size = 0;
   iree_host_size_t validation_state_offset = 0;
+  iree_host_size_t profile_plans_offset = 0;
+  const iree_host_size_t profile_plan_capacity =
+      iree_any_bit_set(
+          flags,
+          IREE_HAL_AMDGPU_PM4_COMMAND_BUFFER_FLAG_MATERIALIZE_PROFILE_DISPATCH_TIMESTAMPS)
+          ? physical_queue_count
+          : 0;
   IREE_RETURN_IF_ERROR(IREE_STRUCT_LAYOUT(
       sizeof(iree_hal_amdgpu_pm4_command_buffer_t), &total_size,
       IREE_STRUCT_FIELD(
           iree_hal_command_buffer_validation_state_size(mode, binding_capacity),
-          uint8_t, &validation_state_offset)));
+          uint8_t, &validation_state_offset),
+      IREE_STRUCT_FIELD(profile_plan_capacity,
+                        iree_hal_amdgpu_pm4_command_buffer_profile_plan_t,
+                        &profile_plans_offset)));
 
   iree_hal_amdgpu_pm4_command_buffer_t* command_buffer = NULL;
   IREE_RETURN_IF_ERROR(iree_allocator_malloc(host_allocator, total_size,
@@ -3178,8 +3090,23 @@ iree_status_t iree_hal_amdgpu_pm4_command_buffer_create(
   command_buffer->flags = flags;
   command_buffer->device_ordinal = (uint32_t)device_ordinal;
 
-  iree_status_t status = iree_ok_status();
-  if (iree_hal_amdgpu_pm4_command_buffer_retains_profile_metadata(
+  iree_hal_amdgpu_pm4_command_program_set_flags_t program_set_flags =
+      IREE_HAL_AMDGPU_PM4_COMMAND_PROGRAM_SET_FLAG_NONE;
+  if (binding_capacity != 0 ||
+      iree_any_bit_set(mode, IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT)) {
+    program_set_flags |=
+        IREE_HAL_AMDGPU_PM4_COMMAND_PROGRAM_SET_FLAG_SERIAL_PROFILE;
+  }
+  iree_status_t status = iree_hal_amdgpu_pm4_command_program_set_initialize(
+      queue_affinity, device_ordinal, physical_queue_count, program_set_flags,
+      profile_plan_capacity != 0
+          ? (iree_hal_amdgpu_pm4_command_buffer_profile_plan_t*)((uint8_t*)
+                                                                     command_buffer +
+                                                                 profile_plans_offset)
+          : NULL,
+      &command_buffer->program_set);
+  if (iree_status_is_ok(status) &&
+      iree_hal_amdgpu_pm4_command_buffer_retains_profile_metadata(
           command_buffer)) {
     status = iree_hal_amdgpu_profile_metadata_register_command_buffer(
         profile_metadata, mode, command_categories, queue_affinity,
@@ -3204,11 +3131,8 @@ static void iree_hal_amdgpu_pm4_command_buffer_destroy(
     iree_hal_amdgpu_pm4_command_buffer_resident_pool_release(
         command_buffer->resident_pool, command_buffer->resident_allocation);
     command_buffer->resident_allocation = NULL;
-    memset(&command_buffer->program, 0, sizeof(command_buffer->program));
-  } else {
-    iree_hal_amdgpu_pm4_program_deinitialize(&command_buffer->program);
+    iree_hal_amdgpu_pm4_command_buffer_reset_resident_plans(command_buffer);
   }
-  iree_hal_amdgpu_pm4_command_buffer_fixup_reset(command_buffer);
   if (command_buffer->recording_state ==
       IREE_HAL_AMDGPU_PM4_COMMAND_BUFFER_RECORDING_STATE_RECORDING) {
     iree_hal_amdgpu_pm4_recording_builders_deinitialize(command_buffer);
@@ -3238,7 +3162,25 @@ const iree_hal_amdgpu_pm4_program_t* iree_hal_amdgpu_pm4_command_buffer_program(
     iree_hal_command_buffer_t* base_command_buffer) {
   iree_hal_amdgpu_pm4_command_buffer_t* command_buffer =
       iree_hal_amdgpu_pm4_command_buffer_cast(base_command_buffer);
-  return &command_buffer->program;
+  return &command_buffer->program_set.program;
+}
+
+const iree_hal_amdgpu_pm4_command_buffer_fixup_plan_t*
+iree_hal_amdgpu_pm4_command_buffer_fixup_plan(
+    iree_hal_command_buffer_t* base_command_buffer) {
+  iree_hal_amdgpu_pm4_command_buffer_t* command_buffer =
+      iree_hal_amdgpu_pm4_command_buffer_cast(base_command_buffer);
+  return &command_buffer->program_set.fixup;
+}
+
+const iree_hal_amdgpu_pm4_command_buffer_profile_plan_t*
+iree_hal_amdgpu_pm4_command_buffer_profile_plan(
+    iree_hal_command_buffer_t* base_command_buffer,
+    uint32_t physical_queue_ordinal) {
+  iree_hal_amdgpu_pm4_command_buffer_t* command_buffer =
+      iree_hal_amdgpu_pm4_command_buffer_cast(base_command_buffer);
+  return iree_hal_amdgpu_pm4_command_program_set_select_profile(
+      &command_buffer->program_set, physical_queue_ordinal);
 }
 
 uint64_t iree_hal_amdgpu_pm4_command_buffer_profile_id(
@@ -3275,22 +3217,6 @@ iree_hal_amdgpu_pm4_command_buffer_atomic_binding_requirements(
                    ? command_buffer->base.binding_count
                    : 0;
   return command_buffer->atomic_binding_requirements;
-}
-
-const iree_hal_amdgpu_pm4_command_buffer_fixup_plan_t*
-iree_hal_amdgpu_pm4_command_buffer_fixup_plan(
-    iree_hal_command_buffer_t* base_command_buffer) {
-  iree_hal_amdgpu_pm4_command_buffer_t* command_buffer =
-      iree_hal_amdgpu_pm4_command_buffer_cast(base_command_buffer);
-  return &command_buffer->fixup.plan;
-}
-
-const iree_hal_amdgpu_pm4_command_buffer_profile_plan_t*
-iree_hal_amdgpu_pm4_command_buffer_profile_plan(
-    iree_hal_command_buffer_t* base_command_buffer) {
-  iree_hal_amdgpu_pm4_command_buffer_t* command_buffer =
-      iree_hal_amdgpu_pm4_command_buffer_cast(base_command_buffer);
-  return &command_buffer->profile.plan;
 }
 
 const iree_hal_amdgpu_pm4_command_buffer_publish_stats_t*
@@ -3383,7 +3309,6 @@ static iree_status_t iree_hal_amdgpu_pm4_command_buffer_begin(
   command_buffer->last_retained_executable = NULL;
   command_buffer->has_previous_launch_state = false;
   command_buffer->has_planned_fixup_barrier = false;
-  command_buffer->has_emitted_fixup_barrier = false;
   command_buffer->profile.has_planned_fixup_barrier = false;
   command_buffer->record_command_count = 0;
   command_buffer->recording_state =
@@ -3412,14 +3337,28 @@ static iree_status_t iree_hal_amdgpu_pm4_command_buffer_end(
           IREE_HAL_AMDGPU_PM4_BARRIER_FLAG_EXECUTION,
           command_buffer->barrier_state.acquire_scope,
           command_buffer->barrier_state.release_scope);
+  iree_hal_amdgpu_pm4_command_program_layout_t program_layout = {0};
+  uint8_t* materialization_base = NULL;
   iree_status_t status = iree_ok_status();
-  if (IREE_UNLIKELY(terminal_barrier_dword_count == 0)) {
+  iree_hal_amdgpu_pm4_command_program_set_flags_t program_set_flags =
+      command_buffer->program_set.flags &
+      ~IREE_HAL_AMDGPU_PM4_COMMAND_PROGRAM_SET_FLAG_PROFILE;
+  if (command_buffer->profile.record_program_dword_count != 0) {
+    program_set_flags |= IREE_HAL_AMDGPU_PM4_COMMAND_PROGRAM_SET_FLAG_PROFILE;
+  }
+  status = iree_hal_amdgpu_pm4_command_program_set_initialize(
+      command_buffer->base.queue_affinity, command_buffer->device_ordinal,
+      command_buffer->program_set.physical_queue_count, program_set_flags,
+      command_buffer->program_set.profile_plans, &command_buffer->program_set);
+  if (iree_status_is_ok(status) &&
+      IREE_UNLIKELY(terminal_barrier_dword_count == 0)) {
     status = iree_make_status(
         IREE_STATUS_UNIMPLEMENTED,
         "PM4 command-buffer terminal barrier cannot be emitted with "
         "capabilities 0x%08" PRIx32,
         command_buffer->vendor_packet_capabilities);
-  } else if (IREE_UNLIKELY(terminal_barrier_dword_count >
+  } else if (iree_status_is_ok(status) &&
+             IREE_UNLIKELY(terminal_barrier_dword_count >
                            IREE_HAL_AMDGPU_PM4_IB_MAX_DWORD_COUNT -
                                command_buffer->record_ib_dword_count)) {
     status = iree_make_status(
@@ -3443,79 +3382,19 @@ static iree_status_t iree_hal_amdgpu_pm4_command_buffer_end(
     }
   }
   if (iree_status_is_ok(status)) {
-    status = iree_hal_amdgpu_pm4_command_buffer_allocate_resident_storage(
+    status = iree_hal_amdgpu_pm4_command_buffer_prepare_resident_storage(
         command_buffer,
-        command_buffer->record_ib_dword_count + terminal_barrier_dword_count);
+        command_buffer->record_ib_dword_count + terminal_barrier_dword_count,
+        &program_layout, &materialization_base);
   }
   if (iree_status_is_ok(status)) {
     iree_time_t time_start = collect_timings ? iree_time_now() : 0;
-    status =
-        iree_hal_amdgpu_pm4_command_buffer_materialize_records(command_buffer);
+    status = iree_hal_amdgpu_pm4_command_buffer_materialize_program_set(
+        command_buffer, &program_layout, materialization_base);
     if (collect_timings) {
       command_buffer->publish_stats.materialize_ns +=
           iree_time_now() - time_start;
     }
-  }
-  if (iree_status_is_ok(status)) {
-    if (IREE_UNLIKELY(command_buffer->template_builder.length !=
-                      command_buffer->record_template_byte_length)) {
-      status = iree_make_status(IREE_STATUS_INTERNAL,
-                                "PM4 template materialization produced %" PRIhsz
-                                " bytes, expected %" PRIhsz,
-                                command_buffer->template_builder.length,
-                                command_buffer->record_template_byte_length);
-    } else if (IREE_UNLIKELY(command_buffer->fixup_builder.count !=
-                             command_buffer->record_fixup_entry_count)) {
-      status = iree_make_status(
-          IREE_STATUS_INTERNAL,
-          "PM4 fixup materialization produced %u entries, expected %u",
-          command_buffer->fixup_builder.count,
-          command_buffer->record_fixup_entry_count);
-    } else if (IREE_UNLIKELY(command_buffer->dword_builder.dword_count !=
-                             command_buffer->record_ib_dword_count)) {
-      status = iree_make_status(
-          IREE_STATUS_INTERNAL,
-          "PM4 IB materialization produced %u dwords, expected %u",
-          command_buffer->dword_builder.dword_count,
-          command_buffer->record_ib_dword_count);
-    }
-  }
-  if (iree_status_is_ok(status)) {
-    const uint32_t dword_count_before =
-        command_buffer->dword_builder.dword_count;
-    status = iree_hal_amdgpu_pm4_dword_builder_emit_barrier(
-        &command_buffer->dword_builder,
-        command_buffer->vendor_packet_capabilities,
-        IREE_HAL_AMDGPU_PM4_BARRIER_FLAG_EXECUTION,
-        command_buffer->barrier_state.acquire_scope,
-        command_buffer->barrier_state.release_scope);
-    if (iree_status_is_ok(status)) {
-      command_buffer->publish_stats.terminal_barrier_dwords +=
-          command_buffer->dword_builder.dword_count - dword_count_before;
-    }
-  }
-  if (iree_status_is_ok(status) &&
-      IREE_UNLIKELY(command_buffer->dword_builder.dword_count !=
-                    command_buffer->program.dword_count)) {
-    status = iree_make_status(IREE_STATUS_INTERNAL,
-                              "PM4 resident IB contains %u dwords, expected %u",
-                              command_buffer->dword_builder.dword_count,
-                              command_buffer->program.dword_count);
-  }
-  if (iree_status_is_ok(status) &&
-      command_buffer->profile.record_program_dword_count > 0) {
-    status = iree_hal_amdgpu_pm4_command_buffer_materialize_profile_records(
-        command_buffer);
-  }
-  if (iree_status_is_ok(status) &&
-      command_buffer->profile.record_program_dword_count > 0 &&
-      IREE_UNLIKELY(command_buffer->profile.fixup_builder.count !=
-                    command_buffer->profile.record_fixup_entry_count)) {
-    status = iree_make_status(
-        IREE_STATUS_INTERNAL,
-        "PM4 profile fixup materialization produced %u entries, expected %u",
-        command_buffer->profile.fixup_builder.count,
-        command_buffer->profile.record_fixup_entry_count);
   }
   if (iree_status_is_ok(status)) {
     command_buffer->publish_stats.host_record_bytes =
@@ -3525,7 +3404,7 @@ static iree_status_t iree_hal_amdgpu_pm4_command_buffer_end(
       iree_hal_amdgpu_pm4_command_buffer_materializes_to_host(command_buffer)) {
     iree_time_t time_start = collect_timings ? iree_time_now() : 0;
     status = iree_hal_amdgpu_pm4_command_buffer_copy_materialized_storage(
-        command_buffer);
+        command_buffer, materialization_base);
     if (collect_timings) {
       command_buffer->publish_stats.resident_copy_ns +=
           iree_time_now() - time_start;
@@ -3542,6 +3421,19 @@ static iree_status_t iree_hal_amdgpu_pm4_command_buffer_end(
   }
 
   iree_hal_amdgpu_pm4_recording_builders_deinitialize(command_buffer);
+  if (materialization_base &&
+      iree_hal_amdgpu_pm4_command_buffer_materializes_to_host(command_buffer) &&
+      !iree_hal_amdgpu_pm4_command_buffer_uses_host_async_copy(
+          command_buffer)) {
+    iree_allocator_free(command_buffer->host_allocator, materialization_base);
+  }
+  if (!iree_status_is_ok(status) && command_buffer->resident_allocation) {
+    iree_hal_amdgpu_pm4_command_buffer_wait_for_publication(command_buffer);
+    iree_hal_amdgpu_pm4_command_buffer_resident_pool_release(
+        command_buffer->resident_pool, command_buffer->resident_allocation);
+    command_buffer->resident_allocation = NULL;
+    iree_hal_amdgpu_pm4_command_buffer_reset_resident_plans(command_buffer);
+  }
   if (collect_timings) {
     command_buffer->publish_stats.total_finalize_ns =
         iree_time_now() - finalize_start;

@@ -22,6 +22,7 @@
 #include "iree/hal/drivers/amdgpu/logical_device.h"
 #include "iree/hal/drivers/amdgpu/physical_device.h"
 #include "iree/hal/drivers/amdgpu/pm4_command_buffer.h"
+#include "iree/hal/drivers/amdgpu/queue_affinity.h"
 #include "iree/hal/drivers/amdgpu/util/aql_emitter.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
@@ -209,6 +210,24 @@ TEST_F(HostQueueCommandBufferProfilingTest,
       &test_device, &fixture,
       IREE_HAL_COMMAND_BUFFER_MODE_RETAIN_PROFILE_METADATA));
   ASSERT_TRUE(iree_hal_amdgpu_pm4_command_buffer_isa(fixture.command_buffer));
+  const iree_hal_amdgpu_pm4_command_buffer_profile_plan_t* first_profile_plan =
+      iree_hal_amdgpu_pm4_command_buffer_profile_plan(
+          fixture.command_buffer, /*physical_queue_ordinal=*/0);
+  ASSERT_NE(first_profile_plan, nullptr);
+  ASSERT_NE(first_profile_plan->program.dwords, nullptr);
+  ASSERT_NE(first_profile_plan->entries, nullptr);
+  ASSERT_NE(first_profile_plan->dummy_ticks, nullptr);
+  for (uint32_t queue_ordinal = 1;
+       queue_ordinal < physical_device->host_queue_count; ++queue_ordinal) {
+    const iree_hal_amdgpu_pm4_command_buffer_profile_plan_t*
+        other_profile_plan = iree_hal_amdgpu_pm4_command_buffer_profile_plan(
+            fixture.command_buffer, queue_ordinal);
+    ASSERT_NE(other_profile_plan, nullptr);
+    EXPECT_NE(other_profile_plan->program.dwords,
+              first_profile_plan->program.dwords);
+    EXPECT_NE(other_profile_plan->entries, first_profile_plan->entries);
+    EXPECT_NE(other_profile_plan->dummy_ticks, first_profile_plan->dummy_ticks);
+  }
 
   Ref<iree_hal_semaphore_t> command_buffer_signal;
   IREE_ASSERT_OK(
@@ -220,8 +239,20 @@ TEST_F(HostQueueCommandBufferProfilingTest,
       /*semaphores=*/&command_buffer_signal_ptr,
       /*payload_values=*/&command_buffer_signal_value,
   };
+  const iree_hal_amdgpu_queue_affinity_domain_t affinity_domain = {
+      /*.supported_affinity=*/
+      test_device.logical_device()->queue_affinity_mask,
+      /*.physical_device_count=*/
+      test_device.logical_device()->physical_device_count,
+      /*.queue_count_per_physical_device=*/
+      test_device.logical_device()->system->topology.gpu_agent_queue_count,
+  };
+  iree_hal_queue_affinity_t execution_affinity = 0;
+  IREE_ASSERT_OK(iree_hal_amdgpu_queue_affinity_for_physical_queue(
+      affinity_domain, /*physical_device_ordinal=*/0,
+      physical_device->host_queue_count - 1, &execution_affinity));
   IREE_ASSERT_OK(iree_hal_device_queue_execute(
-      test_device.base_device(), IREE_HAL_QUEUE_AFFINITY_ANY,
+      test_device.base_device(), execution_affinity,
       iree_hal_semaphore_list_empty(), command_buffer_signal_list,
       fixture.command_buffer, iree_hal_buffer_binding_table_empty(),
       IREE_HAL_EXECUTE_FLAG_NONE));

@@ -2800,7 +2800,8 @@ static iree_status_t iree_hal_amdgpu_logical_device_create_pm4_command_buffer(
   }
   return iree_hal_amdgpu_pm4_command_buffer_create(
       logical_device->device_allocator, mode, command_categories,
-      effective_queue_affinity, binding_capacity, device_ordinal, flags,
+      effective_queue_affinity, binding_capacity, device_ordinal,
+      physical_device->host_queue_count, flags,
       physical_device->vendor_packet_capabilities,
       &physical_device->atomic_pm4_context,
       physical_device->pm4_timestamp_strategy,
