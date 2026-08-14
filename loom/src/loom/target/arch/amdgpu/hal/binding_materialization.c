@@ -7,6 +7,7 @@
 #include "loom/target/arch/amdgpu/hal/binding_materialization.h"
 
 #include <inttypes.h>
+#include <string.h>
 
 #include "loom/codegen/low/builder.h"
 #include "loom/codegen/low/function.h"
@@ -591,23 +592,13 @@ static bool loom_amdgpu_hal_binding_can_group_direct_arg_load(
   return true;
 }
 
-static iree_status_t loom_amdgpu_hal_binding_materialize_direct_arg_value(
-    loom_rewriter_t* rewriter,
-    const loom_amdgpu_hal_kernarg_direct_arg_t* direct_arg,
-    loom_value_id_t loaded) {
-  IREE_RETURN_IF_ERROR(loom_amdgpu_hal_binding_move_value_name(
-      rewriter->module, direct_arg->arg_id, loaded));
-  return loom_value_replace_all_uses_with(rewriter->module, direct_arg->arg_id,
-                                          loaded);
-}
-
 static iree_status_t loom_amdgpu_hal_binding_materialize_direct_arg_group(
     loom_rewriter_t* rewriter, const loom_low_descriptor_set_t* descriptor_set,
     const loom_amdgpu_hal_kernel_abi_layout_t* layout,
     iree_host_size_t start_index, iree_host_size_t group_count,
     uint32_t unit_count, loom_value_id_t kernarg_ptr, loom_type_t sgpr_type,
     loom_type_t sgpr_x2_type, loom_type_t group_type,
-    loom_location_id_t location) {
+    loom_location_id_t location, loom_value_id_t* materialized_values) {
   const loom_amdgpu_hal_kernarg_direct_arg_t* first_arg =
       &layout->direct_args[start_index];
   const uint32_t total_unit_count = unit_count * (uint32_t)group_count;
@@ -642,8 +633,9 @@ static iree_status_t loom_amdgpu_hal_binding_materialize_direct_arg_group(
     slice_offset += unit_count;
   }
   for (iree_host_size_t i = 0; i < group_count; ++i) {
-    IREE_RETURN_IF_ERROR(loom_amdgpu_hal_binding_materialize_direct_arg_value(
-        rewriter, &layout->direct_args[start_index + i], values[i]));
+    const loom_amdgpu_hal_kernarg_direct_arg_t* direct_arg =
+        &layout->direct_args[start_index + i];
+    materialized_values[direct_arg->argument_index] = values[i];
   }
   return iree_ok_status();
 }
@@ -652,24 +644,192 @@ static iree_status_t loom_amdgpu_hal_binding_materialize_direct_arg_load(
     loom_rewriter_t* rewriter, const loom_low_descriptor_set_t* descriptor_set,
     const loom_amdgpu_hal_kernarg_direct_arg_t* direct_arg,
     loom_value_id_t kernarg_ptr, loom_type_t sgpr_type,
-    loom_type_t sgpr_x2_type, loom_location_id_t location) {
-  loom_value_id_t loaded = LOOM_VALUE_ID_INVALID;
+    loom_type_t sgpr_x2_type, loom_location_id_t location,
+    loom_value_id_t* out_loaded) {
+  *out_loaded = LOOM_VALUE_ID_INVALID;
   if (direct_arg->kernarg_size == sizeof(uint32_t) &&
       loom_type_equal(direct_arg->abi_type, sgpr_type)) {
     IREE_RETURN_IF_ERROR(loom_amdgpu_hal_binding_build_scalar_load(
         rewriter, descriptor_set, kernarg_ptr, direct_arg->kernarg_offset,
-        sgpr_type, location, &loaded));
+        sgpr_type, location, out_loaded));
   } else if (direct_arg->kernarg_size == 2u * sizeof(uint32_t) &&
              loom_type_equal(direct_arg->abi_type, sgpr_x2_type)) {
     IREE_RETURN_IF_ERROR(loom_amdgpu_hal_binding_build_s_load_dwordx2(
         rewriter, descriptor_set, kernarg_ptr, direct_arg->kernarg_offset,
-        sgpr_x2_type, location, &loaded));
+        sgpr_x2_type, location, out_loaded));
   } else {
     IREE_ASSERT_UNREACHABLE("verified AMDGPU HAL ABI direct argument layout");
     IREE_BUILTIN_UNREACHABLE();
   }
-  return loom_amdgpu_hal_binding_materialize_direct_arg_value(
-      rewriter, direct_arg, loaded);
+  return iree_ok_status();
+}
+
+static bool loom_amdgpu_hal_binding_try_direct_arg_index(
+    const loom_module_t* module, const loom_block_t* entry_block,
+    const loom_amdgpu_hal_kernel_abi_layout_t* layout, loom_value_id_t value_id,
+    uint16_t* out_argument_index) {
+  const loom_value_t* value = loom_module_value(module, value_id);
+  if (!loom_value_is_block_arg(value) ||
+      loom_value_def_block(value) != entry_block) {
+    return false;
+  }
+  const uint16_t argument_index = loom_value_def_index(value);
+  if (argument_index >= layout->direct_arg_count ||
+      layout->direct_args[argument_index].arg_id != value_id) {
+    return false;
+  }
+  *out_argument_index = argument_index;
+  return true;
+}
+
+static iree_status_t loom_amdgpu_hal_binding_snapshot_function_predicates(
+    loom_rewriter_t* rewriter, loom_func_like_t function,
+    loom_predicate_t** out_predicates, uint16_t* out_predicate_count) {
+  *out_predicates = NULL;
+  *out_predicate_count = 0;
+  const loom_predicate_t* predicates =
+      loom_func_like_predicates(function, out_predicate_count);
+  if (*out_predicate_count == 0) return iree_ok_status();
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      rewriter->arena, *out_predicate_count, sizeof(**out_predicates),
+      (void**)out_predicates));
+  memcpy(*out_predicates, predicates,
+         (iree_host_size_t)*out_predicate_count * sizeof(**out_predicates));
+  return iree_ok_status();
+}
+
+static iree_status_t loom_amdgpu_hal_binding_set_function_predicates(
+    loom_rewriter_t* rewriter, loom_func_like_t function,
+    const loom_predicate_t* predicates, uint16_t predicate_count) {
+  IREE_ASSERT_NE(function.vtable->predicates_attr_index, LOOM_ATTR_INDEX_NONE);
+  loom_attribute_t predicate_attr = loom_attr_absent();
+  if (predicate_count != 0) {
+    loom_predicate_t* predicate_storage = NULL;
+    IREE_RETURN_IF_ERROR(loom_builder_copy_predicate_list_attr_storage(
+        &rewriter->builder, predicates, predicate_count,
+        IREE_SV("AMDGPU HAL retained function predicates"),
+        &predicate_storage));
+    predicate_attr =
+        loom_attr_predicate_list(predicate_storage, predicate_count);
+  }
+  return loom_rewriter_set_attr(rewriter, function.op,
+                                function.vtable->predicates_attr_index,
+                                predicate_attr);
+}
+
+static iree_status_t loom_amdgpu_hal_binding_transfer_function_predicates(
+    loom_rewriter_t* rewriter, loom_func_like_t function,
+    const loom_amdgpu_hal_kernel_abi_layout_t* layout,
+    const loom_block_t* entry_block, loom_predicate_t* predicates,
+    uint16_t predicate_count, loom_value_id_t* materialized_values) {
+  if (predicate_count == 0) return iree_ok_status();
+
+  loom_predicate_t* transferred_predicates = NULL;
+  uint16_t* argument_indices = NULL;
+  loom_value_id_t* values = NULL;
+  loom_type_t* result_types = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      rewriter->arena, predicate_count, sizeof(*transferred_predicates),
+      (void**)&transferred_predicates));
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      rewriter->arena, layout->direct_arg_count, sizeof(*argument_indices),
+      (void**)&argument_indices));
+  IREE_RETURN_IF_ERROR(
+      iree_arena_allocate_array(rewriter->arena, layout->direct_arg_count,
+                                sizeof(*values), (void**)&values));
+  IREE_RETURN_IF_ERROR(
+      iree_arena_allocate_array(rewriter->arena, layout->direct_arg_count,
+                                sizeof(*result_types), (void**)&result_types));
+
+  uint16_t retained_count = 0;
+  uint16_t transferred_count = 0;
+  uint16_t argument_count = 0;
+  bool has_direct_predicate = false;
+  for (uint16_t i = 0; i < predicate_count; ++i) {
+    loom_predicate_t predicate = predicates[i];
+    bool references_direct_arg = false;
+    bool is_transferable = true;
+    for (uint8_t j = 0; j < predicate.arg_count; ++j) {
+      if (predicate.arg_tags[j] != LOOM_PRED_ARG_VALUE) continue;
+      const loom_value_id_t value_id = (loom_value_id_t)predicate.args[j];
+      uint16_t argument_index = 0;
+      if (!loom_amdgpu_hal_binding_try_direct_arg_index(
+              rewriter->module, entry_block, layout, value_id,
+              &argument_index)) {
+        is_transferable = false;
+        continue;
+      }
+      references_direct_arg = true;
+      if (materialized_values[argument_index] == LOOM_VALUE_ID_INVALID) {
+        is_transferable = false;
+      }
+    }
+
+    if (!references_direct_arg) {
+      predicates[retained_count++] = predicate;
+      continue;
+    }
+    has_direct_predicate = true;
+    if (!is_transferable) {
+      // Predicates are compile-time facts, not runtime uses. Do not introduce a
+      // kernarg load solely to keep a predicate whose values otherwise vanish.
+      continue;
+    }
+
+    for (uint8_t j = 0; j < predicate.arg_count; ++j) {
+      if (predicate.arg_tags[j] != LOOM_PRED_ARG_VALUE) continue;
+      uint16_t argument_index = 0;
+      const bool is_direct_arg = loom_amdgpu_hal_binding_try_direct_arg_index(
+          rewriter->module, entry_block, layout,
+          (loom_value_id_t)predicate.args[j], &argument_index);
+      IREE_ASSERT(is_direct_arg);
+      predicate.args[j] = materialized_values[argument_index];
+      bool already_listed = false;
+      for (uint16_t k = 0; k < argument_count; ++k) {
+        already_listed |= argument_indices[k] == argument_index;
+      }
+      if (!already_listed) {
+        argument_indices[argument_count] = argument_index;
+        values[argument_count] = materialized_values[argument_index];
+        result_types[argument_count] =
+            loom_module_value_type(rewriter->module, values[argument_count]);
+        ++argument_count;
+      }
+    }
+    transferred_predicates[transferred_count++] = predicate;
+  }
+
+  if (transferred_count != 0) {
+    loom_op_t* assume_op = NULL;
+    IREE_RETURN_IF_ERROR(loom_low_assume_build(
+        &rewriter->builder, values, argument_count, transferred_predicates,
+        transferred_count, result_types, argument_count, function.op->location,
+        &assume_op));
+    const loom_value_slice_t results = loom_low_assume_results(assume_op);
+    for (uint16_t j = 0; j < argument_count; ++j) {
+      materialized_values[argument_indices[j]] = results.values[j];
+    }
+  }
+
+  if (!has_direct_predicate) return iree_ok_status();
+  return loom_amdgpu_hal_binding_set_function_predicates(
+      rewriter, function, predicates, retained_count);
+}
+
+static iree_status_t loom_amdgpu_hal_binding_replace_direct_arg_uses(
+    loom_rewriter_t* rewriter,
+    const loom_amdgpu_hal_kernel_abi_layout_t* layout,
+    const loom_value_id_t* materialized_values) {
+  for (iree_host_size_t i = 0; i < layout->direct_arg_count; ++i) {
+    const loom_value_id_t replacement =
+        materialized_values[layout->direct_args[i].argument_index];
+    if (replacement == LOOM_VALUE_ID_INVALID) continue;
+    IREE_RETURN_IF_ERROR(loom_amdgpu_hal_binding_move_value_name(
+        rewriter->module, layout->direct_args[i].arg_id, replacement));
+    IREE_RETURN_IF_ERROR(loom_rewriter_replace_all_uses_with(
+        rewriter, layout->direct_args[i].arg_id, replacement));
+  }
+  return iree_ok_status();
 }
 
 static iree_status_t loom_amdgpu_hal_binding_materialize_direct_args(
@@ -686,6 +846,20 @@ static iree_status_t loom_amdgpu_hal_binding_materialize_direct_args(
 
   loom_block_t* entry_block =
       loom_region_entry_block(loom_low_function_body(function_op));
+  loom_func_like_t function =
+      loom_func_like_cast(rewriter->module, function_op);
+  IREE_ASSERT(loom_func_like_isa(function));
+  loom_predicate_t* predicates = NULL;
+  uint16_t predicate_count = 0;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_hal_binding_snapshot_function_predicates(
+      rewriter, function, &predicates, &predicate_count));
+  loom_value_id_t* materialized_values = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      rewriter->arena, layout->direct_arg_count, sizeof(*materialized_values),
+      (void**)&materialized_values));
+  for (iree_host_size_t i = 0; i < layout->direct_arg_count; ++i) {
+    materialized_values[i] = LOOM_VALUE_ID_INVALID;
+  }
   for (iree_host_size_t i = 0; i < layout->direct_arg_count; ++i) {
     const loom_amdgpu_hal_kernarg_direct_arg_t* direct_arg =
         &layout->direct_args[i];
@@ -709,7 +883,7 @@ static iree_status_t loom_amdgpu_hal_binding_materialize_direct_args(
       IREE_RETURN_IF_ERROR(loom_amdgpu_hal_binding_materialize_direct_arg_group(
           rewriter, descriptor_set, layout, i, /*group_count=*/4,
           arg_unit_count, kernarg_ptr, sgpr_type, sgpr_x2_type, group_type,
-          function_op->location));
+          function_op->location, materialized_values));
       *out_materialized_count += 4;
       i += 3;
       continue;
@@ -724,7 +898,7 @@ static iree_status_t loom_amdgpu_hal_binding_materialize_direct_args(
       IREE_RETURN_IF_ERROR(loom_amdgpu_hal_binding_materialize_direct_arg_group(
           rewriter, descriptor_set, layout, i, /*group_count=*/2,
           arg_unit_count, kernarg_ptr, sgpr_type, sgpr_x2_type, group_type,
-          function_op->location));
+          function_op->location, materialized_values));
       *out_materialized_count += 2;
       ++i;
       continue;
@@ -732,9 +906,20 @@ static iree_status_t loom_amdgpu_hal_binding_materialize_direct_args(
 
     IREE_RETURN_IF_ERROR(loom_amdgpu_hal_binding_materialize_direct_arg_load(
         rewriter, descriptor_set, direct_arg, kernarg_ptr, sgpr_type,
-        sgpr_x2_type, function_op->location));
+        sgpr_x2_type, function_op->location,
+        &materialized_values[direct_arg->argument_index]));
     ++*out_materialized_count;
   }
+
+  IREE_RETURN_IF_ERROR(loom_amdgpu_hal_binding_transfer_function_predicates(
+      rewriter, function, layout, entry_block, predicates, predicate_count,
+      materialized_values));
+  // Delay replacement until every assumption has been built. The new
+  // assumptions refer only to materialized values, so the complete replacement
+  // updates all original body, type, and attribute uses without rewriting the
+  // assumptions into self-references.
+  IREE_RETURN_IF_ERROR(loom_amdgpu_hal_binding_replace_direct_arg_uses(
+      rewriter, layout, materialized_values));
 
   for (iree_host_size_t i = layout->direct_arg_count; i > 0; --i) {
     const loom_amdgpu_hal_kernarg_direct_arg_t* direct_arg =

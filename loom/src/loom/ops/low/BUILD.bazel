@@ -71,6 +71,7 @@ loom_generated_cc_library(
         "//loom/src/loom/target:registers",
         "//loom/src/loom/target:types",
         "//loom/src/loom/util:fact_table",
+        "//loom/src/loom/util:predicate_facts",
         "//loom/src/loom/util:stable_id",
     ],
 )

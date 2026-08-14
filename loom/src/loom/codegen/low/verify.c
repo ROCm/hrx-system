@@ -1935,7 +1935,7 @@ static iree_status_t loom_low_verify_walk_op(void* user_data, loom_op_t* op,
     }
     IREE_RETURN_IF_ERROR(
         loom_low_verify_structural_register_parts(function_state, op));
-    if (iree_any_bit_set(op->traits, LOOM_TRAIT_HINT)) {
+    if (loom_traits_are_compile_time_only(op->traits)) {
       return iree_ok_status();
     }
     IREE_RETURN_IF_ERROR(

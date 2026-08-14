@@ -303,6 +303,11 @@ iree_status_t loom_module_recompute_type_uses(loom_module_t* module);
 bool loom_module_value_has_type_uses(const loom_module_t* module,
                                      loom_value_id_t value_id);
 
+// Returns true if |value_id| is referenced by a predicate-list attribute on a
+// live operation. Aggregate attributes are inspected recursively.
+bool loom_module_value_has_predicate_attribute_uses(const loom_module_t* module,
+                                                    loom_value_id_t value_id);
+
 // Returns the first type-use record that references |value_id|, or INVALID
 // when the value is out of range or has no incoming type uses.
 static inline loom_type_use_id_t loom_module_value_first_incoming_type_use(

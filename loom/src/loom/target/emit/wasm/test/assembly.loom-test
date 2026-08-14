@@ -52,7 +52,8 @@ wasm.target<simd128> @target
 
 low.func.def public target<wasm.core.simd128>(@target) abi(wasm_function) @i32_const_bitpattern() -> (reg<wasm.i32>) asm {
   %bits = i32.const 4294967295
-  return %bits
+  %assumed_bits = low.assume %bits [eq(%bits, -1)] : reg<wasm.i32>
+  return %assumed_bits
 }
 
 // ----

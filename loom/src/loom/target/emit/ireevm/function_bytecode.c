@@ -1029,7 +1029,7 @@ static iree_status_t loom_ireevm_emit_structural_packet(
 
 static iree_status_t loom_ireevm_emit_packet(
     loom_ireevm_emit_state_t* state, const loom_low_packet_view_t* packet) {
-  if (loom_low_packet_is_compiler_hint(packet)) {
+  if (loom_low_packet_is_compile_time_only(packet)) {
     return iree_ok_status();
   }
   state->current_packet = packet;

@@ -15,6 +15,7 @@
 #include "loom/ir/context.h"
 #include "loom/ops/index/ops.h"
 #include "loom/ops/kernel/ops.h"
+#include "loom/ops/low/ops.h"
 #include "loom/ops/op_defs.h"
 #include "loom/ops/scalar/ops.h"
 #include "loom/pass/pipeline.h"
@@ -531,6 +532,11 @@ static bool loom_low_target_legalize_lookup_assume_operand_facts(
   for (uint16_t i = 0; i < values.count; ++i) {
     if (values.values[i] != target_value) continue;
     *out_facts = loom_value_fact_table_lookup(fact_table, target_value);
+    loom_value_facts_t element_facts = loom_value_facts_unknown();
+    if (loom_value_facts_query_all_equal_element(&fact_table->context,
+                                                 *out_facts, &element_facts)) {
+      *out_facts = element_facts;
+    }
     return true;
   }
   return false;
@@ -763,33 +769,31 @@ static iree_status_t loom_low_target_legalize_check_assume_topology_domain(
 static iree_status_t loom_low_target_legalize_check_assume_predicates(
     loom_low_target_legalize_function_state_t* state, const loom_op_t* op,
     const loom_value_fact_table_t* fact_table) {
+  loom_value_slice_t values = {0};
+  loom_attribute_t predicate_attr = loom_attr_absent();
   if (loom_index_assume_isa(op)) {
-    loom_attribute_t predicate_attr = loom_index_assume_predicates(op);
-    IREE_RETURN_IF_ERROR(
-        loom_low_target_legalize_check_assume_predicate_conflicts(
-            state, op, fact_table, loom_index_assume_values(op),
-            predicate_attr.predicate_list, predicate_attr.count));
-    if (!loom_low_target_legalize_op_is_in_function_entry_block(state, op)) {
-      return iree_ok_status();
-    }
-    return loom_low_target_legalize_check_assume_topology_domain(
-        state, op, fact_table, loom_index_assume_values(op),
-        predicate_attr.predicate_list, predicate_attr.count);
+    values = loom_index_assume_values(op);
+    predicate_attr = loom_index_assume_predicates(op);
+  } else if (loom_scalar_assume_isa(op)) {
+    values = loom_scalar_assume_values(op);
+    predicate_attr = loom_scalar_assume_predicates(op);
+  } else if (loom_low_assume_isa(op)) {
+    values = loom_low_assume_values(op);
+    predicate_attr = loom_low_assume_predicates(op);
+  } else {
+    return iree_ok_status();
   }
-  if (loom_scalar_assume_isa(op)) {
-    loom_attribute_t predicate_attr = loom_scalar_assume_predicates(op);
-    IREE_RETURN_IF_ERROR(
-        loom_low_target_legalize_check_assume_predicate_conflicts(
-            state, op, fact_table, loom_scalar_assume_values(op),
-            predicate_attr.predicate_list, predicate_attr.count));
-    if (!loom_low_target_legalize_op_is_in_function_entry_block(state, op)) {
-      return iree_ok_status();
-    }
-    return loom_low_target_legalize_check_assume_topology_domain(
-        state, op, fact_table, loom_scalar_assume_values(op),
-        predicate_attr.predicate_list, predicate_attr.count);
+
+  IREE_RETURN_IF_ERROR(
+      loom_low_target_legalize_check_assume_predicate_conflicts(
+          state, op, fact_table, values, predicate_attr.predicate_list,
+          predicate_attr.count));
+  if (!loom_low_target_legalize_op_is_in_function_entry_block(state, op)) {
+    return iree_ok_status();
   }
-  return iree_ok_status();
+  return loom_low_target_legalize_check_assume_topology_domain(
+      state, op, fact_table, values, predicate_attr.predicate_list,
+      predicate_attr.count);
 }
 
 static iree_string_view_t loom_low_target_legalize_report_descriptor_key(

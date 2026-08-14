@@ -46,12 +46,12 @@ typedef struct loom_low_packet_view_t {
   const loom_low_descriptor_t* descriptor;
 } loom_low_packet_view_t;
 
-// Returns true when |packet| is a compile-time hint with no emitted target
-// instruction. Hints remain in schedule and report tables so their scheduling
-// effect is observable, but final emitters omit them.
+// Returns true when |packet| is compile-time-only and has no emitted target
+// instruction. These packets remain in schedule and report tables so their
+// structural position is observable, but final emitters omit them.
 IREE_ATTRIBUTE_ALWAYS_INLINE static inline bool
-loom_low_packet_is_compiler_hint(const loom_low_packet_view_t* packet) {
-  return iree_any_bit_set(packet->node->traits, LOOM_TRAIT_HINT);
+loom_low_packet_is_compile_time_only(const loom_low_packet_view_t* packet) {
+  return loom_traits_are_compile_time_only(packet->node->traits);
 }
 
 // Returns the number of packets in a successful schedule.

@@ -29,7 +29,7 @@ extern "C" {
 typedef enum loom_low_placement_cause_bits_e {
   // Unknown or uninitialized placement cause.
   LOOM_LOW_PLACEMENT_CAUSE_UNKNOWN = 0,
-  // Descriptor tied result requiring source/result storage identity.
+  // Semantically tied result requiring source/result storage identity.
   LOOM_LOW_PLACEMENT_CAUSE_TIED_RESULT = 1,
   // low.copy source/result storage affinity.
   LOOM_LOW_PLACEMENT_CAUSE_LOW_COPY = 2,

@@ -110,6 +110,18 @@ func.def target(@test_target) @rejects_assume_range_contradicting_exact_facts() 
 
 test.target<low_core> @test_target
 
+low.func.def target<test.low.core>(@test_target) @rejects_low_assume_range_contradicting_exact_facts() -> (reg<test.i32>) {
+  %exact = low.const<test.const.i32> {i32_value = 64} : reg<test.i32>
+  // ERROR@+1: TARGET/059 {predicate_name="range", value_name="exact", required_min="128", required_max="255", known_min="64", known_max="64"}
+  %assumed = low.assume %exact [range(%exact, 128, 255)] : reg<test.i32>
+  low.return %assumed : reg<test.i32>
+}
+
+// ====
+// RUN: pass target-legalize
+
+test.target<low_core> @test_target
+
 func.def target(@test_target) @rejects_assume_ne_contradicting_exact_facts() -> (index) {
   %exact = index.constant 64 : index
   // ERROR@+1: TARGET/060 {predicate_name="ne", value_name="exact", known_value="64"}

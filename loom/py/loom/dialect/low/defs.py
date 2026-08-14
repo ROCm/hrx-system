@@ -57,6 +57,8 @@ from loom.dsl import (
     ATTR_TYPE_ENUM,
     ATTR_TYPE_I64,
     ATTR_TYPE_TYPE,
+    COMPILE_TIME_ONLY,
+    FACT_IDENTITY,
     HINT,
     ISOLATED_FROM_ABOVE,
     PURE,
@@ -92,6 +94,7 @@ from loom.dsl import (
     SymbolDefinition,
     SymbolDefinitionFlag,
     SymbolReference,
+    VariadicValuesMatch,
     YieldCountMatchesResults,
     YieldTypesMatchResults,
 )
@@ -1008,6 +1011,33 @@ low_const = Op(
 )
 
 # ============================================================================
+# low.assume — predicate-constrained register identity
+# ============================================================================
+
+low_assume = Op(
+    "low.assume",
+    group=low_ops,
+    phase=OpPhase.EXECUTABLE,
+    doc=("Identity with predicate constraints on target-low register results. Each result aliases the corresponding operand's exact physical storage and emits no target instruction."),
+    operands=[Operand("values", REGISTER, variadic=True)],
+    results=[Result("results", REGISTER, variadic=True)],
+    attrs=[AttrDef("predicates", "predicate_list")],
+    constraints=[VariadicValuesMatch("values", "results")],
+    traits=[PURE, FACT_IDENTITY, STORAGE_RELATION, COMPILE_TIME_ONLY],
+    facts="loom_low_assume_facts",
+    format=[
+        Refs("values"),
+        PredicateList("predicates"),
+        COLON,
+        TypesOf("results"),
+    ],
+    examples=[
+        "%step2 = low.assume %step [eq(%step, 3)] : reg<amdgpu.sgpr>",
+        "%i2, %n2 = low.assume %i, %n [lt(%i, %n)] : reg<amdgpu.sgpr>, reg<amdgpu.sgpr>",
+    ],
+)
+
+# ============================================================================
 # low.copy — explicit virtual-register copy/coalesce boundary
 # ============================================================================
 
@@ -1450,4 +1480,5 @@ ALL_LOW_OPS: tuple[Op, ...] = (
     low_scf_if,
     low_scf_for,
     low_schedule_fence,
+    low_assume,
 )

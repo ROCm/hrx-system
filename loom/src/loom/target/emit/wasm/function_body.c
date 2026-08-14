@@ -1238,7 +1238,7 @@ static iree_status_t loom_wasm_emit_structural_op(loom_wasm_emit_state_t* state,
 
 static iree_status_t loom_wasm_emit_op(loom_wasm_emit_state_t* state,
                                        const loom_op_t* op) {
-  if (iree_any_bit_set(op->traits, LOOM_TRAIT_HINT)) {
+  if (loom_traits_are_compile_time_only(op->traits)) {
     return iree_ok_status();
   }
   loom_low_descriptor_packet_t packet = {0};

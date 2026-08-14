@@ -284,3 +284,59 @@ low.kernel.def target<amdgpu.rdna3.core>(@target) abi_layout({constant_count = 2
   low.op<amdgpu.global_store_b32_saddr>(%offset, %value, %b) {offset = 0} : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.sgpr x2>)
   low.return
 }
+
+// ====
+
+amdgpu.target<gfx1100> @target
+
+low.kernel.def target<amdgpu.rdna3.core>(@target) workgroup_size(64, 1, 1) @direct_predicates(%token_count: reg<amdgpu.sgpr>, %capacity: reg<amdgpu.sgpr>) where [le(%token_count, %capacity), range(%token_count, 4, 2048), range(%capacity, 4, 4096)] {
+  %sum = low.op<amdgpu.s_add_u32>(%token_count, %capacity) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr>
+  low.return
+}
+
+// ----
+amdgpu.target<gfx1100> @target
+
+low.kernel.def target<amdgpu.rdna3.core>(@target) abi_layout({constant_count = 2, direct_arg_count = 2, direct_arg_names = {arg0 = "token_count", arg1 = "capacity"}, direct_arg_offsets = [0, 4], direct_arg_parameter_indices = [0, 1], direct_arg_sizes = [4, 4], parameter_count = 2, resource_count = 0, resource_offsets = [], resource_parameter_indices = [], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) @direct_predicates() {
+  %kernarg = low.live_in<amdgpu.kernarg_segment_ptr> : reg<amdgpu.sgpr x2>
+  %4 = low.op<amdgpu.s_load_dwordx2_offset_only>(%kernarg) {offset = 0} : (reg<amdgpu.sgpr x2>) -> reg<amdgpu.sgpr x2>
+  %5 = low.slice %4[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %6 = low.slice %4[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %token_count, %capacity = low.assume %5, %6 [le(%5, %6), range(%5, 4, 2048), range(%6, 4, 4096)] : reg<amdgpu.sgpr>, reg<amdgpu.sgpr>
+  %sum = low.op<amdgpu.s_add_u32>(%token_count, %capacity) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr>
+  low.return
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+
+low.kernel.def target<amdgpu.rdna3.core>(@target) workgroup_size(64, 1, 1) @unused_predicate_arg(%used: reg<amdgpu.sgpr>, %unused: reg<amdgpu.sgpr>) where [eq(%unused, 3)] {
+  %sum = low.op<amdgpu.s_add_u32>(%used, %used) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr>
+  low.return
+}
+
+// ----
+amdgpu.target<gfx1100> @target
+
+low.kernel.def target<amdgpu.rdna3.core>(@target) abi_layout({constant_count = 2, direct_arg_count = 2, direct_arg_names = {arg0 = "used", arg1 = "unused"}, direct_arg_offsets = [0, 4], direct_arg_parameter_indices = [0, 1], direct_arg_sizes = [4, 4], parameter_count = 2, resource_count = 0, resource_offsets = [], resource_parameter_indices = [], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) @unused_predicate_arg() {
+  %kernarg = low.live_in<amdgpu.kernarg_segment_ptr> : reg<amdgpu.sgpr x2>
+  %used = low.op<amdgpu.s_load_dword_offset_only>(%kernarg) {offset = 0} : (reg<amdgpu.sgpr x2>) -> reg<amdgpu.sgpr>
+  %sum = low.op<amdgpu.s_add_u32>(%used, %used) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr>
+  low.return
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+
+low.kernel.def target<amdgpu.rdna3.core>(@target) workgroup_size(64, 1, 1) @predicate_only_arg(%unused: reg<amdgpu.sgpr>) where [eq(%unused, 3)] {
+  low.return
+}
+
+// ----
+amdgpu.target<gfx1100> @target
+
+low.kernel.def target<amdgpu.rdna3.core>(@target) abi_layout({constant_count = 1, direct_arg_count = 1, direct_arg_names = {arg0 = "unused"}, direct_arg_offsets = [0], direct_arg_parameter_indices = [0], direct_arg_sizes = [4], parameter_count = 1, resource_count = 0, resource_offsets = [], resource_parameter_indices = [], uses_kernarg_segment_ptr = false}) workgroup_size(64, 1, 1) @predicate_only_arg() {
+  low.return
+}

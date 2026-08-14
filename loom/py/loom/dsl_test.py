@@ -44,6 +44,7 @@ from loom.dsl import (
     BUFFER,
     BY_REFERENCE,
     COMMUTATIVE,
+    COMPILE_TIME_ONLY,
     CONSTANT_LIKE,
     CONVERGENT,
     DECOMPOSABLE,
@@ -52,6 +53,7 @@ from loom.dsl import (
     ENCODING_SCHEMA,
     ENCODING_STORAGE,
     ENCODING_TRANSFORM,
+    FACT_IDENTITY,
     FLOAT,
     FLOAT_ELEMENT,
     HINT,
@@ -71,6 +73,7 @@ from loom.dsl import (
     REGISTER,
     SAFE_TO_SPECULATE,
     STORAGE,
+    STORAGE_RELATION,
     SYMBOL_DEFINE,
     TENSOR,
     TERMINATOR,
@@ -2604,6 +2607,44 @@ class TestEffects:
     def test_hint_with_convergent_raises(self) -> None:
         with _raises(ValueError, match="HINT.*CONVERGENT"):
             Op("test.bad", traits=[HINT, CONVERGENT])
+
+    def test_compile_time_only_can_refine_values(self) -> None:
+        op = Op(
+            "test.assume",
+            operands=[Operand("value", ANY)],
+            results=[Result("result", ANY)],
+            traits=[PURE, FACT_IDENTITY, STORAGE_RELATION, COMPILE_TIME_ONLY],
+        )
+        assert op.is_pure
+
+    def test_compile_time_only_is_redundant_with_hint(self) -> None:
+        with _raises(ValueError, match="COMPILE_TIME_ONLY.*redundant.*HINT"):
+            Op("test.hint", traits=[HINT, COMPILE_TIME_ONLY])
+
+    def test_compile_time_only_with_runtime_trait_raises(self) -> None:
+        with _raises(ValueError, match="COMPILE_TIME_ONLY.*Convergent"):
+            Op("test.bad", traits=[COMPILE_TIME_ONLY, CONVERGENT])
+
+    def test_compile_time_only_result_requires_identity_storage(self) -> None:
+        with _raises(
+            ValueError,
+            match="COMPILE_TIME_ONLY.*FACT_IDENTITY.*STORAGE_RELATION",
+        ):
+            Op(
+                "test.bad",
+                operands=[Operand("value", ANY)],
+                results=[Result("result", ANY)],
+                traits=[PURE, COMPILE_TIME_ONLY],
+            )
+
+    def test_compile_time_only_with_explicit_effects_raises(self) -> None:
+        with _raises(ValueError, match="COMPILE_TIME_ONLY.*explicit effects"):
+            Op(
+                "test.bad",
+                operands=[Operand("pool", POOL)],
+                traits=[COMPILE_TIME_ONLY],
+                effects=[Reads("pool")],
+            )
 
     def test_convergent_can_be_pure(self) -> None:
         op = Op("test.convergent", traits=[PURE, CONVERGENT])

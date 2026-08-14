@@ -44,7 +44,8 @@ enum {
   LOOM_OP_LOW_SCF_IF = LOOM_OP_KIND(LOOM_DIALECT_LOW, 21),
   LOOM_OP_LOW_SCF_FOR = LOOM_OP_KIND(LOOM_DIALECT_LOW, 22),
   LOOM_OP_LOW_SCHEDULE_FENCE = LOOM_OP_KIND(LOOM_DIALECT_LOW, 23),
-  LOOM_OP_LOW_COUNT_ = 24,
+  LOOM_OP_LOW_ASSUME = LOOM_OP_KIND(LOOM_DIALECT_LOW, 24),
+  LOOM_OP_LOW_COUNT_ = 25,
 };
 
 // Function visibility. Absent (0) means private (module-internal).
@@ -756,6 +757,28 @@ iree_status_t loom_low_schedule_fence_build(
     loom_builder_t* builder,
     loom_location_id_t location,
     loom_op_t** out_op);
+
+// LOOM_OP_LOW_ASSUME: Identity with predicate constraints on target-low register results. Each result aliases the corresponding operand's exact physical storage and emits no target instruction.
+// %step2 = low.assume %step [eq(%step, 3)] : reg<amdgpu.sgpr>
+LOOM_DEFINE_ISA(loom_low_assume_isa, LOOM_OP_LOW_ASSUME)
+LOOM_DEFINE_VARIADIC_OPERANDS(loom_low_assume_values, 0)
+LOOM_DEFINE_VARIADIC_RESULTS(loom_low_assume_results, 0)
+LOOM_DEFINE_ATTR_PREDICATE_LIST(loom_low_assume_predicates, 0)
+iree_status_t loom_low_assume_build(
+    loom_builder_t* builder,
+    const loom_value_id_t* values,
+    iree_host_size_t values_count,
+    const loom_predicate_t* predicates,
+    iree_host_size_t predicates_count,
+    const loom_type_t* result_types,
+    iree_host_size_t result_count,
+    loom_location_id_t location,
+    loom_op_t** out_op);
+iree_status_t loom_low_assume_facts(
+    loom_fact_context_t* context,
+    const loom_module_t* module, const loom_op_t* op,
+    const loom_value_facts_t* operand_facts,
+    loom_value_facts_t* result_facts);
 
 // Returns the vtable array for the low dialect.
 const loom_op_vtable_t* const* loom_low_dialect_vtables(

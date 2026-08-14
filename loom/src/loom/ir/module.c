@@ -4022,6 +4022,116 @@ iree_status_t loom_module_walk_attribute_value_refs(
                                                     callback, user_data);
 }
 
+static bool loom_module_predicate_list_attr_refs_value(
+    loom_attribute_t attr, loom_value_id_t value_id) {
+  if (attr.count == 0 || !attr.predicate_list) return false;
+  for (uint16_t predicate_index = 0; predicate_index < attr.count;
+       ++predicate_index) {
+    const loom_predicate_t* predicate = &attr.predicate_list[predicate_index];
+    for (uint8_t argument_index = 0; argument_index < predicate->arg_count;
+         ++argument_index) {
+      if (predicate->arg_tags[argument_index] == LOOM_PRED_ARG_VALUE &&
+          (loom_value_id_t)predicate->args[argument_index] == value_id) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+static bool loom_module_attr_refs_predicate_value(loom_attribute_t attr,
+                                                  loom_value_id_t value_id,
+                                                  uint8_t aggregate_depth) {
+  switch ((loom_attr_kind_t)attr.kind) {
+    case LOOM_ATTR_PREDICATE_LIST:
+      return loom_module_predicate_list_attr_refs_value(attr, value_id);
+    case LOOM_ATTR_DICT:
+      if (aggregate_depth >= LOOM_ATTR_AGGREGATE_MAX_NESTING_DEPTH ||
+          attr.count == 0 || !attr.dict_entries) {
+        return false;
+      }
+      for (uint16_t i = 0; i < attr.count; ++i) {
+        if (loom_module_attr_refs_predicate_value(
+                attr.dict_entries[i].value, value_id,
+                (uint8_t)(aggregate_depth + 1))) {
+          return true;
+        }
+      }
+      return false;
+    case LOOM_ATTR_PARAMETERIZED:
+      if (aggregate_depth >= LOOM_ATTR_AGGREGATE_MAX_NESTING_DEPTH ||
+          attr.count == 0 || !attr.parameterized_slots) {
+        return false;
+      }
+      for (uint16_t i = 0; i < attr.count; ++i) {
+        if (loom_module_attr_refs_predicate_value(
+                attr.parameterized_slots[i], value_id,
+                (uint8_t)(aggregate_depth + 1))) {
+          return true;
+        }
+      }
+      return false;
+    case LOOM_ATTR_PARAMETERIZED_ARRAY:
+      if (aggregate_depth >= LOOM_ATTR_AGGREGATE_MAX_NESTING_DEPTH ||
+          attr.count == 0 || !attr.parameterized_array) {
+        return false;
+      }
+      for (uint16_t i = 0; i < attr.count; ++i) {
+        if (loom_module_attr_refs_predicate_value(
+                attr.parameterized_array[i], value_id,
+                (uint8_t)(aggregate_depth + 1))) {
+          return true;
+        }
+      }
+      return false;
+    default:
+      return false;
+  }
+}
+
+static bool loom_module_op_attrs_ref_predicate_value(const loom_op_t* op,
+                                                     loom_value_id_t value_id) {
+  const loom_attribute_t* attrs = loom_op_const_attrs(op);
+  for (uint8_t attr_index = 0; attr_index < op->attribute_count; ++attr_index) {
+    if (loom_module_attr_refs_predicate_value(attrs[attr_index], value_id,
+                                              /*aggregate_depth=*/0)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+static bool loom_module_region_refs_predicate_value(const loom_region_t* region,
+                                                    loom_value_id_t value_id) {
+  if (!region) return false;
+  const loom_block_t* block = NULL;
+  loom_region_for_each_block(region, block) {
+    const loom_op_t* op = NULL;
+    loom_block_for_each_op(block, op) {
+      if (iree_any_bit_set(op->flags, LOOM_OP_FLAG_DEAD)) continue;
+      if (loom_module_op_attrs_ref_predicate_value(op, value_id)) return true;
+      loom_region_t** regions = loom_op_regions((loom_op_t*)op);
+      for (uint8_t i = 0; i < op->region_count; ++i) {
+        if (loom_module_region_refs_predicate_value(regions[i], value_id)) {
+          return true;
+        }
+      }
+    }
+  }
+  return false;
+}
+
+bool loom_module_value_has_predicate_attribute_uses(const loom_module_t* module,
+                                                    loom_value_id_t value_id) {
+  if (!module || value_id == LOOM_VALUE_ID_INVALID ||
+      value_id >= module->values.count) {
+    return false;
+  }
+  const loom_value_t* value = loom_module_value(module, value_id);
+  return loom_value_has_attribute_uses(value) &&
+         loom_module_region_refs_predicate_value(module->body, value_id);
+}
+
 static iree_status_t loom_module_replace_attribute_value_refs_impl(
     loom_module_t* module, loom_attribute_t attr, loom_value_id_t old_id,
     loom_value_id_t new_id, uint8_t depth, loom_attribute_t* out_attr,
@@ -4670,6 +4780,12 @@ iree_status_t loom_block_remove_arg(loom_module_t* module, loom_block_t* block,
     return iree_make_status(
         IREE_STATUS_FAILED_PRECONDITION,
         "cannot remove block argument %%%u with incoming type use(s)",
+        (unsigned)value_id);
+  }
+  if (loom_module_value_has_predicate_attribute_uses(module, value_id)) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "cannot remove block argument %%%u with predicate attribute use(s)",
         (unsigned)value_id);
   }
 

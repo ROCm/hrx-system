@@ -1,0 +1,91 @@
+// RUN: roundtrip
+
+test.target<low_core> @target
+
+low.kernel.def target<test.low.core>(@target) @assume_roundtrip(%position: reg<test.i32>, %step: reg<test.i32>) {
+  %bounded_position, %fixed_step = low.assume %position, %step [range(%position, 0, 1024), eq(%step, 3), lt(%position, %step)] : reg<test.i32>, reg<test.i32>
+  low.return
+}
+
+// ====
+
+// RUN: format bytecode
+
+test.target<low_core> @target
+
+low.kernel.def target<test.low.core>(@target) @assume_bytecode(%position: reg<test.i32>, %step: reg<test.i32>) {
+  %bounded_position, %fixed_step = low.assume %position, %step [range(%position, 0, 1024), eq(%step, 3), lt(%position, %step)] : reg<test.i32>, reg<test.i32>
+  low.return
+}
+
+// ====
+
+// RUN: verify
+
+test.target<low_core> @target
+
+low.kernel.def target<test.low.core>(@target) @assume_count_mismatch(%value: reg<test.i32>) {
+  // ERROR@+1: STRUCTURE/013 {field_a="values", actual_count="1", field_b="results", expected_count="2"}
+  %first, %second = low.assume %value [] : reg<test.i32>, reg<test.i32>
+  low.return
+}
+
+// ====
+
+// RUN: verify
+
+test.target<low_core> @target
+
+low.kernel.def target<test.low.core>(@target) @assume_type_mismatch(%value: reg<test.i32>) {
+  // ERROR@+1: TYPE/001 {field_a="values[0]", type_a="reg<test.i32>", field_b="results[0]", type_b="reg<test.i64>"}
+  %result = low.assume %value [] : reg<test.i64>
+  low.return
+}
+
+// ====
+
+// RUN: pass canonicalize
+
+test.target<low_core> @target
+
+low.kernel.def target<test.low.core>(@target) @assume_exact_fact(%value: reg<test.i32>) {
+  %exact = low.assume %value [eq(%value, 3)] : reg<test.i32>
+  %lo = test.fact_all_equal_range_lo %exact : reg<test.i32> -> i64
+  %hi = test.fact_all_equal_range_hi %exact : reg<test.i32> -> i64
+  test.use %lo, %hi : i64, i64
+  low.return
+}
+
+// ----
+test.target<low_core> @target
+
+low.kernel.def target<test.low.core>(@target) @assume_exact_fact(%value: reg<test.i32>) {
+  %lo = scalar.constant 3 : i64
+  %hi = scalar.constant 3 : i64
+  test.use %lo, %hi : i64, i64
+  low.return
+}
+
+// ====
+
+// RUN: pass canonicalize
+
+test.target<low_core> @target
+
+low.kernel.def target<test.low.core>(@target) @assume_relational_facts(%lhs: reg<test.i32>, %rhs: reg<test.i32>) {
+  %bounded_lhs, %bounded_rhs = low.assume %lhs, %rhs [lt(%lhs, %rhs), range(%lhs, 32, 4096), range(%rhs, 1, 2048)] : reg<test.i32>, reg<test.i32>
+  %lhs_hi = test.fact_all_equal_range_hi %bounded_lhs : reg<test.i32> -> i64
+  %rhs_lo = test.fact_all_equal_range_lo %bounded_rhs : reg<test.i32> -> i64
+  test.use %lhs_hi, %rhs_lo : i64, i64
+  low.return
+}
+
+// ----
+test.target<low_core> @target
+
+low.kernel.def target<test.low.core>(@target) @assume_relational_facts(%lhs: reg<test.i32>, %rhs: reg<test.i32>) {
+  %lhs_hi = scalar.constant 2047 : i64
+  %rhs_lo = scalar.constant 33 : i64
+  test.use %lhs_hi, %rhs_lo : i64, i64
+  low.return
+}

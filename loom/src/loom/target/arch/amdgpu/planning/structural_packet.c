@@ -103,7 +103,7 @@ loom_amdgpu_structural_packet_info_t loom_amdgpu_structural_packet_analyze(
     info.instruction_count = 1;
     return info;
   }
-  if (iree_any_bit_set(node->traits, LOOM_TRAIT_HINT)) {
+  if (loom_traits_are_compile_time_only(node->traits)) {
     return info;
   }
   const loom_low_allocation_packet_move_op_kind_t packet_move_kind =

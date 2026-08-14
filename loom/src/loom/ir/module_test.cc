@@ -820,6 +820,54 @@ TEST_F(ModuleTest, BlockRemoveArgRejectsLiveUses) {
   loom_module_free(module);
 }
 
+TEST_F(ModuleTest, BlockRemoveArgRejectsPredicateAttributeUses) {
+  loom_module_t* module = NULL;
+  IREE_ASSERT_OK(loom_module_allocate(&context_, IREE_SV("test"), &block_pool_,
+                                      NULL, iree_allocator_system(), &module));
+
+  loom_builder_t builder;
+  loom_builder_initialize(module, &module->arena, loom_module_block(module),
+                          &builder);
+  loom_string_id_t name_id = LOOM_STRING_ID_INVALID;
+  IREE_ASSERT_OK(
+      loom_builder_intern_string(&builder, IREE_SV("predicate"), &name_id));
+  uint16_t symbol_id = LOOM_SYMBOL_ID_INVALID;
+  IREE_ASSERT_OK(loom_module_add_symbol(module, name_id, &symbol_id));
+  const loom_symbol_ref_t callee = {
+      /*.module_id=*/0,
+      /*.symbol_id=*/symbol_id,
+  };
+  const loom_type_t i32_type = loom_type_scalar(LOOM_SCALAR_TYPE_I32);
+  loom_op_t* function_op = NULL;
+  IREE_ASSERT_OK(loom_test_func_build(
+      &builder, /*build_flags=*/0, /*visibility=*/0, /*cc=*/0, callee,
+      &i32_type, /*arg_types_count=*/1, /*result_types=*/NULL,
+      /*result_count=*/0, /*tied_results=*/NULL, /*tied_result_count=*/0,
+      /*predicates=*/NULL, /*predicates_count=*/0, LOOM_LOCATION_UNKNOWN,
+      &function_op));
+
+  loom_block_t* entry_block =
+      loom_region_entry_block(loom_test_func_body(function_op));
+  const loom_value_id_t argument = loom_block_arg_id(entry_block, 0);
+  loom_predicate_t predicate = {
+      /*.kind=*/LOOM_PREDICATE_EQ,
+      /*.arg_count=*/2,
+      /*.arg_tags=*/{LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_CONST, 0},
+      /*.reserved=*/{},
+      /*.args=*/{argument, 3, 0},
+  };
+  loom_op_attrs(function_op)[3] = loom_attr_predicate_list(&predicate, 1);
+  IREE_ASSERT_OK(loom_module_compute_uses(module));
+
+  EXPECT_TRUE(loom_module_value_has_predicate_attribute_uses(module, argument));
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_FAILED_PRECONDITION,
+                        loom_block_remove_arg(module, entry_block, 0));
+  EXPECT_EQ(entry_block->arg_count, 1u);
+  EXPECT_EQ(loom_block_arg_id(entry_block, 0), argument);
+
+  loom_module_free(module);
+}
+
 //===----------------------------------------------------------------------===//
 // Value definition
 //===----------------------------------------------------------------------===//

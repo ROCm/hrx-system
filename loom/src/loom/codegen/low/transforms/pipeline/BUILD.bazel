@@ -54,6 +54,7 @@ loom_cc_library(
         "//loom/src/loom/ops:op_defs",
         "//loom/src/loom/ops/index",
         "//loom/src/loom/ops/kernel",
+        "//loom/src/loom/ops/low",
         "//loom/src/loom/ops/scalar",
         "//loom/src/loom/pass:pipeline",
         "//loom/src/loom/pass:registry",
