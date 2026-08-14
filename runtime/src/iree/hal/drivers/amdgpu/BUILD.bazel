@@ -510,6 +510,7 @@ iree_runtime_cc_test(
 
 iree_runtime_cc_test(
     name = "allocator_test",
+    size = "medium",
     srcs = ["allocator_test.cc"],
     deps = [
         ":amdgpu",
