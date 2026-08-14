@@ -43,6 +43,7 @@ iree_cc_test(
     iree::base::threading
     iree::hal
     iree::hal::drivers::local_task::registration
+    iree::hal::memory::slab_provider
     iree::hal::remote::client
     iree::hal::remote::client::command_buffer_test_util
     iree::hal::remote::protocol::commands

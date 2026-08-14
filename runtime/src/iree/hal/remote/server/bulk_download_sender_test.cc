@@ -487,7 +487,6 @@ const iree_hal_device_vtable_t failing_queue_write_device_vtable = {
     /*.assign_topology_info=*/nullptr,
     /*.create_channel=*/nullptr,
     /*.create_command_buffer=*/nullptr,
-    /*.create_event=*/nullptr,
     /*.load_executable=*/nullptr,
     /*.import_file=*/failing_queue_write_device_import_file,
     /*.create_semaphore=*/failing_queue_write_device_create_semaphore,

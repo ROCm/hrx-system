@@ -14,13 +14,12 @@
 
 namespace {
 
-constexpr std::array<iree_hal_remote_resource_type_t, 7> kResourceTypes = {
+constexpr std::array<iree_hal_remote_resource_type_t, 6> kResourceTypes = {
     IREE_HAL_REMOTE_RESOURCE_TYPE_BUFFER,
     IREE_HAL_REMOTE_RESOURCE_TYPE_SEMAPHORE,
     IREE_HAL_REMOTE_RESOURCE_TYPE_EXECUTABLE,
     IREE_HAL_REMOTE_RESOURCE_TYPE_COMMAND_BUFFER,
     IREE_HAL_REMOTE_RESOURCE_TYPE_FILE,
-    IREE_HAL_REMOTE_RESOURCE_TYPE_EVENT,
     IREE_HAL_REMOTE_RESOURCE_TYPE_PHYSICAL_MEMORY,
 };
 

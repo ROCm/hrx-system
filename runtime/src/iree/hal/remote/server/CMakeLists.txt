@@ -152,6 +152,8 @@ iree_cc_library(
     "file_index.h"
     "profile_relay.h"
   SRCS
+    "atomic.c"
+    "atomic.h"
     "bulk.c"
     "bulk.h"
     "bulk_download_sender.c"
@@ -489,6 +491,7 @@ iree_cc_test(
   NAME
     session_test
   SRCS
+    "atomic.h"
     "server.h"
     "session.h"
     "session_test.cc"
@@ -500,6 +503,7 @@ iree_cc_test(
     iree::base
     iree::base::threading
     iree::hal
+    iree::hal::remote::protocol::commands
     iree::hal::remote::protocol::common
     iree::hal::remote::protocol::control
     iree::hal::remote::protocol::queue

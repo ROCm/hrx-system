@@ -73,8 +73,6 @@ iree_cc_library(
     "device.h"
     "driver.c"
     "driver.h"
-    "event.c"
-    "event.h"
     "executable.c"
     "executable.h"
     "file.c"

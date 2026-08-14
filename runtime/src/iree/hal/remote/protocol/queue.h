@@ -88,6 +88,11 @@ typedef enum iree_hal_remote_queue_op_type_e {
   IREE_HAL_REMOTE_QUEUE_OP_COMMAND_BUFFER_EXECUTE = 0x0009,
   IREE_HAL_REMOTE_QUEUE_OP_HOST_CALL_INVOKE = 0x000A,
 
+  // ── Synchronization ─────────────────────────────────────────────────────
+  IREE_HAL_REMOTE_QUEUE_OP_ATOMIC_WAIT = 0x000F,
+  IREE_HAL_REMOTE_QUEUE_OP_ATOMIC_STORE = 0x0010,
+  IREE_HAL_REMOTE_QUEUE_OP_ATOMIC_RMW = 0x0011,
+
   // ── Queue Control ───────────────────────────────────────────────────────
   IREE_HAL_REMOTE_QUEUE_OP_QUEUE_FLUSH = 0x000B,
   IREE_HAL_REMOTE_QUEUE_OP_RESOURCE_RELEASE_BATCH = 0x000C,
@@ -305,6 +310,42 @@ typedef struct iree_hal_remote_command_buffer_execute_op_t {
   //   Serialized command stream (iree_hal_remote_cmd_header_t sequence).
 } iree_hal_remote_command_buffer_execute_op_t;
 static_assert(sizeof(iree_hal_remote_command_buffer_execute_op_t) == 32, "");
+
+// Buffer target shared by direct queue atomic operations.
+typedef struct iree_hal_remote_queue_atomic_target_t {
+  // Server buffer resource containing the atomic memory location.
+  iree_hal_remote_resource_id_t buffer_id;
+  // Absolute byte offset into the root buffer allocation.
+  uint64_t offset;
+  // Exact local device queue affinity requested by the client.
+  uint64_t queue_affinity;
+} iree_hal_remote_queue_atomic_target_t;
+static_assert(sizeof(iree_hal_remote_queue_atomic_target_t) == 24, "");
+
+// ATOMIC_WAIT: Wait until a device memory location satisfies a predicate.
+typedef struct iree_hal_remote_queue_atomic_wait_op_t {
+  iree_hal_remote_queue_op_header_t header;
+  iree_hal_remote_queue_atomic_target_t target;
+  iree_hal_remote_atomic_wait_params_t params;
+} iree_hal_remote_queue_atomic_wait_op_t;
+static_assert(sizeof(iree_hal_remote_queue_atomic_wait_op_t) == 56, "");
+
+// ATOMIC_STORE: Atomically replace a device memory location.
+typedef struct iree_hal_remote_queue_atomic_store_op_t {
+  iree_hal_remote_queue_op_header_t header;
+  iree_hal_remote_queue_atomic_target_t target;
+  iree_hal_remote_atomic_store_params_t params;
+} iree_hal_remote_queue_atomic_store_op_t;
+static_assert(sizeof(iree_hal_remote_queue_atomic_store_op_t) == 48, "");
+
+// ATOMIC_RMW: Atomically modify a device memory location without returning its
+// previous value.
+typedef struct iree_hal_remote_queue_atomic_rmw_op_t {
+  iree_hal_remote_queue_op_header_t header;
+  iree_hal_remote_queue_atomic_target_t target;
+  iree_hal_remote_atomic_rmw_params_t params;
+} iree_hal_remote_queue_atomic_rmw_op_t;
+static_assert(sizeof(iree_hal_remote_queue_atomic_rmw_op_t) == 48, "");
 
 // HOST_CALL_INVOKE: reserved for future explicit server-side named handlers.
 // HAL queue_host_call callbacks are client-local function pointers and are not

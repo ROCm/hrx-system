@@ -47,9 +47,9 @@ extern "C" {
 typedef enum iree_hal_remote_cmd_type_e {
   // ── Synchronization ─────────────────────────────────────────────────────
   IREE_HAL_REMOTE_CMD_EXECUTION_BARRIER = 0x0001,
-  IREE_HAL_REMOTE_CMD_EVENT_SIGNAL = 0x0002,
-  IREE_HAL_REMOTE_CMD_EVENT_RESET = 0x0003,
-  IREE_HAL_REMOTE_CMD_EVENT_WAIT = 0x0004,
+  IREE_HAL_REMOTE_CMD_ATOMIC_WAIT = 0x0002,
+  IREE_HAL_REMOTE_CMD_ATOMIC_STORE = 0x0003,
+  IREE_HAL_REMOTE_CMD_ATOMIC_RMW = 0x0004,
 
   // ── Buffer ──────────────────────────────────────────────────────────────
   IREE_HAL_REMOTE_CMD_BUFFER_ADVISE = 0x0010,
@@ -121,55 +121,55 @@ static_assert(offsetof(iree_hal_remote_buffer_barrier_t, buffer_id) == 8, "");
 
 // EXECUTION_BARRIER: Insert a pipeline barrier.
 // Variable-length tail: memory barriers followed by buffer barriers.
+#define IREE_HAL_REMOTE_EXECUTION_BARRIER_FLAGS_KNOWN UINT64_C(0x3)
 typedef struct iree_hal_remote_execution_barrier_cmd_t {
   iree_hal_remote_cmd_header_t header;
+  uint64_t barrier_flags;      // iree_hal_execution_barrier_flags_t
   uint32_t source_stage_mask;  // iree_hal_execution_stage_t
   uint32_t target_stage_mask;  // iree_hal_execution_stage_t
-  uint32_t barrier_flags;      // Reserved, must be 0.
   uint16_t memory_barrier_count;
   uint16_t buffer_barrier_count;
+  uint32_t reserved;  // Must be 0.
   // Followed by:
   //   iree_hal_remote_memory_barrier_t memory_barriers[memory_barrier_count]
   //   iree_hal_remote_buffer_barrier_t buffer_barriers[buffer_barrier_count]
   //   (total command padded to 8-byte alignment)
 } iree_hal_remote_execution_barrier_cmd_t;
-static_assert(sizeof(iree_hal_remote_execution_barrier_cmd_t) == 24, "");
+static_assert(sizeof(iree_hal_remote_execution_barrier_cmd_t) == 32, "");
+static_assert(offsetof(iree_hal_remote_execution_barrier_cmd_t,
+                       barrier_flags) == 8,
+              "");
 
-// EVENT_SIGNAL: Sets an event when prior commands reach source_stage_mask.
-typedef struct iree_hal_remote_event_signal_cmd_t {
+// ATOMIC_WAIT: Wait until a device memory location satisfies a predicate.
+typedef struct iree_hal_remote_atomic_wait_cmd_t {
   iree_hal_remote_cmd_header_t header;
-  iree_hal_remote_resource_id_t event_id;
-  uint32_t source_stage_mask;  // iree_hal_execution_stage_t
-  uint32_t reserved;           // Must be 0.
-} iree_hal_remote_event_signal_cmd_t;
-static_assert(sizeof(iree_hal_remote_event_signal_cmd_t) == 24, "");
-
-// EVENT_RESET: Resets an event when prior commands reach source_stage_mask.
-typedef struct iree_hal_remote_event_reset_cmd_t {
-  iree_hal_remote_cmd_header_t header;
-  iree_hal_remote_resource_id_t event_id;
-  uint32_t source_stage_mask;  // iree_hal_execution_stage_t
-  uint32_t reserved;           // Must be 0.
-} iree_hal_remote_event_reset_cmd_t;
-static_assert(sizeof(iree_hal_remote_event_reset_cmd_t) == 24, "");
-
-// EVENT_WAIT: Waits on events and applies a pipeline barrier.
-// Variable-length tail: event IDs followed by memory and buffer barriers.
-typedef struct iree_hal_remote_event_wait_cmd_t {
-  iree_hal_remote_cmd_header_t header;
+  iree_hal_remote_binding_t target;
   uint32_t source_stage_mask;  // iree_hal_execution_stage_t
   uint32_t target_stage_mask;  // iree_hal_execution_stage_t
-  uint16_t event_count;
-  uint16_t memory_barrier_count;
-  uint16_t buffer_barrier_count;
-  uint16_t reserved;  // Must be 0.
-  // Followed by:
-  //   iree_hal_remote_resource_id_t event_ids[event_count]
-  //   iree_hal_remote_memory_barrier_t memory_barriers[memory_barrier_count]
-  //   iree_hal_remote_buffer_barrier_t buffer_barriers[buffer_barrier_count]
-  //   (total command padded to 8-byte alignment)
-} iree_hal_remote_event_wait_cmd_t;
-static_assert(sizeof(iree_hal_remote_event_wait_cmd_t) == 24, "");
+  iree_hal_remote_atomic_wait_params_t params;
+} iree_hal_remote_atomic_wait_cmd_t;
+static_assert(sizeof(iree_hal_remote_atomic_wait_cmd_t) == 72, "");
+
+// ATOMIC_STORE: Atomically replace a device memory location.
+typedef struct iree_hal_remote_atomic_store_cmd_t {
+  iree_hal_remote_cmd_header_t header;
+  iree_hal_remote_binding_t target;
+  uint32_t source_stage_mask;  // iree_hal_execution_stage_t
+  uint32_t target_stage_mask;  // iree_hal_execution_stage_t
+  iree_hal_remote_atomic_store_params_t params;
+} iree_hal_remote_atomic_store_cmd_t;
+static_assert(sizeof(iree_hal_remote_atomic_store_cmd_t) == 64, "");
+
+// ATOMIC_RMW: Atomically modify a device memory location without returning its
+// previous value.
+typedef struct iree_hal_remote_atomic_rmw_cmd_t {
+  iree_hal_remote_cmd_header_t header;
+  iree_hal_remote_binding_t target;
+  uint32_t source_stage_mask;  // iree_hal_execution_stage_t
+  uint32_t target_stage_mask;  // iree_hal_execution_stage_t
+  iree_hal_remote_atomic_rmw_params_t params;
+} iree_hal_remote_atomic_rmw_cmd_t;
+static_assert(sizeof(iree_hal_remote_atomic_rmw_cmd_t) == 64, "");
 
 // BUFFER_ADVISE: Provide a hint about buffer usage.
 typedef struct iree_hal_remote_buffer_advise_cmd_t {

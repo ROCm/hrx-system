@@ -112,6 +112,8 @@ static iree_status_t iree_hal_remote_client_executable_query_function_info(
       const uint64_t allowed_flags =
           IREE_HAL_EXECUTABLE_FUNCTION_FLAG_SEQUENTIAL |
           IREE_HAL_EXECUTABLE_FUNCTION_FLAG_WORKGROUP_SIZE_DYNAMIC;
+      const uint32_t allowed_resource_usage_flags =
+          IREE_HAL_EXECUTABLE_FUNCTION_RESOURCE_FLAG_ALL;
       if (response->reserved0 != 0 || response->reserved1 != 0 ||
           response->occupancy_reserved != 0) {
         status = iree_make_status(
@@ -122,6 +124,31 @@ static iree_status_t iree_hal_remote_client_executable_query_function_info(
                                   "EXECUTABLE_QUERY_FUNCTION response has "
                                   "unknown flags 0x%016" PRIx64,
                                   response->flags);
+      } else if ((response->resource_usage_provided_flags &
+                  ~allowed_resource_usage_flags) != 0) {
+        status = iree_make_status(
+            IREE_STATUS_INTERNAL,
+            "EXECUTABLE_QUERY_FUNCTION response has unknown resource usage "
+            "flags 0x%08" PRIx32,
+            response->resource_usage_provided_flags &
+                ~allowed_resource_usage_flags);
+      } else if (
+          (!iree_all_bits_set(
+               response->resource_usage_provided_flags,
+               IREE_HAL_EXECUTABLE_FUNCTION_RESOURCE_FLAG_WORKGROUP_LOCAL_MEMORY) &&
+           response->fixed_workgroup_local_memory_size != 0) ||
+          (!iree_all_bits_set(
+               response->resource_usage_provided_flags,
+               IREE_HAL_EXECUTABLE_FUNCTION_RESOURCE_FLAG_PRIVATE_MEMORY) &&
+           response->fixed_private_memory_size != 0) ||
+          (!iree_all_bits_set(
+               response->resource_usage_provided_flags,
+               IREE_HAL_EXECUTABLE_FUNCTION_RESOURCE_FLAG_INVOCATION_REGISTERS) &&
+           response->invocation_register_count != 0)) {
+        status = iree_make_status(
+            IREE_STATUS_INTERNAL,
+            "EXECUTABLE_QUERY_FUNCTION response populates unavailable "
+            "resource usage fields");
       } else {
         iree_host_size_t expected_length = 0;
         status = IREE_STRUCT_LAYOUT(
@@ -156,8 +183,19 @@ static iree_status_t iree_hal_remote_client_executable_query_function_info(
     out_info->constant_byte_length = response->constant_byte_length;
     out_info->binding_count = response->binding_count;
     out_info->parameter_count = response->parameter_count;
+    out_info->maximum_workgroup_invocations =
+        response->maximum_workgroup_invocations;
     memcpy(out_info->workgroup_size, response->workgroup_size,
            sizeof(out_info->workgroup_size));
+    out_info->resource_usage.provided_flags =
+        (iree_hal_executable_function_resource_flags_t)
+            response->resource_usage_provided_flags;
+    out_info->resource_usage.fixed_workgroup_local_memory_size =
+        response->fixed_workgroup_local_memory_size;
+    out_info->resource_usage.fixed_private_memory_size =
+        response->fixed_private_memory_size;
+    out_info->resource_usage.invocation_register_count =
+        response->invocation_register_count;
     out_info->occupancy_info.reserved = response->occupancy_reserved;
   }
 
@@ -791,7 +829,8 @@ static iree_status_t iree_hal_remote_client_executable_query_global_buffer(
 
   if (iree_status_is_ok(status)) {
     status = iree_hal_remote_client_buffer_create(
-        executable->device, resolved_id, &params, byte_length, placement_flags,
+        executable->device, resolved_id, &params,
+        /*allocation_size=*/byte_length, byte_length, placement_flags,
         executable->host_allocator, out_buffer);
     if (!iree_status_is_ok(status)) {
       status = iree_status_join(status,

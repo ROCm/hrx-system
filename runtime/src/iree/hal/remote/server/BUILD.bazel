@@ -129,6 +129,8 @@ iree_runtime_cc_test(
 iree_runtime_cc_library(
     name = "server",
     srcs = [
+        "atomic.c",
+        "atomic.h",
         "bulk.c",
         "bulk.h",
         "bulk_download_sender.c",
@@ -475,6 +477,7 @@ iree_runtime_cc_test(
 iree_runtime_cc_test(
     name = "session_test",
     srcs = [
+        "atomic.h",
         "server.h",
         "session.h",
         "session_test.cc",
@@ -487,6 +490,7 @@ iree_runtime_cc_test(
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/threading",
         "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/remote/protocol:commands",
         "//runtime/src/iree/hal/remote/protocol:common",
         "//runtime/src/iree/hal/remote/protocol:control",
         "//runtime/src/iree/hal/remote/protocol:queue",

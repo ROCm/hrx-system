@@ -79,7 +79,6 @@ typedef enum iree_hal_remote_resource_type_e {
   IREE_HAL_REMOTE_RESOURCE_TYPE_EXECUTABLE = 0x03,
   IREE_HAL_REMOTE_RESOURCE_TYPE_COMMAND_BUFFER = 0x04,
   IREE_HAL_REMOTE_RESOURCE_TYPE_FILE = 0x05,
-  IREE_HAL_REMOTE_RESOURCE_TYPE_EVENT = 0x06,
   IREE_HAL_REMOTE_RESOURCE_TYPE_PHYSICAL_MEMORY = 0x07,
 } iree_hal_remote_resource_type_t;
 
@@ -134,6 +133,69 @@ static_assert(offsetof(iree_hal_remote_buffer_params_t, queue_affinity) == 16,
 static_assert(offsetof(iree_hal_remote_buffer_params_t, min_alignment) == 24,
               "");
 
+// Atomic operation constants mirrored from iree/hal/atomic.h. Atomic wire
+// records use fixed-width fields and intentionally do not depend on HAL
+// headers.
+#define IREE_HAL_REMOTE_ATOMIC_WIDTH_32 32u
+#define IREE_HAL_REMOTE_ATOMIC_WIDTH_64 64u
+#define IREE_HAL_REMOTE_ATOMIC_WAIT_CONDITION_EQUAL 0u
+#define IREE_HAL_REMOTE_ATOMIC_WAIT_CONDITION_NOT_EQUAL 1u
+#define IREE_HAL_REMOTE_ATOMIC_WAIT_CONDITION_UNSIGNED_GREATER_EQUAL 2u
+#define IREE_HAL_REMOTE_ATOMIC_RMW_OPERATION_ADD 0u
+#define IREE_HAL_REMOTE_ATOMIC_RMW_OPERATION_SUBTRACT 1u
+#define IREE_HAL_REMOTE_ATOMIC_RMW_OPERATION_AND 2u
+#define IREE_HAL_REMOTE_ATOMIC_RMW_OPERATION_OR 3u
+#define IREE_HAL_REMOTE_ATOMIC_RMW_OPERATION_XOR 4u
+#define IREE_HAL_REMOTE_ATOMIC_FLAGS_KNOWN UINT32_C(0x7)
+
+// Fixed-width wire equivalent of iree_hal_atomic_wait_params_t.
+typedef struct iree_hal_remote_atomic_wait_params_t {
+  // Unsigned value compared against the masked value loaded from memory.
+  uint64_t value;
+  // Mask applied to each value loaded from memory before comparison.
+  uint64_t mask;
+  // iree_hal_atomic_flags_t ordering and visibility bits.
+  uint32_t flags;
+  // Atomic memory width in bits.
+  uint8_t width;
+  // Comparison that determines when the wait is satisfied.
+  uint8_t condition;
+  // Must be zero.
+  uint16_t reserved;
+} iree_hal_remote_atomic_wait_params_t;
+static_assert(sizeof(iree_hal_remote_atomic_wait_params_t) == 24, "");
+static_assert(offsetof(iree_hal_remote_atomic_wait_params_t, flags) == 16, "");
+
+// Fixed-width wire equivalent of iree_hal_atomic_store_params_t.
+typedef struct iree_hal_remote_atomic_store_params_t {
+  // Unsigned value stored to memory.
+  uint64_t value;
+  // iree_hal_atomic_flags_t ordering and visibility bits.
+  uint32_t flags;
+  // Atomic memory width in bits.
+  uint8_t width;
+  // Must be zero.
+  uint8_t reserved[3];
+} iree_hal_remote_atomic_store_params_t;
+static_assert(sizeof(iree_hal_remote_atomic_store_params_t) == 16, "");
+static_assert(offsetof(iree_hal_remote_atomic_store_params_t, flags) == 8, "");
+
+// Fixed-width wire equivalent of iree_hal_atomic_rmw_params_t.
+typedef struct iree_hal_remote_atomic_rmw_params_t {
+  // Unsigned right-hand operand applied to the memory value.
+  uint64_t operand;
+  // iree_hal_atomic_flags_t ordering and visibility bits.
+  uint32_t flags;
+  // Atomic memory width in bits.
+  uint8_t width;
+  // Read-modify-write operation to perform.
+  uint8_t operation;
+  // Must be zero.
+  uint16_t reserved;
+} iree_hal_remote_atomic_rmw_params_t;
+static_assert(sizeof(iree_hal_remote_atomic_rmw_params_t) == 16, "");
+static_assert(offsetof(iree_hal_remote_atomic_rmw_params_t, flags) == 8, "");
+
 // Buffer binding entry. Used in DISPATCH ops/cmds and COMMAND_BUFFER_EXECUTE
 // binding tables.
 typedef struct iree_hal_remote_binding_t {
@@ -166,18 +228,6 @@ typedef struct iree_hal_remote_dispatch_config_t {
 static_assert(sizeof(iree_hal_remote_dispatch_config_t) == 56, "");
 static_assert(offsetof(iree_hal_remote_dispatch_config_t,
                        workgroup_count_buffer_id) == 24,
-              "");
-
-// Memory heap description. Used in DEVICE_QUERY_INFO and BUFFER_QUERY_HEAPS
-// responses. Wire equivalent of iree_hal_allocator_memory_heap_t.
-typedef struct iree_hal_remote_memory_heap_t {
-  uint32_t type;           // iree_hal_memory_type_t
-  uint32_t allowed_usage;  // iree_hal_buffer_usage_t
-  uint64_t max_allocation_size;
-  uint64_t min_alignment;
-} iree_hal_remote_memory_heap_t;
-static_assert(sizeof(iree_hal_remote_memory_heap_t) == 24, "");
-static_assert(offsetof(iree_hal_remote_memory_heap_t, max_allocation_size) == 8,
               "");
 
 #ifdef __cplusplus

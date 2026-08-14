@@ -142,14 +142,7 @@ TEST(CommandParseTest, RejectsVariableTailMismatch) {
 }
 
 TEST(CommandParseTest, RejectsCommandSpecificInvalidFields) {
-  std::vector<uint8_t> command_bytes(
-      sizeof(iree_hal_remote_event_signal_cmd_t));
-  InitializeHeader(IREE_HAL_REMOTE_CMD_EVENT_SIGNAL, &command_bytes);
-  auto* event_signal = reinterpret_cast<iree_hal_remote_event_signal_cmd_t*>(
-      command_bytes.data());
-  event_signal->reserved = 1;
-  ExpectInvalid(command_bytes);
-
+  std::vector<uint8_t> command_bytes;
   command_bytes.assign(sizeof(iree_hal_remote_buffer_fill_cmd_t), 0);
   InitializeHeader(IREE_HAL_REMOTE_CMD_BUFFER_FILL, &command_bytes);
   auto* fill = reinterpret_cast<iree_hal_remote_buffer_fill_cmd_t*>(
@@ -162,6 +155,103 @@ TEST(CommandParseTest, RejectsCommandSpecificInvalidFields) {
   auto* copy = reinterpret_cast<iree_hal_remote_buffer_copy_cmd_t*>(
       command_bytes.data());
   copy->reserved = 1;
+  ExpectInvalid(std::move(command_bytes));
+}
+
+TEST(CommandParseTest, ValidatesExecutionBarrierFlags) {
+  std::vector<uint8_t> command_bytes(
+      sizeof(iree_hal_remote_execution_barrier_cmd_t));
+  InitializeHeader(IREE_HAL_REMOTE_CMD_EXECUTION_BARRIER, &command_bytes);
+  auto* barrier = reinterpret_cast<iree_hal_remote_execution_barrier_cmd_t*>(
+      command_bytes.data());
+  barrier->barrier_flags =
+      IREE_HAL_EXECUTION_BARRIER_FLAG_ACQUIRE_SYSTEM_SCOPE |
+      IREE_HAL_EXECUTION_BARRIER_FLAG_RELEASE_SYSTEM_SCOPE;
+
+  iree_hal_remote_command_view_t command;
+  IREE_ASSERT_OK(iree_hal_remote_command_parse(
+      iree_make_const_byte_span(command_bytes.data(), command_bytes.size()),
+      &command));
+
+  barrier->barrier_flags |= UINT64_C(1) << 63;
+  ExpectInvalid(command_bytes);
+  barrier->barrier_flags &= ~(UINT64_C(1) << 63);
+  barrier->reserved = 1;
+  ExpectInvalid(std::move(command_bytes));
+}
+
+TEST(CommandParseTest, ValidatesAtomicCommands) {
+  std::vector<uint8_t> command_bytes(sizeof(iree_hal_remote_atomic_wait_cmd_t));
+  InitializeHeader(IREE_HAL_REMOTE_CMD_ATOMIC_WAIT, &command_bytes);
+  auto* wait = reinterpret_cast<iree_hal_remote_atomic_wait_cmd_t*>(
+      command_bytes.data());
+  wait->target.length = 8;
+  wait->params.value = UINT64_C(0x123456789ABCDEF0);
+  wait->params.mask = UINT64_MAX;
+  wait->params.flags = IREE_HAL_REMOTE_ATOMIC_FLAGS_KNOWN;
+  wait->params.width = IREE_HAL_REMOTE_ATOMIC_WIDTH_64;
+  wait->params.condition = IREE_HAL_REMOTE_ATOMIC_WAIT_CONDITION_NOT_EQUAL;
+  iree_hal_remote_command_view_t command;
+  IREE_ASSERT_OK(iree_hal_remote_command_parse(
+      iree_make_const_byte_span(command_bytes.data(), command_bytes.size()),
+      &command));
+  EXPECT_EQ(command.header.type, IREE_HAL_REMOTE_CMD_ATOMIC_WAIT);
+
+  wait->params.width = 16;
+  ExpectInvalid(command_bytes);
+  wait->params.width = IREE_HAL_REMOTE_ATOMIC_WIDTH_32;
+  wait->target.length = 4;
+  wait->params.value = UINT64_C(1) << 32;
+  ExpectInvalid(command_bytes);
+  wait->params.value = 1;
+  wait->params.mask = UINT64_C(1) << 32;
+  ExpectInvalid(command_bytes);
+  wait->params.mask = UINT32_MAX;
+  wait->target.length = 8;
+  ExpectInvalid(command_bytes);
+  wait->target.length = 4;
+  wait->target.buffer_id = UINT64_C(0x0100000000000001);
+  wait->target.buffer_slot = 1;
+  ExpectInvalid(command_bytes);
+  wait->target.buffer_slot = 0;
+  wait->target.reserved = 1;
+  ExpectInvalid(command_bytes);
+  wait->target.reserved = 0;
+  wait->params.flags = IREE_HAL_REMOTE_ATOMIC_FLAGS_KNOWN | (1u << 31);
+  ExpectInvalid(command_bytes);
+  wait->params.flags = 0;
+  wait->params.condition = 0xFF;
+  ExpectInvalid(command_bytes);
+  wait->params.condition = IREE_HAL_REMOTE_ATOMIC_WAIT_CONDITION_EQUAL;
+  wait->params.reserved = 1;
+  ExpectInvalid(command_bytes);
+
+  command_bytes.assign(sizeof(iree_hal_remote_atomic_store_cmd_t), 0);
+  InitializeHeader(IREE_HAL_REMOTE_CMD_ATOMIC_STORE, &command_bytes);
+  auto* store = reinterpret_cast<iree_hal_remote_atomic_store_cmd_t*>(
+      command_bytes.data());
+  store->target.length = 4;
+  store->params.width = IREE_HAL_REMOTE_ATOMIC_WIDTH_32;
+  IREE_ASSERT_OK(iree_hal_remote_command_parse(
+      iree_make_const_byte_span(command_bytes.data(), command_bytes.size()),
+      &command));
+  store->params.reserved[2] = 1;
+  ExpectInvalid(command_bytes);
+
+  command_bytes.assign(sizeof(iree_hal_remote_atomic_rmw_cmd_t), 0);
+  InitializeHeader(IREE_HAL_REMOTE_CMD_ATOMIC_RMW, &command_bytes);
+  auto* rmw =
+      reinterpret_cast<iree_hal_remote_atomic_rmw_cmd_t*>(command_bytes.data());
+  rmw->target.length = 8;
+  rmw->params.width = IREE_HAL_REMOTE_ATOMIC_WIDTH_64;
+  rmw->params.operation = IREE_HAL_REMOTE_ATOMIC_RMW_OPERATION_XOR;
+  IREE_ASSERT_OK(iree_hal_remote_command_parse(
+      iree_make_const_byte_span(command_bytes.data(), command_bytes.size()),
+      &command));
+  rmw->params.operation = 0xFF;
+  ExpectInvalid(command_bytes);
+  rmw->params.operation = IREE_HAL_REMOTE_ATOMIC_RMW_OPERATION_ADD;
+  rmw->params.reserved = 1;
   ExpectInvalid(std::move(command_bytes));
 }
 

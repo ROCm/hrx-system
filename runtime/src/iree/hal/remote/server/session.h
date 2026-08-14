@@ -236,6 +236,28 @@ void iree_hal_remote_server_session_deinitialize_resource_table(
     iree_hal_remote_server_session_t* session_slot,
     iree_allocator_t host_allocator);
 
+// Resolves a session-local resource ID that may still use its provisional
+// client-assigned form. Unresolved IDs are returned unchanged so the owning
+// resource lookup fails with its ordinary not-found path.
+iree_hal_remote_resource_id_t iree_hal_remote_server_resolve_resource_id(
+    iree_hal_remote_server_session_t* session_slot,
+    iree_hal_remote_resource_id_t resource_id);
+
+// Resolves a direct or binding-table buffer reference for command recording.
+// Direct resources are borrowed from the session resource table; indirect
+// references remain unresolved until queue execution binds the slot.
+iree_status_t iree_hal_remote_server_resolve_command_buffer_ref(
+    iree_hal_remote_server_session_t* session_slot,
+    iree_hal_remote_resource_id_t buffer_id, uint32_t buffer_slot,
+    uint64_t offset, uint64_t length, const char* command_name,
+    iree_hal_buffer_ref_t* out_ref);
+
+// Derives the local mode used to replay an uploaded reusable command buffer.
+// Peer-side validation and retention hints are ignored because the server owns
+// both contracts. Metadata retention hints are preserved for local profiling.
+iree_status_t iree_hal_remote_server_derive_uploaded_command_buffer_mode(
+    uint32_t wire_mode, iree_hal_command_buffer_mode_t* out_local_mode);
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif  // __cplusplus

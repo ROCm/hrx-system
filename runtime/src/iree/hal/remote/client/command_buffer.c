@@ -8,11 +8,15 @@
 
 #include "iree/hal/remote/client/buffer.h"
 #include "iree/hal/remote/client/device.h"
-#include "iree/hal/remote/client/event.h"
 #include "iree/hal/remote/client/executable.h"
 #include "iree/hal/remote/protocol/commands.h"
 #include "iree/hal/remote/protocol/control.h"
 #include "iree/hal/utils/resource_set.h"
+
+static_assert(IREE_HAL_REMOTE_EXECUTION_BARRIER_FLAGS_KNOWN ==
+                  (IREE_HAL_EXECUTION_BARRIER_FLAG_ACQUIRE_SYSTEM_SCOPE |
+                   IREE_HAL_EXECUTION_BARRIER_FLAG_RELEASE_SYSTEM_SCOPE),
+              "remote execution barrier flags must match the HAL");
 
 //===----------------------------------------------------------------------===//
 // iree_hal_remote_client_command_buffer_t
@@ -120,6 +124,15 @@ static void iree_hal_remote_client_cb_encode_buffer_ref(
   *out_buffer_id = iree_hal_remote_client_cb_resolve_buffer_ref(
       command_buffer, ref, out_offset, out_length, out_status);
   *out_buffer_slot = 0;
+}
+
+static void iree_hal_remote_client_cb_encode_binding(
+    iree_hal_remote_client_command_buffer_t* command_buffer,
+    iree_hal_buffer_ref_t ref, iree_hal_remote_binding_t* out_binding,
+    iree_status_t* out_status) {
+  iree_hal_remote_client_cb_encode_buffer_ref(
+      command_buffer, ref, &out_binding->buffer_id, &out_binding->buffer_slot,
+      &out_binding->offset, &out_binding->length, out_status);
 }
 
 //===----------------------------------------------------------------------===//
@@ -410,6 +423,7 @@ static iree_status_t iree_hal_remote_client_command_buffer_execution_barrier(
   if (iree_status_is_ok(status)) {
     iree_hal_remote_execution_barrier_cmd_t* cmd =
         (iree_hal_remote_execution_barrier_cmd_t*)ptr;
+    cmd->barrier_flags = (uint64_t)flags;
     cmd->source_stage_mask = (uint32_t)source_stage_mask;
     cmd->target_stage_mask = (uint32_t)target_stage_mask;
     cmd->memory_barrier_count = (uint16_t)memory_barrier_count;
@@ -450,203 +464,96 @@ static iree_status_t iree_hal_remote_client_command_buffer_execution_barrier(
   return status;
 }
 
-static iree_status_t iree_hal_remote_client_command_buffer_signal_event(
-    iree_hal_command_buffer_t* base_command_buffer, iree_hal_event_t* event,
-    iree_hal_execution_stage_t source_stage_mask) {
-  iree_hal_remote_client_command_buffer_t* command_buffer =
-      iree_hal_remote_client_command_buffer_cast(base_command_buffer);
-
-  const iree_host_size_t stream_start = command_buffer->stream_length;
-  void* ptr = NULL;
-  iree_status_t status = iree_hal_remote_client_cb_append_command(
-      command_buffer, IREE_HAL_REMOTE_CMD_EVENT_SIGNAL,
-      sizeof(iree_hal_remote_event_signal_cmd_t), &ptr);
-  if (iree_status_is_ok(status)) {
-    if (!iree_hal_remote_client_event_isa(event)) {
-      status = iree_make_status(
-          IREE_STATUS_FAILED_PRECONDITION,
-          "cannot record remote command buffer signal_event with a non-remote "
-          "event");
-    }
-  }
-  if (iree_status_is_ok(status)) {
-    status = iree_hal_remote_client_command_buffer_retain_resource(
-        command_buffer, (iree_hal_resource_t*)event);
-  }
-  if (iree_status_is_ok(status)) {
-    iree_hal_remote_event_signal_cmd_t* cmd =
-        (iree_hal_remote_event_signal_cmd_t*)ptr;
-    cmd->event_id = iree_hal_remote_client_event_resource_id(event);
-    cmd->source_stage_mask = (uint32_t)source_stage_mask;
-  }
-
-  if (!iree_status_is_ok(status)) {
-    command_buffer->stream_length = stream_start;
-  }
-  return status;
-}
-
-static iree_status_t iree_hal_remote_client_command_buffer_reset_event(
-    iree_hal_command_buffer_t* base_command_buffer, iree_hal_event_t* event,
-    iree_hal_execution_stage_t source_stage_mask) {
-  iree_hal_remote_client_command_buffer_t* command_buffer =
-      iree_hal_remote_client_command_buffer_cast(base_command_buffer);
-
-  const iree_host_size_t stream_start = command_buffer->stream_length;
-  void* ptr = NULL;
-  iree_status_t status = iree_hal_remote_client_cb_append_command(
-      command_buffer, IREE_HAL_REMOTE_CMD_EVENT_RESET,
-      sizeof(iree_hal_remote_event_reset_cmd_t), &ptr);
-  if (iree_status_is_ok(status)) {
-    if (!iree_hal_remote_client_event_isa(event)) {
-      status = iree_make_status(
-          IREE_STATUS_FAILED_PRECONDITION,
-          "cannot record remote command buffer reset_event with a non-remote "
-          "event");
-    }
-  }
-  if (iree_status_is_ok(status)) {
-    status = iree_hal_remote_client_command_buffer_retain_resource(
-        command_buffer, (iree_hal_resource_t*)event);
-  }
-  if (iree_status_is_ok(status)) {
-    iree_hal_remote_event_reset_cmd_t* cmd =
-        (iree_hal_remote_event_reset_cmd_t*)ptr;
-    cmd->event_id = iree_hal_remote_client_event_resource_id(event);
-    cmd->source_stage_mask = (uint32_t)source_stage_mask;
-  }
-
-  if (!iree_status_is_ok(status)) {
-    command_buffer->stream_length = stream_start;
-  }
-  return status;
-}
-
-static iree_status_t iree_hal_remote_client_command_buffer_wait_events(
+static iree_status_t iree_hal_remote_client_command_buffer_atomic_wait(
     iree_hal_command_buffer_t* base_command_buffer,
-    iree_host_size_t event_count, const iree_hal_event_t** events,
     iree_hal_execution_stage_t source_stage_mask,
     iree_hal_execution_stage_t target_stage_mask,
-    iree_host_size_t memory_barrier_count,
-    const iree_hal_memory_barrier_t* memory_barriers,
-    iree_host_size_t buffer_barrier_count,
-    const iree_hal_buffer_barrier_t* buffer_barriers) {
+    iree_hal_buffer_ref_t target_ref, iree_hal_atomic_wait_params_t params) {
   iree_hal_remote_client_command_buffer_t* command_buffer =
       iree_hal_remote_client_command_buffer_cast(base_command_buffer);
 
-  iree_status_t status = iree_ok_status();
-  if (event_count > UINT16_MAX) {
-    status = iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                              "event count %" PRIhsz " exceeds wire limit %u",
-                              event_count, (unsigned)UINT16_MAX);
-  }
-  if (iree_status_is_ok(status) && memory_barrier_count > UINT16_MAX) {
-    status = iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                              "memory barrier count %" PRIhsz
-                              " exceeds wire limit %u",
-                              memory_barrier_count, (unsigned)UINT16_MAX);
-  }
-  if (iree_status_is_ok(status) && buffer_barrier_count > UINT16_MAX) {
-    status = iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                              "buffer barrier count %" PRIhsz
-                              " exceeds wire limit %u",
-                              buffer_barrier_count, (unsigned)UINT16_MAX);
-  }
-  if (iree_status_is_ok(status) && event_count > 0 && !events) {
-    status =
-        iree_make_status(IREE_STATUS_INVALID_ARGUMENT, "event list is NULL");
-  }
-  if (iree_status_is_ok(status) && memory_barrier_count > 0 &&
-      !memory_barriers) {
-    status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "memory barrier list is NULL");
-  }
-  if (iree_status_is_ok(status) && buffer_barrier_count > 0 &&
-      !buffer_barriers) {
-    status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "buffer barrier list is NULL");
-  }
-
-  iree_host_size_t event_ids_offset = 0;
-  iree_host_size_t memory_barriers_offset = 0;
-  iree_host_size_t buffer_barriers_offset = 0;
-  iree_host_size_t total_size = 0;
-  if (iree_status_is_ok(status)) {
-    status = IREE_STRUCT_LAYOUT(
-        sizeof(iree_hal_remote_event_wait_cmd_t), &total_size,
-        IREE_STRUCT_FIELD(event_count, iree_hal_remote_resource_id_t,
-                          &event_ids_offset),
-        IREE_STRUCT_FIELD(memory_barrier_count,
-                          iree_hal_remote_memory_barrier_t,
-                          &memory_barriers_offset),
-        IREE_STRUCT_FIELD(buffer_barrier_count,
-                          iree_hal_remote_buffer_barrier_t,
-                          &buffer_barriers_offset),
-        IREE_STRUCT_FIELD_ALIGNED(0, uint8_t, 8, NULL));
-  }
   const iree_host_size_t stream_start = command_buffer->stream_length;
   void* ptr = NULL;
+  iree_status_t status = iree_hal_remote_client_cb_append_command(
+      command_buffer, IREE_HAL_REMOTE_CMD_ATOMIC_WAIT,
+      sizeof(iree_hal_remote_atomic_wait_cmd_t), &ptr);
   if (iree_status_is_ok(status)) {
-    status = iree_hal_remote_client_cb_append_command(
-        command_buffer, IREE_HAL_REMOTE_CMD_EVENT_WAIT, total_size, &ptr);
-  }
-
-  if (iree_status_is_ok(status)) {
-    iree_hal_remote_event_wait_cmd_t* cmd =
-        (iree_hal_remote_event_wait_cmd_t*)ptr;
+    iree_hal_remote_atomic_wait_cmd_t* cmd =
+        (iree_hal_remote_atomic_wait_cmd_t*)ptr;
+    iree_hal_remote_client_cb_encode_binding(command_buffer, target_ref,
+                                             &cmd->target, &status);
     cmd->source_stage_mask = (uint32_t)source_stage_mask;
     cmd->target_stage_mask = (uint32_t)target_stage_mask;
-    cmd->event_count = (uint16_t)event_count;
-    cmd->memory_barrier_count = (uint16_t)memory_barrier_count;
-    cmd->buffer_barrier_count = (uint16_t)buffer_barrier_count;
-
-    iree_hal_remote_resource_id_t* event_ids =
-        (iree_hal_remote_resource_id_t*)((uint8_t*)cmd + event_ids_offset);
-    for (iree_host_size_t i = 0; i < event_count && iree_status_is_ok(status);
-         ++i) {
-      if (!iree_hal_remote_client_event_isa(events[i])) {
-        status = iree_make_status(
-            IREE_STATUS_FAILED_PRECONDITION,
-            "cannot record remote command buffer wait_events with a "
-            "non-remote event");
-        break;
-      }
-      status = iree_hal_remote_client_command_buffer_retain_resource(
-          command_buffer, (iree_hal_resource_t*)events[i]);
-      event_ids[i] = iree_hal_remote_client_event_resource_id(events[i]);
-    }
-
-    if (iree_status_is_ok(status)) {
-      iree_hal_remote_memory_barrier_t* wire_memory_barriers =
-          (iree_hal_remote_memory_barrier_t*)((uint8_t*)cmd +
-                                              memory_barriers_offset);
-      for (iree_host_size_t i = 0; i < memory_barrier_count; ++i) {
-        iree_hal_remote_memory_barrier_t* wire = &wire_memory_barriers[i];
-        wire->source_scope = (uint32_t)memory_barriers[i].source_scope;
-        wire->target_scope = (uint32_t)memory_barriers[i].target_scope;
-      }
-    }
-
-    if (iree_status_is_ok(status)) {
-      iree_hal_remote_buffer_barrier_t* wire_buffer_barriers =
-          (iree_hal_remote_buffer_barrier_t*)((uint8_t*)cmd +
-                                              buffer_barriers_offset);
-      for (iree_host_size_t i = 0;
-           i < buffer_barrier_count && iree_status_is_ok(status); ++i) {
-        iree_hal_remote_buffer_barrier_t* wire = &wire_buffer_barriers[i];
-        wire->source_scope = (uint32_t)buffer_barriers[i].source_scope;
-        wire->target_scope = (uint32_t)buffer_barriers[i].target_scope;
-        uint64_t barrier_offset = 0;
-        uint64_t barrier_length = 0;
-        iree_hal_remote_client_cb_encode_buffer_ref(
-            command_buffer, buffer_barriers[i].buffer_ref, &wire->buffer_id,
-            &wire->buffer_slot, &barrier_offset, &barrier_length, &status);
-        wire->offset = barrier_offset;
-        wire->length = barrier_length;
-      }
-    }
+    cmd->params.value = params.value;
+    cmd->params.mask = params.mask;
+    cmd->params.flags = (uint32_t)params.flags;
+    cmd->params.width = (uint8_t)params.width;
+    cmd->params.condition = (uint8_t)params.condition;
+    cmd->params.reserved = params.reserved;
   }
+  if (!iree_status_is_ok(status)) {
+    command_buffer->stream_length = stream_start;
+  }
+  return status;
+}
 
+static iree_status_t iree_hal_remote_client_command_buffer_atomic_store(
+    iree_hal_command_buffer_t* base_command_buffer,
+    iree_hal_execution_stage_t source_stage_mask,
+    iree_hal_execution_stage_t target_stage_mask,
+    iree_hal_buffer_ref_t target_ref, iree_hal_atomic_store_params_t params) {
+  iree_hal_remote_client_command_buffer_t* command_buffer =
+      iree_hal_remote_client_command_buffer_cast(base_command_buffer);
+
+  const iree_host_size_t stream_start = command_buffer->stream_length;
+  void* ptr = NULL;
+  iree_status_t status = iree_hal_remote_client_cb_append_command(
+      command_buffer, IREE_HAL_REMOTE_CMD_ATOMIC_STORE,
+      sizeof(iree_hal_remote_atomic_store_cmd_t), &ptr);
+  if (iree_status_is_ok(status)) {
+    iree_hal_remote_atomic_store_cmd_t* cmd =
+        (iree_hal_remote_atomic_store_cmd_t*)ptr;
+    iree_hal_remote_client_cb_encode_binding(command_buffer, target_ref,
+                                             &cmd->target, &status);
+    cmd->source_stage_mask = (uint32_t)source_stage_mask;
+    cmd->target_stage_mask = (uint32_t)target_stage_mask;
+    cmd->params.value = params.value;
+    cmd->params.flags = (uint32_t)params.flags;
+    cmd->params.width = (uint8_t)params.width;
+    memcpy(cmd->params.reserved, params.reserved, sizeof(cmd->params.reserved));
+  }
+  if (!iree_status_is_ok(status)) {
+    command_buffer->stream_length = stream_start;
+  }
+  return status;
+}
+
+static iree_status_t iree_hal_remote_client_command_buffer_atomic_rmw(
+    iree_hal_command_buffer_t* base_command_buffer,
+    iree_hal_execution_stage_t source_stage_mask,
+    iree_hal_execution_stage_t target_stage_mask,
+    iree_hal_buffer_ref_t target_ref, iree_hal_atomic_rmw_params_t params) {
+  iree_hal_remote_client_command_buffer_t* command_buffer =
+      iree_hal_remote_client_command_buffer_cast(base_command_buffer);
+
+  const iree_host_size_t stream_start = command_buffer->stream_length;
+  void* ptr = NULL;
+  iree_status_t status = iree_hal_remote_client_cb_append_command(
+      command_buffer, IREE_HAL_REMOTE_CMD_ATOMIC_RMW,
+      sizeof(iree_hal_remote_atomic_rmw_cmd_t), &ptr);
+  if (iree_status_is_ok(status)) {
+    iree_hal_remote_atomic_rmw_cmd_t* cmd =
+        (iree_hal_remote_atomic_rmw_cmd_t*)ptr;
+    iree_hal_remote_client_cb_encode_binding(command_buffer, target_ref,
+                                             &cmd->target, &status);
+    cmd->source_stage_mask = (uint32_t)source_stage_mask;
+    cmd->target_stage_mask = (uint32_t)target_stage_mask;
+    cmd->params.operand = params.operand;
+    cmd->params.flags = (uint32_t)params.flags;
+    cmd->params.width = (uint8_t)params.width;
+    cmd->params.operation = (uint8_t)params.operation;
+    cmd->params.reserved = params.reserved;
+  }
   if (!iree_status_is_ok(status)) {
     command_buffer->stream_length = stream_start;
   }
@@ -964,9 +871,9 @@ static const iree_hal_command_buffer_vtable_t
             iree_hal_remote_client_command_buffer_end_debug_group,
         .execution_barrier =
             iree_hal_remote_client_command_buffer_execution_barrier,
-        .signal_event = iree_hal_remote_client_command_buffer_signal_event,
-        .reset_event = iree_hal_remote_client_command_buffer_reset_event,
-        .wait_events = iree_hal_remote_client_command_buffer_wait_events,
+        .atomic_wait = iree_hal_remote_client_command_buffer_atomic_wait,
+        .atomic_store = iree_hal_remote_client_command_buffer_atomic_store,
+        .atomic_rmw = iree_hal_remote_client_command_buffer_atomic_rmw,
         .fill_buffer = iree_hal_remote_client_command_buffer_fill_buffer,
         .update_buffer = iree_hal_remote_client_command_buffer_update_buffer,
         .copy_buffer = iree_hal_remote_client_command_buffer_copy_buffer,

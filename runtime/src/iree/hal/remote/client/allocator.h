@@ -37,11 +37,6 @@ typedef struct iree_hal_remote_client_allocator_t {
   // Back-pointer to the owning device for control RPC calls.
   iree_hal_remote_client_device_t* device;
 
-  // Cached heap descriptions from BUFFER_QUERY_HEAPS response.
-  // NULL until the first successful query_memory_heaps call.
-  iree_hal_allocator_memory_heap_t* heaps;
-  iree_host_size_t heap_count;
-
   // Cached allocator capability bits.
   iree_hal_remote_client_allocator_flags_t flags;
 

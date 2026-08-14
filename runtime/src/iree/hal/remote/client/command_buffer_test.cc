@@ -169,6 +169,148 @@ TEST_F(RemoteCommandBufferTest, RejectsUpdateAboveMaximumWithoutMutation) {
   iree_hal_command_buffer_release(command_buffer);
 }
 
+TEST_F(RemoteCommandBufferTest, ExecutionBarrierPreservesFlags) {
+  iree_hal_command_buffer_t* command_buffer = nullptr;
+  IREE_ASSERT_OK(CreateCommandBuffer(&command_buffer));
+  IREE_ASSERT_OK(iree_hal_command_buffer_begin(command_buffer));
+  const iree_hal_execution_barrier_flags_t flags =
+      IREE_HAL_EXECUTION_BARRIER_FLAG_ACQUIRE_SYSTEM_SCOPE |
+      IREE_HAL_EXECUTION_BARRIER_FLAG_RELEASE_SYSTEM_SCOPE;
+  IREE_ASSERT_OK(iree_hal_command_buffer_execution_barrier(
+      command_buffer, IREE_HAL_EXECUTION_STAGE_TRANSFER,
+      IREE_HAL_EXECUTION_STAGE_DISPATCH, flags,
+      /*memory_barrier_count=*/0, /*memory_barriers=*/nullptr,
+      /*buffer_barrier_count=*/0, /*buffer_barriers=*/nullptr));
+  IREE_ASSERT_OK(iree_hal_command_buffer_end(command_buffer));
+
+  iree_const_byte_span_t stream =
+      iree_hal_remote_client_command_buffer_stream(command_buffer);
+  iree_hal_remote_command_view_t command;
+  IREE_ASSERT_OK(iree_hal_remote_command_parse(stream, &command));
+  ASSERT_EQ(command.header.type, IREE_HAL_REMOTE_CMD_EXECUTION_BARRIER);
+  ASSERT_EQ(command.bytes.data_length,
+            sizeof(iree_hal_remote_execution_barrier_cmd_t));
+  iree_hal_remote_execution_barrier_cmd_t barrier;
+  memcpy(&barrier, command.bytes.data, sizeof(barrier));
+  EXPECT_EQ(barrier.barrier_flags, flags);
+  EXPECT_EQ(barrier.source_stage_mask, IREE_HAL_EXECUTION_STAGE_TRANSFER);
+  EXPECT_EQ(barrier.target_stage_mask, IREE_HAL_EXECUTION_STAGE_DISPATCH);
+  EXPECT_EQ(barrier.reserved, 0u);
+
+  iree_hal_command_buffer_release(command_buffer);
+}
+
+TEST_F(RemoteCommandBufferTest, AtomicCommandsPreserveParameters) {
+  iree_hal_command_buffer_t* command_buffer = nullptr;
+  IREE_ASSERT_OK(CreateCommandBuffer(&command_buffer));
+  IREE_ASSERT_OK(iree_hal_command_buffer_begin(command_buffer));
+
+  const iree_hal_atomic_wait_params_t wait_params = {
+      /*.value=*/UINT64_C(0x0123456789ABCDEF),
+      /*.mask=*/UINT64_C(0xFEDCBA9876543210),
+      /*.flags=*/IREE_HAL_ATOMIC_FLAG_ACQUIRE |
+          IREE_HAL_ATOMIC_FLAG_SYSTEM_SCOPE,
+      /*.width=*/IREE_HAL_ATOMIC_WIDTH_64,
+      /*.condition=*/IREE_HAL_ATOMIC_WAIT_CONDITION_UNSIGNED_GREATER_EQUAL,
+  };
+  IREE_ASSERT_OK(iree_hal_command_buffer_atomic_wait(
+      command_buffer, IREE_HAL_EXECUTION_STAGE_TRANSFER,
+      IREE_HAL_EXECUTION_STAGE_DISPATCH,
+      iree_hal_make_indirect_buffer_ref(/*buffer_slot=*/0, /*offset=*/24,
+                                        /*length=*/8),
+      wait_params));
+
+  const iree_hal_atomic_store_params_t store_params = {
+      /*.value=*/UINT32_C(0x89ABCDEF),
+      /*.flags=*/IREE_HAL_ATOMIC_FLAG_RELEASE |
+          IREE_HAL_ATOMIC_FLAG_SYSTEM_SCOPE,
+      /*.width=*/IREE_HAL_ATOMIC_WIDTH_32,
+  };
+  IREE_ASSERT_OK(iree_hal_command_buffer_atomic_store(
+      command_buffer, IREE_HAL_EXECUTION_STAGE_COMMAND_ISSUE,
+      IREE_HAL_EXECUTION_STAGE_COMMAND_RETIRE,
+      iree_hal_make_indirect_buffer_ref(/*buffer_slot=*/0, /*offset=*/40,
+                                        /*length=*/4),
+      store_params));
+
+  const iree_hal_atomic_rmw_params_t rmw_params = {
+      /*.operand=*/UINT64_C(0x1020304050607080),
+      /*.flags=*/IREE_HAL_ATOMIC_FLAG_ACQUIRE | IREE_HAL_ATOMIC_FLAG_RELEASE,
+      /*.width=*/IREE_HAL_ATOMIC_WIDTH_64,
+      /*.operation=*/IREE_HAL_ATOMIC_RMW_OPERATION_XOR,
+  };
+  IREE_ASSERT_OK(iree_hal_command_buffer_atomic_rmw(
+      command_buffer, IREE_HAL_EXECUTION_STAGE_DISPATCH,
+      IREE_HAL_EXECUTION_STAGE_TRANSFER,
+      iree_hal_make_indirect_buffer_ref(/*buffer_slot=*/0, /*offset=*/56,
+                                        /*length=*/8),
+      rmw_params));
+  IREE_ASSERT_OK(iree_hal_command_buffer_end(command_buffer));
+
+  iree_const_byte_span_t stream =
+      iree_hal_remote_client_command_buffer_stream(command_buffer);
+  iree_host_size_t offset = 0;
+  iree_hal_remote_command_view_t command;
+
+  IREE_ASSERT_OK(iree_hal_remote_command_parse(
+      iree_make_const_byte_span(stream.data + offset,
+                                stream.data_length - offset),
+      &command));
+  ASSERT_EQ(command.header.type, IREE_HAL_REMOTE_CMD_ATOMIC_WAIT);
+  iree_hal_remote_atomic_wait_cmd_t wait_command;
+  memcpy(&wait_command, command.bytes.data, sizeof(wait_command));
+  EXPECT_EQ(wait_command.target.buffer_id, 0u);
+  EXPECT_EQ(wait_command.target.buffer_slot, 0u);
+  EXPECT_EQ(wait_command.target.offset, 24u);
+  EXPECT_EQ(wait_command.target.length, 8u);
+  EXPECT_EQ(wait_command.source_stage_mask, IREE_HAL_EXECUTION_STAGE_TRANSFER);
+  EXPECT_EQ(wait_command.target_stage_mask, IREE_HAL_EXECUTION_STAGE_DISPATCH);
+  EXPECT_EQ(wait_command.params.value, wait_params.value);
+  EXPECT_EQ(wait_command.params.mask, wait_params.mask);
+  EXPECT_EQ(wait_command.params.flags, wait_params.flags);
+  EXPECT_EQ(wait_command.params.width, wait_params.width);
+  EXPECT_EQ(wait_command.params.condition, wait_params.condition);
+  offset += command.bytes.data_length;
+
+  IREE_ASSERT_OK(iree_hal_remote_command_parse(
+      iree_make_const_byte_span(stream.data + offset,
+                                stream.data_length - offset),
+      &command));
+  ASSERT_EQ(command.header.type, IREE_HAL_REMOTE_CMD_ATOMIC_STORE);
+  iree_hal_remote_atomic_store_cmd_t store_command;
+  memcpy(&store_command, command.bytes.data, sizeof(store_command));
+  EXPECT_EQ(store_command.target.offset, 40u);
+  EXPECT_EQ(store_command.target.length, 4u);
+  EXPECT_EQ(store_command.source_stage_mask,
+            IREE_HAL_EXECUTION_STAGE_COMMAND_ISSUE);
+  EXPECT_EQ(store_command.target_stage_mask,
+            IREE_HAL_EXECUTION_STAGE_COMMAND_RETIRE);
+  EXPECT_EQ(store_command.params.value, store_params.value);
+  EXPECT_EQ(store_command.params.flags, store_params.flags);
+  EXPECT_EQ(store_command.params.width, store_params.width);
+  offset += command.bytes.data_length;
+
+  IREE_ASSERT_OK(iree_hal_remote_command_parse(
+      iree_make_const_byte_span(stream.data + offset,
+                                stream.data_length - offset),
+      &command));
+  ASSERT_EQ(command.header.type, IREE_HAL_REMOTE_CMD_ATOMIC_RMW);
+  iree_hal_remote_atomic_rmw_cmd_t rmw_command;
+  memcpy(&rmw_command, command.bytes.data, sizeof(rmw_command));
+  EXPECT_EQ(rmw_command.target.offset, 56u);
+  EXPECT_EQ(rmw_command.target.length, 8u);
+  EXPECT_EQ(rmw_command.source_stage_mask, IREE_HAL_EXECUTION_STAGE_DISPATCH);
+  EXPECT_EQ(rmw_command.target_stage_mask, IREE_HAL_EXECUTION_STAGE_TRANSFER);
+  EXPECT_EQ(rmw_command.params.operand, rmw_params.operand);
+  EXPECT_EQ(rmw_command.params.flags, rmw_params.flags);
+  EXPECT_EQ(rmw_command.params.width, rmw_params.width);
+  EXPECT_EQ(rmw_command.params.operation, rmw_params.operation);
+  offset += command.bytes.data_length;
+  EXPECT_EQ(offset, stream.data_length);
+
+  iree_hal_command_buffer_release(command_buffer);
+}
+
 TEST_F(RemoteCommandBufferTest, LargeVariableRecordsUse32BitLengths) {
   iree_hal_command_buffer_t* command_buffer = nullptr;
   IREE_ASSERT_OK(CreateCommandBuffer(&command_buffer));
@@ -219,24 +361,7 @@ TEST_F(RemoteCommandBufferTest, LargeVariableRecordsUse32BitLengths) {
     barrier_offset += command.bytes.data_length;
   }
   ASSERT_LT(barrier_offset, stream.data_length);
-  EXPECT_EQ(command.header.length, 65544u);
-
-  IREE_ASSERT_OK(iree_hal_command_buffer_wait_events(
-      command_buffer, /*event_count=*/0, /*events=*/nullptr,
-      IREE_HAL_EXECUTION_STAGE_COMMAND_ISSUE,
-      IREE_HAL_EXECUTION_STAGE_COMMAND_RETIRE, memory_barriers.size(),
-      memory_barriers.data(), /*buffer_barrier_count=*/0,
-      /*buffer_barriers=*/nullptr));
-
-  stream = iree_hal_remote_client_command_buffer_stream(command_buffer);
-  const iree_host_size_t wait_offset =
-      barrier_offset + command.bytes.data_length;
-  IREE_ASSERT_OK(iree_hal_remote_command_parse(
-      iree_make_const_byte_span(stream.data + wait_offset,
-                                stream.data_length - wait_offset),
-      &command));
-  EXPECT_EQ(command.header.type, IREE_HAL_REMOTE_CMD_EVENT_WAIT);
-  EXPECT_EQ(command.header.length, 65544u);
+  EXPECT_EQ(command.header.length, 65552u);
 
   IREE_ASSERT_OK(iree_hal_command_buffer_end(command_buffer));
   iree_hal_command_buffer_release(command_buffer);

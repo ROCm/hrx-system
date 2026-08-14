@@ -12,6 +12,7 @@
 #include "iree/async/buffer_pool.h"
 #include "iree/hal/remote/protocol/control.h"
 #include "iree/hal/remote/protocol/queue.h"
+#include "iree/hal/remote/server/atomic.h"
 #include "iree/hal/remote/server/server.h"
 #include "iree/net/channel/queue/frame.h"
 #include "iree/net/channel/util/frame_sender.h"
@@ -561,6 +562,109 @@ TEST(RemoteServerSessionTest, QueueTruncatedPayloadSignalsErrorAdvance) {
   EXPECT_EQ(advance->resolution_count, 0);
   EXPECT_EQ(advance->status_code, IREE_STATUS_INVALID_ARGUMENT);
   EXPECT_GT(advance->status_wire_length, 0u);
+}
+
+TEST(RemoteServerSessionTest, UploadedCommandBufferModeIsServerOwned) {
+  iree_hal_command_buffer_mode_t local_mode = UINT32_MAX;
+  IREE_ASSERT_OK(iree_hal_remote_server_derive_uploaded_command_buffer_mode(
+      IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT, &local_mode));
+  EXPECT_EQ(local_mode, IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT);
+
+  IREE_ASSERT_OK(iree_hal_remote_server_derive_uploaded_command_buffer_mode(
+      IREE_HAL_COMMAND_BUFFER_MODE_UNVALIDATED |
+          IREE_HAL_COMMAND_BUFFER_MODE_UNRETAINED,
+      &local_mode));
+  EXPECT_EQ(local_mode, IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT);
+
+  const iree_hal_command_buffer_mode_t metadata_modes =
+      IREE_HAL_COMMAND_BUFFER_MODE_RETAIN_PROFILE_METADATA |
+      IREE_HAL_COMMAND_BUFFER_MODE_RETAIN_DISPATCH_METADATA;
+  IREE_ASSERT_OK(iree_hal_remote_server_derive_uploaded_command_buffer_mode(
+      metadata_modes, &local_mode));
+  EXPECT_EQ(local_mode, metadata_modes);
+
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      iree_hal_remote_server_derive_uploaded_command_buffer_mode(
+          IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT, &local_mode));
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      iree_hal_remote_server_derive_uploaded_command_buffer_mode(
+          IREE_HAL_COMMAND_BUFFER_MODE_ALLOW_INLINE_EXECUTION, &local_mode));
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      iree_hal_remote_server_derive_uploaded_command_buffer_mode(
+          UINT32_C(1) << 31, &local_mode));
+}
+
+TEST(RemoteServerSessionTest, QueueAtomicRejectsMalformedRecords) {
+  iree_hal_remote_server_session_t session = {};
+  const iree_hal_semaphore_list_t empty_list = iree_hal_semaphore_list_empty();
+
+  iree_hal_remote_queue_atomic_wait_op_t wait = {};
+  wait.header.type = IREE_HAL_REMOTE_QUEUE_OP_ATOMIC_WAIT;
+  wait.params.width = IREE_HAL_REMOTE_ATOMIC_WIDTH_64;
+  wait.params.condition = IREE_HAL_REMOTE_ATOMIC_WAIT_CONDITION_EQUAL;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      iree_hal_remote_server_queue_atomic_wait(
+          &session, /*local_device=*/nullptr, empty_list, empty_list,
+          iree_make_const_byte_span(&wait, sizeof(wait) - 1)));
+  wait.header.flags = 1;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      iree_hal_remote_server_queue_atomic_wait(
+          &session, /*local_device=*/nullptr, empty_list, empty_list,
+          iree_make_const_byte_span(&wait, sizeof(wait))));
+  wait.header.flags = 0;
+  wait.params.width = 16;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      iree_hal_remote_server_queue_atomic_wait(
+          &session, /*local_device=*/nullptr, empty_list, empty_list,
+          iree_make_const_byte_span(&wait, sizeof(wait))));
+  wait.params.width = IREE_HAL_REMOTE_ATOMIC_WIDTH_32;
+  wait.params.value = UINT64_C(1) << 32;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      iree_hal_remote_server_queue_atomic_wait(
+          &session, /*local_device=*/nullptr, empty_list, empty_list,
+          iree_make_const_byte_span(&wait, sizeof(wait))));
+  wait.params.value = 0;
+  wait.params.condition = 0xFF;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      iree_hal_remote_server_queue_atomic_wait(
+          &session, /*local_device=*/nullptr, empty_list, empty_list,
+          iree_make_const_byte_span(&wait, sizeof(wait))));
+  wait.params.width = IREE_HAL_REMOTE_ATOMIC_WIDTH_64;
+  wait.params.condition = IREE_HAL_REMOTE_ATOMIC_WAIT_CONDITION_EQUAL;
+  wait.target.buffer_id = 0;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      iree_hal_remote_server_queue_atomic_wait(
+          &session, /*local_device=*/nullptr, empty_list, empty_list,
+          iree_make_const_byte_span(&wait, sizeof(wait))));
+
+  iree_hal_remote_queue_atomic_store_op_t store = {};
+  store.header.type = IREE_HAL_REMOTE_QUEUE_OP_ATOMIC_STORE;
+  store.params.width = IREE_HAL_REMOTE_ATOMIC_WIDTH_32;
+  store.params.reserved[1] = 1;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      iree_hal_remote_server_queue_atomic_store(
+          &session, /*local_device=*/nullptr, empty_list, empty_list,
+          iree_make_const_byte_span(&store, sizeof(store))));
+
+  iree_hal_remote_queue_atomic_rmw_op_t rmw = {};
+  rmw.header.type = IREE_HAL_REMOTE_QUEUE_OP_ATOMIC_RMW;
+  rmw.params.width = IREE_HAL_REMOTE_ATOMIC_WIDTH_64;
+  rmw.params.operation = 0xFF;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      iree_hal_remote_server_queue_atomic_rmw(
+          &session, /*local_device=*/nullptr, empty_list, empty_list,
+          iree_make_const_byte_span(&rmw, sizeof(rmw))));
 }
 
 TEST(RemoteServerSessionTest, QueueCommandBeforeFailedFileOpenSignalsAdvance) {

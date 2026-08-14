@@ -681,8 +681,7 @@ static iree_status_t iree_hal_remote_client_buffer_create_internal(
   if (iree_status_is_ok(status)) {
     iree_hal_buffer_placement_t placement = {
         .device = (iree_hal_device_t*)device,
-        .queue_affinity = params->queue_affinity ? params->queue_affinity
-                                                 : IREE_HAL_QUEUE_AFFINITY_ANY,
+        .queue_affinity = params->queue_affinity,
         .flags = placement_flags,
     };
     // Remote buffers are proxies — the server manages the real memory. Default
@@ -726,11 +725,12 @@ iree_status_t iree_hal_remote_client_buffer_create(
     iree_hal_remote_client_device_t* device,
     iree_hal_remote_resource_id_t resource_id,
     const iree_hal_buffer_params_t* params, iree_device_size_t allocation_size,
+    iree_device_size_t byte_length,
     iree_hal_buffer_placement_flags_t placement_flags,
     iree_allocator_t host_allocator, iree_hal_buffer_t** out_buffer) {
   return iree_hal_remote_client_buffer_create_internal(
       device, resource_id, /*root_buffer=*/NULL, params, allocation_size,
-      /*byte_offset=*/0, /*byte_length=*/allocation_size, placement_flags,
+      /*byte_offset=*/0, byte_length, placement_flags,
       iree_hal_buffer_release_callback_null(),
       /*owns_remote_resource=*/true, host_allocator, out_buffer);
 }

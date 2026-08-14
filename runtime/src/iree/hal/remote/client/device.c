@@ -13,7 +13,6 @@
 #include "iree/hal/remote/client/allocator.h"
 #include "iree/hal/remote/client/bulk.h"
 #include "iree/hal/remote/client/command_buffer.h"
-#include "iree/hal/remote/client/event.h"
 #include "iree/hal/remote/client/executable.h"
 #include "iree/hal/remote/client/file.h"
 #include "iree/hal/remote/client/queue.h"
@@ -670,15 +669,6 @@ static iree_status_t iree_hal_remote_client_device_create_command_buffer(
       device->host_allocator, out_command_buffer);
 }
 
-static iree_status_t iree_hal_remote_client_device_create_event(
-    iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
-    iree_hal_event_flags_t flags, iree_hal_event_t** out_event) {
-  iree_hal_remote_client_device_t* device =
-      iree_hal_remote_client_device_cast(base_device);
-  return iree_hal_remote_client_event_create(device, queue_affinity, flags,
-                                             device->host_allocator, out_event);
-}
-
 static iree_status_t iree_hal_remote_client_device_load_executable(
     iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
     const iree_hal_executable_target_t* target,
@@ -733,6 +723,16 @@ static iree_status_t iree_hal_remote_client_device_query_queue_pool_backend(
     iree_hal_queue_pool_backend_t* out_backend) {
   iree_hal_remote_client_device_t* device =
       iree_hal_remote_client_device_cast(base_device);
+  IREE_RETURN_IF_ERROR(iree_hal_remote_client_device_check_connected(device));
+  iree_hal_slab_provider_properties_t properties;
+  iree_hal_slab_provider_query_properties(device->queue_slab_provider,
+                                          &properties);
+  if (!iree_all_bits_set(properties.supported_usage,
+                         IREE_HAL_BUFFER_USAGE_DEFAULT)) {
+    return iree_make_status(
+        IREE_STATUS_UNAVAILABLE,
+        "remote device has no memory type suitable for queue pool slabs");
+  }
   out_backend->slab_provider = device->queue_slab_provider;
   out_backend->notification = device->queue_pool_notification;
   out_backend->epoch_query = (iree_hal_pool_epoch_query_t){
@@ -1114,6 +1114,7 @@ static void iree_hal_remote_client_device_on_session_ready(
       remote_topology->application_data, /*device_ordinal=*/0,
       device->host_allocator, &remote_device_spec);
   if (!iree_status_is_ok(status)) {
+    iree_hal_device_spec_release(remote_device_spec);
     status = iree_status_join(
         status,
         iree_net_session_shutdown(session, IREE_STATUS_INVALID_ARGUMENT,
@@ -1122,6 +1123,9 @@ static void iree_hal_remote_client_device_on_session_ready(
     IREE_TRACE_ZONE_END(z0);
     return;
   }
+
+  iree_hal_remote_client_slab_provider_configure(device->queue_slab_provider,
+                                                 remote_device_spec);
 
   iree_hal_device_spec_t* old_device_spec = device->device_spec;
   device->device_spec = remote_device_spec;
@@ -1872,6 +1876,24 @@ iree_hal_remote_client_device_state(iree_hal_device_t* base_device) {
   return iree_hal_remote_client_device_load_state(device);
 }
 
+static iree_status_t iree_hal_remote_client_device_external_capture_begin(
+    iree_hal_device_t* base_device,
+    const iree_hal_device_external_capture_options_t* options) {
+  (void)base_device;
+  (void)options;
+  return iree_make_status(
+      IREE_STATUS_UNIMPLEMENTED,
+      "remote devices do not support process-local external capture");
+}
+
+static iree_status_t iree_hal_remote_client_device_external_capture_end(
+    iree_hal_device_t* base_device) {
+  (void)base_device;
+  return iree_make_status(
+      IREE_STATUS_UNIMPLEMENTED,
+      "remote devices do not support process-local external capture");
+}
+
 static const iree_hal_device_vtable_t iree_hal_remote_client_device_vtable = {
     .destroy = iree_hal_remote_client_device_destroy,
     .id = iree_hal_remote_client_device_id,
@@ -1888,7 +1910,6 @@ static const iree_hal_device_vtable_t iree_hal_remote_client_device_vtable = {
     .create_channel = iree_hal_remote_client_device_create_channel,
     .create_command_buffer =
         iree_hal_remote_client_device_create_command_buffer,
-    .create_event = iree_hal_remote_client_device_create_event,
     .load_executable = iree_hal_remote_client_device_load_executable,
     .import_file = iree_hal_remote_client_device_import_file,
     .create_semaphore = iree_hal_remote_client_device_create_semaphore,
@@ -1906,8 +1927,15 @@ static const iree_hal_device_vtable_t iree_hal_remote_client_device_vtable = {
     .queue_host_call = iree_hal_remote_client_device_queue_host_call,
     .queue_dispatch = iree_hal_remote_client_device_queue_dispatch,
     .queue_execute = iree_hal_remote_client_device_queue_execute,
+    .queue_atomic_wait = iree_hal_remote_client_device_queue_atomic_wait,
+    .queue_atomic_store = iree_hal_remote_client_device_queue_atomic_store,
+    .queue_atomic_rmw = iree_hal_remote_client_device_queue_atomic_rmw,
+    .queue_timestamp = iree_hal_remote_client_device_queue_timestamp,
     .queue_flush = iree_hal_remote_client_device_queue_flush,
     .profiling_begin = iree_hal_remote_client_device_profiling_begin,
     .profiling_flush = iree_hal_remote_client_device_profiling_flush,
     .profiling_end = iree_hal_remote_client_device_profiling_end,
+    .external_capture_begin =
+        iree_hal_remote_client_device_external_capture_begin,
+    .external_capture_end = iree_hal_remote_client_device_external_capture_end,
 };

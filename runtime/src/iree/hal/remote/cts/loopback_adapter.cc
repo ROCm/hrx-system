@@ -314,9 +314,6 @@ static std::vector<std::string> BuildRemoteTags(
   if (StringVectorContains(source_config.tags, "async_queue")) {
     tags.push_back("async_queue");
   }
-  if (StringVectorContains(source_config.tags, "events")) {
-    tags.push_back("events");
-  }
   if (StringVectorContains(source_config.tags, "file_io")) {
     tags.push_back("file_io");
   }

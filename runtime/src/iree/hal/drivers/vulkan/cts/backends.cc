@@ -48,18 +48,12 @@ static iree_status_t CreateVulkanDevice(
 static bool vulkan_registered_ =
     (CtsRegistry::RegisterBackend({
          "vulkan",
-         {"vulkan",
-          CreateVulkanDevice,
+         {"vulkan", CreateVulkanDevice,
           /*executable_target_family=*/nullptr,
           /*executable_target_key=*/nullptr,
-          /*executable_data=*/nullptr,
-          RecordingMode::kDirect,
+          /*executable_data=*/nullptr, RecordingMode::kDirect,
           /*unsupported_tests=*/{},
-          /*expected_failures=*/
-          {
-              // Features and API surface not currently implemented.
-              {"EventTest.*", "Vulkan rewrite HAL does not implement events"},
-          }},
+          /*expected_failures=*/{}},
          {"async_queue", "file_io", "vulkan"},
      }),
      true);

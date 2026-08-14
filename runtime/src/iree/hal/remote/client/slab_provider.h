@@ -15,11 +15,18 @@ extern "C" {
 #endif  // __cplusplus
 
 typedef struct iree_hal_remote_client_device_t iree_hal_remote_client_device_t;
+typedef struct iree_hal_device_spec_t iree_hal_device_spec_t;
 
 // Creates a slab provider that backs HAL pools with remote device buffers.
 iree_status_t iree_hal_remote_client_slab_provider_create(
     iree_hal_remote_client_device_t* device, iree_allocator_t host_allocator,
     iree_hal_slab_provider_t** out_provider);
+
+// Configures immutable slab properties from the connected remote device spec.
+// Must be called exactly once before the provider is exposed to queue pools.
+void iree_hal_remote_client_slab_provider_configure(
+    iree_hal_slab_provider_t* provider,
+    const iree_hal_device_spec_t* device_spec);
 
 #ifdef __cplusplus
 }  // extern "C"

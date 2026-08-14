@@ -33,6 +33,7 @@
 #include "iree/base/threading/numa.h"
 #include "iree/hal/api.h"
 #include "iree/hal/drivers/local_task/registration/driver_module.h"
+#include "iree/hal/memory/slab_provider.h"
 #include "iree/hal/remote/client/api.h"
 #include "iree/hal/remote/client/command_buffer_test_util.h"
 #include "iree/hal/remote/protocol/commands.h"
@@ -601,9 +602,15 @@ TEST_F(RemoteSessionTest, LoadsExecutableUsingAdvertisedTargetOrdinal) {
   EXPECT_EQ(info.constant_byte_length, 2u * sizeof(uint32_t));
   EXPECT_EQ(info.binding_count, 3u);
   EXPECT_EQ(info.parameter_count, 1u);
+  EXPECT_EQ(info.maximum_workgroup_invocations, 0u);
   EXPECT_EQ(info.workgroup_size[0], 4u);
   EXPECT_EQ(info.workgroup_size[1], 2u);
   EXPECT_EQ(info.workgroup_size[2], 1u);
+  EXPECT_EQ(info.resource_usage.provided_flags,
+            IREE_HAL_EXECUTABLE_FUNCTION_RESOURCE_FLAG_NONE);
+  EXPECT_EQ(info.resource_usage.fixed_workgroup_local_memory_size, 0u);
+  EXPECT_EQ(info.resource_usage.fixed_private_memory_size, 0u);
+  EXPECT_EQ(info.resource_usage.invocation_register_count, 0u);
 
   iree_hal_executable_function_parameter_t parameter;
   IREE_ASSERT_OK(iree_hal_executable_function_parameters(
@@ -942,6 +949,7 @@ class RemoteBufferTest : public ::testing::Test {
     CreateAndStartServer();
     CreateClientDevice();
     ASSERT_EQ(ConnectAndWait(), IREE_STATUS_OK);
+    CreateClientDeviceGroup();
   }
 
   void TearDown() override {
@@ -950,6 +958,8 @@ class RemoteBufferTest : public ::testing::Test {
       iree_hal_device_release(client_device_);
       client_device_ = nullptr;
     }
+    iree_hal_device_group_release(client_device_group_);
+    client_device_group_ = nullptr;
     if (server_) {
       StopServerAndWait();
       iree_hal_remote_server_release(server_);
@@ -1122,6 +1132,18 @@ class RemoteBufferTest : public ::testing::Test {
         iree_allocator_system(), &client_device_));
   }
 
+  void CreateClientDeviceGroup() {
+    iree_async_frontier_tracker_t* client_tracker = nullptr;
+    IREE_ASSERT_OK(iree_async_frontier_tracker_create(
+        iree_async_frontier_tracker_options_default(), iree_allocator_system(),
+        &client_tracker));
+    iree_status_t status = iree_hal_device_group_create_from_device(
+        client_device_, client_tracker, iree_allocator_system(),
+        &client_device_group_);
+    iree_async_frontier_tracker_release(client_tracker);
+    IREE_ASSERT_OK(status);
+  }
+
   void AllocateMappableBuffer(iree_device_size_t allocation_size,
                               iree_hal_buffer_t** out_buffer) {
     iree_hal_allocator_t* allocator = iree_hal_device_allocator(client_device_);
@@ -1216,14 +1238,11 @@ class RemoteBufferTest : public ::testing::Test {
 
   // Client side.
   iree_hal_device_t* client_device_ = nullptr;
+  // Queue frontier group retaining the client device and its topology.
+  iree_hal_device_group_t* client_device_group_ = nullptr;
 };
 
 TEST_F(RemoteBufferTest, DeactivateKeepsLateResourceCleanupSafe) {
-  iree_hal_event_t* event = nullptr;
-  IREE_ASSERT_OK(iree_hal_event_create(client_device_,
-                                       IREE_HAL_QUEUE_AFFINITY_ANY,
-                                       IREE_HAL_EVENT_FLAG_NONE, &event));
-
   iree_hal_file_t* file = nullptr;
   IREE_ASSERT_OK(iree_hal_remote_client_device_open_file(
       client_device_, IREE_SV("server://read"), IREE_HAL_MEMORY_ACCESS_READ,
@@ -1234,7 +1253,6 @@ TEST_F(RemoteBufferTest, DeactivateKeepsLateResourceCleanupSafe) {
   // Child resources may outlive terminal device deactivation. Their cleanup
   // paths reach the retired queue and control channels, which must remain alive
   // and reject the late sends through their closed admission gates.
-  iree_hal_event_release(event);
   iree_hal_file_release(file);
 
   iree_hal_device_release(client_device_);
@@ -1654,8 +1672,85 @@ static iree_hal_profile_sink_t* RejectingProfileSinkAsBase(
 // Buffer allocation and map/unmap tests
 //===----------------------------------------------------------------------===//
 
+TEST_F(RemoteBufferTest, AllocatorHeapsMirrorDeviceSpec) {
+  iree_hal_allocator_t* allocator = iree_hal_device_allocator(client_device_);
+  const iree_hal_device_memory_spec_t* memory =
+      iree_hal_device_spec_memory(iree_hal_device_spec(client_device_));
+
+  iree_host_size_t heap_count = 0;
+  IREE_ASSERT_OK(iree_hal_allocator_query_memory_heaps(
+      allocator, /*capacity=*/0, /*heaps=*/nullptr, &heap_count));
+  ASSERT_EQ(heap_count, memory->memory_type_count);
+
+  std::vector<iree_hal_allocator_memory_heap_t> heaps(heap_count);
+  IREE_ASSERT_OK(iree_hal_allocator_query_memory_heaps(
+      allocator, heaps.size(), heaps.data(), &heap_count));
+  for (iree_host_size_t i = 0; i < heap_count; ++i) {
+    const iree_hal_memory_type_spec_t& memory_type = memory->memory_types[i];
+    const iree_hal_memory_heap_spec_t& memory_heap =
+        memory->heaps[memory_type.heap_index];
+    const iree_device_size_t expected_max_allocation_size =
+        iree_all_bits_set(
+            memory_heap.flags,
+            IREE_HAL_MEMORY_HEAP_SPEC_FLAG_MAXIMUM_ALLOCATION_SIZE_UNKNOWN) ||
+                memory_heap.maximum_allocation_size > IREE_DEVICE_SIZE_MAX
+            ? IREE_DEVICE_SIZE_MAX
+            : (iree_device_size_t)memory_heap.maximum_allocation_size;
+    EXPECT_EQ(heaps[i].type, memory_type.memory_type);
+    EXPECT_EQ(heaps[i].allowed_usage, memory_type.allowed_buffer_usage);
+    EXPECT_EQ(heaps[i].atomic_operations.device_scope_32,
+              memory_type.atomic_operations.device_scope_32);
+    EXPECT_EQ(heaps[i].atomic_operations.device_scope_64,
+              memory_type.atomic_operations.device_scope_64);
+    EXPECT_EQ(heaps[i].atomic_operations.system_scope_32,
+              memory_type.atomic_operations.system_scope_32);
+    EXPECT_EQ(heaps[i].atomic_operations.system_scope_64,
+              memory_type.atomic_operations.system_scope_64);
+    EXPECT_EQ(heaps[i].max_allocation_size, expected_max_allocation_size);
+    EXPECT_EQ(heaps[i].min_alignment, memory_type.minimum_alignment);
+  }
+}
+
+TEST_F(RemoteBufferTest, QueueSlabsUsePreferredDeviceMemoryType) {
+  const iree_hal_device_memory_spec_t* memory =
+      iree_hal_device_spec_memory(iree_hal_device_spec(client_device_));
+  const iree_hal_memory_type_t required_memory_type =
+      IREE_HAL_MEMORY_TYPE_OPTIMAL_FOR_DEVICE & ~IREE_HAL_MEMORY_TYPE_OPTIMAL;
+  const iree_hal_memory_type_spec_t* expected_memory_type = nullptr;
+  for (iree_host_size_t i = 0; i < memory->memory_type_count; ++i) {
+    const iree_hal_memory_type_spec_t* memory_type = &memory->memory_types[i];
+    if (iree_all_bits_set(memory_type->memory_type, required_memory_type) &&
+        iree_all_bits_set(memory_type->allowed_buffer_usage,
+                          IREE_HAL_BUFFER_USAGE_DEFAULT)) {
+      expected_memory_type = memory_type;
+      break;
+    }
+  }
+  ASSERT_NE(expected_memory_type, nullptr);
+
+  iree_hal_queue_pool_backend_t backend = {0};
+  IREE_ASSERT_OK(iree_hal_device_query_queue_pool_backend(
+      client_device_, /*queue_affinity=*/1, &backend));
+  ASSERT_NE(backend.slab_provider, nullptr);
+  iree_hal_slab_provider_properties_t properties;
+  iree_hal_slab_provider_query_properties(backend.slab_provider, &properties);
+  EXPECT_EQ(properties.memory_type, expected_memory_type->memory_type);
+  EXPECT_EQ(properties.supported_usage,
+            expected_memory_type->allowed_buffer_usage);
+  EXPECT_EQ(properties.atomic_operations.device_scope_32,
+            expected_memory_type->atomic_operations.device_scope_32);
+  EXPECT_EQ(properties.atomic_operations.device_scope_64,
+            expected_memory_type->atomic_operations.device_scope_64);
+  EXPECT_EQ(properties.atomic_operations.system_scope_32,
+            expected_memory_type->atomic_operations.system_scope_32);
+  EXPECT_EQ(properties.atomic_operations.system_scope_64,
+            expected_memory_type->atomic_operations.system_scope_64);
+}
+
 TEST_F(RemoteBufferTest, AllocateAndDeallocate) {
   iree_hal_allocator_t* allocator = iree_hal_device_allocator(client_device_);
+  iree_hal_allocator_t* local_allocator =
+      iree_hal_device_allocator(local_task_device_);
 
   iree_hal_buffer_params_t params = {0};
   params.usage =
@@ -1664,14 +1759,33 @@ TEST_F(RemoteBufferTest, AllocateAndDeallocate) {
   params.type =
       IREE_HAL_MEMORY_TYPE_HOST_VISIBLE | IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
 
+  iree_hal_buffer_t* local_buffer = nullptr;
+  IREE_ASSERT_OK(iree_hal_allocator_allocate_buffer(
+      local_allocator, params, /*allocation_size=*/256, &local_buffer));
   iree_hal_buffer_t* buffer = nullptr;
   IREE_ASSERT_OK(iree_hal_allocator_allocate_buffer(
       allocator, params, /*allocation_size=*/256, &buffer));
   ASSERT_NE(buffer, nullptr);
 
-  EXPECT_EQ(iree_hal_buffer_allocation_size(buffer), 256);
+  EXPECT_EQ(iree_hal_buffer_allocation_size(buffer),
+            iree_hal_buffer_allocation_size(local_buffer));
+  EXPECT_EQ(iree_hal_buffer_byte_length(buffer),
+            iree_hal_buffer_byte_length(local_buffer));
+  EXPECT_EQ(iree_hal_buffer_memory_type(buffer),
+            iree_hal_buffer_memory_type(local_buffer));
+  EXPECT_EQ(iree_hal_buffer_allowed_access(buffer),
+            iree_hal_buffer_allowed_access(local_buffer));
+  EXPECT_EQ(iree_hal_buffer_allowed_usage(buffer),
+            iree_hal_buffer_allowed_usage(local_buffer));
+  const iree_hal_buffer_placement_t local_placement =
+      iree_hal_buffer_allocation_placement(local_buffer);
+  const iree_hal_buffer_placement_t remote_placement =
+      iree_hal_buffer_allocation_placement(buffer);
+  EXPECT_EQ(remote_placement.queue_affinity, local_placement.queue_affinity);
+  EXPECT_EQ(remote_placement.flags, local_placement.flags);
 
   iree_hal_buffer_release(buffer);
+  iree_hal_buffer_release(local_buffer);
 }
 
 TEST_F(RemoteBufferTest, VirtualMemoryUnsupportedMatchesServerAllocator) {
@@ -2973,7 +3087,7 @@ static void SubmitAbsF32DispatchAndVerify(iree_hal_device_t* device,
                                           iree_host_size_t output_binding,
                                           DispatchSubmission submission) {
   iree_hal_buffer_params_t buffer_params = {0};
-  buffer_params.usage = IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE |
+  buffer_params.usage = IREE_HAL_BUFFER_USAGE_STORAGE |
                         IREE_HAL_BUFFER_USAGE_MAPPING_SCOPED |
                         IREE_HAL_BUFFER_USAGE_TRANSFER;
   buffer_params.access = IREE_HAL_MEMORY_ACCESS_ALL;
@@ -3149,6 +3263,8 @@ TEST_F(RemoteBufferTest, CommandBufferUpdateOneShotAndReusable) {
   const iree_hal_command_buffer_mode_t modes[] = {
       IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT,
       IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT,
+      IREE_HAL_COMMAND_BUFFER_MODE_UNVALIDATED |
+          IREE_HAL_COMMAND_BUFFER_MODE_UNRETAINED,
   };
   for (iree_hal_command_buffer_mode_t mode : modes) {
     SCOPED_TRACE(mode);
@@ -3404,7 +3520,7 @@ TEST_F(RemoteBufferTest, OneShotCommandBufferDispatch) {
 TEST_F(RemoteBufferTest, OneShotCommandBufferFillAndCopy) {
   iree_hal_allocator_t* allocator = iree_hal_device_allocator(client_device_);
   iree_hal_buffer_params_t buffer_params = {0};
-  buffer_params.usage = IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE |
+  buffer_params.usage = IREE_HAL_BUFFER_USAGE_STORAGE |
                         IREE_HAL_BUFFER_USAGE_MAPPING_SCOPED |
                         IREE_HAL_BUFFER_USAGE_TRANSFER;
   buffer_params.access = IREE_HAL_MEMORY_ACCESS_ALL;

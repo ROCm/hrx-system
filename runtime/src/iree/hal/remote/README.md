@@ -374,12 +374,12 @@ release message from racing ahead of earlier submitted work.
 The control channel carries request/response messages and notifications for
 operations that are not naturally queue ordered:
 
-- Device queries and trim.
-- Semaphore and event creation, synchronous semaphore query/wait/signal.
+- Device trim; immutable device facts arrive in the bootstrap catalog.
+- Semaphore creation and synchronous semaphore query/wait/signal.
 - Executable upload and executable metadata queries.
 - Command-buffer upload for reusable command buffers.
 - File open/register/list/close.
-- Buffer allocation, import, map, unmap, and heap queries.
+- Buffer allocation, import, map, unmap, and virtual/physical memory control.
 - Resource release batches.
 - Profiling begin/flush/end.
 - Device lost, resource error, and memory pressure notifications.

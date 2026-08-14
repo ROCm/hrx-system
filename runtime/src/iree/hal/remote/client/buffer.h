@@ -78,6 +78,7 @@ iree_status_t iree_hal_remote_client_buffer_create(
     iree_hal_remote_client_device_t* device,
     iree_hal_remote_resource_id_t resource_id,
     const iree_hal_buffer_params_t* params, iree_device_size_t allocation_size,
+    iree_device_size_t byte_length,
     iree_hal_buffer_placement_flags_t placement_flags,
     iree_allocator_t host_allocator, iree_hal_buffer_t** out_buffer);
 

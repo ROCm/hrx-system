@@ -85,8 +85,6 @@ static_assert(sizeof(iree_hal_remote_control_response_prefix_t) == 8, "");
 // messages include wait={control:epoch} in their frontier.
 typedef enum iree_hal_remote_control_type_e {
   // ── Device ──────────────────────────────────────────────────────────────
-  IREE_HAL_REMOTE_CONTROL_DEVICE_QUERY_INFO = 0x0001,
-  IREE_HAL_REMOTE_CONTROL_DEVICE_QUERY_I64 = 0x0002,
   IREE_HAL_REMOTE_CONTROL_DEVICE_TRIM = 0x0003,
 
   // ── Semaphore ───────────────────────────────────────────────────────────
@@ -94,9 +92,6 @@ typedef enum iree_hal_remote_control_type_e {
   IREE_HAL_REMOTE_CONTROL_SEMAPHORE_QUERY = 0x0011,
   IREE_HAL_REMOTE_CONTROL_SEMAPHORE_SIGNAL = 0x0012,  // fire-and-forget
   IREE_HAL_REMOTE_CONTROL_SEMAPHORE_WAIT = 0x0013,
-
-  // ── Event ───────────────────────────────────────────────────────────────
-  IREE_HAL_REMOTE_CONTROL_EVENT_CREATE = 0x0018,  // [epoch]
 
   // ── Executable ──────────────────────────────────────────────────────────
   IREE_HAL_REMOTE_CONTROL_EXECUTABLE_UPLOAD = 0x0020,  // [epoch]
@@ -120,7 +115,6 @@ typedef enum iree_hal_remote_control_type_e {
   IREE_HAL_REMOTE_CONTROL_BUFFER_IMPORT = 0x0051,  // [epoch]
   IREE_HAL_REMOTE_CONTROL_BUFFER_MAP = 0x0052,
   IREE_HAL_REMOTE_CONTROL_BUFFER_UNMAP = 0x0053,
-  IREE_HAL_REMOTE_CONTROL_BUFFER_QUERY_HEAPS = 0x0054,
   IREE_HAL_REMOTE_CONTROL_BUFFER_VIRTUAL_QUERY_CAPABILITIES = 0x0055,
   IREE_HAL_REMOTE_CONTROL_BUFFER_VIRTUAL_QUERY_GRANULARITY = 0x0056,
   IREE_HAL_REMOTE_CONTROL_BUFFER_VIRTUAL_RESERVE = 0x0057,  // [epoch]
@@ -159,56 +153,6 @@ typedef enum iree_hal_remote_control_type_e {
 //===----------------------------------------------------------------------===//
 // Device messages
 //===----------------------------------------------------------------------===//
-
-// Queue description returned in DEVICE_QUERY_INFO responses. Describes a
-// single device queue's affinity bit and command categories it supports.
-typedef struct iree_hal_remote_queue_description_t {
-  uint64_t queue_affinity;  // Bitmask identifying this queue.
-  uint32_t categories;      // iree_hal_command_category_t
-  uint32_t reserved;        // Must be 0.
-} iree_hal_remote_queue_description_t;
-static_assert(sizeof(iree_hal_remote_queue_description_t) == 16, "");
-
-// DEVICE_QUERY_INFO request. Queries device topology, capabilities, and
-// memory heaps.
-typedef struct iree_hal_remote_device_query_info_request_t {
-  uint32_t flags;     // Reserved, must be 0.
-  uint32_t reserved;  // Must be 0.
-} iree_hal_remote_device_query_info_request_t;
-static_assert(sizeof(iree_hal_remote_device_query_info_request_t) == 8, "");
-
-// DEVICE_QUERY_INFO response. Variable-length tail carries device name,
-// queue descriptions, and memory heap descriptions.
-typedef struct iree_hal_remote_device_query_info_response_t {
-  uint64_t device_id;           // Opaque server-assigned device identifier.
-  uint16_t device_name_length;  // UTF-8 byte count (not null-terminated).
-  uint8_t queue_count;          // Number of device queues.
-  uint8_t heap_count;           // Number of memory heaps.
-  uint32_t reserved;            // Must be 0.
-  // Followed by:
-  //   uint8_t device_name[device_name_length]  (padded to 8-byte alignment)
-  //   iree_hal_remote_queue_description_t queues[queue_count]
-  //   iree_hal_remote_memory_heap_t heaps[heap_count]
-} iree_hal_remote_device_query_info_response_t;
-static_assert(sizeof(iree_hal_remote_device_query_info_response_t) == 16, "");
-
-// DEVICE_QUERY_I64 request. Queries a named integer device property.
-// Variable-length tail carries category and key strings.
-typedef struct iree_hal_remote_device_query_i64_request_t {
-  uint16_t category_length;  // UTF-8 byte count.
-  uint16_t key_length;       // UTF-8 byte count.
-  uint32_t reserved;         // Must be 0.
-  // Followed by:
-  //   uint8_t category[category_length]  (padded to 8-byte alignment)
-  //   uint8_t key[key_length]  (padded to 8-byte alignment)
-} iree_hal_remote_device_query_i64_request_t;
-static_assert(sizeof(iree_hal_remote_device_query_i64_request_t) == 8, "");
-
-// DEVICE_QUERY_I64 response. Returns the queried value.
-typedef struct iree_hal_remote_device_query_i64_response_t {
-  int64_t value;
-} iree_hal_remote_device_query_i64_response_t;
-static_assert(sizeof(iree_hal_remote_device_query_i64_response_t) == 8, "");
 
 // DEVICE_TRIM request. Releases unused device resources.
 typedef struct iree_hal_remote_device_trim_request_t {
@@ -269,24 +213,6 @@ static_assert(sizeof(iree_hal_remote_semaphore_wait_request_t) == 24, "");
 // Response: status only (OK or DEADLINE_EXCEEDED).
 
 //===----------------------------------------------------------------------===//
-// Event messages
-//===----------------------------------------------------------------------===//
-
-// EVENT_CREATE request. Creates a device event. [epoch]
-typedef struct iree_hal_remote_event_create_request_t {
-  uint64_t queue_affinity;  // iree_hal_queue_affinity_t
-  uint32_t flags;           // iree_hal_event_flags_t
-  uint32_t reserved;        // Must be 0.
-} iree_hal_remote_event_create_request_t;
-static_assert(sizeof(iree_hal_remote_event_create_request_t) == 16, "");
-
-// EVENT_CREATE response. Returns the server-assigned canonical ID.
-typedef struct iree_hal_remote_event_create_response_t {
-  iree_hal_remote_resource_id_t resolved_id;  // PROVISIONAL=0
-} iree_hal_remote_event_create_response_t;
-static_assert(sizeof(iree_hal_remote_event_create_response_t) == 8, "");
-
-//===----------------------------------------------------------------------===//
 // Executable messages
 //===----------------------------------------------------------------------===//
 
@@ -340,20 +266,42 @@ static_assert(sizeof(iree_hal_remote_executable_query_function_request_t) == 16,
 // only valid for the lifetime of the response payload; clients that expose it
 // through HAL APIs must copy it into executable-owned storage.
 typedef struct iree_hal_remote_executable_query_function_response_t {
-  uint64_t flags;  // iree_hal_executable_function_flags_t
+  // iree_hal_executable_function_flags_t behavior bits.
+  uint64_t flags;
+  // Static or minimum workgroup size.
   uint32_t workgroup_size[3];
-  int32_t occupancy_reserved;  // iree_hal_occupancy_info_t::reserved.
+  // Reserved occupancy information; must be 0.
+  int32_t occupancy_reserved;
+  // Total byte length of constants expected.
   uint32_t constant_byte_length;
+  // Total number of bindings expected.
   uint16_t binding_count;
+  // Total number of logical parameters.
   uint16_t parameter_count;
-  uint16_t name_length;  // Byte length of the following function name.
-  uint16_t reserved0;    // Must be 0.
-  uint32_t reserved1;    // Must be 0.
+  // Byte length of the following function name.
+  uint16_t name_length;
+  // Must be 0.
+  uint16_t reserved0;
+  // Maximum invocations accepted in one workgroup, or 0 if unspecified.
+  uint32_t maximum_workgroup_invocations;
+  // iree_hal_executable_function_resource_flags_t available fields.
+  uint32_t resource_usage_provided_flags;
+  // Fixed workgroup-local memory required per workgroup, in bytes.
+  uint32_t fixed_workgroup_local_memory_size;
+  // Fixed private memory required per invocation, in bytes.
+  uint32_t fixed_private_memory_size;
+  // Number of 32-bit register units used per invocation.
+  uint32_t invocation_register_count;
+  // Must be 0.
+  uint64_t reserved1;
   // Followed by:
   //   char name[name_length]
 } iree_hal_remote_executable_query_function_response_t;
 static_assert(sizeof(iree_hal_remote_executable_query_function_response_t) ==
-                  40,
+                  64,
+              "");
+static_assert(offsetof(iree_hal_remote_executable_query_function_response_t,
+                       maximum_workgroup_invocations) == 36,
               "");
 
 // EXECUTABLE_QUERY_PARAMETERS request. Queries reflected parameters for a
@@ -461,16 +409,26 @@ static_assert(sizeof(iree_hal_remote_executable_global_buffer_response_t) == 56,
 //===----------------------------------------------------------------------===//
 
 // COMMAND_BUFFER_UPLOAD request. Uploads a reusable command buffer. [epoch]
-// Same upload delivery model as EXECUTABLE_UPLOAD (inline or bulk).
+// Same upload delivery model as EXECUTABLE_UPLOAD (inline or bulk). The server
+// owns local validation and resource retention; |mode| only carries reusable
+// metadata-retention intent across the protocol.
 typedef struct iree_hal_remote_command_buffer_upload_request_t {
-  iree_hal_remote_resource_id_t provisional_id;  // PROVISIONAL=1
-  uint32_t mode;              // iree_hal_command_buffer_mode_t
-  uint32_t categories;        // iree_hal_command_category_t
-  uint16_t binding_capacity;  // Max binding table slots.
-  uint16_t upload_flags;      // IREE_HAL_REMOTE_UPLOAD_FLAG_*
-  uint32_t reserved;          // Must be 0.
-  uint64_t data_length;       // Byte count of serialized command stream.
-  uint64_t bulk_transfer_id;  // Valid when BULK_REFERENCE is set.
+  // Provisional command buffer resource ID.
+  iree_hal_remote_resource_id_t provisional_id;
+  // Client command buffer mode hints.
+  uint32_t mode;
+  // Command categories used by the recording.
+  uint32_t categories;
+  // Maximum binding table slot count.
+  uint16_t binding_capacity;
+  // Exactly one IREE_HAL_REMOTE_UPLOAD_FLAG_* delivery mode.
+  uint16_t upload_flags;
+  // Reserved for future use and must be zero.
+  uint32_t reserved;
+  // Byte count of serialized command stream data.
+  uint64_t data_length;
+  // Transfer ID when BULK_REFERENCE is selected; otherwise zero.
+  uint64_t bulk_transfer_id;
   // [if INLINE_DATA]: uint8_t data[data_length]  (padded to 8-byte alignment)
 } iree_hal_remote_command_buffer_upload_request_t;
 static_assert(sizeof(iree_hal_remote_command_buffer_upload_request_t) == 40,
@@ -647,11 +605,17 @@ static_assert(offsetof(iree_hal_remote_buffer_alloc_request_t,
                        allocation_size) == 40,
               "");
 
-// BUFFER_ALLOC response. Returns the resolved buffer ID.
+// BUFFER_ALLOC response. Returns the resolved buffer ID and concrete server
+// allocation properties.
 typedef struct iree_hal_remote_buffer_alloc_response_t {
   iree_hal_remote_resource_id_t resolved_id;  // PROVISIONAL=0
+  iree_hal_remote_buffer_params_t params;
+  uint64_t allocation_size;
+  uint64_t byte_length;
+  uint32_t placement_flags;  // iree_hal_buffer_placement_flags_t
+  uint32_t reserved;         // Must be 0.
 } iree_hal_remote_buffer_alloc_response_t;
-static_assert(sizeof(iree_hal_remote_buffer_alloc_response_t) == 8, "");
+static_assert(sizeof(iree_hal_remote_buffer_alloc_response_t) == 64, "");
 
 // BUFFER_IMPORT request. Imports an externally-owned buffer (shared memory,
 // DMA-BUF, platform handle). [epoch] The external_type identifies the import
@@ -729,23 +693,6 @@ typedef struct iree_hal_remote_buffer_unmap_request_t {
 } iree_hal_remote_buffer_unmap_request_t;
 static_assert(sizeof(iree_hal_remote_buffer_unmap_request_t) == 40, "");
 // Response: status only (no body).
-
-// BUFFER_QUERY_HEAPS request. Queries the device's memory heap topology.
-typedef struct iree_hal_remote_buffer_query_heaps_request_t {
-  uint32_t flags;     // Reserved, must be 0.
-  uint32_t reserved;  // Must be 0.
-} iree_hal_remote_buffer_query_heaps_request_t;
-static_assert(sizeof(iree_hal_remote_buffer_query_heaps_request_t) == 8, "");
-
-// BUFFER_QUERY_HEAPS response. Returns heap descriptions.
-typedef struct iree_hal_remote_buffer_query_heaps_response_t {
-  uint16_t heap_count;
-  uint16_t reserved0;  // Must be 0.
-  uint32_t reserved1;  // Must be 0.
-  // Followed by:
-  //   iree_hal_remote_memory_heap_t heaps[heap_count]
-} iree_hal_remote_buffer_query_heaps_response_t;
-static_assert(sizeof(iree_hal_remote_buffer_query_heaps_response_t) == 8, "");
 
 // BUFFER_VIRTUAL_QUERY_CAPABILITIES request. Queries allocator-level virtual
 // memory capabilities that are not parameter-specific.

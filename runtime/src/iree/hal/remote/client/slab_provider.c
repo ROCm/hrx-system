@@ -23,11 +23,8 @@ typedef struct iree_hal_remote_client_slab_provider_t {
   // Host allocator used for provider storage.
   iree_allocator_t host_allocator;
 
-  // Memory type reported to pools created from this provider.
-  iree_hal_memory_type_t memory_type;
-
-  // Buffer usages reported to pools created from this provider.
-  iree_hal_buffer_usage_t supported_usage;
+  // Properties of the preferred server-side backing memory class.
+  iree_hal_slab_provider_properties_t properties;
 
   // Total slabs acquired through this provider.
   iree_atomic_int64_t total_acquired;
@@ -67,8 +64,7 @@ iree_status_t iree_hal_remote_client_slab_provider_create(
         &iree_hal_remote_client_slab_provider_vtable, &provider->base);
     provider->device = device;
     provider->host_allocator = host_allocator;
-    provider->memory_type = IREE_HAL_MEMORY_TYPE_OPTIMAL_FOR_DEVICE;
-    provider->supported_usage = IREE_HAL_BUFFER_USAGE_DEFAULT;
+    memset(&provider->properties, 0, sizeof(provider->properties));
     iree_atomic_store(&provider->total_acquired, 0, iree_memory_order_relaxed);
     iree_atomic_store(&provider->total_released, 0, iree_memory_order_relaxed);
     *out_provider = &provider->base;
@@ -76,6 +72,32 @@ iree_status_t iree_hal_remote_client_slab_provider_create(
 
   IREE_TRACE_ZONE_END(z0);
   return status;
+}
+
+void iree_hal_remote_client_slab_provider_configure(
+    iree_hal_slab_provider_t* base_provider,
+    const iree_hal_device_spec_t* device_spec) {
+  iree_hal_remote_client_slab_provider_t* provider =
+      iree_hal_remote_client_slab_provider_cast(base_provider);
+  const iree_hal_device_memory_spec_t* memory =
+      iree_hal_device_spec_memory(device_spec);
+  const iree_hal_memory_type_t required_memory_type =
+      IREE_HAL_MEMORY_TYPE_OPTIMAL_FOR_DEVICE & ~IREE_HAL_MEMORY_TYPE_OPTIMAL;
+  const iree_hal_buffer_usage_t required_usage = IREE_HAL_BUFFER_USAGE_DEFAULT;
+
+  for (iree_host_size_t i = 0; i < memory->memory_type_count; ++i) {
+    const iree_hal_memory_type_spec_t* memory_type = &memory->memory_types[i];
+    if (!iree_all_bits_set(memory_type->memory_type, required_memory_type) ||
+        !iree_all_bits_set(memory_type->allowed_buffer_usage, required_usage)) {
+      continue;
+    }
+    provider->properties = (iree_hal_slab_provider_properties_t){
+        .memory_type = memory_type->memory_type,
+        .supported_usage = memory_type->allowed_buffer_usage,
+        .atomic_operations = memory_type->atomic_operations,
+    };
+    break;
+  }
 }
 
 static void iree_hal_remote_client_slab_provider_destroy(
@@ -133,10 +155,36 @@ static iree_status_t iree_hal_remote_client_slab_provider_wrap_buffer(
       (iree_hal_buffer_t*)(uintptr_t)slab->provider_handle;
   IREE_RETURN_IF_ERROR(iree_hal_buffer_validate_range(root_buffer, slab_offset,
                                                       allocation_size));
+  iree_hal_buffer_placement_t placement =
+      iree_hal_buffer_allocation_placement(root_buffer);
+  params.type = iree_hal_buffer_memory_type(root_buffer);
+  params.queue_affinity = placement.queue_affinity;
   return iree_hal_remote_client_buffer_create_view(
       provider->device, root_buffer, slab_offset, allocation_size, &params,
-      IREE_HAL_BUFFER_PLACEMENT_FLAG_NONE, release_callback,
-      provider->host_allocator, out_buffer);
+      placement.flags, release_callback, provider->host_allocator, out_buffer);
+}
+
+static iree_status_t iree_hal_remote_client_slab_provider_validate_asan_options(
+    const iree_hal_slab_provider_t* base_provider,
+    const iree_hal_asan_pool_options_t* options) {
+  (void)base_provider;
+  (void)options;
+  return iree_make_status(
+      IREE_STATUS_FAILED_PRECONDITION,
+      "remote slab provider does not support HAL ASAN range advice");
+}
+
+static void iree_hal_remote_client_slab_provider_advise_asan_range(
+    iree_hal_slab_provider_t* base_provider, const iree_hal_slab_t* slab,
+    iree_device_size_t backing_offset,
+    iree_hal_asan_range_advice_flags_t advice_flags,
+    const iree_hal_asan_allocation_layout_t* layout) {
+  (void)base_provider;
+  (void)slab;
+  (void)backing_offset;
+  (void)advice_flags;
+  (void)layout;
+  IREE_ASSERT(false, "remote slab provider cannot advise ASAN ranges");
 }
 
 static void iree_hal_remote_client_slab_provider_prefault(
@@ -167,12 +215,10 @@ static void iree_hal_remote_client_slab_provider_query_stats(
 
 static void iree_hal_remote_client_slab_provider_query_properties(
     const iree_hal_slab_provider_t* base_provider,
-    iree_hal_memory_type_t* out_memory_type,
-    iree_hal_buffer_usage_t* out_supported_usage) {
+    iree_hal_slab_provider_properties_t* out_properties) {
   const iree_hal_remote_client_slab_provider_t* provider =
       iree_hal_remote_client_slab_provider_const_cast(base_provider);
-  *out_memory_type = provider->memory_type;
-  *out_supported_usage = provider->supported_usage;
+  *out_properties = provider->properties;
 }
 
 static const iree_hal_slab_provider_vtable_t
@@ -181,6 +227,10 @@ static const iree_hal_slab_provider_vtable_t
         .acquire_slab = iree_hal_remote_client_slab_provider_acquire_slab,
         .release_slab = iree_hal_remote_client_slab_provider_release_slab,
         .wrap_buffer = iree_hal_remote_client_slab_provider_wrap_buffer,
+        .validate_asan_options =
+            iree_hal_remote_client_slab_provider_validate_asan_options,
+        .advise_asan_range =
+            iree_hal_remote_client_slab_provider_advise_asan_range,
         .prefault = iree_hal_remote_client_slab_provider_prefault,
         .trim = iree_hal_remote_client_slab_provider_trim,
         .query_stats = iree_hal_remote_client_slab_provider_query_stats,

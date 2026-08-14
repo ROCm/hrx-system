@@ -14,6 +14,7 @@
 #include "iree/hal/remote/protocol/common.h"
 #include "iree/hal/remote/protocol/control.h"
 #include "iree/hal/remote/protocol/queue.h"
+#include "iree/hal/remote/server/atomic.h"
 #include "iree/hal/remote/server/binding_storage.h"
 #include "iree/hal/remote/server/bulk.h"
 #include "iree/hal/remote/server/bulk_session.h"
@@ -31,7 +32,6 @@
 // Inline arrays used while replaying uncommon synchronization commands.
 // Larger command payloads spill to the host allocator instead of imposing a
 // protocol limit.
-#define IREE_HAL_REMOTE_INLINE_EVENT_COUNT 32
 #define IREE_HAL_REMOTE_INLINE_BARRIER_COUNT 32
 
 // Bounds retained ADVANCE records when the peer stops accepting progress.
@@ -1663,7 +1663,7 @@ static iree_status_t iree_hal_remote_server_process_pending_queue_command(
 // Resolves a resource ID that may be provisional. If the ID has the
 // PROVISIONAL flag set, looks up a resolved mapping and returns it. Pending or
 // unknown provisionals return unchanged so resource table lookups fail loudly.
-static iree_hal_remote_resource_id_t iree_hal_remote_server_resolve_resource_id(
+iree_hal_remote_resource_id_t iree_hal_remote_server_resolve_resource_id(
     iree_hal_remote_server_session_t* session_slot,
     iree_hal_remote_resource_id_t resource_id) {
   if (!IREE_HAL_REMOTE_RESOURCE_ID_IS_PROVISIONAL(resource_id)) {
@@ -1679,7 +1679,7 @@ static iree_hal_remote_resource_id_t iree_hal_remote_server_resolve_resource_id(
   return resource_id;
 }
 
-static iree_status_t iree_hal_remote_server_resolve_command_buffer_ref(
+iree_status_t iree_hal_remote_server_resolve_command_buffer_ref(
     iree_hal_remote_server_session_t* session_slot,
     iree_hal_remote_resource_id_t buffer_id, uint32_t buffer_slot,
     uint64_t offset, uint64_t length, const char* command_name,
@@ -2027,6 +2027,39 @@ static iree_status_t iree_hal_remote_server_submit_barrier(
   return iree_hal_device_queue_barrier(local_device,
                                        IREE_HAL_QUEUE_AFFINITY_ANY, wait_list,
                                        signal_list, IREE_HAL_EXECUTE_FLAG_NONE);
+}
+
+static iree_status_t iree_hal_remote_server_submit_atomic_wait(
+    void* user_data, iree_hal_device_t* local_device,
+    iree_hal_semaphore_list_t wait_list,
+    iree_hal_semaphore_list_t signal_list) {
+  iree_hal_remote_server_op_context_t* context =
+      (iree_hal_remote_server_op_context_t*)user_data;
+  return iree_hal_remote_server_queue_atomic_wait(
+      context->session_slot, local_device, wait_list, signal_list,
+      context->command_data);
+}
+
+static iree_status_t iree_hal_remote_server_submit_atomic_store(
+    void* user_data, iree_hal_device_t* local_device,
+    iree_hal_semaphore_list_t wait_list,
+    iree_hal_semaphore_list_t signal_list) {
+  iree_hal_remote_server_op_context_t* context =
+      (iree_hal_remote_server_op_context_t*)user_data;
+  return iree_hal_remote_server_queue_atomic_store(
+      context->session_slot, local_device, wait_list, signal_list,
+      context->command_data);
+}
+
+static iree_status_t iree_hal_remote_server_submit_atomic_rmw(
+    void* user_data, iree_hal_device_t* local_device,
+    iree_hal_semaphore_list_t wait_list,
+    iree_hal_semaphore_list_t signal_list) {
+  iree_hal_remote_server_op_context_t* context =
+      (iree_hal_remote_server_op_context_t*)user_data;
+  return iree_hal_remote_server_queue_atomic_rmw(
+      context->session_slot, local_device, wait_list, signal_list,
+      context->command_data);
 }
 
 static iree_status_t iree_hal_remote_server_submit_buffer_fill(
@@ -2794,81 +2827,57 @@ iree_status_t iree_hal_remote_server_session_send_error_response(
       request_envelope, status);
 }
 
-// Handles EVENT_CREATE: creates an event on the local device and assigns a
-// resource slot in the session's table.
-static iree_status_t iree_hal_remote_server_handle_event_create(
-    iree_hal_remote_server_session_t* entry,
-    const iree_hal_remote_control_envelope_t* envelope, const uint8_t* body,
-    iree_host_size_t body_length) {
-  const iree_hal_remote_event_create_request_t* request = NULL;
-  iree_hal_event_t* event = NULL;
-  iree_hal_remote_resource_id_t resolved_id = 0;
-
-  iree_status_t status = iree_ok_status();
-  if (body_length < sizeof(iree_hal_remote_event_create_request_t)) {
-    status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "EVENT_CREATE body too small: %" PRIhsz " bytes",
-                              body_length);
-  }
-  if (iree_status_is_ok(status)) {
-    request = (const iree_hal_remote_event_create_request_t*)body;
-    if (request->reserved != 0) {
-      status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                                "EVENT_CREATE reserved field is nonzero");
-    }
-  }
-  if (iree_status_is_ok(status)) {
-    iree_hal_device_t* local_device = entry->server->devices[0];
-    status = iree_hal_event_create(
-        local_device, (iree_hal_queue_affinity_t)request->queue_affinity,
-        (iree_hal_event_flags_t)request->flags, &event);
-  }
-  if (iree_status_is_ok(status)) {
-    status = iree_hal_remote_resource_table_assign(
-        &entry->resource_table, IREE_HAL_REMOTE_RESOURCE_TYPE_EVENT, event,
-        &resolved_id);
-  }
-
-  iree_hal_event_release(event);
-
-  if (!iree_status_is_ok(status)) {
-    return iree_hal_remote_server_send_error_response(
-        entry->server->host_allocator, entry->session, envelope, status);
-  }
-  iree_hal_remote_event_create_response_t response = {
-      .resolved_id = resolved_id,
-  };
-  return iree_hal_remote_server_send_response(
-      entry->server->host_allocator, entry->session, envelope, IREE_STATUS_OK,
-      &response, sizeof(response));
-}
-
 // Handles BUFFER_ALLOC: allocates a buffer on the local device and assigns
 // a resource slot in the session's table.
 static iree_status_t iree_hal_remote_server_handle_buffer_alloc(
     iree_hal_remote_server_session_t* entry,
     const iree_hal_remote_control_envelope_t* envelope, const uint8_t* body,
     iree_host_size_t body_length) {
-  if (body_length < sizeof(iree_hal_remote_buffer_alloc_request_t)) {
+  if (body_length != sizeof(iree_hal_remote_buffer_alloc_request_t)) {
     return iree_hal_remote_server_send_error_response(
         entry->server->host_allocator, entry->session, envelope,
         iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                         "BUFFER_ALLOC body too small: %" PRIhsz " bytes",
-                         body_length));
+                         "BUFFER_ALLOC body length %" PRIhsz
+                         " does not match canonical length %" PRIhsz,
+                         body_length,
+                         sizeof(iree_hal_remote_buffer_alloc_request_t)));
   }
 
   const iree_hal_remote_buffer_alloc_request_t* request =
       (const iree_hal_remote_buffer_alloc_request_t*)body;
+  if (request->params.reserved0 != 0 || request->params.reserved1 != 0) {
+    return iree_hal_remote_server_send_error_response(
+        entry->server->host_allocator, entry->session, envelope,
+        iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                         "BUFFER_ALLOC reserved fields must be 0"));
+  }
+  if (IREE_HAL_REMOTE_RESOURCE_ID_TYPE(request->provisional_id) !=
+          IREE_HAL_REMOTE_RESOURCE_TYPE_BUFFER ||
+      !IREE_HAL_REMOTE_RESOURCE_ID_IS_PROVISIONAL(request->provisional_id)) {
+    return iree_hal_remote_server_send_error_response(
+        entry->server->host_allocator, entry->session, envelope,
+        iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "BUFFER_ALLOC requires a provisional buffer resource ID"));
+  }
+  if (request->allocation_size > IREE_DEVICE_SIZE_MAX ||
+      request->params.min_alignment > IREE_DEVICE_SIZE_MAX) {
+    return iree_hal_remote_server_send_error_response(
+        entry->server->host_allocator, entry->session, envelope,
+        iree_make_status(
+            IREE_STATUS_OUT_OF_RANGE,
+            "BUFFER_ALLOC request exceeds server device size capacity"));
+  }
 
   // Convert wire params to HAL params.
-  iree_hal_buffer_params_t params = {
-      .usage = (iree_hal_buffer_usage_t)request->params.usage,
-      .access = (iree_hal_memory_access_t)request->params.access,
-      .type = (iree_hal_memory_type_t)request->params.type,
-      .queue_affinity =
-          (iree_hal_queue_affinity_t)request->params.queue_affinity,
-      .min_alignment = (iree_device_size_t)request->params.min_alignment,
-  };
+  iree_hal_buffer_params_t params =
+      iree_hal_remote_server_wire_params_to_hal(request->params);
+  if (!iree_device_size_is_valid_alignment(params.min_alignment)) {
+    return iree_hal_remote_server_send_error_response(
+        entry->server->host_allocator, entry->session, envelope,
+        iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                         "BUFFER_ALLOC minimum alignment is invalid"));
+  }
 
   iree_device_size_t allocation_size =
       (iree_device_size_t)request->allocation_size;
@@ -2891,89 +2900,27 @@ static iree_status_t iree_hal_remote_server_handle_buffer_alloc(
   status = iree_hal_remote_resource_table_assign(
       &entry->resource_table, IREE_HAL_REMOTE_RESOURCE_TYPE_BUFFER, buffer,
       &resolved_id);
-  // The table retains the buffer; release our allocation reference.
-  iree_hal_buffer_release(buffer);
   if (!iree_status_is_ok(status)) {
+    iree_hal_buffer_release(buffer);
     return iree_hal_remote_server_send_error_response(
         entry->server->host_allocator, entry->session, envelope, status);
   }
 
-  // Send success response with the resolved resource_id.
-  iree_hal_remote_buffer_alloc_response_t response = {
-      .resolved_id = resolved_id,
-  };
+  iree_hal_buffer_placement_t placement =
+      iree_hal_buffer_allocation_placement(buffer);
+  iree_hal_remote_buffer_alloc_response_t response;
+  memset(&response, 0, sizeof(response));
+  response.resolved_id = resolved_id;
+  response.params = iree_hal_remote_server_buffer_to_wire_params(buffer);
+  response.allocation_size = (uint64_t)iree_hal_buffer_allocation_size(buffer);
+  response.byte_length = (uint64_t)iree_hal_buffer_byte_length(buffer);
+  response.placement_flags = placement.flags;
+
+  // The table retains the buffer; release our allocation reference.
+  iree_hal_buffer_release(buffer);
   return iree_hal_remote_server_send_response(
       entry->server->host_allocator, entry->session, envelope, IREE_STATUS_OK,
       &response, sizeof(response));
-}
-
-// Handles BUFFER_QUERY_HEAPS: queries the local device's memory heap topology
-// and sends the descriptions back to the client.
-static iree_status_t iree_hal_remote_server_handle_buffer_query_heaps(
-    iree_hal_remote_server_session_t* entry,
-    const iree_hal_remote_control_envelope_t* envelope, const uint8_t* body,
-    iree_host_size_t body_length) {
-  iree_hal_remote_server_t* server = entry->server;
-  iree_hal_device_t* local_device = server->devices[0];
-  iree_hal_allocator_t* allocator = iree_hal_device_allocator(local_device);
-
-  // Query heap count first. The HAL contract returns OUT_OF_RANGE when
-  // capacity < count (the standard pre-sizing pattern). We use capacity=0
-  // to trigger this and read the count from out_count.
-  iree_host_size_t heap_count = 0;
-  iree_status_t status =
-      iree_hal_allocator_query_memory_heaps(allocator, 0, NULL, &heap_count);
-  if (iree_status_code(status) == IREE_STATUS_OUT_OF_RANGE) {
-    iree_status_ignore(status);
-    status = iree_ok_status();
-  }
-  if (!iree_status_is_ok(status)) {
-    return iree_hal_remote_server_send_error_response(
-        entry->server->host_allocator, entry->session, envelope, status);
-  }
-
-  // Query full heap descriptions (stack-allocated for reasonable counts).
-  iree_hal_allocator_memory_heap_t heaps_storage[16];
-  if (heap_count > IREE_ARRAYSIZE(heaps_storage)) {
-    return iree_hal_remote_server_send_error_response(
-        entry->server->host_allocator, entry->session, envelope,
-        iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                         "too many heaps: %" PRIhsz, heap_count));
-  }
-  status = iree_hal_allocator_query_memory_heaps(allocator, heap_count,
-                                                 heaps_storage, &heap_count);
-  if (!iree_status_is_ok(status)) {
-    return iree_hal_remote_server_send_error_response(
-        entry->server->host_allocator, entry->session, envelope, status);
-  }
-
-  // Build response: header + wire heap descriptions.
-  uint8_t response_body[sizeof(iree_hal_remote_buffer_query_heaps_response_t) +
-                        16 * sizeof(iree_hal_remote_memory_heap_t)];
-  memset(response_body, 0, sizeof(response_body));
-
-  iree_hal_remote_buffer_query_heaps_response_t* response_header =
-      (iree_hal_remote_buffer_query_heaps_response_t*)response_body;
-  response_header->heap_count = (uint16_t)heap_count;
-
-  iree_hal_remote_memory_heap_t* wire_heaps =
-      (iree_hal_remote_memory_heap_t*)(response_body +
-                                       sizeof(
-                                           iree_hal_remote_buffer_query_heaps_response_t));
-  for (iree_host_size_t i = 0; i < heap_count; ++i) {
-    wire_heaps[i].type = (uint32_t)heaps_storage[i].type;
-    wire_heaps[i].allowed_usage = (uint32_t)heaps_storage[i].allowed_usage;
-    wire_heaps[i].max_allocation_size =
-        (uint64_t)heaps_storage[i].max_allocation_size;
-    wire_heaps[i].min_alignment = (uint64_t)heaps_storage[i].min_alignment;
-  }
-
-  iree_host_size_t response_body_length =
-      sizeof(iree_hal_remote_buffer_query_heaps_response_t) +
-      heap_count * sizeof(iree_hal_remote_memory_heap_t);
-  return iree_hal_remote_server_send_response(
-      entry->server->host_allocator, entry->session, envelope, IREE_STATUS_OK,
-      response_body, response_body_length);
 }
 
 static iree_status_t
@@ -4120,6 +4067,14 @@ static iree_status_t iree_hal_remote_server_handle_executable_query_function(
   response.binding_count = info.binding_count;
   response.parameter_count = info.parameter_count;
   response.name_length = (uint16_t)info.name.size;
+  response.maximum_workgroup_invocations = info.maximum_workgroup_invocations;
+  response.resource_usage_provided_flags = info.resource_usage.provided_flags;
+  response.fixed_workgroup_local_memory_size =
+      info.resource_usage.fixed_workgroup_local_memory_size;
+  response.fixed_private_memory_size =
+      info.resource_usage.fixed_private_memory_size;
+  response.invocation_register_count =
+      info.resource_usage.invocation_register_count;
   return iree_hal_remote_server_send_response_with_data(
       entry, envelope, IREE_STATUS_OK, &response, sizeof(response),
       info.name.data, info.name.size);
@@ -4480,14 +4435,6 @@ typedef struct iree_hal_remote_server_barrier_list_t {
       inline_buffer_barriers[IREE_HAL_REMOTE_INLINE_BARRIER_COUNT];
 } iree_hal_remote_server_barrier_list_t;
 
-typedef struct iree_hal_remote_server_event_list_t {
-  // Events passed to the local HAL command buffer.
-  const iree_hal_event_t** events;
-
-  // Inline event storage for the common small-count case.
-  const iree_hal_event_t* inline_events[IREE_HAL_REMOTE_INLINE_EVENT_COUNT];
-} iree_hal_remote_server_event_list_t;
-
 static void iree_hal_remote_server_barrier_list_initialize(
     iree_hal_remote_server_barrier_list_t* list) {
   memset(list, 0, sizeof(*list));
@@ -4503,19 +4450,6 @@ static void iree_hal_remote_server_barrier_list_deinitialize(
   if (list->buffer_barriers &&
       list->buffer_barriers != list->inline_buffer_barriers) {
     iree_allocator_free(host_allocator, list->buffer_barriers);
-  }
-}
-
-static void iree_hal_remote_server_event_list_initialize(
-    iree_hal_remote_server_event_list_t* list) {
-  memset(list, 0, sizeof(*list));
-}
-
-static void iree_hal_remote_server_event_list_deinitialize(
-    iree_hal_remote_server_event_list_t* list,
-    iree_allocator_t host_allocator) {
-  if (list->events && list->events != list->inline_events) {
-    iree_allocator_free(host_allocator, list->events);
   }
 }
 
@@ -4571,44 +4505,6 @@ static iree_status_t iree_hal_remote_server_prepare_barrier_list(
   return status;
 }
 
-static iree_status_t iree_hal_remote_server_prepare_event_list(
-    iree_hal_remote_server_session_t* session_slot,
-    iree_host_size_t event_count,
-    const iree_hal_remote_resource_id_t* wire_event_ids,
-    const char* command_name, iree_hal_remote_server_event_list_t* list) {
-  iree_allocator_t host_allocator = session_slot->server->host_allocator;
-  iree_status_t status = iree_ok_status();
-
-  if (event_count > 0) {
-    if (event_count <= IREE_HAL_REMOTE_INLINE_EVENT_COUNT) {
-      list->events = list->inline_events;
-    } else {
-      status = iree_allocator_malloc_array(host_allocator, event_count,
-                                           sizeof(*list->events),
-                                           (void**)&list->events);
-    }
-  }
-  for (iree_host_size_t i = 0; i < event_count && iree_status_is_ok(status);
-       ++i) {
-    iree_hal_remote_resource_id_t event_id =
-        iree_hal_remote_server_resolve_resource_id(session_slot,
-                                                   wire_event_ids[i]);
-    iree_hal_event_t* event =
-        (iree_hal_event_t*)iree_hal_remote_resource_table_lookup(
-            &session_slot->resource_table, IREE_HAL_REMOTE_RESOURCE_TYPE_EVENT,
-            event_id);
-    if (event) {
-      list->events[i] = event;
-    } else {
-      status = iree_make_status(IREE_STATUS_NOT_FOUND,
-                                "%s event 0x%016" PRIx64 " not found",
-                                command_name, event_id);
-    }
-  }
-
-  return status;
-}
-
 static iree_status_t iree_hal_remote_server_replay_execution_barrier_cmd(
     iree_hal_remote_server_session_t* session_slot,
     iree_hal_command_buffer_t* local_command_buffer, const uint8_t* cmd_data) {
@@ -4634,100 +4530,11 @@ static iree_status_t iree_hal_remote_server_replay_execution_barrier_cmd(
         local_command_buffer,
         (iree_hal_execution_stage_t)cmd->source_stage_mask,
         (iree_hal_execution_stage_t)cmd->target_stage_mask,
-        IREE_HAL_EXECUTION_BARRIER_FLAG_NONE, cmd->memory_barrier_count,
-        barrier_list.memory_barriers, cmd->buffer_barrier_count,
-        barrier_list.buffer_barriers);
-  }
-
-  iree_hal_remote_server_barrier_list_deinitialize(
-      &barrier_list, session_slot->server->host_allocator);
-  return status;
-}
-
-static iree_status_t iree_hal_remote_server_replay_event_signal_cmd(
-    iree_hal_remote_server_session_t* session_slot,
-    iree_hal_command_buffer_t* local_command_buffer, const uint8_t* cmd_data) {
-  const iree_hal_remote_event_signal_cmd_t* cmd =
-      (const iree_hal_remote_event_signal_cmd_t*)cmd_data;
-  iree_hal_remote_resource_id_t event_id =
-      iree_hal_remote_server_resolve_resource_id(session_slot, cmd->event_id);
-  iree_hal_event_t* event =
-      (iree_hal_event_t*)iree_hal_remote_resource_table_lookup(
-          &session_slot->resource_table, IREE_HAL_REMOTE_RESOURCE_TYPE_EVENT,
-          event_id);
-  if (!event) {
-    return iree_make_status(IREE_STATUS_NOT_FOUND,
-                            "EVENT_SIGNAL event 0x%016" PRIx64 " not found",
-                            event_id);
-  }
-  return iree_hal_command_buffer_signal_event(
-      local_command_buffer, event,
-      (iree_hal_execution_stage_t)cmd->source_stage_mask);
-}
-
-static iree_status_t iree_hal_remote_server_replay_event_reset_cmd(
-    iree_hal_remote_server_session_t* session_slot,
-    iree_hal_command_buffer_t* local_command_buffer, const uint8_t* cmd_data) {
-  const iree_hal_remote_event_reset_cmd_t* cmd =
-      (const iree_hal_remote_event_reset_cmd_t*)cmd_data;
-  iree_hal_remote_resource_id_t event_id =
-      iree_hal_remote_server_resolve_resource_id(session_slot, cmd->event_id);
-  iree_hal_event_t* event =
-      (iree_hal_event_t*)iree_hal_remote_resource_table_lookup(
-          &session_slot->resource_table, IREE_HAL_REMOTE_RESOURCE_TYPE_EVENT,
-          event_id);
-  if (!event) {
-    return iree_make_status(IREE_STATUS_NOT_FOUND,
-                            "EVENT_RESET event 0x%016" PRIx64 " not found",
-                            event_id);
-  }
-  return iree_hal_command_buffer_reset_event(
-      local_command_buffer, event,
-      (iree_hal_execution_stage_t)cmd->source_stage_mask);
-}
-
-static iree_status_t iree_hal_remote_server_replay_event_wait_cmd(
-    iree_hal_remote_server_session_t* session_slot,
-    iree_hal_command_buffer_t* local_command_buffer, const uint8_t* cmd_data) {
-  const iree_hal_remote_event_wait_cmd_t* cmd =
-      (const iree_hal_remote_event_wait_cmd_t*)cmd_data;
-  const iree_host_size_t event_ids_offset = sizeof(*cmd);
-  const iree_host_size_t memory_barriers_offset =
-      event_ids_offset +
-      cmd->event_count * sizeof(iree_hal_remote_resource_id_t);
-  const iree_host_size_t buffer_barriers_offset =
-      memory_barriers_offset +
-      cmd->memory_barrier_count * sizeof(iree_hal_remote_memory_barrier_t);
-  iree_hal_remote_server_event_list_t event_list;
-  iree_hal_remote_server_barrier_list_t barrier_list;
-  iree_hal_remote_server_event_list_initialize(&event_list);
-  iree_hal_remote_server_barrier_list_initialize(&barrier_list);
-
-  iree_status_t status = iree_hal_remote_server_prepare_event_list(
-      session_slot, cmd->event_count,
-      (const iree_hal_remote_resource_id_t*)(cmd_data + event_ids_offset),
-      "EVENT_WAIT", &event_list);
-  if (iree_status_is_ok(status)) {
-    status = iree_hal_remote_server_prepare_barrier_list(
-        session_slot, cmd->memory_barrier_count,
-        (const iree_hal_remote_memory_barrier_t*)(cmd_data +
-                                                  memory_barriers_offset),
-        cmd->buffer_barrier_count,
-        (const iree_hal_remote_buffer_barrier_t*)(cmd_data +
-                                                  buffer_barriers_offset),
-        "EVENT_WAIT", &barrier_list);
-  }
-  if (iree_status_is_ok(status)) {
-    status = iree_hal_command_buffer_wait_events(
-        local_command_buffer, cmd->event_count, event_list.events,
-        (iree_hal_execution_stage_t)cmd->source_stage_mask,
-        (iree_hal_execution_stage_t)cmd->target_stage_mask,
+        (iree_hal_execution_barrier_flags_t)cmd->barrier_flags,
         cmd->memory_barrier_count, barrier_list.memory_barriers,
         cmd->buffer_barrier_count, barrier_list.buffer_barriers);
   }
 
-  iree_hal_remote_server_event_list_deinitialize(
-      &event_list, session_slot->server->host_allocator);
   iree_hal_remote_server_barrier_list_deinitialize(
       &barrier_list, session_slot->server->host_allocator);
   return status;
@@ -4814,19 +4621,22 @@ static iree_status_t iree_hal_remote_server_replay_command_stream(
             session_slot, local_command_buffer, command_data);
         break;
 
-      case IREE_HAL_REMOTE_CMD_EVENT_SIGNAL:
-        status = iree_hal_remote_server_replay_event_signal_cmd(
-            session_slot, local_command_buffer, command_data);
+      case IREE_HAL_REMOTE_CMD_ATOMIC_WAIT:
+        status = iree_hal_remote_server_command_buffer_atomic_wait(
+            session_slot, local_command_buffer,
+            (const iree_hal_remote_atomic_wait_cmd_t*)command_data);
         break;
 
-      case IREE_HAL_REMOTE_CMD_EVENT_RESET:
-        status = iree_hal_remote_server_replay_event_reset_cmd(
-            session_slot, local_command_buffer, command_data);
+      case IREE_HAL_REMOTE_CMD_ATOMIC_STORE:
+        status = iree_hal_remote_server_command_buffer_atomic_store(
+            session_slot, local_command_buffer,
+            (const iree_hal_remote_atomic_store_cmd_t*)command_data);
         break;
 
-      case IREE_HAL_REMOTE_CMD_EVENT_WAIT:
-        status = iree_hal_remote_server_replay_event_wait_cmd(
-            session_slot, local_command_buffer, command_data);
+      case IREE_HAL_REMOTE_CMD_ATOMIC_RMW:
+        status = iree_hal_remote_server_command_buffer_atomic_rmw(
+            session_slot, local_command_buffer,
+            (const iree_hal_remote_atomic_rmw_cmd_t*)command_data);
         break;
 
       case IREE_HAL_REMOTE_CMD_BUFFER_FILL: {
@@ -4926,6 +4736,39 @@ static iree_status_t iree_hal_remote_server_record_command_stream(
 // COMMAND_BUFFER_UPLOAD handler
 //===----------------------------------------------------------------------===//
 
+iree_status_t iree_hal_remote_server_derive_uploaded_command_buffer_mode(
+    uint32_t wire_mode, iree_hal_command_buffer_mode_t* out_local_mode) {
+  IREE_ASSERT_ARGUMENT(out_local_mode);
+  *out_local_mode = IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT;
+
+  const iree_hal_command_buffer_mode_t known_modes =
+      IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT |
+      IREE_HAL_COMMAND_BUFFER_MODE_ALLOW_INLINE_EXECUTION |
+      IREE_HAL_COMMAND_BUFFER_MODE_UNVALIDATED |
+      IREE_HAL_COMMAND_BUFFER_MODE_UNRETAINED |
+      IREE_HAL_COMMAND_BUFFER_MODE_RETAIN_PROFILE_METADATA |
+      IREE_HAL_COMMAND_BUFFER_MODE_RETAIN_DISPATCH_METADATA;
+  const uint32_t unknown_modes = wire_mode & ~known_modes;
+  if (unknown_modes) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "COMMAND_BUFFER_UPLOAD mode contains unknown bits 0x%08" PRIx32,
+        unknown_modes);
+  }
+  if (iree_any_bit_set(
+          wire_mode, IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT |
+                         IREE_HAL_COMMAND_BUFFER_MODE_ALLOW_INLINE_EXECUTION)) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "COMMAND_BUFFER_UPLOAD requires a reusable command buffer mode");
+  }
+
+  *out_local_mode =
+      wire_mode & (IREE_HAL_COMMAND_BUFFER_MODE_RETAIN_PROFILE_METADATA |
+                   IREE_HAL_COMMAND_BUFFER_MODE_RETAIN_DISPATCH_METADATA);
+  return iree_ok_status();
+}
+
 // Handles COMMAND_BUFFER_UPLOAD: stores a reusable command buffer recording.
 static iree_status_t iree_hal_remote_server_handle_command_buffer_upload(
     iree_hal_remote_server_session_t* entry,
@@ -4943,11 +4786,53 @@ static iree_status_t iree_hal_remote_server_handle_command_buffer_upload(
   const iree_hal_remote_command_buffer_upload_request_t* request =
       (const iree_hal_remote_command_buffer_upload_request_t*)body;
 
-  if (!(request->upload_flags & IREE_HAL_REMOTE_UPLOAD_FLAG_INLINE_DATA)) {
+  if (IREE_HAL_REMOTE_RESOURCE_ID_TYPE(request->provisional_id) !=
+          IREE_HAL_REMOTE_RESOURCE_TYPE_COMMAND_BUFFER ||
+      !IREE_HAL_REMOTE_RESOURCE_ID_IS_PROVISIONAL(request->provisional_id)) {
     return iree_hal_remote_server_send_error_response(
         entry->server->host_allocator, entry->session, envelope,
-        iree_make_status(IREE_STATUS_UNIMPLEMENTED,
-                         "COMMAND_BUFFER_UPLOAD: only INLINE_DATA supported"));
+        iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                         "COMMAND_BUFFER_UPLOAD provisional id must have "
+                         "provisional COMMAND_BUFFER type"));
+  }
+  if (request->reserved != 0) {
+    return iree_hal_remote_server_send_error_response(
+        entry->server->host_allocator, entry->session, envelope,
+        iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                         "COMMAND_BUFFER_UPLOAD reserved field is nonzero"));
+  }
+  if (request->upload_flags != IREE_HAL_REMOTE_UPLOAD_FLAG_INLINE_DATA) {
+    return iree_hal_remote_server_send_error_response(
+        entry->server->host_allocator, entry->session, envelope,
+        iree_make_status(
+            IREE_STATUS_UNIMPLEMENTED,
+            "COMMAND_BUFFER_UPLOAD: only INLINE_DATA is supported"));
+  }
+  if (request->bulk_transfer_id != 0) {
+    return iree_hal_remote_server_send_error_response(
+        entry->server->host_allocator, entry->session, envelope,
+        iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "COMMAND_BUFFER_UPLOAD inline request has a bulk transfer ID"));
+  }
+  const uint32_t unknown_categories =
+      request->categories & ~IREE_HAL_COMMAND_CATEGORY_ANY;
+  if (unknown_categories) {
+    return iree_hal_remote_server_send_error_response(
+        entry->server->host_allocator, entry->session, envelope,
+        iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                         "COMMAND_BUFFER_UPLOAD categories contain unknown "
+                         "bits 0x%08" PRIx32,
+                         unknown_categories));
+  }
+  iree_hal_command_buffer_mode_t local_mode =
+      IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT;
+  iree_status_t mode_status =
+      iree_hal_remote_server_derive_uploaded_command_buffer_mode(request->mode,
+                                                                 &local_mode);
+  if (!iree_status_is_ok(mode_status)) {
+    return iree_hal_remote_server_send_error_response(
+        entry->server->host_allocator, entry->session, envelope, mode_status);
   }
 
   // Validate data_length fits in iree_host_size_t (prevents silent truncation
@@ -4971,11 +4856,13 @@ static iree_status_t iree_hal_remote_server_handle_command_buffer_upload(
     return iree_hal_remote_server_send_error_response(
         entry->server->host_allocator, entry->session, envelope, layout_status);
   }
-  if (body_length < required_length) {
+  if (body_length != required_length) {
     return iree_hal_remote_server_send_error_response(
         entry->server->host_allocator, entry->session, envelope,
         iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                         "COMMAND_BUFFER_UPLOAD inline data truncated"));
+                         "COMMAND_BUFFER_UPLOAD body length %" PRIhsz
+                         " does not match canonical length %" PRIhsz,
+                         body_length, required_length));
   }
 
   // Replay the command stream into a real local command buffer. The
@@ -4987,7 +4874,7 @@ static iree_status_t iree_hal_remote_server_handle_command_buffer_upload(
 
   iree_hal_command_buffer_t* command_buffer = NULL;
   iree_status_t status = iree_hal_command_buffer_create(
-      local_device, (iree_hal_command_buffer_mode_t)request->mode,
+      local_device, local_mode,
       (iree_hal_command_category_t)request->categories,
       IREE_HAL_QUEUE_AFFINITY_ANY, (iree_host_size_t)request->binding_capacity,
       &command_buffer);
@@ -5531,6 +5418,21 @@ iree_status_t iree_hal_remote_server_on_queue_command(
         status = iree_hal_remote_server_submit_command(
             session_slot, wait_frontier, signal_frontier,
             iree_hal_remote_server_submit_command_buffer_execute, &op_context);
+        break;
+      case IREE_HAL_REMOTE_QUEUE_OP_ATOMIC_WAIT:
+        status = iree_hal_remote_server_submit_command(
+            session_slot, wait_frontier, signal_frontier,
+            iree_hal_remote_server_submit_atomic_wait, &op_context);
+        break;
+      case IREE_HAL_REMOTE_QUEUE_OP_ATOMIC_STORE:
+        status = iree_hal_remote_server_submit_command(
+            session_slot, wait_frontier, signal_frontier,
+            iree_hal_remote_server_submit_atomic_store, &op_context);
+        break;
+      case IREE_HAL_REMOTE_QUEUE_OP_ATOMIC_RMW:
+        status = iree_hal_remote_server_submit_command(
+            session_slot, wait_frontier, signal_frontier,
+            iree_hal_remote_server_submit_atomic_rmw, &op_context);
         break;
       default:
         status = iree_make_status(IREE_STATUS_UNIMPLEMENTED,
@@ -6351,9 +6253,6 @@ iree_status_t iree_hal_remote_server_on_control_data(
     case IREE_HAL_REMOTE_CONTROL_BUFFER_UNMAP:
       return iree_hal_remote_server_handle_buffer_unmap(entry, envelope, body,
                                                         body_length);
-    case IREE_HAL_REMOTE_CONTROL_BUFFER_QUERY_HEAPS:
-      return iree_hal_remote_server_handle_buffer_query_heaps(
-          entry, envelope, body, body_length);
     case IREE_HAL_REMOTE_CONTROL_BUFFER_VIRTUAL_QUERY_CAPABILITIES:
       return iree_hal_remote_server_handle_buffer_virtual_query_capabilities(
           entry, envelope, body, body_length);
@@ -6399,9 +6298,6 @@ iree_status_t iree_hal_remote_server_on_control_data(
     case IREE_HAL_REMOTE_CONTROL_EXECUTABLE_GLOBAL_BUFFER:
       return iree_hal_remote_server_handle_executable_global_buffer(
           entry, envelope, body, body_length);
-    case IREE_HAL_REMOTE_CONTROL_EVENT_CREATE:
-      return iree_hal_remote_server_handle_event_create(entry, envelope, body,
-                                                        body_length);
     case IREE_HAL_REMOTE_CONTROL_COMMAND_BUFFER_UPLOAD:
       return iree_hal_remote_server_handle_command_buffer_upload(
           entry, envelope, body, body_length);
