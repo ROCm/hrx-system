@@ -32,11 +32,17 @@ static const uint8_t kSourceCodeObjectData[] =
     "buffer\0"
     "value\0"
     "grid_x\0"
+    "block_count_x\0"
+    "block_count_y\0"
+    "block_count_z\0"
     "direct\0"
     "direct.kd\0"
     "global_buffer\0"
     "by_value\0"
-    "hidden_global_offset_x\0";
+    "hidden_global_offset_x\0"
+    "hidden_block_count_x\0"
+    "hidden_block_count_y\0"
+    "hidden_block_count_z\0";
 
 static iree_const_byte_span_t SourceCodeObjectData() {
   return iree_make_const_byte_span(kSourceCodeObjectData,
@@ -341,8 +347,57 @@ TEST(ExecutableMetadataHsacoTest, PopulatesImplicitArgsSuffixLayout) {
       layout->flags,
       IREE_HAL_AMDGPU_KERNARG_LAYOUT_FLAG_IMPLICIT_ARGS |
           IREE_HAL_AMDGPU_KERNARG_LAYOUT_FLAG_REQUIRES_ZERO_FILL));
+  EXPECT_FALSE(iree_any_bit_set(
+      layout->flags,
+      IREE_HAL_AMDGPU_KERNARG_LAYOUT_FLAG_USES_IMPLICIT_BLOCK_COUNT));
   EXPECT_EQ(layout->binding_count, 1);
   EXPECT_EQ(layout->constant_byte_length, 4);
+
+  iree_hal_amdgpu_executable_metadata_free(metadata);
+}
+
+TEST(ExecutableMetadataHsacoTest, MarksImplicitBlockCountUsage) {
+  const iree_const_byte_span_t source_code_object_data = SourceCodeObjectData();
+  std::vector<uint8_t> loaded_code_object_storage = MakeLoadedCodeObjectData();
+  const iree_const_byte_span_t loaded_code_object_data =
+      LoadedCodeObjectData(loaded_code_object_storage);
+  std::vector<iree_hal_amdgpu_hsaco_metadata_arg_t> args = {
+      MakeArg(ViewFromCodeObjectData(source_code_object_data, "block_count_x"),
+              16, 4, IREE_HAL_AMDGPU_HSACO_METADATA_ARG_KIND_HIDDEN,
+              ViewFromCodeObjectData(source_code_object_data,
+                                     "hidden_block_count_x")),
+      MakeArg(ViewFromCodeObjectData(source_code_object_data, "block_count_y"),
+              20, 4, IREE_HAL_AMDGPU_HSACO_METADATA_ARG_KIND_HIDDEN,
+              ViewFromCodeObjectData(source_code_object_data,
+                                     "hidden_block_count_y")),
+      MakeArg(ViewFromCodeObjectData(source_code_object_data, "block_count_z"),
+              24, 4, IREE_HAL_AMDGPU_HSACO_METADATA_ARG_KIND_HIDDEN,
+              ViewFromCodeObjectData(source_code_object_data,
+                                     "hidden_block_count_z")),
+  };
+  iree_hal_amdgpu_hsaco_metadata_kernel_t kernel =
+      MakeKernel(ViewFromCodeObjectData(source_code_object_data, "implicit"),
+                 ViewFromCodeObjectData(source_code_object_data, "implicit.kd"),
+                 16 + IREE_AMDGPU_KERNEL_IMPLICIT_ARGS_SIZE, args);
+  iree_hal_amdgpu_hsaco_metadata_t hsaco_metadata = {
+      /*.host_allocator=*/{},
+      /*.elf_data=*/source_code_object_data,
+      /*.message_pack_data=*/{},
+      /*.target=*/{},
+      /*.reflection_name_storage_size=*/{},
+      /*.arg_name_storage_size=*/{},
+      /*.kernel_count=*/1,
+      /*.kernels=*/&kernel,
+  };
+
+  iree_hal_amdgpu_executable_metadata_t* metadata =
+      AllocateAndPopulate(&hsaco_metadata, loaded_code_object_data);
+  const iree_hal_amdgpu_kernarg_layout_t* layout = nullptr;
+  IREE_ASSERT_OK(iree_hal_amdgpu_executable_metadata_resolve_layout(
+      metadata, metadata->exports[0].kernarg_layout, &layout));
+  EXPECT_TRUE(iree_any_bit_set(
+      layout->flags,
+      IREE_HAL_AMDGPU_KERNARG_LAYOUT_FLAG_USES_IMPLICIT_BLOCK_COUNT));
 
   iree_hal_amdgpu_executable_metadata_free(metadata);
 }

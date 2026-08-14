@@ -40,6 +40,8 @@ typedef enum iree_hal_amdgpu_kernarg_layout_flag_bits_e {
   IREE_HAL_AMDGPU_KERNARG_LAYOUT_FLAG_PACKED_BINDING_PREFIX = 1u << 2,
   // Constant spans consume the constant stream as one contiguous source range.
   IREE_HAL_AMDGPU_KERNARG_LAYOUT_FLAG_CONTIGUOUS_CONSTANTS = 1u << 3,
+  // The kernel consumes hidden_block_count_x/y/z from its implicit arguments.
+  IREE_HAL_AMDGPU_KERNARG_LAYOUT_FLAG_USES_IMPLICIT_BLOCK_COUNT = 1u << 4,
 } iree_hal_amdgpu_kernarg_layout_flag_bits_t;
 typedef uint32_t iree_hal_amdgpu_kernarg_layout_flags_t;
 
@@ -70,6 +72,8 @@ typedef struct iree_hal_amdgpu_kernarg_layout_params_t {
   // Native byte offset of the implicit-argument suffix, or
   // IREE_HAL_AMDGPU_KERNARG_LAYOUT_IMPLICIT_ARGS_NONE.
   iree_host_size_t implicit_args_byte_offset;
+  // Semantic feature flags declared by executable metadata.
+  iree_hal_amdgpu_kernarg_layout_flags_t declared_flags;
   // Number of entries in binding_slots.
   iree_host_size_t binding_count;
   // Dense binding ordinal to native kernarg qword target mappings.

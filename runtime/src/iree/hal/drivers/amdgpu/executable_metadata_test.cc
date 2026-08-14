@@ -78,6 +78,7 @@ TEST(ExecutableMetadataTest, AppendsAndResolvesLayout) {
       /*.constant_byte_length=*/4,
       /*.implicit_args_byte_offset=*/
       IREE_HAL_AMDGPU_KERNARG_LAYOUT_IMPLICIT_ARGS_NONE,
+      /*.declared_flags=*/{},
       /*.binding_count=*/IREE_ARRAYSIZE(binding_slots),
       /*.binding_slots=*/binding_slots,
       /*.constant_span_count=*/IREE_ARRAYSIZE(constant_spans),
