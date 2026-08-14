@@ -179,6 +179,7 @@ iree_runtime_cc_test(
         ":atomic",
         ":headers",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
         "//runtime/src/iree/hal/drivers/amdgpu/util:device_library",
         "//runtime/src/iree/hal/drivers/amdgpu/util:libhsa",
         "//runtime/src/iree/hal/drivers/amdgpu/util:packet",

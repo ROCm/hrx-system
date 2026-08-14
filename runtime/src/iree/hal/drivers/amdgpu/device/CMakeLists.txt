@@ -221,6 +221,7 @@ iree_cc_test(
     ::atomic
     ::headers
     iree::base
+    iree::base::internal
     iree::hal::drivers::amdgpu::util::device_library
     iree::hal::drivers::amdgpu::util::libhsa
     iree::hal::drivers::amdgpu::util::packet
