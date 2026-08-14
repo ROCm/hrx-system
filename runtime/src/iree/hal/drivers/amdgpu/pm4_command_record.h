@@ -42,6 +42,10 @@ typedef enum iree_hal_amdgpu_pm4_command_record_flag_bits_e {
   IREE_HAL_AMDGPU_PM4_COMMAND_RECORD_FLAG_NONE = 0u,
   // An execution/visibility barrier precedes the operation.
   IREE_HAL_AMDGPU_PM4_COMMAND_RECORD_FLAG_EXECUTION_BARRIER = 1u << 0,
+  // The barrier source is a command-processor access that bypasses GL2.
+  IREE_HAL_AMDGPU_PM4_COMMAND_RECORD_FLAG_SOURCE_BYPASSES_GL2 = 1u << 1,
+  // The barrier target is a command-processor access that bypasses GL2.
+  IREE_HAL_AMDGPU_PM4_COMMAND_RECORD_FLAG_TARGET_BYPASSES_GL2 = 1u << 2,
 } iree_hal_amdgpu_pm4_command_record_flag_bits_t;
 
 // Static or dynamic buffer reference captured by a compact PM4 record.
@@ -118,13 +122,37 @@ typedef struct iree_hal_amdgpu_pm4_command_materialization_stats_t {
 
 // Pending execution/visibility barrier accumulated while recording.
 typedef struct iree_hal_amdgpu_pm4_command_barrier_state_t {
-  // True when the next executable operation must emit a barrier.
-  bool pending;
+  // Common PM4 command-record flags carried to the next operation.
+  iree_hal_amdgpu_pm4_command_record_flags_t flags;
   // Maximum pending acquire fence scope.
   iree_hsa_fence_scope_t acquire_scope;
   // Maximum pending release fence scope.
   iree_hsa_fence_scope_t release_scope;
 } iree_hal_amdgpu_pm4_command_barrier_state_t;
+
+// Returns the PM4 emission flags carried by common command-record flags.
+static inline iree_hal_amdgpu_pm4_barrier_flags_t
+iree_hal_amdgpu_pm4_command_record_barrier_flags(
+    iree_hal_amdgpu_pm4_command_record_flags_t record_flags) {
+  iree_hal_amdgpu_pm4_barrier_flags_t barrier_flags =
+      IREE_HAL_AMDGPU_PM4_BARRIER_FLAG_NONE;
+  if (iree_any_bit_set(
+          record_flags,
+          IREE_HAL_AMDGPU_PM4_COMMAND_RECORD_FLAG_EXECUTION_BARRIER)) {
+    barrier_flags |= IREE_HAL_AMDGPU_PM4_BARRIER_FLAG_EXECUTION;
+  }
+  if (iree_any_bit_set(
+          record_flags,
+          IREE_HAL_AMDGPU_PM4_COMMAND_RECORD_FLAG_SOURCE_BYPASSES_GL2)) {
+    barrier_flags |= IREE_HAL_AMDGPU_PM4_BARRIER_FLAG_SOURCE_BYPASSES_GL2;
+  }
+  if (iree_any_bit_set(
+          record_flags,
+          IREE_HAL_AMDGPU_PM4_COMMAND_RECORD_FLAG_TARGET_BYPASSES_GL2)) {
+    barrier_flags |= IREE_HAL_AMDGPU_PM4_BARRIER_FLAG_TARGET_BYPASSES_GL2;
+  }
+  return barrier_flags;
+}
 
 // Mutable state shared by compact PM4 command recorders.
 typedef struct iree_hal_amdgpu_pm4_command_recording_state_t {

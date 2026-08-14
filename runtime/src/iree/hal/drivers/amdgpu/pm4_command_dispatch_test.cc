@@ -194,6 +194,20 @@ class PM4CommandDispatchTest : public ::testing::Test {
     return NULL;
   }
 
+  static const uint32_t* FindAcquireMemPacket(
+      const iree_hal_amdgpu_pm4_program_t* program) {
+    const uint32_t header = iree_hal_amdgpu_pm4_make_header(
+        IREE_HAL_AMDGPU_PM4_HDR_IT_OPCODE_ACQUIRE_MEM,
+        IREE_HAL_AMDGPU_PM4_ACQUIRE_MEM_GFX10_DWORD_COUNT);
+    for (uint32_t i = 0;
+         i + IREE_HAL_AMDGPU_PM4_ACQUIRE_MEM_GFX10_DWORD_COUNT <=
+         program->dword_count;
+         ++i) {
+      if (program->dwords[i] == header) return &program->dwords[i];
+    }
+    return NULL;
+  }
+
   static uint64_t PacketAddress(const uint32_t* packet) {
     return (uint64_t)packet[1] | (uint64_t)packet[2] << 32;
   }
@@ -356,6 +370,21 @@ TEST_F(PM4CommandDispatchTest, DynamicParametersObservePriorDispatch) {
       IREE_HAL_DISPATCH_FLAG_DYNAMIC_INDIRECT_PARAMETERS));
   IREE_ASSERT_OK(iree_hal_command_buffer_end(command_buffer));
   ASSERT_TRUE(iree_hal_amdgpu_pm4_command_buffer_isa(command_buffer));
+
+  const iree_hal_amdgpu_pm4_program_t* program =
+      iree_hal_amdgpu_pm4_command_buffer_program(command_buffer);
+  const uint32_t* acquire_mem_packet = FindAcquireMemPacket(program);
+  ASSERT_NE(nullptr, acquire_mem_packet);
+  iree_hal_amdgpu_physical_device_t* physical_device =
+      test_device_.logical_device()->physical_devices[0];
+  const bool cp_memory_bypasses_gl2 = iree_any_bit_set(
+      physical_device->vendor_packet_capabilities,
+      IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_CP_MEMORY_BYPASSES_GL2);
+  EXPECT_EQ(cp_memory_bypasses_gl2,
+            iree_any_bit_set(acquire_mem_packet[7],
+                             IREE_HAL_AMDGPU_PM4_ACQUIRE_MEM_GCR_GL2_WB));
+  EXPECT_FALSE(iree_any_bit_set(acquire_mem_packet[7],
+                                IREE_HAL_AMDGPU_PM4_ACQUIRE_MEM_GCR_GL2_INV));
 
   IREE_ASSERT_OK(Execute(command_buffer));
   ExpectOutput(output_buffer, /*dispatched_workgroup_count=*/4);

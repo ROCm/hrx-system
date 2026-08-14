@@ -96,6 +96,9 @@ enum iree_hal_amdgpu_vendor_packet_capability_bits_t {
   IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_ATOMIC_WAIT = 1u << 16,
   // PM4 ATOMIC_MEM swap can implement 32/64-bit HAL atomic stores.
   IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_ATOMIC_STORE = 1u << 17,
+  // Command-processor memory accesses bypass GL2 and access MALL directly.
+  IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_CP_MEMORY_BYPASSES_GL2 = 1u
+                                                                        << 18,
 };
 typedef uint32_t iree_hal_amdgpu_vendor_packet_capability_flags_t;
 

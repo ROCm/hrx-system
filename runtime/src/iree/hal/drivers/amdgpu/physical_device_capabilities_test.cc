@@ -1033,10 +1033,16 @@ TEST_F(PhysicalDeviceCapabilitiesTest, SelectsRdnaPm4FamilyCapabilities) {
   };
   for (const char* processor : processors) {
     SCOPED_TRACE(processor);
+    const iree_hal_amdgpu_gfxip_version_t version =
+        GfxIpFromProcessor(processor);
     const iree_hal_amdgpu_vendor_packet_capability_flags_t capabilities =
-        iree_hal_amdgpu_select_vendor_packet_capabilities(
-            GfxIpFromProcessor(processor));
-    EXPECT_EQ(capabilities, kExpectedCapabilities);
+        iree_hal_amdgpu_select_vendor_packet_capabilities(version);
+    const iree_hal_amdgpu_vendor_packet_capability_flags_t expected_capabilities =
+        kExpectedCapabilities |
+        (version.major == 12
+             ? IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_CP_MEMORY_BYPASSES_GL2
+             : 0u);
+    EXPECT_EQ(capabilities, expected_capabilities);
     EXPECT_TRUE(
         iree_hal_amdgpu_vendor_packet_capabilities_support_pm4_dispatch_command_buffers(
             capabilities));

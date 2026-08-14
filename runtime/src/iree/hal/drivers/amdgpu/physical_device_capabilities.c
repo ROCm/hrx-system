@@ -789,6 +789,10 @@ iree_hal_amdgpu_select_vendor_packet_capabilities(
     capabilities |= IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_CDNA;
   } else if (iree_hal_amdgpu_gfxip_is_rdna(version)) {
     capabilities |= IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_RDNA;
+    if (version.major == 12) {
+      capabilities |=
+          IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_CP_MEMORY_BYPASSES_GL2;
+    }
   }
 
   // BARRIER_VALUE is an HSA vendor-packet capability with a narrower

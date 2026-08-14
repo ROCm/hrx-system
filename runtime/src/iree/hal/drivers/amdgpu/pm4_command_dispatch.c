@@ -160,12 +160,7 @@ static iree_status_t iree_hal_amdgpu_pm4_dispatch_resolve_thread_count(
 static iree_hal_amdgpu_pm4_dispatch_record_flags_t
 iree_hal_amdgpu_pm4_dispatch_recorder_record_flags(
     const iree_hal_amdgpu_pm4_command_recording_state_t* recording_state) {
-  iree_hal_amdgpu_pm4_dispatch_record_flags_t flags =
-      IREE_HAL_AMDGPU_PM4_DISPATCH_RECORD_FLAG_NONE;
-  if (recording_state->barrier_state.pending) {
-    flags |= IREE_HAL_AMDGPU_PM4_DISPATCH_RECORD_FLAG_EXECUTION_BARRIER;
-  }
-  return flags;
+  return recording_state->barrier_state.flags;
 }
 
 static iree_status_t iree_hal_amdgpu_pm4_dispatch_measure_barrier(
@@ -241,13 +236,14 @@ static iree_status_t iree_hal_amdgpu_pm4_dispatch_record_measure(
   if (iree_any_bit_set(
           record->flags,
           IREE_HAL_AMDGPU_PM4_DISPATCH_RECORD_FLAG_EXECUTION_BARRIER)) {
+    const iree_hal_amdgpu_pm4_barrier_flags_t barrier_flags =
+        iree_hal_amdgpu_pm4_command_record_barrier_flags(record->flags);
     IREE_RETURN_IF_ERROR(iree_hal_amdgpu_pm4_dispatch_measure_barrier(
-        capabilities, IREE_HAL_AMDGPU_PM4_BARRIER_FLAG_EXECUTION,
-        record->barrier_acquire_scope, record->barrier_release_scope,
-        &out_measurement->program_dword_count));
+        capabilities, barrier_flags, record->barrier_acquire_scope,
+        record->barrier_release_scope, &out_measurement->program_dword_count));
     IREE_RETURN_IF_ERROR(iree_hal_amdgpu_pm4_dispatch_measure_barrier(
-        capabilities, IREE_HAL_AMDGPU_PM4_BARRIER_FLAG_EXECUTION,
-        record->barrier_acquire_scope, record->barrier_release_scope,
+        capabilities, barrier_flags, record->barrier_acquire_scope,
+        record->barrier_release_scope,
         &out_measurement->profile_program_dword_count));
   }
   if (uses_indirect_parameters &&
@@ -754,7 +750,7 @@ iree_status_t iree_hal_amdgpu_pm4_dispatch_record_materialize(
     const uint32_t dword_count_before = state->dword_builder->dword_count;
     IREE_RETURN_IF_ERROR(iree_hal_amdgpu_pm4_dword_builder_emit_barrier(
         state->dword_builder, state->vendor_packet_capabilities,
-        IREE_HAL_AMDGPU_PM4_BARRIER_FLAG_EXECUTION,
+        iree_hal_amdgpu_pm4_command_record_barrier_flags(record->flags),
         record->barrier_acquire_scope, record->barrier_release_scope));
     stats.execution_barrier_dwords =
         state->dword_builder->dword_count - dword_count_before;
