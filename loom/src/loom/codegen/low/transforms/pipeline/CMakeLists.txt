@@ -52,6 +52,7 @@ loom_cc_library(
     loom::ir
     loom::ops::index
     loom::ops::kernel
+    loom::ops::low
     loom::ops::op_defs
     loom::ops::scalar
     loom::pass::pipeline
