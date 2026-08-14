@@ -22,6 +22,11 @@ typedef struct loom_amdgpu_fragment_memory_address_t {
   int64_t immediate_offset;
 } loom_amdgpu_fragment_memory_address_t;
 
+// Returns the exact byte offset contributed by one subgroup lane ID.
+uint64_t loom_amdgpu_fragment_memory_relative_lane_byte_offset(
+    const loom_amdgpu_fragment_memory_address_layout_t* address_layout,
+    uint8_t lane);
+
 // Returns true when a plan uses its original dynamic view-base value.
 bool loom_amdgpu_fragment_memory_uses_dynamic_view_base_value(
     const loom_amdgpu_fragment_memory_plan_t* plan, uint8_t term_index);

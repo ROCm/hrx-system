@@ -131,10 +131,12 @@ loom-compile-report \
 
 The JSON views are sparse so they can feed an autoresearch loop without
 replaying the full report. Omitted metrics are unavailable, not zero. `diff`
-requires exact schema, target, config, workload, and entry identity; it has no
-force mode for unlike compilations. To compare two target specializations of
-the same source, config, workload, artifact family, and target family, select
-the bounded target comparison explicitly:
+requires exact schema, target, config, workload, and entry identity by default.
+`--force` permits an explicitly observational comparison only when each report
+contains one entry; it preserves every identity mismatch instead of pretending
+the inputs describe one controlled experiment. To compare two target
+specializations of the same source, config, workload, artifact family, and
+target family, select the bounded target comparison explicitly:
 
 ```bash
 loom-compile-report \
@@ -346,25 +348,27 @@ Treat the evidence channels separately. Planner output answers "what would run?"
 Compile reports answer "what did the compiler emit?" Artifact manifests answer
 "what does this loader-ready artifact contain?"
 
-`dispatch_complete` produces two related timing views when
+`dispatch_complete` produces two distinct executions when
 `--profile-final-batch=true`. `measurement.operation_timing_ns` measures the
 warmed major batch from host submission through queue completion. The final
-profiled batch then replays the same candidate, configuration, invocation plan,
-bindings, and dispatch multiplicity with profile metadata retained;
-`profiled_dispatch_timing.duration_ns` contains aggregate device timing and
-`profiled_dispatch_timing.dispatch_distribution.duration_ns` contains exact
-per-dispatch p50, p90, and spread statistics when every final-replay sample can
+profile replay then executes the same candidate, configuration, invocation
+plan, bindings, and dispatch multiplicity with profile metadata retained.
+`profile_replay.measurement_relationship` identifies it as a distinct
+execution, `profile_replay.dispatch_timing.duration_ns` contains aggregate
+device timing, and
+`profile_replay.dispatch_timing.dispatch_distribution.duration_ns` contains
+exact per-dispatch p50, p90, and spread statistics when every replay sample can
 be reconstructed. Profiling stays outside the major timing window because
 instrumentation may perturb queue-completion timing.
 
 Kernel comparisons against Vulkan, HIP, or another device profiler use
-`profiled_dispatch_timing.dispatch_distribution.duration_ns.p50` on the Loom
-side. The report promotes that field as `timing_interpretation.device_score`
-only when at least 16 complete, comparable, homogeneous, non-overlapping
-samples describe one physical dispatch per logical operation. Host
-queue-completion time is never compared with device time. Batch shape still
-matters: match dispatch multiplicity and inspect the distribution provenance
-before comparing results.
+`profile_replay.dispatch_timing.dispatch_distribution.duration_ns.p50` on the
+Loom side. `profile_replay.comparison` appears only when at least 16 complete,
+comparable, homogeneous, non-overlapping samples describe one physical
+dispatch per logical operation. The comparison is against equivalently
+instrumented device timing, never against the ordinary host queue-completion
+measurement. Batch shape still matters: match dispatch multiplicity and inspect
+the distribution provenance before comparing results.
 
 An isolated `--batch-size=1` benchmark submits through direct HAL
 `queue_dispatch`; no command buffer is created. Larger batches use reusable

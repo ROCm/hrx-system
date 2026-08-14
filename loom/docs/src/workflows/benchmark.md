@@ -101,7 +101,17 @@ iree-benchmark-loom program.loom \
 ```
 
 Concrete parameter values appear in the structured result, so reports can be
-joined by values rather than filename conventions.
+joined by values rather than filename conventions. Executed HAL results also
+record every launch in case-sample and source order. `workload` is the ordered,
+typed value vector supplied to the kernel's launch function; `launch_config` is
+the separate resolved workgroup count, workgroup size, subgroup size, and any
+other launch fields used for that invocation. This makes a measured duration
+traceable to its exact runtime launch without pretending those values were
+compile-time constants.
+
+```shell
+jq '.work_items[] | {benchmark, case, launches}' results.json
+```
 
 ## Control data reuse
 
@@ -143,13 +153,15 @@ changing the primary host completion timing. It does not make the replay the
 device component of that ordinary timing. Retained metadata can add timestamp
 packets, barriers, flushes, fixups, or harvest work according to the target.
 When the target provides complete timestamps,
-`profiled_dispatch_timing.dispatch_distribution.duration_ns` contains
+`profile_replay.measurement_relationship` records that the replay is a distinct
+execution, and
+`profile_replay.dispatch_timing.dispatch_distribution.duration_ns` contains
 per-dispatch statistics for that instrumented replay.
 
-The device timing specification and `timing_interpretation.warnings` state
-known comparability and perturbation hazards. A structured device-oriented
-score means the tool's completeness checks passed; it does not by itself prove
-equivalence with another runtime's instrumentation.
+`profile_replay.warnings` states known comparability and perturbation hazards.
+When present, `profile_replay.comparison` means the tool's completeness checks
+passed; it does not by itself prove equivalence with another runtime's
+instrumentation.
 
 A same-replay device interval must be contained by the synchronous host
 interval that encloses it. A separately profiled replay has no subtraction or

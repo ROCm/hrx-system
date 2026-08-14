@@ -18,6 +18,7 @@
 #include "loom/tools/iree-benchmark-loom/context.h"
 #include "loom/tools/iree-benchmark-loom/event.h"
 #include "loom/tools/iree-benchmark-loom/hal_actual.h"
+#include "loom/tools/iree-benchmark-loom/launch_evidence.h"
 #include "loom/tools/iree-benchmark-loom/model.h"
 #include "loom/tools/iree-benchmark-loom/options.h"
 #include "loom/tools/iree-benchmark-loom/testbench.h"
@@ -92,7 +93,14 @@ typedef struct iree_benchmark_loom_hal_work_item_state_t {
   // Number of failed correctness samples observed while preparing this work
   // item.
   iree_host_size_t correctness_failed_sample_count;
+  // Exact workloads and resolved launch configurations observed during the
+  // correctness pass for this physical work item.
+  iree_benchmark_loom_launch_evidence_t launch_evidence;
 } iree_benchmark_loom_hal_work_item_state_t;
+
+// Releases launch evidence owned by one prepared HAL work item.
+void iree_benchmark_loom_hal_work_item_state_deinitialize(
+    iree_benchmark_loom_hal_work_item_state_t* state);
 
 // Initializes or reuses the compile context for |compile_item|.
 iree_status_t iree_benchmark_loom_hal_compile_context_initialize(

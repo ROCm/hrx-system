@@ -8,10 +8,20 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+from typing import cast
+
 from loom.reporting.compile_report import (
     CompileReportDocument,
     CompileReportError,
     compile_report_entry_identity,
+)
+from loom.reporting.compile_report_move_causes import (
+    CompileReportMoveCause,
+    parse_compile_report_move_causes,
+)
+from loom.reporting.compile_report_subgroup_access import (
+    build_subgroup_access_show,
 )
 from loom.reporting.compile_report_suggestions import (
     CompileReportSuggestion,
@@ -95,7 +105,7 @@ class AmdgpuCompileReportSuggestionProvider:
             )
             if wave_suggestion is not None:
                 suggestions.append(wave_suggestion)
-        suggestions.extend(_suggest_fragment_packet_expansion(document))
+        suggestions.extend(_suggest_fragment_packet_expansion(document, options))
         suggestions.extend(_suggest_lds_bank_service(document, options))
         return CompileReportSuggestionResult(
             provider_name=self.provider_name,
@@ -457,9 +467,48 @@ def _suggest_single_subgroup_communication(
     )
 
 
+@dataclass(frozen=True, slots=True)
+class _FragmentWaveShape:
+    """Exact cross-lane geometry for one fragment packet variant."""
+
+    subgroup_size: int
+    per_lane_packet_bytes: int
+    interval_coverage: str
+    subgroup_requested_bytes: int
+    subgroup_unique_bytes: int
+    subgroup_span_bytes: int
+    maximum_uncovered_gap_bytes: int
+    maximum_adjacent_lane_delta_bytes: int
+
+
+@dataclass(frozen=True, slots=True)
+class _FragmentWaveAccess:
+    """One report group carrying an exact fragment wave shape."""
+
+    path_prefix: str
+    modeled_packet_count: int
+    shape: _FragmentWaveShape
+
+
+_FRAGMENT_WAVE_IDENTITY_FIELDS = (
+    "function",
+    "source_op",
+    "source_op_kind",
+    "source_root",
+    "source_root_argument_index",
+    "memory_space",
+    "operation",
+    "packet",
+    "strategy",
+)
+
+
 def _suggest_fragment_packet_expansion(
     document: CompileReportDocument,
+    options: CompileReportSuggestionOptions,
 ) -> tuple[CompileReportSuggestion, ...]:
+    if not options.include_experimental:
+        return ()
     source_low_value = document.report.get("source_low")
     if source_low_value is None:
         return ()
@@ -477,6 +526,15 @@ def _suggest_fragment_packet_expansion(
         "source_low.selection_summaries",
     )
     memory = _report_object(memory_value, "source_low.memory")
+    subgroup_access = build_subgroup_access_show(document)
+    if subgroup_access is None:
+        return ()
+    subgroup_groups = cast(list[dict[str, object]], subgroup_access["groups"])
+    subgroup_groups_by_identity: dict[tuple[object, ...], list[dict[str, object]]] = {}
+    for group in subgroup_groups:
+        identity = cast(dict[str, object], group["identity"])
+        key = tuple(identity[field] for field in _FRAGMENT_WAVE_IDENTITY_FIELDS)
+        subgroup_groups_by_identity.setdefault(key, []).append(group)
     argument_packet_rows = _report_indexed_rows(
         memory,
         "source_low.memory",
@@ -501,6 +559,13 @@ def _suggest_fragment_packet_expansion(
             "vector.fragment.store",
         ):
             continue
+        source_operation_kind = _report_integer(
+            selection.get("source_op_kind"),
+            (
+                "source_low.selection_summaries."
+                f"rows[{selection_position}].source_op_kind"
+            ),
+        )
         strategy = _optional_report_string(
             selection.get("plan_key"),
             (f"source_low.selection_summaries.rows[{selection_position}].plan_key"),
@@ -557,7 +622,7 @@ def _suggest_fragment_packet_expansion(
                     matched_packet_rows.append((packet_position, packet_row))
 
         packet_groups: dict[
-            tuple[str | None, str | None, str | None],
+            tuple[str | None, int | None, str | None, str | None],
             list[tuple[int, dict[str, object]]],
         ] = {}
         for packet_position, packet_row in matched_packet_rows:
@@ -573,13 +638,33 @@ def _suggest_fragment_packet_expansion(
                 packet_row.get("source_root"),
                 f"{packet_row_path}[{packet_position}].source_root",
             )
-            group_key = (source_root, memory_space, operation)
+            source_root_argument_index_value = packet_row.get(
+                "source_root_argument_index"
+            )
+            source_root_argument_index = (
+                None
+                if source_root_argument_index_value is None
+                else _report_integer(
+                    source_root_argument_index_value,
+                    (
+                        f"{packet_row_path}[{packet_position}]."
+                        "source_root_argument_index"
+                    ),
+                )
+            )
+            group_key = (
+                source_root,
+                source_root_argument_index,
+                memory_space,
+                operation,
+            )
             packet_groups.setdefault(group_key, []).append(
                 (packet_position, packet_row)
             )
 
         for (
             source_root,
+            source_root_argument_index,
             memory_space,
             operation,
         ), packet_group in packet_groups.items():
@@ -589,6 +674,7 @@ def _suggest_fragment_packet_expansion(
             packet_names = []
             storage_formats = []
             packet_evidence = []
+            packet_rows_with_scalar_packets = []
             for packet_position, packet_row in packet_group:
                 packet_path = f"{packet_row_path}[{packet_position}]"
                 packet_name = _report_string(
@@ -621,6 +707,10 @@ def _suggest_fragment_packet_expansion(
                 packet_count += row_packet_count
                 scalar_packet_count += row_scalar_packet_count
                 contiguous_vector_packet_count += row_contiguous_vector_packet_count
+                if row_scalar_packet_count != 0:
+                    packet_rows_with_scalar_packets.append(
+                        (packet_position, packet_name, row_packet_count)
+                    )
                 packet_evidence.extend(
                     (
                         CompileReportSuggestionEvidence(
@@ -647,6 +737,22 @@ def _suggest_fragment_packet_expansion(
                 or contiguous_vector_packet_count != 0
             ):
                 continue
+            wave_accesses = _match_exact_fragment_wave_accesses(
+                subgroup_groups_by_identity,
+                function_name=function_name,
+                source_operation=source_operation,
+                source_operation_kind=source_operation_kind,
+                source_root=source_root,
+                source_root_argument_index=source_root_argument_index,
+                memory_space=memory_space,
+                operation=operation,
+                strategy=strategy,
+                packet_rows=packet_rows_with_scalar_packets,
+                packet_row_path=packet_row_path,
+            )
+            if wave_accesses is None:
+                continue
+            packet_evidence.extend(_fragment_wave_evidence(wave_accesses))
 
             selection_path = (
                 f"source_low.selection_summaries.rows[{selection_position}]"
@@ -667,6 +773,7 @@ def _suggest_fragment_packet_expansion(
                 *packet_evidence,
             ]
             entry = _entry_for_function(document, function_name)
+            operand_bank_materialization: CompileReportMoveCause | None = None
             if entry is not None:
                 entry_index = _report_integer(
                     entry.get("index"),
@@ -698,6 +805,33 @@ def _suggest_fragment_packet_expansion(
                                 value=register_move_count,
                             )
                         )
+                move_causes = parse_compile_report_move_causes(entry, entry_path)
+                if move_causes is not None and move_causes.causes is not None:
+                    operand_bank_materialization = next(
+                        (
+                            cause
+                            for cause in move_causes.causes
+                            if cause.cause == "operand_bank_materialization"
+                        ),
+                        None,
+                    )
+                    if operand_bank_materialization is not None:
+                        cause_path = (
+                            f"{entry_path}.move_causes.causes"
+                            f"[{operand_bank_materialization.position}]"
+                        )
+                        evidence.extend(
+                            (
+                                CompileReportSuggestionEvidence(
+                                    path=f"{cause_path}.packet_count",
+                                    value=operand_bank_materialization.packet_count,
+                                ),
+                                CompileReportSuggestionEvidence(
+                                    path=f"{cause_path}.unit_count",
+                                    value=operand_bank_materialization.unit_count,
+                                ),
+                            )
+                        )
 
             location = "/".join(
                 value
@@ -706,24 +840,252 @@ def _suggest_fragment_packet_expansion(
             )
             packet_summary = ", ".join(dict.fromkeys(packet_names))
             storage_summary = "/".join(dict.fromkeys(storage_formats))
+            operation_name = operation or "memory"
+            if scalar_packet_count == packet_count:
+                scalar_packet_summary = (
+                    f"{packet_count} scalar {operation_name} packets"
+                )
+            else:
+                scalar_packet_summary = (
+                    f"{scalar_packet_count} of {packet_count} {operation_name} "
+                    "packets as scalar packets"
+                )
+            wave_summary = _format_fragment_wave_accesses(wave_accesses)
+            geometry_guardrail = (
+                "Packet width alone is not an objective. Compare candidates "
+                "by total packet count and exact cross-lane coverage, span, "
+                "gap, and adjacent-lane delta; reject a wider variant that "
+                "worsens dispersion unless hardware timing pays for it."
+            )
+            if operand_bank_materialization is not None:
+                action = (
+                    "Inspect allocator placement before changing fragment "
+                    f"storage: the {strategy} plan for {location} "
+                    f"{storage_summary or 'storage'} emits "
+                    f"{scalar_packet_summary} "
+                    f"({packet_summary}) and no contiguous vector packets, "
+                    "while the entry also contains "
+                    f"{operand_bank_materialization.packet_count} "
+                    "target-created operand-bank materialization packets. "
+                    f"{wave_summary} {geometry_guardrail} "
+                    "Check whether those repairs coincide with these fragment "
+                    "loads; if so, test disjoint address/destination placement "
+                    "or a shorter overlapping live window and require both "
+                    "repairs and full drains to fall before changing the "
+                    "memory hierarchy."
+                )
+            else:
+                action = (
+                    f"Run a bounded operand-layout and packing experiment for "
+                    f"{location} "
+                    f"{storage_summary or 'storage'}: the {strategy} plan "
+                    f"emits {scalar_packet_summary} ({packet_summary}) and "
+                    f"no contiguous vector packets. {wave_summary} "
+                    f"{geometry_guardrail} Require full drains and register "
+                    "moves to fall before benchmarking."
+                )
             suggestions.append(
                 CompileReportSuggestion(
                     suggestion_id="amdgpu.fragment_packet_expansion",
                     entry_name=_entry_name_for_function(document, function_name),
-                    action=(
-                        f"Inspect operand layout and packing for {location} "
-                        f"{storage_summary or 'storage'}: the {strategy} plan "
-                        f"emits {packet_count} scalar "
-                        f"{operation or 'memory'} packets ({packet_summary}) and "
-                        "no contiguous vector packets. "
-                        "If narrow packets are layout-required, bound their live "
-                        "window and reduce full drains and register moves before "
-                        "benchmarking."
-                    ),
+                    confidence=CompileReportSuggestionConfidence.EXPERIMENTAL,
+                    action=action,
                     evidence=tuple(evidence),
                 )
             )
     return tuple(suggestions)
+
+
+def _match_exact_fragment_wave_accesses(
+    subgroup_groups_by_identity: dict[tuple[object, ...], list[dict[str, object]]],
+    *,
+    function_name: str | None,
+    source_operation: str,
+    source_operation_kind: int,
+    source_root: str | None,
+    source_root_argument_index: int | None,
+    memory_space: str | None,
+    operation: str | None,
+    strategy: str,
+    packet_rows: list[tuple[int, str, int]],
+    packet_row_path: str,
+) -> tuple[_FragmentWaveAccess, ...] | None:
+    """Matches packet rows to exact wave facts without reconstructing geometry."""
+    accesses = []
+    used_group_indexes = set()
+    for packet_position, packet_name, packet_count in packet_rows:
+        group_key = (
+            function_name,
+            source_operation,
+            source_operation_kind,
+            source_root,
+            source_root_argument_index,
+            memory_space,
+            operation,
+            packet_name,
+            strategy,
+        )
+        matched_groups = subgroup_groups_by_identity.get(group_key)
+        if not matched_groups:
+            return None
+
+        modeled_packet_count = 0
+        for group in matched_groups:
+            report_index = cast(int, group["report_index"])
+            if report_index in used_group_indexes:
+                raise CompileReportError(
+                    "one subgroup access group matched multiple fragment packet rows"
+                )
+            used_group_indexes.add(report_index)
+            path_prefix = f"source_low.memory.subgroup_access_groups[{report_index}]"
+            summary = cast(dict[str, object], group["summary"])
+            group_packet_count = cast(int, summary["modeled_packet_count"])
+            modeled_packet_count += group_packet_count
+            access = cast(dict[str, object], group["access"])
+            if access["proof"] != "exact":
+                return None
+            address = cast(dict[str, object], access["address"])
+            geometry = cast(dict[str, object], access["geometry"])
+            accesses.append(
+                _FragmentWaveAccess(
+                    path_prefix=path_prefix,
+                    modeled_packet_count=group_packet_count,
+                    shape=_FragmentWaveShape(
+                        subgroup_size=cast(int, address["subgroup_size"]),
+                        per_lane_packet_bytes=cast(
+                            int, address["per_lane_packet_bytes"]
+                        ),
+                        interval_coverage=cast(str, geometry["interval_coverage"]),
+                        subgroup_requested_bytes=cast(
+                            int, geometry["subgroup_requested_bytes"]
+                        ),
+                        subgroup_unique_bytes=cast(
+                            int, geometry["subgroup_unique_bytes"]
+                        ),
+                        subgroup_span_bytes=cast(int, geometry["subgroup_span_bytes"]),
+                        maximum_uncovered_gap_bytes=cast(
+                            int, geometry["maximum_uncovered_gap_bytes"]
+                        ),
+                        maximum_adjacent_lane_delta_bytes=cast(
+                            int, geometry["maximum_adjacent_lane_delta_bytes"]
+                        ),
+                    ),
+                )
+            )
+        if modeled_packet_count != packet_count:
+            raise CompileReportError(
+                f"{packet_row_path}[{packet_position}].packet_count: subgroup "
+                f"access groups model {modeled_packet_count}, got {packet_count}"
+            )
+    return tuple(accesses)
+
+
+def _fragment_wave_evidence(
+    accesses: tuple[_FragmentWaveAccess, ...],
+) -> tuple[CompileReportSuggestionEvidence, ...]:
+    evidence = []
+    for access in accesses:
+        path_prefix = access.path_prefix
+        shape = access.shape
+        values = (
+            ("access.proof", "exact"),
+            ("summary.modeled_packet_count", access.modeled_packet_count),
+            ("access.address.subgroup_size", shape.subgroup_size),
+            ("access.address.per_lane_packet_bytes", shape.per_lane_packet_bytes),
+            ("access.geometry.interval_coverage", shape.interval_coverage),
+            (
+                "access.geometry.subgroup_requested_bytes",
+                shape.subgroup_requested_bytes,
+            ),
+            ("access.geometry.subgroup_unique_bytes", shape.subgroup_unique_bytes),
+            ("access.geometry.subgroup_span_bytes", shape.subgroup_span_bytes),
+            (
+                "access.geometry.maximum_uncovered_gap_bytes",
+                shape.maximum_uncovered_gap_bytes,
+            ),
+            (
+                "access.geometry.maximum_adjacent_lane_delta_bytes",
+                shape.maximum_adjacent_lane_delta_bytes,
+            ),
+        )
+        evidence.extend(
+            CompileReportSuggestionEvidence(
+                path=f"{path_prefix}.{suffix}",
+                value=value,
+            )
+            for suffix, value in values
+        )
+    return tuple(evidence)
+
+
+def _format_fragment_wave_accesses(
+    accesses: tuple[_FragmentWaveAccess, ...],
+) -> str:
+    shapes = sorted(
+        {access.shape for access in accesses},
+        key=lambda shape: (
+            shape.subgroup_size,
+            shape.per_lane_packet_bytes,
+            shape.interval_coverage,
+            shape.subgroup_span_bytes,
+            shape.maximum_uncovered_gap_bytes,
+        ),
+    )
+    if len(shapes) == 1:
+        shape = shapes[0]
+        overlap = shape.subgroup_requested_bytes > shape.subgroup_unique_bytes
+        coverage = shape.interval_coverage
+        if overlap:
+            coverage += ", overlapping"
+        return (
+            f"The exact wave shape is {shape.subgroup_size} lanes x "
+            f"{shape.per_lane_packet_bytes:,} B/lane with {coverage} coverage: "
+            f"{shape.subgroup_requested_bytes:,} B requested, "
+            f"{shape.subgroup_unique_bytes:,} B unique in a "
+            f"{shape.subgroup_span_bytes:,} B span, maximum gap "
+            f"{shape.maximum_uncovered_gap_bytes:,} B, and maximum "
+            "adjacent-lane delta "
+            f"{shape.maximum_adjacent_lane_delta_bytes:,} B."
+        )
+
+    subgroup_sizes = sorted({shape.subgroup_size for shape in shapes})
+    packet_widths = sorted({shape.per_lane_packet_bytes for shape in shapes})
+    coverages = sorted(
+        {
+            shape.interval_coverage
+            + (
+                "+overlapping"
+                if shape.subgroup_requested_bytes > shape.subgroup_unique_bytes
+                else ""
+            )
+            for shape in shapes
+        }
+    )
+    unique_bytes = [shape.subgroup_unique_bytes for shape in shapes]
+    span_bytes = [shape.subgroup_span_bytes for shape in shapes]
+    return (
+        f"The exact wave evidence contains {len(shapes)} shapes across "
+        f"subgroup sizes {_format_integer_values(subgroup_sizes)}, packet "
+        f"widths {_format_integer_values(packet_widths)} B/lane, and coverage "
+        f"{', '.join(coverages)}: unique footprints "
+        f"{_format_integer_range(unique_bytes)} B, spans "
+        f"{_format_integer_range(span_bytes)} B, maximum gap up to "
+        f"{max(shape.maximum_uncovered_gap_bytes for shape in shapes):,} B, "
+        "and maximum adjacent-lane delta up to "
+        f"{max(shape.maximum_adjacent_lane_delta_bytes for shape in shapes):,} B."
+    )
+
+
+def _format_integer_values(values: list[int]) -> str:
+    return "/".join(f"{value:,}" for value in values)
+
+
+def _format_integer_range(values: list[int]) -> str:
+    minimum = min(values)
+    maximum = max(values)
+    if minimum == maximum:
+        return f"{minimum:,}"
+    return f"{minimum:,}-{maximum:,}"
 
 
 def _suggest_lds_bank_service(

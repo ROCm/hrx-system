@@ -57,6 +57,11 @@ iree_status_t loom_target_compile_report_format_bank_service_summary_json(
     const loom_target_compile_report_bank_service_summary_t* summary,
     loom_output_stream_t* stream);
 
+// Writes one structural subgroup-access summary object.
+iree_status_t loom_target_compile_report_format_subgroup_access_summary_json(
+    const loom_target_compile_report_subgroup_access_summary_t* summary,
+    loom_output_stream_t* stream);
+
 // Returns true when the report has economics evidence to serialize.
 bool loom_target_compile_report_has_report_economics(
     const loom_target_compile_report_t* report);

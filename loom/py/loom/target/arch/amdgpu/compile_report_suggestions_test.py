@@ -144,6 +144,8 @@ def _add_fragment_packet_evidence(
     report: dict[str, object],
     *,
     expanded: bool,
+    wave_proof: str | None = "exact",
+    wave_coverage: str = "dense",
 ) -> None:
     entry = report["entries"]["rows"][0]
     entry["wait_plan"] = {"full_drain_count": 18}
@@ -249,6 +251,145 @@ def _add_fragment_packet_evidence(
             "argument_packet_count": len(packet_rows),
             "argument_packets": packet_rows,
         },
+    }
+    if expanded and wave_proof is not None:
+        subgroup_size = entry["target_resources"]["subgroup_size"]
+        subgroup_groups = [
+            _fragment_wave_group(
+                index=index,
+                packet=packet_row["packet"],
+                proof=wave_proof,
+                coverage=wave_coverage,
+                subgroup_size=subgroup_size,
+            )
+            for index, packet_row in enumerate(packet_rows)
+        ]
+        memory = report["source_low"]["memory"]
+        memory["subgroup_access"] = _fragment_wave_summary(
+            packet_count,
+            proof=wave_proof,
+            coverage=wave_coverage,
+        )
+        memory["subgroup_access_group_count"] = len(subgroup_groups)
+        memory["subgroup_access_groups"] = subgroup_groups
+
+
+def _fragment_wave_group(
+    *,
+    index: int,
+    packet: str,
+    proof: str,
+    coverage: str,
+    subgroup_size: int,
+) -> dict[str, object]:
+    packet_count = 64
+    packet_bytes = 2
+    address = {
+        "lane_address_proof": "compiled-fragment-lane-register-layout",
+        "active_lane_proof": "subgroup-uniform-control-full-wave",
+        "lane_mapping": "digit-terms",
+        "subgroup_size": subgroup_size,
+        "per_lane_packet_bytes": packet_bytes,
+        "linear_lane_stride_bytes": 0,
+        "lane_terms": [
+            {
+                "divisor": 1,
+                "modulus": 16,
+                "byte_stride": 2 if coverage == "dense" else 64,
+            }
+        ],
+    }
+    access: dict[str, object] = {
+        "proof": proof,
+        "unknown_reason": None,
+        "address": address,
+    }
+    if proof == "exact":
+        distinct_start_count = 16
+        lane_stride_bytes = 2 if coverage == "dense" else 64
+        unique_bytes = distinct_start_count * packet_bytes
+        span_bytes = (distinct_start_count - 1) * lane_stride_bytes + packet_bytes
+        access["geometry"] = {
+            "interval_coverage": coverage,
+            "subgroup_requested_bytes": subgroup_size * packet_bytes,
+            "subgroup_unique_bytes": unique_bytes,
+            "subgroup_span_bytes": span_bytes,
+            "maximum_adjacent_lane_delta_bytes": (
+                (distinct_start_count - 1) * lane_stride_bytes
+            ),
+            "maximum_uncovered_gap_bytes": max(0, lane_stride_bytes - packet_bytes),
+            "distinct_lane_address_count": distinct_start_count,
+            "contiguous_region_count": 1 if coverage == "dense" else 16,
+        }
+    else:
+        access["unknown_reason"] = "active-lane-control-not-uniform"
+    return {
+        "index": index,
+        "function": "routed_linear",
+        "source_op": "vector.fragment.load",
+        "source_op_kind": 80,
+        "source_root": "weights",
+        "source_root_argument_index": 1,
+        "memory_space": "global",
+        "operation": "load",
+        "packet": packet,
+        "strategy": "strided_d16_packed_b16_fragment_load",
+        "access": access,
+        "summary": _fragment_wave_summary(
+            packet_count,
+            proof=proof,
+            coverage=coverage,
+        ),
+    }
+
+
+def _fragment_wave_summary(
+    packet_count: int,
+    *,
+    proof: str,
+    coverage: str,
+) -> dict[str, object]:
+    exact_packet_count = packet_count if proof == "exact" else 0
+    return {
+        "modeled_packet_count": packet_count,
+        "exact_packet_count": exact_packet_count,
+        "unknown_packet_count": packet_count - exact_packet_count,
+        "structural": {
+            "dense_packet_count": (
+                packet_count if proof == "exact" and coverage == "dense" else 0
+            ),
+            "gapped_packet_count": (
+                packet_count if proof == "exact" and coverage == "gapped" else 0
+            ),
+            "overlapping_packet_count": packet_count if proof == "exact" else 0,
+        },
+        "dynamic": {
+            "exact_packet_count": 0,
+            "unknown_packet_count": packet_count,
+            "packet_count": 0,
+            "dense_packet_count": 0,
+            "gapped_packet_count": 0,
+            "overlapping_packet_count": 0,
+        },
+    }
+
+
+def _add_operand_bank_materialization_evidence(
+    report: dict[str, object],
+    *,
+    packet_count: int,
+) -> None:
+    report["entries"]["rows"][0]["move_causes"] = {
+        "kind_count": 1,
+        "packet_count": packet_count,
+        "unit_count": packet_count,
+        "causes": [
+            {
+                "cause": "operand_bank_materialization",
+                "packet_count": packet_count,
+                "unit_count": packet_count,
+            }
+        ],
     }
 
 
@@ -553,21 +694,53 @@ def test_ignores_multi_subgroup_or_barrier_free_communication(
     }
 
 
-def test_fragment_packet_expansion_cites_source_packets_and_pressure() -> None:
-    report = _compile_report()
+@pytest.mark.parametrize(
+    ("target_key", "subgroup_size"),
+    [
+        ("gfx942", 64),
+        ("gfx1250-a0", 32),
+    ],
+)
+def test_fragment_packet_expansion_cites_source_packets_and_pressure(
+    target_key: str,
+    subgroup_size: int,
+) -> None:
+    report = _compile_report(
+        target_key=target_key,
+        subgroup_size=subgroup_size,
+    )
     _add_fragment_packet_evidence(report, expanded=True)
+    _add_operand_bank_materialization_evidence(report, packet_count=12)
     document = parse_compile_report(report)
 
-    result = AMDGPU_COMPILE_REPORT_SUGGESTION_PROVIDER.suggest(document)
+    result = AMDGPU_COMPILE_REPORT_SUGGESTION_PROVIDER.suggest(
+        document,
+        CompileReportSuggestionOptions(include_experimental=True),
+    )
 
     suggestion = next(
         suggestion
         for suggestion in result.suggestions
         if suggestion.suggestion_id == "amdgpu.fragment_packet_expansion"
     )
+    assert suggestion.confidence == "experimental"
+    assert "Inspect allocator placement before changing fragment storage" in (
+        suggestion.action
+    )
     assert "vector.fragment.load/weights/global" in suggestion.action
     assert "128 scalar load packets" in suggestion.action
     assert "strided_d16_packed_b16_fragment_load" in suggestion.action
+    assert "12 target-created operand-bank materialization packets" in (
+        suggestion.action
+    )
+    assert "Check whether those repairs coincide" in suggestion.action
+    assert f"{subgroup_size} lanes x 2 B/lane" in suggestion.action
+    assert "dense, overlapping coverage" in suggestion.action
+    assert "32 B unique in a 32 B span" in suggestion.action
+    assert "maximum gap 0 B" in suggestion.action
+    assert "maximum adjacent-lane delta 30 B" in suggestion.action
+    assert "Packet width alone is not an objective" in suggestion.action
+    assert "reject a wider variant that worsens dispersion" in suggestion.action
     evidence = {item.path: item.value for item in suggestion.evidence}
     assert evidence["source_low.memory.argument_packets[0].scalar_packet_count"] == 64
     assert evidence["source_low.memory.argument_packets[1].scalar_packet_count"] == 64
@@ -577,6 +750,71 @@ def test_fragment_packet_expansion_cites_source_packets_and_pressure() -> None:
     )
     assert evidence["entries.rows[0].wait_plan.full_drain_count"] == 18
     assert evidence["entries.rows[0].static_instruction_mix.register_move_count"] == 64
+    assert evidence["entries.rows[0].move_causes.causes[0].packet_count"] == 12
+    assert evidence["entries.rows[0].move_causes.causes[0].unit_count"] == 12
+    assert (
+        evidence[
+            "source_low.memory.subgroup_access_groups[0].access.address."
+            "per_lane_packet_bytes"
+        ]
+        == 2
+    )
+    assert (
+        evidence[
+            "source_low.memory.subgroup_access_groups[0].access.geometry."
+            "interval_coverage"
+        ]
+        == "dense"
+    )
+    assert (
+        evidence[
+            "source_low.memory.subgroup_access_groups[0].access.geometry."
+            "subgroup_span_bytes"
+        ]
+        == 32
+    )
+
+
+def test_fragment_packet_expansion_reports_mixed_packet_shapes_honestly() -> None:
+    report = _compile_report(target_key="gfx942", subgroup_size=64)
+    _add_fragment_packet_evidence(report, expanded=True)
+    memory = report["source_low"]["memory"]
+    memory["arguments"][0]["scalar_packet_count"] = 96
+    memory["arguments"][0]["vector_packet_count"] = 32
+    memory["argument_packets"][0]["scalar_packet_count"] = 32
+    document = parse_compile_report(report)
+
+    result = AMDGPU_COMPILE_REPORT_SUGGESTION_PROVIDER.suggest(
+        document,
+        CompileReportSuggestionOptions(include_experimental=True),
+    )
+
+    suggestion = next(
+        suggestion
+        for suggestion in result.suggestions
+        if suggestion.suggestion_id == "amdgpu.fragment_packet_expansion"
+    )
+    assert "96 of 128 load packets as scalar packets" in suggestion.action
+    assert "128 scalar load packets" not in suggestion.action
+
+
+def test_fragment_packet_expansion_without_move_causes_stays_layout_scoped() -> None:
+    report = _compile_report()
+    _add_fragment_packet_evidence(report, expanded=True)
+    document = parse_compile_report(report)
+
+    result = AMDGPU_COMPILE_REPORT_SUGGESTION_PROVIDER.suggest(
+        document,
+        CompileReportSuggestionOptions(include_experimental=True),
+    )
+
+    suggestion = next(
+        suggestion
+        for suggestion in result.suggestions
+        if suggestion.suggestion_id == "amdgpu.fragment_packet_expansion"
+    )
+    assert "Run a bounded operand-layout and packing experiment" in (suggestion.action)
+    assert "allocator placement" not in suggestion.action
 
 
 def test_contiguous_fragment_packets_do_not_suggest_expansion() -> None:
@@ -584,11 +822,74 @@ def test_contiguous_fragment_packets_do_not_suggest_expansion() -> None:
     _add_fragment_packet_evidence(report, expanded=False)
     document = parse_compile_report(report)
 
+    result = AMDGPU_COMPILE_REPORT_SUGGESTION_PROVIDER.suggest(
+        document,
+        CompileReportSuggestionOptions(include_experimental=True),
+    )
+
+    assert "amdgpu.fragment_packet_expansion" not in {
+        suggestion.suggestion_id for suggestion in result.suggestions
+    }
+
+
+def test_fragment_packet_expansion_is_explicitly_opt_in() -> None:
+    report = _compile_report()
+    _add_fragment_packet_evidence(report, expanded=True)
+    document = parse_compile_report(report)
+
     result = AMDGPU_COMPILE_REPORT_SUGGESTION_PROVIDER.suggest(document)
 
     assert "amdgpu.fragment_packet_expansion" not in {
         suggestion.suggestion_id for suggestion in result.suggestions
     }
+
+
+@pytest.mark.parametrize("wave_proof", [None, "unknown"])
+def test_fragment_packet_expansion_requires_exact_wave_geometry(
+    wave_proof: str | None,
+) -> None:
+    report = _compile_report()
+    _add_fragment_packet_evidence(
+        report,
+        expanded=True,
+        wave_proof=wave_proof,
+    )
+    document = parse_compile_report(report)
+
+    result = AMDGPU_COMPILE_REPORT_SUGGESTION_PROVIDER.suggest(
+        document,
+        CompileReportSuggestionOptions(include_experimental=True),
+    )
+
+    assert "amdgpu.fragment_packet_expansion" not in {
+        suggestion.suggestion_id for suggestion in result.suggestions
+    }
+
+
+def test_gapped_fragment_packet_shape_does_not_recommend_widening() -> None:
+    report = _compile_report()
+    _add_fragment_packet_evidence(
+        report,
+        expanded=True,
+        wave_coverage="gapped",
+    )
+    document = parse_compile_report(report)
+
+    result = AMDGPU_COMPILE_REPORT_SUGGESTION_PROVIDER.suggest(
+        document,
+        CompileReportSuggestionOptions(include_experimental=True),
+    )
+
+    suggestion = next(
+        suggestion
+        for suggestion in result.suggestions
+        if suggestion.suggestion_id == "amdgpu.fragment_packet_expansion"
+    )
+    assert "gapped, overlapping coverage" in suggestion.action
+    assert "32 B unique in a 962 B span" in suggestion.action
+    assert "maximum gap 62 B" in suggestion.action
+    assert "maximum adjacent-lane delta 960 B" in suggestion.action
+    assert "reject a wider variant that worsens dispersion" in suggestion.action
 
 
 def test_unvalidated_bank_model_is_explicitly_opt_in() -> None:

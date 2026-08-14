@@ -105,6 +105,35 @@ static void SetBankService(
   row->bank_service.maximum_request_multiplicity = maximum_request_multiplicity;
 }
 
+static void SetSubgroupAccess(
+    iree_string_view_t proof, iree_string_view_t interval_coverage,
+    iree_string_view_t unknown_reason, uint64_t requested_byte_count,
+    uint64_t unique_byte_count, uint64_t span_byte_count,
+    loom_target_compile_report_source_low_memory_row_t* row) {
+  row->subgroup_access.proof = proof;
+  row->subgroup_access.lane_address_proof =
+      IREE_SVL("compiled-fragment-lane-register-layout");
+  row->subgroup_access.active_lane_proof = IREE_SVL("full-wave");
+  row->subgroup_access.lane_mapping = IREE_SVL("linear");
+  row->subgroup_access.interval_coverage = interval_coverage;
+  row->subgroup_access.unknown_reason = unknown_reason;
+  row->subgroup_access.subgroup_size = 32;
+  row->subgroup_access.lane_term_count = 1;
+  row->subgroup_access.lane_terms[0] = {
+      /*.divisor=*/1,
+      /*.modulus=*/0,
+      /*.byte_stride=*/4,
+  };
+  row->subgroup_access.per_lane_packet_byte_count = 4;
+  row->subgroup_access.linear_lane_byte_stride = 4;
+  row->subgroup_access.subgroup_requested_byte_count = requested_byte_count;
+  row->subgroup_access.subgroup_unique_byte_count = unique_byte_count;
+  row->subgroup_access.subgroup_span_byte_count = span_byte_count;
+  row->subgroup_access.distinct_lane_address_count = 32;
+  row->subgroup_access.contiguous_region_count =
+      iree_string_view_equal(interval_coverage, IREE_SV("gapped")) ? 2 : 1;
+}
+
 static const loom_target_compile_report_source_low_memory_summary_t*
 GetOnlySourceLowMemoryRootSummary(const loom_target_compile_report_t* report) {
   if (report->source_low_memory_root_summaries.count != 1u ||
@@ -173,6 +202,17 @@ TEST(CompileReportFormatTest, PreservesBankServiceProofAndDynamicCoverage) {
                  /*maximum_request_multiplicity=*/0, &rows[2]);
   rows[2].execution_count_plus_one =
       LOOM_TARGET_COMPILE_REPORT_SOURCE_LOW_MEMORY_EXECUTION_COUNT_PLUS_ONE_UNKNOWN;
+  SetSubgroupAccess(IREE_SVL("exact"), IREE_SVL("dense"),
+                    iree_string_view_empty(), /*requested_byte_count=*/128,
+                    /*unique_byte_count=*/64, /*span_byte_count=*/64, &rows[0]);
+  SetSubgroupAccess(IREE_SVL("exact"), IREE_SVL("gapped"),
+                    iree_string_view_empty(), /*requested_byte_count=*/128,
+                    /*unique_byte_count=*/128, /*span_byte_count=*/256,
+                    &rows[1]);
+  SetSubgroupAccess(IREE_SVL("unknown"), iree_string_view_empty(),
+                    IREE_SVL("active-lane-control-not-uniform"),
+                    /*requested_byte_count=*/0, /*unique_byte_count=*/0,
+                    /*span_byte_count=*/0, &rows[2]);
   for (const auto& row : rows) {
     IREE_ASSERT_OK(loom_target_compile_report_record_source_low_memory_row(
         &entry_report, &row));
@@ -207,6 +247,22 @@ TEST(CompileReportFormatTest, PreservesBankServiceProofAndDynamicCoverage) {
                                      IREE_SVL("base-residue-unknown")));
   EXPECT_FALSE(group[0].has_mixed_unknown_reasons);
 
+  const loom_target_compile_report_subgroup_access_summary_t* access_summary =
+      &entry_report.subgroup_access_summary;
+  EXPECT_EQ(access_summary->modeled_packet_count, 3u);
+  EXPECT_EQ(access_summary->exact_packet_count, 2u);
+  EXPECT_EQ(access_summary->unknown_packet_count, 1u);
+  EXPECT_EQ(access_summary->dense_packet_count, 1u);
+  EXPECT_EQ(access_summary->gapped_packet_count, 1u);
+  EXPECT_EQ(access_summary->overlapping_packet_count, 1u);
+  EXPECT_EQ(access_summary->exact_dynamic_packet_count, 2u);
+  EXPECT_EQ(access_summary->unknown_dynamic_packet_count, 1u);
+  EXPECT_EQ(access_summary->dynamic_packet_count, 5u);
+  EXPECT_EQ(access_summary->dynamic_dense_packet_count, 2u);
+  EXPECT_EQ(access_summary->dynamic_gapped_packet_count, 3u);
+  EXPECT_EQ(access_summary->dynamic_overlapping_packet_count, 2u);
+  EXPECT_EQ(entry_report.source_low_subgroup_access_summaries.count, 3u);
+
   loom_target_compile_report_t report;
   loom_target_compile_report_initialize(&report, iree_allocator_system());
   IREE_ASSERT_OK(
@@ -215,14 +271,19 @@ TEST(CompileReportFormatTest, PreservesBankServiceProofAndDynamicCoverage) {
   const auto* entry = static_cast<const loom_target_compile_report_entry_t*>(
       loom_target_compile_report_vec_const_rows(report.entry_rows.head));
   EXPECT_EQ(entry[0].bank_service_summary.dynamic_extra_round_count, 6u);
+  EXPECT_EQ(entry[0].subgroup_access_summary.dynamic_gapped_packet_count, 3u);
   EXPECT_EQ(report.bank_service_summary.dynamic_extra_round_count, 6u);
+  EXPECT_EQ(report.subgroup_access_summary.dynamic_gapped_packet_count, 3u);
   ASSERT_EQ(report.source_low_bank_service_summaries.count, 1u);
+  ASSERT_EQ(report.source_low_subgroup_access_summaries.count, 3u);
 
   loom_target_compile_report_t clone = {};
   IREE_ASSERT_OK(loom_target_compile_report_clone(
       &report, iree_allocator_system(), &clone));
   EXPECT_EQ(clone.bank_service_summary.dynamic_extra_round_count, 6u);
+  EXPECT_EQ(clone.subgroup_access_summary.dynamic_gapped_packet_count, 3u);
   ASSERT_EQ(clone.source_low_bank_service_summaries.count, 1u);
+  ASSERT_EQ(clone.source_low_subgroup_access_summaries.count, 3u);
   loom_target_compile_report_deinitialize(&clone);
 
   loom_target_compile_report_deinitialize(&report);

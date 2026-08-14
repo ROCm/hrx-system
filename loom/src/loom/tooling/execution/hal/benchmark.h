@@ -187,8 +187,8 @@ typedef struct loom_run_hal_benchmark_result_t {
   // Number of pre-recorded command buffers rotated across benchmark batches,
   // or zero when isolated operations use direct queue dispatch.
   iree_host_size_t command_buffer_ring_count;
-  // Final profiled-batch summary.
-  loom_run_hal_profile_summary_t profile;
+  // Separate final profiled replay executed after the timing measurement.
+  loom_run_hal_profile_summary_t profile_replay;
 } loom_run_hal_benchmark_result_t;
 
 // Initializes HAL benchmark options for rigorous batched dispatch timing.

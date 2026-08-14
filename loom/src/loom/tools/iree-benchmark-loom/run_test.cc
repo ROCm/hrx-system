@@ -122,7 +122,7 @@ check.benchmark<@sampled_choice> @sampled_choice_value7 {value = 7}
   EXPECT_EQ(collector.events[2].kind, IREE_BENCHMARK_LOOM_EVENT_SAMPLE);
   EXPECT_EQ(collector.events[3].kind,
             IREE_BENCHMARK_LOOM_EVENT_BENCHMARK_RESULT);
-  EXPECT_EQ(collector.events[4].kind, IREE_BENCHMARK_LOOM_EVENT_PROFILE);
+  EXPECT_EQ(collector.events[4].kind, IREE_BENCHMARK_LOOM_EVENT_PROFILE_REPLAY);
   EXPECT_EQ(collector.events[5].kind, IREE_BENCHMARK_LOOM_EVENT_SUMMARY);
   EXPECT_EQ(collector.events[5].summary.planned_case_count, 1u);
   EXPECT_EQ(collector.events[5].summary.planned_benchmark_count, 1u);

@@ -264,7 +264,7 @@ iree_status_t iree_benchmark_loom_emit_work_item_result_aliases(
         module_plan->module, selection->benchmark_plan, selection->case_plan,
         &selection->policy, &alias_result, correctness_sample_count,
         correctness_failed_sample_count));
-    IREE_RETURN_IF_ERROR(iree_benchmark_loom_event_sink_emit_profile(
+    IREE_RETURN_IF_ERROR(iree_benchmark_loom_event_sink_emit_profile_replay(
         event_sink, run, &selection->identity, work_item->work_item_index,
         module_plan->module, selection->benchmark_plan, selection->case_plan,
         &selection->policy, &alias_result));
@@ -279,6 +279,7 @@ iree_status_t iree_benchmark_loom_run_work_item_correctness_range(
     const iree_benchmark_loom_work_item_t* work_item,
     const loom_testbench_case_execution_options_t* execution_options,
     iree_arena_allocator_t* arena,
+    iree_benchmark_loom_case_sample_observer_t sample_observer,
     const iree_benchmark_loom_event_sink_t* event_sink,
     iree_host_size_t* out_sample_count,
     iree_host_size_t* out_failed_sample_count) {
@@ -311,6 +312,9 @@ iree_status_t iree_benchmark_loom_run_work_item_correctness_range(
     loom_testbench_case_sample_result_t sample_result = {0};
     status = loom_testbench_run_case_sample(&executor, case_sample_ordinal,
                                             &sample_result);
+    if (iree_status_is_ok(status) && sample_observer.fn != NULL) {
+      sample_observer.fn(sample_observer.user_data, case_sample_ordinal);
+    }
     if (iree_status_is_ok(status)) {
       status = iree_benchmark_loom_emit_work_item_sample_aliases(
           run, module_plan, work_plan, work_item, sample_offset, &sample_result,
@@ -365,8 +369,8 @@ iree_status_t iree_benchmark_loom_run_case_end_to_end_work_item(
   iree_host_size_t correctness_failed_sample_count = 0;
   iree_status_t status = iree_benchmark_loom_run_work_item_correctness_range(
       run, module_plan, work_plan, work_item, &benchmark_execution_options,
-      execution_arena, event_sink, &correctness_sample_count,
-      &correctness_failed_sample_count);
+      execution_arena, (iree_benchmark_loom_case_sample_observer_t){0},
+      event_sink, &correctness_sample_count, &correctness_failed_sample_count);
   if (iree_status_is_ok(status)) {
     *inout_correctness_sample_count += correctness_sample_count;
     *inout_correctness_failed_sample_count += correctness_failed_sample_count;

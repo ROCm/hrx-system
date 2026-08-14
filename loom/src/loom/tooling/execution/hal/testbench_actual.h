@@ -16,6 +16,7 @@
 
 #include "iree/base/api.h"
 #include "iree/hal/api.h"
+#include "loom/analysis/kernel_launch_config.h"
 #include "loom/sanitizer/options.h"
 #include "loom/target/provider.h"
 #include "loom/tooling/compile/pipeline.h"
@@ -171,6 +172,9 @@ typedef struct loom_run_hal_testbench_actual_provider_t {
   loom_run_hal_prepared_candidate_t prepared_candidate;
   // Dispatch options derived from the compiled source entry.
   loom_run_hal_invocation_options_t invocation_options;
+  // Most recently resolved source launch configuration. This is refreshed
+  // from the exact workload values before each invocation is submitted.
+  loom_kernel_launch_config_t resolved_launch_config;
   // Compiler products retained through artifact emission.
   loom_compile_pipeline_result_t pipeline_result;
   // Expanded-source products retained through launch evaluation.

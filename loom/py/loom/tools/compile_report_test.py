@@ -22,6 +22,7 @@ def _write_report(
     target_key: str = "gfx11-generic",
     target_record: str = "gfx11-generic",
     experimental_bank_conflict: bool = False,
+    subgroup_size: int | None = None,
 ) -> None:
     workload = {
         "workgroup_size": {"x": 64, "y": 1, "z": 1, "flat": 64},
@@ -64,6 +65,11 @@ def _write_report(
             ],
         },
     }
+    if subgroup_size is not None:
+        report["target_resources"] = {"subgroup_size": subgroup_size}
+        report["entries"]["rows"][0]["target_resources"] = {
+            "subgroup_size": subgroup_size
+        }
     if experimental_bank_conflict:
         bank_service = {
             "modeled_packet_count": 1,
@@ -125,7 +131,7 @@ def test_show_json_reads_direct_report(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     report_path = tmp_path / "report.json"
-    _write_report(report_path)
+    _write_report(report_path, subgroup_size=64)
 
     assert main(["show", str(report_path), "--format=json"]) == 0
 
@@ -135,6 +141,8 @@ def test_show_json_reads_direct_report(
     assert view["kind"] == "loom.compile_report.show"
     assert view["schema_version"] == 0
     assert view["missing_evidence"] == "omitted_metrics_are_unavailable"
+    assert view["workload"]["dispatch_workgroup_count"] == 4
+    assert view["workload"]["dispatch_subgroup_count"] == 4
     assert view["entries"][0]["identity"] == {"name": "kernel"}
 
 
@@ -151,6 +159,56 @@ def test_diff_text_reports_changed_metric(
     captured = capsys.readouterr()
     assert captured.err == ""
     assert "code bytes: 512 B -> 480 B" in captured.out
+
+
+def test_diff_force_compares_single_mismatched_entries(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    baseline_path = tmp_path / "baseline.json"
+    candidate_path = tmp_path / "candidate.json"
+    _write_report(baseline_path, code_byte_count=512)
+    _write_report(candidate_path, code_byte_count=480)
+    candidate = json.loads(candidate_path.read_text(encoding="utf-8"))
+    candidate_entry = candidate["entries"]["rows"][0]
+    candidate_entry["function"] = "candidate_kernel"
+    candidate_entry["source_function"] = "candidate_kernel"
+    candidate_entry["target_export"] = "candidate_kernel"
+    candidate_path.write_text(json.dumps(candidate), encoding="utf-8")
+
+    assert main(["diff", str(baseline_path), str(candidate_path)]) == 2
+    strict = capsys.readouterr()
+    assert strict.out == ""
+    assert "missing entry" in strict.err
+
+    assert (
+        main(
+            [
+                "diff",
+                str(baseline_path),
+                str(candidate_path),
+                "--force",
+                "--format=json",
+            ]
+        )
+        == 0
+    )
+    forced = capsys.readouterr()
+    view = json.loads(forced.out)
+    assert forced.err == ""
+    assert view["forced"] is True
+    assert [row["path"] for row in view["identity_mismatches"]] == [
+        "entry.function",
+        "entry.source_function",
+        "entry.target_export",
+    ]
+    assert view["entries"][0]["identities"] == {
+        "baseline": {"name": "kernel"},
+        "candidate": {"name": "candidate_kernel"},
+    }
+    assert (
+        view["entries"][0]["artifact_facts"]["changed"]["code_byte_count"]["delta"]
+        == -32
+    )
 
 
 def test_diff_json_preserves_qualified_target_identity(

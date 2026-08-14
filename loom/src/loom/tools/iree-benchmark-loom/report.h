@@ -99,6 +99,13 @@ iree_status_t iree_benchmark_loom_write_hal_profile_summary_json(
     const loom_run_hal_profile_summary_t* profile,
     loom_output_stream_t* stream);
 
+// Writes a final profile replay and its relationship to the scored measurement
+// without the surrounding field name.
+iree_status_t iree_benchmark_loom_write_hal_profile_replay_json(
+    const iree_benchmark_loom_benchmark_policy_t* policy,
+    const iree_benchmark_loom_benchmark_result_t* benchmark_result,
+    loom_output_stream_t* stream);
+
 // Writes host-side timing summary statistics as a compact JSON object.
 iree_status_t iree_benchmark_loom_write_timing_stats_json(
     const iree_benchmark_loom_timing_stats_t* stats,

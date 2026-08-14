@@ -229,7 +229,7 @@ iree_status_t iree_benchmark_loom_event_sink_emit_benchmark_result(
             });
 }
 
-iree_status_t iree_benchmark_loom_event_sink_emit_profile(
+iree_status_t iree_benchmark_loom_event_sink_emit_profile_replay(
     const iree_benchmark_loom_event_sink_t* sink,
     const iree_benchmark_loom_run_identity_t* run,
     const iree_benchmark_loom_candidate_identity_t* candidate,
@@ -247,8 +247,8 @@ iree_status_t iree_benchmark_loom_event_sink_emit_profile(
   IREE_ASSERT_ARGUMENT(benchmark_result);
   return iree_benchmark_loom_event_sink_emit(
       sink, &(iree_benchmark_loom_event_t){
-                .kind = IREE_BENCHMARK_LOOM_EVENT_PROFILE,
-                .profile =
+                .kind = IREE_BENCHMARK_LOOM_EVENT_PROFILE_REPLAY,
+                .profile_replay =
                     {
                         .run = run,
                         .candidate = candidate,
@@ -435,14 +435,16 @@ static iree_status_t iree_benchmark_loom_jsonl_event_sink_emit(
               event->benchmark_result.correctness_sample_count,
               event->benchmark_result.correctness_failed_sample_count,
               iree_benchmark_loom_jsonl_sink_begin(jsonl_sink)));
-    case IREE_BENCHMARK_LOOM_EVENT_PROFILE:
+    case IREE_BENCHMARK_LOOM_EVENT_PROFILE_REPLAY:
       return iree_benchmark_loom_jsonl_sink_end(
           jsonl_sink,
-          iree_benchmark_loom_append_profile_row(
-              event->profile.run, event->profile.candidate,
-              event->profile.work_item_index, event->profile.module,
-              event->profile.benchmark_plan, event->profile.case_plan,
-              event->profile.policy, event->profile.benchmark_result,
+          iree_benchmark_loom_append_profile_replay_row(
+              event->profile_replay.run, event->profile_replay.candidate,
+              event->profile_replay.work_item_index,
+              event->profile_replay.module,
+              event->profile_replay.benchmark_plan,
+              event->profile_replay.case_plan, event->profile_replay.policy,
+              event->profile_replay.benchmark_result,
               jsonl_sink->host_allocator,
               iree_benchmark_loom_jsonl_sink_begin(jsonl_sink)));
     case IREE_BENCHMARK_LOOM_EVENT_FAILURE:

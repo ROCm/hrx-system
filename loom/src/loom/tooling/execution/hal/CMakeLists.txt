@@ -233,6 +233,7 @@ loom_cc_test(
     loom::ops::index
     loom::ops::kernel
     loom::ops::test
+    loom::target::facts
     loom::target::low_descriptor_registry_core_test
     loom::target::profile
     loom::testing::module_ptr

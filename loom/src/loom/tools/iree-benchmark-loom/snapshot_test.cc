@@ -9,6 +9,8 @@
 #include "iree/base/internal/json.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
+#include "loom/tools/iree-benchmark-loom/hal_actual.h"
+#include "loom/tools/iree-benchmark-loom/launch_evidence.h"
 
 namespace loom {
 namespace {
@@ -107,6 +109,35 @@ TEST(BenchmarkSnapshotSinkTest, AggregatesDeduplicatedWorkItems) {
   result.timing.mean_ns = 30.0;
   result.timing.p50_ns = 30;
   result.timing.p90_ns = 40;
+  iree_benchmark_loom_workload_value_t workload_values[] = {
+      {/*.type=*/LOOM_SCALAR_TYPE_INDEX, /*.value=*/4096},
+      {/*.type=*/LOOM_SCALAR_TYPE_I32, /*.value=*/513},
+  };
+  iree_benchmark_loom_launch_record_t launch_record = {
+      /*.case_sample_ordinal=*/0,
+      /*.sequence_step_ordinal=*/0,
+      /*.entry=*/IREE_SV("kernel_entry"),
+      /*.workload_values=*/workload_values,
+      /*.workload_value_count=*/IREE_ARRAYSIZE(workload_values),
+      /*.launch_config=*/
+      {
+          /*.fields=*/
+          LOOM_KERNEL_LAUNCH_CONFIG_FIELD_FLAG_WORKGROUP_COUNT |
+              LOOM_KERNEL_LAUNCH_CONFIG_FIELD_FLAG_WORKGROUP_SIZE |
+              LOOM_KERNEL_LAUNCH_CONFIG_FIELD_FLAG_SUBGROUP_SIZE,
+          /*.workgroup_count=*/{64, 2, 1},
+          /*.workgroup_size=*/{64, 1, 1},
+          /*.subgroup_size=*/32,
+      },
+  };
+  iree_benchmark_loom_launch_evidence_t launch_evidence = {
+      /*.host_allocator=*/{},
+      /*.records=*/&launch_record,
+      /*.record_count=*/1,
+      /*.workload_values=*/workload_values,
+      /*.workload_value_count=*/IREE_ARRAYSIZE(workload_values),
+  };
+  result.launch_evidence = &launch_evidence;
   loom_sanitizer_options_t sanitizer = {};
   sanitizer.checks = LOOM_SANITIZER_CHECK_RACE;
   sanitizer.reporting_mode = LOOM_SANITIZER_REPORTING_MODE_REPORT_ONLY;
@@ -123,6 +154,8 @@ TEST(BenchmarkSnapshotSinkTest, AggregatesDeduplicatedWorkItems) {
       &benchmark_plan, &case_plan, &policy, &result,
       /*correctness_sample_count=*/1,
       /*correctness_failed_sample_count=*/0));
+  workload_values[0].value = 1;
+  launch_record.launch_config.workgroup_count.x = 1;
   iree_benchmark_loom_artifact_bundle_t bundle = {};
   IREE_ASSERT_OK(iree_benchmark_loom_event_sink_emit_summary(
       &event_sink, &run, &bundle, /*planned_case_count=*/1,
@@ -187,9 +220,24 @@ TEST(BenchmarkSnapshotSinkTest, AggregatesDeduplicatedWorkItems) {
   EXPECT_TRUE(iree_string_view_is_empty(
       TryLookupObject(measurement, IREE_SV("operation_timing_ns"))));
   EXPECT_TRUE(iree_string_view_is_empty(
-      TryLookupObject(first_work_item, IREE_SV("profile"))));
+      TryLookupObject(first_work_item, IREE_SV("profile_replay"))));
   EXPECT_TRUE(iree_string_view_is_empty(
       TryLookupObject(first_work_item, IREE_SV("compile_report"))));
+  iree_string_view_t launches =
+      LookupObject(first_work_item, IREE_SV("launches"));
+  iree_string_view_t launch = FirstArrayElement(launches);
+  iree_string_view_t workload = LookupObject(launch, IREE_SV("workload"));
+  iree_string_view_t first_workload_value = FirstArrayElement(workload);
+  EXPECT_TRUE(iree_string_view_equal(
+      LookupObject(first_workload_value, IREE_SV("type")), IREE_SV("index")));
+  EXPECT_TRUE(iree_string_view_equal(
+      LookupObject(first_workload_value, IREE_SV("value")), IREE_SV("4096")));
+  iree_string_view_t launch_config =
+      LookupObject(launch, IREE_SV("launch_config"));
+  iree_string_view_t workgroup_count =
+      LookupObject(launch_config, IREE_SV("workgroup_count"));
+  EXPECT_TRUE(iree_string_view_equal(
+      LookupObject(workgroup_count, IREE_SV("x")), IREE_SV("64")));
   EXPECT_TRUE(
       iree_string_view_is_empty(TryLookupObject(root, IREE_SV("failures"))));
   EXPECT_TRUE(iree_string_view_is_empty(
@@ -237,7 +285,7 @@ TEST(BenchmarkSnapshotSinkTest, IncludesRequestedProfileSummary) {
   result.hal_benchmark.timing.operation_timing.mean_ns = 30.0;
   result.hal_benchmark.timing.operation_timing.p50_ns = 30;
   result.hal_benchmark.timing.operation_timing.p90_ns = 40;
-  result.hal_benchmark.profile.requested = true;
+  result.hal_benchmark.profile_replay.requested = true;
 
   IREE_ASSERT_OK(iree_benchmark_loom_event_sink_emit_run(
       &event_sink, &run, /*dry_run=*/false, &kNoSanitizer));
@@ -260,8 +308,12 @@ TEST(BenchmarkSnapshotSinkTest, IncludesRequestedProfileSummary) {
   iree_string_view_t root = ParseJsonDocument(SnapshotJson(&snapshot, &output));
   iree_string_view_t work_items = LookupObject(root, IREE_SV("work_items"));
   iree_string_view_t first_work_item = FirstArrayElement(work_items);
-  iree_string_view_t profile =
-      LookupObject(first_work_item, IREE_SV("profile"));
+  iree_string_view_t profile_replay =
+      LookupObject(first_work_item, IREE_SV("profile_replay"));
+  EXPECT_TRUE(iree_string_view_equal(
+      LookupObject(profile_replay, IREE_SV("measurement_relationship")),
+      IREE_SV("distinct_execution")));
+  iree_string_view_t profile = LookupObject(profile_replay, IREE_SV("summary"));
   EXPECT_TRUE(iree_string_view_equal(
       LookupObject(profile, IREE_SV("requested")), IREE_SV("true")));
   EXPECT_TRUE(iree_string_view_equal(LookupObject(profile, IREE_SV("executed")),
@@ -539,12 +591,18 @@ TEST(BenchmarkSnapshotSinkTest, IncludesFailurePayloadsOnFailure) {
   case_plan.name = IREE_SV("kernel_case");
   iree_benchmark_loom_benchmark_policy_t policy = {};
   policy.measure = IREE_SV("dispatch_complete");
+  iree_benchmark_loom_hal_actual_provider_t provider = {};
+  provider.execution.invocation_options.function_name =
+      IREE_SV("rejected_kernel");
+  provider.execution.compile_failure_stage = IREE_SV("compile");
+  provider.execution.compile_failure_kind = IREE_SV("diagnostics");
+  provider.execution.compile_failure_message =
+      IREE_SV("candidate did not lower");
+  provider.execution.compile_rejected = true;
+  provider.diagnostics.error_count = 1;
   iree_benchmark_loom_benchmark_result_t result = {};
-  result.has_failure = true;
-  result.failure_stage = IREE_SV("compile");
-  result.failure_kind = IREE_SV("diagnostics");
-  result.failure_message = IREE_SV("candidate did not lower");
-  result.diagnostic_error_count = 1;
+  iree_benchmark_loom_benchmark_result_set_compile_rejection(&provider,
+                                                             &result);
   result.diagnostic_json = IREE_SV("{\"message\":\"bad op\"}");
 
   IREE_ASSERT_OK(iree_benchmark_loom_event_sink_emit_run(
@@ -577,6 +635,9 @@ TEST(BenchmarkSnapshotSinkTest, IncludesFailurePayloadsOnFailure) {
   iree_string_view_t first_work_item = FirstArrayElement(work_items);
   iree_string_view_t failure =
       LookupObject(first_work_item, IREE_SV("failure"));
+  iree_string_view_t failure_entry = LookupObject(failure, IREE_SV("entry"));
+  EXPECT_TRUE(
+      iree_string_view_equal(failure_entry, IREE_SV("rejected_kernel")));
   iree_string_view_t failure_stage = LookupObject(failure, IREE_SV("stage"));
   EXPECT_TRUE(iree_string_view_equal(failure_stage, IREE_SV("compile")));
   EXPECT_TRUE(iree_string_view_equal(

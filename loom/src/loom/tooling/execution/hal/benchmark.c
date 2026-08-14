@@ -750,7 +750,7 @@ static iree_status_t loom_run_hal_benchmark_queue_dispatch_binding_ring(
       iree_all_bits_set(options->flags,
                         LOOM_RUN_HAL_BENCHMARK_FLAG_PROFILE_FINAL_BATCH)) {
     status = loom_run_hal_benchmark_run_profiled_batch(
-        runtime, callback, options, allocator, &out_result->profile);
+        runtime, callback, options, allocator, &out_result->profile_replay);
   }
   if (iree_status_is_ok(status)) {
     out_result->binding_ring_count = binding_list_count;
@@ -838,7 +838,7 @@ iree_status_t loom_run_hal_benchmark_dispatch_binding_ring(
                         LOOM_RUN_HAL_BENCHMARK_FLAG_PROFILE_FINAL_BATCH)) {
     status = loom_run_hal_benchmark_profile_final_batch(
         runtime, candidate, plan, binding_list_count, binding_lists, options,
-        allocator, &out_result->profile);
+        allocator, &out_result->profile_replay);
   }
   if (iree_status_is_ok(status)) {
     out_result->binding_ring_count = binding_list_count;
@@ -913,7 +913,7 @@ iree_status_t loom_run_hal_benchmark_dispatch_sequence_plan_ring(
                         LOOM_RUN_HAL_BENCHMARK_FLAG_PROFILE_FINAL_BATCH)) {
     status = loom_run_hal_benchmark_profile_final_sequence_batch(
         runtime, sequence_count, candidates, execution_epochs, plan_ring_count,
-        plans, options, allocator, &out_result->profile);
+        plans, options, allocator, &out_result->profile_replay);
   }
   if (iree_status_is_ok(status)) {
     out_result->binding_ring_count = plan_ring_count;

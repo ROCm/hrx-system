@@ -113,6 +113,23 @@ static bool loom_amdgpu_fragment_memory_address_base_key_is_equal(
   return true;
 }
 
+uint64_t loom_amdgpu_fragment_memory_relative_lane_byte_offset(
+    const loom_amdgpu_fragment_memory_address_layout_t* address_layout,
+    uint8_t lane) {
+  if (address_layout->linear_lane_byte_stride != 0) {
+    return (uint64_t)lane * address_layout->linear_lane_byte_stride;
+  }
+  uint64_t byte_offset = 0;
+  for (uint8_t i = 0; i < address_layout->lane_term_count; ++i) {
+    const loom_amdgpu_fragment_memory_lane_term_t* term =
+        &address_layout->lane_terms[i];
+    uint64_t digit = lane / term->divisor;
+    if (term->modulus > 1) digit %= term->modulus;
+    byte_offset += digit * term->byte_stride;
+  }
+  return byte_offset;
+}
+
 bool loom_amdgpu_fragment_memory_uses_dynamic_view_base_value(
     const loom_amdgpu_fragment_memory_plan_t* plan, uint8_t term_index) {
   // The source plan keeps normalized dynamic terms for legality, but the

@@ -45,6 +45,7 @@ static iree_status_t iree_benchmark_loom_run_dispatch_sample_work_item(
           work_item->begin_benchmark_sample, options->host_allocator,
           &benchmark_result);
       if (iree_status_is_ok(status)) {
+        benchmark_result.launch_evidence = &work_item_state.launch_evidence;
         status = iree_benchmark_loom_emit_work_item_result_aliases(
             options->run, options->module_plan, work_plan, work_item,
             &benchmark_result, work_item_state.correctness_sample_count,
@@ -61,6 +62,7 @@ static iree_status_t iree_benchmark_loom_run_dispatch_sample_work_item(
           work_item->begin_benchmark_sample, options->host_allocator,
           &benchmark_result);
       if (iree_status_is_ok(status)) {
+        benchmark_result.launch_evidence = &work_item_state.launch_evidence;
         status = iree_benchmark_loom_emit_work_item_result_aliases(
             options->run, options->module_plan, work_plan, work_item,
             &benchmark_result, work_item_state.correctness_sample_count,
@@ -69,6 +71,7 @@ static iree_status_t iree_benchmark_loom_run_dispatch_sample_work_item(
       }
     }
   }
+  iree_benchmark_loom_hal_work_item_state_deinitialize(&work_item_state);
   return status;
 }
 
@@ -92,6 +95,7 @@ static iree_status_t iree_benchmark_loom_run_hal_case_end_to_end_work_item(
         &compile_context->execution_options, options->execution_arena,
         options->host_allocator, &benchmark_result);
     if (iree_status_is_ok(status)) {
+      benchmark_result.launch_evidence = &work_item_state.launch_evidence;
       iree_benchmark_loom_hal_compile_context_set_result_artifacts(
           compile_context, &benchmark_result);
       status = iree_benchmark_loom_emit_work_item_result_aliases(
@@ -101,6 +105,7 @@ static iree_status_t iree_benchmark_loom_run_hal_case_end_to_end_work_item(
           inout_failed_benchmark_count);
     }
   }
+  iree_benchmark_loom_hal_work_item_state_deinitialize(&work_item_state);
   return status;
 }
 

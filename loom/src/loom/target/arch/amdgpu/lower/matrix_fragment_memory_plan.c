@@ -1516,6 +1516,17 @@ static bool loom_amdgpu_fragment_memory_fp8_load_scale_source(
   return true;
 }
 
+static bool loom_amdgpu_fragment_memory_dynamic_base_is_subgroup_uniform(
+    const loom_low_source_memory_access_plan_t* source) {
+  for (uint8_t i = 0; i < source->dynamic_term_count; ++i) {
+    if (!loom_value_facts_is_subgroup_uniform(
+            source->dynamic_terms[i].byte_facts)) {
+      return false;
+    }
+  }
+  return true;
+}
+
 static bool loom_amdgpu_fragment_memory_analyze(
     const loom_amdgpu_fragment_memory_environment_t* environment,
     const loom_amdgpu_fragment_memory_source_t* source,
@@ -1720,6 +1731,9 @@ static bool loom_amdgpu_fragment_memory_analyze(
         .role = role,
         .layout_kind = layout->kind,
         .source = source_access,
+        .dynamic_base_is_subgroup_uniform =
+            loom_amdgpu_fragment_memory_dynamic_base_is_subgroup_uniform(
+                &source_access),
         .payload = source->payload,
         .fp8_load_scale_source = fp8_load_scale_source,
         .view_rank = access.view_rank,

@@ -14,6 +14,7 @@
 #include "loom/ops/func/ops.h"
 #include "loom/ops/index/ops.h"
 #include "loom/ops/kernel/ops.h"
+#include "loom/target/facts.h"
 #include "loom/target/low_descriptor_registry_core_test.h"
 #include "loom/target/profile.h"
 #include "loom/tooling/execution/session.h"
@@ -315,6 +316,75 @@ check.case @nested_launch_schedule {
                         loom_run_hal_testbench_count_kernel_launches(
                             &module_plan.cases[0], &kernel_launch_count));
 
+  loom_run_module_deinitialize(&run_module);
+}
+
+TEST_F(HalTestbenchActualTest, RetainsResolvedLaunchConfigForExactWorkload) {
+  static constexpr char kSource[] = R"(
+kernel.def @dynamic(%workgroup_count: index) {
+  %unit = index.constant 1 : index
+  %size = index.constant 64 : index
+  kernel.launch.config workgroups(%workgroup_count, %unit, %unit) workgroup_size(%size, %unit, %unit) : index
+} launch(%workgroup_count: index) {
+  kernel.return
+}
+
+check.case @dynamic_case {
+  %workgroup_count = check.param.choice values([1, 4]) name("workgroup_count") : index
+  kernel.launch @dynamic[%workgroup_count](%workgroup_count) : [index](index)
+  check.return
+}
+)";
+  loom_run_module_t run_module = {};
+  loom_testbench_module_plan_t module_plan = {};
+  ParseAndPlan(IREE_SV(kSource), &run_module, &module_plan);
+  ASSERT_EQ(module_plan.case_count, 1u);
+  const loom_testbench_case_plan_t* case_plan = &module_plan.cases[0];
+  const loom_testbench_invocation_plan_t* kernel_launch = nullptr;
+  IREE_ASSERT_OK(
+      loom_run_hal_testbench_select_kernel_launch(case_plan, &kernel_launch));
+
+  loom_target_facts_t target_facts = {};
+  int64_t workload_arguments[1] = {};
+  loom_run_hal_testbench_actual_provider_t provider = {};
+  provider.session = &session_;
+  provider.run_module = &run_module;
+  provider.kernel_launch = kernel_launch;
+  provider.launch_config_module = run_module.module;
+  provider.launch_config_target_facts = &target_facts;
+  provider.workload_arguments = workload_arguments;
+  provider.invocation_options.function_name = IREE_SV("dynamic");
+
+  loom_testbench_value_materializer_options_t materializer_options = {};
+  loom_testbench_value_materializer_options_initialize(&materializer_options);
+  loom_testbench_value_table_t value_table = {};
+  IREE_ASSERT_OK(loom_testbench_value_table_initialize(
+      run_module.module, case_plan, iree_allocator_system(), &value_table));
+  for (iree_host_size_t sample_ordinal = 0; sample_ordinal < 2;
+       ++sample_ordinal) {
+    loom_testbench_value_table_reset(&value_table);
+    IREE_ASSERT_OK(loom_testbench_materialize_case_sample(
+        &materializer_options, case_plan, sample_ordinal, &value_table));
+    loom_run_hal_invocation_options_t invocation_options = {};
+    loom_run_hal_binding_list_t bindings = {};
+    IREE_ASSERT_OK(loom_run_hal_testbench_materialize_invocation_from_table(
+        &value_table, &provider, iree_allocator_system(), &invocation_options,
+        &bindings));
+
+    const uint32_t expected_workgroup_count = sample_ordinal == 0 ? 1 : 4;
+    EXPECT_EQ(provider.workload_arguments[0], expected_workgroup_count);
+    EXPECT_EQ(invocation_options.workgroup_count[0], expected_workgroup_count);
+    EXPECT_EQ(provider.resolved_launch_config.workgroup_count.x,
+              expected_workgroup_count);
+    EXPECT_EQ(provider.resolved_launch_config.workgroup_size.x, 64u);
+    EXPECT_TRUE(iree_all_bits_set(
+        provider.resolved_launch_config.fields,
+        LOOM_KERNEL_LAUNCH_CONFIG_FIELD_FLAG_WORKGROUP_COUNT |
+            LOOM_KERNEL_LAUNCH_CONFIG_FIELD_FLAG_WORKGROUP_SIZE));
+    loom_run_hal_binding_list_deinitialize(&bindings);
+  }
+
+  loom_testbench_value_table_deinitialize(&value_table);
   loom_run_module_deinitialize(&run_module);
 }
 

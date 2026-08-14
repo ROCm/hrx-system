@@ -570,6 +570,101 @@ loom_target_compile_report_format_source_low_memory_bank_service_json(
   return loom_json_object_end(&object);
 }
 
+static iree_status_t
+loom_target_compile_report_format_subgroup_access_object_json(
+    const loom_target_compile_report_subgroup_access_t* access,
+    loom_output_stream_t* stream) {
+  loom_json_object_writer_t object;
+  IREE_RETURN_IF_ERROR(loom_json_object_begin(stream, &object));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
+      &object, IREE_SV("proof"), access->proof));
+  IREE_RETURN_IF_ERROR(
+      loom_target_compile_report_json_write_optional_string_field(
+          &object, IREE_SV("unknown_reason"), access->unknown_reason));
+
+  IREE_RETURN_IF_ERROR(
+      loom_json_object_begin_field(&object, IREE_SV("address")));
+  loom_json_object_writer_t address;
+  IREE_RETURN_IF_ERROR(loom_json_object_begin(stream, &address));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
+      &address, IREE_SV("lane_address_proof"), access->lane_address_proof));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
+      &address, IREE_SV("active_lane_proof"), access->active_lane_proof));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
+      &address, IREE_SV("lane_mapping"), access->lane_mapping));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+      &address, IREE_SV("subgroup_size"), access->subgroup_size));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+      &address, IREE_SV("per_lane_packet_bytes"),
+      access->per_lane_packet_byte_count));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+      &address, IREE_SV("linear_lane_stride_bytes"),
+      access->linear_lane_byte_stride));
+  IREE_RETURN_IF_ERROR(
+      loom_json_object_begin_field(&address, IREE_SV("lane_terms")));
+  loom_json_array_writer_t terms;
+  IREE_RETURN_IF_ERROR(loom_json_array_begin(stream, &terms));
+  for (uint8_t i = 0; i < access->lane_term_count; ++i) {
+    IREE_RETURN_IF_ERROR(loom_json_array_begin_element(&terms));
+    loom_json_object_writer_t term;
+    IREE_RETURN_IF_ERROR(loom_json_object_begin(stream, &term));
+    IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+        &term, IREE_SV("divisor"), access->lane_terms[i].divisor));
+    IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+        &term, IREE_SV("modulus"), access->lane_terms[i].modulus));
+    IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+        &term, IREE_SV("byte_stride"), access->lane_terms[i].byte_stride));
+    IREE_RETURN_IF_ERROR(loom_json_object_end(&term));
+  }
+  IREE_RETURN_IF_ERROR(loom_json_array_end(&terms));
+  IREE_RETURN_IF_ERROR(loom_json_object_end(&address));
+
+  if (iree_string_view_equal(access->proof, IREE_SV("exact"))) {
+    IREE_RETURN_IF_ERROR(
+        loom_json_object_begin_field(&object, IREE_SV("geometry")));
+    loom_json_object_writer_t geometry;
+    IREE_RETURN_IF_ERROR(loom_json_object_begin(stream, &geometry));
+    IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
+        &geometry, IREE_SV("interval_coverage"), access->interval_coverage));
+    IREE_RETURN_IF_ERROR(loom_json_object_write_uint64_field(
+        &geometry, IREE_SV("subgroup_requested_bytes"),
+        access->subgroup_requested_byte_count));
+    IREE_RETURN_IF_ERROR(loom_json_object_write_uint64_field(
+        &geometry, IREE_SV("subgroup_unique_bytes"),
+        access->subgroup_unique_byte_count));
+    IREE_RETURN_IF_ERROR(loom_json_object_write_uint64_field(
+        &geometry, IREE_SV("subgroup_span_bytes"),
+        access->subgroup_span_byte_count));
+    IREE_RETURN_IF_ERROR(loom_json_object_write_uint64_field(
+        &geometry, IREE_SV("maximum_adjacent_lane_delta_bytes"),
+        access->maximum_adjacent_lane_delta_bytes));
+    IREE_RETURN_IF_ERROR(loom_json_object_write_uint64_field(
+        &geometry, IREE_SV("maximum_uncovered_gap_bytes"),
+        access->maximum_uncovered_byte_gap_bytes));
+    IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+        &geometry, IREE_SV("distinct_lane_address_count"),
+        access->distinct_lane_address_count));
+    IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+        &geometry, IREE_SV("contiguous_region_count"),
+        access->contiguous_region_count));
+    IREE_RETURN_IF_ERROR(loom_json_object_end(&geometry));
+  }
+  return loom_json_object_end(&object);
+}
+
+static iree_status_t
+loom_target_compile_report_format_source_low_memory_subgroup_access_json(
+    const loom_target_compile_report_subgroup_access_t* access,
+    loom_json_object_writer_t* row_object) {
+  if (iree_string_view_is_empty(access->proof)) {
+    return iree_ok_status();
+  }
+  IREE_RETURN_IF_ERROR(
+      loom_json_object_begin_field(row_object, IREE_SV("subgroup_access")));
+  return loom_target_compile_report_format_subgroup_access_object_json(
+      access, row_object->stream);
+}
+
 iree_status_t loom_target_compile_report_format_bank_service_summary_json(
     const loom_target_compile_report_bank_service_summary_t* summary,
     loom_output_stream_t* stream) {
@@ -626,6 +721,57 @@ iree_status_t loom_target_compile_report_format_bank_service_summary_json(
   IREE_RETURN_IF_ERROR(loom_json_object_write_uint64_field(
       &dynamic, IREE_SV("extra_round_count"),
       summary->dynamic_extra_round_count));
+  IREE_RETURN_IF_ERROR(loom_json_object_end(&dynamic));
+  return loom_json_object_end(&object);
+}
+
+iree_status_t loom_target_compile_report_format_subgroup_access_summary_json(
+    const loom_target_compile_report_subgroup_access_summary_t* summary,
+    loom_output_stream_t* stream) {
+  loom_json_object_writer_t object;
+  IREE_RETURN_IF_ERROR(loom_json_object_begin(stream, &object));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint64_field(
+      &object, IREE_SV("modeled_packet_count"), summary->modeled_packet_count));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint64_field(
+      &object, IREE_SV("exact_packet_count"), summary->exact_packet_count));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint64_field(
+      &object, IREE_SV("unknown_packet_count"), summary->unknown_packet_count));
+
+  IREE_RETURN_IF_ERROR(
+      loom_json_object_begin_field(&object, IREE_SV("structural")));
+  loom_json_object_writer_t structural;
+  IREE_RETURN_IF_ERROR(loom_json_object_begin(stream, &structural));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint64_field(
+      &structural, IREE_SV("dense_packet_count"), summary->dense_packet_count));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint64_field(
+      &structural, IREE_SV("gapped_packet_count"),
+      summary->gapped_packet_count));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint64_field(
+      &structural, IREE_SV("overlapping_packet_count"),
+      summary->overlapping_packet_count));
+  IREE_RETURN_IF_ERROR(loom_json_object_end(&structural));
+
+  IREE_RETURN_IF_ERROR(
+      loom_json_object_begin_field(&object, IREE_SV("dynamic")));
+  loom_json_object_writer_t dynamic;
+  IREE_RETURN_IF_ERROR(loom_json_object_begin(stream, &dynamic));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint64_field(
+      &dynamic, IREE_SV("exact_packet_count"),
+      summary->exact_dynamic_packet_count));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint64_field(
+      &dynamic, IREE_SV("unknown_packet_count"),
+      summary->unknown_dynamic_packet_count));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint64_field(
+      &dynamic, IREE_SV("packet_count"), summary->dynamic_packet_count));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint64_field(
+      &dynamic, IREE_SV("dense_packet_count"),
+      summary->dynamic_dense_packet_count));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint64_field(
+      &dynamic, IREE_SV("gapped_packet_count"),
+      summary->dynamic_gapped_packet_count));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint64_field(
+      &dynamic, IREE_SV("overlapping_packet_count"),
+      summary->dynamic_overlapping_packet_count));
   IREE_RETURN_IF_ERROR(loom_json_object_end(&dynamic));
   return loom_json_object_end(&object);
 }
@@ -703,6 +849,9 @@ loom_target_compile_report_format_source_low_memory_row_json(
   IREE_RETURN_IF_ERROR(
       loom_target_compile_report_format_source_low_memory_bank_service_json(
           &row->bank_service, &object));
+  IREE_RETURN_IF_ERROR(
+      loom_target_compile_report_format_source_low_memory_subgroup_access_json(
+          &row->subgroup_access, &object));
   if (row->execution_count_plus_one !=
           LOOM_TARGET_COMPILE_REPORT_SOURCE_LOW_MEMORY_EXECUTION_COUNT_PLUS_ONE_UNKNOWN &&
       row->execution_count_plus_one != 2) {
@@ -792,6 +941,55 @@ loom_target_compile_report_format_source_low_bank_service_summary_json(
   IREE_RETURN_IF_ERROR(
       loom_target_compile_report_format_bank_service_summary_json(&row->summary,
                                                                   stream));
+  return loom_json_object_end(&object);
+}
+
+static iree_status_t
+loom_target_compile_report_format_source_low_subgroup_access_summary_json(
+    const loom_target_compile_report_source_low_subgroup_access_summary_t* row,
+    iree_host_size_t row_index, loom_output_stream_t* stream) {
+  loom_json_object_writer_t object;
+  IREE_RETURN_IF_ERROR(loom_json_object_begin(stream, &object));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_host_size_field(
+      &object, IREE_SV("index"), row_index));
+  IREE_RETURN_IF_ERROR(
+      loom_target_compile_report_json_write_optional_string_field(
+          &object, IREE_SV("function"), row->function_name));
+  IREE_RETURN_IF_ERROR(
+      loom_target_compile_report_json_write_optional_string_field(
+          &object, IREE_SV("source_op"), row->source_op_name));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+      &object, IREE_SV("source_op_kind"), row->source_op_kind));
+  IREE_RETURN_IF_ERROR(
+      loom_target_compile_report_json_write_optional_string_field(
+          &object, IREE_SV("source_root"), row->source_root_name));
+  if (row->source_root_argument_index != UINT16_MAX) {
+    IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+        &object, IREE_SV("source_root_argument_index"),
+        row->source_root_argument_index));
+  }
+  IREE_RETURN_IF_ERROR(
+      loom_target_compile_report_json_write_optional_string_field(
+          &object, IREE_SV("memory_space"), row->memory_space));
+  IREE_RETURN_IF_ERROR(
+      loom_target_compile_report_json_write_optional_string_field(
+          &object, IREE_SV("operation"), row->operation_kind));
+  IREE_RETURN_IF_ERROR(
+      loom_target_compile_report_json_write_optional_string_field(
+          &object, IREE_SV("packet"), row->packet_key));
+  IREE_RETURN_IF_ERROR(
+      loom_target_compile_report_json_write_optional_string_field(
+          &object, IREE_SV("strategy"), row->strategy_key));
+  IREE_RETURN_IF_ERROR(
+      loom_json_object_begin_field(&object, IREE_SV("access")));
+  IREE_RETURN_IF_ERROR(
+      loom_target_compile_report_format_subgroup_access_object_json(
+          &row->access, stream));
+  IREE_RETURN_IF_ERROR(
+      loom_json_object_begin_field(&object, IREE_SV("summary")));
+  IREE_RETURN_IF_ERROR(
+      loom_target_compile_report_format_subgroup_access_summary_json(
+          &row->summary, stream));
   return loom_json_object_end(&object);
 }
 
@@ -1123,6 +1321,13 @@ loom_target_compile_report_format_source_low_memory_summary_json(
         loom_target_compile_report_format_bank_service_summary_json(
             &report->bank_service_summary, stream));
   }
+  if (report->subgroup_access_summary.modeled_packet_count != 0) {
+    IREE_RETURN_IF_ERROR(
+        loom_json_object_begin_field(&object, IREE_SV("subgroup_access")));
+    IREE_RETURN_IF_ERROR(
+        loom_target_compile_report_format_subgroup_access_summary_json(
+            &report->subgroup_access_summary, stream));
+  }
   if (report->source_low_memory_root_summaries.count != 0) {
     IREE_RETURN_IF_ERROR(loom_json_object_write_host_size_field(
         &object, IREE_SV("root_count"),
@@ -1243,6 +1448,30 @@ loom_target_compile_report_format_source_low_memory_summary_json(
       }
     }
     IREE_RETURN_IF_ERROR(loom_json_array_end(&array_4));
+  }
+  if (report->source_low_subgroup_access_summaries.count != 0) {
+    IREE_RETURN_IF_ERROR(loom_json_object_write_host_size_field(
+        &object, IREE_SV("subgroup_access_group_count"),
+        report->source_low_subgroup_access_summaries.count));
+    IREE_RETURN_IF_ERROR(loom_json_object_begin_field(
+        &object, IREE_SV("subgroup_access_groups")));
+    loom_json_array_writer_t array_5;
+    IREE_RETURN_IF_ERROR(loom_json_array_begin(stream, &array_5));
+    iree_host_size_t row_index = 0;
+    for (const loom_target_compile_report_vec_t* vec =
+             report->source_low_subgroup_access_summaries.head;
+         vec != NULL; vec = vec->next) {
+      const loom_target_compile_report_source_low_subgroup_access_summary_t* rows =
+          (const loom_target_compile_report_source_low_subgroup_access_summary_t*)
+              loom_target_compile_report_vec_const_rows(vec);
+      for (iree_host_size_t i = 0; i < vec->count; ++i, ++row_index) {
+        IREE_RETURN_IF_ERROR(loom_json_array_begin_element(&array_5));
+        IREE_RETURN_IF_ERROR(
+            loom_target_compile_report_format_source_low_subgroup_access_summary_json(
+                &rows[i], row_index, stream));
+      }
+    }
+    IREE_RETURN_IF_ERROR(loom_json_array_end(&array_5));
   }
   return loom_json_object_end(&object);
 }

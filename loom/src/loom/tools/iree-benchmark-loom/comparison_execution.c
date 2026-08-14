@@ -320,6 +320,7 @@ static iree_status_t iree_benchmark_loom_run_comparison_window(
     const iree_benchmark_loom_comparison_execution_options_t* options,
     iree_benchmark_loom_dispatch_comparison_candidate_t* candidate,
     iree_benchmark_loom_hal_compile_context_t* compile_contexts,
+    const iree_benchmark_loom_hal_work_item_state_t* work_item_states,
     const iree_benchmark_loom_candidate_identity_t* baseline,
     iree_string_view_t comparison_group, iree_string_view_t method,
     iree_host_size_t order_index, iree_host_size_t repetition_index,
@@ -360,6 +361,8 @@ static iree_status_t iree_benchmark_loom_run_comparison_window(
         &compile_context->benchmark_materializer, candidate->begin_sample,
         options->host_allocator, &benchmark_result);
   }
+  benchmark_result.launch_evidence =
+      &work_item_states[candidate->work_item_index].launch_evidence;
   if (iree_status_is_ok(status) &&
       (!benchmark_result.executed || !benchmark_result.passed)) {
     ++*inout_failed_benchmark_count;
@@ -494,22 +497,23 @@ iree_status_t iree_benchmark_loom_run_dispatch_comparison(
          iree_status_is_ok(status) && candidate_index < selection_count;
          ++candidate_index) {
       status = iree_benchmark_loom_run_comparison_window(
-          options, &candidates[0], compile_contexts, baseline, comparison_group,
-          method, order_index++, /*repetition_index=*/0, 'A',
+          options, &candidates[0], compile_contexts, work_item_states, baseline,
+          comparison_group, method, order_index++, /*repetition_index=*/0, 'A',
           inout_failed_benchmark_count);
       for (iree_host_size_t repetition_index = 0;
            iree_status_is_ok(status) &&
            repetition_index < benchmark_options->repetitions;
            ++repetition_index) {
         status = iree_benchmark_loom_run_comparison_window(
-            options, &candidates[candidate_index], compile_contexts, baseline,
-            comparison_group, method, order_index++, repetition_index,
-            (char)('A' + candidate_index), inout_failed_benchmark_count);
+            options, &candidates[candidate_index], compile_contexts,
+            work_item_states, baseline, comparison_group, method, order_index++,
+            repetition_index, (char)('A' + candidate_index),
+            inout_failed_benchmark_count);
         if (iree_status_is_ok(status)) {
           status = iree_benchmark_loom_run_comparison_window(
-              options, &candidates[0], compile_contexts, baseline,
-              comparison_group, method, order_index++, repetition_index + 1,
-              'A', inout_failed_benchmark_count);
+              options, &candidates[0], compile_contexts, work_item_states,
+              baseline, comparison_group, method, order_index++,
+              repetition_index + 1, 'A', inout_failed_benchmark_count);
         }
       }
     }
@@ -524,9 +528,10 @@ iree_status_t iree_benchmark_loom_run_dispatch_comparison(
            iree_status_is_ok(status) && candidate_index < selection_count;
            ++candidate_index) {
         status = iree_benchmark_loom_run_comparison_window(
-            options, &candidates[candidate_index], compile_contexts, baseline,
-            comparison_group, method, order_index++, repetition_index,
-            (char)('A' + candidate_index), inout_failed_benchmark_count);
+            options, &candidates[candidate_index], compile_contexts,
+            work_item_states, baseline, comparison_group, method, order_index++,
+            repetition_index, (char)('A' + candidate_index),
+            inout_failed_benchmark_count);
       }
     }
   }
@@ -543,6 +548,12 @@ iree_status_t iree_benchmark_loom_run_dispatch_comparison(
     for (iree_host_size_t i = 0; i < work_plan->hal_compile_item_count; ++i) {
       iree_benchmark_loom_hal_compile_context_deinitialize(
           &compile_contexts[i]);
+    }
+  }
+  if (work_item_states != NULL) {
+    for (iree_host_size_t i = 0; i < work_plan->work_item_count; ++i) {
+      iree_benchmark_loom_hal_work_item_state_deinitialize(
+          &work_item_states[i]);
     }
   }
   iree_allocator_free(options->host_allocator, work_item_states);

@@ -46,15 +46,44 @@ Start with the target-neutral human view:
 loom-compile-report show kernel.report.json
 ```
 
-The header states artifact, target, specialization, workload, configuration,
-and compile status. Each entry then separates two evidence classes:
+The header states artifact, target, specialization, compiled launch geometry,
+configuration, and compile status. Launch fields appear only when the compiled
+artifact fixes them; a missing workgroup count is the normal result for a
+workload-dependent launch function, not missing benchmark evidence. Each entry
+then separates two evidence classes:
 
 - **Artifact facts** come from the emitted code or target-owned artifact
   inspection: code bytes, instruction counts, instruction families, and
   physical memory usage.
 - **Compiler analysis** comes from the prepared program and target model:
-  scheduled pressure, estimated dispatch traffic, operation counts, residency,
-  allocation, and scheduling evidence.
+  scheduled pressure, compiled execution economics, residency, allocation, and
+  scheduling evidence.
+
+Compiled execution economics never require a static dispatch size. Exact
+fixed-trip multiplicities are reported per workitem and, when the artifact
+fixes local workgroup size, for one workgroup. They count target-Low operation
+effects and descriptor-effect widths, not native instruction issues, memory
+transactions, or executed branch paths. Control flow is a statically reachable
+block envelope: data-dependent alternatives may both contribute. Whole-
+dispatch geometry belongs to a concrete benchmark launch unless the compiled
+artifact genuinely specializes it.
+
+Register-move analysis includes compiler-classified causes. Summary reports
+preserve the aggregate packet and register-unit counts; detailed reports let
+`show` enumerate causes and let `diff` distinguish added, removed, changed, and
+unchanged causes. This separates a source-level repacking change from a
+target-created operand-bank repair instead of treating both as generic moves.
+
+Fragment memory reports also preserve the producer-proven address relationship
+across a complete subgroup. `show` prints each authored memory source and its
+packet variants with the per-lane packet width, exact lane-offset formula, and
+the byte-interval union for the subgroup. Requested bytes count every lane's
+request, unique bytes count their union, and span bytes cover the lowest through
+highest requested address. Dense, gapped, and overlapping are exact geometry
+facts; they are deliberately not presented as cache-line transaction or cycle
+predictions. When the compiler cannot prove a complete subgroup, uniform
+dynamic base, uniform control, or packet width, the missing proof and its reason
+remain visible instead of manufacturing geometry.
 
 Unavailable fields are omitted instead of rendered as zero. That distinction
 matters: zero instructions is a measurement; no target inspector for that
@@ -94,9 +123,34 @@ loom-compile-report diff \
   >candidate.diff.json
 ```
 
-There is no force switch for incomparable reports. Fix the experiment so that
-one independent variable changes, or describe the result as two observations
-instead of a causal comparison.
+When historical or externally produced artifacts cannot be regenerated with a
+common identity, `--force` can compare reports containing exactly one compiled
+entry each:
+
+```shell
+loom-compile-report diff \
+  historical-baseline.report.json \
+  historical-candidate.report.json \
+  --force
+```
+
+The forced view preserves both report and entry identities, lists every field
+that violates the exact comparison contract, and labels the deltas as
+observational rather than causal. Reports with more than one entry remain an
+error because entry order is not a semantic pairing contract. Use the strict
+default for controlled experiments; `--force` makes otherwise inaccessible
+evidence inspectable, but does not repair the experiment.
+
+Wave memory diffs group packet and strategy variants under the stable authored
+source identity. A scalar-to-wide lowering therefore appears as removed and
+added variants of one source even when the number of packets changes. The tool
+does not invent one-to-one matches between ambiguous variants, and it retains
+the complete before and after geometry so widening, lane dispersion, and
+overlap can be evaluated together.
+
+For a forced single-entry comparison, the explicit entry pair also aligns wave
+memory sources whose function was renamed. Packet variants still require exact
+semantic identity; the forced pair does not authorize guessed variant matches.
 
 ## Compare target specialization
 
@@ -128,14 +182,24 @@ motivated it. The output is a prioritized experiment queue, not an assertion
 that a transformation will improve performance. Recompile, retest, and measure
 each accepted experiment.
 
+The experimental AMDGPU fragment-packet finding requires exact wave geometry
+for every cited scalar packet row. It reports per-lane width together with
+cross-lane coverage, unique bytes, span, maximum gap, and maximum adjacent-lane
+delta. Packet width is not treated as a monotonic objective: wider candidates
+that worsen dispersion require a hardware timing win, rather than receiving a
+recommendation merely because they reduce static packet count. When the same
+packets coincide with target-created operand-bank materialization, the finding
+leads with allocator placement and asks the reader to verify that the repairs
+belong to those loads before changing the memory hierarchy.
+
 ```shell
 loom-compile-report suggest kernel.report.json --format=json \
   >kernel.suggestions.json
 ```
 
 Default findings require the target provider's high-confidence evidence tier.
-Experiments derived from structurally exact but hardware-unvalidated models are
-opted into explicitly:
+Exploratory policies and experiments derived from structurally exact but
+hardware-unvalidated models are opted into explicitly:
 
 ```shell
 loom-compile-report suggest kernel.report.json \

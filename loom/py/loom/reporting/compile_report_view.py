@@ -4,7 +4,7 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-"""Target-neutral views and strict diffs for Loom compile reports."""
+"""Target-neutral views and identity-aware diffs for Loom compile reports."""
 
 from __future__ import annotations
 
@@ -31,6 +31,33 @@ from loom.reporting.compile_report_bank_service import (
 from loom.reporting.compile_report_capabilities import (
     append_target_capability_diff_text,
     build_target_capability_diff,
+)
+from loom.reporting.compile_report_execution_economics import (
+    append_execution_economics_diff_text,
+    append_execution_economics_show_text,
+    build_execution_economics_diff,
+    build_execution_economics_show,
+    execution_economics_diff_has_changes,
+)
+from loom.reporting.compile_report_move_causes import (
+    append_move_cause_diff_text,
+    append_move_cause_show_text,
+    build_move_cause_diff,
+    build_move_cause_show,
+    move_cause_diff_has_changes,
+)
+from loom.reporting.compile_report_subgroup_access import (
+    append_subgroup_access_diff_text,
+    append_subgroup_access_show_text,
+    build_subgroup_access_diff,
+    build_subgroup_access_show,
+)
+from loom.reporting.compile_report_workload import (
+    append_workload_diff_text,
+    append_workload_show_text,
+    build_workload_diff,
+    build_workload_show,
+    workload_diff_has_changes,
 )
 
 SHOW_KIND = "loom.compile_report.show"
@@ -234,59 +261,6 @@ _METRIC_SPECS = (
         "target_resources.residency.unique_limiting_resource."
         "next_worse.additional_units",
     ),
-    _analysis(
-        "dispatch_read_bytes",
-        "estimated dispatch reads",
-        "economics.memory.dispatch_issued.read_bytes",
-        "bytes",
-    ),
-    _analysis(
-        "dispatch_write_bytes",
-        "estimated dispatch writes",
-        "economics.memory.dispatch_issued.write_bytes",
-        "bytes",
-    ),
-    _analysis(
-        "dispatch_total_bytes",
-        "estimated dispatch traffic",
-        "economics.memory.dispatch_issued.total_bytes",
-        "bytes",
-    ),
-    _analysis(
-        "dispatch_vector_alu_count",
-        "estimated dispatch vector ALU",
-        "economics.operations.dispatch.vector_alu_count",
-    ),
-    _analysis(
-        "dispatch_matrix_count",
-        "estimated dispatch matrix operations",
-        "economics.operations.dispatch.matrix_count",
-    ),
-    _analysis(
-        "dispatch_mfma_count",
-        "estimated dispatch MFMA",
-        "economics.operations.dispatch.mfma_count",
-    ),
-    _analysis(
-        "dispatch_smfmac_count",
-        "estimated dispatch SMFMAC",
-        "economics.operations.dispatch.smfmac_count",
-    ),
-    _analysis(
-        "dispatch_wmma_count",
-        "estimated dispatch WMMA",
-        "economics.operations.dispatch.wmma_count",
-    ),
-    _analysis(
-        "dispatch_swmmac_count",
-        "estimated dispatch SWMMAC",
-        "economics.operations.dispatch.swmmac_count",
-    ),
-    _analysis(
-        "dispatch_dot_count",
-        "estimated dispatch dot operations",
-        "economics.operations.dispatch.dot_count",
-    ),
     _analysis("schedule_node_count", "schedule nodes", "schedule_node_count"),
     _analysis(
         "schedule_dependency_count",
@@ -380,6 +354,11 @@ def build_compile_report_show(
     document: CompileReportDocument,
 ) -> dict[str, object]:
     """Builds a deterministic target-neutral report view."""
+    report_workload = build_workload_show(
+        document.report.get("workload"),
+        document.report.get("target_resources"),
+        document.source,
+    )
     view: dict[str, object] = {
         "kind": SHOW_KIND,
         "schema_version": COMPILE_REPORT_SCHEMA_VERSION,
@@ -391,11 +370,15 @@ def build_compile_report_show(
             "name": document.status_name,
         },
         "identity": report_identity_json(document),
+        "workload": report_workload,
         "entries": [
             _show_entry_json(
                 entry,
                 compile_report_entry_identity(entry),
+                report_workload,
                 document.report.get("workload"),
+                document.report.get("target_resources"),
+                f"{document.source}.entries.rows[{entry['index']}]",
             )
             for entry in document.entries
         ],
@@ -403,6 +386,9 @@ def build_compile_report_show(
     bank_service = build_bank_service_show(document)
     if bank_service is not None:
         view["bank_service"] = bank_service
+    subgroup_access = build_subgroup_access_show(document)
+    if subgroup_access is not None:
+        view["subgroup_access"] = subgroup_access
     if document.envelope_context:
         view["envelope_context"] = dict(document.envelope_context)
     return view
@@ -412,12 +398,38 @@ def build_compile_report_diff(
     baseline: CompileReportDocument,
     candidate: CompileReportDocument,
     comparison_mode: CompileReportComparisonMode = CompileReportComparisonMode.EXACT,
+    *,
+    force: bool = False,
 ) -> dict[str, object]:
     """Builds a deterministic diff under the selected identity contract."""
-    pairs = match_compile_report_entries(baseline, candidate, comparison_mode)
+    match = match_compile_report_entries(
+        baseline,
+        candidate,
+        comparison_mode,
+        force=force,
+    )
+    baseline_report_workload = build_workload_show(
+        baseline.report.get("workload"),
+        baseline.report.get("target_resources"),
+        baseline.source,
+    )
+    candidate_report_workload = build_workload_show(
+        candidate.report.get("workload"),
+        candidate.report.get("target_resources"),
+        candidate.source,
+    )
+    report_workload = build_workload_diff(
+        baseline_report_workload, candidate_report_workload
+    )
     entries = []
     unchanged_entry_count = 0
-    for pair in pairs:
+    for pair in match.pairs:
+        baseline_entry_source = (
+            f"{baseline.source}.entries.rows[{pair.baseline['index']}]"
+        )
+        candidate_entry_source = (
+            f"{candidate.source}.entries.rows[{pair.candidate['index']}]"
+        )
         artifact_facts = _diff_metrics(
             pair.baseline,
             pair.candidate,
@@ -428,18 +440,68 @@ def build_compile_report_diff(
             pair.candidate,
             EvidenceClass.COMPILER_ANALYSIS,
         )
-        if not _diff_group_has_changes(artifact_facts) and not _diff_group_has_changes(
-            compiler_analysis
+        baseline_entry_workload = build_workload_show(
+            pair.baseline.get("workload", baseline.report.get("workload")),
+            pair.baseline.get(
+                "target_resources", baseline.report.get("target_resources")
+            ),
+            baseline_entry_source,
+        )
+        candidate_entry_workload = build_workload_show(
+            pair.candidate.get("workload", candidate.report.get("workload")),
+            pair.candidate.get(
+                "target_resources", candidate.report.get("target_resources")
+            ),
+            candidate_entry_source,
+        )
+        entry_workload = None
+        if (
+            baseline_entry_workload != baseline_report_workload
+            or candidate_entry_workload != candidate_report_workload
+        ):
+            entry_workload = build_workload_diff(
+                baseline_entry_workload, candidate_entry_workload
+            )
+        execution_economics = build_execution_economics_diff(
+            build_execution_economics_show(
+                pair.baseline, baseline_entry_workload, baseline_entry_source
+            ),
+            build_execution_economics_show(
+                pair.candidate, candidate_entry_workload, candidate_entry_source
+            ),
+        )
+        move_causes = build_move_cause_diff(
+            pair.baseline,
+            pair.candidate,
+            baseline_entry_source,
+            candidate_entry_source,
+        )
+        if (
+            not _diff_group_has_changes(artifact_facts)
+            and not _diff_group_has_changes(compiler_analysis)
+            and not workload_diff_has_changes(entry_workload)
+            and not execution_economics_diff_has_changes(execution_economics)
+            and not move_cause_diff_has_changes(move_causes)
         ):
             unchanged_entry_count += 1
             continue
-        entries.append(
-            {
-                "identity": pair.identity.to_json_object(),
-                "artifact_facts": artifact_facts,
-                "compiler_analysis": compiler_analysis,
+        entry_view: dict[str, object] = {
+            "artifact_facts": artifact_facts,
+            "execution_economics": execution_economics,
+            "compiler_analysis": compiler_analysis,
+        }
+        if workload_diff_has_changes(entry_workload):
+            entry_view["workload"] = entry_workload
+        if move_causes is not None:
+            entry_view["move_causes"] = move_causes
+        if force:
+            entry_view["identities"] = {
+                "baseline": pair.baseline_identity.to_json_object(),
+                "candidate": pair.candidate_identity.to_json_object(),
             }
-        )
+        else:
+            entry_view["identity"] = pair.baseline_identity.to_json_object()
+        entries.append(entry_view)
     view: dict[str, object] = {
         "kind": DIFF_KIND,
         "schema_version": COMPILE_REPORT_SCHEMA_VERSION,
@@ -447,12 +509,29 @@ def build_compile_report_diff(
         "baseline_source": baseline.source,
         "candidate_source": candidate.source,
         "comparison_mode": comparison_mode.value,
-        "identity": report_common_identity_json(baseline, comparison_mode),
         "changed_entry_count": len(entries),
         "unchanged_entry_count": unchanged_entry_count,
         "entries": entries,
     }
-    if comparison_mode is CompileReportComparisonMode.TARGET:
+    if force:
+        pair = match.pairs[0]
+        view["forced"] = True
+        view["identities"] = {
+            "baseline": report_identity_json(baseline),
+            "candidate": report_identity_json(candidate),
+        }
+        view["entry_identities"] = {
+            "baseline": pair.baseline_identity.to_json_object(),
+            "candidate": pair.candidate_identity.to_json_object(),
+        }
+        view["identity_mismatches"] = [
+            mismatch.to_json_object() for mismatch in match.identity_mismatches
+        ]
+    else:
+        view["identity"] = report_common_identity_json(baseline, comparison_mode)
+    if workload_diff_has_changes(report_workload):
+        view["workload"] = report_workload
+    if comparison_mode is CompileReportComparisonMode.TARGET and not force:
         view["targets"] = {
             "baseline": report_target_identity_json(baseline),
             "candidate": report_target_identity_json(candidate),
@@ -460,7 +539,24 @@ def build_compile_report_diff(
     bank_service = build_bank_service_diff(baseline, candidate)
     if bank_service is not None:
         view["bank_service"] = bank_service
-    if comparison_mode is CompileReportComparisonMode.TARGET:
+    subgroup_access = build_subgroup_access_diff(
+        baseline,
+        candidate,
+        entry_function_pairs=(
+            tuple(
+                (
+                    pair.baseline_identity.function,
+                    pair.candidate_identity.function,
+                )
+                for pair in match.pairs
+            )
+            if force
+            else ()
+        ),
+    )
+    if subgroup_access is not None:
+        view["subgroup_access"] = subgroup_access
+    if comparison_mode is CompileReportComparisonMode.TARGET and not force:
         target_capabilities = build_target_capability_diff(baseline, candidate)
         if target_capabilities is not None:
             view["target_capabilities"] = target_capabilities
@@ -492,9 +588,8 @@ def format_compile_report_show_text(view: dict[str, object]) -> str:
         for binding_value in config_bindings:
             binding = _expect_dict(binding_value)
             lines.append(f"    {binding['key']} = {binding['value']}")
-    workload = identity.get("workload")
-    if isinstance(workload, dict):
-        lines.append(f"  workload: {_format_workload(workload)}")
+    lines.append("")
+    append_workload_show_text(lines, _expect_dict(view["workload"]))
 
     entries = _expect_list(view["entries"])
     if not entries:
@@ -504,11 +599,17 @@ def format_compile_report_show_text(view: dict[str, object]) -> str:
         entry_identity = _expect_dict(entry["identity"])
         lines.append("")
         lines.append(f"Entry {_entry_display_name(entry_identity)}")
+        entry_workload = entry.get("workload")
+        if isinstance(entry_workload, dict):
+            append_workload_show_text(lines, entry_workload, indent="  ")
         _append_metric_group(
             lines,
             "Artifact facts",
             _expect_dict(entry["artifact_facts"]),
             EvidenceClass.ARTIFACT_FACT,
+        )
+        append_execution_economics_show_text(
+            lines, _expect_dict(entry["execution_economics"])
         )
         _append_metric_group(
             lines,
@@ -516,6 +617,12 @@ def format_compile_report_show_text(view: dict[str, object]) -> str:
             _expect_dict(entry["compiler_analysis"]),
             EvidenceClass.COMPILER_ANALYSIS,
         )
+        move_causes = entry.get("move_causes")
+        if isinstance(move_causes, dict):
+            append_move_cause_show_text(lines, move_causes)
+    subgroup_access = view.get("subgroup_access")
+    if isinstance(subgroup_access, dict):
+        append_subgroup_access_show_text(lines, subgroup_access)
     bank_service = view.get("bank_service")
     if isinstance(bank_service, dict):
         append_bank_service_show_text(lines, bank_service)
@@ -523,14 +630,49 @@ def format_compile_report_show_text(view: dict[str, object]) -> str:
 
 
 def format_compile_report_diff_text(view: dict[str, object]) -> str:
-    """Formats a strict diff for humans and agent prompts."""
-    identity = _expect_dict(view["identity"])
+    """Formats a diff for humans and agent prompts."""
     lines = [
         "Loom compile report diff",
         f"  baseline: {view['baseline_source']}",
         f"  candidate: {view['candidate_source']}",
     ]
-    if view.get("comparison_mode") == CompileReportComparisonMode.TARGET.value:
+    if view.get("forced") is True:
+        identities = _expect_dict(view["identities"])
+        baseline_identity = _expect_dict(identities["baseline"])
+        candidate_identity = _expect_dict(identities["candidate"])
+        lines.extend(
+            (
+                "  comparison: forced single-entry observation",
+                "  warning: identity contract bypassed; deltas are not causal",
+                f"  baseline target: {_format_target(baseline_identity)}",
+                (
+                    "  baseline specialization: "
+                    f"{_format_specialization(baseline_identity)}"
+                ),
+                f"  candidate target: {_format_target(candidate_identity)}",
+                (
+                    "  candidate specialization: "
+                    f"{_format_specialization(candidate_identity)}"
+                ),
+            )
+        )
+        mismatches = _expect_list(view["identity_mismatches"])
+        lines.append(f"  identity mismatches: {len(mismatches)}")
+        workload_mismatch_count = 0
+        for mismatch_value in mismatches:
+            mismatch = _expect_dict(mismatch_value)
+            if str(mismatch["path"]).endswith(".workload"):
+                workload_mismatch_count += 1
+                continue
+            lines.append(
+                f"    {mismatch['path']}: {mismatch['baseline']!r} != "
+                f"{mismatch['candidate']!r}"
+            )
+        if workload_mismatch_count:
+            lines.append(
+                f"    workload mismatches: {workload_mismatch_count}; expanded below"
+            )
+    elif view.get("comparison_mode") == CompileReportComparisonMode.TARGET.value:
         targets = _expect_dict(view["targets"])
         baseline_target = _expect_dict(targets["baseline"])
         candidate_target = _expect_dict(targets["candidate"])
@@ -550,12 +692,17 @@ def format_compile_report_diff_text(view: dict[str, object]) -> str:
             )
         )
     else:
+        identity = _expect_dict(view["identity"])
         lines.extend(
             (
                 f"  target: {_format_target(identity)}",
                 f"  specialization: {_format_specialization(identity)}",
             )
         )
+    report_workload = view.get("workload")
+    if isinstance(report_workload, dict):
+        lines.append("")
+        append_workload_diff_text(lines, report_workload)
     lines.append(
         f"  entries: {view['changed_entry_count']} changed, "
         f"{view['unchanged_entry_count']} unchanged"
@@ -568,14 +715,33 @@ def format_compile_report_diff_text(view: dict[str, object]) -> str:
         lines.append("  reported entry evidence: unchanged")
     for entry_value in _expect_list(view["entries"]):
         entry = _expect_dict(entry_value)
-        entry_identity = _expect_dict(entry["identity"])
+        if view.get("forced") is True:
+            entry_identities = _expect_dict(entry["identities"])
+            baseline_entry_identity = _expect_dict(entry_identities["baseline"])
+            candidate_entry_identity = _expect_dict(entry_identities["candidate"])
+            baseline_name = _entry_display_name(baseline_entry_identity)
+            candidate_name = _entry_display_name(candidate_entry_identity)
+            entry_name = (
+                baseline_name
+                if baseline_name == candidate_name
+                else f"{baseline_name} -> {candidate_name}"
+            )
+        else:
+            entry_identity = _expect_dict(entry["identity"])
+            entry_name = _entry_display_name(entry_identity)
         lines.append("")
-        lines.append(f"Entry {_entry_display_name(entry_identity)}")
+        lines.append(f"Entry {entry_name}")
+        entry_workload = entry.get("workload")
+        if isinstance(entry_workload, dict):
+            append_workload_diff_text(lines, entry_workload, indent="  ")
         _append_diff_group(
             lines,
             "Artifact facts",
             _expect_dict(entry["artifact_facts"]),
             EvidenceClass.ARTIFACT_FACT,
+        )
+        append_execution_economics_diff_text(
+            lines, _expect_dict(entry["execution_economics"])
         )
         _append_diff_group(
             lines,
@@ -583,6 +749,12 @@ def format_compile_report_diff_text(view: dict[str, object]) -> str:
             _expect_dict(entry["compiler_analysis"]),
             EvidenceClass.COMPILER_ANALYSIS,
         )
+        move_causes = entry.get("move_causes")
+        if isinstance(move_causes, dict):
+            append_move_cause_diff_text(lines, move_causes)
+    subgroup_access = view.get("subgroup_access")
+    if isinstance(subgroup_access, dict):
+        append_subgroup_access_diff_text(lines, subgroup_access)
     bank_service = view.get("bank_service")
     if isinstance(bank_service, dict):
         append_bank_service_diff_text(lines, bank_service)
@@ -595,15 +767,29 @@ def format_compile_report_diff_text(view: dict[str, object]) -> str:
 def _show_entry_json(
     entry: dict[str, object],
     identity: CompileReportEntryIdentity,
-    report_workload: object,
+    report_workload: dict[str, object],
+    report_workload_value: object,
+    report_target_resources_value: object,
+    source: str,
 ) -> dict[str, object]:
-    view = {
+    entry_workload = build_workload_show(
+        entry.get("workload", report_workload_value),
+        entry.get("target_resources", report_target_resources_value),
+        source,
+    )
+    view: dict[str, object] = {
         "identity": identity.to_json_object(),
         "artifact_facts": _show_metrics(entry, EvidenceClass.ARTIFACT_FACT),
+        "execution_economics": build_execution_economics_show(
+            entry, entry_workload, source
+        ),
         "compiler_analysis": _show_metrics(entry, EvidenceClass.COMPILER_ANALYSIS),
     }
-    if entry.get("workload") is not None and entry.get("workload") != report_workload:
-        view["workload"] = entry["workload"]
+    if entry_workload != report_workload:
+        view["workload"] = entry_workload
+    move_causes = build_move_cause_show(entry, source)
+    if move_causes is not None:
+        view["move_causes"] = move_causes
     return view
 
 
@@ -789,17 +975,6 @@ def _format_specialization(identity: dict[str, object]) -> str:
 
 def _format_context(context: dict[str, object]) -> str:
     return ", ".join(f"{key}={value}" for key, value in context.items())
-
-
-def _format_workload(workload: dict[str, object]) -> str:
-    fields = []
-    for key in ("workgroup_size", "workgroup_count", "workgroup_cluster_size"):
-        value = workload.get(key)
-        if isinstance(value, dict):
-            fields.append(f"{key}=({value.get('x')},{value.get('y')},{value.get('z')})")
-    if "dispatch_workitem_count" in workload:
-        fields.append(f"workitems={workload['dispatch_workitem_count']}")
-    return ", ".join(fields) if fields else "unavailable"
 
 
 def _entry_display_name(identity: dict[str, object]) -> str:

@@ -58,6 +58,7 @@ def run(args: argparse.Namespace, *, stdout: TextIO) -> int:
             baseline,
             candidate,
             CompileReportComparisonMode(args.comparison),
+            force=args.force,
         )
         text = format_compile_report_diff_text(view)
     elif args.command == "suggest":
@@ -103,7 +104,8 @@ def _create_argument_parser() -> argparse.ArgumentParser:
     )
     diff_parser.add_argument("baseline", type=Path, help="Baseline report path.")
     diff_parser.add_argument("candidate", type=Path, help="Candidate report path.")
-    diff_parser.add_argument(
+    identity_group = diff_parser.add_mutually_exclusive_group()
+    identity_group.add_argument(
         "--comparison",
         choices=tuple(mode.value for mode in CompileReportComparisonMode),
         default=CompileReportComparisonMode.EXACT.value,
@@ -111,6 +113,14 @@ def _create_argument_parser() -> argparse.ArgumentParser:
             "Identity contract. 'exact' requires identical compilation identity; "
             "'target' permits only target specialization identity to vary within "
             "one target and backend family. Defaults to exact."
+        ),
+    )
+    identity_group.add_argument(
+        "--force",
+        action="store_true",
+        help=(
+            "Compare one entry from each report despite identity mismatches. "
+            "The output retains every mismatch and is observational, not causal."
         ),
     )
     _add_output_format_argument(diff_parser)
@@ -124,8 +134,8 @@ def _create_argument_parser() -> argparse.ArgumentParser:
         "--include-experimental",
         action="store_true",
         help=(
-            "Include experiments grounded in structurally exact but "
-            "hardware-unvalidated target models."
+            "Include exploratory experiments whose model or policy has not "
+            "earned default confidence."
         ),
     )
     _add_output_format_argument(suggest_parser)

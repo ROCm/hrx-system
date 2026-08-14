@@ -215,6 +215,7 @@ loom_cc_test(
         "//loom/src/loom/ops/index",
         "//loom/src/loom/ops/kernel",
         "//loom/src/loom/ops/test",
+        "//loom/src/loom/target:facts",
         "//loom/src/loom/target:low_descriptor_registry_core_test",
         "//loom/src/loom/target:profile",
         "//loom/src/loom/testing:module_ptr",
