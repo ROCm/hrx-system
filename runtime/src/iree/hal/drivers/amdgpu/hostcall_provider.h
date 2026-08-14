@@ -26,7 +26,7 @@ typedef struct iree_hal_amdgpu_hostcall_provider_state_t {
   iree_allocator_t host_allocator;
 
   // Immutable provider callbacks copied from the creation extension.
-  iree_hal_amdgpu_hostcall_provider_t provider;
+  iree_hal_hostcall_provider_t provider;
 
   // Provider-owned context initialized over |shared_memory|.
   void* provider_context;
@@ -52,11 +52,11 @@ typedef struct iree_hal_amdgpu_hostcall_provider_state_t {
 
 // Creates an eager physical-device hostcall provider state.
 iree_status_t iree_hal_amdgpu_hostcall_provider_state_create(
-    const iree_hal_amdgpu_hostcall_provider_t* provider,
+    const iree_hal_hostcall_provider_t* provider,
     iree_hal_device_t* logical_device, const iree_hal_amdgpu_libhsa_t* libhsa,
     hsa_agent_t device_agent, hsa_amd_memory_pool_t shared_memory_pool,
     iree_host_size_t host_numa_node,
-    const iree_hal_amdgpu_hostcall_provider_device_info_t* device_info,
+    const iree_hal_hostcall_provider_device_info_t* device_info,
     iree_allocator_t host_allocator,
     iree_hal_amdgpu_hostcall_provider_state_t** out_state);
 

@@ -313,8 +313,7 @@ static iree_hal_buffer_params_t SparseDispatchBufferParams() {
   iree_hal_buffer_params_t params = {0};
   params.type = IREE_HAL_MEMORY_TYPE_OPTIMAL_FOR_DEVICE |
                 IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
-  params.usage =
-      IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE;
+  params.usage = IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_STORAGE;
   return params;
 }
 

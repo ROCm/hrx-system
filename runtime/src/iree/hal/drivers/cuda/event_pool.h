@@ -42,7 +42,7 @@ void iree_hal_cuda_event_release(iree_hal_cuda_event_t* event);
 // iree_hal_cuda_event_pool_t
 //===----------------------------------------------------------------------===//
 
-// A simple pool of iree_hal_event_t objects to recycle.
+// A simple pool of private CUDA event objects to recycle.
 //
 // Thread-safe; multiple threads may acquire and release events from the pool.
 typedef struct iree_hal_cuda_event_pool_t iree_hal_cuda_event_pool_t;

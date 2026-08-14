@@ -130,8 +130,7 @@ static const std::vector<uint8_t>& iree_hal_device_spec_fuzz_seed(void) {
         IREE_HAL_EXTERNAL_HANDLE_DIRECTION_FLAG_IMPORT |
         IREE_HAL_EXTERNAL_HANDLE_DIRECTION_FLAG_EXPORT;
     external_buffer_handle.allowed_buffer_usage =
-        IREE_HAL_BUFFER_USAGE_TRANSFER |
-        IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE_READ;
+        IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_STORAGE_READ;
     external_buffer_handle.allowed_memory_access =
         IREE_HAL_MEMORY_ACCESS_READ | IREE_HAL_MEMORY_ACCESS_WRITE;
     external_buffer_handle.compatible_memory_type_mask = 1u;
@@ -179,6 +178,7 @@ static const std::vector<uint8_t>& iree_hal_device_spec_fuzz_seed(void) {
     queue_family.timestamp_valid_bits = 64;
     queue_family.timestamp_frequency_hz = UINT64_C(1000000000);
     queue_family.physical_device_affinity = 1;
+    queue_family.queue_affinity = 0xFu;
     queue_family.role_flags = IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_DISPATCH |
                               IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_TRANSFER |
                               IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_PROFILING;

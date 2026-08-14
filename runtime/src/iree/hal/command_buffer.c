@@ -138,6 +138,7 @@ IREE_API_EXPORT iree_string_view_t iree_hal_command_category_format(
       // Separate:
       {IREE_HAL_COMMAND_CATEGORY_TRANSFER, IREE_SVL("TRANSFER")},
       {IREE_HAL_COMMAND_CATEGORY_DISPATCH, IREE_SVL("DISPATCH")},
+      {IREE_HAL_COMMAND_CATEGORY_ATOMIC, IREE_SVL("ATOMIC")},
   };
   return iree_bitfield_format_inline(value, IREE_ARRAYSIZE(mappings), mappings,
                                      out_temp);
@@ -364,68 +365,59 @@ IREE_API_EXPORT iree_status_t iree_hal_command_buffer_execution_barrier(
   return status;
 }
 
-IREE_API_EXPORT iree_status_t iree_hal_command_buffer_signal_event(
-    iree_hal_command_buffer_t* command_buffer, iree_hal_event_t* event,
-    iree_hal_execution_stage_t source_stage_mask) {
-  IREE_ASSERT_ARGUMENT(command_buffer);
-  IREE_ASSERT_ARGUMENT(event);
-  IREE_TRACE_ZONE_BEGIN(z0);
-  IF_VALIDATING(command_buffer, {
-    IREE_RETURN_AND_END_ZONE_IF_ERROR(
-        z0, iree_hal_command_buffer_signal_event_validation(
-                command_buffer, VALIDATION_STATE(command_buffer), event,
-                source_stage_mask));
-  });
-  iree_status_t status = _VTABLE_DISPATCH(command_buffer, signal_event)(
-      command_buffer, event, source_stage_mask);
-  IREE_TRACE_ZONE_END(z0);
-  return status;
-}
-
-IREE_API_EXPORT iree_status_t iree_hal_command_buffer_reset_event(
-    iree_hal_command_buffer_t* command_buffer, iree_hal_event_t* event,
-    iree_hal_execution_stage_t source_stage_mask) {
-  IREE_ASSERT_ARGUMENT(command_buffer);
-  IREE_ASSERT_ARGUMENT(event);
-  IREE_TRACE_ZONE_BEGIN(z0);
-  IF_VALIDATING(command_buffer, {
-    IREE_RETURN_AND_END_ZONE_IF_ERROR(
-        z0, iree_hal_command_buffer_reset_event_validation(
-                command_buffer, VALIDATION_STATE(command_buffer), event,
-                source_stage_mask));
-  });
-  iree_status_t status = _VTABLE_DISPATCH(command_buffer, reset_event)(
-      command_buffer, event, source_stage_mask);
-  IREE_TRACE_ZONE_END(z0);
-  return status;
-}
-
-IREE_API_EXPORT iree_status_t iree_hal_command_buffer_wait_events(
-    iree_hal_command_buffer_t* command_buffer, iree_host_size_t event_count,
-    const iree_hal_event_t** events,
+IREE_API_EXPORT iree_status_t iree_hal_command_buffer_atomic_wait(
+    iree_hal_command_buffer_t* command_buffer,
     iree_hal_execution_stage_t source_stage_mask,
     iree_hal_execution_stage_t target_stage_mask,
-    iree_host_size_t memory_barrier_count,
-    const iree_hal_memory_barrier_t* memory_barriers,
-    iree_host_size_t buffer_barrier_count,
-    const iree_hal_buffer_barrier_t* buffer_barriers) {
+    iree_hal_buffer_ref_t target_ref, iree_hal_atomic_wait_params_t params) {
   IREE_ASSERT_ARGUMENT(command_buffer);
-  IREE_ASSERT_ARGUMENT(!event_count || events);
-  IREE_ASSERT_ARGUMENT(!memory_barrier_count || memory_barriers);
-  IREE_ASSERT_ARGUMENT(!buffer_barrier_count || buffer_barriers);
   IREE_TRACE_ZONE_BEGIN(z0);
   IF_VALIDATING(command_buffer, {
     IREE_RETURN_AND_END_ZONE_IF_ERROR(
-        z0,
-        iree_hal_command_buffer_wait_events_validation(
-            command_buffer, VALIDATION_STATE(command_buffer), event_count,
-            events, source_stage_mask, target_stage_mask, memory_barrier_count,
-            memory_barriers, buffer_barrier_count, buffer_barriers));
+        z0, iree_hal_command_buffer_atomic_wait_validation(
+                command_buffer, VALIDATION_STATE(command_buffer),
+                source_stage_mask, target_stage_mask, target_ref, params));
   });
-  iree_status_t status = _VTABLE_DISPATCH(command_buffer, wait_events)(
-      command_buffer, event_count, events, source_stage_mask, target_stage_mask,
-      memory_barrier_count, memory_barriers, buffer_barrier_count,
-      buffer_barriers);
+  iree_status_t status = _VTABLE_DISPATCH(command_buffer, atomic_wait)(
+      command_buffer, source_stage_mask, target_stage_mask, target_ref, params);
+  IREE_TRACE_ZONE_END(z0);
+  return status;
+}
+
+IREE_API_EXPORT iree_status_t iree_hal_command_buffer_atomic_store(
+    iree_hal_command_buffer_t* command_buffer,
+    iree_hal_execution_stage_t source_stage_mask,
+    iree_hal_execution_stage_t target_stage_mask,
+    iree_hal_buffer_ref_t target_ref, iree_hal_atomic_store_params_t params) {
+  IREE_ASSERT_ARGUMENT(command_buffer);
+  IREE_TRACE_ZONE_BEGIN(z0);
+  IF_VALIDATING(command_buffer, {
+    IREE_RETURN_AND_END_ZONE_IF_ERROR(
+        z0, iree_hal_command_buffer_atomic_store_validation(
+                command_buffer, VALIDATION_STATE(command_buffer),
+                source_stage_mask, target_stage_mask, target_ref, params));
+  });
+  iree_status_t status = _VTABLE_DISPATCH(command_buffer, atomic_store)(
+      command_buffer, source_stage_mask, target_stage_mask, target_ref, params);
+  IREE_TRACE_ZONE_END(z0);
+  return status;
+}
+
+IREE_API_EXPORT iree_status_t iree_hal_command_buffer_atomic_rmw(
+    iree_hal_command_buffer_t* command_buffer,
+    iree_hal_execution_stage_t source_stage_mask,
+    iree_hal_execution_stage_t target_stage_mask,
+    iree_hal_buffer_ref_t target_ref, iree_hal_atomic_rmw_params_t params) {
+  IREE_ASSERT_ARGUMENT(command_buffer);
+  IREE_TRACE_ZONE_BEGIN(z0);
+  IF_VALIDATING(command_buffer, {
+    IREE_RETURN_AND_END_ZONE_IF_ERROR(
+        z0, iree_hal_command_buffer_atomic_rmw_validation(
+                command_buffer, VALIDATION_STATE(command_buffer),
+                source_stage_mask, target_stage_mask, target_ref, params));
+  });
+  iree_status_t status = _VTABLE_DISPATCH(command_buffer, atomic_rmw)(
+      command_buffer, source_stage_mask, target_stage_mask, target_ref, params);
   IREE_TRACE_ZONE_END(z0);
   return status;
 }

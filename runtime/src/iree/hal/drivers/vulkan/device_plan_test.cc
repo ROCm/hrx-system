@@ -75,6 +75,7 @@ class PhysicalDeviceSnapshotBuilder {
     snapshot_.features12.shaderInt8 = VK_TRUE;
     snapshot_.features2.features.shaderInt16 = VK_TRUE;
     snapshot_.features2.features.shaderInt64 = VK_TRUE;
+    snapshot_.features12.shaderBufferInt64Atomics = VK_TRUE;
     snapshot_.features13.shaderIntegerDotProduct = VK_TRUE;
     snapshot_.features12.vulkanMemoryModel = VK_TRUE;
     snapshot_.features12.vulkanMemoryModelDeviceScope = VK_TRUE;
@@ -298,6 +299,9 @@ TEST(DevicePlanTest, OwnedCreateReportsAvailableScalarShaderFeatures) {
                                 IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_INT64));
   EXPECT_TRUE(iree_all_bits_set(
       plan.enabled_features,
+      IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_BUFFER_INT64_ATOMICS));
+  EXPECT_TRUE(iree_all_bits_set(
+      plan.enabled_features,
       IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_INTEGER_DOT_PRODUCT));
   EXPECT_TRUE(
       iree_all_bits_set(plan.enabled_features,
@@ -312,6 +316,7 @@ TEST(DevicePlanTest, OwnedCreateReportsAvailableScalarShaderFeatures) {
   EXPECT_TRUE(plan.enabled_features12.shaderInt8);
   EXPECT_TRUE(plan.enabled_features2.features.shaderInt16);
   EXPECT_TRUE(plan.enabled_features2.features.shaderInt64);
+  EXPECT_TRUE(plan.enabled_features12.shaderBufferInt64Atomics);
   EXPECT_TRUE(plan.enabled_features13.shaderIntegerDotProduct);
   EXPECT_TRUE(plan.enabled_features12.vulkanMemoryModel);
   EXPECT_TRUE(plan.enabled_features12.vulkanMemoryModelDeviceScope);

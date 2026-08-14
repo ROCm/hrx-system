@@ -15,8 +15,8 @@
 #include "iree/async/notification.h"
 #include "iree/async/util/proactor_pool.h"
 #include "iree/base/internal/arena.h"
-#include "iree/hal/drivers/local_sync/sync_event.h"
 #include "iree/hal/drivers/local_sync/sync_semaphore.h"
+#include "iree/hal/local/atomic.h"
 #include "iree/hal/local/device_spec_builder.h"
 #include "iree/hal/local/executable_environment.h"
 #include "iree/hal/local/inline_command_buffer.h"
@@ -221,6 +221,8 @@ iree_status_t iree_hal_sync_device_create(
         .backend_id = IREE_SV("local"),
         .queue_count = 1,
         .default_queue_worker_count = 1,
+        .atomic_capabilities = iree_hal_local_atomic_capabilities(
+            IREE_HAL_ATOMIC_OPERATION_FLAGS_ALL),
         .loader_count = loader_count,
         .loaders = loaders,
     };
@@ -414,14 +416,6 @@ static iree_status_t iree_hal_sync_device_create_command_buffer(
         queue_affinity, binding_capacity, &device->large_block_pool,
         device->host_allocator, out_command_buffer);
   }
-}
-
-static iree_status_t iree_hal_sync_device_create_event(
-    iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
-    iree_hal_event_flags_t flags, iree_hal_event_t** out_event) {
-  return iree_hal_sync_event_create(queue_affinity, flags,
-                                    iree_hal_device_host_allocator(base_device),
-                                    out_event);
 }
 
 static iree_status_t iree_hal_sync_device_load_executable(
@@ -1705,6 +1699,192 @@ static iree_status_t iree_hal_sync_device_queue_execute(
                                            status);
 }
 
+static iree_status_t iree_hal_sync_device_check_atomic_width(
+    iree_hal_atomic_width_t width) {
+  if (IREE_UNLIKELY(!iree_hal_local_atomic_width_is_lock_free(width))) {
+    return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
+                            "local-sync devices do not support lock-based "
+                            "%u-bit atomic operations",
+                            width);
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t iree_hal_sync_device_map_atomic_target(
+    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
+    iree_hal_atomic_width_t width, iree_hal_memory_access_t access,
+    iree_hal_buffer_mapping_t* out_mapping) {
+  const iree_device_size_t byte_count = iree_hal_atomic_width_byte_count(width);
+  iree_status_t status =
+      iree_hal_buffer_map_range(target_buffer, IREE_HAL_MAPPING_MODE_SCOPED,
+                                access, target_offset, byte_count, out_mapping);
+  if (iree_status_is_ok(status) &&
+      IREE_UNLIKELY(!iree_host_size_has_alignment(
+          (iree_host_size_t)(uintptr_t)out_mapping->contents.data,
+          (iree_host_size_t)byte_count))) {
+    status = iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "mapped atomic target address is not naturally aligned");
+  }
+  if (!iree_status_is_ok(status) && out_mapping->contents.data) {
+    status = iree_status_join(status, iree_hal_buffer_unmap_range(out_mapping));
+  }
+  return status;
+}
+
+static iree_status_t iree_hal_sync_device_atomic_wait(
+    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
+    iree_hal_atomic_wait_params_t params) {
+  iree_hal_buffer_mapping_t mapping = {{0}};
+  IREE_RETURN_IF_ERROR(iree_hal_sync_device_map_atomic_target(
+      target_buffer, target_offset, params.width, IREE_HAL_MEMORY_ACCESS_READ,
+      &mapping));
+  iree_hal_local_atomic_wait(mapping.contents.data, params);
+  return iree_hal_buffer_unmap_range(&mapping);
+}
+
+static iree_status_t iree_hal_sync_device_queue_atomic_wait_profiled(
+    iree_hal_sync_device_t* device,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
+    iree_hal_atomic_wait_params_t params) {
+  iree_hal_sync_device_profile_operation_t profile_operation;
+  iree_hal_sync_device_profile_operation_initialize(
+      IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_ATOMIC_WAIT,
+      iree_hal_atomic_width_byte_count(params.width), /*operation_count=*/1,
+      &profile_operation);
+  IREE_RETURN_IF_ERROR(iree_hal_sync_device_profiled_queue_op_begin(
+      device, wait_semaphore_list, signal_semaphore_list, &profile_operation));
+  iree_status_t status =
+      iree_hal_sync_device_atomic_wait(target_buffer, target_offset, params);
+  return iree_hal_sync_device_profiled_queue_op_end(
+      device, signal_semaphore_list, &profile_operation, status);
+}
+
+static iree_status_t iree_hal_sync_device_queue_atomic_wait(
+    iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
+    iree_hal_atomic_wait_params_t params) {
+  IREE_RETURN_IF_ERROR(iree_hal_sync_device_check_atomic_width(params.width));
+  iree_hal_sync_device_t* device = iree_hal_sync_device_cast(base_device);
+  if (IREE_UNLIKELY(device->profile_recorder)) {
+    return iree_hal_sync_device_queue_atomic_wait_profiled(
+        device, wait_semaphore_list, signal_semaphore_list, target_buffer,
+        target_offset, params);
+  }
+  IREE_RETURN_IF_ERROR(
+      iree_hal_sync_device_queue_op_begin(device, wait_semaphore_list));
+  iree_status_t status =
+      iree_hal_sync_device_atomic_wait(target_buffer, target_offset, params);
+  return iree_hal_sync_device_queue_op_end(device, signal_semaphore_list,
+                                           status);
+}
+
+static iree_status_t iree_hal_sync_device_atomic_store(
+    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
+    iree_hal_atomic_store_params_t params) {
+  iree_hal_buffer_mapping_t mapping = {{0}};
+  IREE_RETURN_IF_ERROR(iree_hal_sync_device_map_atomic_target(
+      target_buffer, target_offset, params.width, IREE_HAL_MEMORY_ACCESS_WRITE,
+      &mapping));
+  iree_hal_local_atomic_store(mapping.contents.data, params);
+  return iree_hal_buffer_unmap_range(&mapping);
+}
+
+static iree_status_t iree_hal_sync_device_queue_atomic_store_profiled(
+    iree_hal_sync_device_t* device,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
+    iree_hal_atomic_store_params_t params) {
+  iree_hal_sync_device_profile_operation_t profile_operation;
+  iree_hal_sync_device_profile_operation_initialize(
+      IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_ATOMIC_STORE,
+      iree_hal_atomic_width_byte_count(params.width), /*operation_count=*/1,
+      &profile_operation);
+  IREE_RETURN_IF_ERROR(iree_hal_sync_device_profiled_queue_op_begin(
+      device, wait_semaphore_list, signal_semaphore_list, &profile_operation));
+  iree_status_t status =
+      iree_hal_sync_device_atomic_store(target_buffer, target_offset, params);
+  return iree_hal_sync_device_profiled_queue_op_end(
+      device, signal_semaphore_list, &profile_operation, status);
+}
+
+static iree_status_t iree_hal_sync_device_queue_atomic_store(
+    iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
+    iree_hal_atomic_store_params_t params) {
+  IREE_RETURN_IF_ERROR(iree_hal_sync_device_check_atomic_width(params.width));
+  iree_hal_sync_device_t* device = iree_hal_sync_device_cast(base_device);
+  if (IREE_UNLIKELY(device->profile_recorder)) {
+    return iree_hal_sync_device_queue_atomic_store_profiled(
+        device, wait_semaphore_list, signal_semaphore_list, target_buffer,
+        target_offset, params);
+  }
+  IREE_RETURN_IF_ERROR(
+      iree_hal_sync_device_queue_op_begin(device, wait_semaphore_list));
+  iree_status_t status =
+      iree_hal_sync_device_atomic_store(target_buffer, target_offset, params);
+  return iree_hal_sync_device_queue_op_end(device, signal_semaphore_list,
+                                           status);
+}
+
+static iree_status_t iree_hal_sync_device_atomic_rmw(
+    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
+    iree_hal_atomic_rmw_params_t params) {
+  iree_hal_buffer_mapping_t mapping = {{0}};
+  IREE_RETURN_IF_ERROR(iree_hal_sync_device_map_atomic_target(
+      target_buffer, target_offset, params.width,
+      IREE_HAL_MEMORY_ACCESS_READ | IREE_HAL_MEMORY_ACCESS_WRITE, &mapping));
+  iree_hal_local_atomic_rmw(mapping.contents.data, params);
+  return iree_hal_buffer_unmap_range(&mapping);
+}
+
+static iree_status_t iree_hal_sync_device_queue_atomic_rmw_profiled(
+    iree_hal_sync_device_t* device,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
+    iree_hal_atomic_rmw_params_t params) {
+  iree_hal_sync_device_profile_operation_t profile_operation;
+  iree_hal_sync_device_profile_operation_initialize(
+      IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_ATOMIC_RMW,
+      iree_hal_atomic_width_byte_count(params.width), /*operation_count=*/1,
+      &profile_operation);
+  IREE_RETURN_IF_ERROR(iree_hal_sync_device_profiled_queue_op_begin(
+      device, wait_semaphore_list, signal_semaphore_list, &profile_operation));
+  iree_status_t status =
+      iree_hal_sync_device_atomic_rmw(target_buffer, target_offset, params);
+  return iree_hal_sync_device_profiled_queue_op_end(
+      device, signal_semaphore_list, &profile_operation, status);
+}
+
+static iree_status_t iree_hal_sync_device_queue_atomic_rmw(
+    iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
+    iree_hal_atomic_rmw_params_t params) {
+  IREE_RETURN_IF_ERROR(iree_hal_sync_device_check_atomic_width(params.width));
+  iree_hal_sync_device_t* device = iree_hal_sync_device_cast(base_device);
+  if (IREE_UNLIKELY(device->profile_recorder)) {
+    return iree_hal_sync_device_queue_atomic_rmw_profiled(
+        device, wait_semaphore_list, signal_semaphore_list, target_buffer,
+        target_offset, params);
+  }
+  IREE_RETURN_IF_ERROR(
+      iree_hal_sync_device_queue_op_begin(device, wait_semaphore_list));
+  iree_status_t status =
+      iree_hal_sync_device_atomic_rmw(target_buffer, target_offset, params);
+  return iree_hal_sync_device_queue_op_end(device, signal_semaphore_list,
+                                           status);
+}
+
 static iree_status_t iree_hal_sync_device_queue_timestamp(
     iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
     const iree_hal_semaphore_list_t wait_semaphore_list,
@@ -1813,7 +1993,6 @@ static const iree_hal_device_vtable_t iree_hal_sync_device_vtable = {
     .assign_topology_info = iree_hal_sync_device_assign_topology_info,
     .create_channel = iree_hal_sync_device_create_channel,
     .create_command_buffer = iree_hal_sync_device_create_command_buffer,
-    .create_event = iree_hal_sync_device_create_event,
     .load_executable = iree_hal_sync_device_load_executable,
     .import_file = iree_hal_sync_device_import_file,
     .create_semaphore = iree_hal_sync_device_create_semaphore,
@@ -1830,6 +2009,9 @@ static const iree_hal_device_vtable_t iree_hal_sync_device_vtable = {
     .queue_host_call = iree_hal_sync_device_queue_host_call,
     .queue_dispatch = iree_hal_sync_device_queue_dispatch,
     .queue_execute = iree_hal_sync_device_queue_execute,
+    .queue_atomic_wait = iree_hal_sync_device_queue_atomic_wait,
+    .queue_atomic_store = iree_hal_sync_device_queue_atomic_store,
+    .queue_atomic_rmw = iree_hal_sync_device_queue_atomic_rmw,
     .queue_timestamp = iree_hal_sync_device_queue_timestamp,
     .queue_flush = iree_hal_sync_device_queue_flush,
     .profiling_begin = iree_hal_sync_device_profiling_begin,

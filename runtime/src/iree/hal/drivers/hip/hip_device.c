@@ -1295,13 +1295,6 @@ static iree_status_t iree_hal_hip_device_create_command_buffer(
   }
 }
 
-static iree_status_t iree_hal_hip_device_create_event(
-    iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
-    iree_hal_event_flags_t flags, iree_hal_event_t** out_event) {
-  return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
-                          "event not yet implemented");
-}
-
 static iree_status_t iree_hal_hip_device_import_file(
     iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
     iree_hal_memory_access_t access, iree_io_file_handle_t* handle,
@@ -3057,6 +3050,37 @@ static iree_status_t iree_hal_hip_device_queue_execute(
   return status;
 }
 
+static iree_status_t iree_hal_hip_device_queue_atomic_wait(
+    iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
+    iree_hal_atomic_wait_params_t params) {
+  return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
+                          "HIP devices do not support atomic waits");
+}
+
+static iree_status_t iree_hal_hip_device_queue_atomic_store(
+    iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
+    iree_hal_atomic_store_params_t params) {
+  return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
+                          "HIP devices do not support atomic stores");
+}
+
+static iree_status_t iree_hal_hip_device_queue_atomic_rmw(
+    iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
+    iree_hal_atomic_rmw_params_t params) {
+  return iree_make_status(
+      IREE_STATUS_UNIMPLEMENTED,
+      "HIP devices do not support atomic read-modify-write");
+}
+
 static iree_status_t iree_hal_hip_device_queue_timestamp(
     iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
     const iree_hal_semaphore_list_t wait_semaphore_list,
@@ -3124,7 +3148,6 @@ static const iree_hal_device_vtable_t iree_hal_hip_device_vtable = {
     .assign_topology_info = iree_hal_hip_device_assign_topology_info,
     .create_channel = iree_hal_hip_device_create_channel,
     .create_command_buffer = iree_hal_hip_device_create_command_buffer,
-    .create_event = iree_hal_hip_device_create_event,
     .load_executable = iree_hal_hip_device_load_executable,
     .import_file = iree_hal_hip_device_import_file,
     .create_semaphore = iree_hal_hip_device_create_semaphore,
@@ -3141,6 +3164,9 @@ static const iree_hal_device_vtable_t iree_hal_hip_device_vtable = {
     .queue_host_call = iree_hal_device_queue_emulated_host_call,
     .queue_dispatch = iree_hal_device_queue_emulated_dispatch,
     .queue_execute = iree_hal_hip_device_queue_execute,
+    .queue_atomic_wait = iree_hal_hip_device_queue_atomic_wait,
+    .queue_atomic_store = iree_hal_hip_device_queue_atomic_store,
+    .queue_atomic_rmw = iree_hal_hip_device_queue_atomic_rmw,
     .queue_timestamp = iree_hal_hip_device_queue_timestamp,
     .queue_flush = iree_hal_hip_device_queue_flush,
     .profiling_begin = iree_hal_hip_device_profiling_begin,

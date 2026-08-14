@@ -470,6 +470,15 @@ enum iree_hal_profile_command_operation_type_e {
 
   // Command-buffer return operation.
   IREE_HAL_PROFILE_COMMAND_OPERATION_TYPE_RETURN = 9u,
+
+  // Atomic predicate wait operation.
+  IREE_HAL_PROFILE_COMMAND_OPERATION_TYPE_ATOMIC_WAIT = 10u,
+
+  // Atomic store operation.
+  IREE_HAL_PROFILE_COMMAND_OPERATION_TYPE_ATOMIC_STORE = 11u,
+
+  // Atomic read-modify-write operation.
+  IREE_HAL_PROFILE_COMMAND_OPERATION_TYPE_ATOMIC_RMW = 12u,
 };
 
 // Bitfield specifying properties of one command-buffer operation record.
@@ -540,9 +549,10 @@ typedef struct iree_hal_profile_command_operation_record_t {
   uint32_t workgroup_size[3];
   // Source byte offset for transfer operations, or 0 when not applicable.
   uint64_t source_offset;
-  // Target byte offset for transfer operations, or 0 when not applicable.
+  // Target byte offset for transfer and memory operations, or 0 when not
+  // applicable.
   uint64_t target_offset;
-  // Byte length for transfer operations, or 0 when not applicable.
+  // Byte length for transfer and memory operations, or 0 when not applicable.
   uint64_t length;
   // Producer-defined source binding ordinal, or UINT32_MAX when absent.
   uint32_t source_ordinal;
@@ -743,6 +753,15 @@ enum iree_hal_profile_queue_event_type_e {
 
   // User-visible host callback submitted through a queue operation.
   IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_HOST_CALL = 11u,
+
+  // Atomic predicate wait submitted through a queue operation.
+  IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_ATOMIC_WAIT = 12u,
+
+  // Atomic store submitted through a queue operation.
+  IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_ATOMIC_STORE = 13u,
+
+  // Atomic read-modify-write submitted through a queue operation.
+  IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_ATOMIC_RMW = 14u,
 };
 
 // Bitfield specifying properties of one queue event record.

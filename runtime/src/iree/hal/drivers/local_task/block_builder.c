@@ -506,10 +506,9 @@ iree_status_t iree_hal_cmd_block_builder_append_cmd(
   header->flags = flags;
   header->size_qwords = (uint8_t)(cmd_bytes / 8);
 
-  // All work commands (DISPATCH, FILL, COPY, UPDATE) get a region-local
-  // dispatch index for their tile_index entry in .data. The multi-worker
-  // processor uses this to distribute tiles across workers for all command
-  // types.
+  // All work commands get a region-local dispatch index for their tile_index
+  // entry in .data. The multi-worker processor uses this to distribute tiles
+  // across workers for all command types.
   header->dispatch_index = (uint8_t)builder->region_dispatch_count;
   builder->region_dispatch_count++;
   builder->total_dispatch_count++;

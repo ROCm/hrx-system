@@ -50,6 +50,17 @@ iree_runtime_cc_library(
     ],
 )
 
+# Device-spec-driven atomic operation test selection helpers.
+iree_runtime_cc_library(
+    name = "atomic_test_util",
+    testonly = True,
+    srcs = ["atomic_test_util.cc"],
+    hdrs = ["atomic_test_util.h"],
+    deps = [
+        "//runtime/src/iree/hal",
+    ],
+)
+
 # CtsTestBase fixture and helper utilities.
 iree_runtime_cc_library(
     name = "test_base",

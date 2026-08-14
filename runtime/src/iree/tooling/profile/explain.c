@@ -132,9 +132,9 @@ typedef struct iree_profile_explain_queue_row_t {
 
 typedef struct iree_profile_explain_queue_operation_totals_t {
   // Event counts indexed by iree_hal_profile_queue_event_type_t.
-  uint64_t event_counts[IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_HOST_CALL + 1];
+  uint64_t event_counts[IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_ATOMIC_RMW + 1];
   // Transfer payload bytes indexed by iree_hal_profile_queue_event_type_t.
-  uint64_t payload_bytes[IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_HOST_CALL + 1];
+  uint64_t payload_bytes[IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_ATOMIC_RMW + 1];
   // Event counts indexed by iree_hal_profile_queue_dependency_strategy_t.
   uint64_t strategy_counts
       [IREE_HAL_PROFILE_QUEUE_DEPENDENCY_STRATEGY_SOFTWARE_DEFER + 1];
@@ -328,7 +328,7 @@ static void iree_profile_explain_compute_queue_operation_totals(
        ++i) {
     const iree_hal_profile_queue_event_t* event =
         &context->queue_query.queue_events[i].record;
-    if (event->type <= IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_HOST_CALL) {
+    if (event->type <= IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_ATOMIC_RMW) {
       ++out_totals->event_counts[event->type];
       out_totals->payload_bytes[event->type] += event->payload_length;
     }
@@ -867,15 +867,19 @@ static void iree_profile_explain_print_text_queue_operations(
           payload_bytes[IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_UPDATE],
           payload_bytes[IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_READ],
           payload_bytes[IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_WRITE]);
-  fprintf(
-      file,
-      "  operation_counts dispatch/execute/alloca/dealloca/host_call=%" PRIu64
-      "/%" PRIu64 "/%" PRIu64 "/%" PRIu64 "/%" PRIu64 "\n",
-      event_counts[IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_DISPATCH],
-      event_counts[IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_EXECUTE],
-      event_counts[IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_ALLOCA],
-      event_counts[IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_DEALLOCA],
-      event_counts[IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_HOST_CALL]);
+  fprintf(file,
+          "  operation_counts "
+          "dispatch/execute/alloca/dealloca/host_call/atomic_wait/atomic_store/"
+          "atomic_rmw=%" PRIu64 "/%" PRIu64 "/%" PRIu64 "/%" PRIu64 "/%" PRIu64
+          "/%" PRIu64 "/%" PRIu64 "/%" PRIu64 "\n",
+          event_counts[IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_DISPATCH],
+          event_counts[IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_EXECUTE],
+          event_counts[IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_ALLOCA],
+          event_counts[IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_DEALLOCA],
+          event_counts[IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_HOST_CALL],
+          event_counts[IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_ATOMIC_WAIT],
+          event_counts[IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_ATOMIC_STORE],
+          event_counts[IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_ATOMIC_RMW]);
 }
 
 static void iree_profile_explain_print_text_memory_pressure(
@@ -1297,7 +1301,8 @@ static void iree_profile_explain_print_jsonl_queue_operations(
           ",\"read_bytes\":%" PRIu64 ",\"write_bytes\":%" PRIu64
           ",\"dispatches\":%" PRIu64 ",\"executes\":%" PRIu64
           ",\"allocas\":%" PRIu64 ",\"deallocas\":%" PRIu64
-          ",\"host_calls\":%" PRIu64 "}\n",
+          ",\"host_calls\":%" PRIu64 ",\"atomic_waits\":%" PRIu64
+          ",\"atomic_stores\":%" PRIu64 ",\"atomic_rmws\":%" PRIu64 "}\n",
           dispatch_context->queue_query.queue_event_count,
           strategy_counts[IREE_HAL_PROFILE_QUEUE_DEPENDENCY_STRATEGY_NONE],
           strategy_counts[IREE_HAL_PROFILE_QUEUE_DEPENDENCY_STRATEGY_INLINE],
@@ -1314,7 +1319,10 @@ static void iree_profile_explain_print_jsonl_queue_operations(
           event_counts[IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_EXECUTE],
           event_counts[IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_ALLOCA],
           event_counts[IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_DEALLOCA],
-          event_counts[IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_HOST_CALL]);
+          event_counts[IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_HOST_CALL],
+          event_counts[IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_ATOMIC_WAIT],
+          event_counts[IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_ATOMIC_STORE],
+          event_counts[IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_ATOMIC_RMW]);
 }
 
 static void iree_profile_explain_print_jsonl_memory_pressure(

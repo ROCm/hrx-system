@@ -309,6 +309,7 @@ static iree_status_t iree_hal_hip_device_spec_populate_queues(
         .timestamp_valid_bits = timestamp_frequency_hz ? 32 : 0,
         .timestamp_frequency_hz = timestamp_frequency_hz,
         .physical_device_affinity = 1ull << i,
+        .queue_affinity = (iree_hal_queue_affinity_t)1 << i,
         .role_flags = role_flags,
         .flags = IREE_HAL_QUEUE_FAMILY_SPEC_FLAG_NONE,
     };

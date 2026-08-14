@@ -39,8 +39,7 @@ constexpr uint32_t kAsanAllocationRawAddressEntrypoint = 1;
 static iree_hal_buffer_params_t AsanDeviceBufferParams() {
   iree_hal_buffer_params_t params = {0};
   params.type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
-  params.usage =
-      IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE | IREE_HAL_BUFFER_USAGE_TRANSFER;
+  params.usage = IREE_HAL_BUFFER_USAGE_STORAGE | IREE_HAL_BUFFER_USAGE_TRANSFER;
   return params;
 }
 
@@ -48,8 +47,7 @@ static iree_hal_buffer_params_t AsanQueueAllocaBufferParams() {
   iree_hal_buffer_params_t params = {0};
   params.type = IREE_HAL_MEMORY_TYPE_OPTIMAL_FOR_DEVICE;
   params.access = IREE_HAL_MEMORY_ACCESS_ALL;
-  params.usage =
-      IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE | IREE_HAL_BUFFER_USAGE_TRANSFER;
+  params.usage = IREE_HAL_BUFFER_USAGE_STORAGE | IREE_HAL_BUFFER_USAGE_TRANSFER;
   return params;
 }
 

@@ -32,7 +32,7 @@ constexpr iree_device_size_t kDefaultAllocationSize = 1024;
 class BufferMappingTest : public CtsTestBase<> {
  protected:
   // Allocates a buffer with HOST_VISIBLE + MAPPING usage for mapping tests.
-  // This differs from the base class helpers which use DISPATCH_STORAGE.
+  // This differs from the base class helpers which use STORAGE.
   iree_status_t AllocateUninitializedBuffer(iree_device_size_t buffer_size,
                                             iree_hal_buffer_t** out_buffer) {
     *out_buffer = NULL;

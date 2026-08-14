@@ -55,6 +55,7 @@ iree_runtime_cc_library(
     name = "headers",
     hdrs = [
         "api.h",
+        "atomic.h",
         "command_buffer.h",
         "debug_utils.h",
         "device_options.h",
@@ -80,6 +81,7 @@ iree_runtime_cc_test(
     deps = [
         ":device_spec",
         ":device_spec_builder",
+        ":headers",
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
         "//runtime/src/iree/hal/utils:device_spec_builder",
@@ -165,6 +167,18 @@ iree_runtime_cc_test(
 )
 
 iree_runtime_cc_test(
+    name = "physical_device_test",
+    srcs = ["physical_device_test.cc"],
+    deps = [
+        ":headers",
+        ":vulkan",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_test(
     name = "spirv_test",
     srcs = ["spirv_test.cc"],
     deps = [
@@ -182,6 +196,10 @@ iree_runtime_cc_library(
         "allocator.c",
         "allocator.h",
         "api.c",
+        "atomic.c",
+        "atomic.h",
+        "barrier.c",
+        "barrier.h",
         "buffer.c",
         "buffer.h",
         "builtins.c",
@@ -229,6 +247,7 @@ iree_runtime_cc_library(
         "//runtime/src/iree/base/threading",
         "//runtime/src/iree/base/threading:thread",
         "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/drivers/vulkan/device:library",
         "//runtime/src/iree/hal/drivers/vulkan/util:libvulkan",
         "//runtime/src/iree/hal/local:profile",
         "//runtime/src/iree/hal/local:transient_buffer",

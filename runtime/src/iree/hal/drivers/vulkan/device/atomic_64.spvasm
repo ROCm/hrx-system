@@ -1,0 +1,226 @@
+; Copyright 2026 The IREE Authors
+;
+; Licensed under the Apache License v2.0 with LLVM Exceptions.
+; See https://llvm.org/LICENSE.txt for license information.
+; SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+;
+; SPIR-V
+; Version: 1.6
+; Generator: Khronos SPIR-V Tools Assembler; 0
+; Bound: 174
+; Schema: 0
+               OpCapability Shader
+               OpCapability Int64Atomics
+               OpCapability PhysicalStorageBufferAddresses
+               OpCapability VulkanMemoryModel
+               OpCapability VulkanMemoryModelDeviceScope
+               OpExtension "SPV_KHR_vulkan_memory_model"
+          %1 = OpExtInstImport "GLSL.std.450"
+               OpMemoryModel PhysicalStorageBuffer64 Vulkan
+               OpEntryPoint GLCompute %main "main" %params
+               OpExecutionMode %main LocalSize 1 1 1
+               OpSource GLSL 460
+               OpSourceExtension "GL_EXT_buffer_reference"
+               OpSourceExtension "GL_EXT_scalar_block_layout"
+               OpSourceExtension "GL_EXT_shader_atomic_int64"
+               OpSourceExtension "GL_EXT_shader_explicit_arithmetic_types_int64"
+               OpSourceExtension "GL_GOOGLE_cpp_style_line_directive"
+               OpSourceExtension "GL_GOOGLE_include_directive"
+               OpSourceExtension "GL_KHR_memory_scope_semantics"
+               OpName %main "main"
+               OpName %Atomic64 "Atomic64"
+               OpMemberName %Atomic64 0 "value"
+               OpName %Parameters "Parameters"
+               OpMemberName %Parameters 0 "target_or_slot"
+               OpMemberName %Parameters 1 "value"
+               OpMemberName %Parameters 2 "mask"
+               OpMemberName %Parameters 3 "operation"
+               OpMemberName %Parameters 4 "flags"
+               OpName %params "params"
+               OpName %Atomic64Slot "Atomic64Slot"
+               OpMemberName %Atomic64Slot 0 "target"
+               OpDecorate %Atomic64 Block
+               OpMemberDecorate %Atomic64 0 Offset 0
+               OpDecorate %Parameters Block
+               OpMemberDecorate %Parameters 0 Offset 0
+               OpMemberDecorate %Parameters 1 Offset 8
+               OpMemberDecorate %Parameters 2 Offset 16
+               OpMemberDecorate %Parameters 3 Offset 24
+               OpMemberDecorate %Parameters 4 Offset 28
+               OpDecorate %Atomic64Slot Block
+               OpMemberDecorate %Atomic64Slot 0 NonWritable
+               OpMemberDecorate %Atomic64Slot 0 Offset 0
+       %void = OpTypeVoid
+         %12 = OpTypeFunction %void
+               OpTypeForwardPointer %_ptr_PhysicalStorageBuffer_Atomic64 PhysicalStorageBuffer
+      %ulong = OpTypeInt 64 0
+   %Atomic64 = OpTypeStruct %ulong
+%_ptr_PhysicalStorageBuffer_Atomic64 = OpTypePointer PhysicalStorageBuffer %Atomic64
+       %uint = OpTypeInt 32 0
+ %Parameters = OpTypeStruct %_ptr_PhysicalStorageBuffer_Atomic64 %ulong %ulong %uint %uint
+%_ptr_PushConstant_Parameters = OpTypePointer PushConstant %Parameters
+     %params = OpVariable %_ptr_PushConstant_Parameters PushConstant
+        %int = OpTypeInt 32 1
+      %int_0 = OpConstant %int 0
+%_ptr_PushConstant__ptr_PhysicalStorageBuffer_Atomic64 = OpTypePointer PushConstant %_ptr_PhysicalStorageBuffer_Atomic64
+      %int_4 = OpConstant %int 4
+%_ptr_PushConstant_uint = OpTypePointer PushConstant %uint
+     %uint_1 = OpConstant %uint 1
+     %uint_0 = OpConstant %uint 0
+       %bool = OpTypeBool
+               OpTypeForwardPointer %_ptr_PhysicalStorageBuffer_Atomic64Slot PhysicalStorageBuffer
+%Atomic64Slot = OpTypeStruct %_ptr_PhysicalStorageBuffer_Atomic64
+%_ptr_PhysicalStorageBuffer_Atomic64Slot = OpTypePointer PhysicalStorageBuffer %Atomic64Slot
+%_ptr_PhysicalStorageBuffer__ptr_PhysicalStorageBuffer_Atomic64 = OpTypePointer PhysicalStorageBuffer %_ptr_PhysicalStorageBuffer_Atomic64
+      %int_3 = OpConstant %int 3
+     %uint_2 = OpConstant %uint 2
+%_ptr_PhysicalStorageBuffer_ulong = OpTypePointer PhysicalStorageBuffer %ulong
+      %int_1 = OpConstant %int 1
+      %int_2 = OpConstant %int 2
+    %uint_66 = OpConstant %uint 66
+%_ptr_PushConstant_ulong = OpTypePointer PushConstant %ulong
+     %uint_3 = OpConstant %uint 3
+    %uint_68 = OpConstant %uint 68
+     %uint_4 = OpConstant %uint 4
+    %uint_72 = OpConstant %uint 72
+     %uint_5 = OpConstant %uint 5
+     %uint_6 = OpConstant %uint 6
+     %uint_7 = OpConstant %uint 7
+       %main = OpFunction %void None %12
+         %48 = OpLabel
+         %51 = OpAccessChain %_ptr_PushConstant__ptr_PhysicalStorageBuffer_Atomic64 %params %int_0
+         %52 = OpLoad %_ptr_PhysicalStorageBuffer_Atomic64 %51
+         %53 = OpAccessChain %_ptr_PushConstant_uint %params %int_4
+         %54 = OpLoad %uint %53
+         %55 = OpBitwiseAnd %uint %54 %uint_1
+         %56 = OpINotEqual %bool %55 %uint_0
+               OpSelectionMerge %57 None
+               OpBranchConditional %56 %58 %57
+         %58 = OpLabel
+         %61 = OpBitcast %_ptr_PhysicalStorageBuffer_Atomic64Slot %52
+         %62 = OpAccessChain %_ptr_PhysicalStorageBuffer__ptr_PhysicalStorageBuffer_Atomic64 %61 %int_0
+         %63 = OpLoad %_ptr_PhysicalStorageBuffer_Atomic64 %62 Aligned 8
+               OpBranch %57
+         %57 = OpLabel
+        %170 = OpPhi %_ptr_PhysicalStorageBuffer_Atomic64 %52 %48 %63 %58
+         %64 = OpAccessChain %_ptr_PushConstant_uint %params %int_3
+         %65 = OpLoad %uint %64
+         %66 = OpULessThanEqual %bool %65 %uint_2
+               OpSelectionMerge %67 None
+               OpBranchConditional %66 %68 %69
+         %68 = OpLabel
+               OpBranch %70
+         %70 = OpLabel
+               OpLoopMerge %109 %72 None
+               OpBranch %73
+         %73 = OpLabel
+         %75 = OpAccessChain %_ptr_PhysicalStorageBuffer_ulong %170 %int_0
+         %76 = OpAtomicLoad %ulong %75 %int_1 %uint_66
+         %78 = OpAccessChain %_ptr_PushConstant_ulong %params %int_2
+         %79 = OpLoad %ulong %78
+         %80 = OpBitwiseAnd %ulong %76 %79
+         %83 = OpIEqual %bool %65 %uint_0
+               OpSelectionMerge %84 None
+               OpBranchConditional %83 %85 %86
+         %85 = OpLabel
+         %88 = OpAccessChain %_ptr_PushConstant_ulong %params %int_1
+         %89 = OpLoad %ulong %88
+         %90 = OpIEqual %bool %80 %89
+               OpBranch %84
+         %86 = OpLabel
+         %93 = OpIEqual %bool %65 %uint_1
+               OpSelectionMerge %94 None
+               OpBranchConditional %93 %95 %96
+         %95 = OpLabel
+         %98 = OpAccessChain %_ptr_PushConstant_ulong %params %int_1
+         %99 = OpLoad %ulong %98
+        %100 = OpINotEqual %bool %80 %99
+               OpBranch %94
+         %96 = OpLabel
+        %102 = OpAccessChain %_ptr_PushConstant_ulong %params %int_1
+        %103 = OpLoad %ulong %102
+        %104 = OpUGreaterThanEqual %bool %80 %103
+               OpBranch %94
+         %94 = OpLabel
+        %172 = OpPhi %bool %100 %95 %104 %96
+               OpBranch %84
+         %84 = OpLabel
+        %173 = OpPhi %bool %90 %85 %172 %94
+               OpSelectionMerge %108 None
+               OpBranchConditional %173 %109 %108
+        %109 = OpLabel
+               OpBranch %67
+        %108 = OpLabel
+               OpBranch %72
+         %72 = OpLabel
+               OpBranch %70
+         %69 = OpLabel
+        %112 = OpIEqual %bool %65 %uint_3
+               OpSelectionMerge %113 None
+               OpBranchConditional %112 %114 %115
+        %114 = OpLabel
+        %117 = OpAccessChain %_ptr_PhysicalStorageBuffer_ulong %170 %int_0
+        %118 = OpAccessChain %_ptr_PushConstant_ulong %params %int_1
+        %119 = OpLoad %ulong %118
+               OpAtomicStore %117 %int_1 %uint_68 %119
+               OpBranch %113
+        %115 = OpLabel
+        %122 = OpIEqual %bool %65 %uint_4
+               OpSelectionMerge %123 None
+               OpBranchConditional %122 %124 %125
+        %124 = OpLabel
+        %127 = OpAccessChain %_ptr_PhysicalStorageBuffer_ulong %170 %int_0
+        %128 = OpAccessChain %_ptr_PushConstant_ulong %params %int_1
+        %129 = OpLoad %ulong %128
+        %130 = OpAtomicIAdd %ulong %127 %int_1 %uint_72 %129
+               OpBranch %123
+        %125 = OpLabel
+        %133 = OpIEqual %bool %65 %uint_5
+               OpSelectionMerge %134 None
+               OpBranchConditional %133 %135 %136
+        %135 = OpLabel
+        %138 = OpAccessChain %_ptr_PhysicalStorageBuffer_ulong %170 %int_0
+        %139 = OpAccessChain %_ptr_PushConstant_ulong %params %int_1
+        %140 = OpLoad %ulong %139
+        %141 = OpSNegate %ulong %140
+        %142 = OpAtomicIAdd %ulong %138 %int_1 %uint_72 %141
+               OpBranch %134
+        %136 = OpLabel
+        %145 = OpIEqual %bool %65 %uint_6
+               OpSelectionMerge %146 None
+               OpBranchConditional %145 %147 %148
+        %147 = OpLabel
+        %150 = OpAccessChain %_ptr_PhysicalStorageBuffer_ulong %170 %int_0
+        %151 = OpAccessChain %_ptr_PushConstant_ulong %params %int_1
+        %152 = OpLoad %ulong %151
+        %153 = OpAtomicAnd %ulong %150 %int_1 %uint_72 %152
+               OpBranch %146
+        %148 = OpLabel
+        %156 = OpIEqual %bool %65 %uint_7
+               OpSelectionMerge %157 None
+               OpBranchConditional %156 %158 %159
+        %158 = OpLabel
+        %161 = OpAccessChain %_ptr_PhysicalStorageBuffer_ulong %170 %int_0
+        %162 = OpAccessChain %_ptr_PushConstant_ulong %params %int_1
+        %163 = OpLoad %ulong %162
+        %164 = OpAtomicOr %ulong %161 %int_1 %uint_72 %163
+               OpBranch %157
+        %159 = OpLabel
+        %166 = OpAccessChain %_ptr_PhysicalStorageBuffer_ulong %170 %int_0
+        %167 = OpAccessChain %_ptr_PushConstant_ulong %params %int_1
+        %168 = OpLoad %ulong %167
+        %169 = OpAtomicXor %ulong %166 %int_1 %uint_72 %168
+               OpBranch %157
+        %157 = OpLabel
+               OpBranch %146
+        %146 = OpLabel
+               OpBranch %134
+        %134 = OpLabel
+               OpBranch %123
+        %123 = OpLabel
+               OpBranch %113
+        %113 = OpLabel
+               OpBranch %67
+         %67 = OpLabel
+               OpReturn
+               OpFunctionEnd

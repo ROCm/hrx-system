@@ -12,6 +12,7 @@
 
 #include "iree/base/internal/cpu.h"
 #include "iree/base/threading/wait_address.h"
+#include "iree/hal/local/atomic.h"
 #include "iree/hal/local/local_executable.h"
 #include "iree/task/executor.h"
 
@@ -288,6 +289,11 @@ static uint32_t iree_hal_cmd_region_tile_count(
       case IREE_HAL_CMD_UPDATE:
         tile_count += iree_hal_cmd_transfer_tile_count(
             ((const iree_hal_cmd_update_t*)cmd)->length);
+        break;
+      case IREE_HAL_CMD_ATOMIC_WAIT:
+      case IREE_HAL_CMD_ATOMIC_STORE:
+      case IREE_HAL_CMD_ATOMIC_RMW:
+        tile_count += 1;
         break;
       default:
         break;
@@ -1149,6 +1155,26 @@ static uint32_t iree_hal_cmd_execute_copy(const iree_hal_cmd_copy_t* copy,
   return completed;
 }
 
+// Claims the sole tile for a scalar work command. Region epochs prevent a
+// stale worker from claiming a recycled tile-index slot after a barrier.
+static bool iree_hal_cmd_claim_single_tile(iree_atomic_int64_t* tile_index,
+                                           int32_t region_epoch,
+                                           uint32_t worker_count) {
+  if (worker_count == 1) return true;
+  int64_t current = iree_atomic_load(tile_index, iree_memory_order_relaxed);
+  while (true) {
+    if ((current >> 32) != region_epoch || (uint32_t)current != 0) {
+      return false;
+    }
+    const int64_t desired = ((int64_t)region_epoch << 32) | 1;
+    if (iree_atomic_compare_exchange_weak(tile_index, &current, desired,
+                                          iree_memory_order_relaxed,
+                                          iree_memory_order_relaxed)) {
+      return true;
+    }
+  }
+}
+
 // Executes an UPDATE command. Copies inline host data from .text to a device
 // buffer. UPDATE commands are at most one transfer tile because the inline
 // source payload is capped by the block ISA command size.
@@ -1159,20 +1185,10 @@ static uint32_t iree_hal_cmd_execute_update(const iree_hal_cmd_update_t* update,
                                             uint32_t worker_count) {
   const uint32_t tile_count = iree_hal_cmd_transfer_tile_count(update->length);
   if (tile_count == 0) return 0;
-  if (worker_count > 1) {
-    int64_t current = iree_atomic_load(tile_index, iree_memory_order_relaxed);
-    while (true) {
-      if ((current >> 32) != region_epoch) return 0;
-      const uint32_t tile = (uint32_t)current;
-      if (tile != 0) return 0;
-      const int64_t desired =
-          ((int64_t)region_epoch << 32) | (int64_t)tile_count;
-      if (iree_atomic_compare_exchange_weak(tile_index, &current, desired,
-                                            iree_memory_order_relaxed,
-                                            iree_memory_order_relaxed)) {
-        break;
-      }
-    }
+  IREE_ASSERT(tile_count == 1,
+              "inline update commands must contain at most one tile");
+  if (!iree_hal_cmd_claim_single_tile(tile_index, region_epoch, worker_count)) {
+    return 0;
   }
 
   uint8_t* target = (uint8_t*)binding_ptrs[update->target_binding];
@@ -1180,6 +1196,68 @@ static uint32_t iree_hal_cmd_execute_update(const iree_hal_cmd_update_t* update,
          (size_t)update->length);
 
   return tile_count;
+}
+
+static iree_status_t iree_hal_cmd_resolve_atomic_target(
+    void** binding_ptrs, uint16_t target_binding, iree_hal_atomic_width_t width,
+    void** out_target) {
+  void* target = binding_ptrs[target_binding];
+  const iree_device_size_t byte_count = iree_hal_atomic_width_byte_count(width);
+  if (IREE_UNLIKELY(((uintptr_t)target % byte_count) != 0)) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "resolved atomic target address is not naturally aligned");
+  }
+  *out_target = target;
+  return iree_ok_status();
+}
+
+static iree_status_t iree_hal_cmd_execute_atomic_wait(
+    const iree_hal_cmd_atomic_wait_t* command, void** binding_ptrs,
+    iree_atomic_int64_t* tile_index, int32_t region_epoch,
+    uint32_t worker_count, uint32_t* out_tiles_completed) {
+  *out_tiles_completed = 0;
+  if (!iree_hal_cmd_claim_single_tile(tile_index, region_epoch, worker_count)) {
+    return iree_ok_status();
+  }
+  void* target = NULL;
+  IREE_RETURN_IF_ERROR(iree_hal_cmd_resolve_atomic_target(
+      binding_ptrs, command->target_binding, command->params.width, &target));
+  iree_hal_local_atomic_wait(target, command->params);
+  *out_tiles_completed = 1;
+  return iree_ok_status();
+}
+
+static iree_status_t iree_hal_cmd_execute_atomic_store(
+    const iree_hal_cmd_atomic_store_t* command, void** binding_ptrs,
+    iree_atomic_int64_t* tile_index, int32_t region_epoch,
+    uint32_t worker_count, uint32_t* out_tiles_completed) {
+  *out_tiles_completed = 0;
+  if (!iree_hal_cmd_claim_single_tile(tile_index, region_epoch, worker_count)) {
+    return iree_ok_status();
+  }
+  void* target = NULL;
+  IREE_RETURN_IF_ERROR(iree_hal_cmd_resolve_atomic_target(
+      binding_ptrs, command->target_binding, command->params.width, &target));
+  iree_hal_local_atomic_store(target, command->params);
+  *out_tiles_completed = 1;
+  return iree_ok_status();
+}
+
+static iree_status_t iree_hal_cmd_execute_atomic_rmw(
+    const iree_hal_cmd_atomic_rmw_t* command, void** binding_ptrs,
+    iree_atomic_int64_t* tile_index, int32_t region_epoch,
+    uint32_t worker_count, uint32_t* out_tiles_completed) {
+  *out_tiles_completed = 0;
+  if (!iree_hal_cmd_claim_single_tile(tile_index, region_epoch, worker_count)) {
+    return iree_ok_status();
+  }
+  void* target = NULL;
+  IREE_RETURN_IF_ERROR(iree_hal_cmd_resolve_atomic_target(
+      binding_ptrs, command->target_binding, command->params.width, &target));
+  iree_hal_local_atomic_rmw(target, command->params);
+  *out_tiles_completed = 1;
+  return iree_ok_status();
 }
 
 //===----------------------------------------------------------------------===//
@@ -1263,6 +1341,45 @@ static uint32_t iree_hal_cmd_block_processor_process_region(
         tiles_completed += iree_hal_cmd_execute_update(
             (const iree_hal_cmd_update_t*)cmd, binding_ptrs, tile_idx,
             region_epoch, context->worker_count);
+        break;
+      }
+      case IREE_HAL_CMD_ATOMIC_WAIT: {
+        uint32_t atomic_tiles = 0;
+        iree_status_t status = iree_hal_cmd_execute_atomic_wait(
+            (const iree_hal_cmd_atomic_wait_t*)cmd, binding_ptrs, tile_idx,
+            region_epoch, context->worker_count, &atomic_tiles);
+        if (IREE_UNLIKELY(!iree_status_is_ok(status))) {
+          iree_hal_cmd_block_processor_report_error(context, status);
+          IREE_TRACE_ZONE_END(z_region);
+          return tiles_completed;
+        }
+        tiles_completed += atomic_tiles;
+        break;
+      }
+      case IREE_HAL_CMD_ATOMIC_STORE: {
+        uint32_t atomic_tiles = 0;
+        iree_status_t status = iree_hal_cmd_execute_atomic_store(
+            (const iree_hal_cmd_atomic_store_t*)cmd, binding_ptrs, tile_idx,
+            region_epoch, context->worker_count, &atomic_tiles);
+        if (IREE_UNLIKELY(!iree_status_is_ok(status))) {
+          iree_hal_cmd_block_processor_report_error(context, status);
+          IREE_TRACE_ZONE_END(z_region);
+          return tiles_completed;
+        }
+        tiles_completed += atomic_tiles;
+        break;
+      }
+      case IREE_HAL_CMD_ATOMIC_RMW: {
+        uint32_t atomic_tiles = 0;
+        iree_status_t status = iree_hal_cmd_execute_atomic_rmw(
+            (const iree_hal_cmd_atomic_rmw_t*)cmd, binding_ptrs, tile_idx,
+            region_epoch, context->worker_count, &atomic_tiles);
+        if (IREE_UNLIKELY(!iree_status_is_ok(status))) {
+          iree_hal_cmd_block_processor_report_error(context, status);
+          IREE_TRACE_ZONE_END(z_region);
+          return tiles_completed;
+        }
+        tiles_completed += atomic_tiles;
         break;
       }
       default: {
@@ -1519,6 +1636,30 @@ static iree_status_t iree_hal_cmd_block_processor_execute_single_worker(
         case IREE_HAL_CMD_UPDATE: {
           *out_tiles_executed += iree_hal_cmd_execute_update(
               (const iree_hal_cmd_update_t*)cmd, binding_ptrs, NULL, 0, 1);
+          break;
+        }
+        case IREE_HAL_CMD_ATOMIC_WAIT: {
+          uint32_t tiles = 0;
+          IREE_RETURN_IF_ERROR(iree_hal_cmd_execute_atomic_wait(
+              (const iree_hal_cmd_atomic_wait_t*)cmd, binding_ptrs, NULL, 0, 1,
+              &tiles));
+          *out_tiles_executed += tiles;
+          break;
+        }
+        case IREE_HAL_CMD_ATOMIC_STORE: {
+          uint32_t tiles = 0;
+          IREE_RETURN_IF_ERROR(iree_hal_cmd_execute_atomic_store(
+              (const iree_hal_cmd_atomic_store_t*)cmd, binding_ptrs, NULL, 0, 1,
+              &tiles));
+          *out_tiles_executed += tiles;
+          break;
+        }
+        case IREE_HAL_CMD_ATOMIC_RMW: {
+          uint32_t tiles = 0;
+          IREE_RETURN_IF_ERROR(iree_hal_cmd_execute_atomic_rmw(
+              (const iree_hal_cmd_atomic_rmw_t*)cmd, binding_ptrs, NULL, 0, 1,
+              &tiles));
+          *out_tiles_executed += tiles;
           break;
         }
         case IREE_HAL_CMD_BARRIER: {

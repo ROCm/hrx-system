@@ -10,15 +10,12 @@
 #include <string.h>
 
 #include "iree/base/api.h"
-#include "iree/hal/device_group.h"
+#include "iree/hal/replay/recorder_device.h"
 #include "iree/io/file_handle.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif  // __cplusplus
-
-// Opaque shared recorder for one HAL replay capture stream.
-typedef struct iree_hal_replay_recorder_t iree_hal_replay_recorder_t;
 
 // Bitfield specifying replay recorder behavior.
 typedef uint32_t iree_hal_replay_recorder_flags_t;
@@ -125,17 +122,6 @@ IREE_API_EXPORT iree_status_t iree_hal_replay_recorder_scope_begin(
 // the caller and does not maintain a host-side scope stack.
 IREE_API_EXPORT iree_status_t iree_hal_replay_recorder_scope_end(
     iree_hal_replay_recorder_t* recorder, iree_string_view_t scope_name);
-
-// Creates a device group whose devices record operations to |recorder|.
-//
-// |base_group| is retained by the wrappers so the underlying devices keep their
-// original topology assignment. The returned group contains replacement wrapper
-// devices in the same topology order, with the source topology copied into the
-// returned group. All wrappers share |recorder| so multi-device captures are
-// emitted to one ordered stream.
-IREE_API_EXPORT iree_status_t iree_hal_replay_wrap_device_group(
-    iree_hal_replay_recorder_t* recorder, iree_hal_device_group_t* base_group,
-    iree_allocator_t host_allocator, iree_hal_device_group_t** out_group);
 
 #ifdef __cplusplus
 }  // extern "C"

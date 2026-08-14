@@ -6,6 +6,7 @@
 
 #include <string.h>
 
+#include "iree/hal/drivers/amdgpu/host_queue_atomic.h"
 #include "iree/hal/drivers/amdgpu/host_queue_blit.h"
 #include "iree/hal/drivers/amdgpu/host_queue_command_buffer.h"
 #include "iree/hal/drivers/amdgpu/host_queue_dispatch.h"
@@ -124,6 +125,19 @@ static iree_status_t iree_hal_amdgpu_pending_op_issue_execute(
   return status;
 }
 
+static iree_status_t iree_hal_amdgpu_pending_op_issue_atomic(
+    iree_hal_amdgpu_pending_op_t* op,
+    const iree_hal_amdgpu_wait_resolution_t* resolution,
+    iree_hal_amdgpu_pending_op_payload_issue_t* issue) {
+  iree_status_t status = iree_hal_amdgpu_host_queue_submit_atomic(
+      op->queue, resolution, op->signal_semaphore_list, &op->atomic,
+      IREE_HAL_AMDGPU_HOST_QUEUE_SUBMISSION_FLAG_NONE, &issue->ready);
+  if (iree_status_is_ok(status) && issue->ready) {
+    op->retained_resource_count = 0;
+  }
+  return status;
+}
+
 static iree_status_t iree_hal_amdgpu_pending_op_issue_alloca(
     iree_hal_amdgpu_pending_op_t* op,
     const iree_hal_amdgpu_wait_resolution_t* resolution,
@@ -200,6 +214,8 @@ iree_status_t iree_hal_amdgpu_pending_op_issue_payload(
       return iree_hal_amdgpu_pending_op_issue_dispatch(op, resolution, issue);
     case IREE_HAL_AMDGPU_PENDING_OP_EXECUTE:
       return iree_hal_amdgpu_pending_op_issue_execute(op, resolution, issue);
+    case IREE_HAL_AMDGPU_PENDING_OP_ATOMIC:
+      return iree_hal_amdgpu_pending_op_issue_atomic(op, resolution, issue);
     case IREE_HAL_AMDGPU_PENDING_OP_ALLOCA:
       return iree_hal_amdgpu_pending_op_issue_alloca(op, resolution, issue);
     case IREE_HAL_AMDGPU_PENDING_OP_DEALLOCA:

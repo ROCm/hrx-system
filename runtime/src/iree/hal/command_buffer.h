@@ -12,9 +12,9 @@
 
 #include "iree/base/api.h"
 #include "iree/hal/allocator.h"
+#include "iree/hal/atomic.h"
 #include "iree/hal/buffer.h"
 #include "iree/hal/channel.h"
-#include "iree/hal/event.h"
 #include "iree/hal/executable.h"
 #include "iree/hal/queue.h"
 #include "iree/hal/resource.h"
@@ -96,12 +96,15 @@ enum iree_hal_command_category_bits_t {
   IREE_HAL_COMMAND_CATEGORY_TRANSFER = 1u << 0,
   // Command is considered a dispatch operation (dispatch/execute).
   IREE_HAL_COMMAND_CATEGORY_DISPATCH = 1u << 1,
+  // Command is considered an atomic memory operation.
+  IREE_HAL_COMMAND_CATEGORY_ATOMIC = 1u << 2,
   // Commands may be of any type.
   // Using this value may prevent optimizations and if possible callers should
   // always specify the strictest set possible (for example, only transfer
   // commands to ensure they get placed on a DMA queue).
-  IREE_HAL_COMMAND_CATEGORY_ANY =
-      IREE_HAL_COMMAND_CATEGORY_TRANSFER | IREE_HAL_COMMAND_CATEGORY_DISPATCH,
+  IREE_HAL_COMMAND_CATEGORY_ANY = IREE_HAL_COMMAND_CATEGORY_TRANSFER |
+                                  IREE_HAL_COMMAND_CATEGORY_DISPATCH |
+                                  IREE_HAL_COMMAND_CATEGORY_ATOMIC,
 };
 typedef uint32_t iree_hal_command_category_t;
 
@@ -188,14 +191,24 @@ enum iree_hal_execution_stage_bits_t {
   IREE_HAL_EXECUTION_STAGE_COMMAND_RETIRE = 1u << 4,
   // Pseudo-stage for read/writes by the host. Not executed on device.
   IREE_HAL_EXECUTION_STAGE_HOST = 1u << 5,
+  // Stage where atomic memory operations execute.
+  IREE_HAL_EXECUTION_STAGE_ATOMIC = 1u << 6,
 };
 typedef uint32_t iree_hal_execution_stage_t;
 
-// Bitfield specifying flags controlling an execution dependency.
-//
-// Maps to VkDependencyFlags.
+// Bitfield specifying cache-coherence semantics for an execution dependency.
 enum iree_hal_execution_barrier_flag_bits_t {
   IREE_HAL_EXECUTION_BARRIER_FLAG_NONE = 0,
+
+  // Makes memory writes published by agents in the system coherence domain
+  // visible to accesses in the target scope. Implementations whose ordinary
+  // memory model is already system coherent may ignore this flag.
+  IREE_HAL_EXECUTION_BARRIER_FLAG_ACQUIRE_SYSTEM_SCOPE = 1ull << 0,
+
+  // Makes memory writes in the source scope available to agents in the system
+  // coherence domain. Implementations whose ordinary memory model is already
+  // system coherent may ignore this flag.
+  IREE_HAL_EXECUTION_BARRIER_FLAG_RELEASE_SYSTEM_SCOPE = 1ull << 1,
 };
 typedef uint64_t iree_hal_execution_barrier_flags_t;
 
@@ -223,6 +236,10 @@ enum iree_hal_access_scope_bits_t {
   IREE_HAL_ACCESS_SCOPE_MEMORY_READ = 1u << 8,
   // External/non-specific write.
   IREE_HAL_ACCESS_SCOPE_MEMORY_WRITE = 1u << 9,
+  // Read performed by an atomic memory operation.
+  IREE_HAL_ACCESS_SCOPE_ATOMIC_READ = 1u << 10,
+  // Write performed by an atomic memory operation.
+  IREE_HAL_ACCESS_SCOPE_ATOMIC_WRITE = 1u << 11,
 };
 typedef uint32_t iree_hal_access_scope_t;
 
@@ -744,13 +761,12 @@ static inline iree_status_t iree_hal_buffer_binding_table_resolve_ref(
 // Commands are recorded by the implementation for later submission to device
 // queues.
 //
-// Buffers, events, and programs referenced must remain valid and not be
-// modified or read while there are commands in-flight. The usual flow is to
-// populate input buffers, dispatch using those buffers, wait on a semaphore
-// until the buffers are guaranteed to no longer be in use, and then reuse the
-// buffers. Lifetimes are managed by the command buffer and all used resources
-// will be retained for as long as the command buffer is live or until it is
-// reset.
+// Resources referenced must remain valid and not be modified or read while
+// there are commands in-flight. The usual flow is to populate input buffers,
+// dispatch using those buffers, wait on a semaphore until the buffers are
+// guaranteed to no longer be in use, and then reuse the buffers. Lifetimes are
+// managed by the command buffer and all used resources will be retained for as
+// long as the command buffer is live.
 //
 // Buffers referenced by a command buffer may be either direct (a concrete
 // iree_hal_buffer_t reference) or indirect (a binding table slot ordinal).
@@ -767,19 +783,13 @@ static inline iree_status_t iree_hal_buffer_binding_table_resolve_ref(
 //
 // Errors that can be recognized when operations are enqueued will be returned
 // immediately, such as invalid argument errors. Errors that can only be
-// determined at execution time will be returned on semaphores. Once a failure
-// occurs the device queue will enter an error state that invalidates all
-// operations on the device queue (as ordering is not strict and any may still
-// be in-flight). In this case the user of the device queue should treat all
-// in-flight operations as cancelled and fully reset themselves. Other device
-// queues that may be waiting on events from the device queue will also enter
-// error states. Only once a user has acknowledged and cleared the error state
-// with a Reset the queue will become usable, and otherwise all operations will
-// return errors.
+// determined at execution time are reported by failing the submission's signal
+// semaphores. Semaphores remain permanently failed, and submissions waiting on
+// a failed semaphore also fail.
 //
 // Command buffers are thread-compatible. Use multiple command buffers if trying
 // to record commands from multiple threads. Command buffers must not be mutated
-// between when they have are submitted for execution on a queue and when the
+// between when they are submitted for execution on a queue and when the
 // semaphore fires indicating the completion of their execution.
 typedef struct iree_hal_command_buffer_t iree_hal_command_buffer_t;
 
@@ -860,6 +870,14 @@ IREE_API_EXPORT iree_status_t iree_hal_command_buffer_end_debug_group(
 // Defines a memory dependency between commands recorded before and after the
 // barrier. One or more memory or buffer barriers can be specified to indicate
 // between which stages or buffers the dependencies exist.
+//
+// |flags| specifies minimum cache-coherence semantics. Implementations may
+// provide stronger visibility when that is inherent in their memory model.
+// IREE_HAL_EXECUTION_BARRIER_FLAG_ACQUIRE_SYSTEM_SCOPE imports writes from the
+// system coherence domain before target-scope accesses, while
+// IREE_HAL_EXECUTION_BARRIER_FLAG_RELEASE_SYSTEM_SCOPE publishes source-scope
+// writes to that domain. HOST source and target stages imply the corresponding
+// acquire-system and release-system semantics, respectively.
 IREE_API_EXPORT iree_status_t iree_hal_command_buffer_execution_barrier(
     iree_hal_command_buffer_t* command_buffer,
     iree_hal_execution_stage_t source_stage_mask,
@@ -870,43 +888,59 @@ IREE_API_EXPORT iree_status_t iree_hal_command_buffer_execution_barrier(
     iree_host_size_t buffer_barrier_count,
     const iree_hal_buffer_barrier_t* buffer_barriers);
 
-// Sets an event to the signaled state.
-// |source_stage_mask| specifies when the event is signaled.
+// Waits until the atomic value at |target_ref| satisfies |params.condition|.
 //
-// Events are only valid within a single command buffer. Events can only be
-// used on non-transfer queues.
-IREE_API_EXPORT iree_status_t iree_hal_command_buffer_signal_event(
-    iree_hal_command_buffer_t* command_buffer, iree_hal_event_t* event,
-    iree_hal_execution_stage_t source_stage_mask);
-
-// Resets an event to the non-signaled state.
-// |source_stage_mask| specifies when the event is unsignaled.
+// |source_stage_mask| names earlier stages that must complete before the wait
+// begins. |target_stage_mask| names later stages that cannot begin until the
+// wait completes. Stages outside those masks may overlap the wait.
 //
-// Events are only valid within a single command buffer. Events can only be
-// used on non-transfer queues.
-IREE_API_EXPORT iree_status_t iree_hal_command_buffer_reset_event(
-    iree_hal_command_buffer_t* command_buffer, iree_hal_event_t* event,
-    iree_hal_execution_stage_t source_stage_mask);
-
-// Waits for one or more events to be signaled and defines a memory dependency
-// between the synchronization scope of the signal operations and the commands
-// following the wait.
+// Implementations may actively poll and occupy queue or execution resources
+// until the predicate is satisfied. If the producer is ordered behind the wait
+// or requires resources exhausted by waits, execution may deadlock. Issued
+// waits are not guaranteed to be cancellable and may prevent device teardown
+// from completing. Callers are responsible for constructing a producer
+// placement and dependency graph that can make progress.
 //
-// |source_stage_mask| must include ExecutionStage::kHost for Event::Signal to
-// be visible.
-//
-// Events are only valid within a single command buffer. Events remain
-// signaled even after waiting and must be reset to be reused. Events can only
-// be used on non-transfer queues.
-IREE_API_EXPORT iree_status_t iree_hal_command_buffer_wait_events(
-    iree_hal_command_buffer_t* command_buffer, iree_host_size_t event_count,
-    const iree_hal_event_t** events,
+// |target_ref.length| must equal the selected atomic width in bytes and the
+// resolved address must be naturally aligned. The buffer requires
+// IREE_HAL_BUFFER_USAGE_STORAGE_READ and IREE_HAL_MEMORY_ACCESS_READ.
+IREE_API_EXPORT iree_status_t iree_hal_command_buffer_atomic_wait(
+    iree_hal_command_buffer_t* command_buffer,
     iree_hal_execution_stage_t source_stage_mask,
     iree_hal_execution_stage_t target_stage_mask,
-    iree_host_size_t memory_barrier_count,
-    const iree_hal_memory_barrier_t* memory_barriers,
-    iree_host_size_t buffer_barrier_count,
-    const iree_hal_buffer_barrier_t* buffer_barriers);
+    iree_hal_buffer_ref_t target_ref, iree_hal_atomic_wait_params_t params);
+
+// Atomically stores |params.value| to |target_ref|.
+//
+// |source_stage_mask| names earlier stages that must complete before the store
+// begins. |target_stage_mask| names later stages that cannot begin until the
+// store completes. Stages outside those masks may overlap the store.
+//
+// |target_ref.length| must equal the selected atomic width in bytes and the
+// resolved address must be naturally aligned. The buffer requires
+// IREE_HAL_BUFFER_USAGE_STORAGE_WRITE and IREE_HAL_MEMORY_ACCESS_WRITE.
+IREE_API_EXPORT iree_status_t iree_hal_command_buffer_atomic_store(
+    iree_hal_command_buffer_t* command_buffer,
+    iree_hal_execution_stage_t source_stage_mask,
+    iree_hal_execution_stage_t target_stage_mask,
+    iree_hal_buffer_ref_t target_ref, iree_hal_atomic_store_params_t params);
+
+// Atomically applies |params.operation| to |target_ref| and discards the prior
+// value.
+//
+// |source_stage_mask| names earlier stages that must complete before the RMW
+// begins. |target_stage_mask| names later stages that cannot begin until the
+// RMW completes. Stages outside those masks may overlap the RMW.
+//
+// |target_ref.length| must equal the selected atomic width in bytes and the
+// resolved address must be naturally aligned. The buffer requires
+// IREE_HAL_BUFFER_USAGE_STORAGE and both IREE_HAL_MEMORY_ACCESS_READ and
+// IREE_HAL_MEMORY_ACCESS_WRITE.
+IREE_API_EXPORT iree_status_t iree_hal_command_buffer_atomic_rmw(
+    iree_hal_command_buffer_t* command_buffer,
+    iree_hal_execution_stage_t source_stage_mask,
+    iree_hal_execution_stage_t target_stage_mask,
+    iree_hal_buffer_ref_t target_ref, iree_hal_atomic_rmw_params_t params);
 
 // Advises the device about the usage of the given buffer.
 // The device may use this information to perform cache management or ignore it
@@ -1099,23 +1133,23 @@ typedef struct iree_hal_command_buffer_vtable_t {
       iree_host_size_t buffer_barrier_count,
       const iree_hal_buffer_barrier_t* buffer_barriers);
 
-  iree_status_t(IREE_API_PTR* signal_event)(
-      iree_hal_command_buffer_t* command_buffer, iree_hal_event_t* event,
-      iree_hal_execution_stage_t source_stage_mask);
-
-  iree_status_t(IREE_API_PTR* reset_event)(
-      iree_hal_command_buffer_t* command_buffer, iree_hal_event_t* event,
-      iree_hal_execution_stage_t source_stage_mask);
-
-  iree_status_t(IREE_API_PTR* wait_events)(
-      iree_hal_command_buffer_t* command_buffer, iree_host_size_t event_count,
-      const iree_hal_event_t** events,
+  iree_status_t(IREE_API_PTR* atomic_wait)(
+      iree_hal_command_buffer_t* command_buffer,
       iree_hal_execution_stage_t source_stage_mask,
       iree_hal_execution_stage_t target_stage_mask,
-      iree_host_size_t memory_barrier_count,
-      const iree_hal_memory_barrier_t* memory_barriers,
-      iree_host_size_t buffer_barrier_count,
-      const iree_hal_buffer_barrier_t* buffer_barriers);
+      iree_hal_buffer_ref_t target_ref, iree_hal_atomic_wait_params_t params);
+
+  iree_status_t(IREE_API_PTR* atomic_store)(
+      iree_hal_command_buffer_t* command_buffer,
+      iree_hal_execution_stage_t source_stage_mask,
+      iree_hal_execution_stage_t target_stage_mask,
+      iree_hal_buffer_ref_t target_ref, iree_hal_atomic_store_params_t params);
+
+  iree_status_t(IREE_API_PTR* atomic_rmw)(
+      iree_hal_command_buffer_t* command_buffer,
+      iree_hal_execution_stage_t source_stage_mask,
+      iree_hal_execution_stage_t target_stage_mask,
+      iree_hal_buffer_ref_t target_ref, iree_hal_atomic_rmw_params_t params);
 
   iree_status_t(IREE_API_PTR* advise_buffer)(
       iree_hal_command_buffer_t* command_buffer,

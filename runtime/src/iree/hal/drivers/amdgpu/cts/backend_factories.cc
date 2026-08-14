@@ -118,7 +118,6 @@ BackendInfo MakeAmdgpuCtsBackendInfo(const char* name,
   };
   info.unsupported_tests = {
       // Features and API surface not currently implemented.
-      {"EventTest.*", "AMDGPU does not implement HAL events"},
   };
   info.host_compatibility_fn = [mode](std::string* out_reason) {
     return IsAmdgpuCtsBackendHostCompatible(mode, out_reason);

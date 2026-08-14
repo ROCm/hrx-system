@@ -98,8 +98,7 @@ TEST_P(VulkanProfilingTest,
   iree_hal_buffer_params_t params = {0};
   params.type = IREE_HAL_MEMORY_TYPE_OPTIMAL_FOR_DEVICE;
   params.access = IREE_HAL_MEMORY_ACCESS_ALL;
-  params.usage =
-      IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE;
+  params.usage = IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_STORAGE;
 
   Ref<iree_hal_buffer_t> buffer;
   SemaphoreList empty_wait;

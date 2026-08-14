@@ -76,7 +76,7 @@ iree_cc_library(
     ::hostcall_message
     ::printf_format
     iree::base
-    iree::hal::drivers::amdgpu
+    iree::hal
     libhrx_defs
   INCLUDES
     "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../..>"
@@ -97,7 +97,6 @@ iree_cc_library(
     ::blocking_printf_protocol
     iree::base
     iree::hal
-    iree::hal::drivers::amdgpu
     libhrx_defs
   INCLUDES
     "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../..>"

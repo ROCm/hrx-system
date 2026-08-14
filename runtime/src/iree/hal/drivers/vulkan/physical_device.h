@@ -93,6 +93,27 @@ iree_status_t iree_hal_vulkan_enumerate_physical_device_handles(
     VkPhysicalDevice** out_physical_devices);
 
 //===----------------------------------------------------------------------===//
+// Physical-device memory classification
+//===----------------------------------------------------------------------===//
+
+// Returns true when |device_type| identifies a device that shares physical
+// memory placement with the host.
+//
+// Host-visible memory on other device types may be remotely accessible BAR or
+// managed memory and is not necessarily host-local.
+bool iree_hal_vulkan_physical_device_type_uses_unified_memory(
+    VkPhysicalDeviceType device_type);
+
+// Maps Vulkan physical-device and memory-type properties to HAL memory facts.
+//
+// Host-visible non-device-local memory is host-local. Host-visible
+// device-local memory is also host-local only on unified-memory device types.
+// Coherence remains independent of both locality properties.
+iree_hal_memory_type_t iree_hal_vulkan_memory_type_from_properties(
+    VkPhysicalDeviceType device_type,
+    VkMemoryPropertyFlags memory_property_flags);
+
+//===----------------------------------------------------------------------===//
 // iree_hal_vulkan_physical_device_snapshot_t
 //===----------------------------------------------------------------------===//
 

@@ -134,7 +134,22 @@ static iree_status_t CreateHostVisibleDispatchBuffer(
                 IREE_HAL_MEMORY_TYPE_HOST_VISIBLE |
                 IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE;
   params.access = IREE_HAL_MEMORY_ACCESS_ALL;
-  params.usage = IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE |
+  params.usage = IREE_HAL_BUFFER_USAGE_STORAGE |
+                 IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_MAPPING;
+  return iree_hal_allocator_allocate_buffer(allocator, params, buffer_size,
+                                            out_buffer);
+}
+
+static iree_status_t CreateHostVisibleIndirectParameterBuffer(
+    iree_hal_allocator_t* allocator, iree_device_size_t buffer_size,
+    iree_hal_buffer_t** out_buffer) {
+  iree_hal_buffer_params_t params = {0};
+  params.type = IREE_HAL_MEMORY_TYPE_OPTIMAL |
+                IREE_HAL_MEMORY_TYPE_HOST_VISIBLE |
+                IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE;
+  params.access = IREE_HAL_MEMORY_ACCESS_ALL;
+  params.usage = IREE_HAL_BUFFER_USAGE_DISPATCH_INDIRECT_PARAMETERS |
+                 IREE_HAL_BUFFER_USAGE_STORAGE |
                  IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_MAPPING;
   return iree_hal_allocator_allocate_buffer(allocator, params, buffer_size,
                                             out_buffer);
@@ -282,11 +297,8 @@ struct TwoDispatchCommandBuffer {
   Ref<iree_hal_command_buffer_t> command_buffer;
 };
 
-static iree_status_t CreateTwoDispatchCommandBuffer(
-    TestLogicalDevice* test_device, TwoDispatchCommandBuffer* out_fixture,
-    iree_hal_command_buffer_mode_t mode =
-        IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT |
-        IREE_HAL_COMMAND_BUFFER_MODE_RETAIN_PROFILE_METADATA) {
+static iree_status_t InitializeTwoDispatchCommandBufferResources(
+    TestLogicalDevice* test_device, TwoDispatchCommandBuffer* out_fixture) {
   IREE_RETURN_IF_ERROR(LoadCtsExecutable(
       test_device->base_device(),
       iree_make_cstring_view("command_buffer_dispatch_constants_bindings_test."
@@ -312,58 +324,79 @@ static iree_status_t CreateTwoDispatchCommandBuffer(
       out_fixture->output_buffer1.out()));
   IREE_RETURN_IF_ERROR(iree_hal_buffer_map_zero(
       out_fixture->output_buffer1, /*offset=*/0, IREE_HAL_WHOLE_BUFFER));
+  return iree_ok_status();
+}
 
-  IREE_RETURN_IF_ERROR(iree_hal_command_buffer_create(
-      test_device->base_device(), mode, IREE_HAL_COMMAND_CATEGORY_DISPATCH,
-      IREE_HAL_QUEUE_AFFINITY_ANY, /*binding_capacity=*/0,
-      out_fixture->command_buffer.out()));
-  IREE_RETURN_IF_ERROR(
-      iree_hal_command_buffer_begin(out_fixture->command_buffer));
+static iree_status_t AppendTwoDispatchOperations(
+    TwoDispatchCommandBuffer* fixture) {
   iree_hal_buffer_ref_t binding_refs0[2] = {
       iree_hal_make_buffer_ref(
-          out_fixture->input_buffer, /*offset=*/0,
-          iree_hal_buffer_byte_length(out_fixture->input_buffer)),
+          fixture->input_buffer, /*offset=*/0,
+          iree_hal_buffer_byte_length(fixture->input_buffer)),
       iree_hal_make_buffer_ref(
-          out_fixture->output_buffer0, /*offset=*/0,
-          iree_hal_buffer_byte_length(out_fixture->output_buffer0)),
+          fixture->output_buffer0, /*offset=*/0,
+          iree_hal_buffer_byte_length(fixture->output_buffer0)),
   };
   const iree_hal_buffer_ref_list_t bindings0 = {
       /*count=*/IREE_ARRAYSIZE(binding_refs0),
       /*values=*/binding_refs0,
   };
   IREE_RETURN_IF_ERROR(AppendConstantsBindingsDispatch(
-      out_fixture->command_buffer, out_fixture->executable, bindings0));
+      fixture->command_buffer, fixture->executable, bindings0));
   iree_hal_buffer_ref_t binding_refs1[2] = {
       iree_hal_make_buffer_ref(
-          out_fixture->input_buffer, /*offset=*/0,
-          iree_hal_buffer_byte_length(out_fixture->input_buffer)),
+          fixture->input_buffer, /*offset=*/0,
+          iree_hal_buffer_byte_length(fixture->input_buffer)),
       iree_hal_make_buffer_ref(
-          out_fixture->output_buffer1, /*offset=*/0,
-          iree_hal_buffer_byte_length(out_fixture->output_buffer1)),
+          fixture->output_buffer1, /*offset=*/0,
+          iree_hal_buffer_byte_length(fixture->output_buffer1)),
   };
   const iree_hal_buffer_ref_list_t bindings1 = {
       /*count=*/IREE_ARRAYSIZE(binding_refs1),
       /*values=*/binding_refs1,
   };
-  IREE_RETURN_IF_ERROR(AppendConstantsBindingsDispatch(
-      out_fixture->command_buffer, out_fixture->executable, bindings1));
+  return AppendConstantsBindingsDispatch(fixture->command_buffer,
+                                         fixture->executable, bindings1);
+}
+
+static iree_status_t CreateTwoDispatchCommandBuffer(
+    TestLogicalDevice* test_device, TwoDispatchCommandBuffer* out_fixture,
+    iree_hal_command_buffer_mode_t mode =
+        IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT |
+        IREE_HAL_COMMAND_BUFFER_MODE_RETAIN_PROFILE_METADATA) {
+  IREE_RETURN_IF_ERROR(
+      InitializeTwoDispatchCommandBufferResources(test_device, out_fixture));
+  IREE_RETURN_IF_ERROR(iree_hal_command_buffer_create(
+      test_device->base_device(), mode, IREE_HAL_COMMAND_CATEGORY_DISPATCH,
+      IREE_HAL_QUEUE_AFFINITY_ANY, /*binding_capacity=*/0,
+      out_fixture->command_buffer.out()));
+  IREE_RETURN_IF_ERROR(
+      iree_hal_command_buffer_begin(out_fixture->command_buffer));
+  IREE_RETURN_IF_ERROR(AppendTwoDispatchOperations(out_fixture));
   return iree_hal_command_buffer_end(out_fixture->command_buffer);
 }
 
-static void ExpectTwoDispatchOutputs(const TwoDispatchCommandBuffer& fixture) {
-  const uint32_t expected_values[4] = {13, 16, 19, 22};
+static void ExpectTwoDispatchOutputs(const TwoDispatchCommandBuffer& fixture,
+                                     const uint32_t expected_values[4]) {
   uint32_t output_values0[4] = {0, 0, 0, 0};
   IREE_ASSERT_OK(iree_hal_buffer_map_read(fixture.output_buffer0, /*offset=*/0,
                                           output_values0,
                                           sizeof(output_values0)));
   EXPECT_EQ(0,
-            memcmp(output_values0, expected_values, sizeof(expected_values)));
+            memcmp(output_values0, expected_values,
+                   IREE_ARRAYSIZE(output_values0) * sizeof(*expected_values)));
   uint32_t output_values1[4] = {0, 0, 0, 0};
   IREE_ASSERT_OK(iree_hal_buffer_map_read(fixture.output_buffer1, /*offset=*/0,
                                           output_values1,
                                           sizeof(output_values1)));
   EXPECT_EQ(0,
-            memcmp(output_values1, expected_values, sizeof(expected_values)));
+            memcmp(output_values1, expected_values,
+                   IREE_ARRAYSIZE(output_values1) * sizeof(*expected_values)));
+}
+
+static void ExpectTwoDispatchOutputs(const TwoDispatchCommandBuffer& fixture) {
+  const uint32_t expected_values[4] = {13, 16, 19, 22};
+  ExpectTwoDispatchOutputs(fixture, expected_values);
 }
 
 }  // namespace iree::hal::amdgpu::test

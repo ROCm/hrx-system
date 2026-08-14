@@ -6,6 +6,7 @@
 
 #include "iree/hal/local/device_spec_builder.h"
 
+#include "iree/hal/atomic.h"
 #include "iree/hal/local/cpu_device_spec.h"
 #include "iree/hal/memory/cpu_slab_provider.h"
 #include "iree/testing/gtest.h"
@@ -87,6 +88,22 @@ TEST(LocalDeviceSpecBuilderTest, CapturesCommonLocalFacts) {
       /*.backend_id=*/IREE_SV("local"),
       /*.queue_count=*/2,
       /*.default_queue_worker_count=*/8,
+      /*.atomic_capabilities=*/
+      {
+          /*.operations=*/
+          {
+              /*.device_scope_32=*/IREE_HAL_ATOMIC_OPERATION_FLAG_STORE,
+          },
+          /*.wait_conditions=*/{},
+      },
+      /*.zero_compute_atomic_capabilities=*/
+      {
+          /*.operations=*/
+          {
+              /*.device_scope_32=*/IREE_HAL_ATOMIC_OPERATION_FLAG_STORE,
+          },
+          /*.wait_conditions=*/{},
+      },
       /*.loader_count=*/1,
       /*.loaders=*/&loader_ptr,
   };
@@ -114,12 +131,31 @@ TEST(LocalDeviceSpecBuilderTest, CapturesCommonLocalFacts) {
             IREE_HAL_CPU_SLAB_PROVIDER_MEMORY_TYPE);
   EXPECT_EQ(memory->memory_types[0].allowed_buffer_usage,
             IREE_HAL_CPU_SLAB_PROVIDER_BUFFER_USAGE);
+  const iree_hal_atomic_operation_capabilities_t expected_memory_operations =
+      iree_hal_atomic_operation_capabilities_for_host(
+          IREE_HAL_ATOMIC_OPERATION_FLAGS_ALL);
+  EXPECT_EQ(memory->memory_types[0].atomic_operations.device_scope_32,
+            expected_memory_operations.device_scope_32);
+  EXPECT_EQ(memory->memory_types[0].atomic_operations.device_scope_64,
+            expected_memory_operations.device_scope_64);
+  EXPECT_EQ(memory->memory_types[0].atomic_operations.system_scope_32,
+            expected_memory_operations.system_scope_32);
+  EXPECT_EQ(memory->memory_types[0].atomic_operations.system_scope_64,
+            expected_memory_operations.system_scope_64);
 
   const iree_hal_device_queue_spec_t* queues =
       iree_hal_device_spec_queues(spec);
   ASSERT_NE(queues, nullptr);
   ASSERT_EQ(queues->family_count, 1);
   EXPECT_EQ(queues->families[0].queue_count, 2);
+  EXPECT_EQ(queues->families[0].queue_affinity, 3u);
+  EXPECT_TRUE(iree_all_bits_set(queues->families[0].role_flags,
+                                IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_ATOMIC));
+  EXPECT_EQ(queues->families[0].atomic_capabilities.operations.device_scope_32,
+            IREE_HAL_ATOMIC_OPERATION_FLAG_STORE);
+  EXPECT_EQ(queues->families[0]
+                .zero_compute_atomic_capabilities.operations.device_scope_32,
+            IREE_HAL_ATOMIC_OPERATION_FLAG_STORE);
 
   const iree_hal_device_dispatch_spec_t* dispatch =
       iree_hal_device_spec_dispatch(spec);

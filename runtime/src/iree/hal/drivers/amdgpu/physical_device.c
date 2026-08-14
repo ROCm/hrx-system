@@ -505,6 +505,20 @@ iree_hal_amdgpu_physical_device_query_svm_direct_host_access(
       out_direct_host_access);
 }
 
+static iree_status_t iree_hal_amdgpu_physical_device_query_agent_is_apu(
+    const iree_hal_amdgpu_libhsa_t* libhsa, hsa_agent_t device_agent,
+    bool* out_agent_is_apu) {
+  *out_agent_is_apu = false;
+  uint8_t memory_properties[8] = {0};
+  IREE_RETURN_IF_ERROR(iree_hsa_agent_get_info(
+      IREE_LIBHSA(libhsa), device_agent,
+      (hsa_agent_info_t)HSA_AMD_AGENT_INFO_MEMORY_PROPERTIES,
+      memory_properties));
+  *out_agent_is_apu =
+      hsa_flag_isset64(memory_properties, HSA_AMD_MEMORY_PROPERTY_AGENT_IS_APU);
+  return iree_ok_status();
+}
+
 static iree_status_t
 iree_hal_amdgpu_physical_device_initialize_cpu_visible_device_coarse_memory(
     const iree_hal_amdgpu_libhsa_t* libhsa, hsa_agent_t device_agent,
@@ -572,6 +586,10 @@ iree_hal_amdgpu_physical_device_initialize_memory_system_capabilities(
     const iree_hal_amdgpu_cpu_visible_device_coarse_memory_t*
         cpu_visible_device_coarse_memory,
     iree_hal_amdgpu_memory_system_capabilities_t* out_capabilities) {
+  bool agent_is_apu = false;
+  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_physical_device_query_agent_is_apu(
+      libhsa, device_agent, &agent_is_apu));
+
   bool svm_direct_host_access = false;
   IREE_RETURN_IF_ERROR(
       iree_hal_amdgpu_physical_device_query_svm_direct_host_access(
@@ -587,6 +605,7 @@ iree_hal_amdgpu_physical_device_initialize_memory_system_capabilities(
           },
       .device_local =
           {
+              .agent_is_apu = agent_is_apu ? 1u : 0u,
               .fine_memory_pool = fine_block_memory_pool,
               .coarse_cpu_visible_memory = cpu_visible_device_coarse_memory,
           },
@@ -775,8 +794,9 @@ iree_hal_amdgpu_physical_device_initialize_default_pool_resources(
       .memory_pool = out_physical_device->host_memory_pools.fine_pool,
       .vmem_memory_type = IREE_HAL_AMDGPU_VMEM_MEMORY_TYPE_DEFAULT,
       .asan_state = asan_state,
-      .memory_type =
-          IREE_HAL_MEMORY_TYPE_HOST_LOCAL | IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE,
+      .memory_type = IREE_HAL_MEMORY_TYPE_HOST_LOCAL |
+                     IREE_HAL_MEMORY_TYPE_HOST_COHERENT |
+                     IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE,
       .supported_usage =
           iree_hal_amdgpu_physical_device_mappable_pool_supported_usage(),
   };
@@ -890,11 +910,6 @@ iree_hal_amdgpu_physical_device_initialize_vendor_packet_strategy(
 
   iree_hal_amdgpu_vendor_packet_capability_flags_t vendor_packet_capabilities =
       iree_hal_amdgpu_select_vendor_packet_capabilities(gfxip_version);
-  if (options->enable_experimental_pm4_command_buffers) {
-    vendor_packet_capabilities |=
-        iree_hal_amdgpu_select_experimental_pm4_command_buffer_capabilities(
-            gfxip_version);
-  }
   iree_hal_amdgpu_pm4_timestamp_strategy_t pm4_timestamp_strategy =
       iree_hal_amdgpu_select_pm4_timestamp_strategy(gfxip_version);
   iree_hal_amdgpu_wait_barrier_strategy_t wait_barrier_strategy =
@@ -910,13 +925,41 @@ iree_hal_amdgpu_physical_device_initialize_vendor_packet_strategy(
   return iree_ok_status();
 }
 
+static iree_status_t
+iree_hal_amdgpu_physical_device_initialize_atomic_pm4_context(
+    const iree_hal_amdgpu_libhsa_t* libhsa,
+    iree_hal_amdgpu_physical_device_t* out_physical_device) {
+  if (!iree_hal_amdgpu_vendor_packet_capabilities_support_pm4_dispatch_command_buffers(
+          out_physical_device->vendor_packet_capabilities)) {
+    return iree_ok_status();
+  }
+  return iree_hal_amdgpu_device_atomic_pm4_context_initialize(
+      libhsa, out_physical_device->agent_target->primary_isa.identity.version,
+      &out_physical_device->device_kernels,
+      &out_physical_device->atomic_pm4_context);
+}
+
+static iree_status_t
+iree_hal_amdgpu_physical_device_initialize_transfer_pm4_context(
+    const iree_hal_amdgpu_libhsa_t* libhsa,
+    iree_hal_amdgpu_physical_device_t* out_physical_device) {
+  if (!iree_hal_amdgpu_vendor_packet_capabilities_support_pm4_dispatch_command_buffers(
+          out_physical_device->vendor_packet_capabilities)) {
+    return iree_ok_status();
+  }
+  return iree_hal_amdgpu_device_buffer_transfer_pm4_context_initialize(
+      libhsa, out_physical_device->agent_target->primary_isa.identity.version,
+      &out_physical_device->buffer_transfer_context,
+      &out_physical_device->transfer_pm4_context);
+}
+
 iree_status_t iree_hal_amdgpu_physical_device_initialize(
     iree_hal_device_t* logical_device, iree_hal_amdgpu_system_t* system,
     const iree_hal_amdgpu_physical_device_options_t* options,
     iree_async_proactor_t* proactor, iree_host_size_t host_ordinal,
     const iree_hal_amdgpu_host_memory_pools_t* host_memory_pools,
     iree_host_size_t device_ordinal, iree_hal_amdgpu_asan_state_t* asan_state,
-    const iree_hal_amdgpu_hostcall_provider_t* hostcall_provider,
+    const iree_hal_hostcall_provider_t* hostcall_provider,
     iree_allocator_t host_allocator,
     iree_hal_amdgpu_physical_device_t* out_physical_device) {
   IREE_ASSERT_ARGUMENT(logical_device);
@@ -1013,6 +1056,14 @@ iree_status_t iree_hal_amdgpu_physical_device_initialize(
         system, options, device_agent, out_physical_device);
   }
   if (iree_status_is_ok(status)) {
+    status = iree_hal_amdgpu_physical_device_initialize_atomic_pm4_context(
+        libhsa, out_physical_device);
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_amdgpu_physical_device_initialize_transfer_pm4_context(
+        libhsa, out_physical_device);
+  }
+  if (iree_status_is_ok(status)) {
     status =
         iree_hal_amdgpu_physical_device_initialize_cpu_visible_device_coarse_memory(
             libhsa, device_agent, coarse_block_memory_pool,
@@ -1035,12 +1086,11 @@ iree_status_t iree_hal_amdgpu_physical_device_initialize(
             out_physical_device->memory_system.svm.direct_host_access);
   }
   if (iree_status_is_ok(status) && hostcall_provider) {
-    const iree_hal_amdgpu_hostcall_provider_device_info_t device_info = {
-        .physical_device_ordinal = device_ordinal,
-        .compute_unit_count = out_physical_device->compute_unit_count,
-        .maximum_waves_per_compute_unit =
+    const iree_hal_hostcall_provider_device_info_t device_info = {
+        .physical_device_ordinal = (uint32_t)device_ordinal,
+        .execution_unit_count = out_physical_device->compute_unit_count,
+        .maximum_resident_subgroup_count =
             out_physical_device->maximum_waves_per_compute_unit,
-        .wavefront_size = out_physical_device->wavefront_size,
     };
     status = iree_hal_amdgpu_hostcall_provider_state_create(
         hostcall_provider, logical_device, libhsa, device_agent,

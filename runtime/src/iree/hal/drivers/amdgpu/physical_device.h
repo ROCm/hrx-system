@@ -10,6 +10,8 @@
 #include "iree/base/api.h"
 #include "iree/base/internal/arena.h"
 #include "iree/hal/drivers/amdgpu/buffer.h"
+#include "iree/hal/drivers/amdgpu/device/atomic_pm4.h"
+#include "iree/hal/drivers/amdgpu/device/blit_pm4.h"
 #include "iree/hal/drivers/amdgpu/host_queue.h"
 #include "iree/hal/drivers/amdgpu/host_queue_staging.h"
 #include "iree/hal/drivers/amdgpu/physical_device_capabilities.h"
@@ -164,10 +166,6 @@ typedef struct iree_hal_amdgpu_physical_device_options_t {
   // optimal device-side strategy for the GPU ISA.
   uint32_t force_wait_barrier_defer : 1;
 
-  // Enables PM4 dispatch command-buffer capabilities on unvalidated gfx9-gfx12
-  // targets for hardware bring-up experiments.
-  uint32_t enable_experimental_pm4_command_buffers : 1;
-
   // Suppresses fine-grained GPU-local memory pools even if HSA reports them.
   uint32_t suppress_device_fine_memory : 1;
 } iree_hal_amdgpu_physical_device_options_t;
@@ -295,8 +293,12 @@ typedef struct iree_hal_amdgpu_physical_device_t {
 
   // Builtin kernel table for this GPU agent.
   iree_hal_amdgpu_device_kernels_t device_kernels;
+  // PM4 launch metadata derived from the builtin atomic kernels.
+  iree_hal_amdgpu_device_atomic_pm4_context_t atomic_pm4_context;
   // Host/device-neutral transfer context that points into |device_kernels|.
   iree_hal_amdgpu_device_buffer_transfer_context_t buffer_transfer_context;
+  // PM4 launch metadata derived from the builtin transfer kernels.
+  iree_hal_amdgpu_device_buffer_transfer_pm4_context_t transfer_pm4_context;
 
   // Total number of host queue slots allocated in |host_queues|.
   iree_host_size_t host_queue_capacity;
@@ -338,7 +340,7 @@ iree_status_t iree_hal_amdgpu_physical_device_initialize(
     iree_async_proactor_t* proactor, iree_host_size_t host_ordinal,
     const iree_hal_amdgpu_host_memory_pools_t* host_memory_pools,
     iree_host_size_t device_ordinal, iree_hal_amdgpu_asan_state_t* asan_state,
-    const iree_hal_amdgpu_hostcall_provider_t* hostcall_provider,
+    const iree_hal_hostcall_provider_t* hostcall_provider,
     iree_allocator_t host_allocator,
     iree_hal_amdgpu_physical_device_t* out_physical_device);
 

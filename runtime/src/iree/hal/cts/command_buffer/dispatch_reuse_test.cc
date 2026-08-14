@@ -453,7 +453,7 @@ TEST_P(DispatchReuseTest, AllocaExecuteDeallocaCycle) {
   iree_hal_buffer_params_t alloca_params = {0};
   alloca_params.type = IREE_HAL_MEMORY_TYPE_OPTIMAL_FOR_DEVICE;
   alloca_params.usage =
-      IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE | IREE_HAL_BUFFER_USAGE_TRANSFER;
+      IREE_HAL_BUFFER_USAGE_STORAGE | IREE_HAL_BUFFER_USAGE_TRANSFER;
 
   // Run the alloca → execute → verify → dealloca cycle 3 times.
   // The dealloca must be deferred until AFTER host readback because the
@@ -512,7 +512,7 @@ TEST_P(DispatchReuseTest, PipelinedAllocaExecuteDealloca) {
   iree_hal_buffer_params_t alloca_params = {0};
   alloca_params.type = IREE_HAL_MEMORY_TYPE_OPTIMAL_FOR_DEVICE;
   alloca_params.usage =
-      IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE | IREE_HAL_BUFFER_USAGE_TRANSFER;
+      IREE_HAL_BUFFER_USAGE_STORAGE | IREE_HAL_BUFFER_USAGE_TRANSFER;
 
   SemaphoreList empty_wait;
 

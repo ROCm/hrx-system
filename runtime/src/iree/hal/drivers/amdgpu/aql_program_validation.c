@@ -105,6 +105,9 @@ iree_hal_amdgpu_aql_program_validate_metadata_block_commands(
       case IREE_HAL_AMDGPU_COMMAND_BUFFER_OPCODE_UPDATE:
       case IREE_HAL_AMDGPU_COMMAND_BUFFER_OPCODE_PROFILE_MARKER:
       case IREE_HAL_AMDGPU_COMMAND_BUFFER_OPCODE_COND_BRANCH:
+      case IREE_HAL_AMDGPU_COMMAND_BUFFER_OPCODE_ATOMIC_WAIT:
+      case IREE_HAL_AMDGPU_COMMAND_BUFFER_OPCODE_ATOMIC_STORE:
+      case IREE_HAL_AMDGPU_COMMAND_BUFFER_OPCODE_ATOMIC_RMW:
         status = iree_make_status(
             IREE_STATUS_UNIMPLEMENTED,
             "AQL command-buffer opcode %u metadata-only replay not yet wired",

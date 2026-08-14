@@ -20,7 +20,7 @@ extern "C" {
 #define IREE_HAL_REPLAY_FILE_MAGIC 0x50525249u
 
 // Major version of the IREE HAL replay file format.
-#define IREE_HAL_REPLAY_FILE_VERSION_MAJOR 3u
+#define IREE_HAL_REPLAY_FILE_VERSION_MAJOR 4u
 
 // Minor version of the IREE HAL replay file format.
 #define IREE_HAL_REPLAY_FILE_VERSION_MINOR 0u
@@ -70,7 +70,6 @@ enum iree_hal_replay_object_type_e {
   IREE_HAL_REPLAY_OBJECT_TYPE_EXECUTABLE = 6u,
   IREE_HAL_REPLAY_OBJECT_TYPE_SEMAPHORE = 7u,
   IREE_HAL_REPLAY_OBJECT_TYPE_FILE = 8u,
-  IREE_HAL_REPLAY_OBJECT_TYPE_EVENT = 9u,
   IREE_HAL_REPLAY_OBJECT_TYPE_CHANNEL = 10u,
   IREE_HAL_REPLAY_OBJECT_TYPE_HOST_CALL = 11u,
 };
@@ -84,7 +83,6 @@ enum iree_hal_replay_operation_code_e {
   IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_ASSIGN_TOPOLOGY_INFO = 5u,
   IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_CREATE_CHANNEL = 6u,
   IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_CREATE_COMMAND_BUFFER = 7u,
-  IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_CREATE_EVENT = 8u,
   IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_LOAD_EXECUTABLE = 9u,
   IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_IMPORT_FILE = 10u,
   IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_CREATE_SEMAPHORE = 11u,
@@ -106,6 +104,9 @@ enum iree_hal_replay_operation_code_e {
   IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_EXTERNAL_CAPTURE_BEGIN = 27u,
   IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_EXTERNAL_CAPTURE_END = 28u,
   IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_QUEUE_TIMESTAMP = 29u,
+  IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_QUEUE_ATOMIC_WAIT = 30u,
+  IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_QUEUE_ATOMIC_STORE = 31u,
+  IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_QUEUE_ATOMIC_RMW = 32u,
 
   IREE_HAL_REPLAY_OPERATION_CODE_REPLAY_SCOPE_BEGIN = 50u,
   IREE_HAL_REPLAY_OPERATION_CODE_REPLAY_SCOPE_END = 51u,
@@ -136,15 +137,15 @@ enum iree_hal_replay_operation_code_e {
   IREE_HAL_REPLAY_OPERATION_CODE_COMMAND_BUFFER_BEGIN_DEBUG_GROUP = 302u,
   IREE_HAL_REPLAY_OPERATION_CODE_COMMAND_BUFFER_END_DEBUG_GROUP = 303u,
   IREE_HAL_REPLAY_OPERATION_CODE_COMMAND_BUFFER_EXECUTION_BARRIER = 304u,
-  IREE_HAL_REPLAY_OPERATION_CODE_COMMAND_BUFFER_SIGNAL_EVENT = 305u,
-  IREE_HAL_REPLAY_OPERATION_CODE_COMMAND_BUFFER_RESET_EVENT = 306u,
-  IREE_HAL_REPLAY_OPERATION_CODE_COMMAND_BUFFER_WAIT_EVENTS = 307u,
   IREE_HAL_REPLAY_OPERATION_CODE_COMMAND_BUFFER_ADVISE_BUFFER = 308u,
   IREE_HAL_REPLAY_OPERATION_CODE_COMMAND_BUFFER_FILL_BUFFER = 309u,
   IREE_HAL_REPLAY_OPERATION_CODE_COMMAND_BUFFER_UPDATE_BUFFER = 310u,
   IREE_HAL_REPLAY_OPERATION_CODE_COMMAND_BUFFER_COPY_BUFFER = 311u,
   IREE_HAL_REPLAY_OPERATION_CODE_COMMAND_BUFFER_COLLECTIVE = 312u,
   IREE_HAL_REPLAY_OPERATION_CODE_COMMAND_BUFFER_DISPATCH = 313u,
+  IREE_HAL_REPLAY_OPERATION_CODE_COMMAND_BUFFER_ATOMIC_WAIT = 314u,
+  IREE_HAL_REPLAY_OPERATION_CODE_COMMAND_BUFFER_ATOMIC_STORE = 315u,
+  IREE_HAL_REPLAY_OPERATION_CODE_COMMAND_BUFFER_ATOMIC_RMW = 316u,
 
   IREE_HAL_REPLAY_OPERATION_CODE_EXECUTABLE_FUNCTION_COUNT = 500u,
   IREE_HAL_REPLAY_OPERATION_CODE_EXECUTABLE_FUNCTION_INFO = 501u,
@@ -174,14 +175,17 @@ enum iree_hal_replay_payload_type_e {
   IREE_HAL_REPLAY_PAYLOAD_TYPE_DEVICE_QUEUE_COPY = 16u,
   IREE_HAL_REPLAY_PAYLOAD_TYPE_COMMAND_BUFFER_FILL_BUFFER = 17u,
   IREE_HAL_REPLAY_PAYLOAD_TYPE_COMMAND_BUFFER_UPDATE_BUFFER = 18u,
-  IREE_HAL_REPLAY_PAYLOAD_TYPE_EVENT_OBJECT = 19u,
-  IREE_HAL_REPLAY_PAYLOAD_TYPE_COMMAND_BUFFER_EVENT = 20u,
-  IREE_HAL_REPLAY_PAYLOAD_TYPE_COMMAND_BUFFER_WAIT_EVENTS = 21u,
   IREE_HAL_REPLAY_PAYLOAD_TYPE_FILE_OBJECT = 22u,
   IREE_HAL_REPLAY_PAYLOAD_TYPE_DEVICE_QUEUE_READ = 23u,
   IREE_HAL_REPLAY_PAYLOAD_TYPE_DEVICE_QUEUE_WRITE = 24u,
   IREE_HAL_REPLAY_PAYLOAD_TYPE_ALLOCATOR_IMPORT_BUFFER = 25u,
   IREE_HAL_REPLAY_PAYLOAD_TYPE_REPLAY_SCOPE = 26u,
+  IREE_HAL_REPLAY_PAYLOAD_TYPE_COMMAND_BUFFER_ATOMIC_WAIT = 27u,
+  IREE_HAL_REPLAY_PAYLOAD_TYPE_COMMAND_BUFFER_ATOMIC_STORE = 28u,
+  IREE_HAL_REPLAY_PAYLOAD_TYPE_COMMAND_BUFFER_ATOMIC_RMW = 29u,
+  IREE_HAL_REPLAY_PAYLOAD_TYPE_DEVICE_QUEUE_ATOMIC_WAIT = 30u,
+  IREE_HAL_REPLAY_PAYLOAD_TYPE_DEVICE_QUEUE_ATOMIC_STORE = 31u,
+  IREE_HAL_REPLAY_PAYLOAD_TYPE_DEVICE_QUEUE_ATOMIC_RMW = 32u,
 };
 
 // Bitfield specifying properties of one replay scope marker.
@@ -446,18 +450,6 @@ typedef struct iree_hal_replay_file_object_payload_t {
   uint8_t digest[32];
 } iree_hal_replay_file_object_payload_t;
 
-// Payload describing a captured event object.
-typedef struct iree_hal_replay_event_object_payload_t {
-  // Queue affinity requested at creation.
-  uint64_t queue_affinity;
-  // Event flag bits requested at creation.
-  uint32_t flags;
-  // Reserved for future event object metadata; must be zero.
-  uint32_t reserved0;
-  // Reserved for future event object metadata; must be zero.
-  uint64_t reserved1;
-} iree_hal_replay_event_object_payload_t;
-
 // Payload describing a replay annotation scope followed by UTF-8 name bytes.
 typedef struct iree_hal_replay_scope_payload_t {
   // Byte length of the scope name following this header.
@@ -492,6 +484,54 @@ typedef struct iree_hal_replay_buffer_ref_payload_t {
   uint32_t reserved0;
 } iree_hal_replay_buffer_ref_payload_t;
 
+// Serialized parameters for an atomic wait operation.
+typedef struct iree_hal_replay_atomic_wait_params_payload_t {
+  // Value compared against the loaded target value after masking.
+  uint64_t value;
+  // Bit mask applied to loaded and comparison values.
+  uint64_t mask;
+  // Atomic ordering and visibility flag bits.
+  uint32_t flags;
+  // Atomic value width.
+  uint8_t width;
+  // Atomic wait comparison condition.
+  uint8_t condition;
+  // Reserved for future atomic wait metadata; must be zero.
+  uint16_t reserved0;
+} iree_hal_replay_atomic_wait_params_payload_t;
+static_assert(sizeof(iree_hal_replay_atomic_wait_params_payload_t) == 24,
+              "atomic wait replay parameters must be 24 bytes");
+
+// Serialized parameters for an atomic store operation.
+typedef struct iree_hal_replay_atomic_store_params_payload_t {
+  // Value stored to the target.
+  uint64_t value;
+  // Atomic ordering and visibility flag bits.
+  uint32_t flags;
+  // Atomic value width.
+  uint8_t width;
+  // Reserved for future atomic store metadata; must be zero.
+  uint8_t reserved0[3];
+} iree_hal_replay_atomic_store_params_payload_t;
+static_assert(sizeof(iree_hal_replay_atomic_store_params_payload_t) == 16,
+              "atomic store replay parameters must be 16 bytes");
+
+// Serialized parameters for an atomic read-modify-write operation.
+typedef struct iree_hal_replay_atomic_rmw_params_payload_t {
+  // Operand combined with the loaded target value.
+  uint64_t operand;
+  // Atomic ordering and visibility flag bits.
+  uint32_t flags;
+  // Atomic value width.
+  uint8_t width;
+  // Atomic read-modify-write operation.
+  uint8_t operation;
+  // Reserved for future atomic read-modify-write metadata; must be zero.
+  uint16_t reserved0;
+} iree_hal_replay_atomic_rmw_params_payload_t;
+static_assert(sizeof(iree_hal_replay_atomic_rmw_params_payload_t) == 16,
+              "atomic RMW replay parameters must be 16 bytes");
+
 // Payload describing one captured memory barrier.
 typedef struct iree_hal_replay_memory_barrier_payload_t {
   // Access scopes prior to the barrier.
@@ -510,31 +550,6 @@ typedef struct iree_hal_replay_buffer_barrier_payload_t {
   iree_hal_replay_buffer_ref_payload_t buffer_ref;
 } iree_hal_replay_buffer_barrier_payload_t;
 
-// Payload describing a command buffer event signal/reset request.
-typedef struct iree_hal_replay_command_buffer_event_payload_t {
-  // Session-local event object id.
-  iree_hal_replay_object_id_t event_id;
-  // Source execution stage mask.
-  uint64_t source_stage_mask;
-} iree_hal_replay_command_buffer_event_payload_t;
-
-// Payload describing a command buffer event wait request followed by event ids
-// and barrier payloads.
-typedef struct iree_hal_replay_command_buffer_wait_events_payload_t {
-  // Source execution stage mask.
-  uint64_t source_stage_mask;
-  // Target execution stage mask.
-  uint64_t target_stage_mask;
-  // Number of event object ids following this header.
-  uint64_t event_count;
-  // Number of memory barrier payloads following event ids.
-  uint64_t memory_barrier_count;
-  // Number of buffer barrier payloads following the memory barriers.
-  uint64_t buffer_barrier_count;
-  // Reserved for future wait-events metadata; must be zero.
-  uint64_t reserved0;
-} iree_hal_replay_command_buffer_wait_events_payload_t;
-
 // Payload describing a command buffer execution barrier request.
 typedef struct iree_hal_replay_command_buffer_execution_barrier_payload_t {
   // Source execution stage mask.
@@ -548,6 +563,50 @@ typedef struct iree_hal_replay_command_buffer_execution_barrier_payload_t {
   // Number of buffer barrier payloads following the memory barriers.
   uint64_t buffer_barrier_count;
 } iree_hal_replay_command_buffer_execution_barrier_payload_t;
+
+// Payload describing a command buffer atomic wait operation.
+typedef struct iree_hal_replay_command_buffer_atomic_wait_payload_t {
+  // Target buffer reference containing the atomic value.
+  iree_hal_replay_buffer_ref_payload_t target_ref;
+  // Source execution stage mask.
+  uint64_t source_stage_mask;
+  // Target execution stage mask.
+  uint64_t target_stage_mask;
+  // Atomic wait parameters.
+  iree_hal_replay_atomic_wait_params_payload_t params;
+} iree_hal_replay_command_buffer_atomic_wait_payload_t;
+static_assert(sizeof(iree_hal_replay_command_buffer_atomic_wait_payload_t) ==
+                  72,
+              "command buffer atomic wait replay payload must be 72 bytes");
+
+// Payload describing a command buffer atomic store operation.
+typedef struct iree_hal_replay_command_buffer_atomic_store_payload_t {
+  // Target buffer reference containing the atomic value.
+  iree_hal_replay_buffer_ref_payload_t target_ref;
+  // Source execution stage mask.
+  uint64_t source_stage_mask;
+  // Target execution stage mask.
+  uint64_t target_stage_mask;
+  // Atomic store parameters.
+  iree_hal_replay_atomic_store_params_payload_t params;
+} iree_hal_replay_command_buffer_atomic_store_payload_t;
+static_assert(sizeof(iree_hal_replay_command_buffer_atomic_store_payload_t) ==
+                  64,
+              "command buffer atomic store replay payload must be 64 bytes");
+
+// Payload describing a command buffer atomic read-modify-write operation.
+typedef struct iree_hal_replay_command_buffer_atomic_rmw_payload_t {
+  // Target buffer reference containing the atomic value.
+  iree_hal_replay_buffer_ref_payload_t target_ref;
+  // Source execution stage mask.
+  uint64_t source_stage_mask;
+  // Target execution stage mask.
+  uint64_t target_stage_mask;
+  // Atomic read-modify-write parameters.
+  iree_hal_replay_atomic_rmw_params_payload_t params;
+} iree_hal_replay_command_buffer_atomic_rmw_payload_t;
+static_assert(sizeof(iree_hal_replay_command_buffer_atomic_rmw_payload_t) == 64,
+              "command buffer atomic RMW replay payload must be 64 bytes");
 
 // Payload describing a dispatch followed by constants and serialized buffer
 // references.
@@ -716,6 +775,55 @@ typedef struct iree_hal_replay_device_queue_write_payload_t {
   // Number of signal semaphore timepoints following the wait timepoints.
   uint64_t signal_semaphore_count;
 } iree_hal_replay_device_queue_write_payload_t;
+
+// Payload describing a device queue atomic wait followed by semaphore lists.
+typedef struct iree_hal_replay_device_queue_atomic_wait_payload_t {
+  // Direct target buffer reference containing the atomic value.
+  iree_hal_replay_buffer_ref_payload_t target_ref;
+  // Queue affinity used for the submission.
+  uint64_t queue_affinity;
+  // Number of wait semaphore timepoints following this header.
+  uint64_t wait_semaphore_count;
+  // Number of signal semaphore timepoints following the wait timepoints.
+  uint64_t signal_semaphore_count;
+  // Atomic wait parameters.
+  iree_hal_replay_atomic_wait_params_payload_t params;
+} iree_hal_replay_device_queue_atomic_wait_payload_t;
+static_assert(sizeof(iree_hal_replay_device_queue_atomic_wait_payload_t) == 80,
+              "device queue atomic wait replay payload must be 80 bytes");
+
+// Payload describing a device queue atomic store followed by semaphore lists.
+typedef struct iree_hal_replay_device_queue_atomic_store_payload_t {
+  // Direct target buffer reference containing the atomic value.
+  iree_hal_replay_buffer_ref_payload_t target_ref;
+  // Queue affinity used for the submission.
+  uint64_t queue_affinity;
+  // Number of wait semaphore timepoints following this header.
+  uint64_t wait_semaphore_count;
+  // Number of signal semaphore timepoints following the wait timepoints.
+  uint64_t signal_semaphore_count;
+  // Atomic store parameters.
+  iree_hal_replay_atomic_store_params_payload_t params;
+} iree_hal_replay_device_queue_atomic_store_payload_t;
+static_assert(sizeof(iree_hal_replay_device_queue_atomic_store_payload_t) == 72,
+              "device queue atomic store replay payload must be 72 bytes");
+
+// Payload describing a device queue atomic read-modify-write followed by
+// semaphore lists.
+typedef struct iree_hal_replay_device_queue_atomic_rmw_payload_t {
+  // Direct target buffer reference containing the atomic value.
+  iree_hal_replay_buffer_ref_payload_t target_ref;
+  // Queue affinity used for the submission.
+  uint64_t queue_affinity;
+  // Number of wait semaphore timepoints following this header.
+  uint64_t wait_semaphore_count;
+  // Number of signal semaphore timepoints following the wait timepoints.
+  uint64_t signal_semaphore_count;
+  // Atomic read-modify-write parameters.
+  iree_hal_replay_atomic_rmw_params_payload_t params;
+} iree_hal_replay_device_queue_atomic_rmw_payload_t;
+static_assert(sizeof(iree_hal_replay_device_queue_atomic_rmw_payload_t) == 72,
+              "device queue atomic RMW replay payload must be 72 bytes");
 
 // Payload describing a command buffer fill operation followed by the fill
 // pattern bytes.

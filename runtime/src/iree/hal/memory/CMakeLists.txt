@@ -159,6 +159,7 @@ iree_cc_library(
   DEPS
     ::slab_provider
     iree::base
+    iree::hal
   PUBLIC
 )
 

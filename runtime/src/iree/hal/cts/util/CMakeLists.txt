@@ -39,6 +39,19 @@ iree_cc_library(
 
 iree_cc_library(
   NAME
+    atomic_test_util
+  HDRS
+    "atomic_test_util.h"
+  SRCS
+    "atomic_test_util.cc"
+  DEPS
+    iree::hal
+  TESTONLY
+  PUBLIC
+)
+
+iree_cc_library(
+  NAME
     test_base
   HDRS
     "test_base.h"

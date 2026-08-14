@@ -70,6 +70,54 @@ static const char* iree_hal_vulkan_bool_string(VkBool32 value) {
 }
 
 //===----------------------------------------------------------------------===//
+// Physical-device memory classification
+//===----------------------------------------------------------------------===//
+
+bool iree_hal_vulkan_physical_device_type_uses_unified_memory(
+    VkPhysicalDeviceType device_type) {
+  switch (device_type) {
+    case VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU:
+    case VK_PHYSICAL_DEVICE_TYPE_CPU:
+      return true;
+    default:
+      return false;
+  }
+}
+
+iree_hal_memory_type_t iree_hal_vulkan_memory_type_from_properties(
+    VkPhysicalDeviceType device_type,
+    VkMemoryPropertyFlags memory_property_flags) {
+  iree_hal_memory_type_t memory_type = IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE;
+  if (iree_all_bits_set(memory_property_flags,
+                        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT)) {
+    memory_type |= IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
+  }
+  if (iree_all_bits_set(memory_property_flags,
+                        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT)) {
+    memory_type |= IREE_HAL_MEMORY_TYPE_HOST_VISIBLE;
+  }
+  if (iree_all_bits_set(memory_property_flags,
+                        VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)) {
+    memory_type |= IREE_HAL_MEMORY_TYPE_HOST_COHERENT;
+  }
+  if (iree_all_bits_set(memory_property_flags,
+                        VK_MEMORY_PROPERTY_HOST_CACHED_BIT)) {
+    memory_type |= IREE_HAL_MEMORY_TYPE_HOST_CACHED;
+  }
+
+  const bool host_visible =
+      iree_all_bits_set(memory_type, IREE_HAL_MEMORY_TYPE_HOST_VISIBLE);
+  const bool device_local =
+      iree_all_bits_set(memory_type, IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL);
+  if (host_visible &&
+      (!device_local ||
+       iree_hal_vulkan_physical_device_type_uses_unified_memory(device_type))) {
+    memory_type |= IREE_HAL_MEMORY_TYPE_HOST_LOCAL;
+  }
+  return memory_type;
+}
+
+//===----------------------------------------------------------------------===//
 // Instance creation
 //===----------------------------------------------------------------------===//
 

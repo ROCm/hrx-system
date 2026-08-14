@@ -28,6 +28,20 @@ iree_cc_library(
 
 iree_cc_library(
   NAME
+    queue_atomic_test
+  SRCS
+    "queue_atomic_test.cc"
+  DEPS
+    iree::hal
+    iree::hal::cts::util::atomic_test_util
+    iree::hal::cts::util::test_base
+  TESTONLY
+  ALWAYSLINK
+  PUBLIC
+)
+
+iree_cc_library(
+  NAME
     queue_dispatch_test
   SRCS
     "queue_dispatch_test.cc"
@@ -85,6 +99,7 @@ iree_cc_library(
     all_tests
   DEPS
     ::queue_alloca_test
+    ::queue_atomic_test
     ::queue_dispatch_test
     ::queue_host_call_test
     ::queue_transfer_test

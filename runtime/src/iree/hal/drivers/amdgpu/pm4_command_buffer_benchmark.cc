@@ -246,7 +246,6 @@ class Pm4CommandBufferBenchmark : public benchmark::Fixture {
     options.command_buffer_mode = command_buffer_mode;
     options.host_queues.upload_capacity = upload_capacity;
     if (command_buffer_mode == IREE_HAL_AMDGPU_COMMAND_BUFFER_MODE_PM4) {
-      options.enable_experimental_pm4_command_buffers = true;
       if (strcmp(FLAG_pm4_publication_mode, "host-copy") == 0) {
         options.pm4_command_buffer_publication_mode =
             IREE_HAL_AMDGPU_PM4_COMMAND_BUFFER_PUBLICATION_MODE_HOST_COPY;
@@ -396,7 +395,7 @@ class Pm4CommandBufferBenchmark : public benchmark::Fixture {
     params.type = IREE_HAL_MEMORY_TYPE_OPTIMAL_FOR_DEVICE;
     params.access = IREE_HAL_MEMORY_ACCESS_ALL;
     params.usage =
-        IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE | IREE_HAL_BUFFER_USAGE_TRANSFER;
+        IREE_HAL_BUFFER_USAGE_STORAGE | IREE_HAL_BUFFER_USAGE_TRANSFER;
     params.min_alignment = kPayloadBufferAlignment;
     for (iree_host_size_t i = 0; i < kMaximumBindingTableCount; ++i) {
       IREE_RETURN_IF_ERROR(iree_hal_allocator_allocate_buffer(
@@ -700,14 +699,14 @@ class Pm4CommandBufferBenchmark : public benchmark::Fixture {
             publish_stats->host_staging_allow_access_agent_count);
     state.counters["pm4_execution_barrier_dwords"] =
         static_cast<double>(publish_stats->execution_barrier_dwords);
-    state.counters["pm4_fixup_barrier_dwords"] =
-        static_cast<double>(publish_stats->fixup_barrier_dwords);
     state.counters["pm4_dispatch_setup_dwords"] =
         static_cast<double>(publish_stats->dispatch_setup_dwords);
     state.counters["pm4_dispatch_user_data_dwords"] =
         static_cast<double>(publish_stats->dispatch_user_data_dwords);
-    state.counters["pm4_dispatch_direct_dwords"] =
-        static_cast<double>(publish_stats->dispatch_direct_dwords);
+    state.counters["pm4_dispatch_dwords"] =
+        static_cast<double>(publish_stats->dispatch_dwords);
+    state.counters["pm4_atomic_dwords"] =
+        static_cast<double>(publish_stats->atomic_dwords);
     state.counters["pm4_terminal_barrier_dwords"] =
         static_cast<double>(publish_stats->terminal_barrier_dwords);
   }

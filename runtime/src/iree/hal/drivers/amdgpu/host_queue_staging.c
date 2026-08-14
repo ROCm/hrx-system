@@ -429,8 +429,10 @@ iree_status_t iree_hal_amdgpu_staging_pool_initialize(
     };
     status = iree_hal_amdgpu_buffer_create(
         libhsa, placement,
-        IREE_HAL_MEMORY_TYPE_HOST_LOCAL | IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE,
+        IREE_HAL_MEMORY_TYPE_HOST_LOCAL | IREE_HAL_MEMORY_TYPE_HOST_COHERENT |
+            IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE,
         IREE_HAL_MEMORY_ACCESS_ALL, IREE_HAL_BUFFER_USAGE_TRANSFER,
+        IREE_HAL_AMDGPU_ATOMIC_MEMORY_CELL_FLAG_NONE,
         (iree_device_size_t)total_size, (iree_device_size_t)total_size,
         host_ptr,
         (iree_hal_buffer_release_callback_t){

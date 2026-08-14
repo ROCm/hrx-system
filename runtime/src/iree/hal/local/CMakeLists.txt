@@ -11,6 +11,33 @@ iree_add_all_subdirs()
 
 iree_cc_library(
   NAME
+    atomic
+  HDRS
+    "atomic.h"
+  SRCS
+    "atomic.c"
+  DEPS
+    iree::base
+    iree::base::internal
+    iree::base::threading
+    iree::hal
+  PUBLIC
+)
+
+iree_cc_test(
+  NAME
+    atomic_test
+  SRCS
+    "atomic_test.cc"
+  DEPS
+    ::atomic
+    iree::base::internal
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+iree_cc_library(
+  NAME
     cpu_device_spec
   HDRS
     "cpu_device_spec.h"
@@ -44,6 +71,7 @@ iree_cc_library(
   SRCS
     "device_spec_builder.c"
   DEPS
+    ::atomic
     ::cpu_device_spec
     ::executable_loader
     iree::base
@@ -60,6 +88,7 @@ iree_cc_test(
   SRCS
     "device_spec_builder_test.cc"
   DEPS
+    ::atomic
     ::cpu_device_spec
     ::device_spec_builder
     iree::hal
@@ -284,6 +313,7 @@ iree_cc_library(
   SRCS
     "inline_command_buffer.c"
   DEPS
+    ::atomic
     ::executable_environment
     ::executable_library
     ::profile

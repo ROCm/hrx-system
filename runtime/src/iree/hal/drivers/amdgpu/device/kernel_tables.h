@@ -5,6 +5,17 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 //===----------------------------------------------------------------------===//
+// Atomic operations (atomic.h)
+//===----------------------------------------------------------------------===//
+
+IREE_HAL_AMDGPU_DEVICE_KERNEL(iree_hal_amdgpu_device_atomic_wait_x32, 1, 1, 1)
+IREE_HAL_AMDGPU_DEVICE_KERNEL(iree_hal_amdgpu_device_atomic_wait_x64, 1, 1, 1)
+IREE_HAL_AMDGPU_DEVICE_KERNEL(iree_hal_amdgpu_device_atomic_store_x32, 1, 1, 1)
+IREE_HAL_AMDGPU_DEVICE_KERNEL(iree_hal_amdgpu_device_atomic_store_x64, 1, 1, 1)
+IREE_HAL_AMDGPU_DEVICE_KERNEL(iree_hal_amdgpu_device_atomic_rmw_x32, 1, 1, 1)
+IREE_HAL_AMDGPU_DEVICE_KERNEL(iree_hal_amdgpu_device_atomic_rmw_x64, 1, 1, 1)
+
+//===----------------------------------------------------------------------===//
 // Blits (blit.h)
 //===----------------------------------------------------------------------===//
 

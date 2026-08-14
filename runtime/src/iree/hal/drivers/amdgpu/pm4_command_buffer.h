@@ -12,6 +12,10 @@
 #include "iree/hal/api.h"
 #include "iree/hal/drivers/amdgpu/abi/command_buffer.h"
 #include "iree/hal/drivers/amdgpu/abi/timestamp.h"
+#include "iree/hal/drivers/amdgpu/atomic_memory.h"
+#include "iree/hal/drivers/amdgpu/device/atomic_pm4.h"
+#include "iree/hal/drivers/amdgpu/device/blit_pm4.h"
+#include "iree/hal/drivers/amdgpu/pm4_command_program_set.h"
 #include "iree/hal/drivers/amdgpu/profile_metadata.h"
 #include "iree/hal/drivers/amdgpu/util/libhsa.h"
 #include "iree/hal/drivers/amdgpu/util/pm4_capabilities.h"
@@ -49,48 +53,6 @@ typedef uint32_t iree_hal_amdgpu_pm4_command_buffer_flags_t;
 typedef struct iree_hal_amdgpu_pm4_command_buffer_resident_pool_t
     iree_hal_amdgpu_pm4_command_buffer_resident_pool_t;
 
-// Device-resident command-buffer storage and dynamic fixup records owned by a
-// finalized PM4 command buffer.
-typedef struct iree_hal_amdgpu_pm4_command_buffer_fixup_plan_t {
-  // Device pointer to immutable fixup records, or NULL when no fixup runs.
-  IREE_AMDGPU_DEVICE_PTR const iree_hal_amdgpu_command_buffer_pm4_fixup_entry_t*
-      entries;
-  // Number of entries in |entries|.
-  uint32_t entry_count;
-  // Reserved padding that must be zero.
-  uint32_t reserved0;
-  // Device pointer to the resident allocation base patched by fixup offsets.
-  IREE_AMDGPU_DEVICE_PTR uint8_t* target_base;
-  // Allocated byte length of |target_base|.
-  iree_host_size_t target_byte_length;
-  // Device pointer to resident kernarg-template storage referenced by PM4.
-  IREE_AMDGPU_DEVICE_PTR uint8_t* template_base;
-  // Allocated byte length of |template_base|.
-  iree_host_size_t template_byte_length;
-} iree_hal_amdgpu_pm4_command_buffer_fixup_plan_t;
-
-// Device-resident PM4 program and fixup plan used only while
-// dispatch-attributed profiling is enabled.
-typedef struct iree_hal_amdgpu_pm4_command_buffer_profile_plan_t {
-  // Device-visible PM4 IB with per-dispatch timestamp packets.
-  iree_hal_amdgpu_pm4_program_t program;
-  // Device pointer to immutable profile fixup records.
-  IREE_AMDGPU_DEVICE_PTR const iree_hal_amdgpu_command_buffer_pm4_fixup_entry_t*
-      entries;
-  // Number of entries in |entries|.
-  uint32_t entry_count;
-  // First synthetic binding slot used for dispatch timestamp destinations.
-  uint32_t timestamp_binding_base;
-  // Total binding-table entries consumed by profile fixup.
-  uint32_t binding_count;
-  // Number of profile-visible dispatch operations in |program|.
-  uint32_t dispatch_count;
-  // Device pointer to the resident allocation base patched by fixup offsets.
-  IREE_AMDGPU_DEVICE_PTR uint8_t* target_base;
-  // Device-visible fallback timestamp range used for unselected dispatches.
-  IREE_AMDGPU_DEVICE_PTR iree_hal_amdgpu_timestamp_range_t* dummy_ticks;
-} iree_hal_amdgpu_pm4_command_buffer_profile_plan_t;
-
 // Host timing and byte counters captured while finalizing PM4 storage.
 typedef struct iree_hal_amdgpu_pm4_command_buffer_publish_stats_t {
   // Total nanoseconds spent in command-buffer end/finalize.
@@ -125,14 +87,14 @@ typedef struct iree_hal_amdgpu_pm4_command_buffer_publish_stats_t {
   uint64_t host_staging_allow_access_agent_count;
   // PM4 dwords used for non-terminal execution barriers.
   uint64_t execution_barrier_dwords;
-  // PM4 dwords used for fixup-to-IB visibility barriers.
-  uint64_t fixup_barrier_dwords;
   // PM4 dwords used for dispatch setup packets.
   uint64_t dispatch_setup_dwords;
   // PM4 dwords used for dispatch user-data packets.
   uint64_t dispatch_user_data_dwords;
-  // PM4 dwords used for dispatch-direct packets.
-  uint64_t dispatch_direct_dwords;
+  // PM4 dwords used for terminal dispatch packets and their alignment.
+  uint64_t dispatch_dwords;
+  // PM4 dwords used for native atomic packets and their alignment.
+  uint64_t atomic_dwords;
   // PM4 dwords used for the terminal execution barrier.
   uint64_t terminal_barrier_dwords;
   // Resident PM4 IB byte length.
@@ -166,23 +128,32 @@ void iree_hal_amdgpu_pm4_command_buffer_resident_pool_trim(
 
 // Creates a host-recorded PM4 command buffer.
 //
-// The PM4 command-buffer path records dispatch-only HAL commands directly into
-// a resident PM4 indirect buffer. Static dispatches reference resident kernarg
-// templates; dynamic dispatches reference resident kernarg templates patched by
-// a queue_execute binding-table fixup dispatch before the PM4 IB runs. The
-// command buffer borrows |resident_pool| and |resource_set_block_pool|; callers
-// must keep them live until all created command buffers are destroyed.
+// The PM4 command-buffer path records dispatch, atomic, and transfer HAL
+// commands directly into a resident PM4 indirect buffer. Static operations
+// reference resident kernarg templates; dynamic operations reference resident
+// templates patched by a queue_execute binding-table fixup dispatch before the
+// PM4 IB runs. The command buffer borrows |resident_pool| and
+// |resource_set_block_pool|; callers must keep them live until all created
+// command buffers are destroyed.
 //
 // |hostcall_buffer| is an optional opaque device address copied into every
 // implicit-argument template. The allocation it references must remain valid
 // for the command buffer lifetime.
+//
+// All device builtin contexts are borrowed immutable planning and launch
+// metadata and must remain valid for the command buffer lifetime.
 iree_status_t iree_hal_amdgpu_pm4_command_buffer_create(
     iree_hal_allocator_t* device_allocator, iree_hal_command_buffer_mode_t mode,
     iree_hal_command_category_t command_categories,
     iree_hal_queue_affinity_t queue_affinity, iree_host_size_t binding_capacity,
-    iree_host_size_t device_ordinal,
+    iree_host_size_t device_ordinal, iree_host_size_t physical_queue_count,
     iree_hal_amdgpu_pm4_command_buffer_flags_t flags,
     iree_hal_amdgpu_vendor_packet_capability_flags_t vendor_packet_capabilities,
+    const iree_hal_amdgpu_device_atomic_pm4_context_t* atomic_context,
+    const iree_hal_amdgpu_device_buffer_transfer_context_t*
+        buffer_transfer_context,
+    const iree_hal_amdgpu_device_buffer_transfer_pm4_context_t*
+        buffer_transfer_pm4_context,
     iree_hal_amdgpu_pm4_timestamp_strategy_t pm4_timestamp_strategy,
     iree_hal_amdgpu_pm4_command_buffer_resident_pool_t* resident_pool,
     void* hostcall_buffer,
@@ -217,15 +188,23 @@ iree_hal_amdgpu_pm4_command_buffer_profile_operations(
 uint32_t iree_hal_amdgpu_pm4_command_buffer_operation_count(
     iree_hal_command_buffer_t* command_buffer);
 
+// Returns per-binding atomic memory cells required at queue submission.
+// |out_count| is zero when the command buffer has no dynamic atomic targets.
+const iree_hal_amdgpu_atomic_memory_cell_flags_t*
+iree_hal_amdgpu_pm4_command_buffer_atomic_binding_requirements(
+    iree_hal_command_buffer_t* command_buffer, uint32_t* out_count);
+
 // Returns the immutable resident kernarg template and fixup plan from end().
 const iree_hal_amdgpu_pm4_command_buffer_fixup_plan_t*
 iree_hal_amdgpu_pm4_command_buffer_fixup_plan(
     iree_hal_command_buffer_t* command_buffer);
 
-// Returns the immutable resident profile PM4 IB and fixup plan from end().
+// Returns the resident profile plan selected for |physical_queue_ordinal|, or
+// NULL when profiling is absent or that queue is outside the command-buffer
+// affinity.
 const iree_hal_amdgpu_pm4_command_buffer_profile_plan_t*
 iree_hal_amdgpu_pm4_command_buffer_profile_plan(
-    iree_hal_command_buffer_t* command_buffer);
+    iree_hal_command_buffer_t* command_buffer, uint32_t physical_queue_ordinal);
 
 // Returns finalize-time publication stats captured by the command buffer.
 const iree_hal_amdgpu_pm4_command_buffer_publish_stats_t*

@@ -155,7 +155,7 @@ static iree_hal_webgpu_buffer_usage_t iree_hal_webgpu_buffer_compute_gpu_usage(
   if (iree_any_bit_set(usage, IREE_HAL_BUFFER_USAGE_TRANSFER_TARGET)) {
     gpu_usage |= IREE_HAL_WEBGPU_BUFFER_USAGE_COPY_DST;
   }
-  if (iree_any_bit_set(usage, IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE)) {
+  if (iree_any_bit_set(usage, IREE_HAL_BUFFER_USAGE_STORAGE)) {
     gpu_usage |= IREE_HAL_WEBGPU_BUFFER_USAGE_STORAGE;
   }
   if (iree_any_bit_set(usage, IREE_HAL_BUFFER_USAGE_DISPATCH_UNIFORM_READ)) {

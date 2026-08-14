@@ -151,10 +151,9 @@ void iree_hal_slab_provider_query_stats(
 
 void iree_hal_slab_provider_query_properties(
     const iree_hal_slab_provider_t* provider,
-    iree_hal_memory_type_t* out_memory_type,
-    iree_hal_buffer_usage_t* out_supported_usage) {
-  provider->vtable->query_properties(provider, out_memory_type,
-                                     out_supported_usage);
+    iree_hal_slab_provider_properties_t* out_properties) {
+  memset(out_properties, 0, sizeof(*out_properties));
+  provider->vtable->query_properties(provider, out_properties);
 }
 
 bool iree_hal_slab_provider_visited(

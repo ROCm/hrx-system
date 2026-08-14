@@ -104,7 +104,6 @@ static bool hip_registered_ =
                "MultiQueueFanOutDifferentValuesBeforeSignal",
                "Blocked by the same HIP queue pool backend UNIMPLEMENTED "
                "path as CrossQueueWaitBeforeSignal."},
-              {"EventTest.*", "HIP does not implement HAL events"},
               {"ExecutableTest.*",
                "HIP does not implement executable reflection"},
               {"QueueDispatchIndirectParametersTest.*",

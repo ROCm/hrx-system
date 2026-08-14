@@ -11,6 +11,7 @@
 #include <stdint.h>
 
 #include "iree/base/api.h"
+#include "iree/hal/atomic.h"
 #include "iree/hal/buffer.h"
 #include "iree/hal/queue.h"
 #include "iree/hal/resource.h"
@@ -44,6 +45,11 @@ typedef struct iree_hal_allocator_memory_heap_t {
   // heap. For example, exclusive device local memory may not allow mapping
   // while cached host local memory may not allow usage in dispatches.
   iree_hal_buffer_usage_t allowed_usage;
+
+  // Atomic operations supported by naturally aligned locations allocated from
+  // this heap. Concrete placement may narrow these prospective capabilities,
+  // and queue-family capabilities are required independently.
+  iree_hal_atomic_operation_capabilities_t atomic_operations;
 
   // Maximum size, in bytes, of any individual allocation of this type.
   // Allocations over this size will fail. Note that due to fragmentation it's

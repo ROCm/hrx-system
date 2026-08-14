@@ -241,6 +241,16 @@ iree_runtime_cc_library(
 )
 
 iree_runtime_cc_library(
+    name = "pm4_atomic",
+    hdrs = ["pm4_atomic.h"],
+    deps = [
+        ":packet",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+    ],
+)
+
+iree_runtime_cc_library(
     name = "info",
     srcs = ["info.c"],
     hdrs = ["info.h"],
@@ -303,7 +313,6 @@ iree_runtime_cc_library(
     hdrs = [
         "aql_ring.h",
         "epoch_signal_table.h",
-        "error_callback.h",
         "kernarg_ring.h",
         "notification_ring.h",
         "queue_upload_ring.h",
@@ -630,6 +639,16 @@ iree_runtime_cc_test(
 )
 
 iree_runtime_cc_test(
+    name = "pm4_atomic_test",
+    srcs = ["pm4_atomic_test.cc"],
+    deps = [
+        ":pm4_atomic",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_test(
     name = "pm4_dispatch_test",
     srcs = ["pm4_dispatch_test.cc"],
     deps = [
@@ -660,6 +679,7 @@ iree_runtime_cc_test(
     deps = [
         ":libhsa",
         ":packet",
+        ":pm4_atomic",
         ":pm4_dispatch",
         ":pm4_dispatch_test_kernels",
         ":pm4_program",

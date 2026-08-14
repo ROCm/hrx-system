@@ -9,6 +9,7 @@
 
 #include "iree/base/api.h"
 #include "iree/base/internal/atomics.h"
+#include "iree/hal/atomic.h"
 #include "iree/hal/buffer.h"
 #include "iree/hal/memory/asan.h"
 
@@ -32,6 +33,18 @@ enum iree_hal_slab_provider_trim_flag_bits_e {
   // Release only resources above the target retention level.
   IREE_HAL_SLAB_PROVIDER_TRIM_FLAG_EXCESS = 1u << 1,
 };
+
+// Immutable properties of slabs acquired from a provider.
+typedef struct iree_hal_slab_provider_properties_t {
+  // Memory type properties shared by every slab from the provider.
+  iree_hal_memory_type_t memory_type;
+
+  // Buffer usage bits supported by every slab from the provider.
+  iree_hal_buffer_usage_t supported_usage;
+
+  // Atomic operations supported by naturally aligned slab locations.
+  iree_hal_atomic_operation_capabilities_t atomic_operations;
+} iree_hal_slab_provider_properties_t;
 
 // Running statistics for a slab provider (and any inner providers in its
 // chain). Stats accumulate from the innermost provider outward, with each
@@ -207,8 +220,7 @@ void iree_hal_slab_provider_query_stats(
 // Queries the memory properties of slabs from this provider.
 void iree_hal_slab_provider_query_properties(
     const iree_hal_slab_provider_t* provider,
-    iree_hal_memory_type_t* out_memory_type,
-    iree_hal_buffer_usage_t* out_supported_usage);
+    iree_hal_slab_provider_properties_t* out_properties);
 
 // Returns true if |provider| has already been visited (should be skipped).
 // If not visited, adds it to the set and returns false. Returns true without
@@ -301,8 +313,7 @@ struct iree_hal_slab_provider_vtable_t {
 
   // Queries the memory properties of slabs from this provider.
   void (*query_properties)(const iree_hal_slab_provider_t* provider,
-                           iree_hal_memory_type_t* out_memory_type,
-                           iree_hal_buffer_usage_t* out_supported_usage);
+                           iree_hal_slab_provider_properties_t* out_properties);
 };
 
 #ifdef __cplusplus

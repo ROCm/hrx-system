@@ -105,7 +105,6 @@ static bool metal_registered_ =
               {"QueueAllocaTest.DeallocaReleasesMemory",
                "Metal queue_dealloca is currently a barrier and does not "
                "decommit the underlying allocation before buffer release."},
-              {"EventTest.*", "Metal does not implement HAL events"},
               {"ExecutableTest.*",
                "Metal does not implement executable reflection"},
               {"SemaphoreTest.*",

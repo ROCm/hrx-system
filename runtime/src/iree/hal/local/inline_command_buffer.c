@@ -6,6 +6,7 @@
 
 #include "iree/hal/local/inline_command_buffer.h"
 
+#include <inttypes.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
@@ -14,6 +15,7 @@
 #include "iree/base/internal/cpu.h"
 #include "iree/base/internal/fpu_state.h"
 #include "iree/base/internal/math.h"
+#include "iree/hal/local/atomic.h"
 #include "iree/hal/local/executable_library.h"
 #include "iree/hal/local/local_executable.h"
 #include "iree/hal/local/profile.h"
@@ -300,47 +302,88 @@ static iree_status_t iree_hal_inline_command_buffer_execution_barrier(
     const iree_hal_memory_barrier_t* memory_barriers,
     iree_host_size_t buffer_barrier_count,
     const iree_hal_buffer_barrier_t* buffer_barriers) {
-  // No-op; we execute synchronously.
+  const iree_hal_execution_barrier_flags_t supported_flags =
+      IREE_HAL_EXECUTION_BARRIER_FLAG_ACQUIRE_SYSTEM_SCOPE |
+      IREE_HAL_EXECUTION_BARRIER_FLAG_RELEASE_SYSTEM_SCOPE;
+  if (IREE_UNLIKELY(flags & ~supported_flags)) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "unsupported inline execution barrier flags: 0x%016" PRIx64,
+        flags & ~supported_flags);
+  }
+
+  // No-op; local-inline executes synchronously in the coherent host memory
+  // domain and therefore already provides system-scope visibility.
   return iree_ok_status();
 }
 
 //===----------------------------------------------------------------------===//
-// iree_hal_command_buffer_signal_event
+// iree_hal_command_buffer_atomic_*
 //===----------------------------------------------------------------------===//
 
-static iree_status_t iree_hal_inline_command_buffer_signal_event(
-    iree_hal_command_buffer_t* base_command_buffer, iree_hal_event_t* event,
-    iree_hal_execution_stage_t source_stage_mask) {
-  // No-op; we execute synchronously.
-  return iree_ok_status();
+static iree_status_t iree_hal_inline_command_buffer_map_atomic_target(
+    iree_hal_buffer_ref_t target_ref, iree_hal_atomic_width_t width,
+    iree_hal_memory_access_t access, iree_hal_buffer_mapping_t* out_mapping) {
+  if (IREE_UNLIKELY(!iree_hal_local_atomic_width_is_lock_free(width))) {
+    return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
+                            "inline command buffers do not support lock-based "
+                            "%u-bit atomic operations",
+                            width);
+  }
+
+  const iree_device_size_t byte_count = iree_hal_atomic_width_byte_count(width);
+  iree_status_t status = iree_hal_buffer_map_range(
+      target_ref.buffer, IREE_HAL_MAPPING_MODE_SCOPED, access,
+      target_ref.offset, byte_count, out_mapping);
+  if (iree_status_is_ok(status) &&
+      IREE_UNLIKELY(!iree_host_size_has_alignment(
+          (iree_host_size_t)(uintptr_t)out_mapping->contents.data,
+          (iree_host_size_t)byte_count))) {
+    status = iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "mapped atomic target address is not naturally aligned");
+  }
+  if (!iree_status_is_ok(status) && out_mapping->contents.data) {
+    status = iree_status_join(status, iree_hal_buffer_unmap_range(out_mapping));
+  }
+  return status;
 }
 
-//===----------------------------------------------------------------------===//
-// iree_hal_command_buffer_reset_event
-//===----------------------------------------------------------------------===//
-
-static iree_status_t iree_hal_inline_command_buffer_reset_event(
-    iree_hal_command_buffer_t* base_command_buffer, iree_hal_event_t* event,
-    iree_hal_execution_stage_t source_stage_mask) {
-  // No-op; we execute synchronously.
-  return iree_ok_status();
-}
-
-//===----------------------------------------------------------------------===//
-// iree_hal_command_buffer_wait_events
-//===----------------------------------------------------------------------===//
-
-static iree_status_t iree_hal_inline_command_buffer_wait_events(
+static iree_status_t iree_hal_inline_command_buffer_atomic_wait(
     iree_hal_command_buffer_t* base_command_buffer,
-    iree_host_size_t event_count, const iree_hal_event_t** events,
     iree_hal_execution_stage_t source_stage_mask,
     iree_hal_execution_stage_t target_stage_mask,
-    iree_host_size_t memory_barrier_count,
-    const iree_hal_memory_barrier_t* memory_barriers,
-    iree_host_size_t buffer_barrier_count,
-    const iree_hal_buffer_barrier_t* buffer_barriers) {
-  // No-op; we execute synchronously.
-  return iree_ok_status();
+    iree_hal_buffer_ref_t target_ref, iree_hal_atomic_wait_params_t params) {
+  iree_hal_buffer_mapping_t mapping = {{0}};
+  IREE_RETURN_IF_ERROR(iree_hal_inline_command_buffer_map_atomic_target(
+      target_ref, params.width, IREE_HAL_MEMORY_ACCESS_READ, &mapping));
+  iree_hal_local_atomic_wait(mapping.contents.data, params);
+  return iree_hal_buffer_unmap_range(&mapping);
+}
+
+static iree_status_t iree_hal_inline_command_buffer_atomic_store(
+    iree_hal_command_buffer_t* base_command_buffer,
+    iree_hal_execution_stage_t source_stage_mask,
+    iree_hal_execution_stage_t target_stage_mask,
+    iree_hal_buffer_ref_t target_ref, iree_hal_atomic_store_params_t params) {
+  iree_hal_buffer_mapping_t mapping = {{0}};
+  IREE_RETURN_IF_ERROR(iree_hal_inline_command_buffer_map_atomic_target(
+      target_ref, params.width, IREE_HAL_MEMORY_ACCESS_WRITE, &mapping));
+  iree_hal_local_atomic_store(mapping.contents.data, params);
+  return iree_hal_buffer_unmap_range(&mapping);
+}
+
+static iree_status_t iree_hal_inline_command_buffer_atomic_rmw(
+    iree_hal_command_buffer_t* base_command_buffer,
+    iree_hal_execution_stage_t source_stage_mask,
+    iree_hal_execution_stage_t target_stage_mask,
+    iree_hal_buffer_ref_t target_ref, iree_hal_atomic_rmw_params_t params) {
+  iree_hal_buffer_mapping_t mapping = {{0}};
+  IREE_RETURN_IF_ERROR(iree_hal_inline_command_buffer_map_atomic_target(
+      target_ref, params.width,
+      IREE_HAL_MEMORY_ACCESS_READ | IREE_HAL_MEMORY_ACCESS_WRITE, &mapping));
+  iree_hal_local_atomic_rmw(mapping.contents.data, params);
+  return iree_hal_buffer_unmap_range(&mapping);
 }
 
 //===----------------------------------------------------------------------===//
@@ -621,9 +664,9 @@ static const iree_hal_command_buffer_vtable_t
         .begin_debug_group = iree_hal_inline_command_buffer_begin_debug_group,
         .end_debug_group = iree_hal_inline_command_buffer_end_debug_group,
         .execution_barrier = iree_hal_inline_command_buffer_execution_barrier,
-        .signal_event = iree_hal_inline_command_buffer_signal_event,
-        .reset_event = iree_hal_inline_command_buffer_reset_event,
-        .wait_events = iree_hal_inline_command_buffer_wait_events,
+        .atomic_wait = iree_hal_inline_command_buffer_atomic_wait,
+        .atomic_store = iree_hal_inline_command_buffer_atomic_store,
+        .atomic_rmw = iree_hal_inline_command_buffer_atomic_rmw,
         .advise_buffer = iree_hal_inline_command_buffer_advise_buffer,
         .fill_buffer = iree_hal_inline_command_buffer_fill_buffer,
         .update_buffer = iree_hal_inline_command_buffer_update_buffer,

@@ -102,7 +102,7 @@ class BlockingPrintfProtocolTest : public ::testing::Test {
         /*.fn=*/CaptureOutput,
         /*.user_data=*/&recorder_,
     };
-    iree_hal_amdgpu_error_callback_t error_callback = {
+    iree_hal_hostcall_error_callback_t error_callback = {
         /*.fn=*/CaptureFailure,
         /*.user_data=*/&recorder_,
     };

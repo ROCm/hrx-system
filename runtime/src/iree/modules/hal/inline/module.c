@@ -288,8 +288,7 @@ IREE_VM_ABI_EXPORT(iree_hal_inline_module_buffer_allocate,  //
   iree_device_size_t allocation_size = iree_hal_cast_device_size(args->i1);
 
   const iree_hal_buffer_params_t params = {
-      .usage = IREE_HAL_BUFFER_USAGE_TRANSFER |
-               IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE |
+      .usage = IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_STORAGE |
                IREE_HAL_BUFFER_USAGE_MAPPING,
       .access = IREE_HAL_MEMORY_ACCESS_ALL,
       .type = IREE_HAL_MEMORY_TYPE_OPTIMAL_FOR_HOST,
@@ -320,8 +319,7 @@ IREE_VM_ABI_EXPORT(iree_hal_inline_module_buffer_allocate_initialized,  //
                                              source_length, 1, &initial_data));
 
   const iree_hal_buffer_params_t params = {
-      .usage = IREE_HAL_BUFFER_USAGE_TRANSFER |
-               IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE |
+      .usage = IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_STORAGE |
                IREE_HAL_BUFFER_USAGE_MAPPING,
       .access = IREE_HAL_MEMORY_ACCESS_ALL,
       .type = IREE_HAL_MEMORY_TYPE_OPTIMAL_FOR_HOST,

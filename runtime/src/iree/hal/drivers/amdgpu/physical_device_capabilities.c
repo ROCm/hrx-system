@@ -9,35 +9,19 @@
 #include <stdint.h>
 #include <string.h>
 
-// Inclusive unsigned 16-bit range used for gfx IP table matching.
-typedef struct iree_hal_amdgpu_uint16_range_t {
-  // Inclusive lower bound.
-  uint16_t min;
-  // Inclusive upper bound.
-  uint16_t max;
-} iree_hal_amdgpu_uint16_range_t;
-
-// Gfx IP version range matched by a capability table row.
-typedef struct iree_hal_amdgpu_gfxip_version_range_t {
-  // Accepted major version range.
-  iree_hal_amdgpu_uint16_range_t major;
-  // Accepted minor version range.
-  iree_hal_amdgpu_uint16_range_t minor;
-  // Accepted stepping range.
-  iree_hal_amdgpu_uint16_range_t stepping;
-} iree_hal_amdgpu_gfxip_version_range_t;
-
-// AMD vendor-packet capability table row.
-typedef struct iree_hal_amdgpu_vendor_packet_capability_row_t {
-  // Gfx IP version range matched by this row.
-  iree_hal_amdgpu_gfxip_version_range_t version;
-  // Vendor-packet and PM4 packet-family capabilities enabled by this row.
-  iree_hal_amdgpu_vendor_packet_capability_flags_t capabilities;
-} iree_hal_amdgpu_vendor_packet_capability_row_t;
-
 enum {
-  // Packet families validated on the local gfx1100 bring-up system.
-  IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_GFX1100_VALIDATED =
+  // PM4 packet families shared by supported CDNA targets using the gfx9 packet
+  // layouts.
+  IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_CDNA =
+      IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_AQL_PM4_IB |
+      IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_EVENT_WRITE |
+      IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_SET_SH_REG |
+      IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_ACQUIRE_MEM |
+      IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_ACQUIRE_MEM_GFX9 |
+      IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_COMPUTE_DISPATCH_DIRECT,
+  // PM4 packet families shared by supported RDNA targets using the gfx10+
+  // packet layouts.
+  IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_RDNA =
       IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_AQL_PM4_IB |
       IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_WAIT_REG_MEM64 |
       IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_WRITE_DATA_MEMORY |
@@ -50,30 +34,21 @@ enum {
       IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_IMMEDIATE_WRITE |
       IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_ACQUIRE_MEM |
       IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_ACQUIRE_MEM_GFX10 |
-      IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_COMPUTE_DISPATCH_DIRECT,
-  // Packet families validated on gfx942/CDNA3 through AQL-submitted PM4 IBs.
-  IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_GFX942_VALIDATED =
-      IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_AQL_PM4_IB |
-      IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_AQL_BARRIER_VALUE |
-      IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_EVENT_WRITE |
-      IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_SET_SH_REG |
-      IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_ACQUIRE_MEM |
-      IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_ACQUIRE_MEM_GFX9 |
-      IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_COMPUTE_DISPATCH_DIRECT,
+      IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_COMPUTE_DISPATCH_DIRECT |
+      IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_COMPUTE_DISPATCH_INDIRECT |
+      IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_ATOMIC_WAIT |
+      IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_ATOMIC_STORE,
 };
 
-static bool iree_hal_amdgpu_uint16_range_contains(
-    iree_hal_amdgpu_uint16_range_t range, uint16_t value) {
-  return value >= range.min && value <= range.max;
+static bool iree_hal_amdgpu_gfxip_is_cdna(
+    iree_hal_amdgpu_gfxip_version_t version) {
+  return version.major == 9 &&
+         ((version.minor == 0 && version.stepping >= 8) || version.minor >= 4);
 }
 
-static bool iree_hal_amdgpu_gfxip_version_range_contains(
-    iree_hal_amdgpu_gfxip_version_range_t range,
+static bool iree_hal_amdgpu_gfxip_is_rdna(
     iree_hal_amdgpu_gfxip_version_t version) {
-  return iree_hal_amdgpu_uint16_range_contains(range.major, version.major) &&
-         iree_hal_amdgpu_uint16_range_contains(range.minor, version.minor) &&
-         iree_hal_amdgpu_uint16_range_contains(range.stepping,
-                                               version.stepping);
+  return version.major >= 10 && version.major <= 12;
 }
 
 // Public HSA AMD agent attributes introduced with clustered dispatch support.
@@ -549,10 +524,10 @@ iree_hal_amdgpu_physical_topology_guaranteed_capabilities(
     capabilities |= IREE_HAL_TOPOLOGY_CAPABILITY_PEER_COHERENT;
   }
   if (edge->atomics.all_hops_32bit) {
-    capabilities |= IREE_HAL_TOPOLOGY_CAPABILITY_ATOMIC_DEVICE;
+    capabilities |= IREE_HAL_TOPOLOGY_CAPABILITY_ATOMIC_32;
   }
   if (edge->atomics.all_hops_64bit) {
-    capabilities |= IREE_HAL_TOPOLOGY_CAPABILITY_ATOMIC_SYSTEM;
+    capabilities |= IREE_HAL_TOPOLOGY_CAPABILITY_ATOMIC_64;
   }
   return capabilities;
 }
@@ -772,6 +747,8 @@ void iree_hal_amdgpu_select_memory_system_capabilities(
   out_capabilities->svm.xnack_enabled = selection->svm.xnack_enabled ? 1u : 0u;
   out_capabilities->svm.direct_host_access =
       selection->svm.direct_host_access ? 1u : 0u;
+  out_capabilities->device_local.unified_memory =
+      selection->device_local.agent_is_apu ? 1u : 0u;
   out_capabilities->device_local.fine_host_visible =
       selection->device_local.fine_memory_pool.handle ? 1u : 0u;
   out_capabilities->device_local.coarse_cpu_visible =
@@ -801,94 +778,31 @@ iree_hal_amdgpu_select_prepublished_kernarg_storage(
 iree_hal_amdgpu_vendor_packet_capability_flags_t
 iree_hal_amdgpu_select_vendor_packet_capabilities(
     iree_hal_amdgpu_gfxip_version_t version) {
-  // The CDNA BARRIER_VALUE rows match CLR's barrier_value_packet_ gate:
-  // gfx9.0.10 or gfx9.[minor >= 4].[stepping 0..2].
-  //
-  // AQL PM4-IB is selected for known gfx9-gfx12 ISAs so the timestamp strategy
-  // can own queue-device profiling support across the packet families mirrored
-  // from aqlprofile. Other PM4 packet families stay opt-in until each
-  // packet-family contract has hardware evidence or an explicit probe.
-  static const iree_hal_amdgpu_vendor_packet_capability_row_t kRows[] = {
-      {
-          .version =
-              {
-                  .major = {9, 9},
-                  .minor = {0, 0},
-                  .stepping = {10, 10},
-              },
-          .capabilities =
-              IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_AQL_PM4_IB |
-              IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_AQL_BARRIER_VALUE,
-      },
-      {
-          .version =
-              {
-                  .major = {9, 9},
-                  .minor = {4, UINT16_MAX},
-                  .stepping = {0, 2},
-              },
-          .capabilities =
-              IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_AQL_PM4_IB |
-              IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_AQL_BARRIER_VALUE,
-      },
-      {
-          .version =
-              {
-                  .major = {9, 9},
-                  .minor = {4, 4},
-                  .stepping = {2, 2},
-              },
-          .capabilities =
-              IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_GFX942_VALIDATED,
-      },
-      {
-          .version =
-              {
-                  .major = {11, 11},
-                  .minor = {0, 0},
-                  .stepping = {0, 0},
-              },
-          .capabilities =
-              IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_GFX1100_VALIDATED,
-      },
-  };
-
+  // AQL PM4-IB is available across the known gfx9-gfx12 HSA families. The
+  // packet streams carried by those IBs follow architecture-family layouts,
+  // not exact processor revision allowlists.
   const bool known_pm4_ib_family = version.major >= 9 && version.major <= 12;
   iree_hal_amdgpu_vendor_packet_capability_flags_t capabilities =
       known_pm4_ib_family ? IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_AQL_PM4_IB
                           : 0;
-  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(kRows); ++i) {
-    if (iree_hal_amdgpu_gfxip_version_range_contains(kRows[i].version,
-                                                     version)) {
-      capabilities |= kRows[i].capabilities;
+  if (iree_hal_amdgpu_gfxip_is_cdna(version)) {
+    capabilities |= IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_CDNA;
+  } else if (iree_hal_amdgpu_gfxip_is_rdna(version)) {
+    capabilities |= IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_RDNA;
+    if (version.major == 12) {
+      capabilities |=
+          IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_CP_MEMORY_BYPASSES_GL2;
     }
   }
-  return capabilities;
-}
 
-iree_hal_amdgpu_vendor_packet_capability_flags_t
-iree_hal_amdgpu_select_experimental_pm4_command_buffer_capabilities(
-    iree_hal_amdgpu_gfxip_version_t version) {
-  switch (version.major) {
-    case 9:
-      return IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_AQL_PM4_IB |
-             IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_EVENT_WRITE |
-             IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_SET_SH_REG |
-             IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_ACQUIRE_MEM |
-             IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_ACQUIRE_MEM_GFX9 |
-             IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_COMPUTE_DISPATCH_DIRECT;
-    case 10:
-    case 11:
-    case 12:
-      return IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_AQL_PM4_IB |
-             IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_EVENT_WRITE |
-             IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_SET_SH_REG |
-             IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_ACQUIRE_MEM |
-             IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_ACQUIRE_MEM_GFX10 |
-             IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_COMPUTE_DISPATCH_DIRECT;
-    default:
-      return 0;
+  // BARRIER_VALUE is an HSA vendor-packet capability with a narrower
+  // CLR-derived agent gate than the CDNA PM4 packet family: gfx9.0.10 or
+  // gfx9.[minor >= 4].[stepping 0..2].
+  if (version.major == 9 && ((version.minor == 0 && version.stepping == 10) ||
+                             (version.minor >= 4 && version.stepping <= 2))) {
+    capabilities |= IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_AQL_BARRIER_VALUE;
   }
+  return capabilities;
 }
 
 iree_hal_amdgpu_pm4_timestamp_strategy_t

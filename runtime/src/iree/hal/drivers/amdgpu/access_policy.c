@@ -90,15 +90,17 @@ iree_status_t iree_hal_amdgpu_access_allow_agent_list(
                                           /*flags=*/NULL, ptr);
 }
 
-iree_status_t iree_hal_amdgpu_access_lock_host_allocation(
+iree_status_t iree_hal_amdgpu_access_lock_host_allocation_to_pool(
     const iree_hal_amdgpu_libhsa_t* libhsa,
-    const iree_hal_amdgpu_access_agent_list_t* agent_list, void* host_ptr,
+    const iree_hal_amdgpu_access_agent_list_t* agent_list,
+    hsa_amd_memory_pool_t memory_pool, void* host_ptr,
     iree_device_size_t length, void** out_agent_ptr) {
   IREE_ASSERT_ARGUMENT(libhsa);
   IREE_ASSERT_ARGUMENT(agent_list);
   IREE_ASSERT_ARGUMENT(host_ptr);
   IREE_ASSERT_ARGUMENT(out_agent_ptr);
-  return iree_hsa_amd_memory_lock(IREE_LIBHSA(libhsa), host_ptr, (size_t)length,
-                                  (hsa_agent_t*)agent_list->values,
-                                  (int)agent_list->count, out_agent_ptr);
+  return iree_hsa_amd_memory_lock_to_pool(
+      IREE_LIBHSA(libhsa), host_ptr, (size_t)length,
+      (hsa_agent_t*)agent_list->values, (int)agent_list->count, memory_pool,
+      /*flags=*/0, out_agent_ptr);
 }

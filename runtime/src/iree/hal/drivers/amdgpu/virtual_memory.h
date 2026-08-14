@@ -9,6 +9,7 @@
 
 #include "iree/base/api.h"
 #include "iree/hal/allocator.h"
+#include "iree/hal/drivers/amdgpu/atomic_memory.h"
 #include "iree/hal/drivers/amdgpu/util/libhsa.h"
 
 #ifdef __cplusplus
@@ -37,6 +38,13 @@ typedef struct iree_hal_amdgpu_virtual_memory_placement_t {
 
   // HAL buffer usage exposed by the virtual buffer.
   iree_hal_buffer_usage_t buffer_usage;
+
+  // Atomic memory cells supported by every queue in |queue_affinity|.
+  iree_hal_amdgpu_atomic_memory_cell_flags_t atomic_memory_cells;
+
+  // Unowned source GPU masks for allocations from |memory_pool|.
+  const iree_hal_amdgpu_atomic_memory_source_masks_t*
+      atomic_memory_source_masks;
 
   // Smallest legal HSA VMM allocation and mapping multiple.
   iree_device_size_t minimum_granule;

@@ -172,6 +172,8 @@ typedef struct iree_hal_amdgpu_host_queue_pm4_ib_submission_t {
   const uint32_t* persistent_ib_dwords;
   // Number of PM4 dwords referenced by |pm4_ib_packet_slot|.
   uint32_t ib_dword_count;
+  // Minimum acquire fence scope required by operation-local data visibility.
+  iree_hsa_fence_scope_t minimum_acquire_scope;
   // Minimum release fence scope required by operation-local data visibility.
   iree_hsa_fence_scope_t minimum_release_scope;
 } iree_hal_amdgpu_host_queue_pm4_ib_submission_t;

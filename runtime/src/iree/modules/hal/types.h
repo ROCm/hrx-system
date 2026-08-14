@@ -20,7 +20,6 @@ IREE_VM_DECLARE_TYPE_ADAPTERS(iree_hal_channel, iree_hal_channel_t);
 IREE_VM_DECLARE_TYPE_ADAPTERS(iree_hal_command_buffer,
                               iree_hal_command_buffer_t);
 IREE_VM_DECLARE_TYPE_ADAPTERS(iree_hal_device, iree_hal_device_t);
-IREE_VM_DECLARE_TYPE_ADAPTERS(iree_hal_event, iree_hal_event_t);
 IREE_VM_DECLARE_TYPE_ADAPTERS(iree_hal_executable, iree_hal_executable_t);
 IREE_VM_DECLARE_TYPE_ADAPTERS(iree_hal_fence, iree_hal_fence_t);
 IREE_VM_DECLARE_TYPE_ADAPTERS(iree_hal_file, iree_hal_file_t);

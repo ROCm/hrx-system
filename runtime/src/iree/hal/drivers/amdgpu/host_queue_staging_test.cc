@@ -365,7 +365,7 @@ class HostQueueStagingTest : public ::testing::Test {
     params.type = IREE_HAL_MEMORY_TYPE_OPTIMAL_FOR_DEVICE;
     params.access = IREE_HAL_MEMORY_ACCESS_ALL;
     params.usage =
-        IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE;
+        IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_STORAGE;
     IREE_RETURN_IF_ERROR(iree_hal_allocator_allocate_buffer(
         allocator, params, buffer_size, out_buffer));
     return FillDeviceBufferRange(device, *out_buffer, /*offset=*/0, buffer_size,
@@ -380,7 +380,7 @@ class HostQueueStagingTest : public ::testing::Test {
         IREE_HAL_MEMORY_TYPE_HOST_VISIBLE | IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE;
     params.access = IREE_HAL_MEMORY_ACCESS_ALL;
     params.usage = IREE_HAL_BUFFER_USAGE_TRANSFER |
-                   IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE |
+                   IREE_HAL_BUFFER_USAGE_STORAGE |
                    IREE_HAL_BUFFER_USAGE_MAPPING_SCOPED;
     params.queue_affinity = kQueueAffinity0;
     params.min_alignment = 16;

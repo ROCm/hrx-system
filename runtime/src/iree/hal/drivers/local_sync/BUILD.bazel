@@ -17,13 +17,11 @@ iree_runtime_cc_library(
     srcs = [
         "sync_device.c",
         "sync_driver.c",
-        "sync_event.c",
         "sync_semaphore.c",
     ],
     hdrs = [
         "sync_device.h",
         "sync_driver.h",
-        "sync_event.h",
         "sync_semaphore.h",
     ],
     deps = [
@@ -36,6 +34,7 @@ iree_runtime_cc_library(
         "//runtime/src/iree/base/threading",
         "//runtime/src/iree/hal",
         "//runtime/src/iree/hal/local",
+        "//runtime/src/iree/hal/local:atomic",
         "//runtime/src/iree/hal/local:device_spec_builder",
         "//runtime/src/iree/hal/local:executable_environment",
         "//runtime/src/iree/hal/local:inline_dispatch",

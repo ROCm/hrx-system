@@ -79,29 +79,54 @@ TEST(PM4CapabilitiesTest, ComputeDispatchDirectRequiresPM4IBSetShRegAndPacket) {
           IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_COMPUTE_DISPATCH_DIRECT));
 }
 
-TEST(PM4CapabilitiesTest, DispatchCommandBuffersRequireBarrierPacketFamilies) {
+TEST(PM4CapabilitiesTest,
+     ComputeDispatchIndirectRequiresPM4IBSetShRegAndPacket) {
+  EXPECT_TRUE(
+      iree_hal_amdgpu_vendor_packet_capabilities_support_pm4_compute_dispatch_indirect(
+          IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_AQL_PM4_IB |
+          IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_SET_SH_REG |
+          IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_COMPUTE_DISPATCH_INDIRECT));
+  EXPECT_FALSE(
+      iree_hal_amdgpu_vendor_packet_capabilities_support_pm4_compute_dispatch_indirect(
+          IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_AQL_PM4_IB |
+          IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_COMPUTE_DISPATCH_INDIRECT));
+  EXPECT_FALSE(
+      iree_hal_amdgpu_vendor_packet_capabilities_support_pm4_compute_dispatch_indirect(
+          IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_SET_SH_REG |
+          IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_COMPUTE_DISPATCH_INDIRECT));
+}
+
+TEST(PM4CapabilitiesTest, DispatchCommandBuffersRequireRdnaPacketFamilies) {
   iree_hal_amdgpu_vendor_packet_capability_flags_t capabilities =
       IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_AQL_PM4_IB |
       IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_EVENT_WRITE |
       IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_SET_SH_REG |
       IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_ACQUIRE_MEM |
       IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_ACQUIRE_MEM_GFX10 |
-      IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_COMPUTE_DISPATCH_DIRECT;
+      IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_COMPUTE_DISPATCH_DIRECT |
+      IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_COMPUTE_DISPATCH_INDIRECT;
   EXPECT_TRUE(
       iree_hal_amdgpu_vendor_packet_capabilities_support_pm4_dispatch_command_buffers(
           capabilities));
+  capabilities &=
+      ~IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_COMPUTE_DISPATCH_INDIRECT;
+  EXPECT_FALSE(
+      iree_hal_amdgpu_vendor_packet_capabilities_support_pm4_dispatch_command_buffers(
+          capabilities));
+  capabilities |=
+      IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_COMPUTE_DISPATCH_INDIRECT;
   capabilities &=
       ~IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_ACQUIRE_MEM_GFX10;
   EXPECT_FALSE(
       iree_hal_amdgpu_vendor_packet_capabilities_support_pm4_dispatch_command_buffers(
           capabilities));
   capabilities |= IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_ACQUIRE_MEM_GFX9;
-  EXPECT_TRUE(
+  EXPECT_FALSE(
       iree_hal_amdgpu_vendor_packet_capabilities_support_pm4_dispatch_command_buffers(
           capabilities));
   capabilities |=
       IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_ACQUIRE_MEM_GFX10;
-  EXPECT_FALSE(
+  EXPECT_TRUE(
       iree_hal_amdgpu_vendor_packet_capabilities_support_pm4_dispatch_command_buffers(
           capabilities));
   capabilities &=
@@ -226,7 +251,7 @@ TEST(PM4EmitterTest, BuilderAppendsAcquireMemGfx10Packet) {
                            IREE_HAL_AMDGPU_PM4_ACQUIRE_MEM_GFX10_DWORD_COUNT));
   EXPECT_EQ(dwords[1], IREE_HAL_AMDGPU_PM4_ACQUIRE_MEM_GFX10_ENGINE_ME);
   EXPECT_EQ(dwords[2], 0xFFFFFFFFu);
-  EXPECT_EQ(dwords[3], 0x01FFFFFFu);
+  EXPECT_EQ(dwords[3], 0x000000FFu);
   EXPECT_EQ(dwords[4], 0u);
   EXPECT_EQ(dwords[5], 0u);
   EXPECT_EQ(dwords[6], 0x0000000Au);
@@ -247,8 +272,7 @@ TEST(PM4EmitterTest, BuilderAppendsAcquireMemGfx9Packet) {
   EXPECT_EQ(dwords[0], iree_hal_amdgpu_pm4_make_compute_header(
                            IREE_HAL_AMDGPU_PM4_HDR_IT_OPCODE_ACQUIRE_MEM,
                            IREE_HAL_AMDGPU_PM4_ACQUIRE_MEM_GFX9_DWORD_COUNT));
-  EXPECT_EQ(dwords[1],
-            IREE_HAL_AMDGPU_PM4_ACQUIRE_MEM_GFX9_CP_COHER_CNTL_CONSERVATIVE);
+  EXPECT_EQ(dwords[1], 0x38C40000u);
   EXPECT_EQ(dwords[2], IREE_HAL_AMDGPU_PM4_ACQUIRE_MEM_COHER_SIZE);
   EXPECT_EQ(dwords[3], IREE_HAL_AMDGPU_PM4_ACQUIRE_MEM_GFX9_COHER_SIZE_HI);
   EXPECT_EQ(dwords[4], 0u);
@@ -569,8 +593,7 @@ TEST(PM4EmitterTest, EmitsWaitRegMem64Packet) {
   EXPECT_EQ(slot.dwords[5], 0x11223344u);
   EXPECT_EQ(slot.dwords[6], 0xFFFFFFFFu);
   EXPECT_EQ(slot.dwords[7], 0x7FFFFFFFu);
-  EXPECT_EQ(slot.dwords[8],
-            4u | IREE_HAL_AMDGPU_PM4_WAIT_REG_MEM_OPTIMIZE_ACE_OFFLOAD_MODE);
+  EXPECT_EQ(slot.dwords[8], 4u);
 }
 
 TEST(PM4EmitterTest, TimestampControlsMatchAqlprofileFamilies) {
@@ -837,18 +860,23 @@ TEST(PM4EmitterTest, BuilderRejectsTimestampAlignmentAndOverflow) {
 
 TEST(PM4EmitterTest, EmitsArbitraryPM4IBDwordEnvelope) {
   uint32_t dwords[32] = {0};
-  iree_hsa_amd_aql_pm4_ib_packet_t packet = {};
+  iree_hsa_amd_aql_pm4_ib_packet_t packet;
+  std::memset(&packet, 0xCC, sizeof(packet));
+  const iree_hsa_signal_t completion_signal = {0x123456789ABCDEF0ull};
 
   iree_hal_amdgpu_aql_packet_control_t packet_control =
       iree_hal_amdgpu_aql_packet_control_barrier_system();
-  uint16_t setup = 0;
+  uint16_t setup = 0xCCCCu;
   uint16_t header = iree_hal_amdgpu_aql_emit_pm4_ib_dwords(
       &packet, dwords, IREE_ARRAYSIZE(dwords), packet_control,
-      iree_hsa_signal_null(), &setup);
+      completion_signal, &setup);
 
   EXPECT_EQ(header, iree_hal_amdgpu_aql_make_header(
                         IREE_HSA_PACKET_TYPE_VENDOR_SPECIFIC, packet_control));
   EXPECT_EQ(setup, IREE_HSA_AMD_AQL_FORMAT_PM4_IB);
+  uint32_t unpublished_header = 0;
+  std::memcpy(&unpublished_header, &packet, sizeof(unpublished_header));
+  EXPECT_EQ(unpublished_header, 0xCCCCCCCCu);
   EXPECT_EQ(packet.ib_jump_cmd[0],
             iree_hal_amdgpu_pm4_make_header(
                 IREE_HAL_AMDGPU_PM4_HDR_IT_OPCODE_INDIRECT_BUFFER,
@@ -859,6 +887,10 @@ TEST(PM4EmitterTest, EmitsArbitraryPM4IBDwordEnvelope) {
             iree_hal_amdgpu_pm4_ib_addr_hi(dword_address));
   EXPECT_EQ(packet.ib_jump_cmd[3], IREE_ARRAYSIZE(dwords) | (1u << 23));
   EXPECT_EQ(packet.dw_cnt_remain, 0xAu);
+  for (uint32_t reserved_dword : packet.reserved) {
+    EXPECT_EQ(reserved_dword, 0u);
+  }
+  EXPECT_EQ(packet.completion_signal.handle, completion_signal.handle);
 }
 
 }  // namespace

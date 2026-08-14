@@ -9,6 +9,7 @@
 
 #include "iree/base/api.h"
 #include "iree/hal/allocator.h"
+#include "iree/hal/drivers/amdgpu/util/pm4_capabilities.h"
 #include "iree/hal/executable/amdgpu/target_id.h"
 #include "iree/hal/utils/device_spec_builder.h"
 
@@ -52,6 +53,8 @@ typedef struct iree_hal_amdgpu_device_spec_physical_device_params_t {
   uint32_t maximum_waves_per_compute_unit;
   // Maximum workgroup local-memory byte length.
   uint32_t maximum_workgroup_local_memory_size;
+  // Immutable vendor packet capabilities available on this physical device.
+  iree_hal_amdgpu_vendor_packet_capability_flags_t vendor_packet_capabilities;
   // Optional physical-device parameter flags.
   iree_hal_amdgpu_device_spec_physical_device_flags_t flags;
 } iree_hal_amdgpu_device_spec_physical_device_params_t;

@@ -323,6 +323,10 @@ enum iree_hal_topology_capability_bits_t {
   // per-allocation access grants. Until the allocation/access policy proves a
   // grant was applied, those buffer modes must not report NATIVE access.
   IREE_HAL_TOPOLOGY_CAPABILITY_PEER_ACCESS_REQUIRES_GRANT = 1u << 12,
+  // 32-bit atomic transactions work across the link.
+  IREE_HAL_TOPOLOGY_CAPABILITY_ATOMIC_32 = 1u << 13,
+  // 64-bit atomic transactions work across the link.
+  IREE_HAL_TOPOLOGY_CAPABILITY_ATOMIC_64 = 1u << 14,
 };
 typedef uint16_t iree_hal_topology_capability_t;
 
@@ -681,16 +685,20 @@ iree_hal_topology_edge_buffer_write_mode_coherent(
 // - HOST_COHERENT: CPU can observe device writes without explicit sync
 // - P2P_COPY: Hardware DMA between devices (bypasses host)
 // - CONCURRENT_SAFE: Can safely access same memory concurrently (no races)
-// - ATOMIC_DEVICE: Atomic operations visible across devices
-// - ATOMIC_SYSTEM: Atomic operations visible system-wide (CPU + all devices)
+// - ATOMIC_DEVICE: Device-scope atomic operations visible across the link
+// - ATOMIC_SYSTEM: System-scope atomic operations visible across the link
+// - ATOMIC_32: 32-bit atomic transactions supported across the link
+// - ATOMIC_64: 64-bit atomic transactions supported across the link
 // - TIMELINE_SEMAPHORE: Supports timeline semaphores for fine-grained sync
 // - REMOTE_DMA: RDMA transfers supported across this link
 // - SHARED_VIRTUAL_ADDRESS: SVA/SVM across this link
 // - PEER_ACCESS_REQUIRES_GRANT: direct peer access needs allocation grants
 //
 // Implementations should be conservative - only set flags that hardware truly
-// guarantees. ATOMIC_SYSTEM requires platform support (PCIe atomics, vendor
-// extensions). Check CUDA unified addressing, ROCm fine-grained memory, etc.
+// guarantees. A usable atomic cell requires both its width and scope bits;
+// queue-family and memory-type capabilities are required independently.
+// ATOMIC_SYSTEM requires platform support (PCIe atomics, vendor extensions).
+// Check CUDA unified addressing, ROCm fine-grained memory, etc.
 static inline iree_hal_topology_capability_t
 iree_hal_topology_edge_capability_flags(
     iree_hal_topology_edge_scheduling_word_t word) {
@@ -924,9 +932,10 @@ static inline uint8_t iree_hal_topology_edge_path_hop_count(
 //
 // Shared state buffer for multi-GPU coordination (small, frequently updated).
 // Scheduler reads edge A->B:
-//   buffer_read_mode_coherent = NATIVE, PEER_COHERENT set, ATOMIC_SYSTEM set
-// Decision: allocate as coherent on A, B uses it in-place with system atomics.
-// No transfer needed — hardware coherency handles visibility.
+//   buffer_read_mode_coherent = NATIVE, PEER_COHERENT set,
+//   ATOMIC_SYSTEM and ATOMIC_64 set
+// Decision: allocate as coherent on A, B uses it in-place with 64-bit system
+// atomics. No transfer needed — hardware coherency handles visibility.
 //
 // ** Choosing allocation pool for a new buffer **
 //
@@ -948,9 +957,9 @@ static inline uint8_t iree_hal_topology_edge_path_hop_count(
 // ** Scheduling algorithm selection **
 //
 // The scheduler inspects edges to choose between global strategies:
-//   coherent NATIVE + ATOMIC_SYSTEM  -> shared-memory work-stealing
-//   noncoherent COPY + P2P_COPY      -> pipeline with DMA
-//   otherwise                        -> replicate-and-compute
+//   coherent NATIVE + ATOMIC_SYSTEM + ATOMIC_64 -> shared-memory work-stealing
+//   noncoherent COPY + P2P_COPY                  -> pipeline with DMA
+//   otherwise                                    -> replicate-and-compute
 // This decision happens once at plan construction time — no buffers exist yet.
 
 //===----------------------------------------------------------------------===//

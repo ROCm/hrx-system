@@ -192,9 +192,10 @@ static iree_status_t iree_hal_amdgpu_executable_global_resolver_create_buffer(
   return iree_hal_amdgpu_buffer_create(
       resolver->libhsa, placement, IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL,
       IREE_HAL_MEMORY_ACCESS_READ | IREE_HAL_MEMORY_ACCESS_WRITE,
-      IREE_HAL_BUFFER_USAGE_DEFAULT, expected_byte_length, expected_byte_length,
-      (void*)(uintptr_t)variable_address, release_callback,
-      resolver->host_allocator, out_buffer);
+      IREE_HAL_BUFFER_USAGE_DEFAULT,
+      IREE_HAL_AMDGPU_ATOMIC_MEMORY_CELL_FLAG_NONE, expected_byte_length,
+      expected_byte_length, (void*)(uintptr_t)variable_address,
+      release_callback, resolver->host_allocator, out_buffer);
 }
 
 iree_status_t iree_hal_amdgpu_executable_global_resolver_initialize_table(

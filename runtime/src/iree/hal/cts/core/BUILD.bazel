@@ -4,7 +4,7 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-# Core HAL CTS tests: driver, event, semaphore.
+# Core HAL CTS tests: driver and semaphore.
 
 load("//runtime/build_tools/bazel:cc.bzl", "iree_runtime_cc_library")
 
@@ -21,17 +21,6 @@ iree_runtime_cc_library(
     deps = [
         "//runtime/src/iree/async/util:proactor_pool",
         "//runtime/src/iree/base/threading",
-        "//runtime/src/iree/hal",
-        "//runtime/src/iree/hal/cts/util:test_base",
-    ],
-    alwayslink = True,
-)
-
-iree_runtime_cc_library(
-    name = "event_test",
-    testonly = True,
-    srcs = ["event_test.cc"],
-    deps = [
         "//runtime/src/iree/hal",
         "//runtime/src/iree/hal/cts/util:test_base",
     ],
@@ -81,7 +70,6 @@ iree_runtime_cc_library(
     testonly = True,
     deps = [
         ":driver_test",
-        ":event_test",
         ":semaphore_test",
     ] + select({
         "@platforms//cpu:wasm32": [],

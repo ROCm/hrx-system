@@ -30,6 +30,18 @@ iree_runtime_cc_library(
 )
 
 iree_runtime_cc_library(
+    name = "queue_atomic_test",
+    testonly = True,
+    srcs = ["queue_atomic_test.cc"],
+    deps = [
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/cts/util:atomic_test_util",
+        "//runtime/src/iree/hal/cts/util:test_base",
+    ],
+    alwayslink = True,
+)
+
+iree_runtime_cc_library(
     name = "queue_dispatch_test",
     testonly = True,
     srcs = ["queue_dispatch_test.cc"],
@@ -81,6 +93,7 @@ iree_runtime_cc_library(
     testonly = True,
     deps = [
         ":queue_alloca_test",
+        ":queue_atomic_test",
         ":queue_dispatch_test",
         ":queue_host_call_test",
         ":queue_transfer_test",

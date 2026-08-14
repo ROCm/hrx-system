@@ -1,0 +1,81 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//build_tools/embed_data:build_defs.bzl", "iree_c_embed_data")
+load("//build_tools/spirv:asm_module.bzl", "iree_spirv_asm_module")
+load("//runtime/build_tools/bazel:cc.bzl", "iree_runtime_cc_library")
+load("//runtime/build_tools/bazel:cc_test.bzl", "iree_runtime_cc_test")
+
+package(
+    default_visibility = ["//runtime/src/iree/hal/drivers/vulkan:__pkg__"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+_KERNELS = [
+    "atomic_32",
+    "atomic_64",
+    "fill_unaligned",
+    "update_unaligned",
+]
+
+iree_c_embed_data(
+    name = "kernels",
+    srcs = ["%s.spv" % name for name in _KERNELS],
+    c_file_output = "kernels.c",
+    flatten = True,
+    h_file_output = "kernels.h",
+    identifier = "iree_hal_vulkan_device_kernels",
+    target_compatible_with = select({
+        "//runtime/config/hal:driver_vulkan": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+)
+
+iree_runtime_cc_library(
+    name = "library",
+    srcs = ["library.c"],
+    hdrs = ["library.h"],
+    deps = [
+        ":kernels",
+        "//runtime/src/iree/base",
+    ],
+)
+
+[
+    iree_spirv_asm_module(
+        name = "%s_generated" % name,
+        testonly = True,
+        src = "%s.spvasm" % name,
+        out = "%s_generated.spv" % name,
+        target_env = "vulkan1.3" if name.startswith("atomic_") else "spv1.0",
+    )
+    for name in _KERNELS
+]
+
+iree_c_embed_data(
+    name = "kernels_generated",
+    testonly = True,
+    srcs = [":%s_generated" % name for name in _KERNELS],
+    c_file_output = "kernels_generated.c",
+    flatten = True,
+    h_file_output = "kernels_generated.h",
+    identifier = "iree_hal_vulkan_device_kernels_generated",
+    target_compatible_with = select({
+        "//runtime/config/hal:driver_vulkan": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+)
+
+iree_runtime_cc_test(
+    name = "kernels_test",
+    srcs = ["kernels_test.cc"],
+    deps = [
+        ":kernels",
+        ":kernels_generated",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)

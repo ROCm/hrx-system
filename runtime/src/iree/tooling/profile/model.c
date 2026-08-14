@@ -1354,6 +1354,12 @@ const char* iree_profile_command_operation_type_name(
       return "cond_branch";
     case IREE_HAL_PROFILE_COMMAND_OPERATION_TYPE_RETURN:
       return "return";
+    case IREE_HAL_PROFILE_COMMAND_OPERATION_TYPE_ATOMIC_WAIT:
+      return "atomic_wait";
+    case IREE_HAL_PROFILE_COMMAND_OPERATION_TYPE_ATOMIC_STORE:
+      return "atomic_store";
+    case IREE_HAL_PROFILE_COMMAND_OPERATION_TYPE_ATOMIC_RMW:
+      return "atomic_rmw";
     default:
       return "unknown";
   }
@@ -1384,6 +1390,12 @@ const char* iree_profile_queue_event_type_name(
       return "dealloca";
     case IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_HOST_CALL:
       return "host_call";
+    case IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_ATOMIC_WAIT:
+      return "atomic_wait";
+    case IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_ATOMIC_STORE:
+      return "atomic_store";
+    case IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_ATOMIC_RMW:
+      return "atomic_rmw";
     default:
       return "unknown";
   }

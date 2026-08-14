@@ -11,8 +11,10 @@
 
 #include "iree/base/api.h"
 #include "iree/hal/allocator.h"
+#include "iree/hal/atomic.h"
 #include "iree/hal/buffer.h"
 #include "iree/hal/memory/asan.h"
+#include "iree/hal/queue.h"
 #include "iree/hal/semaphore.h"
 #include "iree/hal/topology.h"
 
@@ -218,6 +220,9 @@ typedef struct iree_hal_memory_type_spec_t {
   uint64_t minimum_alignment;
   // Optimal transfer granularity in bytes.
   uint64_t optimal_transfer_granularity;
+  // Atomic operations supported by naturally aligned locations allocated from
+  // this memory type. Queue-family capabilities are required independently.
+  iree_hal_atomic_operation_capabilities_t atomic_operations;
   // Stable memory type flags.
   iree_hal_memory_type_spec_flags_t flags;
 } iree_hal_memory_type_spec_t;
@@ -393,6 +398,8 @@ typedef enum iree_hal_queue_family_role_flag_bits_e {
   IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_COLLECTIVE = 1u << 3,
   // Queue family can produce profiling timestamps.
   IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_PROFILING = 1u << 4,
+  // Queue family can execute atomic memory operations.
+  IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_ATOMIC = 1u << 5,
 } iree_hal_queue_family_role_flag_bits_t;
 
 // Queue family capability flags.
@@ -416,8 +423,18 @@ typedef struct iree_hal_queue_family_spec_t {
   uint64_t timestamp_frequency_hz;
   // Nonzero physical-device set serviced by queues in this family.
   iree_hal_physical_device_affinity_t physical_device_affinity;
+  // Queue-affinity routing lanes selecting this family. One lane may route
+  // among several family queues. Atomic waits require callers to select
+  // exactly one bit from this mask.
+  iree_hal_queue_affinity_t queue_affinity;
   // Queue family role flags.
   iree_hal_queue_family_role_flags_t role_flags;
+  // Atomic operations and wait predicates supported by this queue family.
+  // These capabilities are intersected with the target memory capabilities.
+  iree_hal_atomic_capabilities_t atomic_capabilities;
+  // Subset of |atomic_capabilities| implemented without occupying dispatch
+  // resources. A zero-compute wait may still occupy its command queue.
+  iree_hal_atomic_capabilities_t zero_compute_atomic_capabilities;
   // Queue family capability flags.
   iree_hal_queue_family_spec_flags_t flags;
 } iree_hal_queue_family_spec_t;

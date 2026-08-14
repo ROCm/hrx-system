@@ -81,6 +81,9 @@ typedef enum iree_hal_task_queue_op_type_e {
   IREE_HAL_TASK_QUEUE_OP_FILL,
   IREE_HAL_TASK_QUEUE_OP_COPY,
   IREE_HAL_TASK_QUEUE_OP_UPDATE,
+  IREE_HAL_TASK_QUEUE_OP_ATOMIC_WAIT,
+  IREE_HAL_TASK_QUEUE_OP_ATOMIC_STORE,
+  IREE_HAL_TASK_QUEUE_OP_ATOMIC_RMW,
   IREE_HAL_TASK_QUEUE_OP_DISPATCH,
 } iree_hal_task_queue_op_type_t;
 
@@ -241,6 +244,30 @@ struct iree_hal_task_queue_op_t {
       // Source data arena-allocated (pointer into operation arena).
       const void* source_data;
     } update;
+    struct {
+      // Retained buffer containing the target location.
+      iree_hal_buffer_t* target_buffer;
+      // Byte offset of the target location in |target_buffer|.
+      iree_device_size_t target_offset;
+      // Width, predicate, ordering, and scope of the wait.
+      iree_hal_atomic_wait_params_t params;
+    } atomic_wait;
+    struct {
+      // Retained buffer containing the target location.
+      iree_hal_buffer_t* target_buffer;
+      // Byte offset of the target location in |target_buffer|.
+      iree_device_size_t target_offset;
+      // Width, value, ordering, and scope of the store.
+      iree_hal_atomic_store_params_t params;
+    } atomic_store;
+    struct {
+      // Retained buffer containing the target location.
+      iree_hal_buffer_t* target_buffer;
+      // Byte offset of the target location in |target_buffer|.
+      iree_device_size_t target_offset;
+      // Width, operand, operation, ordering, and scope of the update.
+      iree_hal_atomic_rmw_params_t params;
+    } atomic_rmw;
     struct {
       iree_hal_executable_t* executable;
       iree_hal_executable_function_t export_ordinal;
@@ -636,6 +663,24 @@ iree_status_t iree_hal_task_queue_submit_update(
     iree_hal_task_queue_t* queue, const void* source_buffer,
     iree_host_size_t source_offset, iree_hal_buffer_t* target_buffer,
     iree_device_size_t target_offset, iree_device_size_t length,
+    iree_hal_semaphore_list_t wait_semaphores,
+    iree_hal_semaphore_list_t signal_semaphores);
+
+iree_status_t iree_hal_task_queue_submit_atomic_wait(
+    iree_hal_task_queue_t* queue, iree_hal_buffer_t* target_buffer,
+    iree_device_size_t target_offset, iree_hal_atomic_wait_params_t params,
+    iree_hal_semaphore_list_t wait_semaphores,
+    iree_hal_semaphore_list_t signal_semaphores);
+
+iree_status_t iree_hal_task_queue_submit_atomic_store(
+    iree_hal_task_queue_t* queue, iree_hal_buffer_t* target_buffer,
+    iree_device_size_t target_offset, iree_hal_atomic_store_params_t params,
+    iree_hal_semaphore_list_t wait_semaphores,
+    iree_hal_semaphore_list_t signal_semaphores);
+
+iree_status_t iree_hal_task_queue_submit_atomic_rmw(
+    iree_hal_task_queue_t* queue, iree_hal_buffer_t* target_buffer,
+    iree_device_size_t target_offset, iree_hal_atomic_rmw_params_t params,
     iree_hal_semaphore_list_t wait_semaphores,
     iree_hal_semaphore_list_t signal_semaphores);
 

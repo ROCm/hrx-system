@@ -31,8 +31,7 @@ iree_hal_buffer_params_t MakeQueueAllocaBufferParams() {
   iree_hal_buffer_params_t params = {0};
   params.type = IREE_HAL_MEMORY_TYPE_OPTIMAL_FOR_DEVICE;
   params.access = IREE_HAL_MEMORY_ACCESS_ALL;
-  params.usage =
-      IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE;
+  params.usage = IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_STORAGE;
   return params;
 }
 
@@ -811,7 +810,7 @@ TEST_P(QueueAllocaTest, BufferMetadata) {
   EXPECT_TRUE(iree_all_bits_set(iree_hal_buffer_allowed_usage(buffer),
                                 IREE_HAL_BUFFER_USAGE_TRANSFER));
   EXPECT_TRUE(iree_all_bits_set(iree_hal_buffer_allowed_usage(buffer),
-                                IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE));
+                                IREE_HAL_BUFFER_USAGE_STORAGE));
 
   // The buffer must have the ASYNCHRONOUS placement flag for dealloca routing.
   const iree_hal_buffer_placement_t placement =
@@ -1060,8 +1059,7 @@ TEST_P(QueueAllocaTest, ZeroAccessFlagsCanonicalized) {
   // .access = 0. The driver must canonicalize this to MEMORY_ACCESS_ALL.
   iree_hal_buffer_params_t params = {0};
   params.type = IREE_HAL_MEMORY_TYPE_OPTIMAL_FOR_DEVICE;
-  params.usage =
-      IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE;
+  params.usage = IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_STORAGE;
 
   iree_hal_buffer_t* buffer = NULL;
   IREE_ASSERT_OK(iree_hal_device_queue_alloca(

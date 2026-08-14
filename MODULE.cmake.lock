@@ -143,10 +143,10 @@ set(IREE_DEP_HSA_RUNTIME_HEADERS_VERSION "")
 set(IREE_DEP_HSA_RUNTIME_HEADERS_DEV_DEPENDENCY "FALSE")
 set(IREE_DEP_HSA_RUNTIME_HEADERS_SOURCE_URL "")
 set(IREE_DEP_HSA_RUNTIME_HEADERS_URLS
-  "https://github.com/iree-org/hsa-runtime-headers/archive/cc2b5f429de4d1cb2be96ed10e6f45246e408d0e.tar.gz"
+  "https://github.com/iree-org/hsa-runtime-headers/archive/4285513114a70f7cf4830c89279c8cfa57b901bb.tar.gz"
 )
-set(IREE_DEP_HSA_RUNTIME_HEADERS_SHA256 "66bd23285a3886c9b9983ac6de5efe4a828a2a293fd898d7fd75ab6c500741fb")
-set(IREE_DEP_HSA_RUNTIME_HEADERS_STRIP_PREFIX "hsa-runtime-headers-cc2b5f429de4d1cb2be96ed10e6f45246e408d0e")
+set(IREE_DEP_HSA_RUNTIME_HEADERS_SHA256 "a906b35e77b9cee074995d144cf7718a0069eba08ba7bc741ee7576950fde923")
+set(IREE_DEP_HSA_RUNTIME_HEADERS_STRIP_PREFIX "hsa-runtime-headers-4285513114a70f7cf4830c89279c8cfa57b901bb")
 set(IREE_DEP_HSA_RUNTIME_HEADERS_BUILD_FILE "//build_tools/third_party/rocm:hsa_runtime_headers.BUILD.bazel")
 
 set(IREE_DEP_HIP_API_HEADERS_KIND "rocm_repository")

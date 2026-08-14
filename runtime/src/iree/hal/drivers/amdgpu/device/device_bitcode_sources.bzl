@@ -5,6 +5,7 @@
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 IREE_HAL_AMDGPU_DEVICE_BITCODE_SRCS = [
+    "atomic.c",
     "blit.c",
     "dispatch.c",
     "tsan.c",

@@ -29,6 +29,8 @@ typedef struct iree_hal_amdgpu_hsaco_kernel_load_plan_t {
   // Native byte offset of the implicit-argument suffix, or
   // IREE_HAL_AMDGPU_KERNARG_LAYOUT_IMPLICIT_ARGS_NONE.
   iree_host_size_t implicit_args_byte_offset;
+  // Semantic kernarg layout flags derived from exact HSACO argument kinds.
+  iree_hal_amdgpu_kernarg_layout_flags_t declared_layout_flags;
   // Byte length required for the immutable native kernarg layout record.
   iree_host_size_t layout_byte_length;
 } iree_hal_amdgpu_hsaco_kernel_load_plan_t;
@@ -112,6 +114,16 @@ static bool iree_hal_amdgpu_hsaco_metadata_arg_kind_is_hidden(
          kind == IREE_HAL_AMDGPU_HSACO_METADATA_ARG_KIND_HIDDEN_NONE;
 }
 
+static bool iree_hal_amdgpu_hsaco_metadata_arg_uses_implicit_block_count(
+    const iree_hal_amdgpu_hsaco_metadata_arg_t* arg) {
+  return iree_string_view_equal(arg->value_kind,
+                                IREE_SV("hidden_block_count_x")) ||
+         iree_string_view_equal(arg->value_kind,
+                                IREE_SV("hidden_block_count_y")) ||
+         iree_string_view_equal(arg->value_kind,
+                                IREE_SV("hidden_block_count_z"));
+}
+
 static iree_status_t iree_hal_amdgpu_hsaco_load_plan_check_u16(
     iree_string_view_t symbol_name, iree_string_view_t field_name,
     iree_host_size_t value) {
@@ -165,6 +177,10 @@ static iree_status_t iree_hal_amdgpu_hsaco_load_plan_analyze_kernel(
     if (iree_hal_amdgpu_hsaco_metadata_arg_kind_is_hidden(arg->kind)) {
       hidden_args_offset =
           iree_min(hidden_args_offset, (iree_host_size_t)arg->offset);
+      if (iree_hal_amdgpu_hsaco_metadata_arg_uses_implicit_block_count(arg)) {
+        out_load_plan->declared_layout_flags |=
+            IREE_HAL_AMDGPU_KERNARG_LAYOUT_FLAG_USES_IMPLICIT_BLOCK_COUNT;
+      }
       continue;
     }
 
@@ -382,6 +398,7 @@ static iree_status_t iree_hal_amdgpu_hsaco_load_plan_populate_layout_tables(
       .kernarg_alignment = kernel->kernarg_segment_alignment,
       .constant_byte_length = load_plan->constant_byte_length,
       .implicit_args_byte_offset = load_plan->implicit_args_byte_offset,
+      .declared_flags = load_plan->declared_layout_flags,
       .binding_count = load_plan->binding_count,
       .binding_slots = binding_slots,
       .constant_span_count = load_plan->constant_span_count,

@@ -274,13 +274,6 @@ iree_hal_amdgpu_pm4_timestamp_strategy_t
 iree_hal_amdgpu_select_pm4_timestamp_strategy(
     iree_hal_amdgpu_gfxip_version_t version);
 
-// Selects unvalidated PM4 dispatch command-buffer capabilities for explicit
-// hardware bring-up on known PM4 gfx families. Production automatic selection
-// must use iree_hal_amdgpu_select_vendor_packet_capabilities alone.
-iree_hal_amdgpu_vendor_packet_capability_flags_t
-iree_hal_amdgpu_select_experimental_pm4_command_buffer_capabilities(
-    iree_hal_amdgpu_gfxip_version_t version);
-
 // AMDGPU memory-system facts used to derive conservative HAL topology flags.
 typedef struct iree_hal_amdgpu_memory_system_capabilities_t {
   // HSA SVM/HMM process and agent facts.
@@ -297,6 +290,8 @@ typedef struct iree_hal_amdgpu_memory_system_capabilities_t {
 
   // Device-local memory placement facts.
   struct {
+    // Host and device allocations share one local memory system.
+    uint32_t unified_memory : 1;
     // A host-coherent fine-grained device memory pool is available.
     uint32_t fine_host_visible : 1;
     // A CPU-visible coarse-grained device memory pool is usable by the driver.
@@ -320,6 +315,8 @@ typedef struct iree_hal_amdgpu_memory_system_capabilities_selection_t {
 
   // Device-local memory placement facts.
   struct {
+    // Whether HSA identifies the GPU agent as an integrated APU.
+    uint32_t agent_is_apu : 1;
     // Fine-grained global memory pool considered for host-visible device data.
     hsa_amd_memory_pool_t fine_memory_pool;
     // Selected CPU-visible coarse-grained device-memory capability.

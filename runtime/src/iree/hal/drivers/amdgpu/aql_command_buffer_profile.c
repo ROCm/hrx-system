@@ -42,9 +42,27 @@ iree_hal_amdgpu_aql_command_buffer_profile_operation_type(uint8_t opcode) {
       return IREE_HAL_PROFILE_COMMAND_OPERATION_TYPE_COND_BRANCH;
     case IREE_HAL_AMDGPU_COMMAND_BUFFER_OPCODE_RETURN:
       return IREE_HAL_PROFILE_COMMAND_OPERATION_TYPE_RETURN;
+    case IREE_HAL_AMDGPU_COMMAND_BUFFER_OPCODE_ATOMIC_WAIT:
+      return IREE_HAL_PROFILE_COMMAND_OPERATION_TYPE_ATOMIC_WAIT;
+    case IREE_HAL_AMDGPU_COMMAND_BUFFER_OPCODE_ATOMIC_STORE:
+      return IREE_HAL_PROFILE_COMMAND_OPERATION_TYPE_ATOMIC_STORE;
+    case IREE_HAL_AMDGPU_COMMAND_BUFFER_OPCODE_ATOMIC_RMW:
+      return IREE_HAL_PROFILE_COMMAND_OPERATION_TYPE_ATOMIC_RMW;
     default:
       return IREE_HAL_PROFILE_COMMAND_OPERATION_TYPE_NONE;
   }
+}
+
+static void iree_hal_amdgpu_aql_command_buffer_profile_atomic_target(
+    const iree_hal_amdgpu_command_buffer_atomic_target_t* target,
+    iree_hal_atomic_width_t width,
+    iree_hal_profile_command_operation_record_t* record) {
+  record->flags |=
+      iree_hal_amdgpu_aql_command_buffer_profile_binding_kind_flags(
+          target->kind);
+  record->target_offset = target->offset;
+  record->target_ordinal = target->ordinal;
+  record->length = iree_hal_atomic_width_byte_count(width);
 }
 
 static iree_hal_profile_command_operation_flags_t
@@ -186,6 +204,29 @@ static void iree_hal_amdgpu_aql_command_buffer_initialize_profile_operation(
       record.target_offset = update_command->target_offset;
       record.length = update_command->length;
       record.target_ordinal = update_command->target_ordinal;
+      break;
+    }
+    case IREE_HAL_AMDGPU_COMMAND_BUFFER_OPCODE_ATOMIC_WAIT: {
+      const iree_hal_amdgpu_command_buffer_atomic_wait_command_t* atomic_wait =
+          (const iree_hal_amdgpu_command_buffer_atomic_wait_command_t*)command;
+      iree_hal_amdgpu_aql_command_buffer_profile_atomic_target(
+          &atomic_wait->target, atomic_wait->width, &record);
+      break;
+    }
+    case IREE_HAL_AMDGPU_COMMAND_BUFFER_OPCODE_ATOMIC_STORE: {
+      const iree_hal_amdgpu_command_buffer_atomic_store_command_t*
+          atomic_store =
+              (const iree_hal_amdgpu_command_buffer_atomic_store_command_t*)
+                  command;
+      iree_hal_amdgpu_aql_command_buffer_profile_atomic_target(
+          &atomic_store->target, atomic_store->width, &record);
+      break;
+    }
+    case IREE_HAL_AMDGPU_COMMAND_BUFFER_OPCODE_ATOMIC_RMW: {
+      const iree_hal_amdgpu_command_buffer_atomic_rmw_command_t* atomic_rmw =
+          (const iree_hal_amdgpu_command_buffer_atomic_rmw_command_t*)command;
+      iree_hal_amdgpu_aql_command_buffer_profile_atomic_target(
+          &atomic_rmw->target, atomic_rmw->width, &record);
       break;
     }
     case IREE_HAL_AMDGPU_COMMAND_BUFFER_OPCODE_BRANCH: {

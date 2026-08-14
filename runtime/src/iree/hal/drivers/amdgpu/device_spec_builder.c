@@ -31,7 +31,28 @@ static iree_status_t iree_hal_amdgpu_device_spec_verify_params(
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "AMDGPU device spec allocator is NULL");
   }
+  const iree_host_size_t queue_count = params->physical_devices[0].queue_count;
+  iree_host_size_t total_queue_count = 0;
+  if (IREE_UNLIKELY(queue_count == 0 ||
+                    !iree_host_size_checked_mul(params->physical_device_count,
+                                                queue_count,
+                                                &total_queue_count) ||
+                    total_queue_count > IREE_HAL_MAX_QUEUES)) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "AMDGPU logical queue count must be in [1, %" PRIhsz
+                            "] (physical_devices=%" PRIhsz
+                            ", queues_per_device=%" PRIhsz ")",
+                            (iree_host_size_t)IREE_HAL_MAX_QUEUES,
+                            params->physical_device_count, queue_count);
+  }
   for (iree_host_size_t i = 0; i < params->physical_device_count; ++i) {
+    if (IREE_UNLIKELY(params->physical_devices[i].queue_count != queue_count)) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "AMDGPU physical devices must expose a uniform queue count; device "
+          "0 reports %" PRIhsz " but device %" PRIhsz " reports %u",
+          queue_count, i, params->physical_devices[i].queue_count);
+    }
     if (IREE_UNLIKELY(params->physical_devices[i].timestamp_frequency_hz ==
                       0)) {
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -67,6 +88,20 @@ iree_hal_amdgpu_device_spec_all_physical_device_affinity(
   return physical_device_count == IREE_HAL_PHYSICAL_DEVICE_AFFINITY_BIT_COUNT
              ? UINT64_MAX
              : ((1ull << physical_device_count) - 1ull);
+}
+
+static iree_hal_queue_affinity_t
+iree_hal_amdgpu_device_spec_queue_affinity_for_physical_device(
+    iree_host_size_t physical_device_ordinal,
+    iree_host_size_t queue_count_per_physical_device) {
+  const iree_host_size_t first_queue_ordinal =
+      physical_device_ordinal * queue_count_per_physical_device;
+  if (queue_count_per_physical_device == IREE_HAL_MAX_QUEUES) {
+    return IREE_HAL_QUEUE_AFFINITY_ANY;
+  }
+  return (
+      (((iree_hal_queue_affinity_t)1 << queue_count_per_physical_device) - 1)
+      << first_queue_ordinal);
 }
 
 static iree_status_t iree_hal_amdgpu_device_spec_populate_identity(
@@ -217,6 +252,7 @@ static iree_status_t iree_hal_amdgpu_device_spec_populate_memory(
               iree_hal_amdgpu_device_spec_memory_access(allocator_heap),
           .minimum_alignment = allocator_heap->min_alignment,
           .optimal_transfer_granularity = 1,
+          .atomic_operations = allocator_heap->atomic_operations,
           .flags = IREE_HAL_MEMORY_TYPE_SPEC_FLAG_NONE,
       };
     }
@@ -270,6 +306,48 @@ static iree_status_t iree_hal_amdgpu_device_spec_populate_memory(
   return status;
 }
 
+static iree_hal_atomic_capabilities_t
+iree_hal_amdgpu_device_spec_atomic_capabilities(
+    iree_hal_atomic_operation_flags_t operations) {
+  const iree_hal_atomic_operation_capabilities_t operation_capabilities = {
+      .device_scope_32 = operations,
+      .device_scope_64 = operations,
+      .system_scope_32 = operations,
+      .system_scope_64 = operations,
+  };
+  const iree_hal_atomic_wait_condition_flags_t wait_conditions =
+      iree_any_bit_set(operations, IREE_HAL_ATOMIC_OPERATION_FLAG_WAIT)
+          ? IREE_HAL_ATOMIC_WAIT_CONDITION_FLAGS_ALL
+          : IREE_HAL_ATOMIC_WAIT_CONDITION_FLAG_NONE;
+  const iree_hal_atomic_wait_condition_capabilities_t
+      wait_condition_capabilities = {
+          .device_scope_32 = wait_conditions,
+          .device_scope_64 = wait_conditions,
+          .system_scope_32 = wait_conditions,
+          .system_scope_64 = wait_conditions,
+      };
+  return (iree_hal_atomic_capabilities_t){
+      .operations = operation_capabilities,
+      .wait_conditions = wait_condition_capabilities,
+  };
+}
+
+static iree_hal_atomic_capabilities_t
+iree_hal_amdgpu_device_spec_zero_compute_atomic_capabilities(
+    iree_hal_amdgpu_vendor_packet_capability_flags_t capabilities) {
+  iree_hal_atomic_operation_flags_t operations =
+      IREE_HAL_ATOMIC_OPERATION_FLAG_NONE;
+  if (iree_hal_amdgpu_vendor_packet_capabilities_support_pm4_atomic_wait(
+          capabilities)) {
+    operations |= IREE_HAL_ATOMIC_OPERATION_FLAG_WAIT;
+  }
+  if (iree_hal_amdgpu_vendor_packet_capabilities_support_pm4_atomic_store(
+          capabilities)) {
+    operations |= IREE_HAL_ATOMIC_OPERATION_FLAG_STORE;
+  }
+  return iree_hal_amdgpu_device_spec_atomic_capabilities(operations);
+}
+
 static iree_status_t iree_hal_amdgpu_device_spec_populate_queues(
     const iree_hal_amdgpu_device_spec_params_t* params,
     iree_hal_device_spec_builder_t* builder) {
@@ -291,10 +369,19 @@ static iree_status_t iree_hal_amdgpu_device_spec_populate_queues(
         .timestamp_valid_bits = 64,
         .timestamp_frequency_hz = physical_device->timestamp_frequency_hz,
         .physical_device_affinity = 1ull << i,
+        .queue_affinity =
+            iree_hal_amdgpu_device_spec_queue_affinity_for_physical_device(
+                i, physical_device->queue_count),
         .role_flags = IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_DISPATCH |
                       IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_TRANSFER |
                       IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_HOST_CALL |
-                      IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_PROFILING,
+                      IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_PROFILING |
+                      IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_ATOMIC,
+        .atomic_capabilities = iree_hal_amdgpu_device_spec_atomic_capabilities(
+            IREE_HAL_ATOMIC_OPERATION_FLAGS_ALL),
+        .zero_compute_atomic_capabilities =
+            iree_hal_amdgpu_device_spec_zero_compute_atomic_capabilities(
+                physical_device->vendor_packet_capabilities),
         .flags = IREE_HAL_QUEUE_FAMILY_SPEC_FLAG_NONE,
     };
   }

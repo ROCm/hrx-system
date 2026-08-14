@@ -209,6 +209,20 @@ iree_runtime_cc_test(
 )
 
 iree_runtime_cc_test(
+    name = "command_buffer_atomic_tests",
+    srcs = ["//runtime/src/iree/hal/cts/util:test_main.cc"],
+    deps = [
+        ":backends",
+        ":replay_cache_backends",
+        "//runtime/src/iree/base/tooling:flags",
+        "//runtime/src/iree/hal/cts/command_buffer:atomic_test",
+        "//runtime/src/iree/hal/cts/util:registry",
+        "//runtime/src/iree/hal/cts/util:test_base",
+        "//runtime/src/iree/testing:gtest",
+    ],
+)
+
+iree_runtime_cc_test(
     name = "command_buffer_fill_buffer_tests",
     srcs = ["//runtime/src/iree/hal/cts/util:test_main.cc"],
     deps = [
@@ -338,6 +352,23 @@ iree_runtime_cc_test(
         ":backends",
         "//runtime/src/iree/base/tooling:flags",
         "//runtime/src/iree/hal/cts/queue:queue_alloca_test",
+        "//runtime/src/iree/hal/cts/util:registry",
+        "//runtime/src/iree/hal/cts/util:test_base",
+        "//runtime/src/iree/testing:gtest",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "queue_atomic_tests",
+    srcs = [
+        "atomic_submission_test.cc",
+        "//runtime/src/iree/hal/cts/util:test_main.cc",
+    ],
+    deps = [
+        ":backends",
+        "//runtime/src/iree/base/tooling:flags",
+        "//runtime/src/iree/hal/cts/queue:queue_atomic_test",
+        "//runtime/src/iree/hal/cts/util:atomic_test_util",
         "//runtime/src/iree/hal/cts/util:registry",
         "//runtime/src/iree/hal/cts/util:test_base",
         "//runtime/src/iree/testing:gtest",

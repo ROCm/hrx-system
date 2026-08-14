@@ -27,7 +27,7 @@ struct TestProviderContext {
   TestProviderState* parent = nullptr;
 
   // Physical-device facts passed to provider initialization.
-  iree_hal_amdgpu_hostcall_provider_device_info_t device_info = {};
+  iree_hal_hostcall_provider_device_info_t device_info = {};
 
   // HAL-owned shared allocation passed to the provider.
   iree_byte_span_t shared_memory = {};
@@ -35,11 +35,11 @@ struct TestProviderContext {
   // Stable device-visible address of |shared_memory|.
   uint64_t device_address = 0;
 
-  // Opaque notification token encoded by device-side protocols.
-  uint64_t notification_token = 0;
+  // Notification primitive encoded by device-side protocols.
+  iree_hal_hostcall_notification_t notification = {};
 
   // Logical-device error callback retained until provider deinitialization.
-  iree_hal_amdgpu_error_callback_t error_callback = {};
+  iree_hal_hostcall_error_callback_t error_callback = {};
 
   // Number of listener service calls observed by this context.
   iree_atomic_int32_t service_count = IREE_ATOMIC_VAR_INIT(0);
@@ -71,6 +71,10 @@ struct TestProviderState {
   // True when provider initialization should fail after returning a context.
   bool fail_initialize = false;
 
+  // Notification type requested from the driver.
+  iree_hal_hostcall_notification_type_t notification_type =
+      IREE_HAL_HOSTCALL_NOTIFICATION_TYPE_HSA_SIGNAL;
+
   // True when the next service call should fail the logical device.
   iree_atomic_int32_t fail_next_service = IREE_ATOMIC_VAR_INIT(0);
 
@@ -83,28 +87,30 @@ struct TestProviderState {
 
 static iree_status_t TestProviderQueryRequirements(
     void* user_data,
-    const iree_hal_amdgpu_hostcall_provider_device_info_t* device_info,
-    iree_hal_amdgpu_hostcall_provider_requirements_t* out_requirements) {
+    const iree_hal_hostcall_provider_device_info_t* device_info,
+    iree_hal_hostcall_provider_requirements_t* out_requirements) {
   TestProviderState* state = static_cast<TestProviderState*>(user_data);
   if (device_info->physical_device_ordinal != state->query_count ||
-      device_info->compute_unit_count == 0 ||
-      device_info->maximum_waves_per_compute_unit == 0 ||
-      device_info->wavefront_size == 0) {
+      device_info->execution_unit_count == 0 ||
+      device_info->maximum_resident_subgroup_count == 0 ||
+      device_info->reserved != 0) {
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                             "test provider received invalid device facts");
   }
   ++state->query_count;
+  *out_requirements = {};
   out_requirements->allocation_size = kSharedMemorySize;
   out_requirements->allocation_alignment = kSharedMemoryAlignment;
+  out_requirements->notification_type = state->notification_type;
   return iree_ok_status();
 }
 
 static iree_status_t TestProviderInitialize(
     void* user_data,
-    const iree_hal_amdgpu_hostcall_provider_device_info_t* device_info,
+    const iree_hal_hostcall_provider_device_info_t* device_info,
     iree_byte_span_t shared_memory, uint64_t device_address,
-    uint64_t notification_token,
-    iree_hal_amdgpu_error_callback_t error_callback, void** out_context) {
+    iree_hal_hostcall_notification_t notification,
+    iree_hal_hostcall_error_callback_t error_callback, void** out_context) {
   TestProviderState* state = static_cast<TestProviderState*>(user_data);
   if (device_info->physical_device_ordinal >= IREE_HAL_AMDGPU_MAX_GPU_AGENT) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
@@ -114,7 +120,9 @@ static iree_status_t TestProviderInitialize(
       (reinterpret_cast<uintptr_t>(shared_memory.data) &
        (kSharedMemoryAlignment - 1)) != 0 ||
       device_address != reinterpret_cast<uintptr_t>(shared_memory.data) ||
-      notification_token == 0 || !error_callback.fn) {
+      notification.type != IREE_HAL_HOSTCALL_NOTIFICATION_TYPE_HSA_SIGNAL ||
+      notification.reserved != 0 || notification.token == 0 ||
+      !error_callback.fn) {
     return iree_make_status(
         IREE_STATUS_FAILED_PRECONDITION,
         "test provider received invalid physical-device resources");
@@ -126,7 +134,7 @@ static iree_status_t TestProviderInitialize(
   context->device_info = *device_info;
   context->shared_memory = shared_memory;
   context->device_address = device_address;
-  context->notification_token = notification_token;
+  context->notification = notification;
   context->error_callback = error_callback;
   memset(shared_memory.data, 0xA5, shared_memory.data_length);
   ++state->initialize_count;
@@ -171,11 +179,11 @@ static bool TestProviderReachedExpectedServiceCount(void* context_ptr) {
                           iree_memory_order_acquire);
 }
 
-static iree_hal_amdgpu_hostcall_provider_extension_t MakeProviderExtension(
+static iree_hal_hostcall_provider_extension_t MakeProviderExtension(
     TestProviderState* state) {
-  iree_hal_amdgpu_hostcall_provider_extension_t extension = {};
+  iree_hal_hostcall_provider_extension_t extension = {};
   extension.base.type =
-      IREE_HAL_AMDGPU_DEVICE_CREATE_PARAMS_EXTENSION_TYPE_HOSTCALL_PROVIDER;
+      IREE_HAL_DEVICE_CREATE_PARAMS_EXTENSION_TYPE_HOSTCALL_PROVIDER;
   extension.provider.user_data = state;
   extension.provider.query_requirements = TestProviderQueryRequirements;
   extension.provider.initialize = TestProviderInitialize;
@@ -295,7 +303,7 @@ TEST_F(HostcallProviderTest, InvalidProviderFailsBeforeRequirementQuery) {
   iree::hal::cts::DeviceCreateContext create_context;
   IREE_ASSERT_OK(create_context.Initialize(host_allocator_));
   TestProviderState provider_state;
-  iree_hal_amdgpu_hostcall_provider_extension_t extension =
+  iree_hal_hostcall_provider_extension_t extension =
       MakeProviderExtension(&provider_state);
   extension.provider.service = nullptr;
   iree_hal_device_create_params_t create_params = *create_context.params();
@@ -317,9 +325,9 @@ TEST_F(HostcallProviderTest, DuplicateProviderFailsBeforeRequirementQuery) {
   iree::hal::cts::DeviceCreateContext create_context;
   IREE_ASSERT_OK(create_context.Initialize(host_allocator_));
   TestProviderState provider_state;
-  iree_hal_amdgpu_hostcall_provider_extension_t first_extension =
+  iree_hal_hostcall_provider_extension_t first_extension =
       MakeProviderExtension(&provider_state);
-  iree_hal_amdgpu_hostcall_provider_extension_t second_extension =
+  iree_hal_hostcall_provider_extension_t second_extension =
       MakeProviderExtension(&provider_state);
   first_extension.base.next = &second_extension;
   iree_hal_device_create_params_t create_params = *create_context.params();
@@ -342,7 +350,7 @@ TEST_F(HostcallProviderTest, InitializationFailureUnwindsProviderContext) {
   IREE_ASSERT_OK(create_context.Initialize(host_allocator_));
   TestProviderState provider_state;
   provider_state.fail_initialize = true;
-  iree_hal_amdgpu_hostcall_provider_extension_t extension =
+  iree_hal_hostcall_provider_extension_t extension =
       MakeProviderExtension(&provider_state);
   iree_hal_device_create_params_t create_params = *create_context.params();
   create_params.next = &extension;
@@ -361,11 +369,34 @@ TEST_F(HostcallProviderTest, InitializationFailureUnwindsProviderContext) {
   EXPECT_EQ(provider_state.deinitialize_count, 1u);
 }
 
+TEST_F(HostcallProviderTest, UnsupportedNotificationFailsBeforeInitialize) {
+  iree::hal::cts::DeviceCreateContext create_context;
+  IREE_ASSERT_OK(create_context.Initialize(host_allocator_));
+  TestProviderState provider_state;
+  provider_state.notification_type = UINT32_MAX;
+  iree_hal_hostcall_provider_extension_t extension =
+      MakeProviderExtension(&provider_state);
+  iree_hal_device_create_params_t create_params = *create_context.params();
+  create_params.next = &extension;
+
+  iree_hal_amdgpu_logical_device_options_t options;
+  iree_hal_amdgpu_logical_device_options_initialize(&options);
+  iree_hal_device_t* device = nullptr;
+  iree_status_t status = iree_hal_amdgpu_logical_device_create(
+      IREE_SV("amdgpu"), &options, &libhsa_, &topology_, &create_params,
+      host_allocator_, &device);
+  EXPECT_TRUE(iree_status_is_unimplemented(status));
+  iree_status_free(status);
+  EXPECT_EQ(device, nullptr);
+  EXPECT_EQ(provider_state.query_count, 1u);
+  EXPECT_EQ(provider_state.initialize_count, 0u);
+}
+
 TEST_F(HostcallProviderTest, EagerPhysicalLifecycleAndFailurePublication) {
   iree::hal::cts::DeviceCreateContext create_context;
   IREE_ASSERT_OK(create_context.Initialize(host_allocator_));
   TestProviderState provider_state;
-  iree_hal_amdgpu_hostcall_provider_extension_t extension =
+  iree_hal_hostcall_provider_extension_t extension =
       MakeProviderExtension(&provider_state);
   iree_hal_device_create_params_t create_params = *create_context.params();
   create_params.next = &extension;
@@ -388,7 +419,7 @@ TEST_F(HostcallProviderTest, EagerPhysicalLifecycleAndFailurePublication) {
     EXPECT_EQ(hostcall_state->provider_context, provider_context);
     EXPECT_EQ(hostcall_state->device_address, provider_context->device_address);
     EXPECT_EQ(hostcall_state->notification_signal.handle,
-              provider_context->notification_token);
+              provider_context->notification.token);
     iree_hal_amdgpu_physical_device_t* physical_device =
         logical_device->physical_devices[i];
     for (iree_host_size_t j = 0; j < physical_device->host_queue_count; ++j) {
