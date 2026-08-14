@@ -226,7 +226,7 @@ TEST(PM4EmitterTest, BuilderAppendsAcquireMemGfx10Packet) {
                            IREE_HAL_AMDGPU_PM4_ACQUIRE_MEM_GFX10_DWORD_COUNT));
   EXPECT_EQ(dwords[1], IREE_HAL_AMDGPU_PM4_ACQUIRE_MEM_GFX10_ENGINE_ME);
   EXPECT_EQ(dwords[2], 0xFFFFFFFFu);
-  EXPECT_EQ(dwords[3], 0x01FFFFFFu);
+  EXPECT_EQ(dwords[3], 0x000000FFu);
   EXPECT_EQ(dwords[4], 0u);
   EXPECT_EQ(dwords[5], 0u);
   EXPECT_EQ(dwords[6], 0x0000000Au);
@@ -247,8 +247,7 @@ TEST(PM4EmitterTest, BuilderAppendsAcquireMemGfx9Packet) {
   EXPECT_EQ(dwords[0], iree_hal_amdgpu_pm4_make_compute_header(
                            IREE_HAL_AMDGPU_PM4_HDR_IT_OPCODE_ACQUIRE_MEM,
                            IREE_HAL_AMDGPU_PM4_ACQUIRE_MEM_GFX9_DWORD_COUNT));
-  EXPECT_EQ(dwords[1],
-            IREE_HAL_AMDGPU_PM4_ACQUIRE_MEM_GFX9_CP_COHER_CNTL_CONSERVATIVE);
+  EXPECT_EQ(dwords[1], 0x38C40000u);
   EXPECT_EQ(dwords[2], IREE_HAL_AMDGPU_PM4_ACQUIRE_MEM_COHER_SIZE);
   EXPECT_EQ(dwords[3], IREE_HAL_AMDGPU_PM4_ACQUIRE_MEM_GFX9_COHER_SIZE_HI);
   EXPECT_EQ(dwords[4], 0u);
