@@ -57,6 +57,9 @@ typedef struct loom_amdgpu_hal_binding_materialization_result_t {
 // imports with reg<amdgpu.sgpr x2>. One semantic direct argument may consume
 // multiple 32-bit HAL constants; adjacent 32-bit arguments may be packed into
 // wider SMEM loads when the target-low descriptor set supports the packet.
+// Function predicates over materialized direct arguments become zero-cost
+// low.assume identities before the signature values are removed, preserving
+// their facts for target-low consumers without retaining stale ABI metadata.
 // Separate amdgpu.hal.buffer_descriptor pseudos materialize range, control, and
 // pointer-high descriptor bits only for selected descriptor-consuming packets.
 iree_status_t loom_amdgpu_hal_binding_materialize(
