@@ -370,7 +370,6 @@ TEST_F(FeedbackChannelLiveTest, DeviceProducerSignalsHost) {
   const uint64_t packet_id = iree_hal_amdgpu_aql_ring_reserve(&aql_ring, 1);
   iree_hal_amdgpu_aql_packet_t* packet =
       iree_hal_amdgpu_aql_ring_packet(&aql_ring, packet_id);
-  memset(packet, 0, sizeof(*packet));
   uint16_t setup = 0;
   const uint16_t header = iree_hal_amdgpu_aql_emit_dispatch(
       &packet->dispatch, kernel.kernel_object, &memory->kernargs,

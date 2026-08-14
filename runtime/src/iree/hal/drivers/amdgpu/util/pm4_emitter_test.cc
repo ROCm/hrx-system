@@ -861,18 +861,23 @@ TEST(PM4EmitterTest, BuilderRejectsTimestampAlignmentAndOverflow) {
 
 TEST(PM4EmitterTest, EmitsArbitraryPM4IBDwordEnvelope) {
   uint32_t dwords[32] = {0};
-  iree_hsa_amd_aql_pm4_ib_packet_t packet = {};
+  iree_hsa_amd_aql_pm4_ib_packet_t packet;
+  std::memset(&packet, 0xCC, sizeof(packet));
+  const iree_hsa_signal_t completion_signal = {0x123456789ABCDEF0ull};
 
   iree_hal_amdgpu_aql_packet_control_t packet_control =
       iree_hal_amdgpu_aql_packet_control_barrier_system();
-  uint16_t setup = 0;
+  uint16_t setup = 0xCCCCu;
   uint16_t header = iree_hal_amdgpu_aql_emit_pm4_ib_dwords(
       &packet, dwords, IREE_ARRAYSIZE(dwords), packet_control,
-      iree_hsa_signal_null(), &setup);
+      completion_signal, &setup);
 
   EXPECT_EQ(header, iree_hal_amdgpu_aql_make_header(
                         IREE_HSA_PACKET_TYPE_VENDOR_SPECIFIC, packet_control));
   EXPECT_EQ(setup, IREE_HSA_AMD_AQL_FORMAT_PM4_IB);
+  uint32_t unpublished_header = 0;
+  std::memcpy(&unpublished_header, &packet, sizeof(unpublished_header));
+  EXPECT_EQ(unpublished_header, 0xCCCCCCCCu);
   EXPECT_EQ(packet.ib_jump_cmd[0],
             iree_hal_amdgpu_pm4_make_header(
                 IREE_HAL_AMDGPU_PM4_HDR_IT_OPCODE_INDIRECT_BUFFER,
@@ -883,6 +888,10 @@ TEST(PM4EmitterTest, EmitsArbitraryPM4IBDwordEnvelope) {
             iree_hal_amdgpu_pm4_ib_addr_hi(dword_address));
   EXPECT_EQ(packet.ib_jump_cmd[3], IREE_ARRAYSIZE(dwords) | (1u << 23));
   EXPECT_EQ(packet.dw_cnt_remain, 0xAu);
+  for (uint32_t reserved_dword : packet.reserved) {
+    EXPECT_EQ(reserved_dword, 0u);
+  }
+  EXPECT_EQ(packet.completion_signal.handle, completion_signal.handle);
 }
 
 }  // namespace

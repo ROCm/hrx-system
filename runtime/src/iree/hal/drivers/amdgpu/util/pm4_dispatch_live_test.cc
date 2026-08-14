@@ -625,7 +625,6 @@ TEST_F(PM4DispatchLiveTest, AqlAndAqlPm4IbLaunchMixedKernels) {
   for (uint32_t i = 0; i < 2; ++i) {
     iree_hal_amdgpu_aql_packet_t* packet =
         iree_hal_amdgpu_aql_ring_packet(&aql_ring, aql_first_packet_id + i);
-    memset(packet, 0, sizeof(*packet));
     uint16_t setup = 0;
     const uint16_t header = iree_hal_amdgpu_aql_emit_dispatch(
         &packet->dispatch, kernels[i].kernel_object, &memory->store_kernargs[i],
@@ -686,7 +685,6 @@ TEST_F(PM4DispatchLiveTest, AqlAndAqlPm4IbLaunchMixedKernels) {
       iree_hal_amdgpu_aql_ring_reserve(&aql_ring, /*count=*/1);
   iree_hal_amdgpu_aql_packet_t* pm4_packet =
       iree_hal_amdgpu_aql_ring_packet(&aql_ring, pm4_packet_id);
-  memset(pm4_packet, 0, sizeof(*pm4_packet));
   uint16_t pm4_setup = 0;
   const uint16_t pm4_header = iree_hal_amdgpu_aql_emit_pm4_ib_dwords(
       &pm4_packet->pm4_ib, pm4_program.dwords, pm4_program.dword_count,
@@ -738,7 +736,6 @@ TEST_F(PM4DispatchLiveTest, AqlAndAqlPm4IbLaunchMixedKernels) {
       iree_hal_amdgpu_aql_ring_reserve(&aql_ring, /*count=*/1);
   pm4_packet =
       iree_hal_amdgpu_aql_ring_packet(&aql_ring, barrier_pm4_packet_id);
-  memset(pm4_packet, 0, sizeof(*pm4_packet));
   pm4_setup = 0;
   const uint16_t barrier_pm4_header = iree_hal_amdgpu_aql_emit_pm4_ib_dwords(
       &pm4_packet->pm4_ib, pm4_program.dwords, pm4_program.dword_count,
@@ -825,7 +822,6 @@ TEST_F(PM4DispatchLiveTest, AqlAndAqlPm4IbLaunchMixedKernels) {
   const uint64_t fixup_pm4_packet_id =
       iree_hal_amdgpu_aql_ring_reserve(&aql_ring, /*count=*/2);
   pm4_packet = iree_hal_amdgpu_aql_ring_packet(&aql_ring, fixup_pm4_packet_id);
-  memset(pm4_packet, 0, sizeof(*pm4_packet));
   pm4_setup = 0;
   const uint16_t fixup_pm4_header = iree_hal_amdgpu_aql_emit_pm4_ib_dwords(
       &pm4_packet->pm4_ib, pm4_program.dwords, pm4_program.dword_count,
@@ -835,7 +831,6 @@ TEST_F(PM4DispatchLiveTest, AqlAndAqlPm4IbLaunchMixedKernels) {
   iree_hal_amdgpu_aql_ring_commit(pm4_packet, fixup_pm4_header, pm4_setup);
   pm4_packet =
       iree_hal_amdgpu_aql_ring_packet(&aql_ring, fixup_pm4_packet_id + 1);
-  memset(pm4_packet, 0, sizeof(*pm4_packet));
   pm4_setup = 0;
   const uint16_t target_pm4_header = iree_hal_amdgpu_aql_emit_pm4_ib_dwords(
       &pm4_packet->pm4_ib, target_pm4_program.dwords,
@@ -877,7 +872,6 @@ TEST_F(PM4DispatchLiveTest, AqlAndAqlPm4IbLaunchMixedKernels) {
   const uint64_t lds_pm4_packet_id =
       iree_hal_amdgpu_aql_ring_reserve(&aql_ring, /*count=*/1);
   pm4_packet = iree_hal_amdgpu_aql_ring_packet(&aql_ring, lds_pm4_packet_id);
-  memset(pm4_packet, 0, sizeof(*pm4_packet));
   pm4_setup = 0;
   const uint16_t lds_pm4_header = iree_hal_amdgpu_aql_emit_pm4_ib_dwords(
       &pm4_packet->pm4_ib, pm4_program.dwords, pm4_program.dword_count,
@@ -1084,7 +1078,6 @@ TEST_F(PM4DispatchLiveTest, NativeMemoryPacketMatrix) {
       iree_hal_amdgpu_aql_ring_reserve(&aql_ring, /*count=*/1);
   iree_hal_amdgpu_aql_packet_t* packet =
       iree_hal_amdgpu_aql_ring_packet(&aql_ring, packet_id);
-  memset(packet, 0, sizeof(*packet));
   uint16_t setup = 0;
   const uint16_t header = iree_hal_amdgpu_aql_emit_pm4_ib_dwords(
       &packet->pm4_ib, pm4_program.dwords, pm4_program.dword_count,
@@ -1190,7 +1183,6 @@ TEST_F(PM4DispatchLiveTest, NativeMemoryPacketMatrix) {
   const uint64_t staged_packet_id =
       iree_hal_amdgpu_aql_ring_reserve(&aql_ring, /*count=*/1);
   packet = iree_hal_amdgpu_aql_ring_packet(&aql_ring, staged_packet_id);
-  memset(packet, 0, sizeof(*packet));
   setup = 0;
   const uint16_t staged_header = iree_hal_amdgpu_aql_emit_pm4_ib_dwords(
       &packet->pm4_ib, pm4_program.dwords, pm4_program.dword_count,

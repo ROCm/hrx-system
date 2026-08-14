@@ -153,6 +153,11 @@ static inline void iree_hal_amdgpu_aql_ring_initialize(
 //
 // IMPORTANT: The returned packet slots have INVALID headers from the CP's
 // perspective. The CP will not process them until a valid header is published.
+// Callers must leave the entire first dword untouched while populating the
+// packet body. In particular, never clear or assign a whole packet slot: AQL
+// packet type zero is VENDOR_SPECIFIC, not INVALID, and exposes a partially
+// populated packet to the CP. Publish the header and setup together only with
+// iree_hal_amdgpu_aql_ring_commit().
 // Normal host submissions commit every reserved slot before ringing the
 // doorbell; device-side patching may intentionally leave a later slot invalid
 // only when an earlier packet is guaranteed to publish it before the CP reaches
@@ -209,9 +214,9 @@ static inline bool iree_hal_amdgpu_aql_ring_try_reserve(
   }
 }
 
-// Returns a pointer to the packet slot for |packet_id|. The caller
-// populates the packet fields (all except the header) and then commits
-// the header via iree_hal_amdgpu_aql_ring_commit().
+// Returns a pointer to the packet slot for |packet_id|. The caller populates
+// the packet body without writing or clearing the first dword and then commits
+// the header and setup via iree_hal_amdgpu_aql_ring_commit().
 static inline iree_hal_amdgpu_aql_packet_t* iree_hal_amdgpu_aql_ring_packet(
     iree_hal_amdgpu_aql_ring_t* ring, uint64_t packet_id) {
   return &ring->base[packet_id & ring->mask];
