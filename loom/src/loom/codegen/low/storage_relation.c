@@ -40,6 +40,15 @@ uint16_t loom_low_storage_relation_count(const loom_module_t* module,
     return loom_low_storage_relation_count_checked(count);
   }
 
+  if (loom_traits_are_fact_identity(op->traits)) {
+    IREE_ASSERT_EQ(op->tied_result_count, 0,
+                   "fact identity storage relations must be ordinal aliases");
+    IREE_ASSERT_EQ(op->operand_count, op->result_count,
+                   "verified low fact identity field counts must match");
+    count += op->result_count;
+    return loom_low_storage_relation_count_checked(count);
+  }
+
   switch (op->kind) {
     case LOOM_OP_LOW_COPY:
       ++count;
@@ -102,6 +111,37 @@ static void loom_low_storage_relation_get_tied_result(
       .destination_value_id = destination_value_id,
       .source_value_id = source_value_id,
       .source_operand_index = tied.operand_index,
+      .destination_unit_offset = 0,
+      .source_unit_offset = 0,
+      .unit_count = destination_unit_count,
+      .kind = LOOM_LOW_STORAGE_RELATION_SAME_STORAGE,
+      .cause = LOOM_LOW_STORAGE_RELATION_CAUSE_TIED_RESULT,
+      .flags = LOOM_LOW_STORAGE_RELATION_FLAG_HARD,
+  };
+}
+
+static void loom_low_storage_relation_get_fact_identity(
+    const loom_module_t* module, const loom_op_t* op, uint16_t relation_index,
+    loom_low_storage_relation_t* out_relation) {
+  IREE_ASSERT(
+      relation_index < op->operand_count && relation_index < op->result_count,
+      "verified low fact identity relation must reference matching "
+      "fields");
+  const loom_value_id_t destination_value_id =
+      loom_op_const_results(op)[relation_index];
+  const loom_value_id_t source_value_id =
+      loom_op_const_operands(op)[relation_index];
+  const uint32_t destination_unit_count =
+      loom_low_storage_relation_value_unit_count(module, destination_value_id);
+  const uint32_t source_unit_count =
+      loom_low_storage_relation_value_unit_count(module, source_value_id);
+  IREE_ASSERT_EQ(destination_unit_count, source_unit_count,
+                 "verified low fact identity must use matching unit counts");
+  *out_relation = (loom_low_storage_relation_t){
+      .op = op,
+      .destination_value_id = destination_value_id,
+      .source_value_id = source_value_id,
+      .source_operand_index = relation_index,
       .destination_unit_offset = 0,
       .source_unit_offset = 0,
       .unit_count = destination_unit_count,
@@ -356,6 +396,11 @@ void loom_low_storage_relation_get(const loom_module_t* module,
   relation_index -= op->tied_result_count;
   IREE_ASSERT(loom_traits_have_storage_relation(op->traits),
               "non-tied low storage relation requires storage-relation trait");
+  if (loom_traits_are_fact_identity(op->traits)) {
+    loom_low_storage_relation_get_fact_identity(module, op, relation_index,
+                                                out_relation);
+    return;
+  }
 
   switch (op->kind) {
     case LOOM_OP_LOW_COPY:

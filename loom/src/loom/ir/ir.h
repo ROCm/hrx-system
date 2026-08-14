@@ -724,6 +724,11 @@ enum loom_trait_bits_e {
   // transforms preserve their ordering. Exact memory analyses may distinguish
   // the ordering effect from storage-root interference.
   LOOM_TRAIT_MEMORY_FENCE = 1u << 24,
+  // Op contributes compiler facts or scheduling metadata but has no runtime
+  // representation once it reaches target-low emission. This does not imply a
+  // source-order boundary or preservation policy. HINT already carries this
+  // property; this trait permits value-carrying fact identities to declare it.
+  LOOM_TRAIT_COMPILE_TIME_ONLY = 1u << 25,
 };
 typedef uint32_t loom_trait_flags_t;
 
@@ -758,6 +763,13 @@ static inline bool loom_traits_has_side_effects(loom_trait_flags_t traits) {
 // Returns true when the op carries an explicit memory ordering effect.
 static inline bool loom_traits_order_memory(loom_trait_flags_t traits) {
   return (traits & LOOM_TRAIT_MEMORY_FENCE) != 0;
+}
+
+// Returns true when target-low emission must omit the op.
+static inline bool loom_traits_are_compile_time_only(
+    loom_trait_flags_t traits) {
+  return iree_any_bit_set(traits,
+                          LOOM_TRAIT_HINT | LOOM_TRAIT_COMPILE_TIME_ONLY);
 }
 
 // Returns true if the trait flags indicate the op's regions cannot

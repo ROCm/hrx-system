@@ -42,6 +42,8 @@ static const loom_pass_trait_name_t kLoomPassTraitNames[] = {
     {IREE_SVL("unknown-effects"), LOOM_TRAIT_UNKNOWN_EFFECTS},
     {IREE_SVL("MemoryFence"), LOOM_TRAIT_MEMORY_FENCE},
     {IREE_SVL("memory-fence"), LOOM_TRAIT_MEMORY_FENCE},
+    {IREE_SVL("CompileTimeOnly"), LOOM_TRAIT_COMPILE_TIME_ONLY},
+    {IREE_SVL("compile-time-only"), LOOM_TRAIT_COMPILE_TIME_ONLY},
     {IREE_SVL("IsolatedFromAbove"), LOOM_TRAIT_ISOLATED_FROM_ABOVE},
     {IREE_SVL("isolated-from-above"), LOOM_TRAIT_ISOLATED_FROM_ABOVE},
     {IREE_SVL("UniqueIdentity"), LOOM_TRAIT_UNIQUE_IDENTITY},

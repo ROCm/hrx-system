@@ -7,7 +7,9 @@ llvmir.target<object> @target {
 
 low.func.def target<llvmir.generic.core>(@target) abi(object_function) @first(%lhs: reg<llvmir.i32>, %rhs: reg<llvmir.i32>) -> (reg<llvmir.i32>) asm {
   %sum = add.i32 %lhs, %rhs
-  return %sum
+  %bounded_sum = low.assume %sum [range(%sum, -2147483648, 2147483647)] :
+      reg<llvmir.i32>
+  return %bounded_sum
 }
 
 low.func.def target<llvmir.generic.core>(@target) abi(object_function) @second(%input_view: reg<llvmir.ptr>, %output_view: reg<llvmir.ptr>, %bounded_i: reg<llvmir.i64>) -> (reg<llvmir.i32>) asm {

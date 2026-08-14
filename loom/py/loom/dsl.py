@@ -141,11 +141,13 @@ __all__ = [
     "MEMORY_FENCE",
     "CONVERGENT",
     "HINT",
+    "COMPILE_TIME_ONLY",
     "SAFE_TO_SPECULATE",
     "REFINABLE_RESULT_TYPE_REFS",
     "POISON_BOUNDARY",
     "FACT_IDENTITY",
     "DISTRIBUTION_TRANSFER",
+    "STORAGE_RELATION",
     "VALUE_ALIAS",
     # Semantic phase/contract metadata.
     "OpPhase",
@@ -1123,6 +1125,11 @@ UNIQUE_IDENTITY = Trait("UniqueIdentity")
 # Compiler hint with no semantic memory effects. Hint ops are preserved by
 # canonicalization/DCE and removed only by an explicit hint-stripping pass.
 HINT = Trait("Hint")
+# Op contributes compiler facts or scheduling metadata but has no runtime
+# representation once it reaches target-low emission. This trait does not
+# itself preserve the op or impose source ordering. HINT already carries this
+# property; this trait permits value-carrying fact identities to declare it.
+COMPILE_TIME_ONLY = Trait("CompileTimeOnly")
 # Op execution may be moved to a program point where it executes more often
 # than in the source IR. This is stronger than Pure: the op must not trap,
 # allocate a distinct identity, read runtime state, write memory, or rely on
@@ -4504,6 +4511,11 @@ def _validate_effects(
             f"A hint is not a semantic memory effect; attach policy to the "
             f"real memory op instead."
         )
+    if "CompileTimeOnly" in trait_names:
+        raise ValueError(
+            f"Op '{op_name}': declares both COMPILE_TIME_ONLY and explicit "
+            f"effects. A compile-time-only op has no runtime memory effect."
+        )
     if "SafeToSpeculate" in trait_names:
         raise ValueError(
             f"Op '{op_name}': declares both SAFE_TO_SPECULATE and explicit "
@@ -4616,6 +4628,25 @@ def _validate_no_effect_conflicts(
 ) -> None:
     """Validate trait-only ops for effect-related conflicts."""
     trait_names = {t.name for t in traits}
+    if "CompileTimeOnly" in trait_names:
+        if "Hint" in trait_names:
+            raise ValueError(
+                f"Op '{op_name}': COMPILE_TIME_ONLY is redundant with HINT. "
+                "Hints are always omitted from runtime emission."
+            )
+        runtime_traits = {
+            "UnknownEffects",
+            "MemoryFence",
+            "NonDeterministic",
+            "Convergent",
+            "UniqueIdentity",
+        }
+        conflicting_traits = sorted(trait_names & runtime_traits)
+        if conflicting_traits:
+            raise ValueError(
+                f"Op '{op_name}': COMPILE_TIME_ONLY conflicts with runtime "
+                f"trait {conflicting_traits[0]}."
+            )
     if "Pure" in trait_names and "NonDeterministic" in trait_names:
         raise ValueError(
             f"Op '{op_name}': declares both PURE and NON_DETERMINISTIC. "
@@ -4707,6 +4738,15 @@ def _validate_trait_field_contracts(
         raise ValueError(
             f"Op '{op_name}': VALUE_ALIAS requires at least one operand "
             "and exactly one result"
+        )
+    if (
+        "CompileTimeOnly" in trait_names
+        and results
+        and ("FactIdentity" not in trait_names or "StorageRelation" not in trait_names)
+    ):
+        raise ValueError(
+            f"Op '{op_name}': result-producing COMPILE_TIME_ONLY ops "
+            "require FACT_IDENTITY and STORAGE_RELATION"
         )
 
 

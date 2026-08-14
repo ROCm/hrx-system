@@ -39,7 +39,8 @@ typedef uint8_t loom_low_storage_relation_kind_t;
 enum loom_low_storage_relation_cause_e {
   // Unknown or uninitialized storage relation cause.
   LOOM_LOW_STORAGE_RELATION_CAUSE_UNKNOWN = 0,
-  // Descriptor tied result requiring source/result storage identity.
+  // Semantically tied result requiring source/result storage identity.
+  // Includes descriptor ties and ordinal FactIdentity result aliases.
   LOOM_LOW_STORAGE_RELATION_CAUSE_TIED_RESULT = 1,
   // low.copy source/result storage affinity.
   LOOM_LOW_STORAGE_RELATION_CAUSE_LOW_COPY = 2,

@@ -881,12 +881,14 @@ static bool loom_low_asm_token_is_canonical_op(loom_parser_t* parser,
   }
 
   // Target mnemonics and canonical Loom op names share the same token shape.
-  // Registered compiler hints retain their canonical spelling inside an asm
+  // Registered compile-time ops retain their canonical spelling inside an asm
   // region while unregistered dotted mnemonics remain target-owned syntax.
   loom_op_kind_t ignored_kind = 0;
   const loom_op_vtable_t* vtable = loom_context_lookup_op_by_name(
       parser->context, token.text, &ignored_kind);
-  return vtable != NULL && iree_any_bit_set(vtable->traits, LOOM_TRAIT_HINT);
+  return vtable != NULL &&
+         iree_any_bit_set(vtable->traits,
+                          LOOM_TRAIT_HINT | LOOM_TRAIT_COMPILE_TIME_ONLY);
 }
 
 static iree_status_t loom_low_asm_next_statement_is_canonical_op(

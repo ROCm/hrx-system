@@ -1466,7 +1466,19 @@ static iree_status_t loom_spirv_emit_scf_for(loom_spirv_emit_state_t* state,
 
 static iree_status_t loom_spirv_emit_low_op(loom_spirv_emit_state_t* state,
                                             const loom_op_t* op) {
-  if (iree_any_bit_set(op->traits, LOOM_TRAIT_HINT)) {
+  if (loom_traits_are_compile_time_only(op->traits)) {
+    if (op->result_count == 0) return iree_ok_status();
+    IREE_ASSERT(loom_traits_are_fact_identity(op->traits));
+    IREE_ASSERT_EQ(op->operand_count, op->result_count);
+    const loom_value_id_t* operands = loom_op_const_operands(op);
+    const loom_value_id_t* results = loom_op_const_results(op);
+    for (uint16_t i = 0; i < op->result_count; ++i) {
+      loom_spirv_module_value_ref_t value_ref = {0};
+      IREE_RETURN_IF_ERROR(
+          loom_spirv_emit_lookup_value(state, operands[i], &value_ref));
+      IREE_RETURN_IF_ERROR(loom_spirv_emit_define_value(
+          state, results[i], value_ref, /*emit_name=*/false));
+    }
     return iree_ok_status();
   }
   if (loom_low_scf_if_isa(op)) {

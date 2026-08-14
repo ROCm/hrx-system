@@ -3426,10 +3426,28 @@ static iree_status_t loom_llvmir_emit_return(
   return loom_llvmir_build_ret(state->llvmir_block, value);
 }
 
+static iree_status_t loom_llvmir_emit_compile_time_op(
+    loom_llvmir_emit_function_state_t* state, const loom_op_t* op) {
+  IREE_ASSERT(loom_traits_are_compile_time_only(op->traits));
+  if (op->result_count == 0) return iree_ok_status();
+  IREE_ASSERT(loom_traits_are_fact_identity(op->traits));
+  IREE_ASSERT_EQ(op->operand_count, op->result_count);
+  const loom_value_id_t* operands = loom_op_const_operands(op);
+  const loom_value_id_t* results = loom_op_const_results(op);
+  for (uint16_t i = 0; i < op->result_count; ++i) {
+    loom_llvmir_value_id_t value = LOOM_LLVMIR_VALUE_ID_INVALID;
+    IREE_RETURN_IF_ERROR(
+        loom_llvmir_emit_lookup_value(state, operands[i], &value));
+    IREE_RETURN_IF_ERROR(
+        loom_llvmir_emit_define_value(state, results[i], value));
+  }
+  return iree_ok_status();
+}
+
 static iree_status_t loom_llvmir_emit_low_op(
     loom_llvmir_emit_function_state_t* state, const loom_op_t* op) {
-  if (iree_any_bit_set(op->traits, LOOM_TRAIT_HINT)) {
-    return iree_ok_status();
+  if (loom_traits_are_compile_time_only(op->traits)) {
+    return loom_llvmir_emit_compile_time_op(state, op);
   }
   if (loom_low_return_isa(op)) {
     return loom_llvmir_emit_return(state, op);

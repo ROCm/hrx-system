@@ -83,7 +83,7 @@ static bool loom_print_low_asm_is_required(loom_print_context_t* ctx,
 static bool loom_print_low_asm_allows_canonical_op(loom_print_context_t* ctx,
                                                    const loom_op_t* op) {
   if (iree_any_bit_set(loom_op_effective_traits(ctx->module, op),
-                       LOOM_TRAIT_HINT)) {
+                       LOOM_TRAIT_HINT | LOOM_TRAIT_COMPILE_TIME_ONLY)) {
     return true;
   }
   iree_string_view_t op_name = loom_op_name(ctx->module, op);

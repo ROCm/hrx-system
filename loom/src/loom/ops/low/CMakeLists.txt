@@ -44,6 +44,7 @@ loom_generated_cc_library(
     loom::target::registers
     loom::target::types
     loom::util::fact_table
+    loom::util::predicate_facts
     loom::util::stable_id
 )
 

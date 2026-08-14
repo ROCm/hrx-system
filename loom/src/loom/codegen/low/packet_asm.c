@@ -451,6 +451,9 @@ static iree_status_t loom_low_packet_asm_append_block(
         (iree_host_size_t)block->scheduled_node_start + i;
     const loom_low_packet_view_t packet =
         loom_low_packet_at(schedule, packet_index);
+    if (loom_low_packet_is_compile_time_only(&packet)) {
+      continue;
+    }
     IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, "  "));
     IREE_RETURN_IF_ERROR(loom_low_packet_asm_append_packet(state, &packet));
     IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, "\n"));

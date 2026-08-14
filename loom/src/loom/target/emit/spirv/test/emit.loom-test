@@ -82,7 +82,8 @@ low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @spirv_
     %difference = low.op<spirv.op_isub.i32>(%a, %b) : (reg<spirv.id : i32>, reg<spirv.id : i32>) -> reg<spirv.id : i32>
     low.scf.yield %difference : reg<spirv.id : i32>
   }
-  low.return %selected : reg<spirv.id : i32>
+  %bounded_selected = low.assume %selected [range(%selected, -2147483648, 2147483647)] : reg<spirv.id : i32>
+  low.return %bounded_selected : reg<spirv.id : i32>
 }
 
 // ----
