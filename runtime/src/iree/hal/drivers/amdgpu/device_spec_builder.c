@@ -306,6 +306,48 @@ static iree_status_t iree_hal_amdgpu_device_spec_populate_memory(
   return status;
 }
 
+static iree_hal_atomic_capabilities_t
+iree_hal_amdgpu_device_spec_atomic_capabilities(
+    iree_hal_atomic_operation_flags_t operations) {
+  const iree_hal_atomic_operation_capabilities_t operation_capabilities = {
+      .device_scope_32 = operations,
+      .device_scope_64 = operations,
+      .system_scope_32 = operations,
+      .system_scope_64 = operations,
+  };
+  const iree_hal_atomic_wait_condition_flags_t wait_conditions =
+      iree_any_bit_set(operations, IREE_HAL_ATOMIC_OPERATION_FLAG_WAIT)
+          ? IREE_HAL_ATOMIC_WAIT_CONDITION_FLAGS_ALL
+          : IREE_HAL_ATOMIC_WAIT_CONDITION_FLAG_NONE;
+  const iree_hal_atomic_wait_condition_capabilities_t
+      wait_condition_capabilities = {
+          .device_scope_32 = wait_conditions,
+          .device_scope_64 = wait_conditions,
+          .system_scope_32 = wait_conditions,
+          .system_scope_64 = wait_conditions,
+      };
+  return (iree_hal_atomic_capabilities_t){
+      .operations = operation_capabilities,
+      .wait_conditions = wait_condition_capabilities,
+  };
+}
+
+static iree_hal_atomic_capabilities_t
+iree_hal_amdgpu_device_spec_zero_compute_atomic_capabilities(
+    iree_hal_amdgpu_vendor_packet_capability_flags_t capabilities) {
+  iree_hal_atomic_operation_flags_t operations =
+      IREE_HAL_ATOMIC_OPERATION_FLAG_NONE;
+  if (iree_hal_amdgpu_vendor_packet_capabilities_support_pm4_atomic_wait(
+          capabilities)) {
+    operations |= IREE_HAL_ATOMIC_OPERATION_FLAG_WAIT;
+  }
+  if (iree_hal_amdgpu_vendor_packet_capabilities_support_pm4_atomic_store(
+          capabilities)) {
+    operations |= IREE_HAL_ATOMIC_OPERATION_FLAG_STORE;
+  }
+  return iree_hal_amdgpu_device_spec_atomic_capabilities(operations);
+}
+
 static iree_status_t iree_hal_amdgpu_device_spec_populate_queues(
     const iree_hal_amdgpu_device_spec_params_t* params,
     iree_hal_device_spec_builder_t* builder) {
@@ -333,7 +375,13 @@ static iree_status_t iree_hal_amdgpu_device_spec_populate_queues(
         .role_flags = IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_DISPATCH |
                       IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_TRANSFER |
                       IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_HOST_CALL |
-                      IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_PROFILING,
+                      IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_PROFILING |
+                      IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_ATOMIC,
+        .atomic_capabilities = iree_hal_amdgpu_device_spec_atomic_capabilities(
+            IREE_HAL_ATOMIC_OPERATION_FLAGS_ALL),
+        .zero_compute_atomic_capabilities =
+            iree_hal_amdgpu_device_spec_zero_compute_atomic_capabilities(
+                physical_device->vendor_packet_capabilities),
         .flags = IREE_HAL_QUEUE_FAMILY_SPEC_FLAG_NONE,
     };
   }

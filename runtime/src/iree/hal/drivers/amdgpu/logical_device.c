@@ -1953,6 +1953,8 @@ static iree_status_t iree_hal_amdgpu_logical_device_create_device_spec(
         physical_device->maximum_waves_per_compute_unit;
     physical_params->maximum_workgroup_local_memory_size =
         physical_device->group_segment_max_size;
+    physical_params->vendor_packet_capabilities =
+        physical_device->vendor_packet_capabilities;
   }
 
   uint64_t device_memory_capacity_bytes = 0;

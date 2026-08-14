@@ -33,6 +33,7 @@ static void CreateDeviceSpecForProcessor(
       /*.wavefront_size=*/wavefront_size,
       /*.maximum_waves_per_compute_unit=*/64,
       /*.maximum_workgroup_local_memory_size=*/64 * 1024,
+      /*.vendor_packet_capabilities=*/0,
       /*.flags=*/IREE_HAL_AMDGPU_DEVICE_SPEC_PHYSICAL_DEVICE_FLAG_UUID |
           IREE_HAL_AMDGPU_DEVICE_SPEC_PHYSICAL_DEVICE_FLAG_PCI_ADDRESS,
   };
@@ -181,6 +182,7 @@ TEST(DeviceSpecTest, AdvertisesTargetsPerPhysicalDevice) {
           /*.wavefront_size=*/32,
           /*.maximum_waves_per_compute_unit=*/64,
           /*.maximum_workgroup_local_memory_size=*/64 * 1024,
+          /*.vendor_packet_capabilities=*/0,
           /*.flags=*/IREE_HAL_AMDGPU_DEVICE_SPEC_PHYSICAL_DEVICE_FLAG_NONE,
       },
       {
@@ -195,6 +197,7 @@ TEST(DeviceSpecTest, AdvertisesTargetsPerPhysicalDevice) {
           /*.wavefront_size=*/32,
           /*.maximum_waves_per_compute_unit=*/64,
           /*.maximum_workgroup_local_memory_size=*/64 * 1024,
+          /*.vendor_packet_capabilities=*/0,
           /*.flags=*/IREE_HAL_AMDGPU_DEVICE_SPEC_PHYSICAL_DEVICE_FLAG_NONE,
       },
   };

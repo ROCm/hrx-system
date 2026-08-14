@@ -20,6 +20,7 @@ iree_cc_library(
   DEPS
     iree::base
     iree::hal
+    iree::hal::drivers::amdgpu::util::packet
     iree::hal::executable::amdgpu::executable_target
     iree::hal::executable::amdgpu::target_id
     iree::hal::utils::device_spec_builder

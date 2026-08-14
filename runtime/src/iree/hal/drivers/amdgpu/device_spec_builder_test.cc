@@ -38,6 +38,7 @@ static void MakePhysicalDeviceParams(
       /*.wavefront_size=*/64,
       /*.maximum_waves_per_compute_unit=*/32,
       /*.maximum_workgroup_local_memory_size=*/64 * 1024,
+      /*.vendor_packet_capabilities=*/0,
       /*.flags=*/IREE_HAL_AMDGPU_DEVICE_SPEC_PHYSICAL_DEVICE_FLAG_UUID |
           IREE_HAL_AMDGPU_DEVICE_SPEC_PHYSICAL_DEVICE_FLAG_PCI_ADDRESS,
   };
@@ -95,6 +96,24 @@ static iree_status_t CreateTwoDeviceSpec(
 
 // The GPU agent wallclock rate on CDNA3 parts.
 static constexpr uint64_t kAgentTimestampFrequencyHz = 100000000ull;
+
+static void ExpectUniformAtomicCapabilities(
+    const iree_hal_atomic_capabilities_t& capabilities,
+    iree_hal_atomic_operation_flags_t expected_operations,
+    iree_hal_atomic_wait_condition_flags_t expected_wait_conditions) {
+  EXPECT_EQ(capabilities.operations.device_scope_32, expected_operations);
+  EXPECT_EQ(capabilities.operations.device_scope_64, expected_operations);
+  EXPECT_EQ(capabilities.operations.system_scope_32, expected_operations);
+  EXPECT_EQ(capabilities.operations.system_scope_64, expected_operations);
+  EXPECT_EQ(capabilities.wait_conditions.device_scope_32,
+            expected_wait_conditions);
+  EXPECT_EQ(capabilities.wait_conditions.device_scope_64,
+            expected_wait_conditions);
+  EXPECT_EQ(capabilities.wait_conditions.system_scope_32,
+            expected_wait_conditions);
+  EXPECT_EQ(capabilities.wait_conditions.system_scope_64,
+            expected_wait_conditions);
+}
 
 // gfx8 falls outside the gfx9-gfx12 range the PM4 strategy table covers, and
 // the advertised timestamp domain does not depend on that strategy.
@@ -178,6 +197,60 @@ TEST(DeviceSpecBuilderTest, QueueFamiliesReportPerPhysicalDeviceFrequency) {
   EXPECT_EQ(queues->families[1].timestamp_frequency_hz,
             kAgentTimestampFrequencyHz);
   EXPECT_EQ(queues->families[1].timestamp_valid_bits, 64u);
+
+  iree_hal_device_spec_release(device_spec);
+  iree_hal_allocator_release(allocator);
+}
+
+// Functional atomics are backed by target-compiled kernels on every physical
+// device, while native packet capabilities independently describe which queue
+// families can execute waits and stores without occupying compute resources.
+TEST(DeviceSpecBuilderTest,
+     AdvertisesFunctionalAndNativeAtomicCapabilitiesPerPhysicalDevice) {
+  iree_hal_allocator_t* allocator = NULL;
+  IREE_ASSERT_OK(
+      iree_hal_allocator_create_heap(IREE_SV("test"), iree_allocator_system(),
+                                     iree_allocator_system(), &allocator));
+
+  iree_hal_amdgpu_device_spec_physical_device_params_t physical_devices[2];
+  MakePhysicalDeviceParams(IREE_SV("gfx1100"), kAgentTimestampFrequencyHz,
+                           /*physical_ordinal=*/0, &physical_devices[0]);
+  physical_devices[0].vendor_packet_capabilities =
+      IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_AQL_PM4_IB |
+      IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_ATOMIC_WAIT |
+      IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_ATOMIC_STORE;
+  MakePhysicalDeviceParams(IREE_SV("gfx942"), kAgentTimestampFrequencyHz,
+                           /*physical_ordinal=*/1, &physical_devices[1]);
+  physical_devices[1].vendor_packet_capabilities =
+      IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_ATOMIC_WAIT |
+      IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_ATOMIC_STORE;
+  const iree_hal_amdgpu_device_spec_params_t params = MakeDeviceSpecParams(
+      physical_devices, IREE_ARRAYSIZE(physical_devices), allocator);
+
+  iree_hal_device_spec_t* device_spec = NULL;
+  IREE_ASSERT_OK(iree_hal_amdgpu_device_spec_create(
+      &params, iree_allocator_system(), &device_spec));
+  const iree_hal_device_queue_spec_t* queues =
+      iree_hal_device_spec_queues(device_spec);
+  ASSERT_NE(queues, nullptr);
+  ASSERT_EQ(queues->family_count, IREE_ARRAYSIZE(physical_devices));
+
+  for (iree_host_size_t i = 0; i < queues->family_count; ++i) {
+    EXPECT_TRUE(iree_all_bits_set(queues->families[i].role_flags,
+                                  IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_ATOMIC));
+    ExpectUniformAtomicCapabilities(queues->families[i].atomic_capabilities,
+                                    IREE_HAL_ATOMIC_OPERATION_FLAGS_ALL,
+                                    IREE_HAL_ATOMIC_WAIT_CONDITION_FLAGS_ALL);
+  }
+  ExpectUniformAtomicCapabilities(
+      queues->families[0].zero_compute_atomic_capabilities,
+      IREE_HAL_ATOMIC_OPERATION_FLAG_WAIT |
+          IREE_HAL_ATOMIC_OPERATION_FLAG_STORE,
+      IREE_HAL_ATOMIC_WAIT_CONDITION_FLAGS_ALL);
+  ExpectUniformAtomicCapabilities(
+      queues->families[1].zero_compute_atomic_capabilities,
+      IREE_HAL_ATOMIC_OPERATION_FLAG_NONE,
+      IREE_HAL_ATOMIC_WAIT_CONDITION_FLAG_NONE);
 
   iree_hal_device_spec_release(device_spec);
   iree_hal_allocator_release(allocator);
