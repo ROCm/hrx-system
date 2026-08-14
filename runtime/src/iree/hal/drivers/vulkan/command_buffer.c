@@ -2624,49 +2624,6 @@ static iree_status_t iree_hal_vulkan_command_buffer_atomic_rmw(
       iree_hal_vulkan_atomic_params_from_rmw(params));
 }
 
-static iree_status_t iree_hal_vulkan_command_buffer_signal_event(
-    iree_hal_command_buffer_t* base_command_buffer, iree_hal_event_t* event,
-    iree_hal_execution_stage_t source_stage_mask) {
-  (void)base_command_buffer;
-  (void)event;
-  (void)source_stage_mask;
-  return iree_make_status(
-      IREE_STATUS_UNIMPLEMENTED,
-      "Vulkan command buffer event signals are unsupported");
-}
-
-static iree_status_t iree_hal_vulkan_command_buffer_reset_event(
-    iree_hal_command_buffer_t* base_command_buffer, iree_hal_event_t* event,
-    iree_hal_execution_stage_t source_stage_mask) {
-  (void)base_command_buffer;
-  (void)event;
-  (void)source_stage_mask;
-  return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
-                          "Vulkan command buffer event resets are unsupported");
-}
-
-static iree_status_t iree_hal_vulkan_command_buffer_wait_events(
-    iree_hal_command_buffer_t* base_command_buffer,
-    iree_host_size_t event_count, const iree_hal_event_t** events,
-    iree_hal_execution_stage_t source_stage_mask,
-    iree_hal_execution_stage_t target_stage_mask,
-    iree_host_size_t memory_barrier_count,
-    const iree_hal_memory_barrier_t* memory_barriers,
-    iree_host_size_t buffer_barrier_count,
-    const iree_hal_buffer_barrier_t* buffer_barriers) {
-  (void)base_command_buffer;
-  (void)event_count;
-  (void)events;
-  (void)source_stage_mask;
-  (void)target_stage_mask;
-  (void)memory_barrier_count;
-  (void)memory_barriers;
-  (void)buffer_barrier_count;
-  (void)buffer_barriers;
-  return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
-                          "Vulkan command buffer event waits are unsupported");
-}
-
 static iree_status_t iree_hal_vulkan_command_buffer_advise_buffer(
     iree_hal_command_buffer_t* base_command_buffer,
     iree_hal_buffer_ref_t buffer_ref, iree_hal_memory_advise_flags_t flags,
@@ -3041,9 +2998,6 @@ static const iree_hal_command_buffer_vtable_t
         .atomic_wait = iree_hal_vulkan_command_buffer_atomic_wait,
         .atomic_store = iree_hal_vulkan_command_buffer_atomic_store,
         .atomic_rmw = iree_hal_vulkan_command_buffer_atomic_rmw,
-        .signal_event = iree_hal_vulkan_command_buffer_signal_event,
-        .reset_event = iree_hal_vulkan_command_buffer_reset_event,
-        .wait_events = iree_hal_vulkan_command_buffer_wait_events,
         .advise_buffer = iree_hal_vulkan_command_buffer_advise_buffer,
         .fill_buffer = iree_hal_vulkan_command_buffer_fill_buffer,
         .update_buffer = iree_hal_vulkan_command_buffer_update_buffer,

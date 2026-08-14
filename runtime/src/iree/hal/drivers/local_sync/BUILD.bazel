@@ -17,13 +17,11 @@ iree_runtime_cc_library(
     srcs = [
         "sync_device.c",
         "sync_driver.c",
-        "sync_event.c",
         "sync_semaphore.c",
     ],
     hdrs = [
         "sync_device.h",
         "sync_driver.h",
-        "sync_event.h",
         "sync_semaphore.h",
     ],
     deps = [

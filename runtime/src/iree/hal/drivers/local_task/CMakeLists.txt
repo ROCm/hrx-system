@@ -147,13 +147,11 @@ iree_cc_library(
   HDRS
     "task_device.h"
     "task_driver.h"
-    "task_event.h"
     "task_queue.h"
     "task_semaphore.h"
   SRCS
     "task_device.c"
     "task_driver.c"
-    "task_event.c"
     "task_queue.c"
     "task_semaphore.c"
   DEPS

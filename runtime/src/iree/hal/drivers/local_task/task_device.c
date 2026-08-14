@@ -17,7 +17,6 @@
 #include "iree/base/internal/arena.h"
 #include "iree/base/internal/math.h"
 #include "iree/hal/drivers/local_task/block_command_buffer.h"
-#include "iree/hal/drivers/local_task/task_event.h"
 #include "iree/hal/drivers/local_task/task_queue.h"
 #include "iree/hal/drivers/local_task/task_semaphore.h"
 #include "iree/hal/local/atomic.h"
@@ -601,14 +600,6 @@ static iree_status_t iree_hal_task_device_create_command_buffer(
       iree_hal_device_allocator(base_device), mode, command_categories,
       queue_affinity, binding_capacity, &device->large_block_pool,
       device->host_allocator, out_command_buffer);
-}
-
-static iree_status_t iree_hal_task_device_create_event(
-    iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
-    iree_hal_event_flags_t flags, iree_hal_event_t** out_event) {
-  return iree_hal_task_event_create(queue_affinity, flags,
-                                    iree_hal_device_host_allocator(base_device),
-                                    out_event);
 }
 
 static iree_status_t iree_hal_task_device_load_executable(
@@ -1277,7 +1268,6 @@ static const iree_hal_device_vtable_t iree_hal_task_device_vtable = {
     .assign_topology_info = iree_hal_task_device_assign_topology_info,
     .create_channel = iree_hal_task_device_create_channel,
     .create_command_buffer = iree_hal_task_device_create_command_buffer,
-    .create_event = iree_hal_task_device_create_event,
     .load_executable = iree_hal_task_device_load_executable,
     .import_file = iree_hal_task_device_import_file,
     .create_semaphore = iree_hal_task_device_create_semaphore,

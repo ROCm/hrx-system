@@ -47,8 +47,6 @@ IREE_API_EXPORT const char* iree_hal_replay_object_type_string(
       return "semaphore";
     case IREE_HAL_REPLAY_OBJECT_TYPE_FILE:
       return "file";
-    case IREE_HAL_REPLAY_OBJECT_TYPE_EVENT:
-      return "event";
     case IREE_HAL_REPLAY_OBJECT_TYPE_CHANNEL:
       return "channel";
     case IREE_HAL_REPLAY_OBJECT_TYPE_HOST_CALL:
@@ -77,8 +75,6 @@ IREE_API_EXPORT const char* iree_hal_replay_operation_code_string(
       return "device.create_channel";
     case IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_CREATE_COMMAND_BUFFER:
       return "device.create_command_buffer";
-    case IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_CREATE_EVENT:
-      return "device.create_event";
     case IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_LOAD_EXECUTABLE:
       return "device.load_executable";
     case IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_IMPORT_FILE:
@@ -173,12 +169,6 @@ IREE_API_EXPORT const char* iree_hal_replay_operation_code_string(
       return "command_buffer.end_debug_group";
     case IREE_HAL_REPLAY_OPERATION_CODE_COMMAND_BUFFER_EXECUTION_BARRIER:
       return "command_buffer.execution_barrier";
-    case IREE_HAL_REPLAY_OPERATION_CODE_COMMAND_BUFFER_SIGNAL_EVENT:
-      return "command_buffer.signal_event";
-    case IREE_HAL_REPLAY_OPERATION_CODE_COMMAND_BUFFER_RESET_EVENT:
-      return "command_buffer.reset_event";
-    case IREE_HAL_REPLAY_OPERATION_CODE_COMMAND_BUFFER_WAIT_EVENTS:
-      return "command_buffer.wait_events";
     case IREE_HAL_REPLAY_OPERATION_CODE_COMMAND_BUFFER_ADVISE_BUFFER:
       return "command_buffer.advise_buffer";
     case IREE_HAL_REPLAY_OPERATION_CODE_COMMAND_BUFFER_FILL_BUFFER:
@@ -255,12 +245,6 @@ IREE_API_EXPORT const char* iree_hal_replay_payload_type_string(
       return "command_buffer_fill_buffer";
     case IREE_HAL_REPLAY_PAYLOAD_TYPE_COMMAND_BUFFER_UPDATE_BUFFER:
       return "command_buffer_update_buffer";
-    case IREE_HAL_REPLAY_PAYLOAD_TYPE_EVENT_OBJECT:
-      return "event_object";
-    case IREE_HAL_REPLAY_PAYLOAD_TYPE_COMMAND_BUFFER_EVENT:
-      return "command_buffer_event";
-    case IREE_HAL_REPLAY_PAYLOAD_TYPE_COMMAND_BUFFER_WAIT_EVENTS:
-      return "command_buffer_wait_events";
     case IREE_HAL_REPLAY_PAYLOAD_TYPE_FILE_OBJECT:
       return "file_object";
     case IREE_HAL_REPLAY_PAYLOAD_TYPE_DEVICE_QUEUE_READ:

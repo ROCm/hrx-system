@@ -223,51 +223,6 @@ static iree_status_t iree_hal_hip_multi_queue_command_buffer_atomic_rmw(
       "read-modify-write");
 }
 
-static iree_status_t iree_hal_hip_multi_queue_command_buffer_signal_event(
-    iree_hal_command_buffer_t* base_command_buffer, iree_hal_event_t* event,
-    iree_hal_execution_stage_t source_stage_mask) {
-  iree_hal_hip_multi_queue_command_buffer_t* command_buffer =
-      iree_hal_hip_multi_queue_command_buffer_cast(base_command_buffer);
-  iree_status_t status = iree_ok_status();
-  CALL_COMMAND(status, iree_hal_command_buffer_signal_event(
-                           command_buffer->child_buffers[command_buffer_index],
-                           event, source_stage_mask));
-  return status;
-}
-
-static iree_status_t iree_hal_hip_multi_queue_command_buffer_reset_event(
-    iree_hal_command_buffer_t* base_command_buffer, iree_hal_event_t* event,
-    iree_hal_execution_stage_t source_stage_mask) {
-  iree_hal_hip_multi_queue_command_buffer_t* command_buffer =
-      iree_hal_hip_multi_queue_command_buffer_cast(base_command_buffer);
-  iree_status_t status = iree_ok_status();
-  CALL_COMMAND(status, iree_hal_command_buffer_reset_event(
-                           command_buffer->child_buffers[command_buffer_index],
-                           event, source_stage_mask));
-  return status;
-}
-
-static iree_status_t iree_hal_hip_multi_queue_command_buffer_wait_events(
-    iree_hal_command_buffer_t* base_command_buffer,
-    iree_host_size_t event_count, const iree_hal_event_t** events,
-    iree_hal_execution_stage_t source_stage_mask,
-    iree_hal_execution_stage_t target_stage_mask,
-    iree_host_size_t memory_barrier_count,
-    const iree_hal_memory_barrier_t* memory_barriers,
-    iree_host_size_t buffer_barrier_count,
-    const iree_hal_buffer_barrier_t* buffer_barriers) {
-  iree_hal_hip_multi_queue_command_buffer_t* command_buffer =
-      iree_hal_hip_multi_queue_command_buffer_cast(base_command_buffer);
-  iree_status_t status = iree_ok_status();
-  CALL_COMMAND(
-      status,
-      iree_hal_command_buffer_wait_events(
-          command_buffer->child_buffers[command_buffer_index], event_count,
-          events, source_stage_mask, target_stage_mask, memory_barrier_count,
-          memory_barriers, buffer_barrier_count, buffer_barriers));
-  return status;
-}
-
 static iree_status_t iree_hal_hip_multi_queue_command_buffer_advise_buffer(
     iree_hal_command_buffer_t* base_command_buffer,
     iree_hal_buffer_ref_t buffer_ref, iree_hal_memory_advise_flags_t flags,
@@ -360,9 +315,6 @@ static const iree_hal_command_buffer_vtable_t
         .atomic_wait = iree_hal_hip_multi_queue_command_buffer_atomic_wait,
         .atomic_store = iree_hal_hip_multi_queue_command_buffer_atomic_store,
         .atomic_rmw = iree_hal_hip_multi_queue_command_buffer_atomic_rmw,
-        .signal_event = iree_hal_hip_multi_queue_command_buffer_signal_event,
-        .reset_event = iree_hal_hip_multi_queue_command_buffer_reset_event,
-        .wait_events = iree_hal_hip_multi_queue_command_buffer_wait_events,
         .advise_buffer = iree_hal_hip_multi_queue_command_buffer_advise_buffer,
         .fill_buffer = iree_hal_hip_multi_queue_command_buffer_fill_buffer,
         .update_buffer = iree_hal_hip_multi_queue_command_buffer_update_buffer,

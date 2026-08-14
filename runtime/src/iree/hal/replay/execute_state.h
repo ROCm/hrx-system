@@ -46,8 +46,6 @@ typedef struct iree_hal_replay_object_entry_t {
     iree_hal_replay_executable_entry_t executable;
     // Retained HAL semaphore.
     iree_hal_semaphore_t* semaphore;
-    // Retained HAL event.
-    iree_hal_event_t* event;
     // Retained HAL file.
     iree_hal_file_t* file;
   } value;

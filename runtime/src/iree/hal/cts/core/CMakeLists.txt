@@ -26,19 +26,6 @@ iree_cc_library(
 
 iree_cc_library(
   NAME
-    event_test
-  SRCS
-    "event_test.cc"
-  DEPS
-    iree::hal
-    iree::hal::cts::util::test_base
-  TESTONLY
-  ALWAYSLINK
-  PUBLIC
-)
-
-iree_cc_library(
-  NAME
     semaphore_test
   SRCS
     "semaphore_test.cc"
@@ -86,7 +73,6 @@ iree_cc_library(
     all_tests
   DEPS
     ::driver_test
-    ::event_test
     ::semaphore_test
     ${_all_tests_platform_deps}
   TESTONLY

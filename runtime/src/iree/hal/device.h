@@ -19,7 +19,6 @@
 #include "iree/hal/command_buffer.h"
 #include "iree/hal/device_event.h"
 #include "iree/hal/device_spec.h"
-#include "iree/hal/event.h"
 #include "iree/hal/fence.h"
 #include "iree/hal/file.h"
 #include "iree/hal/memory/asan.h"
@@ -1412,10 +1411,6 @@ typedef struct iree_hal_device_vtable_t {
       iree_hal_queue_affinity_t queue_affinity,
       iree_host_size_t binding_capacity,
       iree_hal_command_buffer_t** out_command_buffer);
-
-  iree_status_t(IREE_API_PTR* create_event)(
-      iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
-      iree_hal_event_flags_t flags, iree_hal_event_t** out_event);
 
   iree_status_t(IREE_API_PTR* load_executable)(
       iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,

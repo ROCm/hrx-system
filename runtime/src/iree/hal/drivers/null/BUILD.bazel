@@ -27,8 +27,6 @@ iree_runtime_cc_library(
         "device.h",
         "driver.c",
         "driver.h",
-        "event.c",
-        "event.h",
         "executable.c",
         "executable.h",
         "semaphore.c",

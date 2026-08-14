@@ -15,12 +15,10 @@ iree_cc_library(
   HDRS
     "sync_device.h"
     "sync_driver.h"
-    "sync_event.h"
     "sync_semaphore.h"
   SRCS
     "sync_device.c"
     "sync_driver.c"
-    "sync_event.c"
     "sync_semaphore.c"
   DEPS
     iree::async

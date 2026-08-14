@@ -424,16 +424,6 @@ static iree_status_t iree_hal_replay_dump_append_json_payload(
           ",\"initial_value\":%" PRIu64 ",\"flags\":%" PRIu64 "}",
           payload.queue_affinity, payload.initial_value, payload.flags);
     }
-    case IREE_HAL_REPLAY_PAYLOAD_TYPE_EVENT_OBJECT: {
-      IREE_RETURN_IF_ERROR(iree_hal_replay_dump_payload_length_check(
-          record, sizeof(iree_hal_replay_event_object_payload_t)));
-      iree_hal_replay_event_object_payload_t payload;
-      memcpy(&payload, record->payload.data, sizeof(payload));
-      return iree_string_builder_append_format(
-          builder,
-          ",\"payload\":{\"queue_affinity\":%" PRIu64 ",\"flags\":%" PRIu32 "}",
-          payload.queue_affinity, payload.flags);
-    }
     case IREE_HAL_REPLAY_PAYLOAD_TYPE_FILE_OBJECT: {
       if (record->payload.data_length <
           sizeof(iree_hal_replay_file_object_payload_t)) {
@@ -1047,60 +1037,6 @@ static iree_status_t iree_hal_replay_dump_append_json_payload(
           builder, &payload.params));
       IREE_RETURN_IF_ERROR(iree_hal_replay_dump_append_json_buffer_ref(
           builder, "target_ref", &payload.target_ref));
-      return iree_string_builder_append_cstring(builder, "}");
-    }
-    case IREE_HAL_REPLAY_PAYLOAD_TYPE_COMMAND_BUFFER_EVENT: {
-      IREE_RETURN_IF_ERROR(iree_hal_replay_dump_payload_length_check(
-          record, sizeof(iree_hal_replay_command_buffer_event_payload_t)));
-      iree_hal_replay_command_buffer_event_payload_t payload;
-      memcpy(&payload, record->payload.data, sizeof(payload));
-      return iree_string_builder_append_format(
-          builder,
-          ",\"payload\":{\"event_id\":%" PRIu64
-          ",\"source_stage_mask\":%" PRIu64 "}",
-          payload.event_id, payload.source_stage_mask);
-    }
-    case IREE_HAL_REPLAY_PAYLOAD_TYPE_COMMAND_BUFFER_WAIT_EVENTS: {
-      if (record->payload.data_length <
-          sizeof(iree_hal_replay_command_buffer_wait_events_payload_t)) {
-        return iree_make_status(IREE_STATUS_DATA_LOSS,
-                                "replay wait events payload is short");
-      }
-      iree_hal_replay_command_buffer_wait_events_payload_t payload;
-      memcpy(&payload, record->payload.data, sizeof(payload));
-      iree_host_size_t events_offset = 0;
-      iree_host_size_t events_size = 0;
-      iree_host_size_t memory_offset = 0;
-      iree_host_size_t memory_size = 0;
-      iree_host_size_t buffer_offset = 0;
-      iree_host_size_t buffer_size = 0;
-      IREE_RETURN_IF_ERROR(iree_hal_replay_dump_wait_events_layout(
-          record, &payload, &events_offset, &events_size, &memory_offset,
-          &memory_size, &buffer_offset, &buffer_size));
-      IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
-          builder,
-          ",\"payload\":{\"source_stage_mask\":%" PRIu64
-          ",\"target_stage_mask\":%" PRIu64 ",\"event_count\":%" PRIu64
-          ",\"memory_barrier_count\":%" PRIu64
-          ",\"buffer_barrier_count\":%" PRIu64,
-          payload.source_stage_mask, payload.target_stage_mask,
-          payload.event_count, payload.memory_barrier_count,
-          payload.buffer_barrier_count));
-      iree_hal_replay_file_range_t events_range =
-          iree_hal_replay_dump_payload_subrange(payload_range, events_offset,
-                                                events_size);
-      iree_hal_replay_file_range_t memory_range =
-          iree_hal_replay_dump_payload_subrange(payload_range, memory_offset,
-                                                memory_size);
-      iree_hal_replay_file_range_t buffer_range =
-          iree_hal_replay_dump_payload_subrange(payload_range, buffer_offset,
-                                                buffer_size);
-      IREE_RETURN_IF_ERROR(iree_hal_replay_dump_append_json_file_range(
-          builder, "events_range", &events_range));
-      IREE_RETURN_IF_ERROR(iree_hal_replay_dump_append_json_file_range(
-          builder, "memory_barriers_range", &memory_range));
-      IREE_RETURN_IF_ERROR(iree_hal_replay_dump_append_json_file_range(
-          builder, "buffer_barriers_range", &buffer_range));
       return iree_string_builder_append_cstring(builder, "}");
     }
     case IREE_HAL_REPLAY_PAYLOAD_TYPE_COMMAND_BUFFER_FILL_BUFFER: {

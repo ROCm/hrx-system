@@ -26,8 +26,8 @@ extern "C" {
 // All resource types must have the iree_hal_resource_t at offset 0. This allows
 // the HAL code to cast any type pointer to a resource to gain access to the
 // ref count and vtable at predictable locations. Note that this allows for the
-// resource to be at >0 of the allocation but the pointers used with the HAL
-// (iree_hal_event_t*, etc) must point to the iree_hal_resource_t.
+// resource to be at >0 of the allocation but pointers used with the HAL must
+// point to the iree_hal_resource_t.
 typedef struct iree_hal_resource_t {
   // Reference count used to manage resource lifetime. The vtable->destroy
   // method will be called when the reference count falls to zero.

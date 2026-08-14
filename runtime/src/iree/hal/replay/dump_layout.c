@@ -404,58 +404,6 @@ iree_status_t iree_hal_replay_dump_execution_barrier_layout(
   return iree_ok_status();
 }
 
-iree_status_t iree_hal_replay_dump_wait_events_layout(
-    const iree_hal_replay_file_record_t* record,
-    const iree_hal_replay_command_buffer_wait_events_payload_t* payload,
-    iree_host_size_t* out_events_offset, iree_host_size_t* out_events_size,
-    iree_host_size_t* out_memory_barriers_offset,
-    iree_host_size_t* out_memory_barriers_size,
-    iree_host_size_t* out_buffer_barriers_offset,
-    iree_host_size_t* out_buffer_barriers_size) {
-  iree_host_size_t events_size = 0;
-  iree_host_size_t memory_barriers_size = 0;
-  iree_host_size_t buffer_barriers_size = 0;
-  if (IREE_UNLIKELY(payload->event_count > IREE_HOST_SIZE_MAX ||
-                    payload->memory_barrier_count > IREE_HOST_SIZE_MAX ||
-                    payload->buffer_barrier_count > IREE_HOST_SIZE_MAX ||
-                    !iree_host_size_checked_mul(
-                        (iree_host_size_t)payload->event_count,
-                        sizeof(iree_hal_replay_object_id_t), &events_size) ||
-                    !iree_host_size_checked_mul(
-                        (iree_host_size_t)payload->memory_barrier_count,
-                        sizeof(iree_hal_replay_memory_barrier_payload_t),
-                        &memory_barriers_size) ||
-                    !iree_host_size_checked_mul(
-                        (iree_host_size_t)payload->buffer_barrier_count,
-                        sizeof(iree_hal_replay_buffer_barrier_payload_t),
-                        &buffer_barriers_size))) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "replay wait events payload count overflow");
-  }
-
-  iree_host_size_t offset = sizeof(*payload);
-  *out_events_offset = offset;
-  *out_events_size = events_size;
-  if (!iree_host_size_checked_add(offset, events_size, &offset)) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "replay wait events payload length overflow");
-  }
-  *out_memory_barriers_offset = offset;
-  *out_memory_barriers_size = memory_barriers_size;
-  if (!iree_host_size_checked_add(offset, memory_barriers_size, &offset)) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "replay wait events payload length overflow");
-  }
-  *out_buffer_barriers_offset = offset;
-  *out_buffer_barriers_size = buffer_barriers_size;
-  if (!iree_host_size_checked_add(offset, buffer_barriers_size, &offset) ||
-      offset != record->payload.data_length) {
-    return iree_make_status(IREE_STATUS_DATA_LOSS,
-                            "replay wait events payload length mismatch");
-  }
-  return iree_ok_status();
-}
-
 iree_status_t iree_hal_replay_dump_scope_name(
     const iree_hal_replay_file_record_t* record,
     iree_string_view_t* out_scope_name) {

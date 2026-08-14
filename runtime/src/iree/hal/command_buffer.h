@@ -15,7 +15,6 @@
 #include "iree/hal/atomic.h"
 #include "iree/hal/buffer.h"
 #include "iree/hal/channel.h"
-#include "iree/hal/event.h"
 #include "iree/hal/executable.h"
 #include "iree/hal/queue.h"
 #include "iree/hal/resource.h"
@@ -762,13 +761,12 @@ static inline iree_status_t iree_hal_buffer_binding_table_resolve_ref(
 // Commands are recorded by the implementation for later submission to device
 // queues.
 //
-// Buffers, events, and programs referenced must remain valid and not be
-// modified or read while there are commands in-flight. The usual flow is to
-// populate input buffers, dispatch using those buffers, wait on a semaphore
-// until the buffers are guaranteed to no longer be in use, and then reuse the
-// buffers. Lifetimes are managed by the command buffer and all used resources
-// will be retained for as long as the command buffer is live or until it is
-// reset.
+// Resources referenced must remain valid and not be modified or read while
+// there are commands in-flight. The usual flow is to populate input buffers,
+// dispatch using those buffers, wait on a semaphore until the buffers are
+// guaranteed to no longer be in use, and then reuse the buffers. Lifetimes are
+// managed by the command buffer and all used resources will be retained for as
+// long as the command buffer is live.
 //
 // Buffers referenced by a command buffer may be either direct (a concrete
 // iree_hal_buffer_t reference) or indirect (a binding table slot ordinal).
@@ -785,19 +783,13 @@ static inline iree_status_t iree_hal_buffer_binding_table_resolve_ref(
 //
 // Errors that can be recognized when operations are enqueued will be returned
 // immediately, such as invalid argument errors. Errors that can only be
-// determined at execution time will be returned on semaphores. Once a failure
-// occurs the device queue will enter an error state that invalidates all
-// operations on the device queue (as ordering is not strict and any may still
-// be in-flight). In this case the user of the device queue should treat all
-// in-flight operations as cancelled and fully reset themselves. Other device
-// queues that may be waiting on events from the device queue will also enter
-// error states. Only once a user has acknowledged and cleared the error state
-// with a Reset the queue will become usable, and otherwise all operations will
-// return errors.
+// determined at execution time are reported by failing the submission's signal
+// semaphores. Semaphores remain permanently failed, and submissions waiting on
+// a failed semaphore also fail.
 //
 // Command buffers are thread-compatible. Use multiple command buffers if trying
 // to record commands from multiple threads. Command buffers must not be mutated
-// between when they have are submitted for execution on a queue and when the
+// between when they are submitted for execution on a queue and when the
 // semaphore fires indicating the completion of their execution.
 typedef struct iree_hal_command_buffer_t iree_hal_command_buffer_t;
 
@@ -949,44 +941,6 @@ IREE_API_EXPORT iree_status_t iree_hal_command_buffer_atomic_rmw(
     iree_hal_execution_stage_t source_stage_mask,
     iree_hal_execution_stage_t target_stage_mask,
     iree_hal_buffer_ref_t target_ref, iree_hal_atomic_rmw_params_t params);
-
-// Sets an event to the signaled state.
-// |source_stage_mask| specifies when the event is signaled.
-//
-// Events are only valid within a single command buffer. Events can only be
-// used on non-transfer queues.
-IREE_API_EXPORT iree_status_t iree_hal_command_buffer_signal_event(
-    iree_hal_command_buffer_t* command_buffer, iree_hal_event_t* event,
-    iree_hal_execution_stage_t source_stage_mask);
-
-// Resets an event to the non-signaled state.
-// |source_stage_mask| specifies when the event is unsignaled.
-//
-// Events are only valid within a single command buffer. Events can only be
-// used on non-transfer queues.
-IREE_API_EXPORT iree_status_t iree_hal_command_buffer_reset_event(
-    iree_hal_command_buffer_t* command_buffer, iree_hal_event_t* event,
-    iree_hal_execution_stage_t source_stage_mask);
-
-// Waits for one or more events to be signaled and defines a memory dependency
-// between the synchronization scope of the signal operations and the commands
-// following the wait.
-//
-// |source_stage_mask| must include ExecutionStage::kHost for Event::Signal to
-// be visible.
-//
-// Events are only valid within a single command buffer. Events remain
-// signaled even after waiting and must be reset to be reused. Events can only
-// be used on non-transfer queues.
-IREE_API_EXPORT iree_status_t iree_hal_command_buffer_wait_events(
-    iree_hal_command_buffer_t* command_buffer, iree_host_size_t event_count,
-    const iree_hal_event_t** events,
-    iree_hal_execution_stage_t source_stage_mask,
-    iree_hal_execution_stage_t target_stage_mask,
-    iree_host_size_t memory_barrier_count,
-    const iree_hal_memory_barrier_t* memory_barriers,
-    iree_host_size_t buffer_barrier_count,
-    const iree_hal_buffer_barrier_t* buffer_barriers);
 
 // Advises the device about the usage of the given buffer.
 // The device may use this information to perform cache management or ignore it
@@ -1196,24 +1150,6 @@ typedef struct iree_hal_command_buffer_vtable_t {
       iree_hal_execution_stage_t source_stage_mask,
       iree_hal_execution_stage_t target_stage_mask,
       iree_hal_buffer_ref_t target_ref, iree_hal_atomic_rmw_params_t params);
-
-  iree_status_t(IREE_API_PTR* signal_event)(
-      iree_hal_command_buffer_t* command_buffer, iree_hal_event_t* event,
-      iree_hal_execution_stage_t source_stage_mask);
-
-  iree_status_t(IREE_API_PTR* reset_event)(
-      iree_hal_command_buffer_t* command_buffer, iree_hal_event_t* event,
-      iree_hal_execution_stage_t source_stage_mask);
-
-  iree_status_t(IREE_API_PTR* wait_events)(
-      iree_hal_command_buffer_t* command_buffer, iree_host_size_t event_count,
-      const iree_hal_event_t** events,
-      iree_hal_execution_stage_t source_stage_mask,
-      iree_hal_execution_stage_t target_stage_mask,
-      iree_host_size_t memory_barrier_count,
-      const iree_hal_memory_barrier_t* memory_barriers,
-      iree_host_size_t buffer_barrier_count,
-      const iree_hal_buffer_barrier_t* buffer_barriers);
 
   iree_status_t(IREE_API_PTR* advise_buffer)(
       iree_hal_command_buffer_t* command_buffer,

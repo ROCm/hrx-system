@@ -117,15 +117,6 @@ iree_status_t iree_hal_replay_dump_execution_barrier_layout(
     iree_host_size_t* out_buffer_barriers_offset,
     iree_host_size_t* out_buffer_barriers_size);
 
-iree_status_t iree_hal_replay_dump_wait_events_layout(
-    const iree_hal_replay_file_record_t* record,
-    const iree_hal_replay_command_buffer_wait_events_payload_t* payload,
-    iree_host_size_t* out_events_offset, iree_host_size_t* out_events_size,
-    iree_host_size_t* out_memory_barriers_offset,
-    iree_host_size_t* out_memory_barriers_size,
-    iree_host_size_t* out_buffer_barriers_offset,
-    iree_host_size_t* out_buffer_barriers_size);
-
 iree_status_t iree_hal_replay_dump_scope_name(
     const iree_hal_replay_file_record_t* record,
     iree_string_view_t* out_scope_name);

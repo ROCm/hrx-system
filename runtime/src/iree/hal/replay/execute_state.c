@@ -33,9 +33,6 @@ static void iree_hal_replay_executor_release_entry(
     case IREE_HAL_REPLAY_OBJECT_TYPE_SEMAPHORE:
       iree_hal_semaphore_release(entry->value.semaphore);
       break;
-    case IREE_HAL_REPLAY_OBJECT_TYPE_EVENT:
-      iree_hal_event_release(entry->value.event);
-      break;
     case IREE_HAL_REPLAY_OBJECT_TYPE_FILE:
       iree_hal_file_release(entry->value.file);
       break;

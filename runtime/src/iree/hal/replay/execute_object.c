@@ -575,28 +575,6 @@ static iree_status_t iree_hal_replay_executor_create_semaphore(
       IREE_HAL_REPLAY_OBJECT_TYPE_SEMAPHORE, entry);
 }
 
-static iree_status_t iree_hal_replay_executor_create_event(
-    iree_hal_replay_executor_t* executor,
-    const iree_hal_replay_file_record_t* record) {
-  IREE_RETURN_IF_ERROR(iree_hal_replay_executor_require_payload(
-      record, IREE_HAL_REPLAY_PAYLOAD_TYPE_EVENT_OBJECT,
-      sizeof(iree_hal_replay_event_object_payload_t)));
-  iree_hal_replay_event_object_payload_t payload;
-  memcpy(&payload, record->payload.data, sizeof(payload));
-  iree_hal_replay_object_entry_t* device_entry = NULL;
-  IREE_RETURN_IF_ERROR(iree_hal_replay_executor_lookup(
-      executor, record->header.object_id, IREE_HAL_REPLAY_OBJECT_TYPE_DEVICE,
-      &device_entry));
-  iree_hal_event_t* event = NULL;
-  IREE_RETURN_IF_ERROR(iree_hal_event_create(device_entry->value.device,
-                                             payload.queue_affinity,
-                                             payload.flags, &event));
-  iree_hal_replay_object_entry_t entry = {.value.event = event};
-  return iree_hal_replay_executor_store(
-      executor, record->header.related_object_id,
-      IREE_HAL_REPLAY_OBJECT_TYPE_EVENT, entry);
-}
-
 static iree_status_t iree_hal_replay_executor_validate_file_reference(
     const iree_hal_replay_file_object_payload_t* payload,
     iree_string_view_t captured_path, iree_string_view_t resolved_path,
@@ -1070,8 +1048,6 @@ iree_status_t iree_hal_replay_executor_replay_object_operation(
       return iree_hal_replay_executor_load_executable(executor, record);
     case IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_CREATE_COMMAND_BUFFER:
       return iree_hal_replay_executor_create_command_buffer(executor, record);
-    case IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_CREATE_EVENT:
-      return iree_hal_replay_executor_create_event(executor, record);
     case IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_IMPORT_FILE:
       return iree_hal_replay_executor_import_file(executor, record);
     case IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_CREATE_SEMAPHORE:

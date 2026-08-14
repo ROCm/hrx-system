@@ -103,7 +103,6 @@ static bool cuda_registered_ =
                "MultiQueueFanOutDifferentValuesBeforeSignal",
                "Blocked by the same CUDA queue pool backend UNIMPLEMENTED "
                "path as CrossQueueWaitBeforeSignal."},
-              {"EventTest.*", "CUDA does not implement HAL events"},
               {"ExecutableTest.*",
                "CUDA does not implement executable reflection"},
               {"QueueDispatchIndirectParametersTest.*",
