@@ -13,6 +13,24 @@ package(
 )
 
 iree_runtime_cc_library(
+    name = "command_program",
+    srcs = ["command_program.c"],
+    hdrs = ["command_program.h"],
+    deps = [
+        ":runtime",
+        "//loom/binding/c:loomc",
+        "//loom/binding/c/target/amdgpu",
+        "//loom/binding/c/target/amdgpu/iree_hal",
+        "//loom/binding/c/target/cmd",
+        "//loom/binding/c/target/cmd:program",
+        "//loom/binding/c/target/cmd/hal",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/io:parameter_provider",
+    ],
+)
+
+iree_runtime_cc_library(
     name = "runtime",
     srcs = ["runtime.c"],
     hdrs = ["runtime.h"],
