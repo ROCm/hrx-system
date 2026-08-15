@@ -14,6 +14,34 @@ package(
 )
 
 iree_runtime_cc_binary(
+    name = "qwen38-cli",
+    srcs = ["qwen38_text_main.c"],
+    tags = [
+        "iree-run-requirement=runtime.resource.amd_gpu",
+        "manual",
+        "requires-gpu-amd",
+        "runtime-resource=amd-gpu",
+    ],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/execute:amdgpu_hal",
+    ]),
+    deps = [
+        "//experimental/qwen/programs:qwen38_text_model_source",
+        "//experimental/qwen/tooling:command_program",
+        "//experimental/qwen/tooling:runtime",
+        "//loom/binding/c/target/cmd/hal",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/tooling:flags",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/io:file_handle",
+        "//runtime/src/iree/tokenizer",
+        "//runtime/src/iree/tokenizer/format/huggingface:tokenizer_json",
+        "//runtime/src/iree/tokenizer/vocab",
+        "//runtime/src/iree/tooling:device_util",
+    ],
+)
+
+iree_runtime_cc_binary(
     name = "qwen38-decode-greedy-cli",
     srcs = ["qwen38_decode_body_main.c"],
     tags = [
