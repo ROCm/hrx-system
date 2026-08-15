@@ -24,6 +24,30 @@ typedef struct qwen_tooling_parameter_request_t {
   iree_io_parameter_span_t span;
 } qwen_tooling_parameter_request_t;
 
+// One physical immutable parameter slab shared by all selected program roots.
+typedef struct qwen_tooling_parameter_pack_t {
+  // Single host allocation containing all trailing metadata arrays.
+  void* storage;
+  // Device-local slab populated by the parameter provider.
+  iree_hal_buffer_t* buffer;
+  // Signals 1 after all unique parameter payloads have been gathered.
+  iree_hal_semaphore_t* ready_semaphore;
+  // Unique parameter requests packed into |buffer|.
+  qwen_tooling_parameter_request_t* requests;
+  // Number of entries populated in |requests|.
+  iree_host_size_t request_count;
+  // Root-local fixed-buffer views across all selected programs.
+  iree_hal_buffer_ref_t* fixed_buffer_refs;
+  // Number of entries populated in |fixed_buffer_refs|.
+  iree_host_size_t fixed_buffer_ref_count;
+  // Per-program starting offsets in |fixed_buffer_refs| plus one sentinel.
+  iree_host_size_t* program_fixed_buffer_offsets;
+  // Exact physical slab byte length.
+  iree_device_size_t byte_length;
+  // Minimum alignment required for the physical slab allocation.
+  iree_device_size_t minimum_alignment;
+} qwen_tooling_parameter_pack_t;
+
 struct qwen_tooling_command_program_t {
   // Materialized reusable command buffer and retained fixed resources.
   loomc_cmd_hal_program_t* hal_program;
@@ -203,90 +227,295 @@ static iree_status_t qwen_tooling_compile_unit(
   return status;
 }
 
-static iree_status_t qwen_tooling_begin_parameter_gather(
+static void qwen_tooling_parameter_pack_deinitialize(
+    iree_allocator_t host_allocator, qwen_tooling_parameter_pack_t* pack) {
+  iree_hal_semaphore_release(pack->ready_semaphore);
+  iree_hal_buffer_release(pack->buffer);
+  iree_allocator_free(host_allocator, pack->storage);
+  memset(pack, 0, sizeof(*pack));
+}
+
+static iree_host_size_t qwen_tooling_parameter_pack_find(
+    const qwen_tooling_parameter_pack_t* pack, iree_string_view_t key) {
+  for (iree_host_size_t i = 0; i < pack->request_count; ++i) {
+    if (iree_string_view_equal(pack->requests[i].key, key)) return i;
+  }
+  return IREE_HOST_SIZE_MAX;
+}
+
+static bool qwen_tooling_parameter_ranges_overlap(
+    iree_device_size_t lhs_offset, iree_device_size_t lhs_length,
+    iree_device_size_t rhs_offset, iree_device_size_t rhs_length) {
+  return lhs_offset < rhs_offset ? lhs_length > rhs_offset - lhs_offset
+                                 : rhs_length > lhs_offset - rhs_offset;
+}
+
+// Packs every selected program's logical parameter roots into one physical
+// slab. A shared parameter key fixes a root's base relative to an existing
+// placement. Roots with no shared keys append once. Conflicting relative
+// layouts cannot be represented by fixed-buffer subranges and fail loud.
+static iree_status_t qwen_tooling_parameter_pack_build(
     loomc_cmd_program_package_t* package,
-    loomc_cmd_program_export_t program_export,
-    const loomc_cmd_program_info_t* program_info,
-    iree_io_parameter_provider_t* parameter_provider, iree_hal_device_t* device,
-    iree_allocator_t host_allocator, iree_hal_buffer_t** out_parameter_buffer,
-    qwen_tooling_parameter_request_t** out_requests,
-    iree_hal_semaphore_t** out_ready_semaphore) {
-  *out_parameter_buffer = NULL;
-  *out_requests = NULL;
-  *out_ready_semaphore = NULL;
-  if (program_info->fixed_buffer_count != 1 ||
-      program_info->parameter_root_count != 1 ||
-      program_info->parameter_count == 0) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "Qwen command programs require one nonempty parameter root");
+    const loomc_cmd_program_export_t* program_exports,
+    const loomc_cmd_program_info_t* program_infos,
+    iree_host_size_t program_count, iree_allocator_t host_allocator,
+    qwen_tooling_parameter_pack_t* out_pack) {
+  memset(out_pack, 0, sizeof(*out_pack));
+
+  iree_host_size_t request_capacity = 0;
+  iree_host_size_t fixed_buffer_ref_capacity = 0;
+  for (iree_host_size_t i = 0; i < program_count; ++i) {
+    if (program_infos[i].parameter_count == 0 ||
+        program_infos[i].parameter_root_count == 0 ||
+        program_infos[i].parameter_root_count !=
+            program_infos[i].fixed_buffer_count) {
+      return iree_make_status(
+          IREE_STATUS_FAILED_PRECONDITION,
+          "command root '%.*s' must source every fixed buffer from parameters",
+          (int)program_infos[i].name.size, program_infos[i].name.data);
+    }
+    if (!iree_host_size_checked_add(request_capacity,
+                                    program_infos[i].parameter_count,
+                                    &request_capacity) ||
+        !iree_host_size_checked_add(fixed_buffer_ref_capacity,
+                                    program_infos[i].fixed_buffer_count,
+                                    &fixed_buffer_ref_capacity)) {
+      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "Qwen parameter metadata count overflow");
+    }
   }
 
-  loomc_cmd_program_parameter_root_info_t root_info = {
-      .type = LOOMC_STRUCTURE_TYPE_CMD_PROGRAM_PARAMETER_ROOT_INFO,
-      .structure_size = sizeof(root_info),
-  };
-  IREE_RETURN_IF_ERROR(qwen_tooling_status_from_loomc(
-      loomc_cmd_program_package_parameter_root_info(package, program_export, 0,
-                                                    &root_info)));
-  if (root_info.fixed_buffer_index != 0 ||
-      root_info.required_byte_length == 0 || root_info.minimum_alignment == 0) {
-    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "the Qwen parameter root has an invalid ABI");
+  iree_host_size_t program_offset_count = 0;
+  if (!iree_host_size_checked_add(program_count, 1, &program_offset_count)) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "Qwen program count overflow");
   }
+  iree_host_size_t storage_size = 0;
+  iree_host_size_t requests_offset = 0;
+  iree_host_size_t fixed_buffer_refs_offset = 0;
+  iree_host_size_t program_offsets_offset = 0;
+  IREE_RETURN_IF_ERROR(IREE_STRUCT_LAYOUT(
+      0, &storage_size,
+      IREE_STRUCT_FIELD_ALIGNED(
+          request_capacity, qwen_tooling_parameter_request_t,
+          iree_alignof(qwen_tooling_parameter_request_t), &requests_offset),
+      IREE_STRUCT_FIELD_ALIGNED(
+          fixed_buffer_ref_capacity, iree_hal_buffer_ref_t,
+          iree_alignof(iree_hal_buffer_ref_t), &fixed_buffer_refs_offset),
+      IREE_STRUCT_FIELD_ALIGNED(program_offset_count, iree_host_size_t,
+                                iree_alignof(iree_host_size_t),
+                                &program_offsets_offset)));
+  IREE_RETURN_IF_ERROR(
+      iree_allocator_malloc(host_allocator, storage_size, &out_pack->storage));
+  memset(out_pack->storage, 0, storage_size);
+  out_pack->requests =
+      (qwen_tooling_parameter_request_t*)((uint8_t*)out_pack->storage +
+                                          requests_offset);
+  out_pack->fixed_buffer_refs =
+      (iree_hal_buffer_ref_t*)((uint8_t*)out_pack->storage +
+                               fixed_buffer_refs_offset);
+  out_pack->program_fixed_buffer_offsets =
+      (iree_host_size_t*)((uint8_t*)out_pack->storage + program_offsets_offset);
 
+  iree_status_t status = iree_ok_status();
+  for (iree_host_size_t program_i = 0;
+       program_i < program_count && iree_status_is_ok(status); ++program_i) {
+    const loomc_cmd_program_info_t* program_info = &program_infos[program_i];
+    out_pack->program_fixed_buffer_offsets[program_i] =
+        out_pack->fixed_buffer_ref_count;
+    out_pack->fixed_buffer_ref_count += program_info->fixed_buffer_count;
+
+    for (iree_host_size_t root_i = 0;
+         root_i < program_info->parameter_root_count &&
+         iree_status_is_ok(status);
+         ++root_i) {
+      loomc_cmd_program_parameter_root_info_t root_info = {
+          .type = LOOMC_STRUCTURE_TYPE_CMD_PROGRAM_PARAMETER_ROOT_INFO,
+          .structure_size = sizeof(root_info),
+      };
+      status = qwen_tooling_status_from_loomc(
+          loomc_cmd_program_package_parameter_root_info(
+              package, program_exports[program_i], root_i, &root_info));
+      if (!iree_status_is_ok(status)) break;
+
+      bool root_base_known = false;
+      iree_device_size_t root_base = 0;
+      for (iree_host_size_t parameter_i = 0;
+           parameter_i < program_info->parameter_count &&
+           iree_status_is_ok(status);
+           ++parameter_i) {
+        loomc_cmd_program_parameter_info_t parameter_info = {
+            .type = LOOMC_STRUCTURE_TYPE_CMD_PROGRAM_PARAMETER_INFO,
+            .structure_size = sizeof(parameter_info),
+        };
+        status = qwen_tooling_status_from_loomc(
+            loomc_cmd_program_package_parameter_info(
+                package, program_exports[program_i], parameter_i,
+                &parameter_info));
+        if (!iree_status_is_ok(status)) break;
+        if (parameter_info.fixed_buffer_index != root_info.fixed_buffer_index) {
+          continue;
+        }
+        const iree_host_size_t existing_i = qwen_tooling_parameter_pack_find(
+            out_pack, iree_string_view_from_loomc(parameter_info.key));
+        if (existing_i == IREE_HOST_SIZE_MAX) continue;
+        const qwen_tooling_parameter_request_t* existing =
+            &out_pack->requests[existing_i];
+        if (existing->span.length != parameter_info.byte_length ||
+            existing->span.buffer_offset < parameter_info.byte_offset) {
+          status = iree_make_status(
+              IREE_STATUS_FAILED_PRECONDITION,
+              "parameter '%.*s' has incompatible command-root layouts",
+              (int)parameter_info.key.size, parameter_info.key.data);
+          break;
+        }
+        const iree_device_size_t candidate_base =
+            existing->span.buffer_offset - parameter_info.byte_offset;
+        if (root_base_known && candidate_base != root_base) {
+          status = iree_make_status(
+              IREE_STATUS_FAILED_PRECONDITION,
+              "command root '%.*s' cannot map to one parameter subrange",
+              (int)program_info->name.size, program_info->name.data);
+          break;
+        }
+        root_base = candidate_base;
+        root_base_known = true;
+      }
+      if (!iree_status_is_ok(status)) break;
+
+      if (!root_base_known &&
+          !iree_device_size_checked_align(
+              out_pack->byte_length, root_info.minimum_alignment, &root_base)) {
+        status = iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                                  "Qwen parameter-pack alignment overflow");
+        break;
+      }
+      if (root_base % root_info.minimum_alignment != 0) {
+        status = iree_make_status(
+            IREE_STATUS_FAILED_PRECONDITION,
+            "command root '%.*s' requires incompatible parameter alignment",
+            (int)program_info->name.size, program_info->name.data);
+        break;
+      }
+
+      for (iree_host_size_t parameter_i = 0;
+           parameter_i < program_info->parameter_count &&
+           iree_status_is_ok(status);
+           ++parameter_i) {
+        loomc_cmd_program_parameter_info_t parameter_info = {
+            .type = LOOMC_STRUCTURE_TYPE_CMD_PROGRAM_PARAMETER_INFO,
+            .structure_size = sizeof(parameter_info),
+        };
+        status = qwen_tooling_status_from_loomc(
+            loomc_cmd_program_package_parameter_info(
+                package, program_exports[program_i], parameter_i,
+                &parameter_info));
+        if (!iree_status_is_ok(status)) break;
+        if (parameter_info.fixed_buffer_index != root_info.fixed_buffer_index) {
+          continue;
+        }
+
+        iree_device_size_t parameter_offset = 0;
+        if (!iree_device_size_checked_add(root_base, parameter_info.byte_offset,
+                                          &parameter_offset)) {
+          status = iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                                    "Qwen parameter offset overflow");
+          break;
+        }
+        const iree_string_view_t key =
+            iree_string_view_from_loomc(parameter_info.key);
+        const iree_host_size_t existing_i =
+            qwen_tooling_parameter_pack_find(out_pack, key);
+        if (existing_i != IREE_HOST_SIZE_MAX) {
+          const qwen_tooling_parameter_request_t* existing =
+              &out_pack->requests[existing_i];
+          if (existing->span.buffer_offset != parameter_offset ||
+              existing->span.length != parameter_info.byte_length ||
+              parameter_offset % parameter_info.minimum_alignment != 0) {
+            status = iree_make_status(
+                IREE_STATUS_FAILED_PRECONDITION,
+                "parameter '%.*s' has incompatible command-root placement",
+                (int)key.size, key.data);
+          }
+          continue;
+        }
+
+        for (iree_host_size_t existing_i = 0;
+             existing_i < out_pack->request_count; ++existing_i) {
+          const qwen_tooling_parameter_request_t* existing =
+              &out_pack->requests[existing_i];
+          if (qwen_tooling_parameter_ranges_overlap(
+                  parameter_offset, parameter_info.byte_length,
+                  existing->span.buffer_offset, existing->span.length)) {
+            status = iree_make_status(
+                IREE_STATUS_FAILED_PRECONDITION,
+                "parameters '%.*s' and '%.*s' require overlapping storage",
+                (int)key.size, key.data, (int)existing->key.size,
+                existing->key.data);
+            break;
+          }
+        }
+        if (!iree_status_is_ok(status)) break;
+        out_pack->requests[out_pack->request_count++] =
+            (qwen_tooling_parameter_request_t){
+                .key = key,
+                .span =
+                    {
+                        .parameter_offset = 0,
+                        .buffer_offset = parameter_offset,
+                        .length = parameter_info.byte_length,
+                    },
+            };
+      }
+
+      iree_device_size_t root_end = 0;
+      if (iree_status_is_ok(status) &&
+          !iree_device_size_checked_add(
+              root_base, root_info.required_byte_length, &root_end)) {
+        status = iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                                  "Qwen parameter-root range overflow");
+      }
+      if (!iree_status_is_ok(status)) break;
+      if (root_end > out_pack->byte_length) out_pack->byte_length = root_end;
+      if (root_info.minimum_alignment > out_pack->minimum_alignment) {
+        out_pack->minimum_alignment = root_info.minimum_alignment;
+      }
+      const iree_host_size_t fixed_buffer_ref_i =
+          out_pack->program_fixed_buffer_offsets[program_i] +
+          root_info.fixed_buffer_index;
+      out_pack->fixed_buffer_refs[fixed_buffer_ref_i] =
+          iree_hal_make_buffer_ref(/*buffer=*/NULL, root_base,
+                                   root_info.required_byte_length);
+    }
+  }
+  out_pack->program_fixed_buffer_offsets[program_count] =
+      out_pack->fixed_buffer_ref_count;
+  if (!iree_status_is_ok(status)) {
+    qwen_tooling_parameter_pack_deinitialize(host_allocator, out_pack);
+  }
+  return status;
+}
+
+static iree_status_t qwen_tooling_parameter_pack_begin_gather(
+    qwen_tooling_parameter_pack_t* pack,
+    iree_io_parameter_provider_t* parameter_provider,
+    iree_hal_device_t* device) {
   iree_status_t status = qwen_tooling_allocate_buffer(
       device, IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL,
       IREE_HAL_BUFFER_USAGE_STORAGE | IREE_HAL_BUFFER_USAGE_TRANSFER,
-      root_info.minimum_alignment, root_info.required_byte_length,
-      out_parameter_buffer);
-  if (iree_status_is_ok(status)) {
-    status = iree_allocator_malloc_array(
-        host_allocator, program_info->parameter_count, sizeof(**out_requests),
-        (void**)out_requests);
-  }
+      pack->minimum_alignment, pack->byte_length, &pack->buffer);
   for (iree_host_size_t i = 0;
-       i < program_info->parameter_count && iree_status_is_ok(status); ++i) {
-    loomc_cmd_program_parameter_info_t parameter_info = {
-        .type = LOOMC_STRUCTURE_TYPE_CMD_PROGRAM_PARAMETER_INFO,
-        .structure_size = sizeof(parameter_info),
-    };
-    status =
-        qwen_tooling_status_from_loomc(loomc_cmd_program_package_parameter_info(
-            package, program_export, i, &parameter_info));
-    if (!iree_status_is_ok(status)) break;
-    if (parameter_info.fixed_buffer_index != root_info.fixed_buffer_index ||
-        parameter_info.byte_length == 0 ||
-        parameter_info.byte_offset > root_info.required_byte_length ||
-        parameter_info.byte_length >
-            root_info.required_byte_length - parameter_info.byte_offset ||
-        parameter_info.minimum_alignment == 0 ||
-        parameter_info.byte_offset % parameter_info.minimum_alignment != 0) {
-      status = iree_make_status(
-          IREE_STATUS_FAILED_PRECONDITION,
-          "compiled parameter '%.*s' has an invalid packed range",
-          (int)parameter_info.key.size, parameter_info.key.data);
-      break;
-    }
-    (*out_requests)[i] = (qwen_tooling_parameter_request_t){
-        .key = iree_string_view_from_loomc(parameter_info.key),
-        .span =
-            {
-                .parameter_offset = 0,
-                .buffer_offset = parameter_info.byte_offset,
-                .length = parameter_info.byte_length,
-            },
-    };
+       i < pack->fixed_buffer_ref_count && iree_status_is_ok(status); ++i) {
+    pack->fixed_buffer_refs[i].buffer = pack->buffer;
   }
-
   if (iree_status_is_ok(status)) {
     status = iree_hal_semaphore_create(
         device, IREE_HAL_QUEUE_AFFINITY_ANY, /*initial_value=*/0,
-        IREE_HAL_SEMAPHORE_FLAG_DEFAULT, out_ready_semaphore);
+        IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &pack->ready_semaphore);
   }
   uint64_t ready_value = 1;
   if (iree_status_is_ok(status)) {
-    iree_hal_semaphore_t* ready_semaphore = *out_ready_semaphore;
+    iree_hal_semaphore_t* ready_semaphore = pack->ready_semaphore;
     const iree_hal_semaphore_list_t signals = {
         .count = 1,
         .semaphores = &ready_semaphore,
@@ -295,106 +524,11 @@ static iree_status_t qwen_tooling_begin_parameter_gather(
     status = iree_io_parameter_provider_gather(
         parameter_provider, device, IREE_HAL_QUEUE_AFFINITY_ANY,
         iree_hal_semaphore_list_empty(), signals, iree_string_view_empty(),
-        *out_parameter_buffer, program_info->parameter_count,
+        pack->buffer, pack->request_count,
         (iree_io_parameter_enumerator_t){
             .fn = qwen_tooling_parameter_enumerate,
-            .user_data = *out_requests,
+            .user_data = pack->requests,
         });
-  }
-  if (!iree_status_is_ok(status)) {
-    iree_hal_semaphore_release(*out_ready_semaphore);
-    iree_allocator_free(host_allocator, *out_requests);
-    iree_hal_buffer_release(*out_parameter_buffer);
-    *out_ready_semaphore = NULL;
-    *out_requests = NULL;
-    *out_parameter_buffer = NULL;
-  }
-  return status;
-}
-
-static iree_status_t qwen_tooling_require_shared_parameter_layout(
-    loomc_cmd_program_package_t* package,
-    loomc_cmd_program_export_t reference_export,
-    const loomc_cmd_program_info_t* reference_info,
-    loomc_cmd_program_export_t candidate_export,
-    const loomc_cmd_program_info_t* candidate_info) {
-  if (reference_info->fixed_buffer_count != 1 ||
-      reference_info->parameter_root_count != 1 ||
-      reference_info->parameter_count == 0) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "Qwen command programs require one nonempty parameter root");
-  }
-  if (candidate_info->fixed_buffer_count !=
-          reference_info->fixed_buffer_count ||
-      candidate_info->parameter_root_count !=
-          reference_info->parameter_root_count ||
-      candidate_info->parameter_count != reference_info->parameter_count) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "command root '%.*s' does not share the fixed parameter ABI",
-        (int)candidate_info->name.size, candidate_info->name.data);
-  }
-
-  loomc_cmd_program_parameter_root_info_t reference_root = {
-      .type = LOOMC_STRUCTURE_TYPE_CMD_PROGRAM_PARAMETER_ROOT_INFO,
-      .structure_size = sizeof(reference_root),
-  };
-  loomc_cmd_program_parameter_root_info_t candidate_root = {
-      .type = LOOMC_STRUCTURE_TYPE_CMD_PROGRAM_PARAMETER_ROOT_INFO,
-      .structure_size = sizeof(candidate_root),
-  };
-  iree_status_t status = qwen_tooling_status_from_loomc(
-      loomc_cmd_program_package_parameter_root_info(package, reference_export,
-                                                    0, &reference_root));
-  if (iree_status_is_ok(status)) {
-    status = qwen_tooling_status_from_loomc(
-        loomc_cmd_program_package_parameter_root_info(package, candidate_export,
-                                                      0, &candidate_root));
-  }
-  if (iree_status_is_ok(status) &&
-      (candidate_root.fixed_buffer_index != reference_root.fixed_buffer_index ||
-       candidate_root.required_byte_length !=
-           reference_root.required_byte_length ||
-       candidate_root.minimum_alignment != reference_root.minimum_alignment)) {
-    status = iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "command root '%.*s' uses a different parameter root layout",
-        (int)candidate_info->name.size, candidate_info->name.data);
-  }
-
-  for (iree_host_size_t i = 0;
-       i < reference_info->parameter_count && iree_status_is_ok(status); ++i) {
-    loomc_cmd_program_parameter_info_t reference_parameter = {
-        .type = LOOMC_STRUCTURE_TYPE_CMD_PROGRAM_PARAMETER_INFO,
-        .structure_size = sizeof(reference_parameter),
-    };
-    loomc_cmd_program_parameter_info_t candidate_parameter = {
-        .type = LOOMC_STRUCTURE_TYPE_CMD_PROGRAM_PARAMETER_INFO,
-        .structure_size = sizeof(candidate_parameter),
-    };
-    status =
-        qwen_tooling_status_from_loomc(loomc_cmd_program_package_parameter_info(
-            package, reference_export, i, &reference_parameter));
-    if (iree_status_is_ok(status)) {
-      status = qwen_tooling_status_from_loomc(
-          loomc_cmd_program_package_parameter_info(package, candidate_export, i,
-                                                   &candidate_parameter));
-    }
-    if (iree_status_is_ok(status) &&
-        (!loomc_string_view_equal(reference_parameter.key,
-                                  candidate_parameter.key) ||
-         candidate_parameter.fixed_buffer_index !=
-             reference_parameter.fixed_buffer_index ||
-         candidate_parameter.byte_offset != reference_parameter.byte_offset ||
-         candidate_parameter.byte_length != reference_parameter.byte_length ||
-         candidate_parameter.minimum_alignment !=
-             reference_parameter.minimum_alignment)) {
-      status = iree_make_status(
-          IREE_STATUS_FAILED_PRECONDITION,
-          "command root '%.*s' diverges at parameter %" PRIhsz,
-          (int)candidate_info->name.size, candidate_info->name.data, i);
-    }
   }
   return status;
 }
@@ -443,9 +577,7 @@ iree_status_t qwen_tooling_command_program_set_create(
   loomc_cmd_program_info_t* program_infos = NULL;
   loomc_launch_config_program_t* launch_config_program = NULL;
   loomc_result_t* result = NULL;
-  iree_hal_buffer_t* parameter_buffer = NULL;
-  qwen_tooling_parameter_request_t* parameter_requests = NULL;
-  iree_hal_semaphore_t* parameter_ready_semaphore = NULL;
+  qwen_tooling_parameter_pack_t parameter_pack = {0};
   bool parameter_gather_submitted = false;
   iree_hal_executable_t** executables_by_unit = NULL;
   iree_host_size_t unit_count = 0;
@@ -708,18 +840,14 @@ iree_status_t qwen_tooling_command_program_set_create(
               package, program_exports[i], &program_infos[i]));
     }
   }
-  for (iree_host_size_t i = 1;
-       i < options->root_count && iree_status_is_ok(status); ++i) {
-    status = qwen_tooling_require_shared_parameter_layout(
-        package, program_exports[0], &program_infos[0], program_exports[i],
-        &program_infos[i]);
-  }
-
   if (iree_status_is_ok(status)) {
-    status = qwen_tooling_begin_parameter_gather(
-        package, program_exports[0], &program_infos[0],
-        runtime_context->parameter_provider, device, host_allocator,
-        &parameter_buffer, &parameter_requests, &parameter_ready_semaphore);
+    status = qwen_tooling_parameter_pack_build(
+        package, program_exports, program_infos, options->root_count,
+        host_allocator, &parameter_pack);
+  }
+  if (iree_status_is_ok(status)) {
+    status = qwen_tooling_parameter_pack_begin_gather(
+        &parameter_pack, runtime_context->parameter_provider, device);
     parameter_gather_submitted = iree_status_is_ok(status);
   }
 
@@ -798,8 +926,6 @@ iree_status_t qwen_tooling_command_program_set_create(
         (qwen_tooling_command_program_t*)((uint8_t*)program_set +
                                           programs_offset);
     program_set->program_count = options->root_count;
-    const iree_hal_buffer_ref_t fixed_buffer =
-        iree_hal_make_buffer_ref(parameter_buffer, 0, IREE_HAL_WHOLE_BUFFER);
     for (iree_host_size_t i = 0;
          i < options->root_count && iree_status_is_ok(status); ++i) {
       qwen_tooling_command_program_t* program = &program_set->programs[i];
@@ -817,8 +943,9 @@ iree_status_t qwen_tooling_command_program_set_create(
           .structure_size = sizeof(materialization_options),
           .command_buffer_mode = runtime_context->command_buffer_mode,
           .queue_affinity = IREE_HAL_QUEUE_AFFINITY_ANY,
-          .fixed_buffers = &fixed_buffer,
-          .fixed_buffer_count = 1,
+          .fixed_buffers = parameter_pack.fixed_buffer_refs +
+                           parameter_pack.program_fixed_buffer_offsets[i],
+          .fixed_buffer_count = program_infos[i].fixed_buffer_count,
           .executables = root_executables,
           .executable_count = root_info->executable_requirement_count,
       };
@@ -838,28 +965,18 @@ iree_status_t qwen_tooling_command_program_set_create(
 
   if (parameter_gather_submitted) {
     const iree_status_t gather_status = iree_hal_semaphore_wait(
-        parameter_ready_semaphore, 1, iree_infinite_timeout(),
+        parameter_pack.ready_semaphore, 1, iree_infinite_timeout(),
         IREE_ASYNC_WAIT_FLAG_NONE);
     status = iree_status_join(status, gather_status);
   }
   if (iree_status_is_ok(status)) {
-    loomc_cmd_program_parameter_root_info_t parameter_root_info = {
-        .type = LOOMC_STRUCTURE_TYPE_CMD_PROGRAM_PARAMETER_ROOT_INFO,
-        .structure_size = sizeof(parameter_root_info),
-    };
-    status = qwen_tooling_status_from_loomc(
-        loomc_cmd_program_package_parameter_root_info(
-            package, program_exports[0], 0, &parameter_root_info));
-    if (iree_status_is_ok(status)) {
-      program_set->package = package;
-      package = NULL;
-      program_set->launch_config_program = launch_config_program;
-      launch_config_program = NULL;
-      program_set->parameter_byte_length =
-          parameter_root_info.required_byte_length;
-      *out_program_set = program_set;
-      program_set = NULL;
-    }
+    program_set->package = package;
+    package = NULL;
+    program_set->launch_config_program = launch_config_program;
+    launch_config_program = NULL;
+    program_set->parameter_byte_length = parameter_pack.byte_length;
+    *out_program_set = program_set;
+    program_set = NULL;
   }
 
   qwen_tooling_command_program_set_release(program_set);
@@ -869,9 +986,7 @@ iree_status_t qwen_tooling_command_program_set_create(
   }
   iree_allocator_free(host_allocator, root_executables);
   iree_allocator_free(host_allocator, executables_by_unit);
-  iree_hal_semaphore_release(parameter_ready_semaphore);
-  iree_allocator_free(host_allocator, parameter_requests);
-  iree_hal_buffer_release(parameter_buffer);
+  qwen_tooling_parameter_pack_deinitialize(host_allocator, &parameter_pack);
   loomc_result_release(result);
   loomc_launch_config_program_release(launch_config_program);
   loomc_cmd_program_package_release(package);

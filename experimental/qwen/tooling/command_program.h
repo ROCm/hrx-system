@@ -36,9 +36,11 @@ typedef struct qwen_tooling_command_program_set_options_t {
 } qwen_tooling_command_program_set_options_t;
 
 // Compiles and materializes sealed command-program roots for the runtime
-// context's device. Every root must publish an identical fixed parameter
-// layout. Parameters are gathered once while distinct kernel units compile,
-// then all materialized command buffers retain the shared fixed resources.
+// context's device. Logical parameter roots are mapped into subranges of one
+// union parameter slab. Repeated keys share their exact payload bytes, and an
+// incompatible relative layout fails instead of duplicating storage.
+// Parameters are gathered once while distinct kernel units compile, then all
+// materialized command buffers retain the shared fixed resources.
 iree_status_t qwen_tooling_command_program_set_create(
     qwen_tooling_runtime_context_t* runtime_context,
     const qwen_tooling_command_program_set_options_t* options,
