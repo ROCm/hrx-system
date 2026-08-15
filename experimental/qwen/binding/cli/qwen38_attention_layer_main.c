@@ -337,6 +337,30 @@ static iree_status_t qwen38_attention_layer_run(void) {
         iree_infinite_timeout());
   }
 
+  // Preserve explicitly requested witness data before validating the final
+  // residual. A failed transition is precisely when the intermediate outputs
+  // are needed to identify the first corrupt command boundary.
+  if (iree_status_is_ok(status) && FLAG_output[0] != '\0') {
+    status = iree_io_file_contents_write(
+        iree_make_cstring_view(FLAG_output),
+        iree_make_const_byte_span(residual_values, QWEN38_HIDDEN_BYTE_LENGTH),
+        host_allocator);
+  }
+  if (iree_status_is_ok(status) && cache_values) {
+    status = iree_io_file_contents_write(
+        iree_make_cstring_view(FLAG_cache_output),
+        iree_make_const_byte_span(cache_values,
+                                  QWEN38_ATTENTION_CACHE_BYTE_LENGTH),
+        host_allocator);
+  }
+  if (iree_status_is_ok(status) && attention_values) {
+    status = iree_io_file_contents_write(
+        iree_make_cstring_view(FLAG_attention_output),
+        iree_make_const_byte_span(attention_values,
+                                  QWEN38_ATTENTION_BYTE_LENGTH),
+        host_allocator);
+  }
+
   double sum = 0.0;
   double sum_squares = 0.0;
   float minimum = FLT_MAX;
@@ -357,26 +381,6 @@ static iree_status_t qwen38_attention_layer_run(void) {
                                 "/%d finite values",
                                 finite_count, QWEN38_HIDDEN_ELEMENT_COUNT);
     }
-  }
-  if (iree_status_is_ok(status) && FLAG_output[0] != '\0') {
-    status = iree_io_file_contents_write(
-        iree_make_cstring_view(FLAG_output),
-        iree_make_const_byte_span(residual_values, QWEN38_HIDDEN_BYTE_LENGTH),
-        host_allocator);
-  }
-  if (iree_status_is_ok(status) && cache_values) {
-    status = iree_io_file_contents_write(
-        iree_make_cstring_view(FLAG_cache_output),
-        iree_make_const_byte_span(cache_values,
-                                  QWEN38_ATTENTION_CACHE_BYTE_LENGTH),
-        host_allocator);
-  }
-  if (iree_status_is_ok(status) && attention_values) {
-    status = iree_io_file_contents_write(
-        iree_make_cstring_view(FLAG_attention_output),
-        iree_make_const_byte_span(attention_values,
-                                  QWEN38_ATTENTION_BYTE_LENGTH),
-        host_allocator);
   }
   if (iree_status_is_ok(status)) {
     fprintf(
