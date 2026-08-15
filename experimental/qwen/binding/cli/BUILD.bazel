@@ -14,7 +14,7 @@ package(
 )
 
 iree_runtime_cc_binary(
-    name = "qwen38-decode-body-cli",
+    name = "qwen38-decode-greedy-cli",
     srcs = ["qwen38_decode_body_main.c"],
     tags = [
         "iree-run-requirement=runtime.resource.amd_gpu",

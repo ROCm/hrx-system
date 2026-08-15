@@ -17,6 +17,7 @@ exports_files([
     "qwen38/decode_config.loom",
     "qwen38/gdn_layer_decode.loom",
     "qwen38/model_decode.loom",
+    "qwen38/output_head_decode.loom",
 ])
 
 loom_link_module(
@@ -26,6 +27,7 @@ loom_link_module(
         "qwen38/attention_layer_decode.loom",
         "qwen38/decode_config.loom",
         "qwen38/gdn_layer_decode.loom",
+        "qwen38/output_head_decode.loom",
         "//experimental/qwen/kernels:ggml/linear_q4k_q8_1_x4.loom",
         "//experimental/qwen/kernels:ggml/linear_q5k_q8_1_x4.loom",
         "//experimental/qwen/kernels:ggml/linear_q6k_q8_1_x4.loom",
@@ -34,10 +36,14 @@ loom_link_module(
         "//experimental/qwen/kernels:ggml/quantize_q8_1_x4.loom",
         "//experimental/qwen/kernels:qwen38/attention_decode.loom",
         "//experimental/qwen/kernels:qwen38/gdn_decode.loom",
+        "//experimental/qwen/kernels:qwen38/greedy_argmax.loom",
         "//experimental/qwen/kernels:qwen38/layer_decode.loom",
     ],
     mode = "selective",
-    roots = ["@qwen38_text_decode_body"],
+    roots = [
+        "@qwen38_text_decode_body",
+        "@qwen38_text_decode_greedy",
+    ],
     strip_check = True,
 )
 

@@ -439,6 +439,8 @@ test_suite(
         ":qwen38_gdn_decode_plan_test",
         ":qwen38_gdn_norm_gate_decode_hal_test",
         ":qwen38_gdn_recurrent_decode_hal_test",
+        ":qwen38_greedy_argmax_hal_test",
+        ":qwen38_greedy_argmax_plan_test",
         ":qwen38_layer_decode_hal_test",
         ":qwen38_layer_decode_plan_test",
     ],

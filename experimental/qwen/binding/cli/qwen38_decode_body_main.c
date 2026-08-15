@@ -28,11 +28,11 @@
 
 IREE_FLAG(string, output, "", "Optional raw F32 residual output path.");
 IREE_FLAG(int32_t, transition_count, 1,
-          "Number of consecutive model-body transitions to execute.");
+          "Number of synthetic in-place command-program replays.");
 
 static const char* const qwen38_decode_body_usage =
-    "Advances all 64 Qwen3.8 base-model layers through one reusable Loom "
-    "command program.\n"
+    "Advances one Qwen3.8 decode transition and selects a greedy token "
+    "through one reusable Loom command program.\n"
     "\n"
     "Required flags:\n"
     "  --device=<AMDGPU device URI>\n"
@@ -40,7 +40,7 @@ static const char* const qwen38_decode_body_usage =
     "\n"
     "Optional output:\n"
     "  --output=<raw F32 residual path>\n"
-    "  --transition_count=<positive replay count up to 128>\n";
+    "  --transition_count=<positive synthetic replay count up to 128>\n";
 
 static iree_status_t qwen38_allocate_buffer(
     iree_hal_device_t* device, iree_hal_memory_type_t memory_type,
@@ -71,7 +71,7 @@ static iree_status_t qwen38_prepare_decode_body(
       .source_identifier = iree_make_cstring_view(files[0].name),
       .source_contents =
           iree_make_const_byte_span(files[0].data, files[0].size),
-      .root_name = IREE_SV("qwen38_text_decode_body"),
+      .root_name = IREE_SV("qwen38_text_decode_greedy"),
   };
   return qwen_tooling_command_program_create(runtime_context, &options,
                                              host_allocator, out_program);
@@ -138,8 +138,10 @@ static iree_status_t qwen38_decode_body_run(void) {
   iree_hal_buffer_t* control_buffer = NULL;
   iree_hal_buffer_t* gdn_state_buffer = NULL;
   iree_hal_buffer_t* attention_cache_buffer = NULL;
+  iree_hal_buffer_t* token_id_buffer = NULL;
   iree_hal_buffer_t* transient_buffer = NULL;
   float* residual_values = NULL;
+  int32_t token_id = -1;
   iree_hal_profiling_from_flags_t* profiling = NULL;
 
   iree_status_t status = iree_ok_status();
@@ -155,14 +157,15 @@ static iree_status_t qwen38_decode_body_run(void) {
   }
   if (iree_status_is_ok(status)) {
     fprintf(stderr,
-            "qwen38: indexed GGUF; compiling and gathering 64 layers...\n");
+            "qwen38: indexed GGUF; compiling and gathering the decode "
+            "program...\n");
     status =
         qwen38_prepare_decode_body(&runtime_context, host_allocator, &program);
   }
   if (iree_status_is_ok(status)) {
     program_info = qwen_tooling_command_program_info(program);
-    if (program_info->rebindable_binding_count != 5 ||
-        program_info->transient.binding_index != 4 ||
+    if (program_info->rebindable_binding_count != 6 ||
+        program_info->transient.binding_index != 5 ||
         program_info->transient.required_byte_length == 0 ||
         program_info->config.binding_index !=
             LOOMC_CMD_PROGRAM_BINDING_INVALID) {
@@ -204,6 +207,12 @@ static iree_status_t qwen38_decode_body_run(void) {
     status = qwen38_allocate_buffer(
         device, IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL,
         IREE_HAL_BUFFER_USAGE_STORAGE | IREE_HAL_BUFFER_USAGE_TRANSFER,
+        /*minimum_alignment=*/64, sizeof(token_id), &token_id_buffer);
+  }
+  if (iree_status_is_ok(status)) {
+    status = qwen38_allocate_buffer(
+        device, IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL,
+        IREE_HAL_BUFFER_USAGE_STORAGE | IREE_HAL_BUFFER_USAGE_TRANSFER,
         program_info->transient.minimum_alignment,
         program_info->transient.required_byte_length, &transient_buffer);
   }
@@ -231,9 +240,9 @@ static iree_status_t qwen38_decode_body_run(void) {
   if (iree_status_is_ok(status)) {
     fprintf(stderr,
             "qwen38: materialized %" PRIhsz
-            " commands; executing the base-model body...\n",
+            " commands; executing greedy decode...\n",
             program_info->command_count);
-    iree_hal_buffer_binding_t bindings[5] = {
+    iree_hal_buffer_binding_t bindings[6] = {
         [0] =
             {
                 .buffer = residual_buffer,
@@ -259,6 +268,12 @@ static iree_status_t qwen38_decode_body_run(void) {
                 .length = IREE_HAL_WHOLE_BUFFER,
             },
         [4] =
+            {
+                .buffer = token_id_buffer,
+                .offset = 0,
+                .length = IREE_HAL_WHOLE_BUFFER,
+            },
+        [5] =
             {
                 .buffer = transient_buffer,
                 .offset = 0,
@@ -289,6 +304,11 @@ static iree_status_t qwen38_decode_body_run(void) {
   if (iree_status_is_ok(status)) {
     status = iree_hal_device_transfer_d2h(
         device, residual_buffer, 0, residual_values, QWEN38_HIDDEN_BYTE_LENGTH,
+        IREE_HAL_TRANSFER_BUFFER_FLAG_DEFAULT, iree_infinite_timeout());
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_device_transfer_d2h(
+        device, token_id_buffer, 0, &token_id, sizeof(token_id),
         IREE_HAL_TRANSFER_BUFFER_FLAG_DEFAULT, iree_infinite_timeout());
   }
 
@@ -322,22 +342,23 @@ static iree_status_t qwen38_decode_body_run(void) {
   if (iree_status_is_ok(status)) {
     fprintf(
         stdout,
-        "Qwen3.8 decode body executed %d time(s): %" PRIhsz
+        "Qwen3.8 greedy decode executed %d time(s): %" PRIhsz
         " commands, %" PRIhsz " parameters, %" PRIu64
-        " parameter bytes, %" PRIu64
-        " transient bytes, residual[min=%g max=%g sum=%.9g "
+        " parameter bytes, %" PRIu64 " transient bytes, token=%" PRId32
+        ", residual[min=%g max=%g sum=%.9g "
         "sum_squares=%.9g]\n",
         FLAG_transition_count, program_info->command_count,
         program_info->parameter_count,
         (uint64_t)qwen_tooling_command_program_parameter_byte_length(program),
-        (uint64_t)program_info->transient.required_byte_length, minimum,
-        maximum, sum, sum_squares);
+        (uint64_t)program_info->transient.required_byte_length, token_id,
+        minimum, maximum, sum, sum_squares);
   }
 
   status =
       iree_status_join(status, iree_hal_end_profiling_from_flags(profiling));
   iree_allocator_free(host_allocator, residual_values);
   iree_hal_buffer_release(transient_buffer);
+  iree_hal_buffer_release(token_id_buffer);
   iree_hal_buffer_release(attention_cache_buffer);
   iree_hal_buffer_release(gdn_state_buffer);
   iree_hal_buffer_release(control_buffer);
@@ -348,7 +369,7 @@ static iree_status_t qwen38_decode_body_run(void) {
 }
 
 int main(int argc, char** argv) {
-  iree_flags_set_usage("qwen38-decode-body-cli", qwen38_decode_body_usage);
+  iree_flags_set_usage("qwen38-decode-greedy-cli", qwen38_decode_body_usage);
   iree_flags_parse_checked(IREE_FLAGS_PARSE_MODE_DEFAULT, &argc, &argv);
 
   iree_status_t status = iree_ok_status();

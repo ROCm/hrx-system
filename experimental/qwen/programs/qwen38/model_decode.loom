@@ -7,6 +7,7 @@
 
 command.program.decl @qwen38_gdn_layer_decode(%layer: index, %gdn_ordinal: index) launch(%parameters: buffer, %residual: buffer, %gdn_state: buffer) where [range(%layer, 0, 63), range(%gdn_ordinal, 0, 47)]
 command.program.decl @qwen38_attention_layer_decode(%layer: index, %attention_ordinal: index) launch(%parameters: buffer, %residual: buffer, %control: buffer, %attention_cache: buffer, %attention_output: buffer) where [range(%layer, 0, 63), range(%attention_ordinal, 0, 15)]
+command.program.decl @qwen38_output_head_decode() launch(%parameters: buffer, %residual: buffer, %token_id: buffer)
 
 // Advances the complete base-model body for one token. Position is read from
 // the issue-time control buffer by every attention layer, allowing one
@@ -41,5 +42,13 @@ command.program.def public @qwen38_text_decode_body() launch(%parameters: buffer
     command.program.launch @qwen38_gdn_layer_decode[%layer2, %gdn_ordinal2](%parameters, %residual, %gdn_state) : [index, index](buffer, buffer, buffer)
     command.program.launch @qwen38_attention_layer_decode[%attention_layer, %group](%parameters, %residual, %control, %attention_cache, %attention_output) : [index, index](buffer, buffer, buffer, buffer, buffer)
   }
+  command.return
+}
+
+// Advances the base model and selects one greedy token without exposing its
+// hidden row or vocabulary logits to the host.
+command.program.def public @qwen38_text_decode_greedy() launch(%parameters: buffer, %residual: buffer, %control: buffer, %gdn_state: buffer, %attention_cache: buffer, %token_id: buffer) {
+  command.program.launch @qwen38_text_decode_body[](%parameters, %residual, %control, %gdn_state, %attention_cache) : [](buffer, buffer, buffer, buffer, buffer)
+  command.program.launch @qwen38_output_head_decode[](%parameters, %residual, %token_id) : [](buffer, buffer, buffer)
   command.return
 }
