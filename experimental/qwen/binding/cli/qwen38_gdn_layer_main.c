@@ -28,9 +28,13 @@
 
 #define QWEN38_HIDDEN_ELEMENT_COUNT 5120
 #define QWEN38_HIDDEN_BYTE_LENGTH 20480
+#define QWEN38_GDN_STATE_ELEMENT_COUNT 817152
 #define QWEN38_GDN_STATE_BYTE_LENGTH 3268608
 
 IREE_FLAG(string, output, "", "Optional raw F32 residual output path.");
+IREE_FLAG(string, state_output, "", "Optional raw F32 GDN state output path.");
+IREE_FLAG(int32_t, transition_count, 1,
+          "Number of consecutive layer transitions to execute.");
 
 static const char* const qwen38_gdn_layer_usage =
     "Runs the exact first Qwen3.8 GDN layer through a reusable Loom command "
@@ -41,7 +45,9 @@ static const char* const qwen38_gdn_layer_usage =
     "  --parameters=<Qwen3.8-27B UD-Q5_K_XL GGUF path>\n"
     "\n"
     "Optional output:\n"
-    "  --output=<raw F32 residual path>\n";
+    "  --output=<raw F32 residual path>\n"
+    "  --state_output=<raw F32 recurrent state and convolution history path>\n"
+    "  --transition_count=<positive replay count>\n";
 
 typedef struct qwen38_parameter_request_t {
   // Concrete GGUF tensor key borrowed from the loaded command package.
@@ -742,9 +748,17 @@ static iree_status_t qwen38_gdn_layer_run(void) {
   iree_hal_buffer_t* state_buffer = NULL;
   iree_hal_buffer_t* transient_buffer = NULL;
   float* residual_values = NULL;
+  float* state_values = NULL;
 
-  iree_status_t status = qwen_tooling_runtime_context_initialize_from_flags(
-      host_allocator, &runtime_context);
+  iree_status_t status = iree_ok_status();
+  if (FLAG_transition_count < 1) {
+    status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "--transition_count must be positive");
+  }
+  if (iree_status_is_ok(status)) {
+    status = qwen_tooling_runtime_context_initialize_from_flags(
+        host_allocator, &runtime_context);
+  }
   if (iree_status_is_ok(status)) {
     fprintf(stderr,
             "qwen38: indexed GGUF; compiling and gathering layer 0...\n");
@@ -820,17 +834,30 @@ static iree_status_t qwen38_gdn_layer_run(void) {
           IREE_STATUS_FAILED_PRECONDITION,
           "the exact layer transient is not binding-table slot 2");
     } else {
-      status = qwen38_submit_and_wait(
-          device, loomc_cmd_hal_program_command_buffer(program.hal_program),
-          (iree_hal_buffer_binding_table_t){
-              .count = IREE_ARRAYSIZE(bindings),
-              .bindings = bindings,
-          });
+      for (int32_t i = 0;
+           i < FLAG_transition_count && iree_status_is_ok(status); ++i) {
+        status = qwen38_submit_and_wait(
+            device, loomc_cmd_hal_program_command_buffer(program.hal_program),
+            (iree_hal_buffer_binding_table_t){
+                .count = IREE_ARRAYSIZE(bindings),
+                .bindings = bindings,
+            });
+      }
     }
   }
   if (iree_status_is_ok(status)) {
     status = iree_hal_device_transfer_d2h(
         device, residual_buffer, 0, residual_values, QWEN38_HIDDEN_BYTE_LENGTH,
+        IREE_HAL_TRANSFER_BUFFER_FLAG_DEFAULT, iree_infinite_timeout());
+  }
+  if (iree_status_is_ok(status) && FLAG_state_output[0] != '\0') {
+    status = iree_allocator_malloc_array(
+        host_allocator, QWEN38_GDN_STATE_ELEMENT_COUNT, sizeof(*state_values),
+        (void**)&state_values);
+  }
+  if (iree_status_is_ok(status) && state_values) {
+    status = iree_hal_device_transfer_d2h(
+        device, state_buffer, 0, state_values, QWEN38_GDN_STATE_BYTE_LENGTH,
         IREE_HAL_TRANSFER_BUFFER_FLAG_DEFAULT, iree_infinite_timeout());
   }
 
@@ -861,18 +888,27 @@ static iree_status_t qwen38_gdn_layer_run(void) {
         iree_make_const_byte_span(residual_values, QWEN38_HIDDEN_BYTE_LENGTH),
         host_allocator);
   }
+  if (iree_status_is_ok(status) && state_values) {
+    status = iree_io_file_contents_write(
+        iree_make_cstring_view(FLAG_state_output),
+        iree_make_const_byte_span(state_values, QWEN38_GDN_STATE_BYTE_LENGTH),
+        host_allocator);
+  }
   if (iree_status_is_ok(status)) {
     fprintf(stdout,
-            "Qwen3.8 GDN layer 0 executed: %" PRIhsz " commands, %" PRIhsz
-            " parameters, %" PRIu64 " parameter bytes, %" PRIu64
+            "Qwen3.8 GDN layer 0 executed %d time(s): %" PRIhsz
+            " commands, %" PRIhsz " parameters, %" PRIu64
+            " parameter bytes, %" PRIu64
             " transient bytes, residual[min=%g max=%g sum=%.9g "
             "sum_squares=%.9g]\n",
-            program.info.command_count, program.info.parameter_count,
+            FLAG_transition_count, program.info.command_count,
+            program.info.parameter_count,
             (uint64_t)program.parameter_byte_length,
             (uint64_t)program.info.transient.required_byte_length, minimum,
             maximum, sum, sum_squares);
   }
 
+  iree_allocator_free(host_allocator, state_values);
   iree_allocator_free(host_allocator, residual_values);
   iree_hal_buffer_release(transient_buffer);
   iree_hal_buffer_release(state_buffer);
