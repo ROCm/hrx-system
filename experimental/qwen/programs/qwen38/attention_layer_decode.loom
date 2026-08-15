@@ -6,7 +6,7 @@
 // arguments; token position remains an issue-time buffer value so one recorded
 // command buffer advances an entire sequence.
 
-config.decl @qwen38.attention_decode.cache_capacity : %value: index where [range(%value, 1, 262144)]
+config.decl @qwen38.attention.cache_capacity : %value: index where [range(%value, 1, 262144)]
 
 kernel.decl @ggml_quantize_q8_1_x4_f32(%token_count: index, %input_size: index) launch(%token_count: index, %input_size: index, %input: buffer, %output: buffer)
 kernel.decl @ggml_linear_q5k_q8_1_x4(%token_count: index, %input_size: index, %output_size: index) launch(%token_count: index, %input_size: index, %output_size: index, %input: buffer, %weight: buffer, %output: buffer)
@@ -49,7 +49,7 @@ command.program.def @qwen38_attention_layer_decode(%layer: index, %attention_ord
   // All full-attention layers share one persistent root. Each layer keeps its
   // key and value arrays together while token-major storage makes the current
   // grouped-query traversal contiguous within each head.
-  %cache_capacity = config.get @qwen38.attention_decode.cache_capacity : index
+  %cache_capacity = config.get @qwen38.attention.cache_capacity : index
   %cache_token_bytes = index.constant 2048 : offset
   %cache_bytes = index.scale %cache_capacity, %cache_token_bytes : index, offset -> offset
   %attention_layer_cache_bytes, %key_cache_offset, %value_cache_offset = buffer.pack [align(256) %cache_bytes, align(256) %cache_bytes] : offset

@@ -23,6 +23,7 @@ exports_files([
     "ggml/quantize_q8_1_x4.loom",
     "qwen38/attention_common.loom",
     "qwen38/attention_decode.loom",
+    "qwen38/attention_prefill.loom",
     "qwen38/gdn_decode.loom",
     "qwen38/gdn_prefill.loom",
     "qwen38/greedy_argmax.loom",
@@ -35,6 +36,12 @@ exports_files([
 loom_link_module(
     name = "qwen38_attention_decode_linked",
     srcs = ["qwen38/attention_decode.loom"],
+    libraries = ["qwen38/attention_common.loom"],
+)
+
+loom_link_module(
+    name = "qwen38_attention_prefill_linked",
+    srcs = ["qwen38/attention_prefill.loom"],
     libraries = ["qwen38/attention_common.loom"],
 )
 
@@ -283,7 +290,7 @@ iree_executable_test(
     src = "//loom/src/loom/tools/iree-benchmark-loom",
     args = [
         "$(location :qwen38_attention_decode_linked)",
-        "--config=qwen38.attention_decode.cache_capacity=128",
+        "--config=qwen38.attention.cache_capacity=128",
         "--dry-run",
         "--output-format=jsonl",
     ],
@@ -297,11 +304,46 @@ iree_executable_test(
     args = [
         "$(location :qwen38_attention_decode_linked)",
         "--case=@qwen38_attention_decode_known_case",
-        "--config=qwen38.attention_decode.cache_capacity=1",
+        "--config=qwen38.attention.cache_capacity=1",
         "--device=amdgpu://0",
         "--sanitizer=access",
     ],
     data = [":qwen38_attention_decode_linked"],
+    tags = [
+        "iree-run-requirement=runtime.resource.amd_gpu",
+        "manual",
+        "requires-gpu-amd",
+        "runtime-resource=amd-gpu",
+    ],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/execute:amdgpu_hal",
+    ]),
+)
+
+iree_executable_test(
+    name = "qwen38_attention_prefill_plan_test",
+    src = "//loom/src/loom/tools/iree-benchmark-loom",
+    args = [
+        "$(location :qwen38_attention_prefill_linked)",
+        "--config=qwen38.attention.cache_capacity=512",
+        "--dry-run",
+        "--output-format=jsonl",
+    ],
+    data = [":qwen38_attention_prefill_linked"],
+    tags = ["hostonly"],
+)
+
+iree_executable_test(
+    name = "qwen38_attention_prefill_hal_test",
+    src = "//loom/src/loom/tools/iree-test-loom",
+    args = [
+        "$(location :qwen38_attention_prefill_linked)",
+        "--case=@qwen38_attention_prefill_known_case",
+        "--config=qwen38.attention.cache_capacity=3",
+        "--device=amdgpu://0",
+        "--sanitizer=access",
+    ],
+    data = [":qwen38_attention_prefill_linked"],
     tags = [
         "iree-run-requirement=runtime.resource.amd_gpu",
         "manual",

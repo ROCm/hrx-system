@@ -2,7 +2,7 @@
 // its sigmoid gate together as 24 adjacent [query, gate] head pairs, while K
 // and V use four 256-wide heads.
 
-config.decl @qwen38.attention_decode.cache_capacity : %value: index where [range(%value, 1, 262144)]
+config.decl @qwen38.attention.cache_capacity : %value: index where [range(%value, 1, 262144)]
 
 func.decl @qwen38_attention_rope_text_value(%position: i32, %lane: index, %normalized_head: buffer) -> (f32)
 
@@ -64,7 +64,7 @@ kernel.def export("qwen38_attention_kv_prepare_decode") @qwen38_attention_kv_pre
   %workgroup_size = index.constant 256 : index
   kernel.launch.config workgroups(%head_count, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
 } launch(%epsilon: f32, %control: buffer, %key_projection: buffer, %value_projection: buffer, %norm_weight: buffer, %key_cache: buffer, %value_cache: buffer) {
-  %cache_capacity = config.get @qwen38.attention_decode.cache_capacity : index
+  %cache_capacity = config.get @qwen38.attention.cache_capacity : index
   %head0 = kernel.workgroup.id<x> : index
   %head = index.assume %head0 [range(%head0, 0, 3)] : index
   %lane0 = kernel.workitem.id<x> : index
@@ -120,7 +120,7 @@ kernel.def export("qwen38_attention_decode") @qwen38_attention_decode() {
   %workgroup_size = index.constant 256 : index
   kernel.launch.config workgroups(%head_count, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
 } launch(%control: buffer, %query: buffer, %gate: buffer, %key_cache: buffer, %value_cache: buffer, %output: buffer) {
-  %cache_capacity = config.get @qwen38.attention_decode.cache_capacity : index
+  %cache_capacity = config.get @qwen38.attention.cache_capacity : index
   %head0 = kernel.workgroup.id<x> : index
   %head = index.assume %head0 [range(%head0, 0, 23)] : index
   %lane0 = kernel.workitem.id<x> : index
