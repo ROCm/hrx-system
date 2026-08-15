@@ -50,28 +50,49 @@ check.case public @qwen38_decode_commit_token_case {
 }
 
 // Converts the prefill control pair [token_count, position_base] in place to
-// the decode pair [next_position, generated_count].
+// the decode pair [next_position, generated_count] and preserves the first
+// selected token in the device-resident output history.
 kernel.def export("qwen38_prefill_finish_control") @qwen38_prefill_finish_control() {
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
-} launch(%control: buffer) {
+} launch(%control: buffer, %token_ids: buffer) {
   %c0_offset = index.constant 0 : offset
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
   %control_view = buffer.view %control[%c0_offset] : buffer -> view<2xi32>
+  %token_ids_view = buffer.view %token_ids[%c0_offset] : buffer -> view<129xi32>
   %token_count = view.load %control_view[%c0] : view<2xi32> -> i32
   %position_base = view.load %control_view[%c1] : view<2xi32> -> i32
+  %first_token = view.load %token_ids_view[%c0] : view<129xi32> -> i32
   %next_position = scalar.addi %position_base, %token_count : i32
   view.store %next_position, %control_view[%c0] : i32, view<2xi32>
-  %c0_i32 = scalar.constant 0 : i32
-  view.store %c0_i32, %control_view[%c1] : i32, view<2xi32>
+  %c1_i32 = scalar.constant 1 : i32
+  view.store %c1_i32, %control_view[%c1] : i32, view<2xi32>
+  view.store %first_token, %token_ids_view[%c1] : i32, view<129xi32>
+  kernel.return
+}
+
+kernel.def @qwen38_prefill_read_history_index1() {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch(%token_ids: buffer, %result: buffer) {
+  %c0_offset = index.constant 0 : offset
+  %token_ids_view = buffer.view %token_ids[%c0_offset] : buffer -> view<5xi32>
+  %result_view = buffer.view %result[%c0_offset] : buffer -> view<1xi32>
+  %token_id = view.load %token_ids_view[1] : view<5xi32> -> i32
+  view.store %token_id, %result_view[0] : i32, view<1xi32>
   kernel.return
 }
 
 check.case public @qwen38_prefill_finish_control_case {
   %control = check.generate.iota offset(3) step(14) : tensor<2xi32>
-  %expected = check.generate.iota offset(20) step(-20) : tensor<2xi32>
-  kernel.launch @qwen38_prefill_finish_control(%control) : (tensor<2xi32>)
+  %token_ids = check.generate.iota offset(7) step(-1) : tensor<5xi32>
+  %committed_token = check.generate.fill value(-1) : tensor<1xi32>
+  %expected = check.generate.iota offset(20) step(-19) : tensor<2xi32>
+  %expected_token = check.generate.fill value(7) : tensor<1xi32>
+  kernel.launch @qwen38_prefill_finish_control(%control, %token_ids) : (tensor<2xi32>, tensor<5xi32>)
+  kernel.launch @qwen38_prefill_read_history_index1(%token_ids, %committed_token) : (tensor<5xi32>, tensor<1xi32>)
   check.expect.equal actual(%control) expected(%expected) : tensor<2xi32>
+  check.expect.equal actual(%committed_token) expected(%expected_token) : tensor<1xi32>
   check.return
 }

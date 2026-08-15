@@ -7,10 +7,14 @@
 // nested layer allocations into one transient root.
 
 command.program.decl @qwen38_gdn_layer_prefill(%token_count: index, %layer: index, %gdn_ordinal: index) launch(%parameters: buffer, %residual: buffer, %gdn_state: buffer, %control: buffer) where [range(%token_count, 1, 512), range(%layer, 0, 63), range(%gdn_ordinal, 0, 47)]
+
 command.program.decl @qwen38_attention_layer_prefill(%token_count: index, %layer: index, %attention_ordinal: index) launch(%parameters: buffer, %residual: buffer, %attention_cache: buffer, %control: buffer, %attention_output: buffer) where [range(%token_count, 1, 512), range(%layer, 0, 63), range(%attention_ordinal, 0, 15)]
+
 command.program.decl @qwen38_output_head_greedy(%residual_offset: offset) launch(%parameters: buffer, %residual: buffer, %token_id: buffer)
-kernel.decl @qwen38_token_embedding_q5k_f32(%token_count: index) launch(%token_count: index, %token_ids: buffer, %weight: buffer, %output: buffer)
-kernel.decl @qwen38_prefill_finish_control() launch(%control: buffer)
+
+kernel.decl @qwen38_token_embedding_q5k_f32(%token_count: index) launch(%token_capacity: index, %token_ids: buffer, %weight: buffer, %output: buffer)
+
+kernel.decl @qwen38_prefill_finish_control() launch(%control: buffer, %token_ids: buffer)
 
 // Advances the complete base-model body over one causal token span. Token
 // count and the absolute first-token position are also read from the issue-time
@@ -61,6 +65,6 @@ command.program.def public @qwen38_text_prefill_greedy(%token_count: index) laun
   %last_token = index.sub %token_count, %c1 : index
   %last_residual_offset = index.scale %last_token, %hidden_row_bytes : index, offset -> offset
   command.program.launch @qwen38_output_head_greedy[%last_residual_offset](%parameters, %residual, %token_ids) : [offset](buffer, buffer, buffer)
-  kernel.launch @qwen38_prefill_finish_control(%control) : (buffer)
+  kernel.launch @qwen38_prefill_finish_control(%control, %token_ids) : (buffer, buffer)
   command.return
 }
