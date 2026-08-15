@@ -62,10 +62,11 @@ func.def inline @qwen38_q5k_unpack_word_pair(%weight: buffer, %block_byte_base: 
   func.return %codes0, %codes1 : i32, i32
 }
 
-// Stages one 128-channel by K256 Q5_K tile. Each row occupies 304 bytes:
-// 256 unsigned code bytes, eight (scale, negative-minimum) f16 pairs, and 16
-// padding bytes matching the conflict-avoiding production MMQ stride.
-func.def inline @qwen38_q5k_stage_weight_tile(%input_size: index, %output_size: index, %channel_tile_base: index, %q5_block: index, %workitem: index, %weight: buffer, %weight_stage: buffer) {
+// Stages a channel subrange of one K256 Q5_K tile into a 128-row LDS tile.
+// Each stage row occupies 304 bytes: 256 unsigned code bytes, eight (scale,
+// negative-minimum) f16 pairs, and 16 padding bytes matching the
+// conflict-avoiding production MMQ stride.
+func.def inline @qwen38_q5k_stage_weight_tile(%input_size: index, %output_size: index, %channel_tile_base: index, %stage_channel_base: index, %stage_channel_count: index, %q5_block: index, %workitem: index, %weight: buffer, %weight_stage: buffer) {
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
   %c2 = index.constant 2 : index
@@ -83,15 +84,17 @@ func.def inline @qwen38_q5k_stage_weight_tile(%input_size: index, %output_size: 
   %weight_metadata = buffer.view %weight_stage[%c0_offset] : buffer -> view<19456xf16>
   %q5_block_count = index.div %input_size, %c256 : index
   %weight_row_bytes = index.scale %q5_block_count, %block_bytes : index, offset -> offset
-  %metadata_lane_active = index.cmp ult, %workitem, %c128 : index
+  %metadata_lane_active = index.cmp ult, %workitem, %stage_channel_count : index
   scf.if %metadata_lane_active {
-    %local_channel = index.assume %workitem [range(%workitem, 0, 127)] : index
+    %local_channel = index.assume %workitem [range(%workitem, 0, 127), lt(%workitem, %stage_channel_count)] : index
     %channel0 = index.add %channel_tile_base, %local_channel : index
     %channel, %bounded_output_size = index.assume %channel0, %output_size [lt(%channel0, %output_size)] : index, index
+    %stage_channel0 = index.add %stage_channel_base, %local_channel : index
+    %stage_channel = index.assume %stage_channel0 [range(%stage_channel0, 0, 127)] : index
     %row_byte_base = index.scale %channel, %weight_row_bytes : index, offset -> offset
     %block_byte_add = index.scale %q5_block, %block_bytes : index, offset -> offset
     %block_byte_base = index.add %row_byte_base, %block_byte_add : offset
-    %metadata_row_base = index.mul %local_channel, %c152 : index
+    %metadata_row_base = index.mul %stage_channel, %c152 : index
     %metadata_base = index.add %metadata_row_base, %c128 : index
     scf.for %group = [%c0 to %c8 step %c1] {
       %scale, %minimum = func.call @ggml_q5k_scale_min(%weight, %block_byte_base, %group) : (buffer, offset, index) -> (f32, f32)
@@ -105,7 +108,7 @@ func.def inline @qwen38_q5k_stage_weight_tile(%input_size: index, %output_size: 
       vector.store %metadata_pair, %weight_metadata[%metadata_index] : vector<2xf16>, view<19456xf16>
     }
   }
-  %code_task_count = index.constant 4096 : index
+  %code_task_count = index.mul %stage_channel_count, %c32 : index
   scf.for %code_task = [%workitem to %code_task_count step %workgroup_size] {
     %local_channel0 = index.div %code_task, %c32 : index
     %local_channel = index.assume %local_channel0 [range(%local_channel0, 0, 127)] : index
@@ -113,6 +116,8 @@ func.def inline @qwen38_q5k_stage_weight_tile(%input_size: index, %output_size: 
     %word = index.assume %word0 [range(%word0, 0, 31)] : index
     %channel0 = index.add %channel_tile_base, %local_channel : index
     %channel, %bounded_output_size = index.assume %channel0, %output_size [lt(%channel0, %output_size)] : index, index
+    %stage_channel0 = index.add %stage_channel_base, %local_channel : index
+    %stage_channel = index.assume %stage_channel0 [range(%stage_channel0, 0, 127)] : index
     %row_byte_base = index.scale %channel, %weight_row_bytes : index, offset -> offset
     %block_byte_add = index.scale %q5_block, %block_bytes : index, offset -> offset
     %block_byte_base = index.add %row_byte_base, %block_byte_add : offset
@@ -122,7 +127,7 @@ func.def inline @qwen38_q5k_stage_weight_tile(%input_size: index, %output_size: 
     %code_page = index.mul %word_quadrant, %c16 : index
     %code_position0 = index.add %code_page, %word_lane : index
     %code_position1 = index.add %code_position0, %c8 : index
-    %stage_row_base = index.mul %local_channel, %c76 : index
+    %stage_row_base = index.mul %stage_channel, %c76 : index
     %stage_index00 = index.add %stage_row_base, %code_position0 : index
     %stage_index0 = index.assume %stage_index00 [range(%stage_index00, 0, 9727)] : index
     %stage_index10 = index.add %stage_row_base, %code_position1 : index
@@ -350,7 +355,7 @@ kernel.def target(@qwen38_dense_q5_i8_wave32) export("qwen38_linear_q5k_i8_wmma"
   %activation_stage = buffer.alloca<workgroup> align(16) %activation_stage_bytes : buffer
   %activation_metadata = buffer.alloca<workgroup> align(16) %activation_metadata_bytes : buffer
   %result0, %result1, %result2, %result3 = scf.for %q5_block = [%c0 to %q5_block_count step %c1](%accumulator0 = %zero_accumulator : vector<8xf32>, %accumulator1 = %zero_accumulator : vector<8xf32>, %accumulator2 = %zero_accumulator : vector<8xf32>, %accumulator3 = %zero_accumulator : vector<8xf32>) -> (vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>) {
-    func.call @qwen38_q5k_stage_weight_tile(%input_size, %output_size, %channel_tile_base, %q5_block, %workitem, %weight_noalias, %weight_stage) : (index, index, index, index, index, buffer, buffer)
+    func.call @qwen38_q5k_stage_weight_tile(%input_size, %output_size, %channel_tile_base, %c0, %c128, %q5_block, %workitem, %weight_noalias, %weight_stage) : (index, index, index, index, index, index, index, buffer, buffer)
     %q8_group0 = index.mul %q5_block, %c2 : index
     func.call @qwen38_q8_stage_activation_tile(%token_count, %input_size, %token_tile_base, %q8_group0, %workitem, %q8_noalias, %activation_stage, %activation_metadata) : (index, index, index, index, index, buffer, buffer, buffer)
     kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
