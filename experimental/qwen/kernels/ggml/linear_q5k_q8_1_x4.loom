@@ -18,19 +18,18 @@ config.decl @ggml.linear_q5k_q8_1_x4.output_capacity : %value: index where [rang
 
 kernel.decl @ggml_quantize_q8_1_x4_f32(%token_count: index, %input_size: index) launch(%token_count: index, %input_size: index, %input: buffer, %output: buffer)
 
+func.decl @ggml_qk_scale_min(%weight: buffer, %block_byte_base: offset, %group: index) -> (f32, f32)
+
+func.decl @ggml_qk_unsigned_q8_1_dot(%quantized_values: vector<16xi8>, %d_scale: f32, %dmin_scale: f32, %q8_values: vector<16xi8>, %q8_d: f32, %q8_s: f32) -> (f32)
+
 // Decodes one 16-value half of a Q5_K scale group and its two physical scales.
 func.def inline @ggml_q5k_chunk(%weight: buffer, %row_byte_base: offset, %q5_block: index, %q5_group: index, %q5_half: index) -> (vector<16xi8>, f32, f32) {
   %c4 = index.constant 4 : index
   %c8 = index.constant 8 : index
   %c16 = index.constant 16 : index
   %block_bytes = index.constant 176 : offset
-  %scale_byte_add = index.constant 4 : offset
   %high_byte_add = index.constant 16 : offset
   %code_byte_add = index.constant 48 : offset
-  %c4_i32 = scalar.constant 4 : i32
-  %c6_i32 = scalar.constant 6 : i32
-  %c15_i32 = scalar.constant 15 : i32
-  %c63_i32 = scalar.constant 63 : i32
   %one_byte_mask = vector.constant 16843009 : vector<4xi32>
   %nibble_mask = vector.constant 252645135 : vector<4xi32>
   %c4_i32v = vector.constant 4 : vector<4xi32>
@@ -38,17 +37,10 @@ func.def inline @ggml_q5k_chunk(%weight: buffer, %row_byte_base: offset, %q5_blo
   %bounded_half = index.assume %q5_half [range(%q5_half, 0, 1)] : index
   %block_byte_add = index.scale %q5_block, %block_bytes : index, offset -> offset
   %block_byte_base = index.add %row_byte_base, %block_byte_add : offset
-  %scale_byte_base = index.add %block_byte_base, %scale_byte_add : offset
   %high_byte_base = index.add %block_byte_base, %high_byte_add : offset
   %code_byte_base = index.add %block_byte_base, %code_byte_add : offset
-  %half_view = buffer.view %weight[%block_byte_base] : buffer -> view<2xf16>
-  %scale_view = buffer.view %weight[%scale_byte_base] : buffer -> view<12xi8>
   %high_view = buffer.view %weight[%high_byte_base] : buffer -> view<8xi32>
   %code_view = buffer.view %weight[%code_byte_base] : buffer -> view<32xi32>
-  %d_f16 = view.load %half_view[0] : view<2xf16> -> f16
-  %dmin_f16 = view.load %half_view[1] : view<2xf16> -> f16
-  %d = scalar.extf %d_f16 : f16 to f32
-  %dmin = scalar.extf %dmin_f16 : f16 to f32
   %iqs_group = index.mul %bounded_group, %c8 : index
   %iqs_half = index.mul %bounded_half, %c4 : index
   %iqs = index.add %iqs_group, %iqs_half : index
@@ -74,58 +66,8 @@ func.def inline @ggml_q5k_chunk(%weight: buffer, %row_byte_base: offset, %q5_blo
   %high_codes = vector.shli %high_bit01, %c4_i32v : vector<4xi32>
   %q5_words = vector.ori %low_codes, %high_codes : vector<4xi32>
   %q5_values = vector.bitcast %q5_words : vector<4xi32> to vector<16xi8>
-  %is_low_group = index.cmp ult, %bounded_group, %c4 : index
-  %scale, %minimum = scf.if %is_low_group -> (i32, i32) {
-    %minimum_index = index.add %bounded_group, %c4 : index
-    %scale_i8 = view.load %scale_view[%bounded_group] : view<12xi8> -> i8
-    %minimum_i8 = view.load %scale_view[%minimum_index] : view<12xi8> -> i8
-    %scale_u8 = scalar.extui %scale_i8 : i8 to i32
-    %minimum_u8 = scalar.extui %minimum_i8 : i8 to i32
-    %scale_low6 = scalar.andi %scale_u8, %c63_i32 : i32
-    %minimum_low6 = scalar.andi %minimum_u8, %c63_i32 : i32
-    scf.yield %scale_low6, %minimum_low6 : i32, i32
-  } else {
-    %packed_index = index.add %bounded_group, %c4 : index
-    %scale_high_index = index.sub %bounded_group, %c4 : index
-    %packed_i8 = view.load %scale_view[%packed_index] : view<12xi8> -> i8
-    %scale_high_i8 = view.load %scale_view[%scale_high_index] : view<12xi8> -> i8
-    %minimum_high_i8 = view.load %scale_view[%bounded_group] : view<12xi8> -> i8
-    %packed = scalar.extui %packed_i8 : i8 to i32
-    %scale_high = scalar.extui %scale_high_i8 : i8 to i32
-    %minimum_high = scalar.extui %minimum_high_i8 : i8 to i32
-    %scale_low4 = scalar.andi %packed, %c15_i32 : i32
-    %minimum_low4 = scalar.shrui %packed, %c4_i32 : i32
-    %scale_high2_raw = scalar.shrui %scale_high, %c6_i32 : i32
-    %minimum_high2_raw = scalar.shrui %minimum_high, %c6_i32 : i32
-    %scale_high2 = scalar.shli %scale_high2_raw, %c4_i32 : i32
-    %minimum_high2 = scalar.shli %minimum_high2_raw, %c4_i32 : i32
-    %scale_value = scalar.ori %scale_low4, %scale_high2 : i32
-    %minimum_value = scalar.ori %minimum_low4, %minimum_high2 : i32
-    scf.yield %scale_value, %minimum_value : i32, i32
-  }
-  %scale_f32 = scalar.uitofp %scale : i32 to f32
-  %minimum_f32 = scalar.uitofp %minimum : i32 to f32
-  %d_scale = scalar.mulf %d, %scale_f32 : f32
-  %dmin_scale = scalar.mulf %dmin, %minimum_f32 : f32
+  %d_scale, %dmin_scale = func.call @ggml_qk_scale_min(%weight, %block_byte_base, %bounded_group) : (buffer, offset, index) -> (f32, f32)
   func.return %q5_values, %d_scale, %dmin_scale : vector<16xi8>, f32, f32
-}
-
-// Contracts one 16-value half-group. Paired lanes use the same Q5 minimum and
-// each apply half the Q8_1 block sum; their subgroup reduction therefore
-// applies the full 32-value minimum correction exactly once.
-func.def inline @ggml_q5k_q8_1_dot(%q5_values: vector<16xi8>, %d_scale: f32, %dmin_scale: f32, %q8_values: vector<16xi8>, %q8_d: f32, %q8_s: f32) -> (f32) {
-  %c0_i32 = scalar.constant 0 : i32
-  %c0_i32v = vector.constant 0 : vector<4xi32>
-  %c0_5_f32 = scalar.constant 0.5 : f32
-  %partial_dots = vector.dot4i<u8s8> %q5_values, %q8_values, %c0_i32v : vector<16xi8>, vector<16xi8>, vector<4xi32>
-  %q_sum = vector.reduce<addi> %partial_dots, %c0_i32 : vector<4xi32>, i32
-  %q_sum_f32 = scalar.sitofp %q_sum : i32 to f32
-  %scaled_dot0 = scalar.mulf<reassoc|nnan|ninf|nsz> %q8_d, %d_scale : f32
-  %scaled_dot = scalar.mulf<reassoc|nnan|ninf|nsz> %scaled_dot0, %q_sum_f32 : f32
-  %q8_half_sum = scalar.mulf<reassoc|nnan|ninf|nsz> %q8_s, %c0_5_f32 : f32
-  %minimum_correction = scalar.mulf<reassoc|nnan|ninf|nsz> %dmin_scale, %q8_half_sum : f32
-  %contribution = scalar.subf<reassoc|nnan|ninf|nsz> %scaled_dot, %minimum_correction : f32
-  func.return %contribution : f32
 }
 
 // Computes one lane's partial for a complete Q5_K row. The active target's
@@ -190,7 +132,7 @@ func.def inline @ggml_q5k_q8_1_x4_row_lane(%input_size: index, %weight: buffer, 
       %q8_words = vector.load %q8_words_view[%q8_word_index] : view<32xi32> -> vector<4xi32>
       %q8_values = vector.bitcast %q8_words : vector<4xi32> to vector<16xi8>
       %q5_values, %d_scale, %dmin_scale = func.call @ggml_q5k_chunk(%weight, %weight_row_byte_base, %q5_block, %q5_group, %q5_half) : (buffer, offset, index, index, index) -> (vector<16xi8>, f32, f32)
-      %dot = func.call @ggml_q5k_q8_1_dot(%q5_values, %d_scale, %dmin_scale, %q8_values, %q8_d, %q8_s) : (vector<16xi8>, f32, f32, vector<16xi8>, f32, f32) -> (f32)
+      %dot = func.call @ggml_qk_unsigned_q8_1_dot(%q5_values, %d_scale, %dmin_scale, %q8_values, %q8_d, %q8_s) : (vector<16xi8>, f32, f32, vector<16xi8>, f32, f32) -> (f32)
       scf.yield %dot : f32
     } else {
       scf.yield %c0_f32 : f32

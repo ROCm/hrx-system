@@ -1,0 +1,75 @@
+// Shared physical-layout helpers for GGML's unsigned K-quant blocks. Q4_K and
+// Q5_K use the same block-wide half scales and eight packed six-bit
+// scale/minimum pairs; only their quantized code payloads differ.
+
+// Decodes the physical scale and minimum for one 32-value group. The caller
+// supplies the byte base of a Q4_K or Q5_K block, both of which place `d`,
+// `dmin`, and `scales[12]` at the same offsets.
+func.def inline @ggml_qk_scale_min(%weight: buffer, %block_byte_base: offset, %group: index) -> (f32, f32) {
+  %c4 = index.constant 4 : index
+  %scale_byte_add = index.constant 4 : offset
+  %c4_i32 = scalar.constant 4 : i32
+  %c6_i32 = scalar.constant 6 : i32
+  %c15_i32 = scalar.constant 15 : i32
+  %c63_i32 = scalar.constant 63 : i32
+  %bounded_group = index.assume %group [range(%group, 0, 7)] : index
+  %scale_byte_base = index.add %block_byte_base, %scale_byte_add : offset
+  %half_view = buffer.view %weight[%block_byte_base] : buffer -> view<2xf16>
+  %scale_view = buffer.view %weight[%scale_byte_base] : buffer -> view<12xi8>
+  %d_f16 = view.load %half_view[0] : view<2xf16> -> f16
+  %dmin_f16 = view.load %half_view[1] : view<2xf16> -> f16
+  %d = scalar.extf %d_f16 : f16 to f32
+  %dmin = scalar.extf %dmin_f16 : f16 to f32
+  %is_low_group = index.cmp ult, %bounded_group, %c4 : index
+  %scale, %minimum = scf.if %is_low_group -> (i32, i32) {
+    %minimum_index = index.add %bounded_group, %c4 : index
+    %scale_i8 = view.load %scale_view[%bounded_group] : view<12xi8> -> i8
+    %minimum_i8 = view.load %scale_view[%minimum_index] : view<12xi8> -> i8
+    %scale_u8 = scalar.extui %scale_i8 : i8 to i32
+    %minimum_u8 = scalar.extui %minimum_i8 : i8 to i32
+    %scale_low6 = scalar.andi %scale_u8, %c63_i32 : i32
+    %minimum_low6 = scalar.andi %minimum_u8, %c63_i32 : i32
+    scf.yield %scale_low6, %minimum_low6 : i32, i32
+  } else {
+    %packed_index = index.add %bounded_group, %c4 : index
+    %scale_high_index = index.sub %bounded_group, %c4 : index
+    %packed_i8 = view.load %scale_view[%packed_index] : view<12xi8> -> i8
+    %scale_high_i8 = view.load %scale_view[%scale_high_index] : view<12xi8> -> i8
+    %minimum_high_i8 = view.load %scale_view[%bounded_group] : view<12xi8> -> i8
+    %packed = scalar.extui %packed_i8 : i8 to i32
+    %scale_high = scalar.extui %scale_high_i8 : i8 to i32
+    %minimum_high = scalar.extui %minimum_high_i8 : i8 to i32
+    %scale_low4 = scalar.andi %packed, %c15_i32 : i32
+    %minimum_low4 = scalar.shrui %packed, %c4_i32 : i32
+    %scale_high2_raw = scalar.shrui %scale_high, %c6_i32 : i32
+    %minimum_high2_raw = scalar.shrui %minimum_high, %c6_i32 : i32
+    %scale_high2 = scalar.shli %scale_high2_raw, %c4_i32 : i32
+    %minimum_high2 = scalar.shli %minimum_high2_raw, %c4_i32 : i32
+    %scale_value = scalar.ori %scale_low4, %scale_high2 : i32
+    %minimum_value = scalar.ori %minimum_low4, %minimum_high2 : i32
+    scf.yield %scale_value, %minimum_value : i32, i32
+  }
+  %scale_f32 = scalar.uitofp %scale : i32 to f32
+  %minimum_f32 = scalar.uitofp %minimum : i32 to f32
+  %d_scale = scalar.mulf %d, %scale_f32 : f32
+  %dmin_scale = scalar.mulf %dmin, %minimum_f32 : f32
+  func.return %d_scale, %dmin_scale : f32, f32
+}
+
+// Contracts one 16-value unsigned K-quant half-group with Q8_1. Paired lanes
+// use the same minimum and each apply half the Q8_1 block sum; their subgroup
+// reduction therefore applies the 32-value minimum correction exactly once.
+func.def inline @ggml_qk_unsigned_q8_1_dot(%quantized_values: vector<16xi8>, %d_scale: f32, %dmin_scale: f32, %q8_values: vector<16xi8>, %q8_d: f32, %q8_s: f32) -> (f32) {
+  %c0_i32 = scalar.constant 0 : i32
+  %c0_i32v = vector.constant 0 : vector<4xi32>
+  %c0_5_f32 = scalar.constant 0.5 : f32
+  %partial_dots = vector.dot4i<u8s8> %quantized_values, %q8_values, %c0_i32v : vector<16xi8>, vector<16xi8>, vector<4xi32>
+  %quantized_sum = vector.reduce<addi> %partial_dots, %c0_i32 : vector<4xi32>, i32
+  %quantized_sum_f32 = scalar.sitofp %quantized_sum : i32 to f32
+  %scaled_dot0 = scalar.mulf<reassoc|nnan|ninf|nsz> %q8_d, %d_scale : f32
+  %scaled_dot = scalar.mulf<reassoc|nnan|ninf|nsz> %scaled_dot0, %quantized_sum_f32 : f32
+  %q8_half_sum = scalar.mulf<reassoc|nnan|ninf|nsz> %q8_s, %c0_5_f32 : f32
+  %minimum_correction = scalar.mulf<reassoc|nnan|ninf|nsz> %dmin_scale, %q8_half_sum : f32
+  %contribution = scalar.subf<reassoc|nnan|ninf|nsz> %scaled_dot, %minimum_correction : f32
+  func.return %contribution : f32
+}
