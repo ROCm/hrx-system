@@ -14,8 +14,6 @@ config.decl @ggml.linear_q8_0_q8_1_x4.output_capacity : %value: index where [ran
 
 kernel.decl @ggml_quantize_q8_1_x4_f32(%token_count: index, %input_size: index) launch(%token_count: index, %input_size: index, %input: buffer, %output: buffer)
 
-func.decl @ggml_q8_1_x4_word(%q8_input: buffer, %row_byte_base: offset, %q8_block: index, %word_in_block: index) -> (vector<4xi8>, f32)
-
 // Computes one lane's partial for a complete Q8_0 row. The active subgroup
 // profile specializes the loop step before native emission.
 func.def inline @ggml_q8_0_q8_1_x4_row_lane(%input_size: index, %weight: buffer, %weight_row_byte_base: offset, %q8_input: buffer, %q8_row_byte_base: offset, %lane0: index) -> (f32) {
@@ -53,7 +51,7 @@ func.def inline @ggml_q8_0_q8_1_x4_row_lane(%input_size: index, %weight: buffer,
       %weight_d_f16 = view.load %scale_view[0] : view<1xf16> -> f16
       %weight_word = vector.load %word_view[0] : view<1xi32> -> vector<1xi32>
       %weight_values = vector.bitcast %weight_word : vector<1xi32> to vector<4xi8>
-      %q8_values, %q8_d = func.call @ggml_q8_1_x4_word(%q8_input, %q8_row_byte_base, %block, %word) : (buffer, offset, index, index) -> (vector<4xi8>, f32)
+      %q8_values, %q8_d = func.apply<ggml.q8_1_x4.word>(%q8_input, %q8_row_byte_base, %block, %word) : (buffer, offset, index, index) -> (vector<4xi8>, f32)
       %dot = vector.dot4i<s8s8> %weight_values, %q8_values, %c0_i32v : vector<4xi8>, vector<4xi8>, vector<1xi32>
       %dot_i32 = vector.extract %dot[0] : vector<1xi32> -> i32
       %dot_f32 = scalar.sitofp %dot_i32 : i32 to f32

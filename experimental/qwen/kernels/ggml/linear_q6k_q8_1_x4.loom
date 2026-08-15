@@ -21,8 +21,6 @@ config.decl @ggml.linear_q6k_q8_1_x4.output_capacity : %value: index where [rang
 
 kernel.decl @ggml_quantize_q8_1_x4_f32(%token_count: index, %input_size: index) launch(%token_count: index, %input_size: index, %input: buffer, %output: buffer)
 
-func.decl @ggml_q8_1_x4_word(%q8_input: buffer, %row_byte_base: offset, %q8_block: index, %word_in_block: index) -> (vector<4xi8>, f32)
-
 // Sign-extends four packed six-bit values without scalar lane extraction.
 // Each byte enters with bits [5:0] populated and leaves as signed i8.
 func.def inline @ggml_q6k_sign_extend_dot4(%code: vector<1xi32>) -> (vector<4xi8>) {
@@ -177,7 +175,7 @@ func.def inline @ggml_q6k_q8_1_x4_block_lane(%weight: buffer, %weight_row_byte_b
     %q8_part_add = index.mul %bounded_part, %c2 : index
     %q8_block_part = index.add %q8_block_base, %q8_part_add : index
     %q8_block = index.add %q8_block_part, %q8_quadrant : index
-    %q8_values, %q8_d = func.call @ggml_q8_1_x4_word(%q8_input, %q8_row_byte_base, %q8_block, %lane_mod8) : (buffer, offset, index, index) -> (vector<4xi8>, f32)
+    %q8_values, %q8_d = func.apply<ggml.q8_1_x4.word>(%q8_input, %q8_row_byte_base, %q8_block, %lane_mod8) : (buffer, offset, index, index) -> (vector<4xi8>, f32)
     %scale_lane = index.add %scale_lane0, %part_shift_index : index
     %scale_i8 = view.load %scale_view[%scale_lane] : view<16xi8> -> i8
     %scale = scalar.sitofp %scale_i8 : i8 to f32

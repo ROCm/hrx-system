@@ -40,7 +40,7 @@ func.def inline @ggml_q8_1_x4_block(%q8_input: buffer, %row_byte_base: offset, %
 // Loads one packed four-value word and its block scale. Dot-product kernels
 // use this narrower form so a lane does not load the other seven words owned
 // by its subgroup peers.
-func.def inline @ggml_q8_1_x4_word(%q8_input: buffer, %row_byte_base: offset, %q8_block: index, %word_in_block: index) -> (vector<4xi8>, f32) {
+func.template<ggml.q8_1_x4.word> device @ggml_q8_1_x4_word(%q8_input: buffer, %row_byte_base: offset, %q8_block: index, %word_in_block: index) -> (vector<4xi8>, f32) {
   %c2 = index.constant 2 : index
   %c4 = index.constant 4 : index
   %c8 = index.constant 8 : index
