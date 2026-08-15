@@ -1345,13 +1345,7 @@ iree_status_t iree_hal_webgpu_queue_read(
     iree_hal_file_t* source_file, uint64_t source_offset,
     iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
     iree_device_size_t length, iree_hal_read_flags_t flags) {
-  if (source_offset + length > iree_hal_file_length(source_file)) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "read range [%" PRIu64 ", %" PRIu64
-                            ") exceeds file length %" PRIu64,
-                            source_offset, source_offset + length,
-                            iree_hal_file_length(source_file));
-  }
+  (void)flags;
 
   // Determine the data source: HOST_LOCAL storage buffer or FD.
   iree_hal_buffer_t* storage = iree_hal_file_storage_buffer(source_file);
@@ -1649,13 +1643,7 @@ iree_status_t iree_hal_webgpu_queue_write(
     iree_hal_buffer_t* source_buffer, iree_device_size_t source_offset,
     iree_hal_file_t* target_file, uint64_t target_offset,
     iree_device_size_t length, iree_hal_write_flags_t flags) {
-  if (target_offset + length > iree_hal_file_length(target_file)) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "write range [%" PRIu64 ", %" PRIu64
-                            ") exceeds file length %" PRIu64,
-                            target_offset, target_offset + length,
-                            iree_hal_file_length(target_file));
-  }
+  (void)flags;
 
   // Determine the target type: HOST_LOCAL storage buffer or FD.
   iree_hal_buffer_t* target_storage = iree_hal_file_storage_buffer(target_file);

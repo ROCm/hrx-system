@@ -431,9 +431,40 @@ IREE_API_EXPORT iree_status_t iree_hal_device_queue_read(
   IREE_ASSERT_ARGUMENT(source_file);
   IREE_ASSERT_ARGUMENT(target_buffer);
   IREE_TRACE_ZONE_BEGIN(z0);
-  iree_status_t status = _VTABLE_DISPATCH(device, queue_read)(
-      device, queue_affinity, wait_semaphore_list, signal_semaphore_list,
-      source_file, source_offset, target_buffer, target_offset, length, flags);
+  IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, (int64_t)length);
+  if (IREE_UNLIKELY(flags != IREE_HAL_READ_FLAG_NONE)) {
+    IREE_TRACE_ZONE_END(z0);
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "unsupported queue read flags: 0x%016" PRIx64,
+                            flags);
+  }
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0,
+      iree_hal_file_validate_access(source_file, IREE_HAL_MEMORY_ACCESS_READ));
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_hal_file_validate_range(source_file, source_offset, length));
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_hal_buffer_validate_range(target_buffer, target_offset, length));
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_hal_buffer_validate_access(
+              iree_hal_buffer_allowed_access(target_buffer),
+              IREE_HAL_MEMORY_ACCESS_WRITE));
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_hal_buffer_validate_usage(
+              iree_hal_buffer_allowed_usage(target_buffer),
+              IREE_HAL_BUFFER_USAGE_TRANSFER_TARGET));
+
+  iree_status_t status = iree_ok_status();
+  if (length == 0) {
+    status = iree_hal_device_queue_barrier(
+        device, queue_affinity, wait_semaphore_list, signal_semaphore_list,
+        IREE_HAL_EXECUTE_FLAG_NONE);
+  } else {
+    status = _VTABLE_DISPATCH(device, queue_read)(
+        device, queue_affinity, wait_semaphore_list, signal_semaphore_list,
+        source_file, source_offset, target_buffer, target_offset, length,
+        flags);
+  }
   IREE_TRACE_ZONE_END(z0);
   return status;
 }
@@ -455,9 +486,40 @@ IREE_API_EXPORT iree_status_t iree_hal_device_queue_write(
   IREE_ASSERT_ARGUMENT(source_buffer);
   IREE_ASSERT_ARGUMENT(target_file);
   IREE_TRACE_ZONE_BEGIN(z0);
-  iree_status_t status = _VTABLE_DISPATCH(device, queue_write)(
-      device, queue_affinity, wait_semaphore_list, signal_semaphore_list,
-      source_buffer, source_offset, target_file, target_offset, length, flags);
+  IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, (int64_t)length);
+  if (IREE_UNLIKELY(flags != IREE_HAL_WRITE_FLAG_NONE)) {
+    IREE_TRACE_ZONE_END(z0);
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "unsupported queue write flags: 0x%016" PRIx64,
+                            flags);
+  }
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_hal_buffer_validate_range(source_buffer, source_offset, length));
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_hal_buffer_validate_access(
+              iree_hal_buffer_allowed_access(source_buffer),
+              IREE_HAL_MEMORY_ACCESS_READ));
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_hal_buffer_validate_usage(
+              iree_hal_buffer_allowed_usage(source_buffer),
+              IREE_HAL_BUFFER_USAGE_TRANSFER_SOURCE));
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0,
+      iree_hal_file_validate_access(target_file, IREE_HAL_MEMORY_ACCESS_WRITE));
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_hal_file_validate_range(target_file, target_offset, length));
+
+  iree_status_t status = iree_ok_status();
+  if (length == 0) {
+    status = iree_hal_device_queue_barrier(
+        device, queue_affinity, wait_semaphore_list, signal_semaphore_list,
+        IREE_HAL_EXECUTE_FLAG_NONE);
+  } else {
+    status = _VTABLE_DISPATCH(device, queue_write)(
+        device, queue_affinity, wait_semaphore_list, signal_semaphore_list,
+        source_buffer, source_offset, target_file, target_offset, length,
+        flags);
+  }
   IREE_TRACE_ZONE_END(z0);
   return status;
 }

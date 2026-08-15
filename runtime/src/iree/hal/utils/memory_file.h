@@ -25,6 +25,12 @@ extern "C" {
 // device-accessible storage buffer when possible. Import failure leaves the
 // file host-only: it still supports synchronous I/O and can be used by devices
 // with an explicit staging path.
+//
+// The file retains |handle| and therefore keeps its host allocation live until
+// all file references and accepted queue operations are released. It does not
+// synchronize concurrent host access. Callers must use queue semaphore
+// dependencies to order host producers before reads and wait for queue write
+// completion before accessing written bytes.
 IREE_API_EXPORT iree_status_t iree_hal_memory_file_wrap(
     iree_hal_allocator_t* device_allocator,
     iree_hal_queue_affinity_t queue_affinity, iree_hal_memory_access_t access,

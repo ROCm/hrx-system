@@ -978,7 +978,15 @@ IREE_API_EXPORT iree_status_t iree_hal_device_queue_copy(
 // defined by the |source_offset| and |length| into the HAL |target_buffer| at
 // the specified |target_offset|. The |queue_affinity| should be set to where
 // the target buffer will be consumed. The source file must have read permission
-// and the target buffer must have transfer-target usage.
+// and the target buffer must allow writes with transfer-target usage.
+//
+// A non-empty operation retains |source_file| and |target_buffer| until it
+// reaches a terminal state. When |source_file| wraps host memory, callers must
+// order host writes before the queue read with |wait_semaphore_list| and must
+// not mutate the source range again until |signal_semaphore_list| is reached.
+//
+// A zero-length read performs no data access but still forwards the wait
+// dependencies to the signal dependencies.
 IREE_API_EXPORT iree_status_t iree_hal_device_queue_read(
     iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
     const iree_hal_semaphore_list_t wait_semaphore_list,
@@ -991,7 +999,15 @@ IREE_API_EXPORT iree_status_t iree_hal_device_queue_read(
 // |source_buffer| defined by the |source_offset| and |length| into the
 // |target_file| at the specified |target_offset|. The |queue_affinity| should
 // be set to where the source buffer was produced. The source buffer must have
-// transfer-source usage and the target file must have write permission.
+// read access with transfer-source usage and the target file must have write
+// permission.
+//
+// A non-empty operation retains |source_buffer| and |target_file| until it
+// reaches a terminal state. When |target_file| wraps host memory, callers must
+// not access the target range until |signal_semaphore_list| is reached.
+//
+// A zero-length write performs no data access but still forwards the wait
+// dependencies to the signal dependencies.
 IREE_API_EXPORT iree_status_t iree_hal_device_queue_write(
     iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
     const iree_hal_semaphore_list_t wait_semaphore_list,
