@@ -6,6 +6,7 @@
 
 #include "experimental/qwen/tooling/command_program.h"
 
+#include <inttypes.h>
 #include <string.h>
 
 #include "iree/io/parameter_provider.h"
@@ -30,6 +31,10 @@ struct qwen_tooling_command_program_t {
   loomc_cmd_program_package_t* package;
   // Materialized reusable command buffer and retained fixed resources.
   loomc_cmd_hal_program_t* hal_program;
+  // Evaluator for issue-time indirect dispatch and dynamic constant data.
+  loomc_launch_config_program_t* launch_config_program;
+  // Program-local token for the selected public command root.
+  loomc_launch_config_function_t launch_config_function;
   // Immutable root ABI borrowed from package.
   loomc_cmd_program_info_t info;
   // Packed fixed-parameter root size in bytes.
@@ -330,6 +335,9 @@ iree_status_t qwen_tooling_command_program_create(
   iree_host_size_t kernel_function_count = 0;
   loomc_program_plan_t* plan = NULL;
   loomc_cmd_program_package_t* package = NULL;
+  loomc_launch_config_program_t* launch_config_program = NULL;
+  loomc_launch_config_function_t launch_config_function =
+      loomc_launch_config_function_invalid();
   loomc_cmd_program_export_t program_export =
       loomc_cmd_program_export_invalid();
   loomc_result_t* result = NULL;
@@ -500,9 +508,31 @@ iree_status_t qwen_tooling_command_program_create(
   }
   if (iree_status_is_ok(status) &&
       loomc_program_plan_unit_is_valid(root_info.launch_config_unit)) {
-    status = iree_make_status(
-        IREE_STATUS_UNIMPLEMENTED,
-        "Qwen command programs do not yet accept dynamic launch config");
+    status = qwen_tooling_compile_unit(
+        plan, compiler, workspace, root_info.launch_config_unit,
+        empty_pass_program, IREE_SV("command launch config compile"),
+        host_allocator, &result);
+  }
+  if (iree_status_is_ok(status) &&
+      loomc_program_plan_unit_is_valid(root_info.launch_config_unit)) {
+    const loomc_artifact_t* artifact = qwen_tooling_find_artifact(
+        result, LOOMC_ARTIFACT_KIND_COMMAND_LAUNCH_CONFIG,
+        LOOMC_ARTIFACT_FORMAT_LOOM_BYTECODE);
+    if (!artifact) {
+      status = iree_make_status(IREE_STATUS_NOT_FOUND,
+                                "command launch config artifact is absent");
+    } else {
+      status = qwen_tooling_status_from_loomc(loomc_launch_config_program_load(
+          artifact, /*release=*/NULL, /*release_user_data=*/NULL,
+          loom_allocator, &launch_config_program));
+    }
+  }
+  loomc_result_release(result);
+  result = NULL;
+  if (iree_status_is_ok(status) && launch_config_program) {
+    status = qwen_tooling_status_from_loomc(
+        loomc_launch_config_program_lookup_function(
+            launch_config_program, root_name, &launch_config_function));
   }
 
   if (iree_status_is_ok(status)) {
@@ -596,6 +626,7 @@ iree_status_t qwen_tooling_command_program_create(
   if (iree_status_is_ok(status)) {
     memset(program, 0, sizeof(*program));
     program->host_allocator = host_allocator;
+    program->launch_config_function = loomc_launch_config_function_invalid();
     const iree_hal_buffer_ref_t fixed_buffer =
         iree_hal_make_buffer_ref(parameter_buffer, 0, IREE_HAL_WHOLE_BUFFER);
     const loomc_cmd_hal_program_options_t materialization_options = {
@@ -630,6 +661,9 @@ iree_status_t qwen_tooling_command_program_create(
     if (iree_status_is_ok(status)) {
       program->package = package;
       package = NULL;
+      program->launch_config_program = launch_config_program;
+      launch_config_program = NULL;
+      program->launch_config_function = launch_config_function;
       program->info = program_info;
       program->parameter_byte_length = parameter_root_info.required_byte_length;
       *out_program = program;
@@ -646,6 +680,7 @@ iree_status_t qwen_tooling_command_program_create(
   iree_allocator_free(host_allocator, parameter_requests);
   iree_hal_buffer_release(parameter_buffer);
   loomc_result_release(result);
+  loomc_launch_config_program_release(launch_config_program);
   loomc_cmd_program_package_release(package);
   loomc_program_plan_release(plan);
   iree_allocator_free(host_allocator, specializations);
@@ -667,6 +702,7 @@ void qwen_tooling_command_program_release(
   if (!program) return;
   const iree_allocator_t host_allocator = program->host_allocator;
   loomc_cmd_hal_program_release(program->hal_program);
+  loomc_launch_config_program_release(program->launch_config_program);
   loomc_cmd_program_package_release(program->package);
   iree_allocator_free(host_allocator, program);
 }
@@ -680,6 +716,32 @@ iree_hal_command_buffer_t* qwen_tooling_command_program_command_buffer(
     const qwen_tooling_command_program_t* program) {
   return program ? loomc_cmd_hal_program_command_buffer(program->hal_program)
                  : NULL;
+}
+
+iree_status_t qwen_tooling_command_program_populate_config(
+    qwen_tooling_command_program_t* program, const uint64_t* argument_bits,
+    iree_host_size_t argument_count, iree_byte_span_t config_data) {
+  if (!program || !program->launch_config_program ||
+      !loomc_launch_config_function_is_valid(program->launch_config_function)) {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "command program has no dynamic launch config");
+  }
+  if (config_data.data_length != program->info.config.required_byte_length) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "config storage has byte length %" PRIhsz ", expected %" PRIu64,
+        config_data.data_length,
+        (uint64_t)program->info.config.required_byte_length);
+  }
+  loomc_cmd_launch_config_t launch_config = {
+      .type = LOOMC_STRUCTURE_TYPE_CMD_LAUNCH_CONFIG,
+      .structure_size = sizeof(launch_config),
+      .data = loomc_make_mutable_byte_span(config_data.data,
+                                           config_data.data_length),
+  };
+  return qwen_tooling_status_from_loomc(loomc_launch_config_program_invoke_cmd(
+      program->launch_config_program, program->launch_config_function,
+      argument_bits, argument_count, &launch_config));
 }
 
 iree_device_size_t qwen_tooling_command_program_parameter_byte_length(

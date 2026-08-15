@@ -51,6 +51,14 @@ const loomc_cmd_program_info_t* qwen_tooling_command_program_info(
 iree_hal_command_buffer_t* qwen_tooling_command_program_command_buffer(
     const qwen_tooling_command_program_t* program);
 
+// Populates caller-owned config data for one issue of a dynamic command
+// program. |argument_bits| maps positionally to the command root's scalar
+// arguments using the loomc launch-config calling convention. |config_data|
+// must provide the byte length and alignment published by program info.
+iree_status_t qwen_tooling_command_program_populate_config(
+    qwen_tooling_command_program_t* program, const uint64_t* argument_bits,
+    iree_host_size_t argument_count, iree_byte_span_t config_data);
+
 // Returns the packed immutable parameter size in bytes.
 iree_device_size_t qwen_tooling_command_program_parameter_byte_length(
     const qwen_tooling_command_program_t* program);
