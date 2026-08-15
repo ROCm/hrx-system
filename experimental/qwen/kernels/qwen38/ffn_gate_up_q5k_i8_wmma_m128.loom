@@ -1,0 +1,255 @@
+// Exact paired Q5_K gate/up contraction with 128-token weight reuse.
+//
+// One workgroup owns 128 tokens by 64 FFN channels. Four wave32 subgroups
+// contract gate while four contract up. Every Q5_K tile is staged once and
+// reused across two 64-token activation tiles, halving weight traffic relative
+// to the M64 schedule. Gate fragments rendezvous with matching up fragments in
+// LDS, and the workgroup publishes two 64x64 tiled Q8_1 packets consumed by
+// the exact Q6_K down projection.
+
+kernel.decl @ggml_quantize_q8_1_x4_f32(%token_count0: index, %input_size0: index) launch(%token_count1: index, %input_size1: index, %input: buffer, %output: buffer)
+
+kernel.decl @qwen38_linear_q5k_i8_wmma(%token_count0: index) launch(%token_count1: index, %q8_input: buffer, %weight: buffer, %output: buffer)
+
+kernel.decl @qwen38_linear_q6k_i8_wmma_tiled(%token_count0: index) launch(%token_count1: index, %q8_input: buffer, %weight: buffer, %output: buffer)
+
+kernel.decl @qwen38_q5k_i8_wmma_fix_differential_headers() launch(%weight: buffer)
+
+kernel.decl @qwen38_swiglu_f32_reference(%token_count0: index, %output_size0: index) launch(%token_count1: index, %output_size1: index, %gate: buffer, %up: buffer, %output: buffer)
+
+kernel.decl @qwen38_q8_tile64_quantize_f32(%token_count0: index, %input_size0: index) launch(%token_count1: index, %input_size1: index, %input: buffer, %output: buffer)
+
+func.decl @qwen38_q8_tile64_store_subgroup_block(%tile_byte_base: offset, %token_local: index, %block_in_tile: index, %value: f32, %output: buffer)
+
+func.decl @qwen38_q8_stage_activation_tile(%token_count: index, %input_size: index, %token_tile_base: index, %q8_group: index, %workitem: index, %q8_input: buffer, %activation_stage: buffer, %activation_metadata: buffer)
+
+func.decl @qwen38_q5k_stage_weight_tile_pair(%input_size: index, %output_size: index, %channel_tile_base: index, %q5_block: index, %workitem: index, %gate_weight: buffer, %up_weight: buffer, %weight_stage: buffer)
+
+func.decl @qwen38_q5k_contract_group(%weight_group: index, %activation_group: index, %wave: index, %lane: index, %weight_stage: buffer, %activation_stage: buffer, %activation_metadata: buffer, %accumulator0: vector<8xf32>, %accumulator1: vector<8xf32>, %accumulator2: vector<8xf32>, %accumulator3: vector<8xf32>) -> (vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>)
+
+config.decl @qwen38.ffn_gate_up_q5k_i8_wmma_m128.input_size : %value: index where [range(%value, 256, 32768), mul(%value, 256)]
+
+config.decl @qwen38.ffn_gate_up_q5k_i8_wmma_m128.output_size : %value: index where [range(%value, 64, 32768), mul(%value, 64)]
+
+amdgpu.target<gfx11-generic> @qwen38_ffn_gate_up_q5_i8_m128_wave32 {subgroup_size = 32}
+
+// Assigns each 64-token half to eight distinct waves. This preserves the M64
+// register footprint while all sixteen waves share one staged Q5_K tile.
+kernel.def target(@qwen38_ffn_gate_up_q5_i8_m128_wave32) export("qwen38_ffn_gate_up_q5k_i8_wmma_m128") @qwen38_ffn_gate_up_q5k_i8_wmma_m128(%token_count0: index) {
+  %token_count = index.assume %token_count0 [range(%token_count0, 128, 512), mul(%token_count0, 128)] : index
+  %output_size = config.get @qwen38.ffn_gate_up_q5k_i8_wmma_m128.output_size : index
+  %c1 = index.constant 1 : index
+  %c64 = index.constant 64 : index
+  %c128 = index.constant 128 : index
+  %workgroup_size = index.constant 512 : index
+  %channel_tiles = index.div %output_size, %c64 : index
+  %token_tiles = index.div %token_count, %c128 : index
+  kernel.launch.config workgroups(%channel_tiles, %token_tiles, %c1) workgroup_size(%workgroup_size, %c1, %c1) : index
+} launch(%token_count0: index, %q8_input: buffer, %gate_weight: buffer, %up_weight: buffer, %output: buffer) {
+  %token_count = index.assume %token_count0 [range(%token_count0, 128, 512), mul(%token_count0, 128)] : index
+  %input_size = config.get @qwen38.ffn_gate_up_q5k_i8_wmma_m128.input_size : index
+  %output_size = config.get @qwen38.ffn_gate_up_q5k_i8_wmma_m128.output_size : index
+  %workitem0 = kernel.workitem.id<x> : index
+  %workitem = index.assume %workitem0 [range(%workitem0, 0, 511)] : index
+  %wave0 = kernel.subgroup.id : index
+  %wave = index.assume %wave0 [range(%wave0, 0, 15)] : index
+  %lane0 = kernel.subgroup.lane.id : index
+  %lane = index.assume %lane0 [range(%lane0, 0, 31)] : index
+  %channel_tile = kernel.workgroup.id<x> : index
+  %token_tile = kernel.workgroup.id<y> : index
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %c4 = index.constant 4 : index
+  %c8 = index.constant 8 : index
+  %c16 = index.constant 16 : index
+  %c32 = index.constant 32 : index
+  %c48 = index.constant 48 : index
+  %c64 = index.constant 64 : index
+  %c128 = index.constant 128 : index
+  %c256 = index.constant 256 : index
+  %weight_stage_bytes = index.constant 38912 : offset
+  %activation_stage_bytes = index.constant 9216 : offset
+  %activation_metadata_bytes = index.constant 1024 : offset
+  %tile_bytes = index.constant 4608 : offset
+  %c0_offset = index.constant 0 : offset
+  %zero_accumulator_values = vector.constant 0.0 : vector<8xf32>
+  %zero_accumulator = vector.fragment<init> %zero_accumulator_values shape [%c16, %c16] : vector<8xf32>
+  %q5_block_count = index.div %input_size, %c256 : index
+  %channel_tile_base = index.mul %channel_tile, %c64 : index
+  %token_tile_base = index.mul %token_tile, %c128 : index
+  %token_half0 = index.div %workitem, %c256 : index
+  %token_half = index.assume %token_half0 [range(%token_half0, 0, 1)] : index
+  %local_workitem0 = index.rem %workitem, %c256 : index
+  %local_workitem = index.assume %local_workitem0 [range(%local_workitem0, 0, 255)] : index
+  %token_half_add = index.mul %token_half, %c64 : index
+  %activation_token_base = index.add %token_tile_base, %token_half_add : index
+  %projection_wave0 = index.rem %wave, %c8 : index
+  %projection_wave = index.assume %projection_wave0 [range(%projection_wave0, 0, 7)] : index
+  %q8_noalias, %gate_noalias, %up_noalias, %output_noalias = buffer.assume.noalias %q8_input, %gate_weight, %up_weight, %output : buffer, buffer, buffer, buffer
+  %weight_stage = buffer.alloca<workgroup> align(16) %weight_stage_bytes : buffer
+  %activation_stage0 = buffer.alloca<workgroup> align(16) %activation_stage_bytes : buffer
+  %activation_metadata0 = buffer.alloca<workgroup> align(16) %activation_metadata_bytes : buffer
+  %activation_stage1 = buffer.alloca<workgroup> align(16) %activation_stage_bytes : buffer
+  %activation_metadata1 = buffer.alloca<workgroup> align(16) %activation_metadata_bytes : buffer
+  %result0, %result1, %result2, %result3 = scf.for %q5_block = [%c0 to %q5_block_count step %c1](%accumulator0 = %zero_accumulator : vector<8xf32>, %accumulator1 = %zero_accumulator : vector<8xf32>, %accumulator2 = %zero_accumulator : vector<8xf32>, %accumulator3 = %zero_accumulator : vector<8xf32>) -> (vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>) {
+    %stages_weight = index.cmp ult, %workitem, %c256 : index
+    scf.if %stages_weight {
+      func.call @qwen38_q5k_stage_weight_tile_pair(%input_size, %output_size, %channel_tile_base, %q5_block, %local_workitem, %gate_noalias, %up_noalias, %weight_stage) : (index, index, index, index, index, buffer, buffer, buffer)
+    }
+    %q8_group0 = index.mul %q5_block, %c2 : index
+    %is_token_half0 = index.cmp eq, %token_half, %c0 : index
+    scf.if %is_token_half0 {
+      func.call @qwen38_q8_stage_activation_tile(%token_count, %input_size, %activation_token_base, %q8_group0, %local_workitem, %q8_noalias, %activation_stage0, %activation_metadata0) : (index, index, index, index, index, buffer, buffer, buffer)
+    } else {
+      func.call @qwen38_q8_stage_activation_tile(%token_count, %input_size, %activation_token_base, %q8_group0, %local_workitem, %q8_noalias, %activation_stage1, %activation_metadata1) : (index, index, index, index, index, buffer, buffer, buffer)
+    }
+    kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+    %half0_result0, %half0_result1, %half0_result2, %half0_result3 = scf.if %is_token_half0 -> (vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>) {
+      %tile_result0, %tile_result1, %tile_result2, %tile_result3 = scf.for %activation_group = [%c0 to %c4 step %c1](%next_accumulator0 = %accumulator0 : vector<8xf32>, %next_accumulator1 = %accumulator1 : vector<8xf32>, %next_accumulator2 = %accumulator2 : vector<8xf32>, %next_accumulator3 = %accumulator3 : vector<8xf32>) -> (vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>) unroll schedule(recurrence) {
+        %next0, %next1, %next2, %next3 = func.call @qwen38_q5k_contract_group(%activation_group, %activation_group, %projection_wave, %lane, %weight_stage, %activation_stage0, %activation_metadata0, %next_accumulator0, %next_accumulator1, %next_accumulator2, %next_accumulator3) : (index, index, index, index, buffer, buffer, buffer, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>) -> (vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>)
+        scf.yield %next0, %next1, %next2, %next3 : vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>
+      }
+      scf.yield %tile_result0, %tile_result1, %tile_result2, %tile_result3 : vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>
+    } else {
+      %tile_result0, %tile_result1, %tile_result2, %tile_result3 = scf.for %activation_group = [%c0 to %c4 step %c1](%next_accumulator0 = %accumulator0 : vector<8xf32>, %next_accumulator1 = %accumulator1 : vector<8xf32>, %next_accumulator2 = %accumulator2 : vector<8xf32>, %next_accumulator3 = %accumulator3 : vector<8xf32>) -> (vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>) unroll schedule(recurrence) {
+        %next0, %next1, %next2, %next3 = func.call @qwen38_q5k_contract_group(%activation_group, %activation_group, %projection_wave, %lane, %weight_stage, %activation_stage1, %activation_metadata1, %next_accumulator0, %next_accumulator1, %next_accumulator2, %next_accumulator3) : (index, index, index, index, buffer, buffer, buffer, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>) -> (vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>)
+        scf.yield %next0, %next1, %next2, %next3 : vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>
+      }
+      scf.yield %tile_result0, %tile_result1, %tile_result2, %tile_result3 : vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>
+    }
+    kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+    %q8_group1 = index.add %q8_group0, %c1 : index
+    scf.if %is_token_half0 {
+      func.call @qwen38_q8_stage_activation_tile(%token_count, %input_size, %activation_token_base, %q8_group1, %local_workitem, %q8_noalias, %activation_stage0, %activation_metadata0) : (index, index, index, index, index, buffer, buffer, buffer)
+    } else {
+      func.call @qwen38_q8_stage_activation_tile(%token_count, %input_size, %activation_token_base, %q8_group1, %local_workitem, %q8_noalias, %activation_stage1, %activation_metadata1) : (index, index, index, index, index, buffer, buffer, buffer)
+    }
+    kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+    %half1_result0, %half1_result1, %half1_result2, %half1_result3 = scf.if %is_token_half0 -> (vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>) {
+      %tile_result0, %tile_result1, %tile_result2, %tile_result3 = scf.for %activation_group = [%c0 to %c4 step %c1](%next_accumulator0 = %half0_result0 : vector<8xf32>, %next_accumulator1 = %half0_result1 : vector<8xf32>, %next_accumulator2 = %half0_result2 : vector<8xf32>, %next_accumulator3 = %half0_result3 : vector<8xf32>) -> (vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>) unroll schedule(recurrence) {
+        %weight_group = index.add %activation_group, %c4 : index
+        %next0, %next1, %next2, %next3 = func.call @qwen38_q5k_contract_group(%weight_group, %activation_group, %projection_wave, %lane, %weight_stage, %activation_stage0, %activation_metadata0, %next_accumulator0, %next_accumulator1, %next_accumulator2, %next_accumulator3) : (index, index, index, index, buffer, buffer, buffer, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>) -> (vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>)
+        scf.yield %next0, %next1, %next2, %next3 : vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>
+      }
+      scf.yield %tile_result0, %tile_result1, %tile_result2, %tile_result3 : vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>
+    } else {
+      %tile_result0, %tile_result1, %tile_result2, %tile_result3 = scf.for %activation_group = [%c0 to %c4 step %c1](%next_accumulator0 = %half0_result0 : vector<8xf32>, %next_accumulator1 = %half0_result1 : vector<8xf32>, %next_accumulator2 = %half0_result2 : vector<8xf32>, %next_accumulator3 = %half0_result3 : vector<8xf32>) -> (vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>) unroll schedule(recurrence) {
+        %weight_group = index.add %activation_group, %c4 : index
+        %next0, %next1, %next2, %next3 = func.call @qwen38_q5k_contract_group(%weight_group, %activation_group, %projection_wave, %lane, %weight_stage, %activation_stage1, %activation_metadata1, %next_accumulator0, %next_accumulator1, %next_accumulator2, %next_accumulator3) : (index, index, index, index, buffer, buffer, buffer, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>) -> (vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>)
+        scf.yield %next0, %next1, %next2, %next3 : vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>
+      }
+      scf.yield %tile_result0, %tile_result1, %tile_result2, %tile_result3 : vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>
+    }
+    kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+    scf.yield %half1_result0, %half1_result1, %half1_result2, %half1_result3 : vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>
+  }
+
+  %result_stage_view = buffer.view %weight_stage[%c0_offset] : buffer -> view<128x64xf32>
+  %paired_wave0 = index.rem %projection_wave, %c4 : index
+  %paired_wave = index.assume %paired_wave0 [range(%paired_wave0, 0, 3)] : index
+  %channel_origin = index.mul %paired_wave, %c16 : index
+  %result_token_base = index.mul %token_half, %c64 : index
+  %result_token0 = index.add %result_token_base, %c0 : index
+  %result_token1 = index.add %result_token_base, %c16 : index
+  %result_token2 = index.add %result_token_base, %c32 : index
+  %result_token3 = index.add %result_token_base, %c48 : index
+  %is_gate_wave = index.cmp ult, %projection_wave, %c4 : index
+  %is_up_wave = index.cmp uge, %projection_wave, %c4 : index
+  scf.if %is_gate_wave {
+    vector.fragment.store<result> %result0, %result_stage_view[%result_token0, %channel_origin] shape [%c16, %c16] : vector<8xf32>, view<128x64xf32>
+    vector.fragment.store<result> %result1, %result_stage_view[%result_token1, %channel_origin] shape [%c16, %c16] : vector<8xf32>, view<128x64xf32>
+    vector.fragment.store<result> %result2, %result_stage_view[%result_token2, %channel_origin] shape [%c16, %c16] : vector<8xf32>, view<128x64xf32>
+    vector.fragment.store<result> %result3, %result_stage_view[%result_token3, %channel_origin] shape [%c16, %c16] : vector<8xf32>, view<128x64xf32>
+  }
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+  scf.if %is_up_wave {
+    %gate0 = vector.fragment.load<result> %result_stage_view[%result_token0, %channel_origin] shape [%c16, %c16] : view<128x64xf32> -> vector<8xf32>
+    %gate1 = vector.fragment.load<result> %result_stage_view[%result_token1, %channel_origin] shape [%c16, %c16] : view<128x64xf32> -> vector<8xf32>
+    %gate2 = vector.fragment.load<result> %result_stage_view[%result_token2, %channel_origin] shape [%c16, %c16] : view<128x64xf32> -> vector<8xf32>
+    %gate3 = vector.fragment.load<result> %result_stage_view[%result_token3, %channel_origin] shape [%c16, %c16] : view<128x64xf32> -> vector<8xf32>
+    %activated0 = vector.siluf<afn> %gate0 : vector<8xf32>
+    %activated1 = vector.siluf<afn> %gate1 : vector<8xf32>
+    %activated2 = vector.siluf<afn> %gate2 : vector<8xf32>
+    %activated3 = vector.siluf<afn> %gate3 : vector<8xf32>
+    %combined0 = vector.mulf<nnan|ninf|nsz> %activated0, %result0 : vector<8xf32>
+    %combined1 = vector.mulf<nnan|ninf|nsz> %activated1, %result1 : vector<8xf32>
+    %combined2 = vector.mulf<nnan|ninf|nsz> %activated2, %result2 : vector<8xf32>
+    %combined3 = vector.mulf<nnan|ninf|nsz> %activated3, %result3 : vector<8xf32>
+    vector.fragment.store<result> %combined0, %result_stage_view[%result_token0, %channel_origin] shape [%c16, %c16] : vector<8xf32>, view<128x64xf32>
+    vector.fragment.store<result> %combined1, %result_stage_view[%result_token1, %channel_origin] shape [%c16, %c16] : vector<8xf32>, view<128x64xf32>
+    vector.fragment.store<result> %combined2, %result_stage_view[%result_token2, %channel_origin] shape [%c16, %c16] : vector<8xf32>, view<128x64xf32>
+    vector.fragment.store<result> %combined3, %result_stage_view[%result_token3, %channel_origin] shape [%c16, %c16] : vector<8xf32>, view<128x64xf32>
+  }
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+
+  %channel_tile_count = index.div %output_size, %c64 : index
+  scf.for %block_ordinal = [%wave to %c256 step %c16] {
+    %output_token_half0 = index.div %block_ordinal, %c128 : index
+    %output_token_half = index.assume %output_token_half0 [range(%output_token_half0, 0, 1)] : index
+    %tile_block0 = index.rem %block_ordinal, %c128 : index
+    %tile_block = index.assume %tile_block0 [range(%tile_block0, 0, 127)] : index
+    %token_local0 = index.div %tile_block, %c2 : index
+    %token_local = index.assume %token_local0 [range(%token_local0, 0, 63)] : index
+    %block_in_tile0 = index.rem %tile_block, %c2 : index
+    %block_in_tile = index.assume %block_in_tile0 [range(%block_in_tile0, 0, 1)] : index
+    %stage_token_half_add = index.mul %output_token_half, %c64 : index
+    %stage_token0 = index.add %stage_token_half_add, %token_local : index
+    %stage_token = index.assume %stage_token0 [range(%stage_token0, 0, 127)] : index
+    %channel_block_base = index.mul %block_in_tile, %c32 : index
+    %channel_local0 = index.add %channel_block_base, %lane : index
+    %channel_local = index.assume %channel_local0 [range(%channel_local0, 0, 63)] : index
+    %output_token_tile_base = index.mul %token_tile, %c2 : index
+    %output_token_tile = index.add %output_token_tile_base, %output_token_half : index
+    %tile_row = index.mul %output_token_tile, %channel_tile_count : index
+    %tile_ordinal = index.add %tile_row, %channel_tile : index
+    %tile_byte_base = index.scale %tile_ordinal, %tile_bytes : index, offset -> offset
+    %value = view.load %result_stage_view[%stage_token, %channel_local] : view<128x64xf32> -> f32
+    func.call @qwen38_q8_tile64_store_subgroup_block(%tile_byte_base, %token_local, %block_in_tile, %value, %output_noalias) : (offset, index, index, f32, buffer)
+  }
+  kernel.return
+}
+
+check.case public @qwen38_ffn_gate_up_q5k_i8_wmma_m128_differential_case {
+  %token_count = check.literal value(128) : index
+  %input_size = check.literal value(256) : index
+  %output_size = check.literal value(128) : index
+  %input = check.generate.iota offset(-0.000732421875) step(0.000000059604644775390625) : tensor<128x256xf32>
+  %q8_input = check.generate.fill value(0) : tensor<128x288xi8>
+  %gate_weight = check.generate.iota offset(-127) step(17) period(15) : tensor<128x176xi8>
+  %up_weight = check.generate.iota offset(-113) step(13) period(17) : tensor<128x176xi8>
+  %gate = check.generate.fill value(0.0) : tensor<128x128xf32>
+  %up = check.generate.fill value(0.0) : tensor<128x128xf32>
+  %swiglu = check.generate.fill value(0.0) : tensor<128x128xf32>
+  %expected = check.generate.fill value(0) : tensor<128x144xi8>
+  %actual = check.generate.fill value(1) : tensor<128x144xi8>
+  kernel.launch @qwen38_q5k_i8_wmma_fix_differential_headers(%gate_weight) : (tensor<128x176xi8>)
+  kernel.launch @qwen38_q5k_i8_wmma_fix_differential_headers(%up_weight) : (tensor<128x176xi8>)
+  kernel.launch @ggml_quantize_q8_1_x4_f32[%token_count, %input_size](%token_count, %input_size, %input, %q8_input) : [index, index](index, index, tensor<128x256xf32>, tensor<128x288xi8>)
+  kernel.launch @qwen38_linear_q5k_i8_wmma[%token_count](%token_count, %q8_input, %gate_weight, %gate) : [index](index, tensor<128x288xi8>, tensor<128x176xi8>, tensor<128x128xf32>)
+  kernel.launch @qwen38_linear_q5k_i8_wmma[%token_count](%token_count, %q8_input, %up_weight, %up) : [index](index, tensor<128x288xi8>, tensor<128x176xi8>, tensor<128x128xf32>)
+  kernel.launch @qwen38_swiglu_f32_reference[%token_count, %output_size](%token_count, %output_size, %gate, %up, %swiglu) : [index, index](index, index, tensor<128x128xf32>, tensor<128x128xf32>, tensor<128x128xf32>)
+  kernel.launch @qwen38_q8_tile64_quantize_f32[%token_count, %output_size](%token_count, %output_size, %swiglu, %expected) : [index, index](index, index, tensor<128x128xf32>, tensor<128x144xi8>)
+  kernel.launch @qwen38_ffn_gate_up_q5k_i8_wmma_m128[%token_count](%token_count, %q8_input, %gate_weight, %up_weight, %actual) : [index](index, tensor<128x288xi8>, tensor<128x176xi8>, tensor<128x176xi8>, tensor<128x144xi8>)
+  check.expect.equal actual(%actual) expected(%expected) : tensor<128x144xi8>
+  check.return
+}
+
+check.case public @qwen38_ffn_q5k_q6k_i8_wmma_production_m128_case {
+  %token_count = check.param.choice values([128, 512]) name("token_count") : index
+  %q8_input = check.generate.fill value(1) : tensor<[%token_count]x5760xi8>
+  %gate_weight = check.generate.fill value(1) : tensor<17408x20x176xi8>
+  %up_weight = check.generate.fill value(1) : tensor<17408x20x176xi8>
+  %down_weight = check.generate.fill value(1) : tensor<5120x68x210xi8>
+  %q8_intermediate = check.generate.fill value(0) : tensor<[%token_count]x19584xi8>
+  %output = check.generate.fill value(0.0) : tensor<[%token_count]x5120xf32>
+  kernel.launch @qwen38_ffn_gate_up_q5k_i8_wmma_m128[%token_count](%token_count, %q8_input, %gate_weight, %up_weight, %q8_intermediate) : [index](index, tensor<[%token_count]x5760xi8>, tensor<17408x20x176xi8>, tensor<17408x20x176xi8>, tensor<[%token_count]x19584xi8>)
+  kernel.launch @qwen38_linear_q6k_i8_wmma_tiled[%token_count](%token_count, %q8_intermediate, %down_weight, %output) : [index](index, tensor<[%token_count]x19584xi8>, tensor<5120x68x210xi8>, tensor<[%token_count]x5120xf32>)
+  check.return
+}
+
+check.benchmark<@qwen38_ffn_gate_up_q5k_i8_wmma_m128_differential_case> @qwen38_ffn_gate_up_q5k_i8_wmma_m128_differential
+
+check.benchmark<@qwen38_ffn_q5k_q6k_i8_wmma_production_m128_case> @qwen38_ffn_q5k_q6k_i8_wmma_production_m128_128 {token_count = 128}
+
+check.benchmark<@qwen38_ffn_q5k_q6k_i8_wmma_production_m128_case> @qwen38_ffn_q5k_q6k_i8_wmma_production_m128_512 {token_count = 512}

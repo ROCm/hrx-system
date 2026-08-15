@@ -25,6 +25,7 @@ exports_files([
     "qwen38/attention_decode.loom",
     "qwen38/attention_prefill.loom",
     "qwen38/attention_prefill_wmma.loom",
+    "qwen38/ffn_gate_up_q5k_i8_wmma.loom",
     "qwen38/ffn_prepare_q8_1.loom",
     "qwen38/gdn_decode.loom",
     "qwen38/gdn_prefill.loom",
@@ -33,9 +34,12 @@ exports_files([
     "qwen38/layer_prefill.loom",
     "qwen38/linear_q5k_f16_wmma.loom",
     "qwen38/linear_q5k_i8_wmma.loom",
+    "qwen38/linear_q5k_i8_wmma_tiled.loom",
     "qwen38/linear_qk_i8_wmma_common.loom",
     "qwen38/linear_q6k_f16_wmma.loom",
     "qwen38/linear_q6k_i8_wmma.loom",
+    "qwen38/linear_q6k_i8_wmma_tiled.loom",
+    "qwen38/q8_tile_64x64.loom",
 ])
 
 loom_link_module(
@@ -90,6 +94,22 @@ loom_link_module(
 )
 
 loom_link_module(
+    name = "qwen38_ffn_gate_up_q5k_i8_wmma_linked",
+    srcs = [
+        "qwen38/ffn_gate_up_q5k_i8_wmma.loom",
+        "qwen38/linear_q5k_i8_wmma.loom",
+    ],
+    libraries = [
+        "ggml/linear_q5k_q8_1_x4.loom",
+        "ggml/linear_qk_common.loom",
+        "ggml/quantize_q8_1_x4.loom",
+        "qwen38/layer_prefill.loom",
+        "qwen38/linear_qk_i8_wmma_common.loom",
+        "qwen38/q8_tile_64x64.loom",
+    ],
+)
+
+loom_link_module(
     name = "qwen38_linear_q5k_i8_wmma_linked",
     srcs = ["qwen38/linear_q5k_i8_wmma.loom"],
     libraries = [
@@ -97,6 +117,24 @@ loom_link_module(
         "ggml/linear_qk_common.loom",
         "ggml/quantize_q8_1_x4.loom",
         "qwen38/linear_qk_i8_wmma_common.loom",
+    ],
+)
+
+loom_link_module(
+    name = "qwen38_linear_q5k_i8_wmma_tiled_linked",
+    srcs = [
+        "qwen38/ffn_gate_up_q5k_i8_wmma.loom",
+        "qwen38/ffn_gate_up_q5k_i8_wmma_m128.loom",
+        "qwen38/linear_q5k_i8_wmma.loom",
+        "qwen38/linear_q5k_i8_wmma_tiled.loom",
+    ],
+    libraries = [
+        "ggml/linear_q5k_q8_1_x4.loom",
+        "ggml/linear_qk_common.loom",
+        "ggml/quantize_q8_1_x4.loom",
+        "qwen38/layer_prefill.loom",
+        "qwen38/linear_qk_i8_wmma_common.loom",
+        "qwen38/q8_tile_64x64.loom",
     ],
 )
 
@@ -116,6 +154,26 @@ loom_link_module(
         "ggml/linear_q6k_q8_1_x4.loom",
         "ggml/quantize_q8_1_x4.loom",
         "qwen38/linear_qk_i8_wmma_common.loom",
+    ],
+)
+
+loom_link_module(
+    name = "qwen38_ffn_q5k_q6k_i8_wmma_tiled_linked",
+    srcs = [
+        "qwen38/ffn_gate_up_q5k_i8_wmma.loom",
+        "qwen38/ffn_gate_up_q5k_i8_wmma_m128.loom",
+        "qwen38/linear_q5k_i8_wmma.loom",
+        "qwen38/linear_q6k_i8_wmma.loom",
+        "qwen38/linear_q6k_i8_wmma_tiled.loom",
+    ],
+    libraries = [
+        "ggml/linear_q5k_q8_1_x4.loom",
+        "ggml/linear_q6k_q8_1_x4.loom",
+        "ggml/linear_qk_common.loom",
+        "ggml/quantize_q8_1_x4.loom",
+        "qwen38/layer_prefill.loom",
+        "qwen38/linear_qk_i8_wmma_common.loom",
+        "qwen38/q8_tile_64x64.loom",
     ],
 )
 

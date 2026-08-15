@@ -1,0 +1,147 @@
+// Device-owned Q8 activation packets for 64-token by 64-channel tiles.
+//
+// Each 4,608-byte packet keeps its 4,096 payload bytes and 512 metadata bytes
+// in separate contiguous planes. A producer workgroup owns one complete
+// packet. Consumers stage two neighboring channel packets as one K128 tile,
+// issuing contiguous b128 global loads before restoring the fragment-oriented
+// LDS layout used by the integer-WMMA contraction.
+
+// Quantizes one 32-channel subgroup block into a workgroup-owned tile packet.
+// The caller supplies one scalar channel value per lane and a tile-relative
+// token/block coordinate shared by the subgroup.
+func.def inline @qwen38_q8_tile64_store_subgroup_block(%tile_byte_base: offset, %token_local: index, %block_in_tile: index, %value: f32, %output: buffer) {
+  %lane0 = kernel.subgroup.lane.id : index
+  %lane = index.assume %lane0 [range(%lane0, 0, 31)] : index
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %c32 = index.constant 32 : index
+  %c64 = index.constant 64 : index
+  %metadata_byte_add = index.constant 4096 : offset
+  %c0_f32 = scalar.constant 0.0 : f32
+  %c1_f32 = scalar.constant 1.0 : f32
+  %c127_f32 = scalar.constant 127.0 : f32
+  %absolute_value = scalar.absf %value : f32
+  %amax = kernel.subgroup.reduce<maxnumf> %absolute_value {cluster_size = 32} : f32
+  %d = scalar.divf %amax, %c127_f32 : f32
+  %d_nonzero = scalar.cmpf one, %d, %c0_f32 : f32
+  %d_inverse = scf.if %d_nonzero -> (f32) {
+    %inverse = scalar.divf %c1_f32, %d : f32
+    scf.yield %inverse : f32
+  } else {
+    scf.yield %c0_f32 : f32
+  }
+  %scaled = scalar.mulf %value, %d_inverse : f32
+  %rounded = scalar.roundf %scaled : f32
+  %quantized = scalar.fptosi %rounded : f32 to i32
+  %quantized_i8 = scalar.trunci %quantized : i32 to i8
+  %payload_view = buffer.view %output[%tile_byte_base] : buffer -> view<4096xi8>
+  %token_payload_base = index.mul %token_local, %c64 : index
+  %block_payload_add = index.mul %block_in_tile, %c32 : index
+  %block_payload_base = index.add %token_payload_base, %block_payload_add : index
+  %payload_index0 = index.add %block_payload_base, %lane : index
+  %payload_index = index.assume %payload_index0 [range(%payload_index0, 0, 4095)] : index
+  view.store %quantized_i8, %payload_view[%payload_index] : i8, view<4096xi8>
+  %quantized_sum = kernel.subgroup.reduce<addf> %rounded {cluster_size = 32} : f32
+  %is_subgroup_leader = index.cmp eq, %lane, %c0 : index
+  scf.if %is_subgroup_leader {
+    %s = scalar.mulf %quantized_sum, %d : f32
+    %d_f16 = scalar.fptrunc %d : f32 to f16
+    %s_f16 = scalar.fptrunc %s : f32 to f16
+    %metadata_pair = vector.from_elements %d_f16, %s_f16 : vector<2xf16>
+    %metadata_byte_base = index.add %tile_byte_base, %metadata_byte_add : offset
+    %metadata_view = buffer.view %output[%metadata_byte_base] : buffer -> view<256xf16>
+    %token_metadata_base = index.mul %token_local, %c2 : index
+    %block_metadata0 = index.add %token_metadata_base, %block_in_tile : index
+    %block_metadata = index.assume %block_metadata0 [range(%block_metadata0, 0, 127)] : index
+    %metadata_index = index.mul %block_metadata, %c2 : index
+    vector.store %metadata_pair, %metadata_view[%metadata_index] : vector<2xf16>, view<256xf16>
+  }
+  func.return
+}
+
+// Stages two adjacent K64 tile packets for one 64-token tile. Payload loads
+// walk each 4 KiB source plane linearly. Metadata loads walk each 512-byte
+// plane linearly and transpose pairs into the fragment order consumed by the
+// integer-WMMA contraction.
+func.def inline @qwen38_q8_tile64_stage_pair(%token_count: index, %input_size: index, %token_tile: index, %channel_tile_base: index, %workitem: index, %q8_input: buffer, %activation_stage: buffer, %activation_metadata: buffer) {
+  %c0_offset = index.constant 0 : offset
+  %metadata_byte_add = index.constant 4096 : offset
+  %tile_bytes = index.constant 4608 : offset
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %c4 = index.constant 4 : index
+  %c8 = index.constant 8 : index
+  %c16 = index.constant 16 : index
+  %c64 = index.constant 64 : index
+  %c128 = index.constant 128 : index
+  %c144 = index.constant 144 : index
+  %c256 = index.constant 256 : index
+  %workgroup_size = index.constant 256 : index
+  %channel_tile_count = index.div %input_size, %c64 : index
+  %token_tile_row = index.mul %token_tile, %channel_tile_count : index
+  %activation_bytes = buffer.view %activation_stage[%c0_offset] : buffer -> view<9216xi8>
+  %activation_meta = buffer.view %activation_metadata[%c0_offset] : buffer -> view<512xf16>
+  %payload_task_count = index.constant 512 : index
+  scf.for %payload_task = [%workitem to %payload_task_count step %workgroup_size] unroll {
+    %tile_in_pair0 = index.div %payload_task, %c256 : index
+    %tile_in_pair = index.assume %tile_in_pair0 [range(%tile_in_pair0, 0, 1)] : index
+    %tile_payload_task0 = index.rem %payload_task, %c256 : index
+    %tile_payload_task = index.assume %tile_payload_task0 [range(%tile_payload_task0, 0, 255)] : index
+    %channel_tile0 = index.add %channel_tile_base, %tile_in_pair : index
+    %channel_tile = index.assume %channel_tile0 [ge(%channel_tile0, 0), lt(%channel_tile0, %channel_tile_count)] : index
+    %tile_ordinal = index.add %token_tile_row, %channel_tile : index
+    %tile_byte_base = index.scale %tile_ordinal, %tile_bytes : index, offset -> offset
+    %tile_payload = buffer.view %q8_input[%tile_byte_base] : buffer -> view<4096xi8>
+    %source_packet_index = index.mul %tile_payload_task, %c16 : index
+    %payload = vector.load %tile_payload[%source_packet_index] : view<4096xi8> -> vector<16xi8>
+    %local_token0 = index.div %tile_payload_task, %c4 : index
+    %local_token = index.assume %local_token0 [range(%local_token0, 0, 63)] : index
+    %packet_in_tile0 = index.rem %tile_payload_task, %c4 : index
+    %packet_in_tile = index.assume %packet_in_tile0 [range(%packet_in_tile0, 0, 3)] : index
+    %stage_row_base = index.mul %local_token, %c144 : index
+    %stage_payload_base = index.add %stage_row_base, %c16 : index
+    %tile_stage_add = index.mul %tile_in_pair, %c64 : index
+    %packet_stage_add = index.mul %packet_in_tile, %c16 : index
+    %tile_stage_base = index.add %stage_payload_base, %tile_stage_add : index
+    %stage_index0 = index.add %tile_stage_base, %packet_stage_add : index
+    %stage_index = index.assume %stage_index0 [range(%stage_index0, 16, 9200)] : index
+    vector.store %payload, %activation_bytes[%stage_index] : vector<16xi8>, view<9216xi8>
+  }
+  %tile_in_pair0 = index.div %workitem, %c128 : index
+  %tile_in_pair = index.assume %tile_in_pair0 [range(%tile_in_pair0, 0, 1)] : index
+  %tile_metadata_task0 = index.rem %workitem, %c128 : index
+  %tile_metadata_task = index.assume %tile_metadata_task0 [range(%tile_metadata_task0, 0, 127)] : index
+  %channel_tile0 = index.add %channel_tile_base, %tile_in_pair : index
+  %channel_tile = index.assume %channel_tile0 [ge(%channel_tile0, 0), lt(%channel_tile0, %channel_tile_count)] : index
+  %tile_ordinal = index.add %token_tile_row, %channel_tile : index
+  %tile_byte_base = index.scale %tile_ordinal, %tile_bytes : index, offset -> offset
+  %tile_metadata_byte_base = index.add %tile_byte_base, %metadata_byte_add : offset
+  %tile_metadata = buffer.view %q8_input[%tile_metadata_byte_base] : buffer -> view<256xf16>
+  %source_metadata_index = index.mul %tile_metadata_task, %c2 : index
+  %metadata_pair = vector.load %tile_metadata[%source_metadata_index] : view<256xf16> -> vector<2xf16>
+  %activation_scale = vector.extract %metadata_pair[0] : vector<2xf16> -> f16
+  %activation_sum = vector.extract %metadata_pair[1] : vector<2xf16> -> f16
+  %local_token0 = index.div %tile_metadata_task, %c2 : index
+  %local_token = index.assume %local_token0 [range(%local_token0, 0, 63)] : index
+  %block_in_tile0 = index.rem %tile_metadata_task, %c2 : index
+  %block_in_tile = index.assume %block_in_tile0 [range(%block_in_tile0, 0, 1)] : index
+  %group_in_pair0 = index.mul %tile_in_pair, %c2 : index
+  %group_in_pair = index.add %group_in_pair0, %block_in_tile : index
+  %token_fragment = index.div %local_token, %c16 : index
+  %token_inner = index.rem %local_token, %c16 : index
+  %token_parity = index.rem %token_inner, %c2 : index
+  %fragment_register = index.div %token_inner, %c2 : index
+  %fragment_group0 = index.mul %token_fragment, %c4 : index
+  %fragment_group = index.add %fragment_group0, %group_in_pair : index
+  %fragment_parity0 = index.mul %fragment_group, %c2 : index
+  %fragment_parity = index.add %fragment_parity0, %token_parity : index
+  %metadata_base = index.mul %fragment_parity, %c8 : index
+  %metadata_index0 = index.add %metadata_base, %fragment_register : index
+  %metadata_index = index.assume %metadata_index0 [range(%metadata_index0, 0, 255)] : index
+  %sum_index0 = index.add %metadata_index, %c256 : index
+  %sum_index = index.assume %sum_index0 [range(%sum_index0, 256, 511)] : index
+  view.store %activation_scale, %activation_meta[%metadata_index] : f16, view<512xf16>
+  view.store %activation_sum, %activation_meta[%sum_index] : f16, view<512xf16>
+  func.return
+}

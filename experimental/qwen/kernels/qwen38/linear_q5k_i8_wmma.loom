@@ -138,6 +138,101 @@ func.def inline @qwen38_q5k_stage_weight_tile(%input_size: index, %output_size: 
   func.return
 }
 
+// Stages matching 64-channel gate and up tiles into the two halves of one
+// 128-row LDS tile. Pairing the immutable sources in one producer makes their
+// disjoint destinations explicit and lets both streams issue before the one
+// consumer rendezvous shared with activation staging.
+func.def inline @qwen38_q5k_stage_weight_tile_pair(%input_size: index, %output_size: index, %channel_tile_base: index, %q5_block: index, %workitem: index, %gate_weight: buffer, %up_weight: buffer, %weight_stage: buffer) {
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %c8 = index.constant 8 : index
+  %c16 = index.constant 16 : index
+  %c32 = index.constant 32 : index
+  %c64 = index.constant 64 : index
+  %c76 = index.constant 76 : index
+  %c128 = index.constant 128 : index
+  %c152 = index.constant 152 : index
+  %c256 = index.constant 256 : index
+  %workgroup_size = index.constant 256 : index
+  %c0_offset = index.constant 0 : offset
+  %block_bytes = index.constant 176 : offset
+  %weight_words = buffer.view %weight_stage[%c0_offset] : buffer -> view<9728xi32>
+  %weight_metadata = buffer.view %weight_stage[%c0_offset] : buffer -> view<19456xf16>
+  %q5_block_count = index.div %input_size, %c256 : index
+  %weight_row_bytes = index.scale %q5_block_count, %block_bytes : index, offset -> offset
+  %metadata_lane_active = index.cmp ult, %workitem, %c64 : index
+  scf.if %metadata_lane_active {
+    %local_channel = index.assume %workitem [range(%workitem, 0, 63)] : index
+    %channel0 = index.add %channel_tile_base, %local_channel : index
+    %channel, %bounded_output_size = index.assume %channel0, %output_size [lt(%channel0, %output_size)] : index, index
+    %row_byte_base = index.scale %channel, %weight_row_bytes : index, offset -> offset
+    %block_byte_add = index.scale %q5_block, %block_bytes : index, offset -> offset
+    %block_byte_base = index.add %row_byte_base, %block_byte_add : offset
+    %gate_metadata_row_base = index.mul %local_channel, %c152 : index
+    %gate_metadata_base = index.add %gate_metadata_row_base, %c128 : index
+    %up_stage_channel0 = index.add %local_channel, %c64 : index
+    %up_stage_channel = index.assume %up_stage_channel0 [range(%up_stage_channel0, 64, 127)] : index
+    %up_metadata_row_base = index.mul %up_stage_channel, %c152 : index
+    %up_metadata_base = index.add %up_metadata_row_base, %c128 : index
+    scf.for %group = [%c0 to %c8 step %c1] {
+      %gate_scale, %gate_minimum = func.call @ggml_q5k_scale_min(%gate_weight, %block_byte_base, %group) : (buffer, offset, index) -> (f32, f32)
+      %gate_minimum_negative = scalar.negf %gate_minimum : f32
+      %gate_scale_f16 = scalar.fptrunc %gate_scale : f32 to f16
+      %gate_minimum_f16 = scalar.fptrunc %gate_minimum_negative : f32 to f16
+      %gate_metadata_pair = vector.from_elements %gate_scale_f16, %gate_minimum_f16 : vector<2xf16>
+      %up_scale, %up_minimum = func.call @ggml_q5k_scale_min(%up_weight, %block_byte_base, %group) : (buffer, offset, index) -> (f32, f32)
+      %up_minimum_negative = scalar.negf %up_minimum : f32
+      %up_scale_f16 = scalar.fptrunc %up_scale : f32 to f16
+      %up_minimum_f16 = scalar.fptrunc %up_minimum_negative : f32 to f16
+      %up_metadata_pair = vector.from_elements %up_scale_f16, %up_minimum_f16 : vector<2xf16>
+      %metadata_group_add = index.mul %group, %c2 : index
+      %gate_metadata_index0 = index.add %gate_metadata_base, %metadata_group_add : index
+      %gate_metadata_index = index.assume %gate_metadata_index0 [range(%gate_metadata_index0, 128, 9722)] : index
+      %up_metadata_index0 = index.add %up_metadata_base, %metadata_group_add : index
+      %up_metadata_index = index.assume %up_metadata_index0 [range(%up_metadata_index0, 9856, 19446)] : index
+      vector.store %gate_metadata_pair, %weight_metadata[%gate_metadata_index] : vector<2xf16>, view<19456xf16>
+      vector.store %up_metadata_pair, %weight_metadata[%up_metadata_index] : vector<2xf16>, view<19456xf16>
+    }
+  }
+  %code_task_count = index.mul %c64, %c32 : index
+  scf.for %code_task = [%workitem to %code_task_count step %workgroup_size] {
+    %local_channel0 = index.div %code_task, %c32 : index
+    %local_channel = index.assume %local_channel0 [range(%local_channel0, 0, 63)] : index
+    %word0 = index.rem %code_task, %c32 : index
+    %word = index.assume %word0 [range(%word0, 0, 31)] : index
+    %channel0 = index.add %channel_tile_base, %local_channel : index
+    %channel, %bounded_output_size = index.assume %channel0, %output_size [lt(%channel0, %output_size)] : index, index
+    %row_byte_base = index.scale %channel, %weight_row_bytes : index, offset -> offset
+    %block_byte_add = index.scale %q5_block, %block_bytes : index, offset -> offset
+    %block_byte_base = index.add %row_byte_base, %block_byte_add : offset
+    %gate_codes0, %gate_codes1 = func.call @qwen38_q5k_unpack_word_pair(%gate_weight, %block_byte_base, %word) : (buffer, offset, index) -> (i32, i32)
+    %up_codes0, %up_codes1 = func.call @qwen38_q5k_unpack_word_pair(%up_weight, %block_byte_base, %word) : (buffer, offset, index) -> (i32, i32)
+    %word_quadrant = index.div %word, %c8 : index
+    %word_lane = index.rem %word, %c8 : index
+    %code_page = index.mul %word_quadrant, %c16 : index
+    %code_position0 = index.add %code_page, %word_lane : index
+    %code_position1 = index.add %code_position0, %c8 : index
+    %gate_stage_row_base = index.mul %local_channel, %c76 : index
+    %gate_stage_index00 = index.add %gate_stage_row_base, %code_position0 : index
+    %gate_stage_index0 = index.assume %gate_stage_index00 [range(%gate_stage_index00, 0, 4863)] : index
+    %gate_stage_index10 = index.add %gate_stage_row_base, %code_position1 : index
+    %gate_stage_index1 = index.assume %gate_stage_index10 [range(%gate_stage_index10, 0, 4863)] : index
+    %up_stage_channel0 = index.add %local_channel, %c64 : index
+    %up_stage_channel = index.assume %up_stage_channel0 [range(%up_stage_channel0, 64, 127)] : index
+    %up_stage_row_base = index.mul %up_stage_channel, %c76 : index
+    %up_stage_index00 = index.add %up_stage_row_base, %code_position0 : index
+    %up_stage_index0 = index.assume %up_stage_index00 [range(%up_stage_index00, 4864, 9727)] : index
+    %up_stage_index10 = index.add %up_stage_row_base, %code_position1 : index
+    %up_stage_index1 = index.assume %up_stage_index10 [range(%up_stage_index10, 4864, 9727)] : index
+    view.store %gate_codes0, %weight_words[%gate_stage_index0] : i32, view<9728xi32>
+    view.store %gate_codes1, %weight_words[%gate_stage_index1] : i32, view<9728xi32>
+    view.store %up_codes0, %weight_words[%up_stage_index0] : i32, view<9728xi32>
+    view.store %up_codes1, %weight_words[%up_stage_index1] : i32, view<9728xi32>
+  }
+  func.return
+}
+
 func.def inline @qwen38_q5k_accumulate_fragment(%dot: vector<8xi32>, %activation_scale_f16: vector<8xf16>, %activation_sum_f16: vector<8xf16>, %weight_scale: f32, %weight_minimum_negative: f32, %accumulator: vector<8xf32>) -> (vector<8xf32>) {
   %dot_f32 = vector.sitofp %dot : vector<8xi32> to vector<8xf32>
   %activation_scale = vector.extf %activation_scale_f16 : vector<8xf16> to vector<8xf32>
@@ -310,20 +405,12 @@ func.def inline @qwen38_q5k_contract_group(%weight_group: index, %activation_gro
   func.return %next0, %next1, %next2, %next3 : vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>
 }
 
-kernel.def target(@qwen38_dense_q5_i8_wave32) export("qwen38_linear_q5k_i8_wmma") @qwen38_linear_q5k_i8_wmma(%token_count0: index) {
+// Executes one exact Q5_K x Q8_1 projection specialization. Kernel wrappers
+// supply distinct compile-time shape contracts while sharing this device body.
+func.def inline @qwen38_linear_q5k_i8_wmma_body(%token_count0: index, %input_size0: index, %output_size0: index, %q8_input: buffer, %weight: buffer, %output: buffer) {
   %token_count = index.assume %token_count0 [range(%token_count0, 64, 512), mul(%token_count0, 64)] : index
-  %output_size = config.get @qwen38.linear_q5k_i8_wmma.output_size : index
-  %c1 = index.constant 1 : index
-  %c64 = index.constant 64 : index
-  %c128 = index.constant 128 : index
-  %workgroup_size = index.constant 256 : index
-  %channel_tiles = index.div %output_size, %c128 : index
-  %token_tiles = index.div %token_count, %c64 : index
-  kernel.launch.config workgroups(%channel_tiles, %token_tiles, %c1) workgroup_size(%workgroup_size, %c1, %c1) : index
-} launch(%token_count0: index, %q8_input: buffer, %weight: buffer, %output: buffer) {
-  %token_count = index.assume %token_count0 [range(%token_count0, 64, 512), mul(%token_count0, 64)] : index
-  %input_size = config.get @qwen38.linear_q5k_i8_wmma.input_size : index
-  %output_size = config.get @qwen38.linear_q5k_i8_wmma.output_size : index
+  %input_size = index.assume %input_size0 [range(%input_size0, 256, 32768), mul(%input_size0, 256)] : index
+  %output_size = index.assume %output_size0 [range(%output_size0, 128, 32768), mul(%output_size0, 128)] : index
   %workitem = kernel.workitem.id<x> : index
   %wave0 = kernel.subgroup.id : index
   %wave = index.assume %wave0 [range(%wave0, 0, 7)] : index
@@ -393,6 +480,24 @@ kernel.def target(@qwen38_dense_q5_i8_wave32) export("qwen38_linear_q5k_i8_wmma"
   vector.fragment.store<result> %result1, %output_view[%token_origin1, %channel_origin] shape [%c16, %c16] : vector<8xf32>, view<[%token_count]x[%output_size]xf32>
   vector.fragment.store<result> %result2, %output_view[%token_origin2, %channel_origin] shape [%c16, %c16] : vector<8xf32>, view<[%token_count]x[%output_size]xf32>
   vector.fragment.store<result> %result3, %output_view[%token_origin3, %channel_origin] shape [%c16, %c16] : vector<8xf32>, view<[%token_count]x[%output_size]xf32>
+  func.return
+}
+
+kernel.def target(@qwen38_dense_q5_i8_wave32) export("qwen38_linear_q5k_i8_wmma") @qwen38_linear_q5k_i8_wmma(%token_count0: index) {
+  %token_count = index.assume %token_count0 [range(%token_count0, 64, 512), mul(%token_count0, 64)] : index
+  %output_size = config.get @qwen38.linear_q5k_i8_wmma.output_size : index
+  %c1 = index.constant 1 : index
+  %c64 = index.constant 64 : index
+  %c128 = index.constant 128 : index
+  %workgroup_size = index.constant 256 : index
+  %channel_tiles = index.div %output_size, %c128 : index
+  %token_tiles = index.div %token_count, %c64 : index
+  kernel.launch.config workgroups(%channel_tiles, %token_tiles, %c1) workgroup_size(%workgroup_size, %c1, %c1) : index
+} launch(%token_count0: index, %q8_input: buffer, %weight: buffer, %output: buffer) {
+  %token_count = index.assume %token_count0 [range(%token_count0, 64, 512), mul(%token_count0, 64)] : index
+  %input_size = config.get @qwen38.linear_q5k_i8_wmma.input_size : index
+  %output_size = config.get @qwen38.linear_q5k_i8_wmma.output_size : index
+  func.call @qwen38_linear_q5k_i8_wmma_body(%token_count, %input_size, %output_size, %q8_input, %weight, %output) : (index, index, index, buffer, buffer, buffer)
   kernel.return
 }
 
