@@ -295,6 +295,8 @@ static iree_status_t iree_hal_amdgpu_host_queue_submit_pm4_copy_data(
     return iree_make_status(IREE_STATUS_INTERNAL,
                             "PM4 COPY_DATA payload does not fit IB slot");
   }
+  submission.minimum_acquire_scope =
+      iree_hal_amdgpu_host_queue_buffer_acquire_scope(source_buffer);
   submission.minimum_release_scope =
       iree_hal_amdgpu_host_queue_buffer_release_scope(target_buffer);
   uint64_t submission_epoch = 0;
@@ -572,7 +574,8 @@ iree_status_t iree_hal_amdgpu_host_queue_submit_copy(
   iree_status_t status = iree_hal_amdgpu_host_queue_submit_dispatch_packet(
       queue, resolution, signal_semaphore_list, &dispatch_packet, &kernargs,
       IREE_HAL_AMDGPU_DEVICE_BUFFER_COPY_KERNARG_SIZE, operation_resources,
-      IREE_ARRAYSIZE(operation_resources), IREE_HSA_FENCE_SCOPE_NONE,
+      IREE_ARRAYSIZE(operation_resources),
+      iree_hal_amdgpu_host_queue_buffer_acquire_scope(source_buffer),
       iree_hal_amdgpu_host_queue_buffer_release_scope(target_buffer),
       &profile_event_info, submission_flags, out_ready, &submission_id);
   if (iree_status_is_ok(status) && *out_ready) {
@@ -659,7 +662,9 @@ iree_status_t iree_hal_amdgpu_host_queue_submit_copy_with_action(
           &submission.dispatch_slot->dispatch, &dispatch_packet,
           submission.kernel.kernargs.blocks->data,
           submission.dispatch_completion_signal);
-  submission.minimum_acquire_scope = minimum_acquire_scope;
+  submission.minimum_acquire_scope = iree_hal_amdgpu_host_queue_max_fence_scope(
+      minimum_acquire_scope,
+      iree_hal_amdgpu_host_queue_buffer_acquire_scope(source_buffer));
   submission.minimum_release_scope = iree_hal_amdgpu_host_queue_max_fence_scope(
       minimum_release_scope,
       iree_hal_amdgpu_host_queue_buffer_release_scope(target_buffer));
