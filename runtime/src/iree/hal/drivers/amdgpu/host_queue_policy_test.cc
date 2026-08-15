@@ -53,6 +53,21 @@ TEST(HostQueuePolicyTest, HostVisibleTargetRequiresSystemRelease) {
   iree_hal_buffer_release(device_fine);
 }
 
+TEST(HostQueuePolicyTest, HostVisibleSourceRequiresSystemAcquire) {
+  alignas(IREE_HAL_HEAP_BUFFER_ALIGNMENT) uint64_t storage = 0;
+  const iree_byte_span_t span = iree_make_byte_span(&storage, sizeof(storage));
+
+  iree_hal_buffer_t* host_local = NULL;
+  IREE_ASSERT_OK(WrapBufferWithMemoryType(
+      IREE_HAL_MEMORY_TYPE_HOST_LOCAL | IREE_HAL_MEMORY_TYPE_HOST_VISIBLE |
+          IREE_HAL_MEMORY_TYPE_HOST_COHERENT |
+          IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE,
+      span, &host_local));
+  EXPECT_EQ(iree_hal_amdgpu_host_queue_buffer_acquire_scope(host_local),
+            IREE_HSA_FENCE_SCOPE_SYSTEM);
+  iree_hal_buffer_release(host_local);
+}
+
 // A target the host cannot map adds nothing: the signal list already covers
 // any other-agent consumer, and SYSTEM here would write back the L2 on every
 // device-local transfer.
@@ -64,6 +79,8 @@ TEST(HostQueuePolicyTest, DeviceOnlyTargetAddsNoReleaseScope) {
   IREE_ASSERT_OK(WrapBufferWithMemoryType(IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL,
                                           span, &device_coarse));
   EXPECT_EQ(iree_hal_amdgpu_host_queue_buffer_release_scope(device_coarse),
+            IREE_HSA_FENCE_SCOPE_NONE);
+  EXPECT_EQ(iree_hal_amdgpu_host_queue_buffer_acquire_scope(device_coarse),
             IREE_HSA_FENCE_SCOPE_NONE);
   iree_hal_buffer_release(device_coarse);
 }
