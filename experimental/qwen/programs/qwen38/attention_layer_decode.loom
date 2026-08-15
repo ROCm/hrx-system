@@ -24,7 +24,7 @@ kernel.decl @qwen38_attention_decode() launch(%control: buffer, %query: buffer, 
 // Advances one full-attention layer. The parameter root is immutable and
 // fixed during command-buffer materialization. The residual, control, and
 // cache roots are rebound for each sequence at issue time.
-command.program.def @qwen38_attention_layer_decode(%layer: index, %attention_ordinal: index) launch(%parameters: buffer, %residual: buffer, %control: buffer, %attention_cache: buffer, %attention_output: buffer) where [range(%layer, 0, 63), range(%attention_ordinal, 0, 15)] {
+command.program.def @qwen38_attention_layer_decode(%layer: index, %attention_ordinal: index) launch(%parameters: buffer, %residual: buffer, %control: buffer, %attention_cache: buffer, %attention_output: buffer) where [range(%layer, 0, 64), range(%attention_ordinal, 0, 15)] {
   %token_count = index.constant 1 : index
   %hidden_size = index.constant 5120 : index
   %query_gate_size = index.constant 12288 : index

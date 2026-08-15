@@ -1,0 +1,73 @@
+// Qwen3.8-27B block-64 NextN/MTP decode transition.
+//
+// The target model publishes one normalized hidden row and one token ID. This
+// program combines them through the stored NextN block, advances its private
+// full-attention cache, and publishes the next draft token and hidden row.
+// Shared embedding and output weights remain distinct logical parameter roots
+// so the runtime can bind them as views of the target model's physical slab.
+
+command.program.decl @qwen38_attention_layer_decode(%layer: index, %attention_ordinal: index) launch(%parameters: buffer, %residual: buffer, %control: buffer, %attention_cache: buffer, %attention_output: buffer) where [range(%layer, 0, 64), range(%attention_ordinal, 0, 15)]
+
+kernel.decl @ggml_quantize_q8_1_x4_f32(%token_count: index, %input_size: index) launch(%token_count: index, %input_size: index, %input: buffer, %output: buffer)
+kernel.decl @ggml_linear_q6k_q8_1_x4(%token_count: index, %input_size: index, %output_size: index) launch(%token_count: index, %input_size: index, %output_size: index, %input: buffer, %weight: buffer, %output: buffer)
+kernel.decl @ggml_linear_q8_0_q8_1_x4(%token_count: index, %input_size: index, %output_size: index) launch(%token_count: index, %input_size: index, %output_size: index, %input: buffer, %weight: buffer, %output: buffer)
+kernel.decl @qwen38_rmsnorm_f32_decode() launch(%epsilon: f32, %input: buffer, %weight: buffer, %output: buffer)
+kernel.decl @qwen38_token_embedding_q5k_f32(%token_count: index) launch(%token_count: index, %token_ids: buffer, %weight: buffer, %output: buffer)
+kernel.decl @qwen38_greedy_argmax_f32(%output_size: index) launch(%output_size: index, %logits: buffer, %token_id: buffer)
+kernel.decl @qwen38_decode_commit_token() launch(%control: buffer, %token_ids: buffer)
+
+// Advances one draft token. The token ID and normalized hidden buffers are
+// updated in place after all consumers of their incoming values complete.
+command.program.def public @qwen38_mtp_decode_greedy() launch(%embedding_parameters: buffer, %output_parameters: buffer, %mtp_parameters: buffer, %residual: buffer, %control: buffer, %attention_cache: buffer, %normalized_hidden: buffer, %token_id: buffer) {
+  %token_count = index.constant 1 : index
+  %hidden_size = index.constant 5120 : index
+  %concat_size = index.constant 10240 : index
+  %vocabulary_size = index.constant 248320 : index
+  %mtp_layer = index.constant 64 : index
+  %mtp_attention_ordinal = index.constant 0 : index
+  %epsilon = scalar.constant 0.000001 : f32
+
+  %embedding_weight = command.parameter %embedding_parameters, "token_embd.weight" : view<874086400xi8>
+  %output_weight = command.parameter %output_parameters, "output.weight" : view<1042944000xi8>
+  %embedding_norm_weight = command.parameter %mtp_parameters, "blk.64.nextn.enorm.weight" : view<5120xf32>
+  %hidden_norm_weight = command.parameter %mtp_parameters, "blk.64.nextn.hnorm.weight" : view<5120xf32>
+  %embedding_hidden_weight = command.parameter %mtp_parameters, "blk.64.nextn.eh_proj.weight" : view<55705600xi8>
+  %shared_head_norm_weight = command.parameter %mtp_parameters, "blk.64.nextn.shared_head_norm.weight" : view<5120xf32>
+
+  %c0_offset = index.constant 0 : offset
+  %hidden_bytes = index.constant 20480 : offset
+  %concat_bytes = index.constant 40960 : offset
+  %concat_q8_bytes = index.constant 11520 : offset
+  %attention_bytes = index.constant 24576 : offset
+  %hidden_q8_bytes = index.constant 5760 : offset
+  %logits_bytes = index.constant 993280 : offset
+
+  %embedding = buffer.alloca<global> align(256) %hidden_bytes : buffer
+  kernel.launch @qwen38_token_embedding_q5k_f32[%token_count](%token_count, %token_id, %embedding_weight, %embedding) : [index](index, buffer, view<874086400xi8>, buffer)
+
+  // Placing both normalized rows in one allocation makes their physical
+  // concatenation the exact activation expected by the Q8_0 projection.
+  %normalized_concat = buffer.alloca<global> align(256) %concat_bytes : buffer
+  %normalized_embedding = buffer.view %normalized_concat[%c0_offset] : buffer -> view<5120xf32>
+  %renormalized_hidden = buffer.view %normalized_concat[%hidden_bytes] : buffer -> view<5120xf32>
+  command.concurrent {
+    kernel.launch @qwen38_rmsnorm_f32_decode(%epsilon, %embedding, %embedding_norm_weight, %normalized_embedding) : (f32, buffer, view<5120xf32>, view<5120xf32>)
+    kernel.launch @qwen38_rmsnorm_f32_decode(%epsilon, %normalized_hidden, %hidden_norm_weight, %renormalized_hidden) : (f32, buffer, view<5120xf32>, view<5120xf32>)
+  }
+
+  %normalized_concat_q8 = buffer.alloca<global> align(256) %concat_q8_bytes : buffer
+  kernel.launch @ggml_quantize_q8_1_x4_f32[%token_count, %concat_size](%token_count, %concat_size, %normalized_concat, %normalized_concat_q8) : [index, index](index, index, buffer, buffer)
+  kernel.launch @ggml_linear_q8_0_q8_1_x4[%token_count, %concat_size, %hidden_size](%token_count, %concat_size, %hidden_size, %normalized_concat_q8, %embedding_hidden_weight, %residual) : [index, index, index](index, index, index, buffer, view<55705600xi8>, buffer)
+
+  %attention_output = buffer.alloca<global> align(256) %attention_bytes : buffer
+  command.program.launch @qwen38_attention_layer_decode[%mtp_layer, %mtp_attention_ordinal](%mtp_parameters, %residual, %control, %attention_cache, %attention_output) : [index, index](buffer, buffer, buffer, buffer, buffer)
+
+  %normalized_hidden_q8 = buffer.alloca<global> align(256) %hidden_q8_bytes : buffer
+  %logits = buffer.alloca<global> align(256) %logits_bytes : buffer
+  kernel.launch @qwen38_rmsnorm_f32_decode(%epsilon, %residual, %shared_head_norm_weight, %normalized_hidden) : (f32, buffer, view<5120xf32>, buffer)
+  kernel.launch @ggml_quantize_q8_1_x4_f32[%token_count, %hidden_size](%token_count, %hidden_size, %normalized_hidden, %normalized_hidden_q8) : [index, index](index, index, buffer, buffer)
+  kernel.launch @ggml_linear_q6k_q8_1_x4[%token_count, %hidden_size, %vocabulary_size](%token_count, %hidden_size, %vocabulary_size, %normalized_hidden_q8, %output_weight, %logits) : [index, index, index](index, index, index, buffer, view<1042944000xi8>, buffer)
+  kernel.launch @qwen38_greedy_argmax_f32[%vocabulary_size](%vocabulary_size, %logits, %token_id) : [index](index, buffer, buffer)
+  kernel.launch @qwen38_decode_commit_token(%control, %token_id) : (buffer, buffer)
+  command.return
+}

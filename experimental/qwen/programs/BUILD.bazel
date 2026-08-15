@@ -21,6 +21,7 @@ exports_files([
     "qwen38/model_decode.loom",
     "qwen38/model_config.loom",
     "qwen38/model_prefill.loom",
+    "qwen38/mtp_decode.loom",
     "qwen38/output_head_decode.loom",
     "qwen38/prefill_config.loom",
 ])
@@ -30,6 +31,7 @@ loom_link_module(
     srcs = [
         "qwen38/model_decode.loom",
         "qwen38/model_prefill.loom",
+        "qwen38/mtp_decode.loom",
     ],
     libraries = [
         "qwen38/attention_layer_decode.loom",
@@ -65,6 +67,7 @@ loom_link_module(
         "@qwen38_text_decode_greedy_with_hidden",
         "@qwen38_text_prefill_greedy",
         "@qwen38_text_prefill_greedy_with_hidden",
+        "@qwen38_mtp_decode_greedy",
     ],
     strip_check = True,
 )
