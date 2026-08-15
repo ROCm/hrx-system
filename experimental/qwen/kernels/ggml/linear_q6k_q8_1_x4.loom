@@ -196,7 +196,7 @@ func.def inline @ggml_q6k_q8_1_x4_block_lane(%weight: buffer, %weight_row_byte_b
 // Computes one lane's partial for a complete Q6_K row. Callers choose how
 // rows and activations are tiled, then reduce the returned value by subgroup.
 func.def inline @ggml_q6k_q8_1_x4_row_lane(%input_size: index, %weight: buffer, %weight_row_byte_base: offset, %q8_input: buffer, %q8_row_byte_base: offset, %lane: index) -> (f32) {
-  %bounded_input_size = index.assume %input_size [range(%input_size, 256, 32768), mul(%input_size, 256)] : index
+  %bounded_input_size = index.assume %input_size [range(%input_size, 256, 17408), mul(%input_size, 256)] : index
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
   %c256 = index.constant 256 : index
@@ -216,7 +216,7 @@ func.def inline @ggml_q6k_q8_1_x4_row_lane(%input_size: index, %weight: buffer, 
 // reduction therefore combines four complete blocks per loop iteration while
 // preserving the canonical wave32 unpacking and dot-product primitive.
 func.def inline @ggml_q6k_q8_1_x4_row_lane_wave64_block4(%input_size: index, %weight: buffer, %weight_row_byte_base: offset, %q8_input: buffer, %q8_row_byte_base: offset, %lane: index) -> (f32) {
-  %bounded_input_size = index.assume %input_size [range(%input_size, 256, 32768), mul(%input_size, 256)] : index
+  %bounded_input_size = index.assume %input_size [range(%input_size, 256, 17408), mul(%input_size, 256)] : index
   %bounded_lane = index.assume %lane [range(%lane, 0, 63)] : index
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
@@ -254,7 +254,7 @@ func.def inline @ggml_q6k_q8_1_x4_row_lane_wave64_block4(%input_size: index, %we
 // dense logits tensor or an endpoint reduction.
 func.template<ggml.linear_q6k_q8_1_x4.body> device @ggml_linear_q6k_q8_1_x4_body(%publish_output: i1, %token_count: index, %token0: index, %input_size: index, %output_size: index, %q8_input: buffer, %weight: buffer) -> (f32, index, index, i1, index, index) {
   %bounded_token_count = index.assume %token_count [range(%token_count, 1, 2048)] : index
-  %bounded_input_size = index.assume %input_size [range(%input_size, 256, 32768), mul(%input_size, 256)] : index
+  %bounded_input_size = index.assume %input_size [range(%input_size, 256, 17408), mul(%input_size, 256)] : index
   %bounded_output_size = index.assume %output_size [range(%output_size, 1, 262144)] : index
   %channel_tile = kernel.workgroup.id<x> : index
   %subgroup0 = kernel.subgroup.id : index
@@ -295,79 +295,77 @@ func.template<ggml.linear_q6k_q8_1_x4.body> device @ggml_linear_q6k_q8_1_x4_body
 
 // Dense raw-layout baseline. A 256-thread workgroup carries eight independent
 // wave32 output rows so decode launches enough waves without duplicating Q6_K
-// decoding within a row.
+// decoding within a row. Workload values size the exact launch; configured
+// capacities only constrain device-body specialization and buffer addressing.
 kernel.def export("ggml_linear_q6k_q8_1_x4") @ggml_linear_q6k_q8_1_x4(%token_count: index, %input_size: index, %output_size: index) {
-  %token_capacity = config.get @ggml.linear_q6k_q8_1_x4.token_capacity : index
-  %output_capacity = config.get @ggml.linear_q6k_q8_1_x4.output_capacity : index
+  %bounded_token_count = index.assume %token_count [range(%token_count, 1, 2048)] : index
+  %bounded_output_size = index.assume %output_size [range(%output_size, 1, 262144)] : index
   %c8 = index.constant 8 : index
   %c7 = index.constant 7 : index
   %c1 = index.constant 1 : index
   %workgroup_size = index.constant 256 : index
-  %padded_output_size = index.add %output_capacity, %c7 : index
+  %padded_output_size = index.add %bounded_output_size, %c7 : index
   %output_tiles = index.div %padded_output_size, %c8 : index
-  kernel.launch.config workgroups(%output_tiles, %token_capacity, %c1) workgroup_size(%workgroup_size, %c1, %c1) : index
+  kernel.launch.config workgroups(%output_tiles, %bounded_token_count, %c1) workgroup_size(%workgroup_size, %c1, %c1) : index
 } launch(%token_count: index, %input_size: index, %output_size: index, %q8_input: buffer, %weight: buffer, %output: buffer) {
   %q8_noalias, %weight_noalias, %output_noalias = buffer.assume.noalias %q8_input, %weight, %output : buffer, buffer, buffer
   %token_capacity = config.get @ggml.linear_q6k_q8_1_x4.token_capacity : index
   %output_capacity = config.get @ggml.linear_q6k_q8_1_x4.output_capacity : index
   %bounded_token_count = index.assume %token_count [range(%token_count, 1, 2048), le(%token_count, %token_capacity)] : index
   %bounded_output_size = index.assume %output_size [range(%output_size, 1, 262144), le(%output_size, %output_capacity)] : index
-  %c0 = index.constant 0 : index
   %token0 = kernel.workgroup.id<y> : index
-  %valid_token = index.cmp ult, %token0, %bounded_token_count : index
-  %safe_token = scf.select %valid_token, %token0, %c0 : index
-  %dot, %token, %channel, %valid_channel, %launch_token_count, %output_bound = func.apply<ggml.linear_q6k_q8_1_x4.body>(%valid_token, %bounded_token_count, %safe_token, %input_size, %bounded_output_size, %q8_noalias, %weight_noalias) : (i1, index, index, index, index, buffer, buffer) -> (f32, index, index, i1, index, index)
+  %token = index.assume %token0 [lt(%token0, %token_capacity)] : index
+  %publish_output = scalar.constant true : i1
+  %dot, %launch_token, %channel, %valid_channel, %launch_token_count, %output_bound = func.apply<ggml.linear_q6k_q8_1_x4.body>(%publish_output, %bounded_token_count, %token, %input_size, %bounded_output_size, %q8_noalias, %weight_noalias) : (i1, index, index, index, index, buffer, buffer) -> (f32, index, index, i1, index, index)
   %c0_i32 = scalar.constant 0 : i32
   %c0_offset = index.constant 0 : offset
   %lane = kernel.subgroup.lane.id : index
   %lane_i32 = index.cast %lane : index to i32
   %is_lane_zero = scalar.cmpi eq, %lane_i32, %c0_i32 : i32
-  scf.if %valid_token {
-    scf.if %valid_channel {
-      scf.if %is_lane_zero {
-        %output_view = buffer.view %output_noalias[%c0_offset] : buffer -> view<[%launch_token_count]x[%output_bound]xf32>
-        view.store %dot, %output_view[%token, %channel] : f32, view<[%launch_token_count]x[%output_bound]xf32>
-      }
+  scf.if %valid_channel {
+    scf.if %is_lane_zero {
+      %output_view = buffer.view %output_noalias[%c0_offset] : buffer -> view<[%launch_token_count]x[%output_bound]xf32>
+      view.store %dot, %output_view[%launch_token, %channel] : f32, view<[%launch_token_count]x[%output_bound]xf32>
     }
   }
   kernel.return
 }
 
 // Wave64 vocabulary schedule matching llama.cpp Vulkan's one-row workgroup and
-// four-block concurrency on AMD targets with native wave64 execution.
+// four-block concurrency on AMD targets with native wave64 execution. As above,
+// workload values size the exact launch while capacities specialize the body.
 kernel.def target(@ggml_q6k_q8_gfx1151_wave64) export("ggml_linear_q6k_q8_1_x4") @ggml_linear_q6k_q8_1_x4_wave64_block4(%token_count: index, %input_size: index, %output_size: index) {
-  %token_capacity = config.get @ggml.linear_q6k_q8_1_x4.token_capacity : index
-  %output_capacity = config.get @ggml.linear_q6k_q8_1_x4.output_capacity : index
+  %bounded_token_count = index.assume %token_count [range(%token_count, 1, 2048)] : index
+  %bounded_output_size = index.assume %output_size [range(%output_size, 1, 262144)] : index
   %c1 = index.constant 1 : index
   %subgroup_size = target.subgroup.size : index
-  kernel.launch.config workgroups(%output_capacity, %token_capacity, %c1) workgroup_size(%subgroup_size, %c1, %c1) : index
+  kernel.launch.config workgroups(%bounded_output_size, %bounded_token_count, %c1) workgroup_size(%subgroup_size, %c1, %c1) : index
 } launch(%token_count: index, %input_size: index, %output_size: index, %q8_input: buffer, %weight: buffer, %output: buffer) {
   %q8_noalias, %weight_noalias, %output_noalias = buffer.assume.noalias %q8_input, %weight, %output : buffer, buffer, buffer
   %token_capacity = config.get @ggml.linear_q6k_q8_1_x4.token_capacity : index
   %output_capacity = config.get @ggml.linear_q6k_q8_1_x4.output_capacity : index
   %bounded_token_count = index.assume %token_count [range(%token_count, 1, 2048), le(%token_count, %token_capacity)] : index
-  %bounded_input_size = index.assume %input_size [range(%input_size, 256, 32768), mul(%input_size, 256)] : index
+  %bounded_input_size = index.assume %input_size [range(%input_size, 256, 17408), mul(%input_size, 256)] : index
   %bounded_output_size = index.assume %output_size [range(%output_size, 1, 262144), le(%output_size, %output_capacity)] : index
-  %token = kernel.workgroup.id<y> : index
+  %token0 = kernel.workgroup.id<y> : index
+  %token = index.assume %token0 [lt(%token0, %token_capacity)] : index
   %channel = kernel.workgroup.id<x> : index
   %lane = kernel.subgroup.lane.id : index
-  %valid_token = index.cmp ult, %token, %bounded_token_count : index
   %valid_channel = index.cmp ult, %channel, %bounded_output_size : index
-  %publish_output = scalar.andi %valid_token, %valid_channel : i1
   %c0 = index.constant 0 : index
   %c128 = index.constant 128 : index
   %c144_bytes = index.constant 144 : offset
   %c210_bytes = index.constant 210 : offset
   %c256 = index.constant 256 : index
-  %safe_token = scf.select %valid_token, %token, %c0 : index
-  %safe_channel = scf.select %valid_channel, %channel, %c0 : index
+  %safe_channel0 = scf.select %valid_channel, %channel, %c0 : index
+  %safe_channel = index.assume %safe_channel0 [lt(%safe_channel0, %output_capacity)] : index
   %q6_block_count = index.div %bounded_input_size, %c256 : index
   %weight_row_bytes = index.scale %q6_block_count, %c210_bytes : index, offset -> offset
   %weight_row_byte_base = index.scale %safe_channel, %weight_row_bytes : index, offset -> offset
   %q8_group_count = index.div %bounded_input_size, %c128 : index
   %q8_row_bytes = index.scale %q8_group_count, %c144_bytes : index, offset -> offset
-  %q8_row_byte_base = index.scale %safe_token, %q8_row_bytes : index, offset -> offset
-  %lane_acc = scf.if %publish_output -> (f32) {
+  %q8_row_byte_base = index.scale %token, %q8_row_bytes : index, offset -> offset
+  %lane_acc = scf.if %valid_channel -> (f32) {
     %value = func.call @ggml_q6k_q8_1_x4_row_lane_wave64_block4(%bounded_input_size, %weight_noalias, %weight_row_byte_base, %q8_noalias, %q8_row_byte_base, %lane) : (index, buffer, offset, buffer, offset, index) -> (f32)
     scf.yield %value : f32
   } else {
@@ -376,7 +374,7 @@ kernel.def target(@ggml_q6k_q8_gfx1151_wave64) export("ggml_linear_q6k_q8_1_x4")
   }
   %dot = kernel.subgroup.reduce<addf> %lane_acc : f32
   %is_lane_zero = index.cmp eq, %lane, %c0 : index
-  scf.if %publish_output {
+  scf.if %valid_channel {
     scf.if %is_lane_zero {
       %c0_offset = index.constant 0 : offset
       %output_view = buffer.view %output_noalias[%c0_offset] : buffer -> view<[%bounded_token_count]x[%bounded_output_size]xf32>

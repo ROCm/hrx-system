@@ -162,25 +162,29 @@ func.template<ggml.quantize_q8_1_x4.group_body> device @ggml_quantize_q8_1_x4_gr
 // A 32-lane workgroup owns one physical group. Each eight-lane cohort loads
 // four values, computes one Q8_1 block, and writes disjoint metadata and packed
 // words. The LDS reductions make the independent eight-lane cohorts explicit.
+// Workload values size the exact launch; group_capacity remains a device-body
+// specialization and addressing bound.
 kernel.def @ggml_quantize_q8_1_x4_f32(%token_count: index, %input_size: index) {
-  %group_capacity = config.get @ggml.quantize_q8_1_x4.group_capacity : index
+  %bounded_token_count = index.assume %token_count [range(%token_count, 1, 2048)] : index
+  %bounded_input_size = index.assume %input_size [range(%input_size, 128, 32768), mul(%input_size, 128)] : index
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 32 : index
-  kernel.launch.config workgroups(%group_capacity, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+  %elements_per_group = index.constant 128 : index
+  %element_count = index.mul %bounded_token_count, %bounded_input_size : index
+  %group_count = index.div %element_count, %elements_per_group : index
+  kernel.launch.config workgroups(%group_count, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
 } launch(%token_count: index, %input_size: index, %input: buffer, %output: buffer) {
   %group_capacity = config.get @ggml.quantize_q8_1_x4.group_capacity : index
   %bounded_token_count = index.assume %token_count [range(%token_count, 1, 2048)] : index
   %bounded_input_size = index.assume %input_size [range(%input_size, 128, 32768), mul(%input_size, 128)] : index
   %elements_per_group = index.constant 128 : index
-  %c0 = index.constant 0 : index
   %element_count = index.mul %bounded_token_count, %bounded_input_size : index
   %group_count0 = index.div %element_count, %elements_per_group : index
   %group_count = index.assume %group_count0 [range(%group_count0, 1, 524288), le(%group_count0, %group_capacity)] : index
   %group0 = kernel.workgroup.id<x> : index
-  %valid_group = index.cmp ult, %group0, %group_count : index
-  %safe_group = scf.select %valid_group, %group0, %c0 : index
-  %group = index.assume %safe_group [lt(%safe_group, %group_count)] : index
-  func.apply<ggml.quantize_q8_1_x4.group_body>(%valid_group, %group_count, %group, %input, %output) : (i1, index, index, buffer, buffer)
+  %group = index.assume %group0 [lt(%group0, %group_capacity)] : index
+  %publish_output = scalar.constant true : i1
+  func.apply<ggml.quantize_q8_1_x4.group_body>(%publish_output, %group_count, %group, %input, %output) : (i1, index, index, buffer, buffer)
   kernel.return
 }
 
