@@ -23,12 +23,18 @@
 #define QWEN38_HIDDEN_ELEMENT_COUNT 5120
 #define QWEN38_HIDDEN_BYTE_LENGTH 20480
 #define QWEN38_DECODE_CAPACITY 128
+#define QWEN38_TOKEN_BUFFER_ELEMENT_COUNT (QWEN38_DECODE_CAPACITY + 1)
+#define QWEN38_VOCABULARY_SIZE 248320
 #define QWEN38_GDN_STATE_BYTE_LENGTH 156893184
 #define QWEN38_ATTENTION_CACHE_BYTE_LENGTH 8388608
 
 IREE_FLAG(string, output, "", "Optional raw F32 residual output path.");
 IREE_FLAG(int32_t, transition_count, 1,
-          "Number of synthetic in-place command-program replays.");
+          "Number of greedy generation transitions.");
+IREE_FLAG(int32_t, initial_token_id, 0,
+          "Device token consumed by the first generation transition.");
+IREE_FLAG(int32_t, initial_position, 0,
+          "Absolute position of the initial token.");
 
 static const char* const qwen38_decode_body_usage =
     "Advances one Qwen3.8 decode transition and selects a greedy token "
@@ -40,7 +46,9 @@ static const char* const qwen38_decode_body_usage =
     "\n"
     "Optional output:\n"
     "  --output=<raw F32 residual path>\n"
-    "  --transition_count=<positive synthetic replay count up to 128>\n";
+    "  --transition_count=<positive generation count up to 128>\n"
+    "  --initial_token_id=<token ID in [0, 248320)>\n"
+    "  --initial_position=<absolute initial token position>\n";
 
 static iree_status_t qwen38_allocate_buffer(
     iree_hal_device_t* device, iree_hal_memory_type_t memory_type,
@@ -141,7 +149,9 @@ static iree_status_t qwen38_decode_body_run(void) {
   iree_hal_buffer_t* token_id_buffer = NULL;
   iree_hal_buffer_t* transient_buffer = NULL;
   float* residual_values = NULL;
-  int32_t token_id = -1;
+  int32_t control_values[2] = {0, 0};
+  int32_t token_ids[QWEN38_TOKEN_BUFFER_ELEMENT_COUNT];
+  memset(token_ids, 0, sizeof(token_ids));
   iree_hal_profiling_from_flags_t* profiling = NULL;
 
   iree_status_t status = iree_ok_status();
@@ -150,6 +160,23 @@ static iree_status_t qwen38_decode_body_run(void) {
     status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "--transition_count must be between 1 and %d",
                               QWEN38_DECODE_CAPACITY);
+  }
+  if (iree_status_is_ok(status) &&
+      (FLAG_initial_token_id < 0 ||
+       FLAG_initial_token_id >= QWEN38_VOCABULARY_SIZE)) {
+    status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "--initial_token_id must be between 0 and %d",
+                              QWEN38_VOCABULARY_SIZE - 1);
+  }
+  if (iree_status_is_ok(status) &&
+      (FLAG_initial_position < 0 ||
+       FLAG_initial_position >
+           QWEN38_DECODE_CAPACITY - FLAG_transition_count)) {
+    status = iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "--initial_position plus --transition_count must fit the %d-token "
+        "decode cache",
+        QWEN38_DECODE_CAPACITY);
   }
   if (iree_status_is_ok(status)) {
     status = qwen_tooling_runtime_context_initialize_from_flags(
@@ -187,7 +214,7 @@ static iree_status_t qwen38_decode_body_run(void) {
     status = qwen38_allocate_buffer(
         device, IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL,
         IREE_HAL_BUFFER_USAGE_STORAGE | IREE_HAL_BUFFER_USAGE_TRANSFER,
-        /*minimum_alignment=*/64, sizeof(int32_t), &control_buffer);
+        /*minimum_alignment=*/64, sizeof(control_values), &control_buffer);
   }
   if (iree_status_is_ok(status)) {
     status = qwen38_allocate_buffer(
@@ -207,7 +234,7 @@ static iree_status_t qwen38_decode_body_run(void) {
     status = qwen38_allocate_buffer(
         device, IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL,
         IREE_HAL_BUFFER_USAGE_STORAGE | IREE_HAL_BUFFER_USAGE_TRANSFER,
-        /*minimum_alignment=*/64, sizeof(token_id), &token_id_buffer);
+        /*minimum_alignment=*/64, sizeof(token_ids), &token_id_buffer);
   }
   if (iree_status_is_ok(status)) {
     status = qwen38_allocate_buffer(
@@ -222,12 +249,15 @@ static iree_status_t qwen38_decode_body_run(void) {
         (void**)&residual_values);
   }
   if (iree_status_is_ok(status)) {
-    for (iree_host_size_t i = 0; i < QWEN38_HIDDEN_ELEMENT_COUNT; ++i) {
-      const int32_t centered = (int32_t)(i % 257) - 128;
-      residual_values[i] = (float)centered / 128.0f;
-    }
+    control_values[0] = FLAG_initial_position;
     status = iree_hal_device_transfer_h2d(
-        device, residual_values, residual_buffer, 0, QWEN38_HIDDEN_BYTE_LENGTH,
+        device, control_values, control_buffer, 0, sizeof(control_values),
+        IREE_HAL_TRANSFER_BUFFER_FLAG_DEFAULT, iree_infinite_timeout());
+  }
+  if (iree_status_is_ok(status)) {
+    token_ids[0] = FLAG_initial_token_id;
+    status = iree_hal_device_transfer_h2d(
+        device, token_ids, token_id_buffer, 0, sizeof(token_ids),
         IREE_HAL_TRANSFER_BUFFER_FLAG_DEFAULT, iree_infinite_timeout());
   }
   if (iree_status_is_ok(status)) {
@@ -282,20 +312,15 @@ static iree_status_t qwen38_decode_body_run(void) {
     };
     status =
         iree_hal_begin_profiling_from_flags(device, host_allocator, &profiling);
-    for (int32_t position = 0;
-         position < FLAG_transition_count && iree_status_is_ok(status);
-         ++position) {
-      status = iree_hal_device_transfer_h2d(
-          device, &position, control_buffer, 0, sizeof(position),
-          IREE_HAL_TRANSFER_BUFFER_FLAG_DEFAULT, iree_infinite_timeout());
-      if (iree_status_is_ok(status)) {
-        status = qwen38_submit_and_wait(
-            device, qwen_tooling_command_program_command_buffer(program),
-            (iree_hal_buffer_binding_table_t){
-                .count = IREE_ARRAYSIZE(bindings),
-                .bindings = bindings,
-            });
-      }
+    for (int32_t transition = 0;
+         transition < FLAG_transition_count && iree_status_is_ok(status);
+         ++transition) {
+      status = qwen38_submit_and_wait(
+          device, qwen_tooling_command_program_command_buffer(program),
+          (iree_hal_buffer_binding_table_t){
+              .count = IREE_ARRAYSIZE(bindings),
+              .bindings = bindings,
+          });
     }
     status =
         iree_status_join(status, iree_hal_end_profiling_from_flags(profiling));
@@ -308,8 +333,21 @@ static iree_status_t qwen38_decode_body_run(void) {
   }
   if (iree_status_is_ok(status)) {
     status = iree_hal_device_transfer_d2h(
-        device, token_id_buffer, 0, &token_id, sizeof(token_id),
+        device, token_id_buffer, 0, token_ids, sizeof(token_ids),
         IREE_HAL_TRANSFER_BUFFER_FLAG_DEFAULT, iree_infinite_timeout());
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_device_transfer_d2h(
+        device, control_buffer, 0, control_values, sizeof(control_values),
+        IREE_HAL_TRANSFER_BUFFER_FLAG_DEFAULT, iree_infinite_timeout());
+  }
+  if (iree_status_is_ok(status) &&
+      (control_values[0] != FLAG_initial_position + FLAG_transition_count ||
+       control_values[1] != FLAG_transition_count)) {
+    status = iree_make_status(IREE_STATUS_DATA_LOSS,
+                              "decode control advanced to [position=%" PRId32
+                              ", generated=%" PRId32 "]",
+                              control_values[0], control_values[1]);
   }
 
   double sum = 0.0;
@@ -350,8 +388,13 @@ static iree_status_t qwen38_decode_body_run(void) {
         FLAG_transition_count, program_info->command_count,
         program_info->parameter_count,
         (uint64_t)qwen_tooling_command_program_parameter_byte_length(program),
-        (uint64_t)program_info->transient.required_byte_length, token_id,
-        minimum, maximum, sum, sum_squares);
+        (uint64_t)program_info->transient.required_byte_length,
+        token_ids[FLAG_transition_count], minimum, maximum, sum, sum_squares);
+    fprintf(stdout, "generated token IDs:");
+    for (int32_t i = 0; i < FLAG_transition_count; ++i) {
+      fprintf(stdout, " %" PRId32, token_ids[i + 1]);
+    }
+    fputc('\n', stdout);
   }
 
   status =

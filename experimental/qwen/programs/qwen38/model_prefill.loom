@@ -8,6 +8,9 @@
 
 command.program.decl @qwen38_gdn_layer_prefill(%token_count: index, %layer: index, %gdn_ordinal: index) launch(%parameters: buffer, %residual: buffer, %gdn_state: buffer, %control: buffer) where [range(%token_count, 1, 512), range(%layer, 0, 63), range(%gdn_ordinal, 0, 47)]
 command.program.decl @qwen38_attention_layer_prefill(%token_count: index, %layer: index, %attention_ordinal: index) launch(%parameters: buffer, %residual: buffer, %attention_cache: buffer, %control: buffer, %attention_output: buffer) where [range(%token_count, 1, 512), range(%layer, 0, 63), range(%attention_ordinal, 0, 15)]
+command.program.decl @qwen38_output_head_greedy(%residual_offset: offset) launch(%parameters: buffer, %residual: buffer, %token_id: buffer)
+kernel.decl @qwen38_token_embedding_q5k_f32(%token_count: index) launch(%token_count: index, %token_ids: buffer, %weight: buffer, %output: buffer)
+kernel.decl @qwen38_prefill_finish_control() launch(%control: buffer)
 
 // Advances the complete base-model body over one causal token span. Token
 // count and the absolute first-token position are also read from the issue-time
@@ -43,5 +46,21 @@ command.program.def public @qwen38_text_prefill_body(%token_count: index) launch
     command.program.launch @qwen38_gdn_layer_prefill[%token_count, %layer2, %gdn_ordinal2](%parameters, %residual, %gdn_state, %control) : [index, index, index](buffer, buffer, buffer, buffer)
     command.program.launch @qwen38_attention_layer_prefill[%token_count, %attention_layer, %group](%parameters, %residual, %attention_cache, %control, %attention_output) : [index, index, index](buffer, buffer, buffer, buffer, buffer)
   }
+  command.return
+}
+
+// Embeds one prompt span, advances every base-model layer, and publishes the
+// first greedy continuation token. The final control update hands the same
+// persistent state directly to qwen38_text_decode_greedy.
+command.program.def public @qwen38_text_prefill_greedy(%token_count: index) launch(%parameters: buffer, %residual: buffer, %control: buffer, %gdn_state: buffer, %attention_cache: buffer, %token_ids: buffer) where [range(%token_count, 1, 512)] {
+  %c1 = index.constant 1 : index
+  %hidden_row_bytes = index.constant 20480 : offset
+  %embedding_weight = command.parameter %parameters, "token_embd.weight" : view<874086400xi8>
+  kernel.launch @qwen38_token_embedding_q5k_f32[%token_count](%token_count, %token_ids, %embedding_weight, %residual) : [index](index, buffer, view<874086400xi8>, buffer)
+  command.program.launch @qwen38_text_prefill_body[%token_count](%parameters, %residual, %control, %gdn_state, %attention_cache) : [index](buffer, buffer, buffer, buffer, buffer)
+  %last_token = index.sub %token_count, %c1 : index
+  %last_residual_offset = index.scale %last_token, %hidden_row_bytes : index, offset -> offset
+  command.program.launch @qwen38_output_head_greedy[%last_residual_offset](%parameters, %residual, %token_ids) : [offset](buffer, buffer, buffer)
+  kernel.launch @qwen38_prefill_finish_control(%control) : (buffer)
   command.return
 }

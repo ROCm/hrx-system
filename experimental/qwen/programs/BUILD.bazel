@@ -19,10 +19,62 @@ exports_files([
     "qwen38/gdn_layer_decode.loom",
     "qwen38/gdn_layer_prefill.loom",
     "qwen38/model_decode.loom",
+    "qwen38/model_config.loom",
     "qwen38/model_prefill.loom",
     "qwen38/output_head_decode.loom",
     "qwen38/prefill_config.loom",
 ])
+
+loom_link_module(
+    name = "qwen38_text_model_linked",
+    srcs = [
+        "qwen38/model_decode.loom",
+        "qwen38/model_prefill.loom",
+    ],
+    libraries = [
+        "qwen38/attention_layer_decode.loom",
+        "qwen38/attention_layer_prefill.loom",
+        "qwen38/gdn_layer_decode.loom",
+        "qwen38/gdn_layer_prefill.loom",
+        "qwen38/model_config.loom",
+        "qwen38/output_head_decode.loom",
+        "//experimental/qwen/kernels:ggml/linear_q4k_q8_1_x4.loom",
+        "//experimental/qwen/kernels:ggml/linear_q5k_q8_1_x4.loom",
+        "//experimental/qwen/kernels:ggml/linear_q6k_f32_decode.loom",
+        "//experimental/qwen/kernels:ggml/linear_q6k_q8_1_x4.loom",
+        "//experimental/qwen/kernels:ggml/linear_q8_0_q8_1_x4.loom",
+        "//experimental/qwen/kernels:ggml/linear_qk_common.loom",
+        "//experimental/qwen/kernels:ggml/quantize_q8_1_x4.loom",
+        "//experimental/qwen/kernels:qwen38/attention_common.loom",
+        "//experimental/qwen/kernels:qwen38/attention_decode.loom",
+        "//experimental/qwen/kernels:qwen38/attention_prefill.loom",
+        "//experimental/qwen/kernels:qwen38/attention_prefill_wmma.loom",
+        "//experimental/qwen/kernels:qwen38/decode_control.loom",
+        "//experimental/qwen/kernels:qwen38/gdn_decode.loom",
+        "//experimental/qwen/kernels:qwen38/gdn_prefill.loom",
+        "//experimental/qwen/kernels:qwen38/greedy_argmax.loom",
+        "//experimental/qwen/kernels:qwen38/layer_decode.loom",
+        "//experimental/qwen/kernels:qwen38/layer_prefill.loom",
+        "//experimental/qwen/kernels:qwen38/linear_q5k_f16_wmma.loom",
+        "//experimental/qwen/kernels:qwen38/linear_q6k_f16_wmma.loom",
+        "//experimental/qwen/kernels:qwen38/token_embedding.loom",
+    ],
+    mode = "selective",
+    roots = [
+        "@qwen38_text_decode_greedy",
+        "@qwen38_text_prefill_greedy",
+    ],
+    strip_check = True,
+)
+
+iree_c_embed_data(
+    name = "qwen38_text_model_source",
+    srcs = [":qwen38_text_model_linked"],
+    c_file_output = "qwen38_text_model_source.c",
+    flatten = True,
+    h_file_output = "qwen38_text_model_source.h",
+    identifier = "qwen38_text_model_source",
+)
 
 loom_link_module(
     name = "qwen38_text_decode_body_linked",
@@ -41,9 +93,11 @@ loom_link_module(
         "//experimental/qwen/kernels:ggml/quantize_q8_1_x4.loom",
         "//experimental/qwen/kernels:qwen38/attention_common.loom",
         "//experimental/qwen/kernels:qwen38/attention_decode.loom",
+        "//experimental/qwen/kernels:qwen38/decode_control.loom",
         "//experimental/qwen/kernels:qwen38/gdn_decode.loom",
         "//experimental/qwen/kernels:qwen38/greedy_argmax.loom",
         "//experimental/qwen/kernels:qwen38/layer_decode.loom",
+        "//experimental/qwen/kernels:qwen38/token_embedding.loom",
     ],
     mode = "selective",
     roots = [
@@ -68,6 +122,7 @@ loom_link_module(
     libraries = [
         "qwen38/attention_layer_prefill.loom",
         "qwen38/gdn_layer_prefill.loom",
+        "qwen38/output_head_decode.loom",
         "qwen38/prefill_config.loom",
         "//experimental/qwen/kernels:ggml/linear_q4k_q8_1_x4.loom",
         "//experimental/qwen/kernels:ggml/linear_q5k_q8_1_x4.loom",
@@ -78,13 +133,20 @@ loom_link_module(
         "//experimental/qwen/kernels:qwen38/attention_common.loom",
         "//experimental/qwen/kernels:qwen38/attention_prefill.loom",
         "//experimental/qwen/kernels:qwen38/attention_prefill_wmma.loom",
+        "//experimental/qwen/kernels:qwen38/decode_control.loom",
         "//experimental/qwen/kernels:qwen38/gdn_prefill.loom",
+        "//experimental/qwen/kernels:qwen38/greedy_argmax.loom",
+        "//experimental/qwen/kernels:qwen38/layer_decode.loom",
         "//experimental/qwen/kernels:qwen38/layer_prefill.loom",
         "//experimental/qwen/kernels:qwen38/linear_q5k_f16_wmma.loom",
         "//experimental/qwen/kernels:qwen38/linear_q6k_f16_wmma.loom",
+        "//experimental/qwen/kernels:qwen38/token_embedding.loom",
     ],
     mode = "selective",
-    roots = ["@qwen38_text_prefill_body"],
+    roots = [
+        "@qwen38_text_prefill_body",
+        "@qwen38_text_prefill_greedy",
+    ],
     strip_check = True,
 )
 

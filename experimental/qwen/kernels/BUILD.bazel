@@ -25,6 +25,7 @@ exports_files([
     "qwen38/attention_decode.loom",
     "qwen38/attention_prefill.loom",
     "qwen38/attention_prefill_wmma.loom",
+    "qwen38/decode_control.loom",
     "qwen38/ffn_gate_up_q5k_i8_wmma.loom",
     "qwen38/ffn_prepare_q8_1.loom",
     "qwen38/gdn_decode.loom",
@@ -40,6 +41,7 @@ exports_files([
     "qwen38/linear_q6k_i8_wmma.loom",
     "qwen38/linear_q6k_i8_wmma_tiled.loom",
     "qwen38/q8_tile_64x64.loom",
+    "qwen38/token_embedding.loom",
 ])
 
 loom_link_module(
@@ -55,6 +57,20 @@ loom_link_module(
         "qwen38/attention_prefill_wmma.loom",
     ],
     libraries = ["qwen38/attention_common.loom"],
+)
+
+loom_link_module(
+    name = "qwen38_token_embedding_linked",
+    srcs = ["qwen38/token_embedding.loom"],
+    libraries = [
+        "ggml/linear_q5k_q8_1_x4.loom",
+        "ggml/linear_qk_common.loom",
+    ],
+)
+
+loom_link_module(
+    name = "qwen38_decode_control_linked",
+    srcs = ["qwen38/decode_control.loom"],
 )
 
 loom_link_module(

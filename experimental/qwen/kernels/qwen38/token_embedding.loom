@@ -1,0 +1,223 @@
+// Exact Qwen3.8 Q5_K token embedding gather.
+//
+// Token IDs remain device resident across generation steps. Each workgroup
+// gathers one immutable GGUF embedding row and expands it directly to the F32
+// residual ABI consumed by the base-model command programs.
+
+func.decl @ggml_q5k_chunk(%weight: buffer, %row_byte_base: offset, %q5_block: index, %q5_group: index, %q5_half: index) -> (vector<16xi8>, f32, f32)
+
+kernel.def export("qwen38_token_embedding_q5k_f32") @qwen38_token_embedding_q5k_f32(%token_count0: index) {
+  %token_count = index.assume %token_count0 [range(%token_count0, 1, 512)] : index
+  %c1 = index.constant 1 : index
+  %workgroup_size = index.constant 256 : index
+  kernel.launch.config workgroups(%token_count, %c1, %c1) workgroup_size(%workgroup_size, %c1, %c1) : index
+} launch(%token_count0: index, %token_ids: buffer, %weight: buffer, %output: buffer) {
+  %token_count = index.assume %token_count0 [range(%token_count0, 1, 512)] : index
+  %token0 = kernel.workgroup.id<x> : index
+  %token = index.assume %token0 [lt(%token0, %token_count)] : index
+  %workitem0 = kernel.workitem.id<x> : index
+  %workitem = index.assume %workitem0 [range(%workitem0, 0, 255)] : index
+  %c0_offset = index.constant 0 : offset
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %c8 = index.constant 8 : index
+  %c16 = index.constant 16 : index
+  %c256 = index.constant 256 : index
+  %chunk_count = index.constant 320 : index
+  %row_bytes = index.constant 3520 : offset
+  %token_ids_noalias, %weight_noalias, %output_noalias = buffer.assume.noalias %token_ids, %weight, %output : buffer, buffer, buffer
+  %token_ids_view = buffer.view %token_ids_noalias[%c0_offset] : buffer -> view<[%token_count]xi32>
+  %output_view = buffer.view %output_noalias[%c0_offset] : buffer -> view<[%token_count]x5120xf32>
+  %token_id_i32 = view.load %token_ids_view[%token] : view<[%token_count]xi32> -> i32
+  %token_id0 = index.cast %token_id_i32 : i32 to index
+  %token_id = index.assume %token_id0 [range(%token_id0, 0, 248319)] : index
+  %row_byte_base = index.scale %token_id, %row_bytes : index, offset -> offset
+  scf.for %chunk = [%workitem to %chunk_count step %c256] {
+    %q5_block = index.div %chunk, %c16 : index
+    %block_chunk = index.rem %chunk, %c16 : index
+    %q5_group0 = index.div %block_chunk, %c2 : index
+    %q5_group = index.assume %q5_group0 [range(%q5_group0, 0, 7)] : index
+    %q5_half0 = index.rem %block_chunk, %c2 : index
+    %q5_half = index.assume %q5_half0 [range(%q5_half0, 0, 1)] : index
+    %quantized, %d_scale, %dmin_scale = func.call @ggml_q5k_chunk(%weight_noalias, %row_byte_base, %q5_block, %q5_group, %q5_half) : (buffer, offset, index, index, index) -> (vector<16xi8>, f32, f32)
+    %codes = vector.uitofp %quantized : vector<16xi8> to vector<16xf32>
+    %d_scale_vector = vector.splat %d_scale : vector<16xf32>
+    %dmin_scale_vector = vector.splat %dmin_scale : vector<16xf32>
+    %scaled = vector.mulf %codes, %d_scale_vector : vector<16xf32>
+    %values = vector.subf %scaled, %dmin_scale_vector : vector<16xf32>
+    %element_base = index.mul %chunk, %c16 : index
+    vector.store %values, %output_view[%token, %element_base] : vector<16xf32>, view<[%token_count]x5120xf32>
+  }
+  kernel.return
+}
+
+// Independent scalar physical-layout decoder for the differential check.
+kernel.def @qwen38_token_embedding_q5k_f32_reference(%token_count0: index) {
+  %token_count = index.assume %token_count0 [range(%token_count0, 1, 512)] : index
+  %c1 = index.constant 1 : index
+  %workgroup_size = index.constant 256 : index
+  kernel.launch.config workgroups(%token_count, %c1, %c1) workgroup_size(%workgroup_size, %c1, %c1) : index
+} launch(%token_count0: index, %token_ids: buffer, %weight: buffer, %output: buffer) {
+  %token_count = index.assume %token_count0 [range(%token_count0, 1, 512)] : index
+  %token0 = kernel.workgroup.id<x> : index
+  %token = index.assume %token0 [lt(%token0, %token_count)] : index
+  %workitem0 = kernel.workitem.id<x> : index
+  %workitem = index.assume %workitem0 [range(%workitem0, 0, 255)] : index
+  %workgroup_size = index.constant 256 : index
+  %hidden_size = index.constant 5120 : index
+  %c0_offset = index.constant 0 : offset
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %c4 = index.constant 4 : index
+  %c15 = index.constant 15 : index
+  %c16 = index.constant 16 : index
+  %c32 = index.constant 32 : index
+  %c256 = index.constant 256 : index
+  %row_bytes = index.constant 3520 : offset
+  %block_bytes = index.constant 176 : offset
+  %scale_byte_add = index.constant 4 : offset
+  %high_byte_add = index.constant 16 : offset
+  %code_byte_add = index.constant 48 : offset
+  %c0_i32 = scalar.constant 0 : i32
+  %c1_i32 = scalar.constant 1 : i32
+  %c4_i32 = scalar.constant 4 : i32
+  %c6_i32 = scalar.constant 6 : i32
+  %c15_i32 = scalar.constant 15 : i32
+  %c16_i32 = scalar.constant 16 : i32
+  %c63_i32 = scalar.constant 63 : i32
+  %token_ids_noalias, %weight_noalias, %output_noalias = buffer.assume.noalias %token_ids, %weight, %output : buffer, buffer, buffer
+  %token_ids_view = buffer.view %token_ids_noalias[%c0_offset] : buffer -> view<[%token_count]xi32>
+  %output_view = buffer.view %output_noalias[%c0_offset] : buffer -> view<[%token_count]x5120xf32>
+  %token_id_i32 = view.load %token_ids_view[%token] : view<[%token_count]xi32> -> i32
+  %token_id0 = index.cast %token_id_i32 : i32 to index
+  %token_id = index.assume %token_id0 [range(%token_id0, 0, 248319)] : index
+  %weight_row_byte_base = index.scale %token_id, %row_bytes : index, offset -> offset
+  scf.for %channel0 = [%workitem to %hidden_size step %workgroup_size] {
+    %channel = index.assume %channel0 [range(%channel0, 0, 5119)] : index
+    %q5_block = index.div %channel, %c256 : index
+    %block_channel = index.rem %channel, %c256 : index
+    %group = index.div %block_channel, %c32 : index
+    %group_channel = index.rem %block_channel, %c32 : index
+    %code_page = index.div %group, %c2 : index
+    %code_page_base = index.mul %code_page, %c32 : index
+    %code_index = index.add %code_page_base, %group_channel : index
+    %block_byte_add = index.scale %q5_block, %block_bytes : index, offset -> offset
+    %block_byte_base = index.add %weight_row_byte_base, %block_byte_add : offset
+    %scale_byte_base = index.add %block_byte_base, %scale_byte_add : offset
+    %high_byte_base = index.add %block_byte_base, %high_byte_add : offset
+    %code_byte_base = index.add %block_byte_base, %code_byte_add : offset
+    %half_view = buffer.view %weight_noalias[%block_byte_base] : buffer -> view<2xf16>
+    %scale_view = buffer.view %weight_noalias[%scale_byte_base] : buffer -> view<12xi8>
+    %high_view = buffer.view %weight_noalias[%high_byte_base] : buffer -> view<32xi8>
+    %code_view = buffer.view %weight_noalias[%code_byte_base] : buffer -> view<128xi8>
+    %d_f16 = view.load %half_view[0] : view<2xf16> -> f16
+    %dmin_f16 = view.load %half_view[1] : view<2xf16> -> f16
+    %d = scalar.extf %d_f16 : f16 to f32
+    %dmin = scalar.extf %dmin_f16 : f16 to f32
+    %packed_code_i8 = view.load %code_view[%code_index] : view<128xi8> -> i8
+    %packed_code = scalar.extui %packed_code_i8 : i8 to i32
+    %group_nibble = index.rem %group, %c2 : index
+    %uses_high_nibble = index.cmp eq, %group_nibble, %c1 : index
+    %low_code = scf.if %uses_high_nibble -> (i32) {
+      %value = scalar.shrui %packed_code, %c4_i32 : i32
+      scf.yield %value : i32
+    } else {
+      %value = scalar.andi %packed_code, %c15_i32 : i32
+      scf.yield %value : i32
+    }
+    %high_i8 = view.load %high_view[%group_channel] : view<32xi8> -> i8
+    %high = scalar.extui %high_i8 : i8 to i32
+    %group_i32 = index.cast %group : index to i32
+    %high_mask = scalar.shli %c1_i32, %group_i32 : i32
+    %high_bit = scalar.andi %high, %high_mask : i32
+    %has_high_bit = scalar.cmpi ne, %high_bit, %c0_i32 : i32
+    %code = scf.if %has_high_bit -> (i32) {
+      %value = scalar.addi %low_code, %c16_i32 : i32
+      scf.yield %value : i32
+    } else {
+      scf.yield %low_code : i32
+    }
+    %is_low_group = index.cmp ult, %group, %c4 : index
+    %scale, %minimum = scf.if %is_low_group -> (i32, i32) {
+      %minimum_index = index.add %group, %c4 : index
+      %scale_i8 = view.load %scale_view[%group] : view<12xi8> -> i8
+      %minimum_i8 = view.load %scale_view[%minimum_index] : view<12xi8> -> i8
+      %scale_u8 = scalar.extui %scale_i8 : i8 to i32
+      %minimum_u8 = scalar.extui %minimum_i8 : i8 to i32
+      %scale_low6 = scalar.andi %scale_u8, %c63_i32 : i32
+      %minimum_low6 = scalar.andi %minimum_u8, %c63_i32 : i32
+      scf.yield %scale_low6, %minimum_low6 : i32, i32
+    } else {
+      %packed_index = index.add %group, %c4 : index
+      %scale_high_index = index.sub %group, %c4 : index
+      %packed_i8 = view.load %scale_view[%packed_index] : view<12xi8> -> i8
+      %scale_high_i8 = view.load %scale_view[%scale_high_index] : view<12xi8> -> i8
+      %minimum_high_i8 = view.load %scale_view[%group] : view<12xi8> -> i8
+      %packed = scalar.extui %packed_i8 : i8 to i32
+      %scale_high = scalar.extui %scale_high_i8 : i8 to i32
+      %minimum_high = scalar.extui %minimum_high_i8 : i8 to i32
+      %scale_low4 = scalar.andi %packed, %c15_i32 : i32
+      %minimum_low4 = scalar.shrui %packed, %c4_i32 : i32
+      %scale_high2_raw = scalar.shrui %scale_high, %c6_i32 : i32
+      %minimum_high2_raw = scalar.shrui %minimum_high, %c6_i32 : i32
+      %scale_high2 = scalar.shli %scale_high2_raw, %c4_i32 : i32
+      %minimum_high2 = scalar.shli %minimum_high2_raw, %c4_i32 : i32
+      %scale_value = scalar.ori %scale_low4, %scale_high2 : i32
+      %minimum_value = scalar.ori %minimum_low4, %minimum_high2 : i32
+      scf.yield %scale_value, %minimum_value : i32, i32
+    }
+    %scale_f32 = scalar.uitofp %scale : i32 to f32
+    %minimum_f32 = scalar.uitofp %minimum : i32 to f32
+    %code_f32 = scalar.uitofp %code : i32 to f32
+    %scaled_code0 = scalar.mulf %d, %scale_f32 : f32
+    %scaled_code = scalar.mulf %scaled_code0, %code_f32 : f32
+    %minimum0 = scalar.mulf %dmin, %minimum_f32 : f32
+    %value = scalar.subf %scaled_code, %minimum0 : f32
+    view.store %value, %output_view[%token, %channel] : f32, view<[%token_count]x5120xf32>
+  }
+  kernel.return
+}
+
+// Repairs only the floating headers in a byte-varied Q5_K fixture.
+kernel.def @qwen38_token_embedding_fix_differential_headers() {
+  %c1 = index.constant 1 : index
+  %vocabulary_size = index.constant 4 : index
+  %workgroup_size = index.constant 64 : index
+  kernel.launch.config workgroups(%vocabulary_size, %c1, %c1) workgroup_size(%workgroup_size, %c1, %c1) : index
+} launch(%weight: buffer) {
+  %row = kernel.workgroup.id<x> : index
+  %workitem0 = kernel.workitem.id<x> : index
+  %block_count = index.constant 20 : index
+  %valid_block = index.cmp ult, %workitem0, %block_count : index
+  scf.if %valid_block {
+    %block = index.assume %workitem0 [range(%workitem0, 0, 19)] : index
+    %row_bytes = index.constant 3520 : offset
+    %block_bytes = index.constant 176 : offset
+    %row_byte_base = index.scale %row, %row_bytes : index, offset -> offset
+    %block_byte_add = index.scale %block, %block_bytes : index, offset -> offset
+    %block_byte_base = index.add %row_byte_base, %block_byte_add : offset
+    %half_view = buffer.view %weight[%block_byte_base] : buffer -> view<2xf16>
+    %d = scalar.constant 0.125 : f32
+    %dmin = scalar.constant 0.03125 : f32
+    %d_f16 = scalar.fptrunc %d : f32 to f16
+    %dmin_f16 = scalar.fptrunc %dmin : f32 to f16
+    view.store %d_f16, %half_view[0] : f16, view<2xf16>
+    view.store %dmin_f16, %half_view[1] : f16, view<2xf16>
+  }
+  kernel.return
+}
+
+check.case public @qwen38_token_embedding_q5k_f32_differential_case {
+  %token_count = check.literal value(2) : index
+  %token_ids = check.generate.iota offset(2) step(-2) : tensor<2xi32>
+  %weight = check.generate.iota offset(-127) step(17) period(15) : tensor<4x20x176xi8>
+  %expected = check.generate.fill value(0.0) : tensor<2x5120xf32>
+  %actual = check.generate.fill value(0.0) : tensor<2x5120xf32>
+  kernel.launch @qwen38_token_embedding_fix_differential_headers(%weight) : (tensor<4x20x176xi8>)
+  kernel.launch @qwen38_token_embedding_q5k_f32_reference[%token_count](%token_count, %token_ids, %weight, %expected) : [index](index, tensor<2xi32>, tensor<4x20x176xi8>, tensor<2x5120xf32>)
+  kernel.launch @qwen38_token_embedding_q5k_f32[%token_count](%token_count, %token_ids, %weight, %actual) : [index](index, tensor<2xi32>, tensor<4x20x176xi8>, tensor<2x5120xf32>)
+  check.expect.close actual(%actual) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<2x5120xf32>
+  check.return
+}
+
+check.benchmark<@qwen38_token_embedding_q5k_f32_differential_case> @qwen38_token_embedding_q5k_f32_small
