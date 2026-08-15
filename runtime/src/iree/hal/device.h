@@ -987,6 +987,8 @@ IREE_API_EXPORT iree_status_t iree_hal_device_queue_copy(
 //
 // A zero-length read performs no data access but still forwards the wait
 // dependencies to the signal dependencies.
+// Device-visible storage-backed files use the device's normal queue copy path;
+// other file representations are handled by the backend.
 IREE_API_EXPORT iree_status_t iree_hal_device_queue_read(
     iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
     const iree_hal_semaphore_list_t wait_semaphore_list,
@@ -1008,6 +1010,8 @@ IREE_API_EXPORT iree_status_t iree_hal_device_queue_read(
 //
 // A zero-length write performs no data access but still forwards the wait
 // dependencies to the signal dependencies.
+// Device-visible storage-backed files use the device's normal queue copy path;
+// other file representations are handled by the backend.
 IREE_API_EXPORT iree_status_t iree_hal_device_queue_write(
     iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
     const iree_hal_semaphore_list_t wait_semaphore_list,

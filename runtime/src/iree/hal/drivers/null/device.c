@@ -16,8 +16,6 @@
 #include "iree/hal/drivers/null/executable.h"
 #include "iree/hal/drivers/null/semaphore.h"
 #include "iree/hal/utils/device_spec_builder.h"
-#include "iree/hal/utils/file_registry.h"
-#include "iree/hal/utils/file_transfer.h"
 #include "iree/hal/utils/queue_emulation.h"
 #include "iree/hal/utils/queue_host_call_emulation.h"
 
@@ -356,13 +354,14 @@ static iree_status_t iree_hal_null_device_import_file(
     iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
     iree_hal_memory_access_t access, iree_io_file_handle_t* handle,
     iree_hal_external_file_flags_t flags, iree_hal_file_t** out_file) {
-  // TODO(null): if the implementation supports native file operations
-  // definitely prefer that. The emulated file I/O present here as a default is
-  // inefficient. The queue affinity specifies which queues may access the file
-  // via read and write queue operations.
-  return iree_hal_file_from_handle(
-      /*device_allocator=*/NULL, queue_affinity, access, handle,
-      /*proactor=*/NULL, iree_hal_device_host_allocator(base_device), out_file);
+  (void)base_device;
+  (void)queue_affinity;
+  (void)access;
+  (void)handle;
+  (void)flags;
+  (void)out_file;
+  return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
+                          "null file import not implemented");
 }
 
 static iree_status_t iree_hal_null_device_create_semaphore(
@@ -501,19 +500,18 @@ static iree_status_t iree_hal_null_device_queue_read(
     iree_hal_file_t* source_file, uint64_t source_offset,
     iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
     iree_device_size_t length, iree_hal_read_flags_t flags) {
-  // TODO(null): if native support for file operations are available then
-  // definitely prefer those over the emulated implementation provided here by
-  // default. The implementation performs allocations, creates semaphores, and
-  // submits command buffers with host-device blocking behavior.
-
-  iree_hal_file_transfer_options_t options = {
-      .chunk_count = IREE_HAL_FILE_TRANSFER_CHUNK_COUNT_DEFAULT,
-      .chunk_size = IREE_HAL_FILE_TRANSFER_CHUNK_SIZE_DEFAULT,
-  };
-  return iree_hal_device_queue_read_streaming(
-      base_device, queue_affinity, wait_semaphore_list, signal_semaphore_list,
-      source_file, source_offset, target_buffer, target_offset, length, flags,
-      options);
+  (void)base_device;
+  (void)queue_affinity;
+  (void)wait_semaphore_list;
+  (void)signal_semaphore_list;
+  (void)source_file;
+  (void)source_offset;
+  (void)target_buffer;
+  (void)target_offset;
+  (void)length;
+  (void)flags;
+  return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
+                          "null native file queue reads not implemented");
 }
 
 static iree_status_t iree_hal_null_device_queue_write(
@@ -523,19 +521,18 @@ static iree_status_t iree_hal_null_device_queue_write(
     iree_hal_buffer_t* source_buffer, iree_device_size_t source_offset,
     iree_hal_file_t* target_file, uint64_t target_offset,
     iree_device_size_t length, iree_hal_write_flags_t flags) {
-  // TODO(null): if native support for file operations are available then
-  // definitely prefer those over the emulated implementation provided here by
-  // default. The implementation performs allocations, creates semaphores, and
-  // submits command buffers with host-device blocking behavior.
-
-  iree_hal_file_transfer_options_t options = {
-      .chunk_count = IREE_HAL_FILE_TRANSFER_CHUNK_COUNT_DEFAULT,
-      .chunk_size = IREE_HAL_FILE_TRANSFER_CHUNK_SIZE_DEFAULT,
-  };
-  return iree_hal_device_queue_write_streaming(
-      base_device, queue_affinity, wait_semaphore_list, signal_semaphore_list,
-      source_buffer, source_offset, target_file, target_offset, length, flags,
-      options);
+  (void)base_device;
+  (void)queue_affinity;
+  (void)wait_semaphore_list;
+  (void)signal_semaphore_list;
+  (void)source_buffer;
+  (void)source_offset;
+  (void)target_file;
+  (void)target_offset;
+  (void)length;
+  (void)flags;
+  return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
+                          "null native file queue writes not implemented");
 }
 
 static iree_status_t iree_hal_null_device_queue_host_call(

@@ -112,7 +112,7 @@ static iree_hal_memory_file_t* iree_hal_memory_file_cast(
   return (iree_hal_memory_file_t*)base_value;
 }
 
-static void iree_hal_memory_file_try_import_buffer(
+static iree_status_t iree_hal_memory_file_try_import_buffer(
     iree_hal_memory_file_t* file, iree_hal_queue_affinity_t queue_affinity,
     iree_hal_memory_access_t access, iree_byte_span_t contents,
     iree_hal_allocator_t* device_allocator);
@@ -120,10 +120,18 @@ static void iree_hal_memory_file_try_import_buffer(
 IREE_API_EXPORT iree_status_t iree_hal_memory_file_wrap(
     iree_hal_allocator_t* device_allocator,
     iree_hal_queue_affinity_t queue_affinity, iree_hal_memory_access_t access,
-    iree_io_file_handle_t* handle, iree_allocator_t host_allocator,
-    iree_hal_file_t** out_file) {
+    iree_io_file_handle_t* handle, iree_hal_memory_file_flags_t flags,
+    iree_allocator_t host_allocator, iree_hal_file_t** out_file) {
   IREE_ASSERT_ARGUMENT(out_file);
   *out_file = NULL;
+
+  const iree_hal_memory_file_flags_t supported_flags =
+      IREE_HAL_MEMORY_FILE_FLAG_REQUIRE_DEVICE_VISIBLE_STORAGE;
+  if (IREE_UNLIKELY(flags & ~supported_flags)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "unsupported memory file flags: 0x%08" PRIx32,
+                            flags);
+  }
 
   // For now we only support host allocations but could open other types that
   // may be backed by memory if desired.
@@ -155,6 +163,8 @@ IREE_API_EXPORT iree_status_t iree_hal_memory_file_wrap(
   iree_hal_resource_initialize(&iree_hal_memory_file_vtable, &file->resource);
   file->host_allocator = host_allocator;
   file->access = access;
+  file->storage = NULL;
+  file->imported_buffer = NULL;
 
   // Create the underlying storage container that we use to manage the storage
   // lifetime independently from the file lifetime.
@@ -170,8 +180,25 @@ IREE_API_EXPORT iree_status_t iree_hal_memory_file_wrap(
   // Import is an optional fast path: the memory file remains usable as a
   // host-backed file even when the target device cannot import this pointer.
   if (iree_status_is_ok(status) && device_allocator) {
-    iree_hal_memory_file_try_import_buffer(file, queue_affinity, access,
-                                           contents, device_allocator);
+    iree_status_t import_status = iree_hal_memory_file_try_import_buffer(
+        file, queue_affinity, access, contents, device_allocator);
+    if (iree_all_bits_set(
+            flags, IREE_HAL_MEMORY_FILE_FLAG_REQUIRE_DEVICE_VISIBLE_STORAGE)) {
+      status = import_status;
+    } else {
+      iree_status_free(import_status);
+    }
+  }
+
+  if (iree_status_is_ok(status) &&
+      iree_all_bits_set(
+          flags, IREE_HAL_MEMORY_FILE_FLAG_REQUIRE_DEVICE_VISIBLE_STORAGE) &&
+      (!file->imported_buffer ||
+       !iree_all_bits_set(iree_hal_buffer_memory_type(file->imported_buffer),
+                          IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE))) {
+    status = iree_make_status(
+        IREE_STATUS_UNAVAILABLE,
+        "host allocation could not be imported as device-visible storage");
   }
 
   if (iree_status_is_ok(status)) {
@@ -228,7 +255,7 @@ static void iree_hal_memory_file_buffer_release(void* user_data,
 // Imports |contents| as a device-accessible HAL buffer.
 // A storage buffer is only exposed when the device allocator can directly
 // import the host allocation with device visibility.
-static void iree_hal_memory_file_try_import_buffer(
+static iree_status_t iree_hal_memory_file_try_import_buffer(
     iree_hal_memory_file_t* file, iree_hal_queue_affinity_t queue_affinity,
     iree_hal_memory_access_t access, iree_byte_span_t contents,
     iree_hal_allocator_t* device_allocator) {
@@ -289,9 +316,8 @@ static void iree_hal_memory_file_try_import_buffer(
           z0, iree_status_code_string(iree_status_code(status)));
     }
   });
-  iree_status_free(status);
-
   IREE_TRACE_ZONE_END(z0);
+  return status;
 }
 
 static iree_hal_memory_access_t iree_hal_memory_file_allowed_access(

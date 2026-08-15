@@ -114,7 +114,8 @@ IREE_API_EXPORT uint64_t iree_hal_file_length(iree_hal_file_t* file);
 // Available if the implementation is able to perform import/address-space
 // mapping/etc such that device-side transfers can directly access the resources
 // as if they were a normal device buffer. When present the buffer covers the
-// entire logical file range and carries access bits compatible with the file.
+// entire logical file range, carries access and usage bits compatible with the
+// file, and keeps the backing storage live independently of the file object.
 IREE_API_EXPORT iree_hal_buffer_t* iree_hal_file_storage_buffer(
     iree_hal_file_t* file);
 

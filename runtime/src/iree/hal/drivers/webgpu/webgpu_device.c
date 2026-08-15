@@ -367,7 +367,8 @@ static iree_status_t iree_hal_webgpu_device_import_file(
       // host allocations as GPU buffers).
       return iree_hal_memory_file_wrap(
           iree_hal_device_allocator(base_device), queue_affinity, access,
-          handle, iree_hal_device_host_allocator(base_device), out_file);
+          handle, IREE_HAL_MEMORY_FILE_FLAG_NONE,
+          iree_hal_device_host_allocator(base_device), out_file);
     case IREE_IO_FILE_HANDLE_TYPE_FD: {
       // Use WebGPU FD file — the fd is a JS file object table index, not a
       // POSIX fd. The standard fd_file uses pread/pwrite (unavailable on wasm).

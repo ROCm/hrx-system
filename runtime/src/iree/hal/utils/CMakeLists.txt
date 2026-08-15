@@ -176,20 +176,6 @@ iree_cc_library(
 
 iree_cc_library(
   NAME
-    file_transfer
-  HDRS
-    "file_transfer.h"
-  SRCS
-    "file_transfer.c"
-  DEPS
-    iree::base
-    iree::base::internal
-    iree::hal
-  PUBLIC
-)
-
-iree_cc_library(
-  NAME
     files
   HDRS
     "fd_file.h"
