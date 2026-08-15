@@ -1,0 +1,257 @@
+// Qwen3.8-27B token-one full-attention primitives. The model projects Q and
+// its sigmoid gate together as 24 adjacent [query, gate] head pairs, while K
+// and V use four 256-wide heads. Text positions use identical temporal,
+// height, and width coordinates, reducing the model's interleaved MRoPE to a
+// 64-wide NEOX rotation for this text-only program.
+
+config.decl @qwen38.attention_decode.cache_capacity : %value: index where [range(%value, 1, 262144)]
+
+// Rotates one value from a normalized 256-wide Q/K head. The first 64 values
+// use NEOX pairs separated by 32; the remaining 192 values pass through.
+func.def inline @qwen38_attention_rope_text_value(%position: i32, %lane0: index, %normalized_head: buffer) -> (f32) {
+  %lane = index.assume %lane0 [range(%lane0, 0, 255)] : index
+  %c0_offset = index.constant 0 : offset
+  %head_view = buffer.view %normalized_head[%c0_offset] : buffer -> view<256xf32>
+  %value = view.load %head_view[%lane] : view<256xf32> -> f32
+  %c32 = index.constant 32 : index
+  %c64 = index.constant 64 : index
+  %rotates = index.cmp ult, %lane, %c64 : index
+  %result = scf.if %rotates -> (f32) {
+    %is_low_half = index.cmp ult, %lane, %c32 : index
+    %pair, %partner = scf.if %is_low_half -> (index, index) {
+      %high_lane = index.add %lane, %c32 : index
+      scf.yield %lane, %high_lane : index, index
+    } else {
+      %low_lane = index.sub %lane, %c32 : index
+      scf.yield %low_lane, %low_lane : index, index
+    }
+    %partner_value = view.load %head_view[%partner] : view<256xf32> -> f32
+    %pair_i32 = index.cast %pair : index to i32
+    %pair_f32 = scalar.uitofp %pair_i32 : i32 to f32
+    %position_f32 = scalar.sitofp %position : i32 to f32
+    %log_frequency_step = scalar.constant -0.5036904811859131 : f32
+    %log_frequency = scalar.mulf %pair_f32, %log_frequency_step : f32
+    %frequency = scalar.expf<afn> %log_frequency : f32
+    %angle = scalar.mulf %position_f32, %frequency : f32
+    %sine = scalar.sinf<afn> %angle : f32
+    %cosine = scalar.cosf<afn> %angle : f32
+    %own_cosine = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %value, %cosine : f32
+    %partner_sine = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %partner_value, %sine : f32
+    %rotated = scf.if %is_low_half -> (f32) {
+      %low = scalar.subf<reassoc|nnan|ninf|nsz> %own_cosine, %partner_sine : f32
+      scf.yield %low : f32
+    } else {
+      %high = scalar.addf<reassoc|nnan|ninf|nsz> %partner_sine, %own_cosine : f32
+      scf.yield %high : f32
+    }
+    scf.yield %rotated : f32
+  } else {
+    scf.yield %value : f32
+  }
+  func.return %result : f32
+}
+
+// Normalizes and rotates 24 query heads while extracting their colocated
+// sigmoid gates. One workgroup owns one complete 256-wide head.
+kernel.def export("qwen38_attention_query_prepare_decode") @qwen38_attention_query_prepare_decode() {
+  %unit = index.constant 1 : index
+  %head_count = index.constant 24 : index
+  %workgroup_size = index.constant 256 : index
+  kernel.launch.config workgroups(%head_count, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%epsilon: f32, %control: buffer, %query_gate_projection: buffer, %norm_weight: buffer, %query: buffer, %gate: buffer) {
+  %head0 = kernel.workgroup.id<x> : index
+  %head = index.assume %head0 [range(%head0, 0, 23)] : index
+  %lane0 = kernel.workitem.id<x> : index
+  %lane = index.assume %lane0 [range(%lane0, 0, 255)] : index
+  %c0_offset = index.constant 0 : offset
+  %c256 = index.constant 256 : index
+  %c512 = index.constant 512 : index
+  %projection_view = buffer.view %query_gate_projection[%c0_offset] : buffer -> view<12288xf32>
+  %weight_view = buffer.view %norm_weight[%c0_offset] : buffer -> view<256xf32>
+  %control_view = buffer.view %control[%c0_offset] : buffer -> view<1xi32>
+  %query_view = buffer.view %query[%c0_offset] : buffer -> view<6144xf32>
+  %gate_view = buffer.view %gate[%c0_offset] : buffer -> view<6144xf32>
+  %head_projection_base = index.mul %head, %c512 : index
+  %query_index = index.add %head_projection_base, %lane : index
+  %gate_head_base = index.add %head_projection_base, %c256 : index
+  %gate_index = index.add %gate_head_base, %lane : index
+  %output_head_base = index.mul %head, %c256 : index
+  %output_index = index.add %output_head_base, %lane : index
+  %raw_query = view.load %projection_view[%query_index] : view<12288xf32> -> f32
+  %raw_gate = view.load %projection_view[%gate_index] : view<12288xf32> -> f32
+  %square = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %raw_query, %raw_query : f32
+  %sum = kernel.workgroup.reduce<addf> %square : f32
+  %head_size_f32 = scalar.constant 256.0 : f32
+  %mean = scalar.divf<nnan|ninf|nsz|arcp> %sum, %head_size_f32 : f32
+  %biased_mean = scalar.addf<nnan|ninf|nsz> %mean, %epsilon : f32
+  %inverse_rms = scalar.rsqrtf<nnan|ninf|nsz|afn> %biased_mean : f32
+  %weight = view.load %weight_view[%lane] : view<256xf32> -> f32
+  %normalized0 = scalar.mulf<nnan|ninf|nsz> %raw_query, %inverse_rms : f32
+  %normalized = scalar.mulf<nnan|ninf|nsz> %normalized0, %weight : f32
+  %scratch_bytes = index.constant 1024 : offset
+  %scratch = buffer.alloca<workgroup> align(16) %scratch_bytes : buffer
+  %scratch_view = buffer.view %scratch[%c0_offset] : buffer -> view<256xf32>
+  view.store %normalized, %scratch_view[%lane] : f32, view<256xf32>
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+  %position = view.load %control_view[0] : view<1xi32> -> i32
+  %rotated = func.call @qwen38_attention_rope_text_value(%position, %lane, %scratch) : (i32, index, buffer) -> (f32)
+  %gate_value = scalar.logisticf<afn> %raw_gate : f32
+  view.store %rotated, %query_view[%output_index] : f32, view<6144xf32>
+  view.store %gate_value, %gate_view[%output_index] : f32, view<6144xf32>
+  kernel.return
+}
+
+// Normalizes and rotates the four key heads, then publishes K and V directly
+// into the session cache at the dynamic token position.
+kernel.def export("qwen38_attention_kv_prepare_decode") @qwen38_attention_kv_prepare_decode() {
+  %unit = index.constant 1 : index
+  %head_count = index.constant 4 : index
+  %workgroup_size = index.constant 256 : index
+  kernel.launch.config workgroups(%head_count, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%epsilon: f32, %control: buffer, %key_projection: buffer, %value_projection: buffer, %norm_weight: buffer, %key_cache: buffer, %value_cache: buffer) {
+  %cache_capacity = config.get @qwen38.attention_decode.cache_capacity : index
+  %head0 = kernel.workgroup.id<x> : index
+  %head = index.assume %head0 [range(%head0, 0, 3)] : index
+  %lane0 = kernel.workitem.id<x> : index
+  %lane = index.assume %lane0 [range(%lane0, 0, 255)] : index
+  %c0_offset = index.constant 0 : offset
+  %c256 = index.constant 256 : index
+  %c1024 = index.constant 1024 : index
+  %key_projection_view = buffer.view %key_projection[%c0_offset] : buffer -> view<1024xf32>
+  %value_projection_view = buffer.view %value_projection[%c0_offset] : buffer -> view<1024xf32>
+  %weight_view = buffer.view %norm_weight[%c0_offset] : buffer -> view<256xf32>
+  %control_view = buffer.view %control[%c0_offset] : buffer -> view<1xi32>
+  %cache_element_count = index.mul %cache_capacity, %c1024 : index
+  %key_cache_view = buffer.view %key_cache[%c0_offset] : buffer -> view<[%cache_element_count]xf16>
+  %value_cache_view = buffer.view %value_cache[%c0_offset] : buffer -> view<[%cache_element_count]xf16>
+  %head_base = index.mul %head, %c256 : index
+  %projection_index = index.add %head_base, %lane : index
+  %raw_key = view.load %key_projection_view[%projection_index] : view<1024xf32> -> f32
+  %raw_value = view.load %value_projection_view[%projection_index] : view<1024xf32> -> f32
+  %square = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %raw_key, %raw_key : f32
+  %sum = kernel.workgroup.reduce<addf> %square : f32
+  %head_size_f32 = scalar.constant 256.0 : f32
+  %mean = scalar.divf<nnan|ninf|nsz|arcp> %sum, %head_size_f32 : f32
+  %biased_mean = scalar.addf<nnan|ninf|nsz> %mean, %epsilon : f32
+  %inverse_rms = scalar.rsqrtf<nnan|ninf|nsz|afn> %biased_mean : f32
+  %weight = view.load %weight_view[%lane] : view<256xf32> -> f32
+  %normalized0 = scalar.mulf<nnan|ninf|nsz> %raw_key, %inverse_rms : f32
+  %normalized = scalar.mulf<nnan|ninf|nsz> %normalized0, %weight : f32
+  %scratch_bytes = index.constant 1024 : offset
+  %scratch = buffer.alloca<workgroup> align(16) %scratch_bytes : buffer
+  %scratch_view = buffer.view %scratch[%c0_offset] : buffer -> view<256xf32>
+  view.store %normalized, %scratch_view[%lane] : f32, view<256xf32>
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+  %position_i32 = view.load %control_view[0] : view<1xi32> -> i32
+  %position0 = index.cast %position_i32 : i32 to index
+  %position = index.assume %position0 [range(%position0, 0, 262143), lt(%position0, %cache_capacity)] : index
+  %rotated = func.call @qwen38_attention_rope_text_value(%position_i32, %lane, %scratch) : (i32, index, buffer) -> (f32)
+  %token_cache_base = index.mul %position, %c1024 : index
+  %cache_head_base = index.add %token_cache_base, %head_base : index
+  %cache_index = index.add %cache_head_base, %lane : index
+  %key_f16 = scalar.fptrunc %rotated : f32 to f16
+  %value_f16 = scalar.fptrunc %raw_value : f32 to f16
+  view.store %key_f16, %key_cache_view[%cache_index] : f16, view<[%cache_element_count]xf16>
+  view.store %value_f16, %value_cache_view[%cache_index] : f16, view<[%cache_element_count]xf16>
+  kernel.return
+}
+
+// Computes grouped-query decode attention with an online softmax. Each
+// workgroup owns one query head and keeps one output component per lane live
+// while traversing the dynamic visible cache prefix.
+kernel.def export("qwen38_attention_decode") @qwen38_attention_decode() {
+  %unit = index.constant 1 : index
+  %head_count = index.constant 24 : index
+  %workgroup_size = index.constant 256 : index
+  kernel.launch.config workgroups(%head_count, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%control: buffer, %query: buffer, %gate: buffer, %key_cache: buffer, %value_cache: buffer, %output: buffer) {
+  %cache_capacity = config.get @qwen38.attention_decode.cache_capacity : index
+  %head0 = kernel.workgroup.id<x> : index
+  %head = index.assume %head0 [range(%head0, 0, 23)] : index
+  %lane0 = kernel.workitem.id<x> : index
+  %lane = index.assume %lane0 [range(%lane0, 0, 255)] : index
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c6 = index.constant 6 : index
+  %c256 = index.constant 256 : index
+  %c1024 = index.constant 1024 : index
+  %c0_offset = index.constant 0 : offset
+  %c0_f32 = scalar.constant 0.0 : f32
+  %negative_large = scalar.constant -3.4028234663852886e+38 : f32
+  %attention_scale = scalar.constant 0.0625 : f32
+  %control_view = buffer.view %control[%c0_offset] : buffer -> view<1xi32>
+  %query_view = buffer.view %query[%c0_offset] : buffer -> view<6144xf32>
+  %gate_view = buffer.view %gate[%c0_offset] : buffer -> view<6144xf32>
+  %output_view = buffer.view %output[%c0_offset] : buffer -> view<6144xf32>
+  %cache_element_count = index.mul %cache_capacity, %c1024 : index
+  %key_cache_view = buffer.view %key_cache[%c0_offset] : buffer -> view<[%cache_element_count]xf16>
+  %value_cache_view = buffer.view %value_cache[%c0_offset] : buffer -> view<[%cache_element_count]xf16>
+  %position_i32 = view.load %control_view[0] : view<1xi32> -> i32
+  %position0 = index.cast %position_i32 : i32 to index
+  %position = index.assume %position0 [range(%position0, 0, 262143), lt(%position0, %cache_capacity)] : index
+  %context_count0 = index.add %position, %c1 : index
+  %context_count = index.assume %context_count0 [range(%context_count0, 1, 262144), le(%context_count0, %cache_capacity)] : index
+  %head_base = index.mul %head, %c256 : index
+  %element = index.add %head_base, %lane : index
+  %key_head = index.div %head, %c6 : index
+  %key_head_base = index.mul %key_head, %c256 : index
+  %query_value = view.load %query_view[%element] : view<6144xf32> -> f32
+  %final_max, %final_sum, %final_acc = scf.for %token = [%c0 to %context_count step %c1](%old_max = %negative_large, %old_sum = %c0_f32, %old_acc = %c0_f32 : f32, f32, f32) -> (f32, f32, f32) {
+    %token_cache_base = index.mul %token, %c1024 : index
+    %cache_head_base = index.add %token_cache_base, %key_head_base : index
+    %cache_index = index.add %cache_head_base, %lane : index
+    %key_f16 = view.load %key_cache_view[%cache_index] : view<[%cache_element_count]xf16> -> f16
+    %value_f16 = view.load %value_cache_view[%cache_index] : view<[%cache_element_count]xf16> -> f16
+    %key = scalar.extf %key_f16 : f16 to f32
+    %value = scalar.extf %value_f16 : f16 to f32
+    %dot_part0 = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %query_value, %key : f32
+    %dot_part = scalar.mulf<reassoc|nnan|ninf|nsz> %dot_part0, %attention_scale : f32
+    %score = kernel.workgroup.reduce<addf> %dot_part : f32
+    %new_max = scalar.maxnumf %old_max, %score : f32
+    %old_delta = scalar.subf %old_max, %new_max : f32
+    %score_delta = scalar.subf %score, %new_max : f32
+    %old_scale = scalar.expf<afn> %old_delta : f32
+    %new_scale = scalar.expf<afn> %score_delta : f32
+    %rescaled_sum = scalar.mulf<reassoc|nnan|ninf|nsz> %old_sum, %old_scale : f32
+    %new_sum = scalar.addf<reassoc|nnan|ninf|nsz> %rescaled_sum, %new_scale : f32
+    %rescaled_acc = scalar.mulf<reassoc|nnan|ninf|nsz> %old_acc, %old_scale : f32
+    %weighted_value = scalar.mulf<reassoc|nnan|ninf|nsz> %value, %new_scale : f32
+    %new_acc = scalar.addf<reassoc|nnan|ninf|nsz> %rescaled_acc, %weighted_value : f32
+    scf.yield %new_max, %new_sum, %new_acc : f32, f32, f32
+  }
+  %attention_value = scalar.divf<nnan|ninf|nsz|arcp> %final_acc, %final_sum : f32
+  %gate_value = view.load %gate_view[%element] : view<6144xf32> -> f32
+  %gated = scalar.mulf<nnan|ninf|nsz> %attention_value, %gate_value : f32
+  view.store %gated, %output_view[%element] : f32, view<6144xf32>
+  kernel.return
+}
+
+check.case public @qwen38_attention_decode_known_case {
+  %epsilon = check.literal value(0.000001) : f32
+  %control = check.generate.fill value(0) : tensor<1xi32>
+  %query_gate_projection = check.generate.fill value(2.0) : tensor<12288xf32>
+  %key_projection = check.generate.fill value(2.0) : tensor<1024xf32>
+  %value_projection = check.generate.fill value(0.25) : tensor<1024xf32>
+  %norm_weight = check.generate.fill value(0.5) : tensor<256xf32>
+  %query = check.generate.fill value(0.0) : tensor<6144xf32>
+  %gate = check.generate.fill value(0.0) : tensor<6144xf32>
+  %key_cache = check.generate.fill value(0.0) : tensor<1024xf16>
+  %value_cache = check.generate.fill value(0.0) : tensor<1024xf16>
+  %output = check.generate.fill value(0.0) : tensor<6144xf32>
+  %expected_query = check.generate.fill value(0.49999994) : tensor<6144xf32>
+  %expected_gate = check.generate.fill value(0.8807970779778823) : tensor<6144xf32>
+  %expected_key = check.generate.fill value(0.5) : tensor<1024xf16>
+  %expected_value = check.generate.fill value(0.25) : tensor<1024xf16>
+  %expected_output = check.generate.fill value(0.22019926949447058) : tensor<6144xf32>
+  kernel.launch @qwen38_attention_query_prepare_decode(%epsilon, %control, %query_gate_projection, %norm_weight, %query, %gate) : (f32, tensor<1xi32>, tensor<12288xf32>, tensor<256xf32>, tensor<6144xf32>, tensor<6144xf32>)
+  kernel.launch @qwen38_attention_kv_prepare_decode(%epsilon, %control, %key_projection, %value_projection, %norm_weight, %key_cache, %value_cache) : (f32, tensor<1xi32>, tensor<1024xf32>, tensor<1024xf32>, tensor<256xf32>, tensor<1024xf16>, tensor<1024xf16>)
+  kernel.launch @qwen38_attention_decode(%control, %query, %gate, %key_cache, %value_cache, %output) : (tensor<1xi32>, tensor<6144xf32>, tensor<6144xf32>, tensor<1024xf16>, tensor<1024xf16>, tensor<6144xf32>)
+  check.expect.close actual(%query) expected(%expected_query) atol(0.000001) rtol(0.000001) nan(same) : tensor<6144xf32>
+  check.expect.close actual(%gate) expected(%expected_gate) atol(0.000001) rtol(0.000001) nan(same) : tensor<6144xf32>
+  check.expect.close actual(%key_cache) expected(%expected_key) atol(0.0009765625) rtol(0.000001) nan(same) : tensor<1024xf16>
+  check.expect.close actual(%value_cache) expected(%expected_value) atol(0.0) rtol(0.0) nan(same) : tensor<1024xf16>
+  check.expect.close actual(%output) expected(%expected_output) atol(0.000001) rtol(0.000001) nan(same) : tensor<6144xf32>
+  check.return
+}
+
+check.benchmark<@qwen38_attention_decode_known_case> @qwen38_attention_decode_benchmark
