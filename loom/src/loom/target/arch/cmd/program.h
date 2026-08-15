@@ -323,6 +323,14 @@ typedef struct loom_cmd_program_barrier_wave_iterator_t {
 iree_status_t loom_cmd_program_parse(iree_const_byte_span_t data,
                                      loom_cmd_program_t* out_program);
 
+// Binds a previously validated canonical command-program artifact.
+//
+// This is an infallible trusted-data operation for package parsers and other
+// producers that have already established the complete byte-format contract.
+// The returned view borrows |data| without allocating.
+void loom_cmd_program_bind_verified(iree_const_byte_span_t data,
+                                    loom_cmd_program_t* out_program);
+
 // Returns one validated buffer-reference table entry.
 loom_cmd_program_buffer_ref_t loom_cmd_program_buffer_ref_at(
     const loom_cmd_program_t* program, uint32_t index);

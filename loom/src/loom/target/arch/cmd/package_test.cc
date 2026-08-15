@@ -200,8 +200,7 @@ TEST(CmdProgramPackageTest, BuildsAndParsesCanonicalMultiRootPackage) {
       loom_cmd_program_package_export_at(&parsed_package, 0);
   EXPECT_TRUE(iree_string_view_equal(prefill.name, IREE_SV("prefill")));
   EXPECT_EQ(prefill.entry_count, 1u);
-  loom_cmd_program_t parsed_prefill = {};
-  IREE_EXPECT_OK(loom_cmd_program_parse(prefill.program_data, &parsed_prefill));
+  EXPECT_EQ(prefill.program.requirements.entry_count, 1u);
 
   loom_cmd_program_package_export_t decode = {};
   ASSERT_TRUE(loom_cmd_program_package_lookup_export(

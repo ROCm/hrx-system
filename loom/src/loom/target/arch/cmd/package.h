@@ -40,8 +40,8 @@ typedef struct loom_cmd_program_package_source_export_t {
 typedef struct loom_cmd_program_package_export_t {
   // Public command-program export name borrowed from package storage.
   iree_string_view_t name;
-  // Embedded portable command program bytes.
-  iree_const_byte_span_t program_data;
+  // Validated embedded portable command program.
+  loom_cmd_program_t program;
   // First entry in the package-global entry table.
   uint32_t first_entry;
   // Number of root-local executable entry associations.

@@ -367,16 +367,12 @@ TEST(CommandProgramTest, CompilesIndependentMultiRootProducts) {
           .executable_index,
       0u);
 
-  loom_cmd_program_t prefill_program = {};
-  IREE_ASSERT_OK(
-      loom_cmd_program_parse(prefill_export.program_data, &prefill_program));
+  const loom_cmd_program_t& prefill_program = prefill_export.program;
   ASSERT_NE(prefill_program.requirements.launch_counts.binding_index,
             UINT32_MAX);
   ASSERT_GT(prefill_program.requirements.launch_counts.required_byte_length,
             0u);
-  loom_cmd_program_t decode_program = {};
-  IREE_ASSERT_OK(
-      loom_cmd_program_parse(decode_export.program_data, &decode_program));
+  const loom_cmd_program_t& decode_program = decode_export.program;
   EXPECT_EQ(decode_program.requirements.launch_counts.binding_index,
             UINT32_MAX);
   EXPECT_EQ(decode_program.requirements.launch_counts.required_byte_length, 0u);

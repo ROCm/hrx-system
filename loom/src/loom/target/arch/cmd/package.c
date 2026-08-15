@@ -30,8 +30,10 @@ static void loom_cmd_program_package_bind(
   };
 }
 
-loom_cmd_program_package_export_t loom_cmd_program_package_export_at(
-    const loom_cmd_program_package_t* package, uint32_t export_index) {
+static loom_cmd_program_package_export_t
+loom_cmd_program_package_bind_export_at(
+    const loom_cmd_program_package_t* package, uint32_t export_index,
+    iree_const_byte_span_t* out_program_data) {
   IREE_ASSERT_ARGUMENT(package);
   IREE_ASSERT_LT(export_index, package->export_count);
   const uint8_t* record = package->export_table +
@@ -48,16 +50,26 @@ loom_cmd_program_package_export_t loom_cmd_program_package_export_at(
   IREE_ASSERT_LE(name_length, package->strings.data_length - name_offset);
   IREE_ASSERT_LE(program_offset, package->storage.data_length);
   IREE_ASSERT_LE(program_length, package->storage.data_length - program_offset);
+  *out_program_data = iree_make_const_byte_span(
+      package->storage.data + program_offset, program_length);
   return (loom_cmd_program_package_export_t){
       .name = iree_make_string_view(
           (const char*)package->strings.data + name_offset, name_length),
-      .program_data = iree_make_const_byte_span(
-          package->storage.data + program_offset, program_length),
       .first_entry = iree_unaligned_load_le_u32(
           record + LOOM_CMD_PROGRAM_PACKAGE_EXPORT_FIRST_ENTRY_OFFSET),
       .entry_count = iree_unaligned_load_le_u32(
           record + LOOM_CMD_PROGRAM_PACKAGE_EXPORT_ENTRY_COUNT_OFFSET),
   };
+}
+
+loom_cmd_program_package_export_t loom_cmd_program_package_export_at(
+    const loom_cmd_program_package_t* package, uint32_t export_index) {
+  iree_const_byte_span_t program_data = iree_const_byte_span_empty();
+  loom_cmd_program_package_export_t program_export =
+      loom_cmd_program_package_bind_export_at(package, export_index,
+                                              &program_data);
+  loom_cmd_program_bind_verified(program_data, &program_export.program);
+  return program_export;
 }
 
 bool loom_cmd_program_package_lookup_export(
@@ -371,8 +383,9 @@ static iree_status_t loom_cmd_program_package_validate_contents(
                               i);
     }
     expected_payload += program_length;
+    iree_const_byte_span_t program_data = iree_const_byte_span_empty();
     const loom_cmd_program_package_export_t program_export =
-        loom_cmd_program_package_export_at(package, i);
+        loom_cmd_program_package_bind_export_at(package, i, &program_data);
     for (uint32_t j = 0; j < i; ++j) {
       const loom_cmd_program_package_export_t previous_export =
           loom_cmd_program_package_export_at(package, j);
@@ -385,8 +398,7 @@ static iree_status_t loom_cmd_program_package_validate_contents(
     }
 
     loom_cmd_program_t program = {0};
-    IREE_RETURN_IF_ERROR(
-        loom_cmd_program_parse(program_export.program_data, &program));
+    IREE_RETURN_IF_ERROR(loom_cmd_program_parse(program_data, &program));
     if (entry_count != program.requirements.entry_count) {
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "command package export '%.*s' has %" PRIu32
