@@ -1,8 +1,8 @@
 // Qwen3.8 dense raw-Q6_K prefill projection experiment.
 //
-// Four- and eight-wave schedules reuse one 64x32 weight tile across 64 or 128
-// tokens. Both consume the original GGUF Q6_K bytes and F32 activations
-// without a persistent repack.
+// Schedules reuse one channel-by-32 weight tile across 64 or 128 tokens. They
+// consume the original GGUF Q6_K bytes and F32 activations without a
+// persistent repack.
 
 func.decl @ggml_q6k_f16_vector4(%weight: buffer, %weight_row_byte_base: offset, %q6_block: index, %q6_group: index, %packet: index) -> (vector<4xf16>)
 
@@ -12,7 +12,7 @@ kernel.decl @ggml_linear_q6k_q8_1_x4(%token_count: index, %input_size: index, %o
 
 amdgpu.target<gfx11-generic> @qwen38_q6k_gfx11_wave64 {subgroup_size = 64}
 
-func.template<qwen38.dense_q6k_f16_wmma.body> device @qwen38_dense_q6k_f16_wmma_body(%token_count: index, %input_size0: index, %output_size0: index, %channel_tile: index, %token_tile: index, %token_tile_width: index, %workgroup_size: index, %subgroup_count: index, %workitem: index, %subgroup: index, %lane: index, %input: buffer, %weight: buffer, %output: buffer) {
+func.template<qwen38.dense_q6k_f16_wmma.body> device @qwen38_dense_q6k_f16_wmma_body(%token_count: index, %input_size0: index, %output_size0: index, %channel_tile: index, %token_tile: index, %channel_tile_width: index, %token_tile_width: index, %channel_group_count: index, %workgroup_size: index, %subgroup_count: index, %workitem: index, %subgroup: index, %lane: index, %input: buffer, %weight: buffer, %output: buffer) {
   %bounded_token_count = index.assume %token_count [range(%token_count, 1, 512)] : index
   %bounded_input_size = index.assume %input_size0 [range(%input_size0, 256, 32768), mul(%input_size0, 256)] : index
   %bounded_output_size = index.assume %output_size0 [range(%output_size0, 1, 32768)] : index
@@ -27,12 +27,12 @@ func.template<qwen38.dense_q6k_f16_wmma.body> device @qwen38_dense_q6k_f16_wmma_
   %c64 = index.constant 64 : index
   %c128 = index.constant 128 : index
   %c256 = index.constant 256 : index
-  %c512 = index.constant 512 : index
   %c0_offset = index.constant 0 : offset
   %f16_byte_count = index.constant 2 : offset
   %weight_block_byte_count = index.constant 210 : index
-  %weight_stage_bytes = index.constant 5120 : offset
   %wave_result_stage_bytes = index.constant 1024 : offset
+  %weight_stage_elements = index.mul %channel_tile_width, %c40 : index
+  %weight_stage_bytes = index.scale %weight_stage_elements, %f16_byte_count : index, offset -> offset
   %activation_stage_elements = index.mul %token_tile_width, %c40 : index
   %activation_stage_bytes = index.scale %activation_stage_elements, %f16_byte_count : index, offset -> offset
   %result_stage_bytes = index.scale %subgroup_count, %wave_result_stage_bytes : index, offset -> offset
@@ -50,7 +50,7 @@ func.template<qwen38.dense_q6k_f16_wmma.body> device @qwen38_dense_q6k_f16_wmma_
   %weight_stage = buffer.alloca<workgroup> align(16) %weight_stage_bytes : buffer
   %activation_stage = buffer.alloca<workgroup> align(16) %activation_stage_bytes : buffer
   %result_stage = buffer.alloca<workgroup> align(16) %result_stage_bytes : buffer
-  %weight_stage_view = buffer.view %weight_stage[%c0_offset] : buffer -> view<64x40xf16>
+  %weight_stage_view = buffer.view %weight_stage[%c0_offset] : buffer -> view<[%channel_tile_width]x40xf16>
   %activation_stage_physical_view = buffer.view %activation_stage[%c0_offset] : buffer -> view<[%token_tile_width]x40xf16>
   %activation_fragment_layout = encoding.layout.strided [1, %c40] : encoding<layout>
   %activation_fragment_view = buffer.view %activation_stage[%c0_offset] : buffer -> view<32x[%token_tile_width]xf16, %activation_fragment_layout>
@@ -58,14 +58,15 @@ func.template<qwen38.dense_q6k_f16_wmma.body> device @qwen38_dense_q6k_f16_wmma_
   %result_fragment_layout = encoding.layout.strided [1, %c16] : encoding<layout>
   %result_fragment_view = buffer.view %result_stage[%wave_result_stage_offset] : buffer -> view<16x16xf32, %result_fragment_layout>
   %result_physical_view = buffer.view %result_stage[%wave_result_stage_offset] : buffer -> view<16x16xf32>
-  %channel_tile_base = index.mul %channel_tile, %c64 : index
+  %channel_tile_base = index.mul %channel_tile, %channel_tile_width : index
   %token_tile_base = index.mul %token_tile, %token_tile_width : index
-  %channel_group0 = index.rem %subgroup, %c4 : index
-  %channel_group = index.assume %channel_group0 [range(%channel_group0, 0, 3)] : index
+  %channel_group0 = index.rem %subgroup, %channel_group_count : index
+  %channel_group = index.assume %channel_group0 [lt(%channel_group0, %channel_group_count)] : index
   %subgroup_channel_add = index.mul %channel_group, %c16 : index
-  %token_group0 = index.div %subgroup, %c4 : index
+  %token_group0 = index.div %subgroup, %channel_group_count : index
   %token_group = index.assume %token_group0 [range(%token_group0, 0, 1)] : index
   %subgroup_token_add = index.mul %token_group, %c64 : index
+  %weight_load_count = index.mul %channel_tile_width, %c8 : index
   %activation_load_count = index.mul %token_tile_width, %c8 : index
   %uses_x64 = index.cmp eq, %token_tile_width, %c64 : index
   %init00 = vector.fragment<init> %zero_accumulator shape [%m, %n] : vector<4xf32>
@@ -96,7 +97,7 @@ func.template<qwen38.dense_q6k_f16_wmma.body> device @qwen38_dense_q6k_f16_wmma_
           } else {
             scf.yield %c0_f16x4 : vector<4xf16>
           }
-          vector.store %weight_values, %weight_stage_view[%local_row, %load_k] : vector<4xf16>, view<64x40xf16>
+          vector.store %weight_values, %weight_stage_view[%local_row, %load_k] : vector<4xf16>, view<[%channel_tile_width]x40xf16>
           %token = index.add %token_tile_base, %local_row : index
           %valid_token = index.cmp ult, %token, %bounded_token_count : index
           %activation_values = scf.if %valid_token -> (vector<4xf16>) {
@@ -112,12 +113,12 @@ func.template<qwen38.dense_q6k_f16_wmma.body> device @qwen38_dense_q6k_f16_wmma_
           vector.store %activation_values, %activation_stage_physical_view[%local_row, %load_k] : vector<4xf16>, view<[%token_tile_width]x40xf16>
         }
       } else {
-        scf.for %weight_task = [%workitem to %c512 step %workgroup_size] unroll {
+        scf.for %weight_task = [%workitem to %weight_load_count step %workgroup_size] unroll {
           %load_packet0 = index.rem %weight_task, %c8 : index
           %load_packet = index.assume %load_packet0 [range(%load_packet0, 0, 7)] : index
           %load_k = index.mul %load_packet, %c4 : index
           %load_row0 = index.div %weight_task, %c8 : index
-          %load_row = index.assume %load_row0 [range(%load_row0, 0, 63)] : index
+          %load_row = index.assume %load_row0 [lt(%load_row0, %channel_tile_width)] : index
           %channel = index.add %channel_tile_base, %load_row : index
           %valid_channel = index.cmp ult, %channel, %bounded_output_size : index
           %weight_values = scf.if %valid_channel -> (vector<4xf16>) {
@@ -128,7 +129,7 @@ func.template<qwen38.dense_q6k_f16_wmma.body> device @qwen38_dense_q6k_f16_wmma_
           } else {
             scf.yield %c0_f16x4 : vector<4xf16>
           }
-          vector.store %weight_values, %weight_stage_view[%load_row, %load_k] : vector<4xf16>, view<64x40xf16>
+          vector.store %weight_values, %weight_stage_view[%load_row, %load_k] : vector<4xf16>, view<[%channel_tile_width]x40xf16>
         }
         scf.for %activation_task = [%workitem to %activation_load_count step %workgroup_size] unroll {
           %load_packet0 = index.rem %activation_task, %c8 : index
@@ -153,7 +154,7 @@ func.template<qwen38.dense_q6k_f16_wmma.body> device @qwen38_dense_q6k_f16_wmma_
       }
       kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
       %next00, %next01, %next10, %next11 = scf.for %k_half = [%c0 to %c32 step %c16](%half_acc00 = %acc00 : vector<4xf32>, %half_acc01 = %acc01 : vector<4xf32>, %half_acc10 = %acc10 : vector<4xf32>, %half_acc11 = %acc11 : vector<4xf32>) -> (vector<4xf32>, vector<4xf32>, vector<4xf32>, vector<4xf32>) unroll {
-        %lhs0 = vector.fragment.load<lhs> %weight_stage_view[%subgroup_channel_add, %k_half] shape [%m, %k] : view<64x40xf16> -> vector<16xf16>
+        %lhs0 = vector.fragment.load<lhs> %weight_stage_view[%subgroup_channel_add, %k_half] shape [%m, %k] : view<[%channel_tile_width]x40xf16> -> vector<16xf16>
         %rhs_token0 = index.add %subgroup_token_add, %c0 : index
         %rhs_token1 = index.add %subgroup_token_add, %c16 : index
         %rhs_token2 = index.add %subgroup_token_add, %c32 : index
@@ -273,7 +274,7 @@ kernel.def target(@qwen38_q6k_gfx11_wave64) export("qwen38_linear_q6k_f16_wmma_x
   %subgroup0 = kernel.subgroup.id : index
   %subgroup = index.assume %subgroup0 [range(%subgroup0, 0, 3)] : index
   %lane = kernel.subgroup.lane.id : index
-  func.apply<qwen38.dense_q6k_f16_wmma.body>(%token_count, %input_size, %output_size, %channel_tile, %token_tile, %c64, %c256, %c4, %workitem, %subgroup, %lane, %input, %weight, %output) : (index, index, index, index, index, index, index, index, index, index, index, buffer, buffer, buffer)
+  func.apply<qwen38.dense_q6k_f16_wmma.body>(%token_count, %input_size, %output_size, %channel_tile, %token_tile, %c64, %c64, %c4, %c256, %c4, %workitem, %subgroup, %lane, %input, %weight, %output) : (index, index, index, index, index, index, index, index, index, index, index, index, index, buffer, buffer, buffer)
   kernel.return
 }
 
@@ -311,7 +312,46 @@ kernel.def target(@qwen38_q6k_gfx11_wave64) export("qwen38_linear_q6k_f16_wmma_x
   %subgroup0 = kernel.subgroup.id : index
   %subgroup = index.assume %subgroup0 [range(%subgroup0, 0, 7)] : index
   %lane = kernel.subgroup.lane.id : index
-  func.apply<qwen38.dense_q6k_f16_wmma.body>(%token_count, %input_size, %output_size, %channel_tile, %token_tile, %c128, %c512, %c8, %workitem, %subgroup, %lane, %input, %weight, %output) : (index, index, index, index, index, index, index, index, index, index, index, buffer, buffer, buffer)
+  %c64 = index.constant 64 : index
+  %c4 = index.constant 4 : index
+  func.apply<qwen38.dense_q6k_f16_wmma.body>(%token_count, %input_size, %output_size, %channel_tile, %token_tile, %c64, %c128, %c4, %c512, %c8, %workitem, %subgroup, %lane, %input, %weight, %output) : (index, index, index, index, index, index, index, index, index, index, index, index, index, buffer, buffer, buffer)
+  kernel.return
+}
+
+kernel.def target(@qwen38_q6k_gfx11_wave64) export("qwen38_linear_q6k_f16_wmma_c128_t128") @qwen38_linear_q6k_f16_wmma_c128_t128(%token_count0: index, %input_size0: index, %output_size0: index) {
+  %token_count = index.assume %token_count0 [range(%token_count0, 0, 512)] : index
+  %input_size = index.assume %input_size0 [range(%input_size0, 256, 32768), mul(%input_size0, 256)] : index
+  %output_size = index.assume %output_size0 [range(%output_size0, 1, 32768)] : index
+  %c1 = index.constant 1 : index
+  %c127 = index.constant 127 : index
+  %c128 = index.constant 128 : index
+  %c1024 = index.constant 1024 : index
+  %padded_output_size = index.add %output_size, %c127 : index
+  %output_tiles = index.div %padded_output_size, %c128 : index
+  %padded_token_count = index.add %token_count, %c127 : index
+  %token_tiles = index.div %padded_token_count, %c128 : index
+  kernel.launch.config workgroups(%output_tiles, %token_tiles, %c1) workgroup_size(%c1024, %c1, %c1) : index
+} launch(%token_count_data: buffer, %input_size0: index, %output_size0: index, %input: buffer, %weight: buffer, %output: buffer) {
+  %c0_offset = index.constant 0 : offset
+  %c0 = index.constant 0 : index
+  %c8 = index.constant 8 : index
+  %c16 = index.constant 16 : index
+  %c128 = index.constant 128 : index
+  %c1024 = index.constant 1024 : index
+  %token_count_view = buffer.view %token_count_data[%c0_offset] : buffer -> view<1xi32>
+  %token_count_i32 = view.load %token_count_view[%c0] : view<1xi32> -> i32
+  %token_count0 = index.cast %token_count_i32 : i32 to index
+  %token_count = index.assume %token_count0 [range(%token_count0, 1, 512)] : index
+  %input_size = index.assume %input_size0 [range(%input_size0, 256, 32768), mul(%input_size0, 256)] : index
+  %output_size = index.assume %output_size0 [range(%output_size0, 1, 32768)] : index
+  %channel_tile = kernel.workgroup.id<x> : index
+  %token_tile = kernel.workgroup.id<y> : index
+  %workitem0 = kernel.workitem.id<x> : index
+  %workitem = index.assume %workitem0 [range(%workitem0, 0, 1023)] : index
+  %subgroup0 = kernel.subgroup.id : index
+  %subgroup = index.assume %subgroup0 [range(%subgroup0, 0, 15)] : index
+  %lane = kernel.subgroup.lane.id : index
+  func.apply<qwen38.dense_q6k_f16_wmma.body>(%token_count, %input_size, %output_size, %channel_tile, %token_tile, %c128, %c128, %c8, %c1024, %c16, %workitem, %subgroup, %lane, %input, %weight, %output) : (index, index, index, index, index, index, index, index, index, index, index, index, index, buffer, buffer, buffer)
   kernel.return
 }
 
@@ -359,6 +399,23 @@ check.case public @qwen38_linear_q6k_f16_wmma_differential_case {
   check.return
 }
 
+// Exercises partial channel and token tiles while requiring the wider-channel
+// schedule to remain bit-identical to the accepted x128 token schedule.
+check.case public @qwen38_linear_q6k_f16_wmma_c128_t128_differential_case {
+  %token_count = check.literal value(129) : index
+  %input_size = check.literal value(256) : index
+  %output_size = check.literal value(129) : index
+  %token_count_data = check.generate.fill value(129) : tensor<1xi32>
+  %input = check.generate.iota offset(-0.75) step(0.0078125) : tensor<129x256xf32>
+  %weight = check.generate.fill value(1) : tensor<129x210xi8>
+  %expected = check.generate.fill value(0.0) : tensor<129x129xf32>
+  %actual = check.generate.fill value(0.0) : tensor<129x129xf32>
+  kernel.launch @qwen38_linear_q6k_f16_wmma_x128[%token_count, %input_size, %output_size](%token_count_data, %input_size, %output_size, %input, %weight, %expected) : [index, index, index](tensor<1xi32>, index, index, tensor<129x256xf32>, tensor<129x210xi8>, tensor<129x129xf32>)
+  kernel.launch @qwen38_linear_q6k_f16_wmma_c128_t128[%token_count, %input_size, %output_size](%token_count_data, %input_size, %output_size, %input, %weight, %actual) : [index, index, index](tensor<1xi32>, index, index, tensor<129x256xf32>, tensor<129x210xi8>, tensor<129x129xf32>)
+  check.expect.close actual(%actual) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<129x129xf32>
+  check.return
+}
+
 check.case public @qwen38_linear_q6k_f16_wmma_prefill_512_case {
   %token_count = check.literal value(512) : index
   %input_size = check.literal value(17408) : index
@@ -368,6 +425,42 @@ check.case public @qwen38_linear_q6k_f16_wmma_prefill_512_case {
   %weight = check.generate.fill value(1) : tensor<5120x68x210xi8>
   %output = check.generate.fill value(0.0) : tensor<512x5120xf32>
   kernel.launch @qwen38_linear_q6k_f16_wmma_x128[%token_count, %input_size, %output_size](%token_count_data, %input_size, %output_size, %input, %weight, %output) : [index, index, index](tensor<1xi32>, index, index, tensor<512x17408xf32>, tensor<5120x68x210xi8>, tensor<512x5120xf32>)
+  check.return
+}
+
+check.case public @qwen38_linear_q6k_f16_wmma_prefill_128_case {
+  %token_count = check.literal value(128) : index
+  %input_size = check.literal value(17408) : index
+  %output_size = check.literal value(5120) : index
+  %token_count_data = check.generate.fill value(128) : tensor<1xi32>
+  %input = check.generate.fill value(0.25) : tensor<128x17408xf32>
+  %weight = check.generate.fill value(1) : tensor<5120x68x210xi8>
+  %output = check.generate.fill value(0.0) : tensor<128x5120xf32>
+  kernel.launch @qwen38_linear_q6k_f16_wmma_x128[%token_count, %input_size, %output_size](%token_count_data, %input_size, %output_size, %input, %weight, %output) : [index, index, index](tensor<1xi32>, index, index, tensor<128x17408xf32>, tensor<5120x68x210xi8>, tensor<128x5120xf32>)
+  check.return
+}
+
+check.case public @qwen38_linear_q6k_f16_wmma_c128_t128_prefill_128_case {
+  %token_count = check.literal value(128) : index
+  %input_size = check.literal value(17408) : index
+  %output_size = check.literal value(5120) : index
+  %token_count_data = check.generate.fill value(128) : tensor<1xi32>
+  %input = check.generate.fill value(0.25) : tensor<128x17408xf32>
+  %weight = check.generate.fill value(1) : tensor<5120x68x210xi8>
+  %output = check.generate.fill value(0.0) : tensor<128x5120xf32>
+  kernel.launch @qwen38_linear_q6k_f16_wmma_c128_t128[%token_count, %input_size, %output_size](%token_count_data, %input_size, %output_size, %input, %weight, %output) : [index, index, index](tensor<1xi32>, index, index, tensor<128x17408xf32>, tensor<5120x68x210xi8>, tensor<128x5120xf32>)
+  check.return
+}
+
+check.case public @qwen38_linear_q6k_f16_wmma_c128_t128_prefill_512_case {
+  %token_count = check.literal value(512) : index
+  %input_size = check.literal value(17408) : index
+  %output_size = check.literal value(5120) : index
+  %token_count_data = check.generate.fill value(512) : tensor<1xi32>
+  %input = check.generate.fill value(0.25) : tensor<512x17408xf32>
+  %weight = check.generate.fill value(1) : tensor<5120x68x210xi8>
+  %output = check.generate.fill value(0.0) : tensor<512x5120xf32>
+  kernel.launch @qwen38_linear_q6k_f16_wmma_c128_t128[%token_count, %input_size, %output_size](%token_count_data, %input_size, %output_size, %input, %weight, %output) : [index, index, index](tensor<1xi32>, index, index, tensor<512x17408xf32>, tensor<5120x68x210xi8>, tensor<512x5120xf32>)
   check.return
 }
 
@@ -384,6 +477,14 @@ check.case public @qwen38_linear_q6k_q8_1_x4_prefill_512_case {
 
 check.benchmark<@qwen38_linear_q6k_f16_wmma_differential_case> @qwen38_linear_q6k_f16_wmma_small
 
+check.benchmark<@qwen38_linear_q6k_f16_wmma_c128_t128_differential_case> @qwen38_linear_q6k_f16_wmma_c128_t128_differential
+
 check.benchmark<@qwen38_linear_q6k_f16_wmma_prefill_512_case> @qwen38_linear_q6k_f16_wmma_prefill_512
+
+check.benchmark<@qwen38_linear_q6k_f16_wmma_prefill_128_case> @qwen38_linear_q6k_f16_wmma_prefill_128
+
+check.benchmark<@qwen38_linear_q6k_f16_wmma_c128_t128_prefill_128_case> @qwen38_linear_q6k_f16_wmma_c128_t128_prefill_128
+
+check.benchmark<@qwen38_linear_q6k_f16_wmma_c128_t128_prefill_512_case> @qwen38_linear_q6k_f16_wmma_c128_t128_prefill_512
 
 check.benchmark<@qwen38_linear_q6k_q8_1_x4_prefill_512_case> @qwen38_linear_q6k_q8_1_x4_prefill_512
