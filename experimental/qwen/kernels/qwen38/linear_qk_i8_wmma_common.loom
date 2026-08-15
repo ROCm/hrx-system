@@ -1,0 +1,76 @@
+// Shared Q8_1 activation staging for exact integer-WMMA contractions.
+
+// Stages one K128 Q8_1 x4 group for 64 tokens. Payload bytes retain their
+// 144-byte physical row stride. Metadata is transposed into fragment order so
+// each wave loads the eight per-result scales and sums as one vector.
+func.def inline @qwen38_q8_stage_activation_tile(%token_count: index, %input_size: index, %token_tile_base: index, %q8_group: index, %workitem: index, %q8_input: buffer, %activation_stage: buffer, %activation_metadata: buffer) {
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %c4 = index.constant 4 : index
+  %c8 = index.constant 8 : index
+  %c16 = index.constant 16 : index
+  %c64 = index.constant 64 : index
+  %c128 = index.constant 128 : index
+  %c144 = index.constant 144 : index
+  %c256 = index.constant 256 : index
+  %c16_offset = index.constant 16 : offset
+  %c0_offset = index.constant 0 : offset
+  %c144_offset = index.constant 144 : offset
+  %workgroup_size = index.constant 256 : index
+  %q8_group_count = index.div %input_size, %c128 : index
+  %q8_row_bytes = index.scale %q8_group_count, %c144_offset : index, offset -> offset
+  %activation_bytes = buffer.view %activation_stage[%c0_offset] : buffer -> view<9216xi8>
+  %activation_meta = buffer.view %activation_metadata[%c0_offset] : buffer -> view<512xf16>
+  %payload_task_count = index.constant 512 : index
+  scf.for %payload_task = [%workitem to %payload_task_count step %workgroup_size] unroll {
+    %local_token0 = index.div %payload_task, %c8 : index
+    %local_token = index.assume %local_token0 [range(%local_token0, 0, 63)] : index
+    %payload_packet0 = index.rem %payload_task, %c8 : index
+    %payload_packet = index.assume %payload_packet0 [range(%payload_packet0, 0, 7)] : index
+    %token0 = index.add %token_tile_base, %local_token : index
+    %token, %bounded_token_count = index.assume %token0, %token_count [lt(%token0, %token_count)] : index, index
+    %row_byte_base = index.scale %token, %q8_row_bytes : index, offset -> offset
+    %group_byte_add = index.scale %q8_group, %c144_offset : index, offset -> offset
+    %group_byte_base = index.add %row_byte_base, %group_byte_add : offset
+    %payload_byte_base = index.add %group_byte_base, %c16_offset : offset
+    %group_payload = buffer.view %q8_input[%payload_byte_base] : buffer -> view<128xi8>
+    %packet_index = index.mul %payload_packet, %c16 : index
+    %payload = vector.load %group_payload[%packet_index] : view<128xi8> -> vector<16xi8>
+    %stage_row_base = index.mul %local_token, %c144 : index
+    %stage_payload_base0 = index.add %stage_row_base, %c16 : index
+    %stage_payload_index0 = index.add %stage_payload_base0, %packet_index : index
+    %stage_payload_index = index.assume %stage_payload_index0 [range(%stage_payload_index0, 16, 9200)] : index
+    vector.store %payload, %activation_bytes[%stage_payload_index] : vector<16xi8>, view<9216xi8>
+  }
+  %local_token0 = index.div %workitem, %c4 : index
+  %local_token = index.assume %local_token0 [range(%local_token0, 0, 63)] : index
+  %group_in_tile0 = index.rem %workitem, %c4 : index
+  %group_in_tile = index.assume %group_in_tile0 [range(%group_in_tile0, 0, 3)] : index
+  %token0 = index.add %token_tile_base, %local_token : index
+  %token, %bounded_token_count = index.assume %token0, %token_count [lt(%token0, %token_count)] : index, index
+  %row_byte_base = index.scale %token, %q8_row_bytes : index, offset -> offset
+  %group_byte_add = index.scale %q8_group, %c144_offset : index, offset -> offset
+  %group_byte_base = index.add %row_byte_base, %group_byte_add : offset
+  %group_metadata = buffer.view %q8_input[%group_byte_base] : buffer -> view<8xf16>
+  %metadata_source_index = index.mul %group_in_tile, %c2 : index
+  %metadata_pair = vector.load %group_metadata[%metadata_source_index] : view<8xf16> -> vector<2xf16>
+  %activation_scale = vector.extract %metadata_pair[0] : vector<2xf16> -> f16
+  %activation_sum = vector.extract %metadata_pair[1] : vector<2xf16> -> f16
+  %token_fragment = index.div %local_token, %c16 : index
+  %token_inner = index.rem %local_token, %c16 : index
+  %token_parity = index.rem %token_inner, %c2 : index
+  %fragment_register = index.div %token_inner, %c2 : index
+  %fragment_group0 = index.mul %token_fragment, %c4 : index
+  %fragment_group = index.add %fragment_group0, %group_in_tile : index
+  %fragment_parity0 = index.mul %fragment_group, %c2 : index
+  %fragment_parity = index.add %fragment_parity0, %token_parity : index
+  %metadata_base = index.mul %fragment_parity, %c8 : index
+  %metadata_index0 = index.add %metadata_base, %fragment_register : index
+  %metadata_index = index.assume %metadata_index0 [range(%metadata_index0, 0, 255)] : index
+  %sum_index0 = index.add %metadata_index, %c256 : index
+  %sum_index = index.assume %sum_index0 [range(%sum_index0, 256, 511)] : index
+  view.store %activation_scale, %activation_meta[%metadata_index] : f16, view<512xf16>
+  view.store %activation_sum, %activation_meta[%sum_index] : f16, view<512xf16>
+  func.return
+}
