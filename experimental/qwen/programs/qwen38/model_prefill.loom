@@ -1,0 +1,47 @@
+// Qwen3.8-27B base-model prefill body.
+//
+// The same command program serves every prompt length through 512 tokens.
+// Sixteen fixed architectural groups each advance three Gated DeltaNet layers
+// followed by one full-attention layer. Preparation unrolls this model
+// structure, specializes every parameter and state ordinal, and aliases the
+// nested layer allocations into one transient root.
+
+command.program.decl @qwen38_gdn_layer_prefill(%token_count: index, %layer: index, %gdn_ordinal: index) launch(%parameters: buffer, %residual: buffer, %gdn_state: buffer, %control: buffer) where [range(%token_count, 1, 512), range(%layer, 0, 63), range(%gdn_ordinal, 0, 47)]
+command.program.decl @qwen38_attention_layer_prefill(%token_count: index, %layer: index, %attention_ordinal: index) launch(%parameters: buffer, %residual: buffer, %attention_cache: buffer, %control: buffer, %attention_output: buffer) where [range(%token_count, 1, 512), range(%layer, 0, 63), range(%attention_ordinal, 0, 15)]
+
+// Advances the complete base-model body over one causal token span. Token
+// count and the absolute first-token position are also read from the issue-time
+// control buffer, allowing one materialized command buffer to process prompts
+// or appended spans without rerecording.
+command.program.def public @qwen38_text_prefill_body(%token_count: index) launch(%parameters: buffer, %residual: buffer, %control: buffer, %gdn_state: buffer, %attention_cache: buffer) where [range(%token_count, 1, 512)] {
+  %group_begin = index.constant 0 : index
+  %group_end = index.constant 16 : index
+  %group_step = index.constant 1 : index
+  %layers_per_group = index.constant 4 : index
+  %gdn_layers_per_group = index.constant 3 : index
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %c3 = index.constant 3 : index
+
+  // Full-attention layers reuse one maximum-capacity output. Nested layer
+  // allocations remain semantic and are packed with it during preparation.
+  %attention_bytes = index.constant 12582912 : offset
+  %attention_output = buffer.alloca<global> align(256) %attention_bytes : buffer
+
+  scf.for %group = [%group_begin to %group_end step %group_step] unroll {
+    %layer0 = index.mul %group, %layers_per_group : index
+    %layer1 = index.add %layer0, %c1 : index
+    %layer2 = index.add %layer0, %c2 : index
+    %attention_layer = index.add %layer0, %c3 : index
+
+    %gdn_ordinal0 = index.mul %group, %gdn_layers_per_group : index
+    %gdn_ordinal1 = index.add %gdn_ordinal0, %c1 : index
+    %gdn_ordinal2 = index.add %gdn_ordinal0, %c2 : index
+
+    command.program.launch @qwen38_gdn_layer_prefill[%token_count, %layer0, %gdn_ordinal0](%parameters, %residual, %gdn_state, %control) : [index, index, index](buffer, buffer, buffer, buffer)
+    command.program.launch @qwen38_gdn_layer_prefill[%token_count, %layer1, %gdn_ordinal1](%parameters, %residual, %gdn_state, %control) : [index, index, index](buffer, buffer, buffer, buffer)
+    command.program.launch @qwen38_gdn_layer_prefill[%token_count, %layer2, %gdn_ordinal2](%parameters, %residual, %gdn_state, %control) : [index, index, index](buffer, buffer, buffer, buffer)
+    command.program.launch @qwen38_attention_layer_prefill[%token_count, %attention_layer, %group](%parameters, %residual, %attention_cache, %control, %attention_output) : [index, index, index](buffer, buffer, buffer, buffer, buffer)
+  }
+  command.return
+}
