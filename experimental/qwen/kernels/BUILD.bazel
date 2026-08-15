@@ -18,6 +18,7 @@ exports_files([
     "ggml/linear_qk_common.loom",
     "ggml/linear_q5k_q8_1_x4.loom",
     "ggml/linear_q6k_q8_1_x4.loom",
+    "ggml/linear_q8_0_q8_1_x4.loom",
     "ggml/quantize_q8_1_x4.loom",
     "qwen38/gdn_decode.loom",
     "qwen38/layer_decode.loom",
@@ -45,6 +46,51 @@ loom_link_module(
     name = "linear_q6k_q8_1_x4_linked",
     srcs = ["ggml/linear_q6k_q8_1_x4.loom"],
     libraries = ["ggml/quantize_q8_1_x4.loom"],
+)
+
+loom_link_module(
+    name = "linear_q8_0_q8_1_x4_linked",
+    srcs = ["ggml/linear_q8_0_q8_1_x4.loom"],
+    libraries = ["ggml/quantize_q8_1_x4.loom"],
+)
+
+iree_executable_test(
+    name = "linear_q8_0_q8_1_x4_plan_test",
+    src = "//loom/src/loom/tools/iree-benchmark-loom",
+    args = [
+        "$(location :linear_q8_0_q8_1_x4_linked)",
+        "--config=ggml.linear_q8_0_q8_1_x4.output_capacity=1024",
+        "--config=ggml.linear_q8_0_q8_1_x4.token_capacity=512",
+        "--config=ggml.quantize_q8_1_x4.group_capacity=20480",
+        "--dry-run",
+        "--output-format=jsonl",
+    ],
+    data = [":linear_q8_0_q8_1_x4_linked"],
+    tags = ["hostonly"],
+)
+
+iree_executable_test(
+    name = "linear_q8_0_q8_1_x4_hal_test",
+    src = "//loom/src/loom/tools/iree-test-loom",
+    args = [
+        "$(location :linear_q8_0_q8_1_x4_linked)",
+        "--case=@ggml_linear_q8_0_q8_1_x4_nonzero_tail_case",
+        "--config=ggml.linear_q8_0_q8_1_x4.output_capacity=17",
+        "--config=ggml.linear_q8_0_q8_1_x4.token_capacity=4",
+        "--config=ggml.quantize_q8_1_x4.group_capacity=32",
+        "--device=amdgpu://0",
+        "--sanitizer=access",
+    ],
+    data = [":linear_q8_0_q8_1_x4_linked"],
+    tags = [
+        "iree-run-requirement=runtime.resource.amd_gpu",
+        "manual",
+        "requires-gpu-amd",
+        "runtime-resource=amd-gpu",
+    ],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/execute:amdgpu_hal",
+    ]),
 )
 
 iree_executable_test(
