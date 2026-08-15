@@ -1,0 +1,459 @@
+// Exact Q6_K x Q8_1 prefill projection using native integer WMMA.
+//
+// A workgroup owns 64 tokens by 128 output channels. Canonical GGUF Q6_K
+// weights are unpacked once per K256 tile into signed-I8 LDS, while the two
+// corresponding Q8_1 x4 activation groups are streamed through a smaller LDS
+// tile. Four barriers cover each K256 tile. The matrix orientation uses
+// signed operands for both tokens and weights, so the final
+// token-major result fragments publish directly without an LDS transpose.
+
+kernel.decl @ggml_quantize_q8_1_x4_f32(%token_count0: index, %input_size0: index) launch(%token_count1: index, %input_size1: index, %input: buffer, %output: buffer)
+
+kernel.decl @ggml_linear_q6k_q8_1_x4(%token_count0: index, %input_size0: index, %output_size0: index) launch(%token_count1: index, %input_size1: index, %output_size1: index, %input: buffer, %weight: buffer, %output: buffer)
+
+func.decl @ggml_q6k_sign_extend_dot4(%code: vector<1xi32>) -> (vector<4xi8>)
+
+func.decl @qwen38_q8_stage_activation_tile(%token_count: index, %input_size: index, %token_tile_base: index, %q8_group: index, %workitem: index, %q8_input: buffer, %activation_stage: buffer, %activation_metadata: buffer)
+
+config.decl @qwen38.linear_q6k_i8_wmma.input_size : %value: index where [range(%value, 256, 32768), mul(%value, 256)]
+
+config.decl @qwen38.linear_q6k_i8_wmma.output_size : %value: index where [range(%value, 128, 32768), mul(%value, 128)]
+
+amdgpu.target<gfx11-generic> @qwen38_dense_q6_i8_wave32 {subgroup_size = 32}
+
+// Unpacks the two four-code words carried by one Q6_K low-nibble word. The
+// high-bit word is shared by two adjacent octets, matching the production
+// CUDA/HIP MMQ load contract while preserving every signed six-bit code.
+func.def inline @qwen38_q6k_unpack_word_pair(%weight: buffer, %block_byte_base: offset, %word: index) -> (i32, i32) {
+  %c2 = index.constant 2 : index
+  %c4 = index.constant 4 : index
+  %c8 = index.constant 8 : index
+  %c16 = index.constant 16 : index
+  %high_byte_add = index.constant 128 : offset
+  %nibble_mask = scalar.constant 252645135 : i32
+  %high_mask = scalar.constant 808464432 : i32
+  %shift_nibble = scalar.constant 4 : i32
+  %bounded_word = index.assume %word [range(%word, 0, 31)] : index
+  %high_byte_base = index.add %block_byte_base, %high_byte_add : offset
+  %code_view = buffer.view %weight[%block_byte_base] : buffer -> view<32xi32>
+  %high_view = buffer.view %weight[%high_byte_base] : buffer -> view<16xi32>
+  %packed_codes = view.load %code_view[%bounded_word] : view<32xi32> -> i32
+  %low_codes = scalar.andi %packed_codes, %nibble_mask : i32
+  %shifted_codes = scalar.shrui %packed_codes, %shift_nibble : i32
+  %high_codes0 = scalar.andi %shifted_codes, %nibble_mask : i32
+  %word_half = index.div %bounded_word, %c16 : index
+  %high_half_base = index.mul %word_half, %c8 : index
+  %word_in_octet = index.rem %bounded_word, %c8 : index
+  %high_word0 = index.add %high_half_base, %word_in_octet : index
+  %high_word = index.assume %high_word0 [range(%high_word0, 0, 15)] : index
+  %packed_high = view.load %high_view[%high_word] : view<16xi32> -> i32
+  %word_in_half = index.rem %bounded_word, %c16 : index
+  %word_octet = index.div %word_in_half, %c8 : index
+  %high_shift_index = index.mul %word_octet, %c2 : index
+  %high_shift = index.cast %high_shift_index : index to i32
+  %shifted_high = scalar.shrui %packed_high, %high_shift : i32
+  %positioned_high0 = scalar.shli %shifted_high, %shift_nibble : i32
+  %high_bits0 = scalar.andi %positioned_high0, %high_mask : i32
+  %high_bits1 = scalar.andi %shifted_high, %high_mask : i32
+  %raw_codes0 = scalar.ori %low_codes, %high_bits0 : i32
+  %raw_codes1 = scalar.ori %high_codes0, %high_bits1 : i32
+  %raw_vector0 = vector.from_elements %raw_codes0 : vector<1xi32>
+  %raw_vector1 = vector.from_elements %raw_codes1 : vector<1xi32>
+  %signed_vector0 = func.call @ggml_q6k_sign_extend_dot4(%raw_vector0) : (vector<1xi32>) -> (vector<4xi8>)
+  %signed_vector1 = func.call @ggml_q6k_sign_extend_dot4(%raw_vector1) : (vector<1xi32>) -> (vector<4xi8>)
+  %signed_word_vector0 = vector.bitcast %signed_vector0 : vector<4xi8> to vector<1xi32>
+  %signed_word_vector1 = vector.bitcast %signed_vector1 : vector<4xi8> to vector<1xi32>
+  %codes0 = vector.extract %signed_word_vector0[0] : vector<1xi32> -> i32
+  %codes1 = vector.extract %signed_word_vector1[0] : vector<1xi32> -> i32
+  func.return %codes0, %codes1 : i32, i32
+}
+
+// Stages one 128-channel by K256 Q6_K tile. Each row occupies 304 bytes:
+// 256 signed code bytes, one f16 block scale, 16 signed K16 scales, and
+// padding matching the conflict-avoiding production MMQ stride.
+func.def inline @qwen38_q6k_stage_weight_tile(%input_size: index, %output_size: index, %channel_tile_base: index, %q6_block: index, %workitem: index, %weight: buffer, %weight_stage: buffer) {
+  %c16 = index.constant 16 : index
+  %c32 = index.constant 32 : index
+  %c76 = index.constant 76 : index
+  %c128 = index.constant 128 : index
+  %c152 = index.constant 152 : index
+  %c256 = index.constant 256 : index
+  %c260 = index.constant 260 : index
+  %c304 = index.constant 304 : index
+  %workgroup_size = index.constant 256 : index
+  %c0_offset = index.constant 0 : offset
+  %block_bytes = index.constant 210 : offset
+  %scale_byte_add = index.constant 192 : offset
+  %d_byte_add = index.constant 208 : offset
+  %weight_words = buffer.view %weight_stage[%c0_offset] : buffer -> view<9728xi32>
+  %weight_half_metadata = buffer.view %weight_stage[%c0_offset] : buffer -> view<19456xf16>
+  %weight_bytes = buffer.view %weight_stage[%c0_offset] : buffer -> view<38912xi8>
+  %q6_block_count = index.div %input_size, %c256 : index
+  %weight_row_bytes = index.scale %q6_block_count, %block_bytes : index, offset -> offset
+  %metadata_lane_active = index.cmp ult, %workitem, %c128 : index
+  scf.if %metadata_lane_active {
+    %local_channel = index.assume %workitem [range(%workitem, 0, 127)] : index
+    %channel0 = index.add %channel_tile_base, %local_channel : index
+    %channel, %bounded_output_size = index.assume %channel0, %output_size [lt(%channel0, %output_size)] : index, index
+    %row_byte_base = index.scale %channel, %weight_row_bytes : index, offset -> offset
+    %block_byte_add = index.scale %q6_block, %block_bytes : index, offset -> offset
+    %block_byte_base = index.add %row_byte_base, %block_byte_add : offset
+    %scale_byte_base = index.add %block_byte_base, %scale_byte_add : offset
+    %d_byte_base = index.add %block_byte_base, %d_byte_add : offset
+    %source_scales = buffer.view %weight[%scale_byte_base] : buffer -> view<16xi8>
+    %source_d = buffer.view %weight[%d_byte_base] : buffer -> view<1xf16>
+    %scales = vector.load %source_scales[0] : view<16xi8> -> vector<16xi8>
+    %d = view.load %source_d[0] : view<1xf16> -> f16
+    %metadata_half_row = index.mul %local_channel, %c152 : index
+    %d_index0 = index.add %metadata_half_row, %c128 : index
+    %d_index = index.assume %d_index0 [range(%d_index0, 128, 19432)] : index
+    view.store %d, %weight_half_metadata[%d_index] : f16, view<19456xf16>
+    %metadata_byte_row = index.mul %local_channel, %c304 : index
+    %scale_index0 = index.add %metadata_byte_row, %c260 : index
+    %scale_index = index.assume %scale_index0 [range(%scale_index0, 260, 38868)] : index
+    vector.store %scales, %weight_bytes[%scale_index] : vector<16xi8>, view<38912xi8>
+  }
+  %code_task_count = index.constant 4096 : index
+  scf.for %code_task = [%workitem to %code_task_count step %workgroup_size] {
+    %local_channel0 = index.div %code_task, %c32 : index
+    %local_channel = index.assume %local_channel0 [range(%local_channel0, 0, 127)] : index
+    %word0 = index.rem %code_task, %c32 : index
+    %word = index.assume %word0 [range(%word0, 0, 31)] : index
+    %channel0 = index.add %channel_tile_base, %local_channel : index
+    %channel, %bounded_output_size = index.assume %channel0, %output_size [lt(%channel0, %output_size)] : index, index
+    %row_byte_base = index.scale %channel, %weight_row_bytes : index, offset -> offset
+    %block_byte_add = index.scale %q6_block, %block_bytes : index, offset -> offset
+    %block_byte_base = index.add %row_byte_base, %block_byte_add : offset
+    %codes0, %codes1 = func.call @qwen38_q6k_unpack_word_pair(%weight, %block_byte_base, %word) : (buffer, offset, index) -> (i32, i32)
+    %word_quadrant = index.div %word, %c16 : index
+    %word_lane = index.rem %word, %c16 : index
+    %code_page = index.mul %word_quadrant, %c32 : index
+    %code_position0 = index.add %code_page, %word_lane : index
+    %code_position1 = index.add %code_position0, %c16 : index
+    %stage_row_base = index.mul %local_channel, %c76 : index
+    %stage_index00 = index.add %stage_row_base, %code_position0 : index
+    %stage_index0 = index.assume %stage_index00 [range(%stage_index00, 0, 9727)] : index
+    %stage_index10 = index.add %stage_row_base, %code_position1 : index
+    %stage_index1 = index.assume %stage_index10 [range(%stage_index10, 0, 9727)] : index
+    view.store %codes0, %weight_words[%stage_index0] : i32, view<9728xi32>
+    view.store %codes1, %weight_words[%stage_index1] : i32, view<9728xi32>
+  }
+  func.return
+}
+
+func.def inline @qwen38_q6k_accumulate_fragment(%dot0: vector<8xi32>, %dot1: vector<8xi32>, %activation_scale_f16: vector<8xf16>, %weight_d_f16: f16, %weight_scale0_i8: i8, %weight_scale1_i8: i8, %accumulator: vector<8xf32>) -> (vector<8xf32>) {
+  %dot0_f32 = vector.sitofp %dot0 : vector<8xi32> to vector<8xf32>
+  %dot1_f32 = vector.sitofp %dot1 : vector<8xi32> to vector<8xf32>
+  %activation_scale = vector.extf %activation_scale_f16 : vector<8xf16> to vector<8xf32>
+  %weight_d = scalar.extf %weight_d_f16 : f16 to f32
+  %weight_scale0 = scalar.sitofp %weight_scale0_i8 : i8 to f32
+  %weight_scale1 = scalar.sitofp %weight_scale1_i8 : i8 to f32
+  %combined_scale0 = scalar.mulf %weight_d, %weight_scale0 : f32
+  %combined_scale1 = scalar.mulf %weight_d, %weight_scale1 : f32
+  %combined_scale0_vector = vector.splat %combined_scale0 : vector<8xf32>
+  %combined_scale1_vector = vector.splat %combined_scale1 : vector<8xf32>
+  %activation_scaled_dot0 = vector.mulf %dot0_f32, %activation_scale : vector<8xf32>
+  %activation_scaled_dot1 = vector.mulf %dot1_f32, %activation_scale : vector<8xf32>
+  %weighted_dot0 = vector.mulf %activation_scaled_dot0, %combined_scale0_vector : vector<8xf32>
+  %weighted_dot1 = vector.mulf %activation_scaled_dot1, %combined_scale1_vector : vector<8xf32>
+  %contribution = vector.addf %weighted_dot0, %weighted_dot1 : vector<8xf32>
+  %next = vector.addf %accumulator, %contribution : vector<8xf32>
+  func.return %next : vector<8xf32>
+}
+
+// Contracts one K32 scale group into four token fragments owned by a wave.
+func.def inline @qwen38_q6k_contract_group(%weight_group: index, %activation_group: index, %wave: index, %lane: index, %weight_stage: buffer, %activation_stage: buffer, %activation_metadata: buffer, %accumulator0: vector<8xf32>, %accumulator1: vector<8xf32>, %accumulator2: vector<8xf32>, %accumulator3: vector<8xf32>) -> (vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>) {
+  %c0 = index.constant 0 : index
+  %c2 = index.constant 2 : index
+  %c4 = index.constant 4 : index
+  %c8 = index.constant 8 : index
+  %c16 = index.constant 16 : index
+  %c32 = index.constant 32 : index
+  %c48 = index.constant 48 : index
+  %c128 = index.constant 128 : index
+  %c144 = index.constant 144 : index
+  %c152 = index.constant 152 : index
+  %c260 = index.constant 260 : index
+  %c304 = index.constant 304 : index
+  %c0_offset = index.constant 0 : offset
+  %lhs_schema = encoding.define #encoding.operand<element_format=i8, payload_elements=16, payload_registers=4> : encoding<schema>
+  %rhs_schema = encoding.define #encoding.operand<element_format=i8, payload_elements=16, payload_registers=4> : encoding<schema>
+  %weight_bytes = buffer.view %weight_stage[%c0_offset] : buffer -> view<38912xi8>
+  %weight_half_metadata = buffer.view %weight_stage[%c0_offset] : buffer -> view<19456xf16>
+  %activation_bytes = buffer.view %activation_stage[%c0_offset] : buffer -> view<9216xi8>
+  %activation_meta = buffer.view %activation_metadata[%c0_offset] : buffer -> view<512xf16>
+  %lane_column0 = index.rem %lane, %c16 : index
+  %lane_column = index.assume %lane_column0 [range(%lane_column0, 0, 15)] : index
+  %lane_parity0 = index.div %lane, %c16 : index
+  %lane_parity = index.assume %lane_parity0 [range(%lane_parity0, 0, 1)] : index
+  %wave_channel_base = index.mul %wave, %c16 : index
+  %local_channel0 = index.add %wave_channel_base, %lane_column : index
+  %local_channel = index.assume %local_channel0 [range(%local_channel0, 0, 127)] : index
+  %weight_row_base = index.mul %local_channel, %c304 : index
+  %weight_group_add = index.mul %weight_group, %c32 : index
+  %weight_code_base0 = index.add %weight_row_base, %weight_group_add : index
+  %weight_code_base = index.assume %weight_code_base0 [range(%weight_code_base0, 0, 38832)] : index
+  %weight_code_high0 = index.add %weight_code_base, %c16 : index
+  %weight_code_high = index.assume %weight_code_high0 [range(%weight_code_high0, 16, 38848)] : index
+  %weight_values0 = vector.load %weight_bytes[%weight_code_base] : view<38912xi8> -> vector<16xi8>
+  %weight_values1 = vector.load %weight_bytes[%weight_code_high] : view<38912xi8> -> vector<16xi8>
+  %weight_words0 = vector.bitcast %weight_values0 : vector<16xi8> to vector<4xi32>
+  %weight_words1 = vector.bitcast %weight_values1 : vector<16xi8> to vector<4xi32>
+  %weight_fragment0 = vector.fragment<rhs> %weight_words0 shape [%c16, %c16] using {schema = %rhs_schema : encoding<schema>} : vector<4xi32>
+  %weight_fragment1 = vector.fragment<rhs> %weight_words1 shape [%c16, %c16] using {schema = %rhs_schema : encoding<schema>} : vector<4xi32>
+  %weight_metadata_half_row = index.mul %local_channel, %c152 : index
+  %weight_d_index0 = index.add %weight_metadata_half_row, %c128 : index
+  %weight_d_index = index.assume %weight_d_index0 [range(%weight_d_index0, 128, 19432)] : index
+  %weight_d = view.load %weight_half_metadata[%weight_d_index] : view<19456xf16> -> f16
+  %weight_metadata_byte_row = index.mul %local_channel, %c304 : index
+  %weight_scale_group = index.mul %weight_group, %c2 : index
+  %weight_scale_base0 = index.add %weight_metadata_byte_row, %c260 : index
+  %weight_scale_index0 = index.add %weight_scale_base0, %weight_scale_group : index
+  %weight_scale_index = index.assume %weight_scale_index0 [range(%weight_scale_index0, 260, 38882)] : index
+  %weight_scales = vector.load %weight_bytes[%weight_scale_index] : view<38912xi8> -> vector<2xi8>
+  %weight_scale0 = vector.extract %weight_scales[0] : vector<2xi8> -> i8
+  %weight_scale1 = vector.extract %weight_scales[1] : vector<2xi8> -> i8
+  %zero_values = vector.constant 0 : vector<8xi32>
+  %zero_fragment = vector.fragment<init> %zero_values shape [%c16, %c16] : vector<8xi32>
+
+  %token_row0 = index.add %c0, %lane_column : index
+  %activation_row_base0 = index.mul %token_row0, %c144 : index
+  %activation_group_add = index.mul %activation_group, %c32 : index
+  %activation_code_base00 = index.add %activation_row_base0, %c16 : index
+  %activation_code_base01 = index.add %activation_code_base00, %activation_group_add : index
+  %activation_code_base0 = index.assume %activation_code_base01 [range(%activation_code_base01, 16, 2272)] : index
+  %activation_code_high00 = index.add %activation_code_base0, %c16 : index
+  %activation_code_high0 = index.assume %activation_code_high00 [range(%activation_code_high00, 32, 2288)] : index
+  %activation_values00 = vector.load %activation_bytes[%activation_code_base0] : view<9216xi8> -> vector<16xi8>
+  %activation_values01 = vector.load %activation_bytes[%activation_code_high0] : view<9216xi8> -> vector<16xi8>
+  %activation_words00 = vector.bitcast %activation_values00 : vector<16xi8> to vector<4xi32>
+  %activation_words01 = vector.bitcast %activation_values01 : vector<16xi8> to vector<4xi32>
+  %activation_fragment00 = vector.fragment<lhs> %activation_words00 shape [%c16, %c16] using {schema = %lhs_schema : encoding<schema>} : vector<4xi32>
+  %activation_fragment01 = vector.fragment<lhs> %activation_words01 shape [%c16, %c16] using {schema = %lhs_schema : encoding<schema>} : vector<4xi32>
+  %dot00 = vector.mma %activation_fragment00, %weight_fragment0, %zero_fragment : vector<4xi32>, vector<4xi32>, vector<8xi32>
+  %dot01 = vector.mma %activation_fragment01, %weight_fragment1, %zero_fragment : vector<4xi32>, vector<4xi32>, vector<8xi32>
+  %metadata_group0 = index.mul %activation_group, %c2 : index
+  %metadata_parity0 = index.add %metadata_group0, %lane_parity : index
+  %metadata_index00 = index.mul %metadata_parity0, %c8 : index
+  %metadata_index0 = index.assume %metadata_index00 [range(%metadata_index00, 0, 56)] : index
+  %activation_scale0 = vector.load %activation_meta[%metadata_index0] : view<512xf16> -> vector<8xf16>
+  %next0 = func.call @qwen38_q6k_accumulate_fragment(%dot00, %dot01, %activation_scale0, %weight_d, %weight_scale0, %weight_scale1, %accumulator0) : (vector<8xi32>, vector<8xi32>, vector<8xf16>, f16, i8, i8, vector<8xf32>) -> (vector<8xf32>)
+
+  %token_row1 = index.add %c16, %lane_column : index
+  %activation_row_base1 = index.mul %token_row1, %c144 : index
+  %activation_code_base10 = index.add %activation_row_base1, %c16 : index
+  %activation_code_base11 = index.add %activation_code_base10, %activation_group_add : index
+  %activation_code_base1 = index.assume %activation_code_base11 [range(%activation_code_base11, 2320, 4576)] : index
+  %activation_code_high10 = index.add %activation_code_base1, %c16 : index
+  %activation_code_high1 = index.assume %activation_code_high10 [range(%activation_code_high10, 2336, 4592)] : index
+  %activation_values10 = vector.load %activation_bytes[%activation_code_base1] : view<9216xi8> -> vector<16xi8>
+  %activation_values11 = vector.load %activation_bytes[%activation_code_high1] : view<9216xi8> -> vector<16xi8>
+  %activation_words10 = vector.bitcast %activation_values10 : vector<16xi8> to vector<4xi32>
+  %activation_words11 = vector.bitcast %activation_values11 : vector<16xi8> to vector<4xi32>
+  %activation_fragment10 = vector.fragment<lhs> %activation_words10 shape [%c16, %c16] using {schema = %lhs_schema : encoding<schema>} : vector<4xi32>
+  %activation_fragment11 = vector.fragment<lhs> %activation_words11 shape [%c16, %c16] using {schema = %lhs_schema : encoding<schema>} : vector<4xi32>
+  %dot10 = vector.mma %activation_fragment10, %weight_fragment0, %zero_fragment : vector<4xi32>, vector<4xi32>, vector<8xi32>
+  %dot11 = vector.mma %activation_fragment11, %weight_fragment1, %zero_fragment : vector<4xi32>, vector<4xi32>, vector<8xi32>
+  %metadata_tile1 = index.constant 8 : index
+  %metadata_parity10 = index.add %metadata_group0, %metadata_tile1 : index
+  %metadata_parity1 = index.add %metadata_parity10, %lane_parity : index
+  %metadata_index10 = index.mul %metadata_parity1, %c8 : index
+  %metadata_index1 = index.assume %metadata_index10 [range(%metadata_index10, 64, 120)] : index
+  %activation_scale1 = vector.load %activation_meta[%metadata_index1] : view<512xf16> -> vector<8xf16>
+  %next1 = func.call @qwen38_q6k_accumulate_fragment(%dot10, %dot11, %activation_scale1, %weight_d, %weight_scale0, %weight_scale1, %accumulator1) : (vector<8xi32>, vector<8xi32>, vector<8xf16>, f16, i8, i8, vector<8xf32>) -> (vector<8xf32>)
+
+  %token_row2 = index.add %c32, %lane_column : index
+  %activation_row_base2 = index.mul %token_row2, %c144 : index
+  %activation_code_base20 = index.add %activation_row_base2, %c16 : index
+  %activation_code_base21 = index.add %activation_code_base20, %activation_group_add : index
+  %activation_code_base2 = index.assume %activation_code_base21 [range(%activation_code_base21, 4624, 6880)] : index
+  %activation_code_high20 = index.add %activation_code_base2, %c16 : index
+  %activation_code_high2 = index.assume %activation_code_high20 [range(%activation_code_high20, 4640, 6896)] : index
+  %activation_values20 = vector.load %activation_bytes[%activation_code_base2] : view<9216xi8> -> vector<16xi8>
+  %activation_values21 = vector.load %activation_bytes[%activation_code_high2] : view<9216xi8> -> vector<16xi8>
+  %activation_words20 = vector.bitcast %activation_values20 : vector<16xi8> to vector<4xi32>
+  %activation_words21 = vector.bitcast %activation_values21 : vector<16xi8> to vector<4xi32>
+  %activation_fragment20 = vector.fragment<lhs> %activation_words20 shape [%c16, %c16] using {schema = %lhs_schema : encoding<schema>} : vector<4xi32>
+  %activation_fragment21 = vector.fragment<lhs> %activation_words21 shape [%c16, %c16] using {schema = %lhs_schema : encoding<schema>} : vector<4xi32>
+  %dot20 = vector.mma %activation_fragment20, %weight_fragment0, %zero_fragment : vector<4xi32>, vector<4xi32>, vector<8xi32>
+  %dot21 = vector.mma %activation_fragment21, %weight_fragment1, %zero_fragment : vector<4xi32>, vector<4xi32>, vector<8xi32>
+  %metadata_tile2 = index.constant 16 : index
+  %metadata_parity20 = index.add %metadata_group0, %metadata_tile2 : index
+  %metadata_parity2 = index.add %metadata_parity20, %lane_parity : index
+  %metadata_index20 = index.mul %metadata_parity2, %c8 : index
+  %metadata_index2 = index.assume %metadata_index20 [range(%metadata_index20, 128, 184)] : index
+  %activation_scale2 = vector.load %activation_meta[%metadata_index2] : view<512xf16> -> vector<8xf16>
+  %next2 = func.call @qwen38_q6k_accumulate_fragment(%dot20, %dot21, %activation_scale2, %weight_d, %weight_scale0, %weight_scale1, %accumulator2) : (vector<8xi32>, vector<8xi32>, vector<8xf16>, f16, i8, i8, vector<8xf32>) -> (vector<8xf32>)
+
+  %token_row3 = index.add %c48, %lane_column : index
+  %activation_row_base3 = index.mul %token_row3, %c144 : index
+  %activation_code_base30 = index.add %activation_row_base3, %c16 : index
+  %activation_code_base31 = index.add %activation_code_base30, %activation_group_add : index
+  %activation_code_base3 = index.assume %activation_code_base31 [range(%activation_code_base31, 6928, 9184)] : index
+  %activation_code_high30 = index.add %activation_code_base3, %c16 : index
+  %activation_code_high3 = index.assume %activation_code_high30 [range(%activation_code_high30, 6944, 9200)] : index
+  %activation_values30 = vector.load %activation_bytes[%activation_code_base3] : view<9216xi8> -> vector<16xi8>
+  %activation_values31 = vector.load %activation_bytes[%activation_code_high3] : view<9216xi8> -> vector<16xi8>
+  %activation_words30 = vector.bitcast %activation_values30 : vector<16xi8> to vector<4xi32>
+  %activation_words31 = vector.bitcast %activation_values31 : vector<16xi8> to vector<4xi32>
+  %activation_fragment30 = vector.fragment<lhs> %activation_words30 shape [%c16, %c16] using {schema = %lhs_schema : encoding<schema>} : vector<4xi32>
+  %activation_fragment31 = vector.fragment<lhs> %activation_words31 shape [%c16, %c16] using {schema = %lhs_schema : encoding<schema>} : vector<4xi32>
+  %dot30 = vector.mma %activation_fragment30, %weight_fragment0, %zero_fragment : vector<4xi32>, vector<4xi32>, vector<8xi32>
+  %dot31 = vector.mma %activation_fragment31, %weight_fragment1, %zero_fragment : vector<4xi32>, vector<4xi32>, vector<8xi32>
+  %metadata_tile3 = index.constant 24 : index
+  %metadata_parity30 = index.add %metadata_group0, %metadata_tile3 : index
+  %metadata_parity3 = index.add %metadata_parity30, %lane_parity : index
+  %metadata_index30 = index.mul %metadata_parity3, %c8 : index
+  %metadata_index3 = index.assume %metadata_index30 [range(%metadata_index30, 192, 248)] : index
+  %activation_scale3 = vector.load %activation_meta[%metadata_index3] : view<512xf16> -> vector<8xf16>
+  %next3 = func.call @qwen38_q6k_accumulate_fragment(%dot30, %dot31, %activation_scale3, %weight_d, %weight_scale0, %weight_scale1, %accumulator3) : (vector<8xi32>, vector<8xi32>, vector<8xf16>, f16, i8, i8, vector<8xf32>) -> (vector<8xf32>)
+  func.return %next0, %next1, %next2, %next3 : vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>
+}
+
+kernel.def target(@qwen38_dense_q6_i8_wave32) export("qwen38_linear_q6k_i8_wmma") @qwen38_linear_q6k_i8_wmma(%token_count0: index) {
+  %token_count = index.assume %token_count0 [range(%token_count0, 64, 512), mul(%token_count0, 64)] : index
+  %output_size = config.get @qwen38.linear_q6k_i8_wmma.output_size : index
+  %c1 = index.constant 1 : index
+  %c64 = index.constant 64 : index
+  %c128 = index.constant 128 : index
+  %workgroup_size = index.constant 256 : index
+  %channel_tiles = index.div %output_size, %c128 : index
+  %token_tiles = index.div %token_count, %c64 : index
+  kernel.launch.config workgroups(%channel_tiles, %token_tiles, %c1) workgroup_size(%workgroup_size, %c1, %c1) : index
+} launch(%token_count0: index, %q8_input: buffer, %weight: buffer, %output: buffer) {
+  %token_count = index.assume %token_count0 [range(%token_count0, 64, 512), mul(%token_count0, 64)] : index
+  %input_size = config.get @qwen38.linear_q6k_i8_wmma.input_size : index
+  %output_size = config.get @qwen38.linear_q6k_i8_wmma.output_size : index
+  %workitem = kernel.workitem.id<x> : index
+  %wave0 = kernel.subgroup.id : index
+  %wave = index.assume %wave0 [range(%wave0, 0, 7)] : index
+  %lane = kernel.subgroup.lane.id : index
+  %channel_tile = kernel.workgroup.id<x> : index
+  %token_tile = kernel.workgroup.id<y> : index
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %c4 = index.constant 4 : index
+  %c15 = index.constant 15 : index
+  %c16 = index.constant 16 : index
+  %c32 = index.constant 32 : index
+  %c48 = index.constant 48 : index
+  %c64 = index.constant 64 : index
+  %c128 = index.constant 128 : index
+  %c256 = index.constant 256 : index
+  %weight_stage_bytes = index.constant 38912 : offset
+  %activation_stage_bytes = index.constant 9216 : offset
+  %activation_metadata_bytes = index.constant 1024 : offset
+  %c0_offset = index.constant 0 : offset
+  %zero_accumulator_values = vector.constant 0.0 : vector<8xf32>
+  %zero_accumulator = vector.fragment<init> %zero_accumulator_values shape [%c16, %c16] : vector<8xf32>
+  %q6_block_count = index.div %input_size, %c256 : index
+  %channel_tile_base = index.mul %channel_tile, %c128 : index
+  %token_tile_base = index.mul %token_tile, %c64 : index
+  %q8_noalias, %weight_noalias, %output_noalias = buffer.assume.noalias %q8_input, %weight, %output : buffer, buffer, buffer
+  %weight_stage = buffer.alloca<workgroup> align(16) %weight_stage_bytes : buffer
+  %activation_stage = buffer.alloca<workgroup> align(16) %activation_stage_bytes : buffer
+  %activation_metadata = buffer.alloca<workgroup> align(16) %activation_metadata_bytes : buffer
+  %result0, %result1, %result2, %result3 = scf.for %q6_block = [%c0 to %q6_block_count step %c1](%accumulator0 = %zero_accumulator : vector<8xf32>, %accumulator1 = %zero_accumulator : vector<8xf32>, %accumulator2 = %zero_accumulator : vector<8xf32>, %accumulator3 = %zero_accumulator : vector<8xf32>) -> (vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>) {
+    func.call @qwen38_q6k_stage_weight_tile(%input_size, %output_size, %channel_tile_base, %q6_block, %workitem, %weight_noalias, %weight_stage) : (index, index, index, index, index, buffer, buffer)
+    %q8_group0 = index.mul %q6_block, %c2 : index
+    func.call @qwen38_q8_stage_activation_tile(%token_count, %input_size, %token_tile_base, %q8_group0, %workitem, %q8_noalias, %activation_stage, %activation_metadata) : (index, index, index, index, index, buffer, buffer, buffer)
+    kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+    %half0_result0, %half0_result1, %half0_result2, %half0_result3 = scf.for %activation_group = [%c0 to %c4 step %c1](%half0_accumulator0 = %accumulator0 : vector<8xf32>, %half0_accumulator1 = %accumulator1 : vector<8xf32>, %half0_accumulator2 = %accumulator2 : vector<8xf32>, %half0_accumulator3 = %accumulator3 : vector<8xf32>) -> (vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>) unroll schedule(recurrence) {
+      %next0, %next1, %next2, %next3 = func.call @qwen38_q6k_contract_group(%activation_group, %activation_group, %wave, %lane, %weight_stage, %activation_stage, %activation_metadata, %half0_accumulator0, %half0_accumulator1, %half0_accumulator2, %half0_accumulator3) : (index, index, index, index, buffer, buffer, buffer, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>) -> (vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>)
+      scf.yield %next0, %next1, %next2, %next3 : vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>
+    }
+    kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+    %q8_group1 = index.add %q8_group0, %c1 : index
+    func.call @qwen38_q8_stage_activation_tile(%token_count, %input_size, %token_tile_base, %q8_group1, %workitem, %q8_noalias, %activation_stage, %activation_metadata) : (index, index, index, index, index, buffer, buffer, buffer)
+    kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+    %half1_result0, %half1_result1, %half1_result2, %half1_result3 = scf.for %activation_group = [%c0 to %c4 step %c1](%half1_accumulator0 = %half0_result0 : vector<8xf32>, %half1_accumulator1 = %half0_result1 : vector<8xf32>, %half1_accumulator2 = %half0_result2 : vector<8xf32>, %half1_accumulator3 = %half0_result3 : vector<8xf32>) -> (vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>) unroll schedule(recurrence) {
+      %weight_group = index.add %activation_group, %c4 : index
+      %next0, %next1, %next2, %next3 = func.call @qwen38_q6k_contract_group(%weight_group, %activation_group, %wave, %lane, %weight_stage, %activation_stage, %activation_metadata, %half1_accumulator0, %half1_accumulator1, %half1_accumulator2, %half1_accumulator3) : (index, index, index, index, buffer, buffer, buffer, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>) -> (vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>)
+      scf.yield %next0, %next1, %next2, %next3 : vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>
+    }
+    kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+    scf.yield %half1_result0, %half1_result1, %half1_result2, %half1_result3 : vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>
+  }
+  %wave_channel_add = index.mul %wave, %c16 : index
+  %channel_origin0 = index.add %channel_tile_base, %wave_channel_add : index
+  %last_channel_start = index.sub %output_size, %c15 : index
+  %channel_origin = index.assume %channel_origin0 [ge(%channel_origin0, 0), lt(%channel_origin0, %last_channel_start)] : index
+  %last_token_start = index.sub %token_count, %c15 : index
+  %token_origin00 = index.add %token_tile_base, %c0 : index
+  %token_origin0 = index.assume %token_origin00 [ge(%token_origin00, 0), lt(%token_origin00, %last_token_start)] : index
+  %token_origin10 = index.add %token_tile_base, %c16 : index
+  %token_origin1 = index.assume %token_origin10 [ge(%token_origin10, 0), lt(%token_origin10, %last_token_start)] : index
+  %token_origin20 = index.add %token_tile_base, %c32 : index
+  %token_origin2 = index.assume %token_origin20 [ge(%token_origin20, 0), lt(%token_origin20, %last_token_start)] : index
+  %token_origin30 = index.add %token_tile_base, %c48 : index
+  %token_origin3 = index.assume %token_origin30 [ge(%token_origin30, 0), lt(%token_origin30, %last_token_start)] : index
+  %output_view = buffer.view %output_noalias[%c0_offset] : buffer -> view<[%token_count]x[%output_size]xf32>
+  vector.fragment.store<result> %result0, %output_view[%token_origin0, %channel_origin] shape [%c16, %c16] : vector<8xf32>, view<[%token_count]x[%output_size]xf32>
+  vector.fragment.store<result> %result1, %output_view[%token_origin1, %channel_origin] shape [%c16, %c16] : vector<8xf32>, view<[%token_count]x[%output_size]xf32>
+  vector.fragment.store<result> %result2, %output_view[%token_origin2, %channel_origin] shape [%c16, %c16] : vector<8xf32>, view<[%token_count]x[%output_size]xf32>
+  vector.fragment.store<result> %result3, %output_view[%token_origin3, %channel_origin] shape [%c16, %c16] : vector<8xf32>, view<[%token_count]x[%output_size]xf32>
+  kernel.return
+}
+
+// Replaces only the floating-point Q6_K block scale in the varied-byte
+// differential fixture. Signed group scales, high bits, and low nibbles
+// retain the generated pattern so every physical code plane is exercised.
+kernel.def target(@qwen38_dense_q6_i8_wave32) @qwen38_q6k_i8_wmma_fix_differential_headers() {
+  %c1 = index.constant 1 : index
+  %output_size = index.constant 128 : index
+  %subgroup_size = target.subgroup.size : index
+  kernel.launch.config workgroups(%output_size, %c1, %c1) workgroup_size(%subgroup_size, %c1, %c1) : index
+} launch(%weight: buffer) {
+  %output_row = kernel.workgroup.id<x> : index
+  %lane = kernel.subgroup.lane.id : index
+  %c0 = index.constant 0 : index
+  %block_bytes = index.constant 210 : offset
+  %d_byte_add = index.constant 208 : offset
+  %d = scalar.constant 0.125 : f32
+  %d_f16 = scalar.fptrunc %d : f32 to f16
+  %row_byte_base = index.scale %output_row, %block_bytes : index, offset -> offset
+  %d_byte_base = index.add %row_byte_base, %d_byte_add : offset
+  %half_view = buffer.view %weight[%d_byte_base] : buffer -> view<1xf16>
+  %is_lane_zero = index.cmp eq, %lane, %c0 : index
+  scf.if %is_lane_zero {
+    view.store %d_f16, %half_view[0] : f16, view<1xf16>
+  }
+  kernel.return
+}
+
+check.case public @qwen38_linear_q6k_i8_wmma_differential_case {
+  %token_count = check.literal value(64) : index
+  %input_size = check.literal value(256) : index
+  %output_size = check.literal value(128) : index
+  %input = check.generate.iota offset(-0.75) step(0.00006103515625) : tensor<64x256xf32>
+  %q8_input = check.generate.fill value(0) : tensor<64x288xi8>
+  %weight = check.generate.iota offset(-127) step(17) period(15) : tensor<128x210xi8>
+  %expected = check.generate.fill value(0.0) : tensor<64x128xf32>
+  %actual = check.generate.fill value(0.0) : tensor<64x128xf32>
+  kernel.launch @qwen38_q6k_i8_wmma_fix_differential_headers(%weight) : (tensor<128x210xi8>)
+  kernel.launch @ggml_quantize_q8_1_x4_f32[%token_count, %input_size](%token_count, %input_size, %input, %q8_input) : [index, index](index, index, tensor<64x256xf32>, tensor<64x288xi8>)
+  kernel.launch @ggml_linear_q6k_q8_1_x4[%token_count, %input_size, %output_size](%token_count, %input_size, %output_size, %q8_input, %weight, %expected) : [index, index, index](index, index, index, tensor<64x288xi8>, tensor<128x210xi8>, tensor<64x128xf32>)
+  kernel.launch @qwen38_linear_q6k_i8_wmma[%token_count](%token_count, %q8_input, %weight, %actual) : [index](index, tensor<64x288xi8>, tensor<128x210xi8>, tensor<64x128xf32>)
+  check.expect.close actual(%actual) expected(%expected) atol(0.5) rtol(0.01) nan(same) : tensor<64x128xf32>
+  check.return
+}
+
+check.case public @qwen38_linear_q6k_i8_wmma_prefill_case {
+  %token_count = check.param.choice values([64, 128, 512]) name("token_count") : index
+  %input_size = check.literal value(17408) : index
+  %output_size = check.literal value(5120) : index
+  %q8_input = check.generate.fill value(1) : tensor<[%token_count]x19584xi8>
+  %weight = check.generate.fill value(1) : tensor<5120x68x210xi8>
+  %output = check.generate.fill value(0.0) : tensor<[%token_count]x5120xf32>
+  kernel.launch @qwen38_linear_q6k_i8_wmma[%token_count](%token_count, %q8_input, %weight, %output) : [index](index, tensor<[%token_count]x19584xi8>, tensor<5120x68x210xi8>, tensor<[%token_count]x5120xf32>)
+  check.return
+}
+
+check.benchmark<@qwen38_linear_q6k_i8_wmma_differential_case> @qwen38_linear_q6k_i8_wmma_small
+
+check.benchmark<@qwen38_linear_q6k_i8_wmma_prefill_case> @qwen38_linear_q6k_i8_wmma_prefill_64 {token_count = 64}
+
+check.benchmark<@qwen38_linear_q6k_i8_wmma_prefill_case> @qwen38_linear_q6k_i8_wmma_prefill_128 {token_count = 128}
+
+check.benchmark<@qwen38_linear_q6k_i8_wmma_prefill_case> @qwen38_linear_q6k_i8_wmma_prefill_512 {token_count = 512}

@@ -34,6 +34,7 @@ exports_files([
     "qwen38/linear_q5k_i8_wmma.loom",
     "qwen38/linear_qk_i8_wmma_common.loom",
     "qwen38/linear_q6k_f16_wmma.loom",
+    "qwen38/linear_q6k_i8_wmma.loom",
 ])
 
 loom_link_module(
@@ -95,6 +96,16 @@ loom_link_module(
     libraries = [
         "ggml/linear_q6k_q8_1_x4.loom",
         "ggml/quantize_q8_1_x4.loom",
+    ],
+)
+
+loom_link_module(
+    name = "qwen38_linear_q6k_i8_wmma_linked",
+    srcs = ["qwen38/linear_q6k_i8_wmma.loom"],
+    libraries = [
+        "ggml/linear_q6k_q8_1_x4.loom",
+        "ggml/quantize_q8_1_x4.loom",
+        "qwen38/linear_qk_i8_wmma_common.loom",
     ],
 )
 
