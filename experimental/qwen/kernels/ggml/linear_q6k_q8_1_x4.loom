@@ -477,6 +477,22 @@ check.case public @ggml_linear_q6k_q8_1_x4_dense_v_benchmark_case {
   check.return
 }
 
+// Exact decode shape for the 17,408-wide FFN down projection. This keeps the
+// dominant production Q6_K boundary directly measurable without changing the
+// command program.
+check.case public @ggml_linear_q6k_q8_1_x4_ffn_down_benchmark_case {
+  %token_count = check.literal value(1) : index
+  %input_size = check.literal value(17408) : index
+  %output_size = check.literal value(5120) : index
+  %q8_input = check.generate.fill value(1) : tensor<1x19584xi8>
+  %weight = check.generate.fill value(0) : tensor<5120x68x210xi8>
+  %output = check.generate.fill value(1.0) : tensor<1x5120xf32>
+  %expected = check.generate.fill value(0.0) : tensor<1x5120xf32>
+  kernel.launch @ggml_linear_q6k_q8_1_x4[%token_count, %input_size, %output_size](%token_count, %input_size, %output_size, %q8_input, %weight, %output) : [index, index, index](index, index, index, tensor<1x19584xi8>, tensor<5120x68x210xi8>, tensor<1x5120xf32>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<1x5120xf32>
+  check.return
+}
+
 check.benchmark<@ggml_linear_q6k_q8_1_x4_nonzero_tail_case> @ggml_linear_q6k_q8_1_x4_small
 
 check.benchmark<@ggml_linear_q6k_q8_1_x4_benchmark_case> @ggml_linear_q6k_q8_1_x4_decode {token_count = 1}
@@ -502,3 +518,5 @@ check.benchmark<@ggml_linear_q6k_q8_1_x4_dense_v_benchmark_case> @ggml_linear_q6
 check.benchmark<@ggml_linear_q6k_q8_1_x4_dense_v_benchmark_case> @ggml_linear_q6k_q8_1_x4_dense_v_prefill_1024 {token_count = 1024}
 
 check.benchmark<@ggml_linear_q6k_q8_1_x4_dense_v_benchmark_case> @ggml_linear_q6k_q8_1_x4_dense_v_prefill_2048 {token_count = 2048}
+
+check.benchmark<@ggml_linear_q6k_q8_1_x4_ffn_down_benchmark_case> @ggml_linear_q6k_q8_1_x4_ffn_down
