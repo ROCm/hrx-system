@@ -31,6 +31,7 @@ exports_files([
     "qwen38/layer_decode.loom",
     "qwen38/layer_prefill.loom",
     "qwen38/linear_q5k_f16_wmma.loom",
+    "qwen38/linear_q5k_i8_wmma.loom",
     "qwen38/linear_q6k_f16_wmma.loom",
 ])
 
@@ -73,6 +74,16 @@ loom_link_module(
     libraries = [
         "ggml/linear_q5k_q8_1_x4.loom",
         "ggml/linear_qk_common.loom",
+    ],
+)
+
+loom_link_module(
+    name = "qwen38_linear_q5k_i8_wmma_linked",
+    srcs = ["qwen38/linear_q5k_i8_wmma.loom"],
+    libraries = [
+        "ggml/linear_q5k_q8_1_x4.loom",
+        "ggml/linear_qk_common.loom",
+        "ggml/quantize_q8_1_x4.loom",
     ],
 )
 
