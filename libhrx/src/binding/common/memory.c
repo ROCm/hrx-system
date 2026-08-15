@@ -2114,11 +2114,11 @@ typedef struct iree_hal_streaming_host_d2h_staging_t {
   iree_hal_resource_t resource;
   // Allocator used for this state and its staging allocation.
   iree_allocator_t host_allocator;
-  // User host destination populated after the queue write completes.
+  // User host destination populated after the queued device-to-host copy.
   void* dst;
   // Byte distance between consecutive destination rows.
   iree_device_size_t dst_pitch;
-  // Host staging allocation populated by the queue write.
+  // Host staging allocation populated by the queued device-to-host copy.
   void* staging;
   // Byte distance between consecutive staging rows.
   iree_device_size_t staging_pitch;
