@@ -1,0 +1,31 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//loom/build_tools/bazel:loom_link.bzl", "loom_link_module")
+
+package(
+    default_visibility = ["//experimental/qwen:__subpackages__"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+exports_files(["qwen38/gdn_layer_decode.loom"])
+
+loom_link_module(
+    name = "qwen38_gdn_layer_decode_linked",
+    srcs = ["qwen38/gdn_layer_decode.loom"],
+    libraries = [
+        "//experimental/qwen/kernels:ggml/linear_q4k_q8_1_x4.loom",
+        "//experimental/qwen/kernels:ggml/linear_q5k_q8_1_x4.loom",
+        "//experimental/qwen/kernels:ggml/linear_q6k_q8_1_x4.loom",
+        "//experimental/qwen/kernels:ggml/linear_qk_common.loom",
+        "//experimental/qwen/kernels:ggml/quantize_q8_1_x4.loom",
+        "//experimental/qwen/kernels:qwen38/gdn_decode.loom",
+        "//experimental/qwen/kernels:qwen38/layer_decode.loom",
+    ],
+    mode = "selective",
+    roots = ["@qwen38_gdn_layer0_decode"],
+    strip_check = True,
+)
