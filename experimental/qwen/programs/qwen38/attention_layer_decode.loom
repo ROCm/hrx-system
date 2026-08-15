@@ -1,0 +1,149 @@
+// Exact Qwen3.8-27B full-attention decode layer.
+//
+// The program consumes native UD-Q5_K_XL parameters, updates the selected
+// layer's F16 key/value cache at a dynamic token position, and advances the
+// residual row in place. Layer identity and cache placement are specialization
+// arguments; token position remains an issue-time buffer value so one recorded
+// command buffer advances an entire sequence.
+
+config.def @ggml.linear_q5k_q8_1_x4.token_capacity = 1 : index
+config.def @ggml.linear_q5k_q8_1_x4.output_capacity = 17408 : index
+config.def @ggml.linear_q6k_q8_1_x4.token_capacity = 1 : index
+config.def @ggml.linear_q6k_q8_1_x4.output_capacity = 12288 : index
+config.def @ggml.linear_q8_0_q8_1_x4.token_capacity = 1 : index
+config.def @ggml.linear_q8_0_q8_1_x4.output_capacity = 1024 : index
+config.def @ggml.quantize_q8_1_x4.group_capacity = 136 : index
+config.def @qwen38.attention_decode.cache_capacity = 128 : index
+
+kernel.decl @ggml_quantize_q8_1_x4_f32(%token_count: index, %input_size: index) launch(%token_count: index, %input_size: index, %input: buffer, %output: buffer)
+kernel.decl @ggml_linear_q5k_q8_1_x4(%token_count: index, %input_size: index, %output_size: index) launch(%token_count: index, %input_size: index, %output_size: index, %input: buffer, %weight: buffer, %output: buffer)
+kernel.decl @ggml_linear_q6k_q8_1_x4(%token_count: index, %input_size: index, %output_size: index) launch(%token_count: index, %input_size: index, %output_size: index, %input: buffer, %weight: buffer, %output: buffer)
+kernel.decl @ggml_linear_q8_0_q8_1_x4(%token_count: index, %input_size: index, %output_size: index) launch(%token_count: index, %input_size: index, %output_size: index, %input: buffer, %weight: buffer, %output: buffer)
+
+kernel.decl @qwen38_rmsnorm_f32_decode() launch(%epsilon: f32, %input: buffer, %weight: buffer, %output: buffer)
+kernel.decl @qwen38_residual_add_f32_decode() launch(%lhs: buffer, %rhs: buffer, %output: buffer)
+kernel.decl @qwen38_swiglu_f32_decode() launch(%gate: buffer, %up: buffer, %output: buffer)
+kernel.decl @qwen38_attention_query_prepare_decode() launch(%epsilon: f32, %control: buffer, %query_gate_projection: buffer, %norm_weight: buffer, %query: buffer, %gate: buffer)
+kernel.decl @qwen38_attention_kv_prepare_decode() launch(%epsilon: f32, %control: buffer, %key_projection: buffer, %value_projection: buffer, %norm_weight: buffer, %key_cache: buffer, %value_cache: buffer)
+kernel.decl @qwen38_attention_decode() launch(%control: buffer, %query: buffer, %gate: buffer, %key_cache: buffer, %value_cache: buffer, %output: buffer)
+
+// Advances one full-attention layer. The parameter root is immutable and
+// fixed during command-buffer materialization. The residual, control, and
+// cache roots are rebound for each sequence at issue time.
+command.program.def @qwen38_attention_layer_decode(%layer: index, %attention_ordinal: index) launch(%parameters: buffer, %residual: buffer, %control: buffer, %attention_cache: buffer, %attention_output: buffer) where [range(%layer, 0, 63), range(%attention_ordinal, 0, 15)] {
+  %token_count = index.constant 1 : index
+  %hidden_size = index.constant 5120 : index
+  %query_gate_size = index.constant 12288 : index
+  %key_value_size = index.constant 1024 : index
+  %attention_size = index.constant 6144 : index
+  %ffn_size = index.constant 17408 : index
+  %epsilon = scalar.constant 0.000001 : f32
+
+  // Native GGUF parameter views preserve the exact physical quantized bytes.
+  %attention_norm_weight = command.parameter %parameters, "blk.{}.attn_norm.weight"[%layer] : view<5120xf32>
+  %query_weight = command.parameter %parameters, "blk.{}.attn_q.weight"[%layer] : view<51609600xi8>
+  %query_norm_weight = command.parameter %parameters, "blk.{}.attn_q_norm.weight"[%layer] : view<256xf32>
+  %key_weight = command.parameter %parameters, "blk.{}.attn_k.weight"[%layer] : view<4300800xi8>
+  %key_norm_weight = command.parameter %parameters, "blk.{}.attn_k_norm.weight"[%layer] : view<256xf32>
+  %value_weight = command.parameter %parameters, "blk.{}.attn_v.weight"[%layer] : view<5570560xi8>
+  %output_weight = command.parameter %parameters, "blk.{}.attn_output.weight"[%layer] : view<25804800xi8>
+  %post_attention_norm_weight = command.parameter %parameters, "blk.{}.post_attention_norm.weight"[%layer] : view<5120xf32>
+  %ffn_down_weight = command.parameter %parameters, "blk.{}.ffn_down.weight"[%layer] : view<73113600xi8>
+  %ffn_gate_weight = command.parameter %parameters, "blk.{}.ffn_gate.weight"[%layer] : view<61276160xi8>
+  %ffn_up_weight = command.parameter %parameters, "blk.{}.ffn_up.weight"[%layer] : view<61276160xi8>
+
+  // All full-attention layers share one persistent root. Each layer keeps its
+  // key and value arrays together while token-major storage makes the current
+  // grouped-query traversal contiguous within each head.
+  %cache_capacity = config.get @qwen38.attention_decode.cache_capacity : index
+  %cache_token_bytes = index.constant 2048 : offset
+  %cache_bytes = index.scale %cache_capacity, %cache_token_bytes : index, offset -> offset
+  %attention_layer_cache_bytes, %key_cache_offset, %value_cache_offset = buffer.pack [align(256) %cache_bytes, align(256) %cache_bytes] : offset
+  %layer_cache_offset = index.scale %attention_ordinal, %attention_layer_cache_bytes : index, offset -> offset
+  %layer_key_cache_offset = index.add %layer_cache_offset, %key_cache_offset : offset
+  %layer_value_cache_offset = index.add %layer_cache_offset, %value_cache_offset : offset
+  %cache_element_count = index.mul %cache_capacity, %key_value_size : index
+  %key_cache = buffer.view %attention_cache[%layer_key_cache_offset] : buffer -> view<[%cache_element_count]xf16>
+  %value_cache = buffer.view %attention_cache[%layer_value_cache_offset] : buffer -> view<[%cache_element_count]xf16>
+
+  // Storage is declared at semantic lifetimes. Command preparation packs and
+  // aliases the allocations into one transient binding.
+  %hidden_bytes = index.constant 20480 : offset
+  %hidden_q8_bytes = index.constant 5760 : offset
+  %query_gate_bytes = index.constant 49152 : offset
+  %key_value_bytes = index.constant 4096 : offset
+  %attention_bytes = index.constant 24576 : offset
+  %attention_q8_bytes = index.constant 6912 : offset
+  %ffn_bytes = index.constant 69632 : offset
+  %ffn_q8_bytes = index.constant 19584 : offset
+
+  %normalized = buffer.alloca<global> align(256) %hidden_bytes : buffer
+  %normalized_q8 = buffer.alloca<global> align(256) %hidden_q8_bytes : buffer
+  kernel.launch @qwen38_rmsnorm_f32_decode(%epsilon, %residual, %attention_norm_weight, %normalized) : (f32, buffer, view<5120xf32>, buffer)
+  kernel.launch @ggml_quantize_q8_1_x4_f32[%token_count, %hidden_size](%token_count, %hidden_size, %normalized, %normalized_q8) : [index, index](index, index, buffer, buffer)
+
+  %query_gate_projection = buffer.alloca<global> align(256) %query_gate_bytes : buffer
+  %key_projection = buffer.alloca<global> align(256) %key_value_bytes : buffer
+  %value_projection = buffer.alloca<global> align(256) %key_value_bytes : buffer
+  command.concurrent {
+    kernel.launch @ggml_linear_q6k_q8_1_x4[%token_count, %hidden_size, %query_gate_size](%token_count, %hidden_size, %query_gate_size, %normalized_q8, %query_weight, %query_gate_projection) : [index, index, index](index, index, index, buffer, view<51609600xi8>, buffer)
+    kernel.launch @ggml_linear_q6k_q8_1_x4[%token_count, %hidden_size, %key_value_size](%token_count, %hidden_size, %key_value_size, %normalized_q8, %key_weight, %key_projection) : [index, index, index](index, index, index, buffer, view<4300800xi8>, buffer)
+    kernel.launch @ggml_linear_q8_0_q8_1_x4[%token_count, %hidden_size, %key_value_size](%token_count, %hidden_size, %key_value_size, %normalized_q8, %value_weight, %value_projection) : [index, index, index](index, index, index, buffer, view<5570560xi8>, buffer)
+  }
+
+  %query = buffer.alloca<global> align(256) %attention_bytes : buffer
+  %gate = buffer.alloca<global> align(256) %attention_bytes : buffer
+  command.concurrent {
+    kernel.launch @qwen38_attention_query_prepare_decode(%epsilon, %control, %query_gate_projection, %query_norm_weight, %query, %gate) : (f32, buffer, buffer, view<256xf32>, buffer, buffer)
+    kernel.launch @qwen38_attention_kv_prepare_decode(%epsilon, %control, %key_projection, %value_projection, %key_norm_weight, %key_cache, %value_cache) : (f32, buffer, buffer, buffer, view<256xf32>, view<[%cache_element_count]xf16>, view<[%cache_element_count]xf16>)
+  }
+
+  %attention_output_q8 = buffer.alloca<global> align(256) %attention_q8_bytes : buffer
+  %projected_attention = buffer.alloca<global> align(256) %hidden_bytes : buffer
+  kernel.launch @qwen38_attention_decode(%control, %query, %gate, %key_cache, %value_cache, %attention_output) : (buffer, buffer, buffer, view<[%cache_element_count]xf16>, view<[%cache_element_count]xf16>, buffer)
+  kernel.launch @ggml_quantize_q8_1_x4_f32[%token_count, %attention_size](%token_count, %attention_size, %attention_output, %attention_output_q8) : [index, index](index, index, buffer, buffer)
+  kernel.launch @ggml_linear_q6k_q8_1_x4[%token_count, %attention_size, %hidden_size](%token_count, %attention_size, %hidden_size, %attention_output_q8, %output_weight, %projected_attention) : [index, index, index](index, index, index, buffer, view<25804800xi8>, buffer)
+  kernel.launch @qwen38_residual_add_f32_decode(%residual, %projected_attention, %residual) : (buffer, buffer, buffer)
+
+  %post_normalized = buffer.alloca<global> align(256) %hidden_bytes : buffer
+  %post_normalized_q8 = buffer.alloca<global> align(256) %hidden_q8_bytes : buffer
+  kernel.launch @qwen38_rmsnorm_f32_decode(%epsilon, %residual, %post_attention_norm_weight, %post_normalized) : (f32, buffer, view<5120xf32>, buffer)
+  kernel.launch @ggml_quantize_q8_1_x4_f32[%token_count, %hidden_size](%token_count, %hidden_size, %post_normalized, %post_normalized_q8) : [index, index](index, index, buffer, buffer)
+
+  %ffn_gate = buffer.alloca<global> align(256) %ffn_bytes : buffer
+  %ffn_up = buffer.alloca<global> align(256) %ffn_bytes : buffer
+  command.concurrent {
+    kernel.launch @ggml_linear_q5k_q8_1_x4[%token_count, %hidden_size, %ffn_size](%token_count, %hidden_size, %ffn_size, %post_normalized_q8, %ffn_gate_weight, %ffn_gate) : [index, index, index](index, index, index, buffer, view<61276160xi8>, buffer)
+    kernel.launch @ggml_linear_q5k_q8_1_x4[%token_count, %hidden_size, %ffn_size](%token_count, %hidden_size, %ffn_size, %post_normalized_q8, %ffn_up_weight, %ffn_up) : [index, index, index](index, index, index, buffer, view<61276160xi8>, buffer)
+  }
+
+  %swiglu = buffer.alloca<global> align(256) %ffn_bytes : buffer
+  %swiglu_q8 = buffer.alloca<global> align(256) %ffn_q8_bytes : buffer
+  %ffn_output = buffer.alloca<global> align(256) %hidden_bytes : buffer
+  kernel.launch @qwen38_swiglu_f32_decode(%ffn_gate, %ffn_up, %swiglu) : (buffer, buffer, buffer)
+  kernel.launch @ggml_quantize_q8_1_x4_f32[%token_count, %ffn_size](%token_count, %ffn_size, %swiglu, %swiglu_q8) : [index, index](index, index, buffer, buffer)
+  kernel.launch @ggml_linear_q6k_q8_1_x4[%token_count, %ffn_size, %hidden_size](%token_count, %ffn_size, %hidden_size, %swiglu_q8, %ffn_down_weight, %ffn_output) : [index, index, index](index, index, index, buffer, view<73113600xi8>, buffer)
+  kernel.launch @qwen38_residual_add_f32_decode(%residual, %ffn_output, %residual) : (buffer, buffer, buffer)
+  command.return
+}
+
+// Block 3 is the first full-attention layer and therefore occupies cache slot
+// zero in the model-wide full-attention cache root.
+command.program.def public @qwen38_attention_layer3_decode() launch(%parameters: buffer, %residual: buffer, %control: buffer, %attention_cache: buffer) {
+  %layer = index.constant 3 : index
+  %attention_ordinal = index.constant 0 : index
+  %attention_bytes = index.constant 24576 : offset
+  %attention_output = buffer.alloca<global> align(256) %attention_bytes : buffer
+  command.program.launch @qwen38_attention_layer_decode[%layer, %attention_ordinal](%parameters, %residual, %control, %attention_cache, %attention_output) : [index, index](buffer, buffer, buffer, buffer, buffer)
+  command.return
+}
+
+// Publishes the gated attention row as an additional issue-time binding. This
+// root has the same computation as the production root and exists to bisect
+// the full layer boundary without changing kernel scheduling or adding a copy.
+command.program.def public @qwen38_attention_layer3_decode_witness() launch(%parameters: buffer, %residual: buffer, %control: buffer, %attention_cache: buffer, %attention_output: buffer) {
+  %layer = index.constant 3 : index
+  %attention_ordinal = index.constant 0 : index
+  command.program.launch @qwen38_attention_layer_decode[%layer, %attention_ordinal](%parameters, %residual, %control, %attention_cache, %attention_output) : [index, index](buffer, buffer, buffer, buffer, buffer)
+  command.return
+}

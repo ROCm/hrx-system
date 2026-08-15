@@ -12,7 +12,39 @@ package(
     licenses = ["notice"],  # Apache 2.0
 )
 
-exports_files(["qwen38/gdn_layer_decode.loom"])
+exports_files([
+    "qwen38/attention_layer_decode.loom",
+    "qwen38/gdn_layer_decode.loom",
+])
+
+loom_link_module(
+    name = "qwen38_attention_layer_decode_linked",
+    srcs = ["qwen38/attention_layer_decode.loom"],
+    libraries = [
+        "//experimental/qwen/kernels:ggml/linear_q5k_q8_1_x4.loom",
+        "//experimental/qwen/kernels:ggml/linear_q6k_q8_1_x4.loom",
+        "//experimental/qwen/kernels:ggml/linear_q8_0_q8_1_x4.loom",
+        "//experimental/qwen/kernels:ggml/linear_qk_common.loom",
+        "//experimental/qwen/kernels:ggml/quantize_q8_1_x4.loom",
+        "//experimental/qwen/kernels:qwen38/attention_decode.loom",
+        "//experimental/qwen/kernels:qwen38/layer_decode.loom",
+    ],
+    mode = "selective",
+    roots = [
+        "@qwen38_attention_layer3_decode",
+        "@qwen38_attention_layer3_decode_witness",
+    ],
+    strip_check = True,
+)
+
+iree_c_embed_data(
+    name = "qwen38_attention_layer_decode_source",
+    srcs = [":qwen38_attention_layer_decode_linked"],
+    c_file_output = "qwen38_attention_layer_decode_source.c",
+    flatten = True,
+    h_file_output = "qwen38_attention_layer_decode_source.h",
+    identifier = "qwen38_attention_layer_decode_source",
+)
 
 loom_link_module(
     name = "qwen38_gdn_layer_decode_linked",
