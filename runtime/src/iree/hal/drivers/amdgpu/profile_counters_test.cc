@@ -93,10 +93,26 @@ TEST(ProfileCountersTest, UsesRocprofilerGfx10AndGfx11SqValuIds) {
   EXPECT_EQ(gfx1100_event.event_id, 62u);
 }
 
+TEST(ProfileCountersTest, MapsGfx115xThroughGfx11CounterFamily) {
+  iree_hal_amdgpu_aqlprofile_pmc_event_t gfx1150_waves =
+      ResolveCounter(IREE_SV("SQ_WAVES"), IREE_SV("gfx1150"));
+  iree_hal_amdgpu_aqlprofile_pmc_event_t gfx1151_waves =
+      ResolveCounter(IREE_SV("SQ_WAVES"), IREE_SV("gfx1151"));
+  iree_hal_amdgpu_aqlprofile_pmc_event_t gfx1151_valu =
+      ResolveCounter(IREE_SV("SQ_INSTS_VALU"), IREE_SV("gfx1151"));
+
+  EXPECT_EQ(gfx1150_waves.event_id, 4u);
+  EXPECT_EQ(gfx1151_waves.event_id, 4u);
+  EXPECT_EQ(gfx1151_valu.event_id, 62u);
+  EXPECT_EQ(gfx1151_valu.block_name, IREE_HAL_AMDGPU_AQLPROFILE_BLOCK_NAME_SQ);
+}
+
 TEST(ProfileCountersTest, RejectsUnsupportedExactTargets) {
   EXPECT_EQ(ResolveCounterStatus(IREE_SV("SQ_WAVES"), IREE_SV("gfx950")),
             IREE_STATUS_UNIMPLEMENTED);
   EXPECT_EQ(ResolveCounterStatus(IREE_SV("SQ_WAVES"), IREE_SV("gfx1103")),
+            IREE_STATUS_UNIMPLEMENTED);
+  EXPECT_EQ(ResolveCounterStatus(IREE_SV("SQ_WAVES"), IREE_SV("gfx1152")),
             IREE_STATUS_UNIMPLEMENTED);
   EXPECT_EQ(ResolveCounterStatus(IREE_SV("SQ_WAVES"), IREE_SV("gfx1200")),
             IREE_STATUS_UNIMPLEMENTED);

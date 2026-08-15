@@ -625,7 +625,8 @@ iree_hal_amdgpu_profile_counter_select_family(
       }
       return IREE_HAL_AMDGPU_PROFILE_COUNTER_FAMILY_UNSUPPORTED;
     case 11:
-      if (gfxip_version.minor == 0 && gfxip_version.stepping <= 2) {
+      if ((gfxip_version.minor == 0 && gfxip_version.stepping <= 2) ||
+          (gfxip_version.minor == 5 && gfxip_version.stepping <= 1)) {
         return IREE_HAL_AMDGPU_PROFILE_COUNTER_FAMILY_GFX11;
       }
       return IREE_HAL_AMDGPU_PROFILE_COUNTER_FAMILY_UNSUPPORTED;
