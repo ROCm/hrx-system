@@ -208,7 +208,7 @@ static bool hip_registered_ =
                "HIP dispatch reuse CTS can hit ROCm memory reservation "
                "failures and invalid binding tables on RDNA runners."},
           }},
-         {"async_queue"},
+         {"async_queue", "file_io"},
      }),
      true);
 
