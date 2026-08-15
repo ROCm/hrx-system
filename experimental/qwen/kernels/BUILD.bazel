@@ -21,6 +21,7 @@ exports_files([
     "ggml/linear_q6k_q8_1_x4.loom",
     "ggml/linear_q8_0_q8_1_x4.loom",
     "ggml/quantize_q8_1_x4.loom",
+    "qwen38/attention_common.loom",
     "qwen38/attention_decode.loom",
     "qwen38/gdn_decode.loom",
     "qwen38/gdn_prefill.loom",
@@ -30,6 +31,12 @@ exports_files([
     "qwen38/linear_q5k_f16_wmma.loom",
     "qwen38/linear_q6k_f16_wmma.loom",
 ])
+
+loom_link_module(
+    name = "qwen38_attention_decode_linked",
+    srcs = ["qwen38/attention_decode.loom"],
+    libraries = ["qwen38/attention_common.loom"],
+)
 
 loom_link_module(
     name = "linear_q4k_q8_1_x4_linked",
@@ -275,12 +282,12 @@ iree_executable_test(
     name = "qwen38_attention_decode_plan_test",
     src = "//loom/src/loom/tools/iree-benchmark-loom",
     args = [
-        "$(location qwen38/attention_decode.loom)",
+        "$(location :qwen38_attention_decode_linked)",
         "--config=qwen38.attention_decode.cache_capacity=128",
         "--dry-run",
         "--output-format=jsonl",
     ],
-    data = ["qwen38/attention_decode.loom"],
+    data = [":qwen38_attention_decode_linked"],
     tags = ["hostonly"],
 )
 
@@ -288,13 +295,13 @@ iree_executable_test(
     name = "qwen38_attention_decode_hal_test",
     src = "//loom/src/loom/tools/iree-test-loom",
     args = [
-        "$(location qwen38/attention_decode.loom)",
+        "$(location :qwen38_attention_decode_linked)",
         "--case=@qwen38_attention_decode_known_case",
         "--config=qwen38.attention_decode.cache_capacity=1",
         "--device=amdgpu://0",
         "--sanitizer=access",
     ],
-    data = ["qwen38/attention_decode.loom"],
+    data = [":qwen38_attention_decode_linked"],
     tags = [
         "iree-run-requirement=runtime.resource.amd_gpu",
         "manual",

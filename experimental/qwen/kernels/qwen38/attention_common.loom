@@ -1,0 +1,48 @@
+// Shared Qwen3.8-27B text-attention helpers.
+
+// Rotates one value from a normalized 256-wide Q/K head. Text positions use
+// identical temporal, height, and width coordinates, reducing the model's
+// interleaved MRoPE to a 64-wide NEOX rotation. The first 64 values use pairs
+// separated by 32; the remaining 192 values pass through.
+func.def inline @qwen38_attention_rope_text_value(%position: i32, %lane0: index, %normalized_head: buffer) -> (f32) {
+  %lane = index.assume %lane0 [range(%lane0, 0, 255)] : index
+  %c0_offset = index.constant 0 : offset
+  %head_view = buffer.view %normalized_head[%c0_offset] : buffer -> view<256xf32>
+  %value = view.load %head_view[%lane] : view<256xf32> -> f32
+  %c32 = index.constant 32 : index
+  %c64 = index.constant 64 : index
+  %rotates = index.cmp ult, %lane, %c64 : index
+  %result = scf.if %rotates -> (f32) {
+    %is_low_half = index.cmp ult, %lane, %c32 : index
+    %pair, %partner = scf.if %is_low_half -> (index, index) {
+      %high_lane = index.add %lane, %c32 : index
+      scf.yield %lane, %high_lane : index, index
+    } else {
+      %low_lane = index.sub %lane, %c32 : index
+      scf.yield %low_lane, %low_lane : index, index
+    }
+    %partner_value = view.load %head_view[%partner] : view<256xf32> -> f32
+    %pair_i32 = index.cast %pair : index to i32
+    %pair_f32 = scalar.uitofp %pair_i32 : i32 to f32
+    %position_f32 = scalar.sitofp %position : i32 to f32
+    %log_frequency_step = scalar.constant -0.5036904811859131 : f32
+    %log_frequency = scalar.mulf %pair_f32, %log_frequency_step : f32
+    %frequency = scalar.expf<afn> %log_frequency : f32
+    %angle = scalar.mulf %position_f32, %frequency : f32
+    %sine = scalar.sinf<afn> %angle : f32
+    %cosine = scalar.cosf<afn> %angle : f32
+    %own_cosine = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %value, %cosine : f32
+    %partner_sine = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %partner_value, %sine : f32
+    %rotated = scf.if %is_low_half -> (f32) {
+      %low = scalar.subf<reassoc|nnan|ninf|nsz> %own_cosine, %partner_sine : f32
+      scf.yield %low : f32
+    } else {
+      %high = scalar.addf<reassoc|nnan|ninf|nsz> %partner_sine, %own_cosine : f32
+      scf.yield %high : f32
+    }
+    scf.yield %rotated : f32
+  } else {
+    scf.yield %value : f32
+  }
+  func.return %result : f32
+}
