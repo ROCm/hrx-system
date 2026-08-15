@@ -222,7 +222,7 @@ func.template<ggml.quantize_q8_1_x4.group_body> device @ggml_quantize_q8_1_x4_gr
 // words. The LDS reductions make the independent eight-lane cohorts explicit.
 // Workload values size the exact launch; group_capacity remains a device-body
 // specialization and addressing bound.
-kernel.def @ggml_quantize_q8_1_x4_f32(%token_count: index, %input_size: index) {
+kernel.def export("ggml_quantize_q8_1_x4_f32") @ggml_quantize_q8_1_x4_f32(%token_count: index, %input_size: index) {
   %bounded_token_count = index.assume %token_count [range(%token_count, 1, 2048)] : index
   %bounded_input_size = index.assume %input_size [range(%input_size, 128, 32768), mul(%input_size, 128)] : index
   %unit = index.constant 1 : index
