@@ -25,6 +25,7 @@ exports_files([
     "qwen38/attention_decode.loom",
     "qwen38/attention_prefill.loom",
     "qwen38/attention_prefill_wmma.loom",
+    "qwen38/ffn_prepare_q8_1.loom",
     "qwen38/gdn_decode.loom",
     "qwen38/gdn_prefill.loom",
     "qwen38/greedy_argmax.loom",
@@ -76,6 +77,15 @@ loom_link_module(
     libraries = [
         "ggml/linear_q5k_q8_1_x4.loom",
         "ggml/linear_qk_common.loom",
+    ],
+)
+
+loom_link_module(
+    name = "qwen38_ffn_prepare_q8_1_linked",
+    srcs = ["qwen38/ffn_prepare_q8_1.loom"],
+    libraries = [
+        "ggml/quantize_q8_1_x4.loom",
+        "qwen38/layer_prefill.loom",
     ],
 )
 

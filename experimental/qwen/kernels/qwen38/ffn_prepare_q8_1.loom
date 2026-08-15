@@ -1,0 +1,201 @@
+// Produces the exact GGML Q8_1 x4 activation consumed by the Qwen3.8 FFN
+// projections directly from the residual RMSNorm boundary. One 1024-workitem
+// workgroup owns one complete 5120-element token row. The row-wide RMS scale
+// is reduced once while each workitem retains five source values, then all 32
+// subgroups normalize and pack their blocks without publishing an intermediate
+// F32 tensor.
+
+kernel.decl @ggml_quantize_q8_1_x4_f32(%token_count0: index, %input_size0: index) launch(%token_count1: index, %input_size1: index, %input: buffer, %output: buffer)
+
+kernel.decl @ggml_q8_1_x4_inspect_one_group() launch(%packed: buffer, %words: buffer, %d_values: buffer, %s_values: buffer)
+
+kernel.decl @qwen38_rmsnorm_f32_prefill(%token_count0: index) launch(%token_count1: index, %epsilon: f32, %input: buffer, %weight: buffer, %output: buffer)
+
+amdgpu.target<gfx11-generic> @qwen38_ffn_prepare_wave32 {subgroup_size = 32}
+
+// Packs one normalized scalar into the Q8_1 x4 row. One subgroup owns one
+// logical 32-value Q8_1 block. The subgroup writes one contiguous byte per
+// lane, while its leader publishes the block metadata.
+func.def inline @qwen38_ffn_quantize_q8_1_value(%token_output_byte_base: index, %channel0: index, %normalized: f32, %output: buffer) {
+  %channel = index.assume %channel0 [range(%channel0, 0, 5119)] : index
+  %lane = kernel.subgroup.lane.id : index
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %c4 = index.constant 4 : index
+  %c32 = index.constant 32 : index
+  %group_bytes = index.constant 144 : index
+  %payload_byte_add = index.constant 16 : index
+  %c0_f32 = scalar.constant 0.0 : f32
+  %c1_f32 = scalar.constant 1.0 : f32
+  %c127_f32 = scalar.constant 127.0 : f32
+  %absolute_value = scalar.absf %normalized : f32
+  %amax = kernel.subgroup.reduce<maxnumf> %absolute_value : f32
+  %d = scalar.divf %amax, %c127_f32 : f32
+  %d_nonzero = scalar.cmpf one, %d, %c0_f32 : f32
+  %d_inverse = scf.if %d_nonzero -> (f32) {
+    %inverse = scalar.divf %c1_f32, %d : f32
+    scf.yield %inverse : f32
+  } else {
+    scf.yield %c0_f32 : f32
+  }
+  %scaled = scalar.mulf %normalized, %d_inverse : f32
+  %rounded = scalar.roundf %scaled : f32
+  %quantized = scalar.fptosi %rounded : f32 to i32
+  %quantized_i8 = scalar.trunci %quantized : i32 to i8
+  %q8_block0 = index.div %channel, %c32 : index
+  %q8_block = index.assume %q8_block0 [range(%q8_block0, 0, 159)] : index
+  %physical_group0 = index.div %q8_block, %c4 : index
+  %physical_group = index.assume %physical_group0 [range(%physical_group0, 0, 39)] : index
+  %block_in_group0 = index.rem %q8_block, %c4 : index
+  %block_in_group = index.assume %block_in_group0 [range(%block_in_group0, 0, 3)] : index
+  %group_byte_add = index.mul %physical_group, %group_bytes : index
+  %group_byte_index = index.add %token_output_byte_base, %group_byte_add : index
+  %payload_byte_index = index.add %group_byte_index, %payload_byte_add : index
+  %group_byte_offset = index.cast %group_byte_index : index to offset
+  %payload_byte_offset = index.cast %payload_byte_index : index to offset
+  %group_ds = buffer.view %output[%group_byte_offset] : buffer -> view<8xf16>
+  %group_qs = buffer.view %output[%payload_byte_offset] : buffer -> view<128xi8>
+  %block_byte_base = index.mul %block_in_group, %c32 : index
+  %payload_index0 = index.add %block_byte_base, %lane : index
+  %payload_index = index.assume %payload_index0 [range(%payload_index0, 0, 127)] : index
+  view.store %quantized_i8, %group_qs[%payload_index] : i8, view<128xi8>
+  %quantized_sum = kernel.subgroup.reduce<addf> %rounded : f32
+  %is_subgroup_leader = index.cmp eq, %lane, %c0 : index
+  scf.if %is_subgroup_leader {
+    %s = scalar.mulf %quantized_sum, %d : f32
+    %d_f16 = scalar.fptrunc %d : f32 to f16
+    %s_f16 = scalar.fptrunc %s : f32 to f16
+    %ds_index = index.mul %block_in_group, %c2 : index
+    %s_index = index.add %ds_index, %c1 : index
+    view.store %d_f16, %group_ds[%ds_index] : f16, view<8xf16>
+    view.store %s_f16, %group_ds[%s_index] : f16, view<8xf16>
+  }
+  func.return
+}
+
+kernel.def target(@qwen38_ffn_prepare_wave32) export("qwen38_ffn_rmsnorm_quantize_q8_1") @qwen38_ffn_rmsnorm_quantize_q8_1(%token_count0: index) {
+  %token_count = index.assume %token_count0 [range(%token_count0, 1, 512)] : index
+  %c1 = index.constant 1 : index
+  %workgroup_size = index.constant 1024 : index
+  kernel.launch.config workgroups(%token_count, %c1, %c1) workgroup_size(%workgroup_size, %c1, %c1) : index
+} launch(%token_count0: index, %epsilon: f32, %input: buffer, %weight: buffer, %output: buffer) {
+  %token_count = index.assume %token_count0 [range(%token_count0, 1, 512)] : index
+  %token0 = kernel.workgroup.id<x> : index
+  %token = index.assume %token0 [lt(%token0, %token_count)] : index
+  %workitem0 = kernel.workitem.id<x> : index
+  %workitem = index.assume %workitem0 [range(%workitem0, 0, 1023)] : index
+  %c0 = index.constant 0 : index
+  %workgroup_size = index.constant 1024 : index
+  %row_byte_count = index.constant 5760 : index
+  %c0_offset = index.constant 0 : offset
+  %c0_f32 = scalar.constant 0.0 : f32
+  %hidden_size_f32 = scalar.constant 5120.0 : f32
+  %element_offsets = vector.iota %c0 step %workgroup_size : vector<5xindex>
+  %input_noalias, %weight_noalias, %output_noalias = buffer.assume.noalias %input, %weight, %output : buffer, buffer, buffer
+  %input_view = buffer.view %input_noalias[%c0_offset] : buffer -> view<[%token_count]x5120xf32>
+  %weight_view = buffer.view %weight_noalias[%c0_offset] : buffer -> view<5120xf32>
+  %input_values = vector.gather %input_view[%token, %workitem][%element_offsets] : view<[%token_count]x5120xf32>, vector<5xindex> -> vector<5xf32>
+  %squares = vector.mulf<reassoc|nnan|ninf|nsz|contract> %input_values, %input_values : vector<5xf32>
+  %thread_sum = vector.reduce<addf> %squares, %c0_f32 : vector<5xf32>, f32
+  %row_sum = kernel.workgroup.reduce<addf> %thread_sum : f32
+  %mean = scalar.divf<nnan|ninf|nsz|arcp> %row_sum, %hidden_size_f32 : f32
+  %biased_mean = scalar.addf<nnan|ninf|nsz> %mean, %epsilon : f32
+  %inverse_rms = scalar.rsqrtf<nnan|ninf|nsz|afn> %biased_mean : f32
+  %inverse_rms_vector = vector.splat %inverse_rms : vector<5xf32>
+  %learned_weights = vector.gather %weight_view[%workitem][%element_offsets] : view<5120xf32>, vector<5xindex> -> vector<5xf32>
+  %normalized0 = vector.mulf<nnan|ninf|nsz> %input_values, %inverse_rms_vector : vector<5xf32>
+  %normalized = vector.mulf<nnan|ninf|nsz> %normalized0, %learned_weights : vector<5xf32>
+  %token_output_byte_base = index.mul %token, %row_byte_count : index
+  %normalized_value0 = vector.extract %normalized[0] : vector<5xf32> -> f32
+  %normalized_value1 = vector.extract %normalized[1] : vector<5xf32> -> f32
+  %normalized_value2 = vector.extract %normalized[2] : vector<5xf32> -> f32
+  %normalized_value3 = vector.extract %normalized[3] : vector<5xf32> -> f32
+  %normalized_value4 = vector.extract %normalized[4] : vector<5xf32> -> f32
+  %channel1 = index.add %workitem, %workgroup_size : index
+  %channel2 = index.add %channel1, %workgroup_size : index
+  %channel3 = index.add %channel2, %workgroup_size : index
+  %channel4 = index.add %channel3, %workgroup_size : index
+  func.call @qwen38_ffn_quantize_q8_1_value(%token_output_byte_base, %workitem, %normalized_value0, %output_noalias) : (index, index, f32, buffer)
+  func.call @qwen38_ffn_quantize_q8_1_value(%token_output_byte_base, %channel1, %normalized_value1, %output_noalias) : (index, index, f32, buffer)
+  func.call @qwen38_ffn_quantize_q8_1_value(%token_output_byte_base, %channel2, %normalized_value2, %output_noalias) : (index, index, f32, buffer)
+  func.call @qwen38_ffn_quantize_q8_1_value(%token_output_byte_base, %channel3, %normalized_value3, %output_noalias) : (index, index, f32, buffer)
+  func.call @qwen38_ffn_quantize_q8_1_value(%token_output_byte_base, %channel4, %normalized_value4, %output_noalias) : (index, index, f32, buffer)
+  kernel.return
+}
+
+check.case public @qwen38_ffn_rmsnorm_quantize_q8_1_differential_case {
+  %token_count = check.literal value(3) : index
+  %hidden_size = check.literal value(5120) : index
+  %epsilon = check.literal value(0.000001) : f32
+  %input_seed = check.param.seed base(0x51333846464e5158) count(1) : i64
+  %input = check.generate.random.uniform seed(%input_seed) range(-1.0 to 1.0) : tensor<3x5120xf32>
+  %weight = check.generate.iota offset(0.5) step(0.125) period(5) : tensor<5120xf32>
+  %normalized = check.generate.fill value(0.0) : tensor<3x5120xf32>
+  %expected = check.generate.fill value(0) : tensor<3x5760xi8>
+  %actual = check.generate.fill value(1) : tensor<3x5760xi8>
+  kernel.launch @qwen38_rmsnorm_f32_prefill[%token_count](%token_count, %epsilon, %input, %weight, %normalized) : [index](index, f32, tensor<3x5120xf32>, tensor<5120xf32>, tensor<3x5120xf32>)
+  kernel.launch @ggml_quantize_q8_1_x4_f32[%token_count, %hidden_size](%token_count, %hidden_size, %normalized, %expected) : [index, index](index, index, tensor<3x5120xf32>, tensor<3x5760xi8>)
+  kernel.launch @qwen38_ffn_rmsnorm_quantize_q8_1[%token_count](%token_count, %epsilon, %input, %weight, %actual) : [index](index, f32, tensor<3x5120xf32>, tensor<5120xf32>, tensor<3x5760xi8>)
+  check.expect.equal actual(%actual) expected(%expected) : tensor<3x5760xi8>
+  check.return
+}
+
+check.case public @qwen38_ffn_rmsnorm_quantize_q8_1_known_case {
+  %token_count = check.literal value(1) : index
+  %epsilon = check.literal value(0.000001) : f32
+  %input = check.generate.fill value(2.0) : tensor<5120xf32>
+  %weight = check.generate.fill value(1.0) : tensor<5120xf32>
+  %packed = check.generate.fill value(0) : tensor<5760xi8>
+  %words = check.generate.fill value(0) : tensor<32xi32>
+  %d_values = check.generate.fill value(0.0) : tensor<4xf32>
+  %s_values = check.generate.fill value(0.0) : tensor<4xf32>
+  %expected_words = check.generate.fill value(2139062143) : tensor<32xi32>
+  %expected_d = check.generate.fill value(0.00787353515625) : tensor<4xf32>
+  %expected_s = check.generate.fill value(32.0) : tensor<4xf32>
+  kernel.launch @qwen38_ffn_rmsnorm_quantize_q8_1[%token_count](%token_count, %epsilon, %input, %weight, %packed) : [index](index, f32, tensor<5120xf32>, tensor<5120xf32>, tensor<5760xi8>)
+  kernel.launch @ggml_q8_1_x4_inspect_one_group(%packed, %words, %d_values, %s_values) : (tensor<5760xi8>, tensor<32xi32>, tensor<4xf32>, tensor<4xf32>)
+  check.expect.equal actual(%words) expected(%expected_words) : tensor<32xi32>
+  check.expect.close actual(%d_values) expected(%expected_d) atol(0.0) rtol(0.0) nan(same) : tensor<4xf32>
+  check.expect.close actual(%s_values) expected(%expected_s) atol(0.0) rtol(0.0) nan(same) : tensor<4xf32>
+  check.return
+}
+
+check.case public @qwen38_ffn_rmsnorm_quantize_q8_1_prefill_case {
+  %token_count = check.param.choice values([32, 128, 512]) name("token_count") : index
+  %epsilon = check.literal value(0.000001) : f32
+  %input = check.generate.fill value(0.25) : tensor<[%token_count]x5120xf32>
+  %weight = check.generate.fill value(0.5) : tensor<5120xf32>
+  %output = check.generate.fill value(0) : tensor<[%token_count]x5760xi8>
+  kernel.launch @qwen38_ffn_rmsnorm_quantize_q8_1[%token_count](%token_count, %epsilon, %input, %weight, %output) : [index](index, f32, tensor<[%token_count]x5120xf32>, tensor<5120xf32>, tensor<[%token_count]x5760xi8>)
+  check.return
+}
+
+check.case public @qwen38_ffn_rmsnorm_quantize_q8_1_baseline_prefill_case {
+  %token_count = check.param.choice values([32, 128, 512]) name("token_count") : index
+  %hidden_size = check.literal value(5120) : index
+  %epsilon = check.literal value(0.000001) : f32
+  %input = check.generate.fill value(0.25) : tensor<[%token_count]x5120xf32>
+  %weight = check.generate.fill value(0.5) : tensor<5120xf32>
+  %normalized = check.generate.fill value(0.0) : tensor<[%token_count]x5120xf32>
+  %output = check.generate.fill value(0) : tensor<[%token_count]x5760xi8>
+  kernel.launch @qwen38_rmsnorm_f32_prefill[%token_count](%token_count, %epsilon, %input, %weight, %normalized) : [index](index, f32, tensor<[%token_count]x5120xf32>, tensor<5120xf32>, tensor<[%token_count]x5120xf32>)
+  kernel.launch @ggml_quantize_q8_1_x4_f32[%token_count, %hidden_size](%token_count, %hidden_size, %normalized, %output) : [index, index](index, index, tensor<[%token_count]x5120xf32>, tensor<[%token_count]x5760xi8>)
+  check.return
+}
+
+check.benchmark<@qwen38_ffn_rmsnorm_quantize_q8_1_differential_case> @qwen38_ffn_rmsnorm_quantize_q8_1_differential
+
+check.benchmark<@qwen38_ffn_rmsnorm_quantize_q8_1_known_case> @qwen38_ffn_rmsnorm_quantize_q8_1_known
+
+check.benchmark<@qwen38_ffn_rmsnorm_quantize_q8_1_baseline_prefill_case> @qwen38_ffn_rmsnorm_quantize_q8_1_baseline_prefill_32 {token_count = 32}
+
+check.benchmark<@qwen38_ffn_rmsnorm_quantize_q8_1_baseline_prefill_case> @qwen38_ffn_rmsnorm_quantize_q8_1_baseline_prefill_128 {token_count = 128}
+
+check.benchmark<@qwen38_ffn_rmsnorm_quantize_q8_1_baseline_prefill_case> @qwen38_ffn_rmsnorm_quantize_q8_1_baseline_prefill_512 {token_count = 512}
+
+check.benchmark<@qwen38_ffn_rmsnorm_quantize_q8_1_prefill_case> @qwen38_ffn_rmsnorm_quantize_q8_1_prefill_32 {token_count = 32}
+
+check.benchmark<@qwen38_ffn_rmsnorm_quantize_q8_1_prefill_case> @qwen38_ffn_rmsnorm_quantize_q8_1_prefill_128 {token_count = 128}
+
+check.benchmark<@qwen38_ffn_rmsnorm_quantize_q8_1_prefill_case> @qwen38_ffn_rmsnorm_quantize_q8_1_prefill_512 {token_count = 512}
