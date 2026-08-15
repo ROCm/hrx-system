@@ -14,6 +14,7 @@ package(
 
 exports_files([
     "qwen38/attention_layer_decode.loom",
+    "qwen38/decode_config.loom",
     "qwen38/gdn_layer_decode.loom",
 ])
 
@@ -21,6 +22,7 @@ loom_link_module(
     name = "qwen38_attention_layer_decode_linked",
     srcs = ["qwen38/attention_layer_decode.loom"],
     libraries = [
+        "qwen38/decode_config.loom",
         "//experimental/qwen/kernels:ggml/linear_q5k_q8_1_x4.loom",
         "//experimental/qwen/kernels:ggml/linear_q6k_q8_1_x4.loom",
         "//experimental/qwen/kernels:ggml/linear_q8_0_q8_1_x4.loom",
@@ -50,6 +52,7 @@ loom_link_module(
     name = "qwen38_gdn_layer_decode_linked",
     srcs = ["qwen38/gdn_layer_decode.loom"],
     libraries = [
+        "qwen38/decode_config.loom",
         "//experimental/qwen/kernels:ggml/linear_q4k_q8_1_x4.loom",
         "//experimental/qwen/kernels:ggml/linear_q5k_q8_1_x4.loom",
         "//experimental/qwen/kernels:ggml/linear_q6k_q8_1_x4.loom",
