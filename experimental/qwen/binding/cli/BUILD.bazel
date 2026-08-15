@@ -88,6 +88,32 @@ iree_runtime_cc_binary(
 )
 
 iree_runtime_cc_binary(
+    name = "qwen38-prefill-body-cli",
+    srcs = ["qwen38_prefill_body_main.c"],
+    tags = [
+        "iree-run-requirement=runtime.resource.amd_gpu",
+        "manual",
+        "requires-gpu-amd",
+        "runtime-resource=amd-gpu",
+    ],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/execute:amdgpu_hal",
+    ]),
+    deps = [
+        "//experimental/qwen/programs:qwen38_text_prefill_body_source",
+        "//experimental/qwen/tooling:command_program",
+        "//experimental/qwen/tooling:runtime",
+        "//loom/binding/c/target/cmd/hal",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/tooling:flags",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/io:file_handle",
+        "//runtime/src/iree/io:parameter_provider",
+        "//runtime/src/iree/tooling:device_util",
+    ],
+)
+
+iree_runtime_cc_binary(
     name = "qwen38-gdn-layer-cli",
     srcs = ["qwen38_gdn_layer_main.c"],
     tags = [
