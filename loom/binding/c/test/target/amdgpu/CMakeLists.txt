@@ -37,8 +37,8 @@ loom_cc_test(
     loom::binding::c::loomc
     loom::binding::c::target::amdgpu
     loom::binding::c::target::cmd
+    loom::binding::c::target::cmd::program
     loom::binding::c::test::test_util
-    loom::target::arch::cmd::package
 )
 endif()
 

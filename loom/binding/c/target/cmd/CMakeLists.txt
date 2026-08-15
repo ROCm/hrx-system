@@ -11,6 +11,34 @@ iree_add_all_subdirs()
 
 loom_cc_library(
   NAME
+    program_internal
+  HDRS
+    "program.h"
+  DEPS
+    loom::binding::c::loomc
+    loom::target::arch::cmd::package
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
+    program
+  HDRS
+    "${PROJECT_SOURCE_DIR}/loom/binding/c/include/loomc/target/cmd/program.h"
+  SRCS
+    "program.c"
+  DEPS
+    ::program_internal
+    iree::base
+    iree::base::core_headers
+    iree::base::internal
+    loom::binding::c::loomc
+    loom::target::arch::cmd::package
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
     cmd
   HDRS
     "${PROJECT_SOURCE_DIR}/loom/binding/c/include/loomc/target/cmd/program_plan.h"
@@ -18,6 +46,7 @@ loom_cc_library(
   SRCS
     "program_plan.c"
   DEPS
+    ::program
     iree::base
     iree::base::internal::arena
     loom::analysis::symbol_facts

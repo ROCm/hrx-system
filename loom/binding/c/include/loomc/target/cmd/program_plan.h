@@ -8,6 +8,7 @@
 #define LOOMC_TARGET_CMD_PROGRAM_PLAN_H_
 
 #include "loomc/program_plan.h"
+#include "loomc/target/cmd/program.h"
 
 /// @file
 /// Command-program projections over generic production plans.
@@ -21,12 +22,6 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-/// Portable single-root command-program artifact format.
-#define LOOMC_ARTIFACT_FORMAT_COMMAND_PROGRAM "loom-cmd"
-
-/// Portable multi-root command-program package artifact format.
-#define LOOMC_ARTIFACT_FORMAT_COMMAND_PACKAGE "loom-cmd-package"
 
 /// One root-local executable-slot requirement.
 ///

@@ -11,7 +11,6 @@
 
 #include "iree/base/api.h"
 #include "iree/testing/gtest.h"
-#include "loom/target/arch/cmd/package.h"
 #include "loomc/compile.h"
 #include "loomc/compile_report.h"
 #include "loomc/context.h"
@@ -23,6 +22,7 @@
 #include "loomc/source.h"
 #include "loomc/target.h"
 #include "loomc/target/amdgpu.h"
+#include "loomc/target/cmd/program.h"
 #include "loomc/target/cmd/program_plan.h"
 #include "loomc/workspace.h"
 #include "test/util.h"
@@ -38,6 +38,8 @@ using LaunchConfigProgramPtr = HandlePtr<loomc_launch_config_program_t,
 using ModulePtr = HandlePtr<loomc_module_t, loomc_module_release>;
 using PassProgramPtr =
     HandlePtr<loomc_pass_program_t, loomc_pass_program_release>;
+using ProgramPackagePtr =
+    HandlePtr<loomc_cmd_program_package_t, loomc_cmd_program_package_release>;
 using ProgramPlanPtr =
     HandlePtr<loomc_program_plan_t, loomc_program_plan_release>;
 using ResultPtr = HandlePtr<loomc_result_t, loomc_result_release>;
@@ -175,6 +177,12 @@ uint32_t LoadLittleEndianU32(const uint8_t* data) {
          (static_cast<uint32_t>(data[1]) << 8) |
          (static_cast<uint32_t>(data[2]) << 16) |
          (static_cast<uint32_t>(data[3]) << 24);
+}
+
+void ReleasePackageBytes(void* user_data, loomc_byte_span_t contents) {
+  *static_cast<bool*>(user_data) = true;
+  iree_allocator_free(iree_allocator_system(),
+                      const_cast<uint8_t*>(contents.data));
 }
 
 const char kCommandProgram[] = R"(
@@ -344,38 +352,68 @@ TEST(CommandProgramTest, CompilesIndependentMultiRootProducts) {
                    LOOMC_ARTIFACT_FORMAT_COMPILE_REPORT_JSON),
       nullptr);
 
-  loom_cmd_program_package_t package = {};
-  IREE_ASSERT_OK(loom_cmd_program_package_parse(
+  loomc_cmd_program_package_t* package = nullptr;
+  LOOMC_ASSERT_OK(loomc_cmd_program_package_load(
+      package_artifact, /*release=*/nullptr, /*release_user_data=*/nullptr,
+      loomc_allocator_system(), &package));
+  ProgramPackagePtr package_ptr(package);
+
+  void* transferred_data = nullptr;
+  IREE_ASSERT_OK(iree_allocator_clone(
+      iree_allocator_system(),
       iree_make_const_byte_span(package_artifact->contents.data,
                                 package_artifact->contents.data_length),
-      &package));
-  ASSERT_EQ(package.export_count, 2u);
-  loom_cmd_program_package_export_t prefill_export = {};
-  ASSERT_TRUE(loom_cmd_program_package_lookup_export(
-      &package, IREE_SV("prefill"), &prefill_export));
-  loom_cmd_program_package_export_t decode_export = {};
-  ASSERT_TRUE(loom_cmd_program_package_lookup_export(
-      &package, IREE_SV("decode"), &decode_export));
-  ASSERT_EQ(prefill_export.entry_count, 1u);
-  ASSERT_EQ(decode_export.entry_count, 1u);
-  EXPECT_EQ(
-      loom_cmd_program_package_export_entry_at(&package, &prefill_export, 0)
-          .executable_index,
-      0u);
-  EXPECT_EQ(
-      loom_cmd_program_package_export_entry_at(&package, &decode_export, 0)
-          .executable_index,
-      0u);
+      &transferred_data));
+  loomc_artifact_t transferred_artifact = *package_artifact;
+  transferred_artifact.contents = loomc_make_byte_span(
+      transferred_data, package_artifact->contents.data_length);
+  bool transferred_data_released = false;
+  loomc_cmd_program_package_t* transferred_package = nullptr;
+  LOOMC_ASSERT_OK(loomc_cmd_program_package_load(
+      &transferred_artifact, ReleasePackageBytes, &transferred_data_released,
+      loomc_allocator_system(), &transferred_package));
+  ProgramPackagePtr transferred_package_ptr(transferred_package);
+  package_result_ptr.reset();
+  EXPECT_FALSE(transferred_data_released);
+  transferred_package_ptr.reset();
+  EXPECT_TRUE(transferred_data_released);
 
-  const loom_cmd_program_t& prefill_program = prefill_export.program;
-  ASSERT_NE(prefill_program.requirements.launch_counts.binding_index,
-            UINT32_MAX);
-  ASSERT_GT(prefill_program.requirements.launch_counts.required_byte_length,
-            0u);
-  const loom_cmd_program_t& decode_program = decode_export.program;
-  EXPECT_EQ(decode_program.requirements.launch_counts.binding_index,
-            UINT32_MAX);
-  EXPECT_EQ(decode_program.requirements.launch_counts.required_byte_length, 0u);
+  ASSERT_EQ(loomc_cmd_program_package_export_count(package_ptr.get()), 2u);
+  loomc_cmd_program_export_t prefill_export =
+      loomc_cmd_program_export_invalid();
+  LOOMC_ASSERT_OK(loomc_cmd_program_package_lookup_export(
+      package_ptr.get(), loomc_make_cstring_view("prefill"), &prefill_export));
+  loomc_cmd_program_export_t decode_export = loomc_cmd_program_export_invalid();
+  LOOMC_ASSERT_OK(loomc_cmd_program_package_lookup_export(
+      package_ptr.get(), loomc_make_cstring_view("decode"), &decode_export));
+
+  loomc_cmd_program_info_t prefill_program_info = {};
+  LOOMC_ASSERT_OK(loomc_cmd_program_package_export_info(
+      package_ptr.get(), prefill_export, &prefill_program_info));
+  ASSERT_EQ(prefill_program_info.entry_count, 1u);
+  ASSERT_NE(prefill_program_info.config.binding_index,
+            LOOMC_CMD_PROGRAM_BINDING_INVALID);
+  ASSERT_GT(prefill_program_info.config.required_byte_length, 0u);
+  loomc_cmd_program_entry_info_t prefill_entry_info = {};
+  LOOMC_ASSERT_OK(loomc_cmd_program_package_entry_info(
+      package_ptr.get(), prefill_export, 0, &prefill_entry_info));
+  EXPECT_EQ(prefill_entry_info.executable_index, 0u);
+  EXPECT_FALSE(loomc_string_view_is_empty(prefill_entry_info.name));
+
+  loomc_cmd_program_info_t decode_program_info = {};
+  LOOMC_ASSERT_OK(loomc_cmd_program_package_export_info(
+      package_ptr.get(), decode_export, &decode_program_info));
+  ASSERT_EQ(decode_program_info.entry_count, 1u);
+  EXPECT_EQ(decode_program_info.config.binding_index,
+            LOOMC_CMD_PROGRAM_BINDING_INVALID);
+  EXPECT_EQ(decode_program_info.config.required_byte_length, 0u);
+  loomc_cmd_program_entry_info_t decode_entry_info = {};
+  LOOMC_ASSERT_OK(loomc_cmd_program_package_entry_info(
+      package_ptr.get(), decode_export, 0, &decode_entry_info));
+  EXPECT_EQ(decode_entry_info.executable_index, 0u);
+  EXPECT_FALSE(loomc_string_view_is_empty(decode_entry_info.name));
+  EXPECT_NE(ToString(prefill_entry_info.name),
+            ToString(decode_entry_info.name));
 
   // Compiled products own all bytes needed by their runtime loaders.
   plan_ptr.reset();
@@ -392,7 +430,7 @@ TEST(CommandProgramTest, CompilesIndependentMultiRootProducts) {
       &prefill_function));
 
   std::vector<uint8_t> launch_data(
-      prefill_program.requirements.launch_counts.required_byte_length);
+      prefill_program_info.config.required_byte_length);
   loomc_cmd_launch_config_t launch_config = {
       /*.type=*/LOOMC_STRUCTURE_TYPE_CMD_LAUNCH_CONFIG,
       /*.structure_size=*/sizeof(launch_config),

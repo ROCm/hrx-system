@@ -12,6 +12,39 @@ package(
     licenses = ["notice"],  # Apache 2.0
 )
 
+_CMD_PROGRAM_VISIBILITY = [
+    "//loom/binding/c/target/cmd:__subpackages__",
+]
+
+loom_cc_library(
+    name = "program_internal",
+    hdrs = [
+        "program.h",
+    ],
+    visibility = _CMD_PROGRAM_VISIBILITY,
+    deps = [
+        "//loom/binding/c:loomc",
+        "//loom/src/loom/target/arch/cmd:package",
+    ],
+)
+
+loom_cc_library(
+    name = "program",
+    srcs = ["program.c"],
+    hdrs = [
+        "//loom/binding/c:include/loomc/target/cmd/program.h",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":program_internal",
+        "//loom/binding/c:loomc",
+        "//loom/src/loom/target/arch/cmd:package",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base:core_headers",
+        "//runtime/src/iree/base/internal",
+    ],
+)
+
 loom_cc_library(
     name = "cmd",
     srcs = ["program_plan.c"],
@@ -21,6 +54,7 @@ loom_cc_library(
     ],
     linkstatic = True,
     deps = [
+        ":program",
         "//loom/binding/c:loomc",
         "//loom/src/loom/analysis:symbol_facts",
         "//loom/src/loom/ir",
