@@ -1,0 +1,45 @@
+// Qwen3.8-27B base-model decode body.
+//
+// The 64 layers are expressed as sixteen architectural groups. Each group
+// advances three Gated DeltaNet layers followed by one full-attention layer.
+// Preparation unrolls this fixed model structure, specializes every layer and
+// state ordinal, and packs all nested allocations into one transient root.
+
+command.program.decl @qwen38_gdn_layer_decode(%layer: index, %gdn_ordinal: index) launch(%parameters: buffer, %residual: buffer, %gdn_state: buffer) where [range(%layer, 0, 63), range(%gdn_ordinal, 0, 47)]
+command.program.decl @qwen38_attention_layer_decode(%layer: index, %attention_ordinal: index) launch(%parameters: buffer, %residual: buffer, %control: buffer, %attention_cache: buffer, %attention_output: buffer) where [range(%layer, 0, 63), range(%attention_ordinal, 0, 15)]
+
+// Advances the complete base-model body for one token. Position is read from
+// the issue-time control buffer by every attention layer, allowing one
+// materialized command buffer to serve the full decode sequence.
+command.program.def public @qwen38_text_decode_body() launch(%parameters: buffer, %residual: buffer, %control: buffer, %gdn_state: buffer, %attention_cache: buffer) {
+  %group_begin = index.constant 0 : index
+  %group_end = index.constant 16 : index
+  %group_step = index.constant 1 : index
+  %layers_per_group = index.constant 4 : index
+  %gdn_layers_per_group = index.constant 3 : index
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %c3 = index.constant 3 : index
+
+  // All attention layers reuse this intermediate. Nested layer allocations
+  // remain semantic and are packed with it during command preparation.
+  %attention_bytes = index.constant 24576 : offset
+  %attention_output = buffer.alloca<global> align(256) %attention_bytes : buffer
+
+  scf.for %group = [%group_begin to %group_end step %group_step] unroll {
+    %layer0 = index.mul %group, %layers_per_group : index
+    %layer1 = index.add %layer0, %c1 : index
+    %layer2 = index.add %layer0, %c2 : index
+    %attention_layer = index.add %layer0, %c3 : index
+
+    %gdn_ordinal0 = index.mul %group, %gdn_layers_per_group : index
+    %gdn_ordinal1 = index.add %gdn_ordinal0, %c1 : index
+    %gdn_ordinal2 = index.add %gdn_ordinal0, %c2 : index
+
+    command.program.launch @qwen38_gdn_layer_decode[%layer0, %gdn_ordinal0](%parameters, %residual, %gdn_state) : [index, index](buffer, buffer, buffer)
+    command.program.launch @qwen38_gdn_layer_decode[%layer1, %gdn_ordinal1](%parameters, %residual, %gdn_state) : [index, index](buffer, buffer, buffer)
+    command.program.launch @qwen38_gdn_layer_decode[%layer2, %gdn_ordinal2](%parameters, %residual, %gdn_state) : [index, index](buffer, buffer, buffer)
+    command.program.launch @qwen38_attention_layer_decode[%attention_layer, %group](%parameters, %residual, %control, %attention_cache, %attention_output) : [index, index](buffer, buffer, buffer, buffer, buffer)
+  }
+  command.return
+}
