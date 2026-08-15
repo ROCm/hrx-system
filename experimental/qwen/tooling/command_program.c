@@ -25,18 +25,27 @@ typedef struct qwen_tooling_parameter_request_t {
 } qwen_tooling_parameter_request_t;
 
 struct qwen_tooling_command_program_t {
-  // Allocator used to release this object.
-  iree_allocator_t host_allocator;
-  // Package retained so strings borrowed by info remain valid.
-  loomc_cmd_program_package_t* package;
   // Materialized reusable command buffer and retained fixed resources.
   loomc_cmd_hal_program_t* hal_program;
-  // Evaluator for issue-time indirect dispatch and dynamic constant data.
+  // Shared launch-config evaluator borrowed from the owning program set.
   loomc_launch_config_program_t* launch_config_program;
   // Program-local token for the selected public command root.
   loomc_launch_config_function_t launch_config_function;
   // Immutable root ABI borrowed from package.
   loomc_cmd_program_info_t info;
+};
+
+struct qwen_tooling_command_program_set_t {
+  // Allocator used to release this object.
+  iree_allocator_t host_allocator;
+  // Package retained so strings borrowed by root info remain valid.
+  loomc_cmd_program_package_t* package;
+  // Shared evaluator for issue-time indirect dispatch and dynamic constants.
+  loomc_launch_config_program_t* launch_config_program;
+  // Materialized roots stored inline in this allocation.
+  qwen_tooling_command_program_t* programs;
+  // Number of entries in |programs|.
+  iree_host_size_t program_count;
   // Packed fixed-parameter root size in bytes.
   iree_device_size_t parameter_byte_length;
 };
@@ -303,19 +312,112 @@ static iree_status_t qwen_tooling_begin_parameter_gather(
   return status;
 }
 
-iree_status_t qwen_tooling_command_program_create(
+static iree_status_t qwen_tooling_require_shared_parameter_layout(
+    loomc_cmd_program_package_t* package,
+    loomc_cmd_program_export_t reference_export,
+    const loomc_cmd_program_info_t* reference_info,
+    loomc_cmd_program_export_t candidate_export,
+    const loomc_cmd_program_info_t* candidate_info) {
+  if (reference_info->fixed_buffer_count != 1 ||
+      reference_info->parameter_root_count != 1 ||
+      reference_info->parameter_count == 0) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "Qwen command programs require one nonempty parameter root");
+  }
+  if (candidate_info->fixed_buffer_count !=
+          reference_info->fixed_buffer_count ||
+      candidate_info->parameter_root_count !=
+          reference_info->parameter_root_count ||
+      candidate_info->parameter_count != reference_info->parameter_count) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "command root '%.*s' does not share the fixed parameter ABI",
+        (int)candidate_info->name.size, candidate_info->name.data);
+  }
+
+  loomc_cmd_program_parameter_root_info_t reference_root = {
+      .type = LOOMC_STRUCTURE_TYPE_CMD_PROGRAM_PARAMETER_ROOT_INFO,
+      .structure_size = sizeof(reference_root),
+  };
+  loomc_cmd_program_parameter_root_info_t candidate_root = {
+      .type = LOOMC_STRUCTURE_TYPE_CMD_PROGRAM_PARAMETER_ROOT_INFO,
+      .structure_size = sizeof(candidate_root),
+  };
+  iree_status_t status = qwen_tooling_status_from_loomc(
+      loomc_cmd_program_package_parameter_root_info(package, reference_export,
+                                                    0, &reference_root));
+  if (iree_status_is_ok(status)) {
+    status = qwen_tooling_status_from_loomc(
+        loomc_cmd_program_package_parameter_root_info(package, candidate_export,
+                                                      0, &candidate_root));
+  }
+  if (iree_status_is_ok(status) &&
+      (candidate_root.fixed_buffer_index != reference_root.fixed_buffer_index ||
+       candidate_root.required_byte_length !=
+           reference_root.required_byte_length ||
+       candidate_root.minimum_alignment != reference_root.minimum_alignment)) {
+    status = iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "command root '%.*s' uses a different parameter root layout",
+        (int)candidate_info->name.size, candidate_info->name.data);
+  }
+
+  for (iree_host_size_t i = 0;
+       i < reference_info->parameter_count && iree_status_is_ok(status); ++i) {
+    loomc_cmd_program_parameter_info_t reference_parameter = {
+        .type = LOOMC_STRUCTURE_TYPE_CMD_PROGRAM_PARAMETER_INFO,
+        .structure_size = sizeof(reference_parameter),
+    };
+    loomc_cmd_program_parameter_info_t candidate_parameter = {
+        .type = LOOMC_STRUCTURE_TYPE_CMD_PROGRAM_PARAMETER_INFO,
+        .structure_size = sizeof(candidate_parameter),
+    };
+    status =
+        qwen_tooling_status_from_loomc(loomc_cmd_program_package_parameter_info(
+            package, reference_export, i, &reference_parameter));
+    if (iree_status_is_ok(status)) {
+      status = qwen_tooling_status_from_loomc(
+          loomc_cmd_program_package_parameter_info(package, candidate_export, i,
+                                                   &candidate_parameter));
+    }
+    if (iree_status_is_ok(status) &&
+        (!loomc_string_view_equal(reference_parameter.key,
+                                  candidate_parameter.key) ||
+         candidate_parameter.fixed_buffer_index !=
+             reference_parameter.fixed_buffer_index ||
+         candidate_parameter.byte_offset != reference_parameter.byte_offset ||
+         candidate_parameter.byte_length != reference_parameter.byte_length ||
+         candidate_parameter.minimum_alignment !=
+             reference_parameter.minimum_alignment)) {
+      status = iree_make_status(
+          IREE_STATUS_FAILED_PRECONDITION,
+          "command root '%.*s' diverges at parameter %" PRIhsz,
+          (int)candidate_info->name.size, candidate_info->name.data, i);
+    }
+  }
+  return status;
+}
+
+iree_status_t qwen_tooling_command_program_set_create(
     qwen_tooling_runtime_context_t* runtime_context,
-    const qwen_tooling_command_program_options_t* options,
+    const qwen_tooling_command_program_set_options_t* options,
     iree_allocator_t host_allocator,
-    qwen_tooling_command_program_t** out_program) {
-  if (!runtime_context || !options || !out_program ||
+    qwen_tooling_command_program_set_t** out_program_set) {
+  if (!runtime_context || !options || !out_program_set ||
       iree_string_view_is_empty(options->source_identifier) ||
-      iree_string_view_is_empty(options->root_name) ||
-      iree_const_byte_span_is_empty(options->source_contents)) {
+      iree_const_byte_span_is_empty(options->source_contents) ||
+      options->root_count == 0 || !options->root_names) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "command program options must be complete");
   }
-  *out_program = NULL;
+  for (iree_host_size_t i = 0; i < options->root_count; ++i) {
+    if (iree_string_view_is_empty(options->root_names[i])) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "command program root names must be nonempty");
+    }
+  }
+  *out_program_set = NULL;
   const loomc_allocator_t loom_allocator =
       loomc_allocator_from_iree(host_allocator);
   iree_hal_device_t* device =
@@ -333,21 +435,23 @@ iree_status_t qwen_tooling_command_program_create(
   loomc_module_function_t* kernel_functions = NULL;
   loomc_target_specialization_t* specializations = NULL;
   iree_host_size_t kernel_function_count = 0;
+  loomc_string_view_t* root_names = NULL;
   loomc_program_plan_t* plan = NULL;
+  loomc_cmd_program_plan_root_info_t* root_plan_infos = NULL;
   loomc_cmd_program_package_t* package = NULL;
+  loomc_cmd_program_export_t* program_exports = NULL;
+  loomc_cmd_program_info_t* program_infos = NULL;
   loomc_launch_config_program_t* launch_config_program = NULL;
-  loomc_launch_config_function_t launch_config_function =
-      loomc_launch_config_function_invalid();
-  loomc_cmd_program_export_t program_export =
-      loomc_cmd_program_export_invalid();
   loomc_result_t* result = NULL;
   iree_hal_buffer_t* parameter_buffer = NULL;
   qwen_tooling_parameter_request_t* parameter_requests = NULL;
   iree_hal_semaphore_t* parameter_ready_semaphore = NULL;
   bool parameter_gather_submitted = false;
-  iree_hal_executable_t** executables = NULL;
-  iree_host_size_t executable_count = 0;
-  qwen_tooling_command_program_t* program = NULL;
+  iree_hal_executable_t** executables_by_unit = NULL;
+  iree_host_size_t unit_count = 0;
+  iree_hal_executable_t** root_executables = NULL;
+  iree_host_size_t root_executable_capacity = 0;
+  qwen_tooling_command_program_set_t* program_set = NULL;
 
   iree_status_t status =
       qwen_tooling_status_from_loomc(loomc_target_environment_create_amdgpu(
@@ -462,6 +566,16 @@ iree_status_t qwen_tooling_command_program_create(
   result = NULL;
 
   if (iree_status_is_ok(status)) {
+    status =
+        iree_allocator_malloc_array(host_allocator, options->root_count,
+                                    sizeof(*root_names), (void**)&root_names);
+  }
+  for (iree_host_size_t i = 0;
+       i < options->root_count && iree_status_is_ok(status); ++i) {
+    root_names[i] = loomc_string_view_from_iree(options->root_names[i]);
+  }
+
+  if (iree_status_is_ok(status)) {
     const loomc_target_specialization_options_t specialization_options = {
         .type = LOOMC_STRUCTURE_TYPE_TARGET_SPECIALIZATION_OPTIONS,
         .structure_size = sizeof(specialization_options),
@@ -472,7 +586,7 @@ iree_status_t qwen_tooling_command_program_create(
         .type = LOOMC_STRUCTURE_TYPE_COMPILE_OPTIONS,
         .structure_size = sizeof(compile_options),
         .next = &specialization_options,
-        .module_name = loomc_string_view_from_iree(options->root_name),
+        .module_name = root_names[0],
     };
     status = qwen_tooling_status_from_loomc(
         loomc_compile_module(compiler, workspace, empty_pass_program, module,
@@ -485,12 +599,10 @@ iree_status_t qwen_tooling_command_program_create(
   loomc_result_release(result);
   result = NULL;
 
-  const loomc_string_view_t root_name =
-      loomc_string_view_from_iree(options->root_name);
   if (iree_status_is_ok(status)) {
     status = qwen_tooling_status_from_loomc(loomc_program_plan_prepare(
-        workspace, module, &root_name, 1, /*options=*/NULL, loom_allocator,
-        &plan, &result));
+        workspace, module, root_names, options->root_count, /*options=*/NULL,
+        loom_allocator, &plan, &result));
   }
   if (iree_status_is_ok(status)) {
     status =
@@ -499,22 +611,51 @@ iree_status_t qwen_tooling_command_program_create(
   loomc_result_release(result);
   result = NULL;
 
-  loomc_program_plan_root_t root = loomc_program_plan_root_invalid();
-  loomc_cmd_program_plan_root_info_t root_info = {0};
   if (iree_status_is_ok(status)) {
-    root = loomc_program_plan_root_at(plan, 0);
+    status = iree_allocator_malloc_array(host_allocator, options->root_count,
+                                         sizeof(*root_plan_infos),
+                                         (void**)&root_plan_infos);
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_allocator_malloc_array(host_allocator, options->root_count,
+                                         sizeof(*program_exports),
+                                         (void**)&program_exports);
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_allocator_malloc_array(host_allocator, options->root_count,
+                                         sizeof(*program_infos),
+                                         (void**)&program_infos);
+  }
+  for (iree_host_size_t i = 0;
+       i < options->root_count && iree_status_is_ok(status); ++i) {
+    const loomc_program_plan_root_t root = loomc_program_plan_root_at(plan, i);
     status = qwen_tooling_status_from_loomc(
-        loomc_cmd_program_plan_root_info(plan, root, &root_info));
+        loomc_cmd_program_plan_root_info(plan, root, &root_plan_infos[i]));
+    if (iree_status_is_ok(status) &&
+        root_plan_infos[i].executable_requirement_count >
+            root_executable_capacity) {
+      root_executable_capacity =
+          root_plan_infos[i].executable_requirement_count;
+    }
+  }
+
+  loomc_program_plan_unit_t launch_config_unit =
+      loomc_program_plan_unit_invalid();
+  for (iree_host_size_t i = 0; i < options->root_count; ++i) {
+    if (root_plan_infos && loomc_program_plan_unit_is_valid(
+                               root_plan_infos[i].launch_config_unit)) {
+      launch_config_unit = root_plan_infos[i].launch_config_unit;
+      break;
+    }
   }
   if (iree_status_is_ok(status) &&
-      loomc_program_plan_unit_is_valid(root_info.launch_config_unit)) {
+      loomc_program_plan_unit_is_valid(launch_config_unit)) {
     status = qwen_tooling_compile_unit(
-        plan, compiler, workspace, root_info.launch_config_unit,
-        empty_pass_program, IREE_SV("command launch config compile"),
-        host_allocator, &result);
+        plan, compiler, workspace, launch_config_unit, empty_pass_program,
+        IREE_SV("command launch config compile"), host_allocator, &result);
   }
   if (iree_status_is_ok(status) &&
-      loomc_program_plan_unit_is_valid(root_info.launch_config_unit)) {
+      loomc_program_plan_unit_is_valid(launch_config_unit)) {
     const loomc_artifact_t* artifact = qwen_tooling_find_artifact(
         result, LOOMC_ARTIFACT_KIND_COMMAND_LAUNCH_CONFIG,
         LOOMC_ARTIFACT_FORMAT_LOOM_BYTECODE);
@@ -529,16 +670,12 @@ iree_status_t qwen_tooling_command_program_create(
   }
   loomc_result_release(result);
   result = NULL;
-  if (iree_status_is_ok(status) && launch_config_program) {
-    status = qwen_tooling_status_from_loomc(
-        loomc_launch_config_program_lookup_function(
-            launch_config_program, root_name, &launch_config_function));
-  }
 
   if (iree_status_is_ok(status)) {
     status = qwen_tooling_compile_unit(
-        plan, compiler, workspace, root_info.package_unit, empty_pass_program,
-        IREE_SV("command package compile"), host_allocator, &result);
+        plan, compiler, workspace, root_plan_infos[0].package_unit,
+        empty_pass_program, IREE_SV("command package compile"), host_allocator,
+        &result);
   }
   if (iree_status_is_ok(status)) {
     const loomc_artifact_t* artifact =
@@ -556,92 +693,147 @@ iree_status_t qwen_tooling_command_program_create(
   loomc_result_release(result);
   result = NULL;
 
-  loomc_cmd_program_info_t program_info = {
-      .type = LOOMC_STRUCTURE_TYPE_CMD_PROGRAM_INFO,
-      .structure_size = sizeof(program_info),
-  };
-  if (iree_status_is_ok(status)) {
+  for (iree_host_size_t i = 0;
+       i < options->root_count && iree_status_is_ok(status); ++i) {
     status =
         qwen_tooling_status_from_loomc(loomc_cmd_program_package_lookup_export(
-            package, root_name, &program_export));
+            package, root_names[i], &program_exports[i]));
+    if (iree_status_is_ok(status)) {
+      program_infos[i] = (loomc_cmd_program_info_t){
+          .type = LOOMC_STRUCTURE_TYPE_CMD_PROGRAM_INFO,
+          .structure_size = sizeof(program_infos[i]),
+      };
+      status =
+          qwen_tooling_status_from_loomc(loomc_cmd_program_package_export_info(
+              package, program_exports[i], &program_infos[i]));
+    }
   }
-  if (iree_status_is_ok(status)) {
-    status =
-        qwen_tooling_status_from_loomc(loomc_cmd_program_package_export_info(
-            package, program_export, &program_info));
+  for (iree_host_size_t i = 1;
+       i < options->root_count && iree_status_is_ok(status); ++i) {
+    status = qwen_tooling_require_shared_parameter_layout(
+        package, program_exports[0], &program_infos[0], program_exports[i],
+        &program_infos[i]);
   }
 
   if (iree_status_is_ok(status)) {
     status = qwen_tooling_begin_parameter_gather(
-        package, program_export, &program_info,
+        package, program_exports[0], &program_infos[0],
         runtime_context->parameter_provider, device, host_allocator,
         &parameter_buffer, &parameter_requests, &parameter_ready_semaphore);
     parameter_gather_submitted = iree_status_is_ok(status);
   }
 
-  executable_count = root_info.executable_requirement_count;
+  unit_count = loomc_program_plan_unit_count(plan);
   if (iree_status_is_ok(status)) {
-    status =
-        iree_allocator_malloc_array(host_allocator, executable_count,
-                                    sizeof(*executables), (void**)&executables);
-  }
-  if (iree_status_is_ok(status)) {
-    for (iree_host_size_t i = 0; i < executable_count; ++i) {
-      executables[i] = NULL;
+    status = iree_allocator_malloc_array(host_allocator, unit_count,
+                                         sizeof(*executables_by_unit),
+                                         (void**)&executables_by_unit);
+    if (iree_status_is_ok(status)) {
+      for (iree_host_size_t i = 0; i < unit_count; ++i) {
+        executables_by_unit[i] = NULL;
+      }
     }
   }
   for (iree_host_size_t i = 0;
-       i < executable_count && iree_status_is_ok(status); ++i) {
-    const loomc_program_plan_unit_t unit =
-        root_info.executable_requirements[i].unit;
-    if (!loomc_program_plan_unit_is_valid(unit)) {
-      status = iree_make_status(
-          IREE_STATUS_UNIMPLEMENTED,
-          "Qwen command programs do not yet accept external executables");
-      break;
-    }
-    status = qwen_tooling_compile_unit(
-        plan, compiler, workspace, unit, executable_pass_program,
-        IREE_SV("AMDGPU executable compile"), host_allocator, &result);
-    if (iree_status_is_ok(status)) {
-      const loomc_artifact_t* artifact =
-          qwen_tooling_find_artifact(result, LOOMC_ARTIFACT_KIND_EXECUTABLE,
-                                     LOOMC_ARTIFACT_FORMAT_AMDGPU_HSACO);
-      if (!artifact) {
-        status = iree_make_status(IREE_STATUS_NOT_FOUND,
-                                  "AMDGPU executable artifact is absent");
-      } else {
-        status =
-            qwen_tooling_load_executable(device, artifact, &executables[i]);
+       i < options->root_count && iree_status_is_ok(status); ++i) {
+    const loomc_cmd_program_plan_root_info_t* root_info = &root_plan_infos[i];
+    for (iree_host_size_t j = 0; j < root_info->executable_requirement_count &&
+                                 iree_status_is_ok(status);
+         ++j) {
+      const loomc_program_plan_unit_t unit =
+          root_info->executable_requirements[j].unit;
+      if (!loomc_program_plan_unit_is_valid(unit)) {
+        status = iree_make_status(
+            IREE_STATUS_UNIMPLEMENTED,
+            "Qwen command programs do not yet accept external executables");
+        break;
       }
+      const iree_host_size_t unit_index = (iree_host_size_t)unit.value;
+      if (executables_by_unit[unit_index]) continue;
+      status = qwen_tooling_compile_unit(
+          plan, compiler, workspace, unit, executable_pass_program,
+          IREE_SV("AMDGPU executable compile"), host_allocator, &result);
+      if (iree_status_is_ok(status)) {
+        const loomc_artifact_t* artifact =
+            qwen_tooling_find_artifact(result, LOOMC_ARTIFACT_KIND_EXECUTABLE,
+                                       LOOMC_ARTIFACT_FORMAT_AMDGPU_HSACO);
+        if (!artifact) {
+          status = iree_make_status(IREE_STATUS_NOT_FOUND,
+                                    "AMDGPU executable artifact is absent");
+        } else {
+          status = qwen_tooling_load_executable(
+              device, artifact, &executables_by_unit[unit_index]);
+        }
+      }
+      loomc_result_release(result);
+      result = NULL;
     }
-    loomc_result_release(result);
-    result = NULL;
   }
 
+  if (iree_status_is_ok(status) && root_executable_capacity != 0) {
+    status = iree_allocator_malloc_array(
+        host_allocator, root_executable_capacity, sizeof(*root_executables),
+        (void**)&root_executables);
+  }
+
+  iree_host_size_t program_set_size = 0;
+  iree_host_size_t programs_offset = 0;
   if (iree_status_is_ok(status)) {
-    status = iree_allocator_malloc(host_allocator, sizeof(*program),
-                                   (void**)&program);
+    status = IREE_STRUCT_LAYOUT(
+        iree_sizeof_struct(*program_set), &program_set_size,
+        IREE_STRUCT_FIELD_ALIGNED(
+            options->root_count, qwen_tooling_command_program_t,
+            iree_alignof(qwen_tooling_command_program_t), &programs_offset));
   }
   if (iree_status_is_ok(status)) {
-    memset(program, 0, sizeof(*program));
-    program->host_allocator = host_allocator;
-    program->launch_config_function = loomc_launch_config_function_invalid();
+    status = iree_allocator_malloc(host_allocator, program_set_size,
+                                   (void**)&program_set);
+    if (iree_status_is_ok(status)) {
+      memset(program_set, 0, program_set_size);
+    }
+  }
+  if (iree_status_is_ok(status)) {
+    program_set->host_allocator = host_allocator;
+    program_set->programs =
+        (qwen_tooling_command_program_t*)((uint8_t*)program_set +
+                                          programs_offset);
+    program_set->program_count = options->root_count;
     const iree_hal_buffer_ref_t fixed_buffer =
         iree_hal_make_buffer_ref(parameter_buffer, 0, IREE_HAL_WHOLE_BUFFER);
-    const loomc_cmd_hal_program_options_t materialization_options = {
-        .type = LOOMC_STRUCTURE_TYPE_CMD_HAL_PROGRAM_OPTIONS,
-        .structure_size = sizeof(materialization_options),
-        .command_buffer_mode = runtime_context->command_buffer_mode,
-        .queue_affinity = IREE_HAL_QUEUE_AFFINITY_ANY,
-        .fixed_buffers = &fixed_buffer,
-        .fixed_buffer_count = 1,
-        .executables = executables,
-        .executable_count = executable_count,
-    };
-    status = qwen_tooling_status_from_loomc(loomc_cmd_hal_program_create(
-        package, program_export, device, &materialization_options,
-        loom_allocator, &program->hal_program));
+    for (iree_host_size_t i = 0;
+         i < options->root_count && iree_status_is_ok(status); ++i) {
+      qwen_tooling_command_program_t* program = &program_set->programs[i];
+      program->launch_config_program = launch_config_program;
+      program->launch_config_function = loomc_launch_config_function_invalid();
+      const loomc_cmd_program_plan_root_info_t* root_info = &root_plan_infos[i];
+      for (iree_host_size_t j = 0; j < root_info->executable_requirement_count;
+           ++j) {
+        const iree_host_size_t unit_index =
+            (iree_host_size_t)root_info->executable_requirements[j].unit.value;
+        root_executables[j] = executables_by_unit[unit_index];
+      }
+      const loomc_cmd_hal_program_options_t materialization_options = {
+          .type = LOOMC_STRUCTURE_TYPE_CMD_HAL_PROGRAM_OPTIONS,
+          .structure_size = sizeof(materialization_options),
+          .command_buffer_mode = runtime_context->command_buffer_mode,
+          .queue_affinity = IREE_HAL_QUEUE_AFFINITY_ANY,
+          .fixed_buffers = &fixed_buffer,
+          .fixed_buffer_count = 1,
+          .executables = root_executables,
+          .executable_count = root_info->executable_requirement_count,
+      };
+      status = qwen_tooling_status_from_loomc(loomc_cmd_hal_program_create(
+          package, program_exports[i], device, &materialization_options,
+          loom_allocator, &program->hal_program));
+      if (iree_status_is_ok(status) &&
+          loomc_program_plan_unit_is_valid(root_info->launch_config_unit)) {
+        status = qwen_tooling_status_from_loomc(
+            loomc_launch_config_program_lookup_function(
+                launch_config_program, root_names[i],
+                &program->launch_config_function));
+      }
+      if (iree_status_is_ok(status)) program->info = program_infos[i];
+    }
   }
 
   if (parameter_gather_submitted) {
@@ -656,33 +848,38 @@ iree_status_t qwen_tooling_command_program_create(
         .structure_size = sizeof(parameter_root_info),
     };
     status = qwen_tooling_status_from_loomc(
-        loomc_cmd_program_package_parameter_root_info(package, program_export,
-                                                      0, &parameter_root_info));
+        loomc_cmd_program_package_parameter_root_info(
+            package, program_exports[0], 0, &parameter_root_info));
     if (iree_status_is_ok(status)) {
-      program->package = package;
+      program_set->package = package;
       package = NULL;
-      program->launch_config_program = launch_config_program;
+      program_set->launch_config_program = launch_config_program;
       launch_config_program = NULL;
-      program->launch_config_function = launch_config_function;
-      program->info = program_info;
-      program->parameter_byte_length = parameter_root_info.required_byte_length;
-      *out_program = program;
-      program = NULL;
+      program_set->parameter_byte_length =
+          parameter_root_info.required_byte_length;
+      *out_program_set = program_set;
+      program_set = NULL;
     }
   }
 
-  qwen_tooling_command_program_release(program);
-  for (iree_host_size_t i = 0; i < executable_count; ++i) {
-    iree_hal_executable_release(executables ? executables[i] : NULL);
+  qwen_tooling_command_program_set_release(program_set);
+  for (iree_host_size_t i = 0; i < unit_count; ++i) {
+    iree_hal_executable_release(executables_by_unit ? executables_by_unit[i]
+                                                    : NULL);
   }
-  iree_allocator_free(host_allocator, executables);
+  iree_allocator_free(host_allocator, root_executables);
+  iree_allocator_free(host_allocator, executables_by_unit);
   iree_hal_semaphore_release(parameter_ready_semaphore);
   iree_allocator_free(host_allocator, parameter_requests);
   iree_hal_buffer_release(parameter_buffer);
   loomc_result_release(result);
   loomc_launch_config_program_release(launch_config_program);
   loomc_cmd_program_package_release(package);
+  iree_allocator_free(host_allocator, program_infos);
+  iree_allocator_free(host_allocator, program_exports);
+  iree_allocator_free(host_allocator, root_plan_infos);
   loomc_program_plan_release(plan);
+  iree_allocator_free(host_allocator, root_names);
   iree_allocator_free(host_allocator, specializations);
   iree_allocator_free(host_allocator, kernel_functions);
   loomc_pass_program_release(executable_pass_program);
@@ -697,14 +894,30 @@ iree_status_t qwen_tooling_command_program_create(
   return status;
 }
 
-void qwen_tooling_command_program_release(
-    qwen_tooling_command_program_t* program) {
-  if (!program) return;
-  const iree_allocator_t host_allocator = program->host_allocator;
-  loomc_cmd_hal_program_release(program->hal_program);
-  loomc_launch_config_program_release(program->launch_config_program);
-  loomc_cmd_program_package_release(program->package);
-  iree_allocator_free(host_allocator, program);
+void qwen_tooling_command_program_set_release(
+    qwen_tooling_command_program_set_t* program_set) {
+  if (!program_set) return;
+  const iree_allocator_t host_allocator = program_set->host_allocator;
+  for (iree_host_size_t i = 0; i < program_set->program_count; ++i) {
+    loomc_cmd_hal_program_release(program_set->programs[i].hal_program);
+  }
+  loomc_launch_config_program_release(program_set->launch_config_program);
+  loomc_cmd_program_package_release(program_set->package);
+  iree_allocator_free(host_allocator, program_set);
+}
+
+qwen_tooling_command_program_t* qwen_tooling_command_program_set_lookup(
+    const qwen_tooling_command_program_set_t* program_set,
+    iree_string_view_t root_name) {
+  if (!program_set) return NULL;
+  for (iree_host_size_t i = 0; i < program_set->program_count; ++i) {
+    if (iree_string_view_equal(
+            iree_string_view_from_loomc(program_set->programs[i].info.name),
+            root_name)) {
+      return &program_set->programs[i];
+    }
+  }
+  return NULL;
 }
 
 const loomc_cmd_program_info_t* qwen_tooling_command_program_info(
@@ -744,7 +957,7 @@ iree_status_t qwen_tooling_command_program_populate_config(
       argument_bits, argument_count, &launch_config));
 }
 
-iree_device_size_t qwen_tooling_command_program_parameter_byte_length(
-    const qwen_tooling_command_program_t* program) {
-  return program ? program->parameter_byte_length : 0;
+iree_device_size_t qwen_tooling_command_program_set_parameter_byte_length(
+    const qwen_tooling_command_program_set_t* program_set) {
+  return program_set ? program_set->parameter_byte_length : 0;
 }

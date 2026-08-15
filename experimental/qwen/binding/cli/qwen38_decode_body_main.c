@@ -68,21 +68,25 @@ static iree_status_t qwen38_allocate_buffer(
 static iree_status_t qwen38_prepare_decode_body(
     qwen_tooling_runtime_context_t* runtime_context,
     iree_allocator_t host_allocator,
-    qwen_tooling_command_program_t** out_program) {
+    qwen_tooling_command_program_set_t** out_program_set) {
   if (qwen38_text_decode_body_source_size() != 1) {
     return iree_make_status(
         IREE_STATUS_FAILED_PRECONDITION,
         "Qwen3.8 decode body source must contain exactly one file");
   }
   const iree_file_toc_t* files = qwen38_text_decode_body_source_create();
-  const qwen_tooling_command_program_options_t options = {
+  const iree_string_view_t root_names[] = {
+      IREE_SV("qwen38_text_decode_greedy"),
+  };
+  const qwen_tooling_command_program_set_options_t options = {
       .source_identifier = iree_make_cstring_view(files[0].name),
       .source_contents =
           iree_make_const_byte_span(files[0].data, files[0].size),
-      .root_name = IREE_SV("qwen38_text_decode_greedy"),
+      .root_names = root_names,
+      .root_count = IREE_ARRAYSIZE(root_names),
   };
-  return qwen_tooling_command_program_create(runtime_context, &options,
-                                             host_allocator, out_program);
+  return qwen_tooling_command_program_set_create(
+      runtime_context, &options, host_allocator, out_program_set);
 }
 
 static iree_status_t qwen38_fill_and_wait(iree_hal_device_t* device,
@@ -140,6 +144,7 @@ static iree_status_t qwen38_decode_body_run(void) {
   const iree_allocator_t host_allocator = iree_allocator_system();
   qwen_tooling_runtime_context_t runtime_context;
   memset(&runtime_context, 0, sizeof(runtime_context));
+  qwen_tooling_command_program_set_t* program_set = NULL;
   qwen_tooling_command_program_t* program = NULL;
   const loomc_cmd_program_info_t* program_info = NULL;
   iree_hal_buffer_t* residual_buffer = NULL;
@@ -186,8 +191,12 @@ static iree_status_t qwen38_decode_body_run(void) {
     fprintf(stderr,
             "qwen38: indexed GGUF; compiling and gathering the decode "
             "program...\n");
-    status =
-        qwen38_prepare_decode_body(&runtime_context, host_allocator, &program);
+    status = qwen38_prepare_decode_body(&runtime_context, host_allocator,
+                                        &program_set);
+  }
+  if (iree_status_is_ok(status)) {
+    program = qwen_tooling_command_program_set_lookup(
+        program_set, IREE_SV("qwen38_text_decode_greedy"));
   }
   if (iree_status_is_ok(status)) {
     program_info = qwen_tooling_command_program_info(program);
@@ -378,18 +387,19 @@ static iree_status_t qwen38_decode_body_run(void) {
         host_allocator);
   }
   if (iree_status_is_ok(status)) {
-    fprintf(
-        stdout,
-        "Qwen3.8 greedy decode executed %d time(s): %" PRIhsz
-        " commands, %" PRIhsz " parameters, %" PRIu64
-        " parameter bytes, %" PRIu64 " transient bytes, token=%" PRId32
-        ", residual[min=%g max=%g sum=%.9g "
-        "sum_squares=%.9g]\n",
-        FLAG_transition_count, program_info->command_count,
-        program_info->parameter_count,
-        (uint64_t)qwen_tooling_command_program_parameter_byte_length(program),
-        (uint64_t)program_info->transient.required_byte_length,
-        token_ids[FLAG_transition_count], minimum, maximum, sum, sum_squares);
+    fprintf(stdout,
+            "Qwen3.8 greedy decode executed %d time(s): %" PRIhsz
+            " commands, %" PRIhsz " parameters, %" PRIu64
+            " parameter bytes, %" PRIu64 " transient bytes, token=%" PRId32
+            ", residual[min=%g max=%g sum=%.9g "
+            "sum_squares=%.9g]\n",
+            FLAG_transition_count, program_info->command_count,
+            program_info->parameter_count,
+            (uint64_t)qwen_tooling_command_program_set_parameter_byte_length(
+                program_set),
+            (uint64_t)program_info->transient.required_byte_length,
+            token_ids[FLAG_transition_count], minimum, maximum, sum,
+            sum_squares);
     fprintf(stdout, "generated token IDs:");
     for (int32_t i = 0; i < FLAG_transition_count; ++i) {
       fprintf(stdout, " %" PRId32, token_ids[i + 1]);
@@ -406,7 +416,7 @@ static iree_status_t qwen38_decode_body_run(void) {
   iree_hal_buffer_release(gdn_state_buffer);
   iree_hal_buffer_release(control_buffer);
   iree_hal_buffer_release(residual_buffer);
-  qwen_tooling_command_program_release(program);
+  qwen_tooling_command_program_set_release(program_set);
   qwen_tooling_runtime_context_deinitialize(&runtime_context);
   return status;
 }

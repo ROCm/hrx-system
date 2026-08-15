@@ -68,21 +68,25 @@ static iree_status_t qwen38_allocate_buffer(
 static iree_status_t qwen38_prepare_layer_program(
     qwen_tooling_runtime_context_t* runtime_context,
     iree_allocator_t host_allocator,
-    qwen_tooling_command_program_t** out_program) {
+    qwen_tooling_command_program_set_t** out_program_set) {
   if (qwen38_attention_layer_prefill_source_size() != 1) {
     return iree_make_status(
         IREE_STATUS_FAILED_PRECONDITION,
         "Qwen3.8 full-attention layer source must contain exactly one file");
   }
   const iree_file_toc_t* files = qwen38_attention_layer_prefill_source_create();
-  const qwen_tooling_command_program_options_t options = {
+  const iree_string_view_t root_names[] = {
+      IREE_SV("qwen38_attention_layer3_prefill"),
+  };
+  const qwen_tooling_command_program_set_options_t options = {
       .source_identifier = iree_make_cstring_view(files[0].name),
       .source_contents =
           iree_make_const_byte_span(files[0].data, files[0].size),
-      .root_name = IREE_SV("qwen38_attention_layer3_prefill"),
+      .root_names = root_names,
+      .root_count = IREE_ARRAYSIZE(root_names),
   };
-  return qwen_tooling_command_program_create(runtime_context, &options,
-                                             host_allocator, out_program);
+  return qwen_tooling_command_program_set_create(
+      runtime_context, &options, host_allocator, out_program_set);
 }
 
 static iree_status_t qwen38_fill_and_wait(iree_hal_device_t* device,
@@ -162,6 +166,7 @@ static iree_status_t qwen38_attention_prefill_layer_run(void) {
   const iree_allocator_t host_allocator = iree_allocator_system();
   qwen_tooling_runtime_context_t runtime_context;
   memset(&runtime_context, 0, sizeof(runtime_context));
+  qwen_tooling_command_program_set_t* program_set = NULL;
   qwen_tooling_command_program_t* program = NULL;
   const loomc_cmd_program_info_t* program_info = NULL;
   iree_hal_buffer_t* residual_buffer = NULL;
@@ -207,7 +212,11 @@ static iree_status_t qwen38_attention_prefill_layer_run(void) {
     fprintf(stderr,
             "qwen38: indexed GGUF; compiling and gathering layer 3...\n");
     status = qwen38_prepare_layer_program(&runtime_context, host_allocator,
-                                          &program);
+                                          &program_set);
+  }
+  if (iree_status_is_ok(status)) {
+    program = qwen_tooling_command_program_set_lookup(
+        program_set, IREE_SV("qwen38_attention_layer3_prefill"));
   }
   if (iree_status_is_ok(status)) {
     program_info = qwen_tooling_command_program_info(program);
@@ -572,18 +581,18 @@ static iree_status_t qwen38_attention_prefill_layer_run(void) {
         host_allocator);
   }
   if (iree_status_is_ok(status)) {
-    fprintf(
-        stdout,
-        "Qwen3.8 full-attention layer 3 processed %d token(s) %d time(s): "
-        "%" PRIhsz " commands, %" PRIhsz " parameters, %" PRIu64
-        " parameter bytes, %" PRIu64
-        " transient bytes, residual[min=%g max=%g sum=%.9g "
-        "sum_squares=%.9g]\n",
-        FLAG_token_count, FLAG_transition_count, program_info->command_count,
-        program_info->parameter_count,
-        (uint64_t)qwen_tooling_command_program_parameter_byte_length(program),
-        (uint64_t)program_info->transient.required_byte_length, minimum,
-        maximum, sum, sum_squares);
+    fprintf(stdout,
+            "Qwen3.8 full-attention layer 3 processed %d token(s) %d time(s): "
+            "%" PRIhsz " commands, %" PRIhsz " parameters, %" PRIu64
+            " parameter bytes, %" PRIu64
+            " transient bytes, residual[min=%g max=%g sum=%.9g "
+            "sum_squares=%.9g]\n",
+            FLAG_token_count, FLAG_transition_count,
+            program_info->command_count, program_info->parameter_count,
+            (uint64_t)qwen_tooling_command_program_set_parameter_byte_length(
+                program_set),
+            (uint64_t)program_info->transient.required_byte_length, minimum,
+            maximum, sum, sum_squares);
   }
 
   status =
@@ -599,7 +608,7 @@ static iree_status_t qwen38_attention_prefill_layer_run(void) {
   iree_hal_buffer_release(sequential_cache_buffer);
   iree_hal_buffer_release(sequential_residual_buffer);
   iree_hal_buffer_release(residual_buffer);
-  qwen_tooling_command_program_release(program);
+  qwen_tooling_command_program_set_release(program_set);
   qwen_tooling_runtime_context_deinitialize(&runtime_context);
   return status;
 }
