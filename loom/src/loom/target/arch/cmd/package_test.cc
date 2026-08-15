@@ -19,7 +19,8 @@
 namespace loom {
 namespace {
 
-static std::vector<uint8_t> BuildProgram(bool indirect) {
+static std::vector<uint8_t> BuildProgram(bool indirect,
+                                         uint32_t executable_count = 1) {
   const uint32_t buffer_ref_count = indirect ? 1 : 0;
   loom_cmd_program_format_layout_t layout = {};
   IREE_CHECK_OK(loom_cmd_program_format_calculate_layout(
@@ -44,7 +45,8 @@ static std::vector<uint8_t> BuildProgram(bool indirect) {
       data.data() + LOOM_CMD_PROGRAM_HEADER_BINDING_COUNT_OFFSET,
       indirect ? 1 : 0);
   iree_unaligned_store_le_u32(
-      data.data() + LOOM_CMD_PROGRAM_HEADER_EXECUTABLE_COUNT_OFFSET, 1);
+      data.data() + LOOM_CMD_PROGRAM_HEADER_EXECUTABLE_COUNT_OFFSET,
+      executable_count);
   iree_unaligned_store_le_u32(
       data.data() + LOOM_CMD_PROGRAM_HEADER_ENTRY_COUNT_OFFSET, 1);
   iree_unaligned_store_le_u32(
@@ -239,6 +241,52 @@ TEST(CmdProgramPackageTest, RejectsInconsistentBuildAssociations) {
                         loom_cmd_program_package_build(
                             exports, IREE_ARRAYSIZE(exports),
                             iree_allocator_system(), &package_data, &package));
+
+  const std::vector<uint8_t> two_executable_data =
+      BuildProgram(/*indirect=*/false, /*executable_count=*/2);
+  loom_cmd_program_t two_executable_program = {};
+  IREE_ASSERT_OK(loom_cmd_program_parse(AsByteSpan(two_executable_data),
+                                        &two_executable_program));
+  entries[1].executable_index = 1;
+  exports[1].program = &two_executable_program;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_cmd_program_package_build(
+                            exports, IREE_ARRAYSIZE(exports),
+                            iree_allocator_system(), &package_data, &package));
+}
+
+TEST(CmdProgramPackageTest, RejectsMismatchedParsedDispatchEntry) {
+  const std::vector<uint8_t> direct_data =
+      BuildProgram(/*indirect=*/false, /*executable_count=*/2);
+  const std::vector<uint8_t> indirect_data = BuildProgram(true);
+  loom_cmd_program_t direct_program = {};
+  loom_cmd_program_t indirect_program = {};
+  IREE_ASSERT_OK(
+      loom_cmd_program_parse(AsByteSpan(direct_data), &direct_program));
+  IREE_ASSERT_OK(
+      loom_cmd_program_parse(AsByteSpan(indirect_data), &indirect_program));
+  loom_cmd_program_package_source_entry_t entries[2] = {};
+  loom_cmd_program_package_source_export_t exports[2] = {};
+  BuildPackageInputs(&direct_program, &indirect_program, entries, exports);
+  iree_byte_span_t package_data = iree_byte_span_empty();
+  loom_cmd_program_package_t package = {};
+  IREE_ASSERT_OK(loom_cmd_program_package_build(
+      exports, IREE_ARRAYSIZE(exports), iree_allocator_system(), &package_data,
+      &package));
+
+  const uint32_t entry_table_offset = iree_unaligned_load_le_u32(
+      package_data.data + LOOM_CMD_PROGRAM_PACKAGE_HEADER_ENTRY_TABLE_OFFSET);
+  iree_unaligned_store_le_u32(
+      package_data.data + entry_table_offset +
+          LOOM_CMD_PROGRAM_PACKAGE_ENTRY_EXECUTABLE_INDEX_OFFSET,
+      1);
+  loom_cmd_program_package_t parsed_package = {};
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_cmd_program_package_parse(
+                            iree_make_const_byte_span(package_data.data,
+                                                      package_data.data_length),
+                            &parsed_package));
+  iree_allocator_free(iree_allocator_system(), package_data.data);
 }
 
 TEST(CmdProgramPackageTest, RejectsMalformedCanonicalStorage) {

@@ -115,6 +115,51 @@ loom_cmd_program_package_entry_t loom_cmd_program_package_export_entry_at(
   };
 }
 
+static bool loom_cmd_program_package_command_dispatch_pair(
+    const loom_cmd_program_command_t* command, uint32_t* out_executable_index,
+    uint32_t* out_entry_index) {
+  switch (loom_cmd_program_command_kind_base(command->kind)) {
+    case LOOM_CMD_PROGRAM_COMMAND_KIND_DISPATCH_DIRECT:
+      *out_executable_index = command->payload.dispatch_direct.executable_index;
+      *out_entry_index = command->payload.dispatch_direct.entry_index;
+      return true;
+    case LOOM_CMD_PROGRAM_COMMAND_KIND_DISPATCH_INDIRECT_STATIC:
+    case LOOM_CMD_PROGRAM_COMMAND_KIND_DISPATCH_INDIRECT_DYNAMIC:
+      *out_executable_index =
+          command->payload.dispatch_indirect.executable_index;
+      *out_entry_index = command->payload.dispatch_indirect.entry_index;
+      return true;
+    default:
+      return false;
+  }
+}
+
+static iree_status_t loom_cmd_program_package_validate_source_dispatches(
+    const loom_cmd_program_package_source_export_t* program_export) {
+  for (uint32_t i = 0; i < program_export->program->commands.count; ++i) {
+    const loom_cmd_program_command_t command =
+        loom_cmd_program_command_at(program_export->program, i);
+    uint32_t executable_index = 0;
+    uint32_t entry_index = 0;
+    if (!loom_cmd_program_package_command_dispatch_pair(
+            &command, &executable_index, &entry_index)) {
+      continue;
+    }
+    if (program_export->entries[entry_index].executable_index !=
+        executable_index) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "command package export '%.*s' dispatch %" PRIu32
+          " pairs executable %" PRIu32 " with entry %" PRIu32
+          " provided by executable %" PRIu32,
+          (int)program_export->name.size, program_export->name.data, i,
+          executable_index, entry_index,
+          program_export->entries[entry_index].executable_index);
+    }
+  }
+  return iree_ok_status();
+}
+
 static iree_status_t loom_cmd_program_package_analyze_sources(
     const loom_cmd_program_package_source_export_t* exports,
     iree_host_size_t export_count, uint32_t* out_entry_count,
@@ -207,6 +252,8 @@ static iree_status_t loom_cmd_program_package_analyze_sources(
                                 "command package strings are too large");
       }
     }
+    IREE_RETURN_IF_ERROR(
+        loom_cmd_program_package_validate_source_dispatches(program_export));
   }
 
   if (entry_count > UINT32_MAX || string_length > UINT32_MAX ||
@@ -436,6 +483,28 @@ static iree_status_t loom_cmd_program_package_validate_contents(
       }
       expected_string += entry_name_length;
       ++expected_entry;
+    }
+    for (uint32_t j = 0; j < program.commands.count; ++j) {
+      const loom_cmd_program_command_t command =
+          loom_cmd_program_command_at(&program, j);
+      uint32_t executable_index = 0;
+      uint32_t entry_index = 0;
+      if (!loom_cmd_program_package_command_dispatch_pair(
+              &command, &executable_index, &entry_index)) {
+        continue;
+      }
+      const loom_cmd_program_package_entry_t entry =
+          loom_cmd_program_package_export_entry_at(package, &program_export,
+                                                   entry_index);
+      if (entry.executable_index != executable_index) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "command package export '%.*s' dispatch %" PRIu32
+            " pairs executable %" PRIu32 " with entry %" PRIu32
+            " provided by executable %" PRIu32,
+            (int)program_export.name.size, program_export.name.data, j,
+            executable_index, entry_index, entry.executable_index);
+      }
     }
   }
 
