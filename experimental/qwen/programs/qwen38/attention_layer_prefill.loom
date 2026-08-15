@@ -20,7 +20,7 @@ kernel.decl @qwen38_residual_add_f32_prefill(%token_count: index) launch(%token_
 kernel.decl @qwen38_swiglu_f32_prefill(%token_count: index) launch(%token_capacity: index, %gate: buffer, %up: buffer, %output: buffer)
 kernel.decl @qwen38_attention_query_prepare_prefill(%token_count: index) launch(%control: buffer, %epsilon: f32, %query_gate_projection: buffer, %norm_weight: buffer, %query: buffer, %gate: buffer)
 kernel.decl @qwen38_attention_kv_prepare_prefill(%token_count: index) launch(%control: buffer, %epsilon: f32, %key_projection: buffer, %value_projection: buffer, %norm_weight: buffer, %key_cache: buffer, %value_cache: buffer)
-kernel.decl @qwen38_attention_prefill_reference(%token_count: index) launch(%control: buffer, %query: buffer, %gate: buffer, %key_cache: buffer, %value_cache: buffer, %output: buffer)
+kernel.decl @qwen38_attention_prefill_f16_wmma(%token_count: index) launch(%control: buffer, %query: buffer, %gate: buffer, %key_cache: buffer, %value_cache: buffer, %output: buffer)
 
 command.program.def @qwen38_attention_layer_prefill(%token_count: index, %layer: index, %attention_ordinal: index) launch(%parameters: buffer, %residual: buffer, %attention_cache: buffer, %control: buffer, %attention_output: buffer) where [range(%token_count, 1, 512), range(%layer, 0, 63), range(%attention_ordinal, 0, 15)] {
   %token_capacity = index.constant 512 : index
@@ -98,7 +98,7 @@ command.program.def @qwen38_attention_layer_prefill(%token_count: index, %layer:
     kernel.launch @qwen38_attention_kv_prepare_prefill[%token_count](%control, %epsilon, %key_projection, %value_projection, %key_norm_weight, %key_cache, %value_cache) : [index](buffer, f32, buffer, buffer, view<256xf32>, view<[%cache_element_count]xf16>, view<[%cache_element_count]xf16>)
   }
 
-  kernel.launch @qwen38_attention_prefill_reference[%token_count](%control, %query, %gate, %key_cache, %value_cache, %attention_output) : [index](buffer, buffer, buffer, view<[%cache_element_count]xf16>, view<[%cache_element_count]xf16>, buffer)
+  kernel.launch @qwen38_attention_prefill_f16_wmma[%token_count](%control, %query, %gate, %key_cache, %value_cache, %attention_output) : [index](buffer, buffer, buffer, view<[%cache_element_count]xf16>, view<[%cache_element_count]xf16>, buffer)
 
   %projected_attention = buffer.alloca<global> align(256) %hidden_bytes : buffer
   command.concurrent {

@@ -24,6 +24,7 @@ exports_files([
     "qwen38/attention_common.loom",
     "qwen38/attention_decode.loom",
     "qwen38/attention_prefill.loom",
+    "qwen38/attention_prefill_wmma.loom",
     "qwen38/gdn_decode.loom",
     "qwen38/gdn_prefill.loom",
     "qwen38/greedy_argmax.loom",
@@ -41,7 +42,10 @@ loom_link_module(
 
 loom_link_module(
     name = "qwen38_attention_prefill_linked",
-    srcs = ["qwen38/attention_prefill.loom"],
+    srcs = [
+        "qwen38/attention_prefill.loom",
+        "qwen38/attention_prefill_wmma.loom",
+    ],
     libraries = ["qwen38/attention_common.loom"],
 )
 
@@ -340,6 +344,28 @@ iree_executable_test(
         "$(location :qwen38_attention_prefill_linked)",
         "--case=@qwen38_attention_prefill_known_case",
         "--config=qwen38.attention.cache_capacity=3",
+        "--device=amdgpu://0",
+        "--sanitizer=access",
+    ],
+    data = [":qwen38_attention_prefill_linked"],
+    tags = [
+        "iree-run-requirement=runtime.resource.amd_gpu",
+        "manual",
+        "requires-gpu-amd",
+        "runtime-resource=amd-gpu",
+    ],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/execute:amdgpu_hal",
+    ]),
+)
+
+iree_executable_test(
+    name = "qwen38_attention_prefill_wmma_hal_test",
+    src = "//loom/src/loom/tools/iree-test-loom",
+    args = [
+        "$(location :qwen38_attention_prefill_linked)",
+        "--case=@qwen38_attention_prefill_f16_wmma_known_case",
+        "--config=qwen38.attention.cache_capacity=81",
         "--device=amdgpu://0",
         "--sanitizer=access",
     ],

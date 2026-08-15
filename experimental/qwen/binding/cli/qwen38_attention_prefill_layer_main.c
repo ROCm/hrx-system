@@ -483,15 +483,16 @@ static iree_status_t qwen38_attention_prefill_layer_run(void) {
     }
   }
   if (iree_status_is_ok(status) && FLAG_verify_sequential) {
-    // Floating workgroup reductions may combine wave partials in different
-    // legal orders across executions. Enforce a tight numerical envelope on
-    // the final F32 residual while retaining exact comparison for F16 cache
+    // Tiled F16 attention and token-one attention combine score and P*V
+    // fragments in different orders. Bound both the aggregate relative error
+    // and the worst element while retaining exact comparison for F16 cache
     // storage below.
     if (memcmp(residual_values, sequential_values, hidden_byte_length) != 0) {
       iree_host_size_t first_mismatch = 0;
       iree_host_size_t mismatch_count = 0;
-      iree_host_size_t tolerance_failure_count = 0;
       float maximum_absolute_difference = 0.0f;
+      double difference_sum_squares = 0.0;
+      double reference_sum_squares = 0.0;
       for (iree_host_size_t i = 0; i < hidden_element_count; ++i) {
         if (memcmp(&residual_values[i], &sequential_values[i],
                    sizeof(residual_values[i])) != 0) {
@@ -499,35 +500,37 @@ static iree_status_t qwen38_attention_prefill_layer_run(void) {
           ++mismatch_count;
           const float absolute_difference =
               fabsf(residual_values[i] - sequential_values[i]);
-          const float tolerance =
-              0.001f + 0.00001f * fabsf(sequential_values[i]);
-          if (!(absolute_difference <= tolerance)) {
-            ++tolerance_failure_count;
-          }
+          difference_sum_squares +=
+              (double)absolute_difference * (double)absolute_difference;
           maximum_absolute_difference =
               iree_max(maximum_absolute_difference, absolute_difference);
         }
+        reference_sum_squares +=
+            (double)sequential_values[i] * (double)sequential_values[i];
       }
-      if (tolerance_failure_count != 0) {
+      const double relative_l2_error =
+          sqrt(difference_sum_squares / reference_sum_squares);
+      if (!(relative_l2_error <= 0.001 &&
+            maximum_absolute_difference <= 0.025f)) {
         status = iree_make_status(
             IREE_STATUS_DATA_LOSS,
-            "batched residual exceeds the token-one error envelope: first "
+            "batched residual exceeds the token-one layer envelope: first "
             "bitwise difference at element %" PRIhsz " (token %" PRIhsz
             ", channel %" PRIhsz ") batched=%g sequential=%g, %" PRIhsz
-            " bitwise differences, %" PRIhsz
-            " tolerance failures, maximum absolute difference=%g",
+            " bitwise differences, relative L2 error=%g, maximum absolute "
+            "difference=%g",
             first_mismatch,
             first_mismatch / QWEN38_HIDDEN_ELEMENT_COUNT_PER_TOKEN,
             first_mismatch % QWEN38_HIDDEN_ELEMENT_COUNT_PER_TOKEN,
             residual_values[first_mismatch], sequential_values[first_mismatch],
-            mismatch_count, tolerance_failure_count,
-            maximum_absolute_difference);
+            mismatch_count, relative_l2_error, maximum_absolute_difference);
       } else {
         fprintf(stderr,
                 "qwen38: batched residual agrees with token-one replay "
-                "within atol=0.001, rtol=0.00001 (%" PRIhsz
-                " bitwise differences, maximum absolute difference=%g).\n",
-                mismatch_count, maximum_absolute_difference);
+                "within relative L2=0.001 and max-abs=0.025 (%" PRIhsz
+                " bitwise differences, relative L2 error=%g, maximum "
+                "absolute difference=%g).\n",
+                mismatch_count, relative_l2_error, maximum_absolute_difference);
       }
     } else {
       fprintf(stderr,
