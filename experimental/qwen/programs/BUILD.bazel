@@ -62,7 +62,9 @@ loom_link_module(
     mode = "selective",
     roots = [
         "@qwen38_text_decode_greedy",
+        "@qwen38_text_decode_greedy_with_hidden",
         "@qwen38_text_prefill_greedy",
+        "@qwen38_text_prefill_greedy_with_hidden",
     ],
     strip_check = True,
 )

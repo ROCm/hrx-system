@@ -10,7 +10,7 @@ command.program.decl @qwen38_gdn_layer_prefill(%token_count: index, %layer: inde
 
 command.program.decl @qwen38_attention_layer_prefill(%token_count: index, %layer: index, %attention_ordinal: index) launch(%parameters: buffer, %residual: buffer, %attention_cache: buffer, %control: buffer, %attention_output: buffer) where [range(%token_count, 1, 512), range(%layer, 0, 63), range(%attention_ordinal, 0, 15)]
 
-command.program.decl @qwen38_output_head_greedy(%residual_offset: offset) launch(%parameters: buffer, %residual: buffer, %token_id: buffer)
+command.program.decl @qwen38_output_head_greedy_with_hidden(%residual_offset: offset) launch(%parameters: buffer, %residual: buffer, %normalized: buffer, %token_id: buffer)
 
 kernel.decl @qwen38_token_embedding_q5k_f32(%token_count: index) launch(%token_capacity: index, %token_ids: buffer, %weight: buffer, %output: buffer)
 
@@ -54,9 +54,8 @@ command.program.def public @qwen38_text_prefill_body(%token_count: index) launch
 }
 
 // Embeds one prompt span, advances every base-model layer, and publishes the
-// first greedy continuation token. The final control update hands the same
-// persistent state directly to qwen38_text_decode_greedy.
-command.program.def public @qwen38_text_prefill_greedy(%token_count: index) launch(%parameters: buffer, %residual: buffer, %control: buffer, %gdn_state: buffer, %attention_cache: buffer, %token_ids: buffer) where [range(%token_count, 1, 512)] {
+// first greedy continuation token plus the final normalized hidden row.
+command.program.def @qwen38_text_prefill_transition(%token_count: index) launch(%parameters: buffer, %residual: buffer, %control: buffer, %gdn_state: buffer, %attention_cache: buffer, %normalized_hidden: buffer, %token_ids: buffer) where [range(%token_count, 1, 512)] {
   %c1 = index.constant 1 : index
   %hidden_row_bytes = index.constant 20480 : offset
   %embedding_weight = command.parameter %parameters, "token_embd.weight" : view<874086400xi8>
@@ -64,7 +63,23 @@ command.program.def public @qwen38_text_prefill_greedy(%token_count: index) laun
   command.program.launch @qwen38_text_prefill_body[%token_count](%parameters, %residual, %control, %gdn_state, %attention_cache) : [index](buffer, buffer, buffer, buffer, buffer)
   %last_token = index.sub %token_count, %c1 : index
   %last_residual_offset = index.scale %last_token, %hidden_row_bytes : index, offset -> offset
-  command.program.launch @qwen38_output_head_greedy[%last_residual_offset](%parameters, %residual, %token_ids) : [offset](buffer, buffer, buffer)
+  command.program.launch @qwen38_output_head_greedy_with_hidden[%last_residual_offset](%parameters, %residual, %normalized_hidden, %token_ids) : [offset](buffer, buffer, buffer, buffer)
   kernel.launch @qwen38_prefill_finish_control(%control, %token_ids) : (buffer, buffer)
+  command.return
+}
+
+// Prefills one token span and hands its persistent state directly to ordinary
+// decode while keeping the normalized hidden row internal.
+command.program.def public @qwen38_text_prefill_greedy(%token_count: index) launch(%parameters: buffer, %residual: buffer, %control: buffer, %gdn_state: buffer, %attention_cache: buffer, %token_ids: buffer) where [range(%token_count, 1, 512)] {
+  %hidden_bytes = index.constant 20480 : offset
+  %normalized_hidden = buffer.alloca<global> align(256) %hidden_bytes : buffer
+  command.program.launch @qwen38_text_prefill_transition[%token_count](%parameters, %residual, %control, %gdn_state, %attention_cache, %normalized_hidden, %token_ids) : [index](buffer, buffer, buffer, buffer, buffer, buffer, buffer)
+  command.return
+}
+
+// Prefills one token span while exposing the final normalized target hidden row
+// consumed by the first NextN/MTP proposal step.
+command.program.def public @qwen38_text_prefill_greedy_with_hidden(%token_count: index) launch(%parameters: buffer, %residual: buffer, %control: buffer, %gdn_state: buffer, %attention_cache: buffer, %normalized_hidden: buffer, %token_ids: buffer) where [range(%token_count, 1, 512)] {
+  command.program.launch @qwen38_text_prefill_transition[%token_count](%parameters, %residual, %control, %gdn_state, %attention_cache, %normalized_hidden, %token_ids) : [index](buffer, buffer, buffer, buffer, buffer, buffer, buffer)
   command.return
 }

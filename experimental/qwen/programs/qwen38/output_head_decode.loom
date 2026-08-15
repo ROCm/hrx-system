@@ -9,10 +9,9 @@ kernel.decl @ggml_linear_q6k_q8_1_x4(%token_count: index, %input_size: index, %o
 kernel.decl @qwen38_rmsnorm_f32_decode() launch(%epsilon: f32, %input: buffer, %weight: buffer, %output: buffer)
 kernel.decl @qwen38_greedy_argmax_f32(%output_size: index) launch(%output_size: index, %logits: buffer, %token_id: buffer)
 
-// Projects one final hidden row and publishes its deterministic greedy token.
-// The parameter root is immutable; residual and token bindings can change on
-// every issue of the materialized command buffer.
-command.program.def public @qwen38_output_head_greedy(%residual_offset: offset) launch(%parameters: buffer, %residual: buffer, %token_id: buffer) {
+// Normalizes and projects one final hidden row, preserving the normalized row
+// used by NextN/MTP while publishing its deterministic greedy token.
+command.program.def @qwen38_output_head(%residual_offset: offset) launch(%parameters: buffer, %residual: buffer, %normalized: buffer, %token_id: buffer) {
   %token_count = index.constant 1 : index
   %hidden_size = index.constant 5120 : index
   %vocabulary_size = index.constant 248320 : index
@@ -23,10 +22,8 @@ command.program.def public @qwen38_output_head_greedy(%residual_offset: offset) 
 
   %residual_row = buffer.view %residual[%residual_offset] : buffer -> view<5120xf32>
 
-  %hidden_bytes = index.constant 20480 : offset
   %hidden_q8_bytes = index.constant 5760 : offset
   %logits_bytes = index.constant 993280 : offset
-  %normalized = buffer.alloca<global> align(256) %hidden_bytes : buffer
   %normalized_q8 = buffer.alloca<global> align(256) %hidden_q8_bytes : buffer
   %logits = buffer.alloca<global> align(256) %logits_bytes : buffer
 
@@ -34,5 +31,12 @@ command.program.def public @qwen38_output_head_greedy(%residual_offset: offset) 
   kernel.launch @ggml_quantize_q8_1_x4_f32[%token_count, %hidden_size](%token_count, %hidden_size, %normalized, %normalized_q8) : [index, index](index, index, buffer, buffer)
   kernel.launch @ggml_linear_q6k_q8_1_x4[%token_count, %hidden_size, %vocabulary_size](%token_count, %hidden_size, %vocabulary_size, %normalized_q8, %output_weight, %logits) : [index, index, index](index, index, index, buffer, view<1042944000xi8>, buffer)
   kernel.launch @qwen38_greedy_argmax_f32[%vocabulary_size](%vocabulary_size, %logits, %token_id) : [index](index, buffer, buffer)
+  command.return
+}
+
+// Publishes the normalized hidden row alongside the greedy token. Both output
+// bindings are issue-time resources and may change on every execution.
+command.program.def public @qwen38_output_head_greedy_with_hidden(%residual_offset: offset) launch(%parameters: buffer, %residual: buffer, %normalized: buffer, %token_id: buffer) {
+  command.program.launch @qwen38_output_head[%residual_offset](%parameters, %residual, %normalized, %token_id) : [offset](buffer, buffer, buffer, buffer)
   command.return
 }
