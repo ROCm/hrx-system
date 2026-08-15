@@ -14,6 +14,7 @@
 #include "loom/pass/builtin_registry.h"
 #include "loomc/iree.h"
 #include "option_chain.h"
+#include "program_provider.h"
 #include "source.h"
 
 struct loomc_target_environment_t {
@@ -28,6 +29,9 @@ struct loomc_target_environment_t {
 
   // Prepared immutable pass capability tables over environment.
   loomc_target_pass_environment_t pass_environment;
+
+  // Borrowed private program-root provider set, or NULL.
+  const loomc_program_provider_set_t* program_provider_set;
 };
 
 struct loomc_target_profile_t {
@@ -203,17 +207,19 @@ static void loomc_target_profile_deinitialize_target_profile(
   target_profile_deinitialize(target_profile, allocator);
 }
 
-loomc_status_t loomc_target_environment_create_from_provider_set(
-    const loom_target_provider_set_t* provider_set, loomc_allocator_t allocator,
+loomc_status_t loomc_target_environment_create_from_provider_sets(
+    const loom_target_provider_set_t* target_provider_set,
+    const loomc_program_provider_set_t* program_provider_set,
+    loomc_allocator_t allocator,
     loomc_target_environment_t** out_target_environment) {
   if (out_target_environment == NULL) {
     return loomc_make_status(LOOMC_STATUS_INVALID_ARGUMENT,
                              "out_target_environment must not be NULL");
   }
   *out_target_environment = NULL;
-  if (provider_set == NULL) {
+  if (target_provider_set == NULL) {
     return loomc_make_status(LOOMC_STATUS_INVALID_ARGUMENT,
-                             "provider_set must not be NULL");
+                             "target_provider_set must not be NULL");
   }
 
   loomc_target_environment_t* target_environment = NULL;
@@ -222,10 +228,11 @@ loomc_status_t loomc_target_environment_create_from_provider_set(
   memset(target_environment, 0, sizeof(*target_environment));
   iree_atomic_ref_count_init(&target_environment->ref_count);
   target_environment->allocator = allocator;
+  target_environment->program_provider_set = program_provider_set;
 
   loomc_status_t status =
       loomc_status_from_iree(loom_target_environment_initialize(
-          provider_set, &target_environment->environment));
+          target_provider_set, &target_environment->environment));
   if (loomc_status_is_ok(status)) {
     status = loomc_target_pass_environment_initialize(
         target_environment, &target_environment->pass_environment);
@@ -251,6 +258,12 @@ const loomc_target_pass_environment_t*
 loomc_target_environment_pass_environment(
     const loomc_target_environment_t* target_environment) {
   return target_environment ? &target_environment->pass_environment : NULL;
+}
+
+const loomc_program_provider_set_t*
+loomc_target_environment_program_provider_set(
+    const loomc_target_environment_t* target_environment) {
+  return target_environment ? target_environment->program_provider_set : NULL;
 }
 
 loomc_status_t loomc_target_environment_register_context(

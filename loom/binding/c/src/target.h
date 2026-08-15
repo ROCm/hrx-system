@@ -20,6 +20,7 @@
 
 typedef struct loom_text_low_asm_environment_t loom_text_low_asm_environment_t;
 typedef struct loom_low_repr_environment_t loom_low_repr_environment_t;
+typedef struct loomc_program_provider_set_t loomc_program_provider_set_t;
 
 #ifdef __cplusplus
 extern "C" {
@@ -51,10 +52,14 @@ typedef struct loomc_target_pass_environment_t {
   loom_target_legalizer_provider_list_t legalizer_provider_list;
 } loomc_target_pass_environment_t;
 
-// Creates a public target environment from an internal provider set.
+// Creates a public target environment from target and program provider sets.
+// Both sets and their descriptors have process lifetime and are borrowed by
+// the returned environment. |program_provider_set| may be NULL.
 LOOMC_API_PRIVATE loomc_status_t
-loomc_target_environment_create_from_provider_set(
-    const loom_target_provider_set_t* provider_set, loomc_allocator_t allocator,
+loomc_target_environment_create_from_provider_sets(
+    const loom_target_provider_set_t* target_provider_set,
+    const loomc_program_provider_set_t* program_provider_set,
+    loomc_allocator_t allocator,
     loomc_target_environment_t** out_target_environment);
 
 // Returns the internal target environment owned by the public handle.
@@ -66,6 +71,12 @@ loomc_target_environment_loom_target_environment(
 // NULL when target_environment is NULL.
 LOOMC_API_PRIVATE const loomc_target_pass_environment_t*
 loomc_target_environment_pass_environment(
+    const loomc_target_environment_t* target_environment);
+
+// Returns the private program-root providers linked into the target
+// environment, or NULL when none were linked.
+LOOMC_API_PRIVATE const loomc_program_provider_set_t*
+loomc_target_environment_program_provider_set(
     const loomc_target_environment_t* target_environment);
 
 // Registers target dialects with a not-yet-finalized Loom context.

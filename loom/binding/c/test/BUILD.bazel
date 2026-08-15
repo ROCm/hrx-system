@@ -183,6 +183,18 @@ loom_cc_test(
 )
 
 loom_cc_test(
+    name = "program_plan_test",
+    srcs = ["program_plan_test.cc"],
+    deps = [
+        ":test_util",
+        "//loom/binding/c:loomc",
+        "//loom/src/loom/target:provider",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
     name = "result_test",
     srcs = ["result_test.cc"],
     deps = [

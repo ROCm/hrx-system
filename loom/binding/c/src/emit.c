@@ -8,6 +8,7 @@
 
 #include <string.h>
 
+#include "compile_report.h"
 #include "diagnostic.h"
 #include "iree/base/internal/arena.h"
 #include "loom/error/error_defs.h"
@@ -215,45 +216,6 @@ static loomc_status_t loomc_emit_validate_artifact_manifest_options(
   return loomc_ok_status();
 }
 
-static bool loomc_emit_compile_report_mode_is_valid(
-    loomc_compile_report_mode_t mode) {
-  switch (mode) {
-    case LOOMC_COMPILE_REPORT_MODE_NONE:
-    case LOOMC_COMPILE_REPORT_MODE_SUMMARY:
-    case LOOMC_COMPILE_REPORT_MODE_DETAILS:
-      return true;
-    default:
-      return false;
-  }
-}
-
-static loomc_status_t loomc_emit_validate_compile_report_options(
-    const loomc_compile_report_options_t* options) {
-  if (options->type != LOOMC_STRUCTURE_TYPE_COMPILE_REPORT_OPTIONS) {
-    return loomc_make_status(
-        LOOMC_STATUS_INVALID_ARGUMENT,
-        "compile report options have an unknown structure type");
-  }
-  if (options->structure_size != 0 &&
-      options->structure_size < sizeof(*options)) {
-    return loomc_make_status(
-        LOOMC_STATUS_INVALID_ARGUMENT,
-        "compile report options structure_size is too small");
-  }
-  if (!loomc_emit_compile_report_mode_is_valid(options->mode)) {
-    return loomc_make_status(LOOMC_STATUS_INVALID_ARGUMENT,
-                             "compile report mode is invalid");
-  }
-  LOOMC_RETURN_IF_ERROR(loomc_emit_validate_string_view(options->identifier));
-  if (options->mode == LOOMC_COMPILE_REPORT_MODE_NONE &&
-      !loomc_string_view_is_empty(options->identifier)) {
-    return loomc_make_status(
-        LOOMC_STATUS_INVALID_ARGUMENT,
-        "compile report identifier requires a non-NONE report mode");
-  }
-  return loomc_ok_status();
-}
-
 static loomc_status_t loomc_emit_validate_unknown_descriptor(
     const loomc_descriptor_prefix_t* prefix) {
   if (prefix->structure_size != 0 && prefix->structure_size < sizeof(*prefix)) {
@@ -350,7 +312,7 @@ static loomc_status_t loomc_emit_resolve_options(
         const loomc_compile_report_options_t* report_options =
             (const loomc_compile_report_options_t*)next;
         LOOMC_RETURN_IF_ERROR(
-            loomc_emit_validate_compile_report_options(report_options));
+            loomc_compile_report_options_validate(report_options));
         out_options->compile_report_mode = report_options->mode;
         out_options->compile_report_identifier = report_options->identifier;
         next = report_options->next;

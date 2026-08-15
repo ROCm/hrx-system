@@ -288,8 +288,9 @@ BuilderPtr CreateLinkIndexBuilder(loomc_context_t* context) {
 TargetEnvironmentPtr CreateTargetEnvironmentFromProviderSet(
     const loom_target_provider_set_t* provider_set) {
   loomc_target_environment_t* target_environment = nullptr;
-  loomc_status_t status = loomc_target_environment_create_from_provider_set(
-      provider_set, loomc_allocator_system(), &target_environment);
+  loomc_status_t status = loomc_target_environment_create_from_provider_sets(
+      provider_set, /*program_provider_set=*/nullptr, loomc_allocator_system(),
+      &target_environment);
   LOOMC_EXPECT_OK(status);
   return TargetEnvironmentPtr(target_environment);
 }

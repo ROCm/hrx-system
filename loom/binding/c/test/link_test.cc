@@ -263,8 +263,9 @@ ContextPtr CreateContext(loomc_target_environment_t* target_environment) {
 
 TargetEnvironmentPtr CreateFakeTargetEnvironment() {
   loomc_target_environment_t* target_environment = nullptr;
-  loomc_status_t status = loomc_target_environment_create_from_provider_set(
-      &kFakeTargetProviderSet, loomc_allocator_system(), &target_environment);
+  loomc_status_t status = loomc_target_environment_create_from_provider_sets(
+      &kFakeTargetProviderSet, /*program_provider_set=*/nullptr,
+      loomc_allocator_system(), &target_environment);
   LOOMC_EXPECT_OK(status);
   return TargetEnvironmentPtr(target_environment);
 }

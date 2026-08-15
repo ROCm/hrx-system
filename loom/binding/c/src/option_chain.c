@@ -6,6 +6,7 @@
 
 #include "option_chain.h"
 
+#include "compile_report.h"
 #include "loomc/iree.h"
 #include "target.h"
 
@@ -124,6 +125,26 @@ loomc_status_t loomc_option_chain_resolve(
             sanitizer_options, &out_options->sanitizer));
         out_options->has_sanitizer = true;
         next = sanitizer_options->next;
+        break;
+      }
+      case LOOMC_STRUCTURE_TYPE_COMPILE_REPORT_OPTIONS: {
+        if (!iree_all_bits_set(allowed_options,
+                               LOOMC_OPTION_CHAIN_ALLOW_COMPILE_REPORT)) {
+          return loomc_make_status(
+              LOOMC_STATUS_UNIMPLEMENTED,
+              "compile report option extension is not supported here");
+        }
+        if (out_options->compile_report != NULL) {
+          return loomc_make_status(
+              LOOMC_STATUS_INVALID_ARGUMENT,
+              "option chain contains duplicate compile report options");
+        }
+        const loomc_compile_report_options_t* report_options =
+            (const loomc_compile_report_options_t*)next;
+        LOOMC_RETURN_IF_ERROR(
+            loomc_compile_report_options_validate(report_options));
+        out_options->compile_report = report_options;
+        next = report_options->next;
         break;
       }
       case LOOMC_STRUCTURE_TYPE_NONE:

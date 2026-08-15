@@ -183,6 +183,19 @@ loom_cc_test(
 
 loom_cc_test(
   NAME
+    program_plan_test
+  SRCS
+    "program_plan_test.cc"
+  DEPS
+    ::test_util
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::binding::c::loomc
+    loom::target::provider
+)
+
+loom_cc_test(
+  NAME
     result_test
   SRCS
     "result_test.cc"
