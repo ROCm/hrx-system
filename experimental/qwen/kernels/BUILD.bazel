@@ -17,6 +17,7 @@ exports_files([
     "ggml/linear_q4k_q8_1_x4.loom",
     "ggml/linear_qk_common.loom",
     "ggml/linear_q5k_q8_1_x4.loom",
+    "ggml/linear_q6k_f32_decode.loom",
     "ggml/linear_q6k_q8_1_x4.loom",
     "ggml/linear_q8_0_q8_1_x4.loom",
     "ggml/quantize_q8_1_x4.loom",
@@ -45,6 +46,11 @@ loom_link_module(
 )
 
 loom_link_module(
+    name = "linear_q6k_f32_decode_linked",
+    srcs = ["ggml/linear_q6k_f32_decode.loom"],
+)
+
+loom_link_module(
     name = "linear_q6k_q8_1_x4_linked",
     srcs = ["ggml/linear_q6k_q8_1_x4.loom"],
     libraries = ["ggml/quantize_q8_1_x4.loom"],
@@ -54,6 +60,41 @@ loom_link_module(
     name = "linear_q8_0_q8_1_x4_linked",
     srcs = ["ggml/linear_q8_0_q8_1_x4.loom"],
     libraries = ["ggml/quantize_q8_1_x4.loom"],
+)
+
+iree_executable_test(
+    name = "linear_q6k_f32_decode_plan_test",
+    src = "//loom/src/loom/tools/iree-benchmark-loom",
+    args = [
+        "$(location :linear_q6k_f32_decode_linked)",
+        "--config=ggml.linear_q6k_f32_decode.output_capacity=5120",
+        "--dry-run",
+        "--output-format=jsonl",
+    ],
+    data = [":linear_q6k_f32_decode_linked"],
+    tags = ["hostonly"],
+)
+
+iree_executable_test(
+    name = "linear_q6k_f32_decode_hal_test",
+    src = "//loom/src/loom/tools/iree-test-loom",
+    args = [
+        "$(location :linear_q6k_f32_decode_linked)",
+        "--case=@ggml_linear_q6k_f32_decode_nonzero_tail_case",
+        "--config=ggml.linear_q6k_f32_decode.output_capacity=9",
+        "--device=amdgpu://0",
+        "--sanitizer=access",
+    ],
+    data = [":linear_q6k_f32_decode_linked"],
+    tags = [
+        "iree-run-requirement=runtime.resource.amd_gpu",
+        "manual",
+        "requires-gpu-amd",
+        "runtime-resource=amd-gpu",
+    ],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/execute:amdgpu_hal",
+    ]),
 )
 
 iree_executable_test(

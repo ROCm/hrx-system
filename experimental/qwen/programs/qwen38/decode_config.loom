@@ -8,6 +8,7 @@ config.def @ggml.linear_q4k_q8_1_x4.token_capacity = 1 : index
 config.def @ggml.linear_q4k_q8_1_x4.output_capacity = 48 : index
 config.def @ggml.linear_q5k_q8_1_x4.token_capacity = 1 : index
 config.def @ggml.linear_q5k_q8_1_x4.output_capacity = 17408 : index
+config.def @ggml.linear_q6k_f32_decode.output_capacity = 5120 : index
 config.def @ggml.linear_q6k_q8_1_x4.token_capacity = 1 : index
 config.def @ggml.linear_q6k_q8_1_x4.output_capacity = 248320 : index
 config.def @ggml.linear_q8_0_q8_1_x4.token_capacity = 1 : index

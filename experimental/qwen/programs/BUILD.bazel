@@ -30,6 +30,7 @@ loom_link_module(
         "qwen38/output_head_decode.loom",
         "//experimental/qwen/kernels:ggml/linear_q4k_q8_1_x4.loom",
         "//experimental/qwen/kernels:ggml/linear_q5k_q8_1_x4.loom",
+        "//experimental/qwen/kernels:ggml/linear_q6k_f32_decode.loom",
         "//experimental/qwen/kernels:ggml/linear_q6k_q8_1_x4.loom",
         "//experimental/qwen/kernels:ggml/linear_q8_0_q8_1_x4.loom",
         "//experimental/qwen/kernels:ggml/linear_qk_common.loom",
@@ -62,6 +63,7 @@ loom_link_module(
     libraries = [
         "qwen38/decode_config.loom",
         "//experimental/qwen/kernels:ggml/linear_q5k_q8_1_x4.loom",
+        "//experimental/qwen/kernels:ggml/linear_q6k_f32_decode.loom",
         "//experimental/qwen/kernels:ggml/linear_q6k_q8_1_x4.loom",
         "//experimental/qwen/kernels:ggml/linear_q8_0_q8_1_x4.loom",
         "//experimental/qwen/kernels:ggml/linear_qk_common.loom",
@@ -93,6 +95,7 @@ loom_link_module(
         "qwen38/decode_config.loom",
         "//experimental/qwen/kernels:ggml/linear_q4k_q8_1_x4.loom",
         "//experimental/qwen/kernels:ggml/linear_q5k_q8_1_x4.loom",
+        "//experimental/qwen/kernels:ggml/linear_q6k_f32_decode.loom",
         "//experimental/qwen/kernels:ggml/linear_q6k_q8_1_x4.loom",
         "//experimental/qwen/kernels:ggml/linear_qk_common.loom",
         "//experimental/qwen/kernels:ggml/quantize_q8_1_x4.loom",

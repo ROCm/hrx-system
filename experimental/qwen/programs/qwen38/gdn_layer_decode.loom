@@ -8,6 +8,7 @@
 kernel.decl @ggml_quantize_q8_1_x4_f32(%token_count: index, %input_size: index) launch(%token_count: index, %input_size: index, %input: buffer, %output: buffer)
 kernel.decl @ggml_linear_q4k_q8_1_x4(%token_count: index, %input_size: index, %output_size: index) launch(%token_count: index, %input_size: index, %output_size: index, %input: buffer, %weight: buffer, %output: buffer)
 kernel.decl @ggml_linear_q5k_q8_1_x4(%token_count: index, %input_size: index, %output_size: index) launch(%token_count: index, %input_size: index, %output_size: index, %input: buffer, %weight: buffer, %output: buffer)
+kernel.decl @ggml_linear_q6k_f32_decode(%token_count: index, %input_size: index, %output_size: index) launch(%token_count: index, %input_size: index, %output_size: index, %input: buffer, %weight: buffer, %output: buffer)
 kernel.decl @ggml_linear_q6k_q8_1_x4(%token_count: index, %input_size: index, %output_size: index) launch(%token_count: index, %input_size: index, %output_size: index, %input: buffer, %weight: buffer, %output: buffer)
 
 kernel.decl @qwen38_rmsnorm_f32_decode() launch(%epsilon: f32, %input: buffer, %weight: buffer, %output: buffer)
@@ -113,11 +114,9 @@ command.program.def @qwen38_gdn_layer_decode(%layer: index, %gdn_ordinal: index)
   }
 
   %swiglu = buffer.alloca<global> align(256) %ffn_bytes : buffer
-  %swiglu_q8 = buffer.alloca<global> align(256) %ffn_q8_bytes : buffer
   %ffn_output = buffer.alloca<global> align(256) %hidden_bytes : buffer
   kernel.launch @qwen38_swiglu_f32_decode(%ffn_gate, %ffn_up, %swiglu) : (buffer, buffer, buffer)
-  kernel.launch @ggml_quantize_q8_1_x4_f32[%token_count, %ffn_size](%token_count, %ffn_size, %swiglu, %swiglu_q8) : [index, index](index, index, buffer, buffer)
-  kernel.launch @ggml_linear_q6k_q8_1_x4[%token_count, %ffn_size, %hidden_size](%token_count, %ffn_size, %hidden_size, %swiglu_q8, %ffn_down_weight, %ffn_output) : [index, index, index](index, index, index, buffer, view<73113600xi8>, buffer)
+  kernel.launch @ggml_linear_q6k_f32_decode[%token_count, %ffn_size, %hidden_size](%token_count, %ffn_size, %hidden_size, %swiglu, %ffn_down_weight, %ffn_output) : [index, index, index](index, index, index, buffer, view<73113600xi8>, buffer)
   kernel.launch @qwen38_residual_add_f32_decode(%residual, %ffn_output, %residual) : (buffer, buffer, buffer)
   command.return
 }
