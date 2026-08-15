@@ -4,12 +4,15 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+#include "loom/binding/c/target/cmd/provider.h"
+#include "loom/target/arch/cmd/provider.h"
 #include "loom/target/arch/llvmir/provider.h"
 #include "loom/target/emit/llvmir/artifact_emitter.h"
 #include "loomc/target/llvmir/base.h"
 #include "target.h"
 
 static const loom_target_provider_t* const kLoomcLlvmirTargetProviders[] = {
+    &loom_cmd_target_provider,
     &loom_llvmir_target_provider,
     &loom_llvmir_artifact_emitter_provider,
 };
@@ -23,6 +26,6 @@ loomc_status_t loomc_target_environment_create_llvmir(
     loomc_allocator_t allocator,
     loomc_target_environment_t** out_target_environment) {
   return loomc_target_environment_create_from_provider_sets(
-      &loomc_llvmir_target_provider_set, /*program_provider_set=*/NULL,
+      &loomc_llvmir_target_provider_set, &loomc_cmd_program_provider_set,
       allocator, out_target_environment);
 }

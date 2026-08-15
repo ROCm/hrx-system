@@ -23,6 +23,7 @@ loom_cc_library(
   DEPS
     iree::base
     loom::binding::c::loomc
+    loom::binding::c::target::cmd
     loom::error::emitter
     loom::ir
     loom::ops::kernel
@@ -33,6 +34,7 @@ loom_cc_library(
     loom::target::arch::amdgpu::provider
     loom::target::arch::amdgpu::records::target_records
     loom::target::arch::amdgpu::target_info
+    loom::target::arch::cmd::provider
     loom::target::emit::native::amdgpu::hal_kernel_library
     loom::target::provider
     loom::target::types

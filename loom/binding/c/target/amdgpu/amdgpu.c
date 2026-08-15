@@ -9,11 +9,13 @@
 #include <string.h>
 
 #include "iree/base/api.h"
+#include "loom/binding/c/target/cmd/provider.h"
 #include "loom/error/emitter.h"
 #include "loom/target/arch/amdgpu/profile.h"
 #include "loom/target/arch/amdgpu/provider.h"
 #include "loom/target/arch/amdgpu/records/target_records.h"
 #include "loom/target/arch/amdgpu/target_info.h"
+#include "loom/target/arch/cmd/provider.h"
 #include "loom/target/emit/native/amdgpu/hal_kernel_library.h"
 #include "loomc/iree.h"
 #include "target.h"
@@ -348,6 +350,7 @@ static const loom_target_provider_t loomc_amdgpu_emit_target_provider = {
 };
 
 static const loom_target_provider_t* const kLoomcAmdgpuTargetProviders[] = {
+    &loom_cmd_target_provider,
     &loom_amdgpu_target_provider,
     &loomc_amdgpu_emit_target_provider,
 };
@@ -361,7 +364,7 @@ loomc_status_t loomc_target_environment_create_amdgpu(
     loomc_allocator_t allocator,
     loomc_target_environment_t** out_target_environment) {
   return loomc_target_environment_create_from_provider_sets(
-      &loomc_amdgpu_target_provider_set, /*program_provider_set=*/NULL,
+      &loomc_amdgpu_target_provider_set, &loomc_cmd_program_provider_set,
       allocator, out_target_environment);
 }
 

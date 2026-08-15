@@ -39,6 +39,22 @@ loom_cc_test(
 )
 
 loom_cc_test(
+    name = "command_program_test",
+    srcs = ["command_program_test.cc"],
+    target_compatible_with = _AMDGPU_ARTIFACTS_COMPATIBLE_WITH,
+    deps = [
+        "//loom/binding/c:loomc",
+        "//loom/binding/c/target/amdgpu",
+        "//loom/binding/c/target/cmd",
+        "//loom/binding/c/test:test_util",
+        "//loom/src/loom/target/arch/cmd:package",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
     name = "iree_hal_test",
     srcs = ["iree_hal_test.cc"],
     target_compatible_with = _AMDGPU_ARTIFACTS_COMPATIBLE_WITH,

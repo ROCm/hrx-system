@@ -34,6 +34,7 @@ loom_cc_library(
     target_compatible_with = _AMDGPU_COMPATIBLE_WITH,
     deps = [
         "//loom/binding/c:loomc",
+        "//loom/binding/c/target/cmd",
         "//loom/src/loom/error:emitter",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:op_defs",
@@ -46,6 +47,7 @@ loom_cc_library(
         "//loom/src/loom/target/arch/amdgpu:target_info",
         "//loom/src/loom/target/arch/amdgpu/ops",
         "//loom/src/loom/target/arch/amdgpu/records:target_records",
+        "//loom/src/loom/target/arch/cmd:provider",
         "//loom/src/loom/target/emit/native/amdgpu:hal_kernel_library",
         "//runtime/src/iree/base",
     ],

@@ -32,6 +32,8 @@ loom_cc_library(
     target_compatible_with = _LLVMIR_COMPATIBLE_WITH,
     deps = [
         "//loom/binding/c:loomc",
+        "//loom/binding/c/target/cmd",
+        "//loom/src/loom/target/arch/cmd:provider",
         "//loom/src/loom/target/arch/llvmir:provider",
         "//loom/src/loom/target/emit/llvmir:artifact_emitter",
     ],

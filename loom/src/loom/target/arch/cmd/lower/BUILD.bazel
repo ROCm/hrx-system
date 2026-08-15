@@ -16,6 +16,11 @@ package(
     licenses = ["notice"],  # Apache 2.0
 )
 
+_CMD_PROVIDER_VISIBILITY = [
+    "//loom/binding/c/target:__subpackages__",
+    "//loom/src/loom/target/arch/cmd/check:__pkg__",
+]
+
 loom_cc_library(
     name = "schedule",
     srcs = ["schedule.c"],
@@ -159,7 +164,7 @@ loom_cc_library(
     name = "program_plan",
     srcs = ["program_plan.c"],
     hdrs = ["program_plan.h"],
-    visibility = ["//loom/src/loom/target/arch/cmd/check:__pkg__"],
+    visibility = _CMD_PROVIDER_VISIBILITY,
     deps = [
         ":kernel_unit",
         ":launch_graph",
@@ -192,7 +197,7 @@ loom_cc_library(
     name = "serialize",
     srcs = ["serialize.c"],
     hdrs = ["serialize.h"],
-    visibility = ["//loom/src/loom/target/arch/cmd/check:__pkg__"],
+    visibility = _CMD_PROVIDER_VISIBILITY,
     deps = [
         ":program_plan",
         "//loom/src/loom/codegen/low:function",

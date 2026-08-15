@@ -27,6 +27,24 @@ endif()
 if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU)
 loom_cc_test(
   NAME
+    command_program_test
+  SRCS
+    "command_program_test.cc"
+  DEPS
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::binding::c::loomc
+    loom::binding::c::target::amdgpu
+    loom::binding::c::target::cmd
+    loom::binding::c::test::test_util
+    loom::target::arch::cmd::package
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU)
+loom_cc_test(
+  NAME
     iree_hal_test
   SRCS
     "iree_hal_test.cc"

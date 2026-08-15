@@ -39,8 +39,10 @@ loom_cc_library(
     target_compatible_with = _SPIRV_COMPATIBLE_WITH,
     deps = [
         "//loom/binding/c:loomc",
+        "//loom/binding/c/target/cmd",
         "//loom/src/loom/error:error_defs",
         "//loom/src/loom/target:types",
+        "//loom/src/loom/target/arch/cmd:provider",
         "//loom/src/loom/target/arch/spirv:cooperative_properties",
         "//loom/src/loom/target/arch/spirv:features",
         "//loom/src/loom/target/arch/spirv:profile",

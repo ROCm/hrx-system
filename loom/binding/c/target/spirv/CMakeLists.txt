@@ -25,7 +25,9 @@ loom_cc_library(
     "spirv.c"
   DEPS
     loom::binding::c::loomc
+    loom::binding::c::target::cmd
     loom::error::error_defs
+    loom::target::arch::cmd::provider
     loom::target::arch::spirv::cooperative_properties
     loom::target::arch::spirv::features
     loom::target::arch::spirv::profile
