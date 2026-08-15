@@ -4,6 +4,7 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+load("//build_tools/embed_data:build_defs.bzl", "iree_c_embed_data")
 load("//loom/build_tools/bazel:loom_link.bzl", "loom_link_module")
 
 package(
@@ -28,4 +29,13 @@ loom_link_module(
     mode = "selective",
     roots = ["@qwen38_gdn_layer0_decode"],
     strip_check = True,
+)
+
+iree_c_embed_data(
+    name = "qwen38_gdn_layer_decode_source",
+    srcs = [":qwen38_gdn_layer_decode_linked"],
+    c_file_output = "qwen38_gdn_layer_decode_source.c",
+    flatten = True,
+    h_file_output = "qwen38_gdn_layer_decode_source.h",
+    identifier = "qwen38_gdn_layer_decode_source",
 )
