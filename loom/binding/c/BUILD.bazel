@@ -75,6 +75,7 @@ LOOMC_TARGET_LLVMIR_PUBLIC_HDRS = [
 ]
 
 LOOMC_TARGET_CMD_PUBLIC_HDRS = [
+    "include/loomc/target/cmd/hal.h",
     "include/loomc/target/cmd/program.h",
     "include/loomc/target/cmd/program_plan.h",
 ]

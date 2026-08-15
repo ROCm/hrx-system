@@ -42,6 +42,38 @@ loom_cc_test(
 )
 endif()
 
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+loom_cc_test(
+  NAME
+    command_program_execution_test
+  SRCS
+    "command_program_execution_test.cc"
+  DEPS
+    iree::async
+    iree::async::util::proactor_pool
+    iree::base
+    iree::base::threading
+    iree::hal
+    iree::hal::drivers
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::binding::c::loomc
+    loom::binding::c::target::amdgpu
+    loom::binding::c::target::amdgpu::iree_hal
+    loom::binding::c::target::cmd
+    loom::binding::c::target::cmd::hal
+    loom::binding::c::target::cmd::program
+    loom::binding::c::target::iree_hal
+    loom::binding::c::test::test_util
+  LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+  SANITIZER_SUPPRESSIONS
+    lsan
+    rocm
+)
+endif()
+
 if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU)
 loom_cc_test(
   NAME

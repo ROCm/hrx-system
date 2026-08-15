@@ -340,6 +340,9 @@ typedef enum loomc_structure_type_e {
 
   /// `loomc_cmd_program_entry_info_t`.
   LOOMC_STRUCTURE_TYPE_CMD_PROGRAM_ENTRY_INFO = 42,
+
+  /// `loomc_cmd_hal_program_options_t`.
+  LOOMC_STRUCTURE_TYPE_CMD_HAL_PROGRAM_OPTIONS = 43,
 } loomc_structure_type_t;
 
 /// One loose string option entry.

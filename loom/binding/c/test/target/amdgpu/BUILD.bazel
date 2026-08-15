@@ -55,6 +55,35 @@ loom_cc_test(
 )
 
 loom_cc_test(
+    name = "command_program_execution_test",
+    srcs = ["command_program_execution_test.cc"],
+    sanitizer_suppressions = rocm_suppressions,
+    tags = [
+        "iree-run-requirement=runtime.resource.amd_gpu",
+        "runtime-resource=amd-gpu",
+    ],
+    target_compatible_with = _AMDGPU_HAL_COMPATIBLE_WITH,
+    deps = [
+        "//loom/binding/c:loomc",
+        "//loom/binding/c/target/amdgpu",
+        "//loom/binding/c/target/amdgpu/iree_hal",
+        "//loom/binding/c/target/cmd",
+        "//loom/binding/c/target/cmd:program",
+        "//loom/binding/c/target/cmd/hal",
+        "//loom/binding/c/target/iree_hal",
+        "//loom/binding/c/test:test_util",
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/async/util:proactor_pool",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/threading",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/drivers",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
     name = "iree_hal_test",
     srcs = ["iree_hal_test.cc"],
     target_compatible_with = _AMDGPU_ARTIFACTS_COMPATIBLE_WITH,
