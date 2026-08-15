@@ -74,9 +74,10 @@ iree_runtime_cc_binary(
         "//loom/config/execute:amdgpu_hal",
     ]),
     deps = [
-        "//experimental/qwen/programs:qwen38_gdn_layer_decode_source",
+        "//experimental/qwen/programs:qwen38_gdn_layer_prefill_source",
         "//experimental/qwen/tooling:command_program",
         "//experimental/qwen/tooling:runtime",
+        "//loom/binding/c/target/cmd/hal",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/tooling:flags",
         "//runtime/src/iree/hal",

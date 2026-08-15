@@ -1,0 +1,10 @@
+// Shared Qwen3.8 prefill capacities. Workload token counts remain issue-time
+// values; these bounds size reusable storage and constrain kernel bodies.
+
+config.def @ggml.linear_q4k_q8_1_x4.token_capacity = 512 : index
+config.def @ggml.linear_q4k_q8_1_x4.output_capacity = 48 : index
+config.def @ggml.linear_q5k_q8_1_x4.token_capacity = 512 : index
+config.def @ggml.linear_q5k_q8_1_x4.output_capacity = 17408 : index
+config.def @ggml.linear_q6k_q8_1_x4.token_capacity = 512 : index
+config.def @ggml.linear_q6k_q8_1_x4.output_capacity = 12288 : index
+config.def @ggml.quantize_q8_1_x4.group_capacity = 69632 : index

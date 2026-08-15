@@ -1,0 +1,123 @@
+// Exact Qwen3.8-27B Gated DeltaNet prefill layer.
+//
+// The root is reusable for every token count through 512. Its scalar argument
+// feeds the command launch-config program, which updates indirect dispatch
+// parameters without rebuilding or recompiling the command buffer.
+
+kernel.decl @ggml_quantize_q8_1_x4_f32(%token_count$0: index, %input_size$1: index) launch(%token_count$2: index, %input_size$3: index, %input: buffer, %output: buffer)
+
+kernel.decl @ggml_linear_q4k_q8_1_x4(%token_count$6: index, %input_size$7: index, %output_size$8: index) launch(%token_count$9: index, %input_size$10: index, %output_size$11: index, %input: buffer, %weight: buffer, %output: buffer)
+
+kernel.decl @qwen38_linear_q5k_f16_wmma(%token_count: index, %input_size$25: index, %output_size$26: index) launch(%token_count_data: buffer, %input_size$28: index, %output_size$29: index, %input: buffer, %weight: buffer, %output: buffer)
+
+kernel.decl @qwen38_linear_q6k_f16_wmma(%token_count: index, %input_size: index, %output_size: index) launch(%token_count_data: buffer, %input_size$0: index, %output_size$0: index, %input: buffer, %weight: buffer, %output: buffer)
+
+kernel.decl @qwen38_rmsnorm_f32_prefill(%token_count$33: index) launch(%token_count$34: index, %epsilon: f32, %input: buffer, %weight: buffer, %output: buffer)
+
+kernel.decl @qwen38_residual_add_f32_prefill(%token_count$39: index) launch(%token_count$40: index, %lhs: buffer, %rhs: buffer, %output: buffer)
+
+kernel.decl @qwen38_swiglu_f32_prefill(%token_count$44: index) launch(%token_count$45: index, %gate: buffer, %up: buffer, %output: buffer)
+
+kernel.decl @qwen38_gdn_conv_prepare_prefill(%token_count: index) launch(%token_count_data: buffer, %l2_epsilon: f32, %qkv_input: buffer, %conv_weight: buffer, %conv_history: buffer, %qkv_silu: buffer, %qk_inverse_norm: buffer)
+
+kernel.decl @qwen38_gdn_recurrent_prefill_x4(%token_count: index) launch(%token_count_data: buffer, %qkv_silu: buffer, %qk_inverse_norm: buffer, %alpha: buffer, %beta: buffer, %ssm_a: buffer, %dt_bias: buffer, %state: buffer, %raw_output: buffer)
+
+kernel.decl @qwen38_gdn_norm_gate_prefill(%token_count$67: index) launch(%token_count$68: index, %rms_epsilon: f32, %raw_output: buffer, %norm_weight: buffer, %z: buffer, %output: buffer)
+
+command.program.def @qwen38_gdn_layer_prefill(%token_count: index, %layer: index, %gdn_ordinal: index) launch(%parameters: buffer, %residual: buffer, %gdn_state: buffer, %token_count_data: buffer) where [range(%token_count, 1, 512), range(%layer, 0, 63), range(%gdn_ordinal, 0, 47)] {
+  %token_capacity = index.constant 512 : index
+  %hidden_size = index.constant 5120 : index
+  %qkv_size = index.constant 10240 : index
+  %gdn_size = index.constant 6144 : index
+  %gate_size = index.constant 48 : index
+  %ffn_size = index.constant 17408 : index
+  %epsilon = scalar.constant 9.9999999999999995e-07 : f32
+
+  %attention_gate_weight = command.parameter %parameters, "blk.{}.attn_gate.weight"[%layer] : view<21626880xi8>
+  %attention_norm_weight = command.parameter %parameters, "blk.{}.attn_norm.weight"[%layer] : view<5120xf32>
+  %qkv_weight = command.parameter %parameters, "blk.{}.attn_qkv.weight"[%layer] : view<36044800xi8>
+  %ffn_down_weight = command.parameter %parameters, "blk.{}.ffn_down.weight"[%layer] : view<73113600xi8>
+  %ffn_gate_weight = command.parameter %parameters, "blk.{}.ffn_gate.weight"[%layer] : view<61276160xi8>
+  %ffn_up_weight = command.parameter %parameters, "blk.{}.ffn_up.weight"[%layer] : view<61276160xi8>
+  %post_attention_norm_weight = command.parameter %parameters, "blk.{}.post_attention_norm.weight"[%layer] : view<5120xf32>
+  %ssm_a = command.parameter %parameters, "blk.{}.ssm_a"[%layer] : view<48xf32>
+  %alpha_weight = command.parameter %parameters, "blk.{}.ssm_alpha.weight"[%layer] : view<168960xi8>
+  %beta_weight = command.parameter %parameters, "blk.{}.ssm_beta.weight"[%layer] : view<138240xi8>
+  %conv_weight = command.parameter %parameters, "blk.{}.ssm_conv1d.weight"[%layer] : view<40960xf32>
+  %dt_bias = command.parameter %parameters, "blk.{}.ssm_dt.bias"[%layer] : view<48xf32>
+  %ssm_norm_weight = command.parameter %parameters, "blk.{}.ssm_norm.weight"[%layer] : view<128xf32>
+  %ssm_output_weight = command.parameter %parameters, "blk.{}.ssm_out.weight"[%layer] : view<25804800xi8>
+
+  %recurrent_state_bytes = index.constant 3145728 : offset
+  %conv_history_bytes = index.constant 122880 : offset
+  %gdn_layer_state_bytes, %recurrent_state_offset, %conv_history_offset = buffer.pack [align(256) %recurrent_state_bytes, align(256) %conv_history_bytes] : offset
+  %layer_state_offset = index.scale %gdn_ordinal, %gdn_layer_state_bytes : index, offset -> offset
+  %layer_recurrent_state_offset = index.add %layer_state_offset, %recurrent_state_offset : offset
+  %layer_conv_history_offset = index.add %layer_state_offset, %conv_history_offset : offset
+  %recurrent_state = buffer.view %gdn_state[%layer_recurrent_state_offset] : buffer -> view<786432xf32>
+  %conv_history = buffer.view %gdn_state[%layer_conv_history_offset] : buffer -> view<30720xf32>
+
+  // Fixed-capacity allocations make the command buffer shape-independent.
+  // Dynamic workgroup counts ensure only the active token prefix executes.
+  %hidden_bytes = index.constant 10485760 : offset
+  %hidden_q8_bytes = index.constant 2949120 : offset
+  %qkv_bytes = index.constant 20971520 : offset
+  %gdn_bytes = index.constant 12582912 : offset
+  %gate_bytes = index.constant 98304 : offset
+  %qk_norm_bytes = index.constant 65536 : offset
+  %ffn_bytes = index.constant 35651584 : offset
+
+  %normalized = buffer.alloca<global> align(256) %hidden_bytes : buffer
+  %normalized_q8 = buffer.alloca<global> align(256) %hidden_q8_bytes : buffer
+  kernel.launch @qwen38_rmsnorm_f32_prefill[%token_count](%token_capacity, %epsilon, %residual, %attention_norm_weight, %normalized) : [index](index, f32, buffer, view<5120xf32>, buffer)
+  kernel.launch @ggml_quantize_q8_1_x4_f32[%token_count, %hidden_size](%token_capacity, %hidden_size, %normalized, %normalized_q8) : [index, index](index, index, buffer, buffer)
+
+  %qkv = buffer.alloca<global> align(256) %qkv_bytes : buffer
+  %z = buffer.alloca<global> align(256) %gdn_bytes : buffer
+  %alpha = buffer.alloca<global> align(256) %gate_bytes : buffer
+  %beta = buffer.alloca<global> align(256) %gate_bytes : buffer
+  command.concurrent {
+    kernel.launch @qwen38_linear_q5k_f16_wmma[%token_count, %hidden_size, %qkv_size](%token_count_data, %hidden_size, %qkv_size, %normalized, %qkv_weight, %qkv) : [index, index, index](buffer, index, index, buffer, view<36044800xi8>, buffer)
+    kernel.launch @qwen38_linear_q5k_f16_wmma[%token_count, %hidden_size, %gdn_size](%token_count_data, %hidden_size, %gdn_size, %normalized, %attention_gate_weight, %z) : [index, index, index](buffer, index, index, buffer, view<21626880xi8>, buffer)
+    kernel.launch @qwen38_linear_q5k_f16_wmma[%token_count, %hidden_size, %gate_size](%token_count_data, %hidden_size, %gate_size, %normalized, %alpha_weight, %alpha) : [index, index, index](buffer, index, index, buffer, view<168960xi8>, buffer)
+    kernel.launch @ggml_linear_q4k_q8_1_x4[%token_count, %hidden_size, %gate_size](%token_capacity, %hidden_size, %gate_size, %normalized_q8, %beta_weight, %beta) : [index, index, index](index, index, index, buffer, view<138240xi8>, buffer)
+  }
+
+  %qkv_silu = buffer.alloca<global> align(256) %qkv_bytes : buffer
+  %qk_inverse_norm = buffer.alloca<global> align(256) %qk_norm_bytes : buffer
+  kernel.launch @qwen38_gdn_conv_prepare_prefill[%token_count](%token_count_data, %epsilon, %qkv, %conv_weight, %conv_history, %qkv_silu, %qk_inverse_norm) : [index](buffer, f32, buffer, view<40960xf32>, view<30720xf32>, buffer, buffer)
+
+  %raw_gdn = buffer.alloca<global> align(256) %gdn_bytes : buffer
+  kernel.launch @qwen38_gdn_recurrent_prefill_x4[%token_count](%token_count_data, %qkv_silu, %qk_inverse_norm, %alpha, %beta, %ssm_a, %dt_bias, %recurrent_state, %raw_gdn) : [index](buffer, buffer, buffer, buffer, buffer, view<48xf32>, view<48xf32>, view<786432xf32>, buffer)
+
+  %gated_gdn = buffer.alloca<global> align(256) %gdn_bytes : buffer
+  kernel.launch @qwen38_gdn_norm_gate_prefill[%token_count](%token_capacity, %epsilon, %raw_gdn, %ssm_norm_weight, %z, %gated_gdn) : [index](index, f32, buffer, view<128xf32>, buffer, buffer)
+
+  %attention_output = buffer.alloca<global> align(256) %hidden_bytes : buffer
+  kernel.launch @qwen38_linear_q6k_f16_wmma[%token_count, %gdn_size, %hidden_size](%token_count_data, %gdn_size, %hidden_size, %gated_gdn, %ssm_output_weight, %attention_output) : [index, index, index](buffer, index, index, buffer, view<25804800xi8>, buffer)
+  kernel.launch @qwen38_residual_add_f32_prefill[%token_count](%token_capacity, %residual, %attention_output, %residual) : [index](index, buffer, buffer, buffer)
+
+  %post_normalized = buffer.alloca<global> align(256) %hidden_bytes : buffer
+  kernel.launch @qwen38_rmsnorm_f32_prefill[%token_count](%token_capacity, %epsilon, %residual, %post_attention_norm_weight, %post_normalized) : [index](index, f32, buffer, view<5120xf32>, buffer)
+
+  %ffn_gate = buffer.alloca<global> align(256) %ffn_bytes : buffer
+  %ffn_up = buffer.alloca<global> align(256) %ffn_bytes : buffer
+  command.concurrent {
+    kernel.launch @qwen38_linear_q5k_f16_wmma[%token_count, %hidden_size, %ffn_size](%token_count_data, %hidden_size, %ffn_size, %post_normalized, %ffn_gate_weight, %ffn_gate) : [index, index, index](buffer, index, index, buffer, view<61276160xi8>, buffer)
+    kernel.launch @qwen38_linear_q5k_f16_wmma[%token_count, %hidden_size, %ffn_size](%token_count_data, %hidden_size, %ffn_size, %post_normalized, %ffn_up_weight, %ffn_up) : [index, index, index](buffer, index, index, buffer, view<61276160xi8>, buffer)
+  }
+
+  %swiglu = buffer.alloca<global> align(256) %ffn_bytes : buffer
+  %ffn_output = buffer.alloca<global> align(256) %hidden_bytes : buffer
+  kernel.launch @qwen38_swiglu_f32_prefill[%token_count](%token_capacity, %ffn_gate, %ffn_up, %swiglu) : [index](index, buffer, buffer, buffer)
+  kernel.launch @qwen38_linear_q6k_f16_wmma[%token_count, %ffn_size, %hidden_size](%token_count_data, %ffn_size, %hidden_size, %swiglu, %ffn_down_weight, %ffn_output) : [index, index, index](buffer, index, index, buffer, view<73113600xi8>, buffer)
+  kernel.launch @qwen38_residual_add_f32_prefill[%token_count](%token_capacity, %residual, %ffn_output, %residual) : [index](index, buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @qwen38_gdn_layer0_prefill(%token_count: index) launch(%parameters: buffer, %residual: buffer, %gdn_state: buffer, %token_count_data: buffer) where [range(%token_count, 1, 512)] {
+  %layer = index.constant 0 : index
+  %gdn_ordinal = index.constant 0 : index
+  command.program.launch @qwen38_gdn_layer_prefill[%token_count, %layer, %gdn_ordinal](%parameters, %residual, %gdn_state, %token_count_data) : [index, index, index](buffer, buffer, buffer, buffer)
+  command.return
+}
