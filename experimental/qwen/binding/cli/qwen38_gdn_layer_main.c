@@ -18,6 +18,7 @@
 #include "iree/hal/api.h"
 #include "iree/io/file_contents.h"
 #include "iree/io/parameter_provider.h"
+#include "iree/tooling/device_util.h"
 #include "loomc/iree.h"
 #include "loomc/loomc.h"
 #include "loomc/target/amdgpu.h"
@@ -749,6 +750,7 @@ static iree_status_t qwen38_gdn_layer_run(void) {
   iree_hal_buffer_t* transient_buffer = NULL;
   float* residual_values = NULL;
   float* state_values = NULL;
+  iree_hal_profiling_from_flags_t* profiling = NULL;
 
   iree_status_t status = iree_ok_status();
   if (FLAG_transition_count < 1) {
@@ -834,6 +836,8 @@ static iree_status_t qwen38_gdn_layer_run(void) {
           IREE_STATUS_FAILED_PRECONDITION,
           "the exact layer transient is not binding-table slot 2");
     } else {
+      status = iree_hal_begin_profiling_from_flags(device, host_allocator,
+                                                   &profiling);
       for (int32_t i = 0;
            i < FLAG_transition_count && iree_status_is_ok(status); ++i) {
         status = qwen38_submit_and_wait(
@@ -843,6 +847,9 @@ static iree_status_t qwen38_gdn_layer_run(void) {
                 .bindings = bindings,
             });
       }
+      status = iree_status_join(status,
+                                iree_hal_end_profiling_from_flags(profiling));
+      profiling = NULL;
     }
   }
   if (iree_status_is_ok(status)) {
@@ -908,6 +915,8 @@ static iree_status_t qwen38_gdn_layer_run(void) {
             maximum, sum, sum_squares);
   }
 
+  status =
+      iree_status_join(status, iree_hal_end_profiling_from_flags(profiling));
   iree_allocator_free(host_allocator, state_values);
   iree_allocator_free(host_allocator, residual_values);
   iree_hal_buffer_release(transient_buffer);
