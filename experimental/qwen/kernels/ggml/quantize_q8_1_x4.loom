@@ -65,6 +65,64 @@ func.template<ggml.q8_1_x4.word> device @ggml_q8_1_x4_word(%q8_input: buffer, %r
   func.return %values, %d : vector<4xi8>, f32
 }
 
+// Packs one logical Q8_1 block into the four-way physical layout. One 32-lane
+// subgroup cluster owns the 32 input values, with one scalar supplied by each
+// lane. The cluster writes one contiguous payload byte per lane and its leader
+// publishes the scale and scaled quantized sum.
+func.def inline @ggml_q8_1_x4_store_subgroup_block(%row_byte_base: offset, %q8_block: index, %value: f32, %output: buffer) {
+  %lane = kernel.subgroup.lane.id : index
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %c4 = index.constant 4 : index
+  %c32 = index.constant 32 : index
+  %group_bytes = index.constant 144 : offset
+  %payload_byte_add = index.constant 16 : offset
+  %c0_f32 = scalar.constant 0.0 : f32
+  %c1_f32 = scalar.constant 1.0 : f32
+  %c127_f32 = scalar.constant 127.0 : f32
+  %block_lane0 = index.rem %lane, %c32 : index
+  %block_lane = index.assume %block_lane0 [range(%block_lane0, 0, 31)] : index
+  %absolute_value = scalar.absf %value : f32
+  %amax = kernel.subgroup.reduce<maxnumf> %absolute_value {cluster_size = 32} : f32
+  %d = scalar.divf %amax, %c127_f32 : f32
+  %d_nonzero = scalar.cmpf one, %d, %c0_f32 : f32
+  %d_inverse = scf.if %d_nonzero -> (f32) {
+    %inverse = scalar.divf %c1_f32, %d : f32
+    scf.yield %inverse : f32
+  } else {
+    scf.yield %c0_f32 : f32
+  }
+  %scaled = scalar.mulf %value, %d_inverse : f32
+  %rounded = scalar.roundf %scaled : f32
+  %quantized = scalar.fptosi %rounded : f32 to i32
+  %quantized_i8 = scalar.trunci %quantized : i32 to i8
+  %physical_group = index.div %q8_block, %c4 : index
+  %block_in_group0 = index.rem %q8_block, %c4 : index
+  %block_in_group = index.assume %block_in_group0 [range(%block_in_group0, 0, 3)] : index
+  %group_byte_add = index.scale %physical_group, %group_bytes : index, offset -> offset
+  %group_byte_base = index.add %row_byte_base, %group_byte_add : offset
+  %payload_byte_base = index.add %group_byte_base, %payload_byte_add : offset
+  %group_ds = buffer.view %output[%group_byte_base] : buffer -> view<8xf16>
+  %group_qs = buffer.view %output[%payload_byte_base] : buffer -> view<128xi8>
+  %block_byte_base = index.mul %block_in_group, %c32 : index
+  %payload_index0 = index.add %block_byte_base, %block_lane : index
+  %payload_index = index.assume %payload_index0 [range(%payload_index0, 0, 127)] : index
+  view.store %quantized_i8, %group_qs[%payload_index] : i8, view<128xi8>
+  %quantized_sum = kernel.subgroup.reduce<addf> %rounded {cluster_size = 32} : f32
+  %is_subgroup_leader = index.cmp eq, %block_lane, %c0 : index
+  scf.if %is_subgroup_leader {
+    %s = scalar.mulf %quantized_sum, %d : f32
+    %d_f16 = scalar.fptrunc %d : f32 to f16
+    %s_f16 = scalar.fptrunc %s : f32 to f16
+    %ds_index = index.mul %block_in_group, %c2 : index
+    %s_index = index.add %ds_index, %c1 : index
+    view.store %d_f16, %group_ds[%ds_index] : f16, view<8xf16>
+    view.store %s_f16, %group_ds[%s_index] : f16, view<8xf16>
+  }
+  func.return
+}
+
 // Packs one explicit physical group. Callers provide the complete physical
 // group domain and an in-range ordinal, and guarantee that one complete
 // 32-lane wave executes after all 128 source values are visible. The uniform
