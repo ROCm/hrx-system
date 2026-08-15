@@ -1,0 +1,75 @@
+// Selects the lowest token ID having the greatest finite logit. One
+// workgroup scans an exact F32 vocabulary row and publishes one device-local
+// token ID, keeping the full row off the host path.
+
+amdgpu.target<gfx11-generic> @qwen38_greedy_argmax_gfx11_wave64 {subgroup_size = 64}
+
+config.decl @qwen38.greedy_argmax.output_capacity : %value: index where [range(%value, 256, 262144)]
+
+kernel.def target(@qwen38_greedy_argmax_gfx11_wave64) export("qwen38_greedy_argmax_f32") @qwen38_greedy_argmax_f32(%output_size: index) {
+  %c1 = index.constant 1 : index
+  %workgroup_size = index.constant 256 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%workgroup_size, %c1, %c1) : index
+} launch(%output_size: index, %logits: buffer, %token_id: buffer) {
+  %output_capacity = config.get @qwen38.greedy_argmax.output_capacity : index
+  %bounded_output_size = index.assume %output_size [range(%output_size, 256, 262144), le(%output_size, %output_capacity)] : index
+  %c0 = index.constant 0 : index
+  %workgroup_size = index.constant 256 : index
+  %largest_i32 = scalar.constant 2147483647 : i32
+  %c0_offset = index.constant 0 : offset
+  %workitem0 = kernel.workitem.id<x> : index
+  %workitem, %output_bound = index.assume %workitem0, %bounded_output_size [range(%workitem0, 0, 255), lt(%workitem0, %bounded_output_size)] : index, index
+  %logits_noalias, %token_id_noalias = buffer.assume.noalias %logits, %token_id : buffer, buffer
+  %logits_view = buffer.view %logits_noalias[%c0_offset] : buffer -> view<[%output_bound]xf32>
+  %token_id_view = buffer.view %token_id_noalias[%c0_offset] : buffer -> view<1xi32>
+  %initial_logit = view.load %logits_view[%workitem] : view<[%output_bound]xf32> -> f32
+  %initial_id = index.cast %workitem : index to i32
+  %scan_begin = index.add %workitem, %workgroup_size : index
+  %local_logit, %local_id = scf.for %candidate = [%scan_begin to %output_bound step %workgroup_size](%best_logit = %initial_logit : f32, %best_id = %initial_id : i32) -> (f32, i32) {
+    %candidate_logit = view.load %logits_view[%candidate] : view<[%output_bound]xf32> -> f32
+    %candidate_id = index.cast %candidate : index to i32
+    %is_greater = scalar.cmpf ogt, %candidate_logit, %best_logit : f32
+    %is_equal = scalar.cmpf oeq, %candidate_logit, %best_logit : f32
+    %is_lower_id = scalar.cmpi slt, %candidate_id, %best_id : i32
+    %is_lower_tie = scalar.andi %is_equal, %is_lower_id : i1
+    %is_better = scalar.ori %is_greater, %is_lower_tie : i1
+    %next_logit = scf.select %is_better, %candidate_logit, %best_logit : f32
+    %next_id = scf.select %is_better, %candidate_id, %best_id : i32
+    scf.yield %next_logit, %next_id : f32, i32
+  }
+  %winning_logit = kernel.workgroup.reduce<maxnumf> %local_logit : f32
+  %owns_winning_logit = scalar.cmpf oeq, %local_logit, %winning_logit : f32
+  %candidate_winning_id = scf.select %owns_winning_logit, %local_id, %largest_i32 : i32
+  %winning_id = kernel.workgroup.reduce<minsi> %candidate_winning_id : i32
+  %publishes_token = index.cmp eq, %workitem, %c0 : index
+  scf.if %publishes_token {
+    view.store %winning_id, %token_id_view[%c0] : i32, view<1xi32>
+  }
+  kernel.return
+}
+
+// Periodic peaks cross both workitem strides and subgroup boundaries. The
+// first greatest logit is token 1008 even though later periods repeat it.
+check.case public @qwen38_greedy_argmax_nontrivial_winner_case {
+  %output_size = check.literal value(1009) : index
+  %logits = check.generate.iota offset(0.0) step(1.0) period(1009) : tensor<1009xf32>
+  %token_id = check.generate.fill value(-1) : tensor<1xi32>
+  %expected = check.generate.fill value(1008) : tensor<1xi32>
+  kernel.launch @qwen38_greedy_argmax_f32[%output_size](%output_size, %logits, %token_id) : [index](index, tensor<1009xf32>, tensor<1xi32>)
+  check.expect.equal actual(%token_id) expected(%expected) : tensor<1xi32>
+  check.return
+}
+
+// A fully tied row must select token zero rather than an execution-order-
+// dependent workitem or subgroup.
+check.case public @qwen38_greedy_argmax_equal_logit_tie_case {
+  %output_size = check.literal value(1009) : index
+  %logits = check.generate.fill value(7.0) : tensor<1009xf32>
+  %token_id = check.generate.fill value(-1) : tensor<1xi32>
+  %expected = check.generate.fill value(0) : tensor<1xi32>
+  kernel.launch @qwen38_greedy_argmax_f32[%output_size](%output_size, %logits, %token_id) : [index](index, tensor<1009xf32>, tensor<1xi32>)
+  check.expect.equal actual(%token_id) expected(%expected) : tensor<1xi32>
+  check.return
+}
+
+check.benchmark<@qwen38_greedy_argmax_nontrivial_winner_case> @qwen38_greedy_argmax_f32_benchmark

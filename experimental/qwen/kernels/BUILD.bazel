@@ -22,6 +22,7 @@ exports_files([
     "ggml/quantize_q8_1_x4.loom",
     "qwen38/attention_decode.loom",
     "qwen38/gdn_decode.loom",
+    "qwen38/greedy_argmax.loom",
     "qwen38/layer_decode.loom",
 ])
 
@@ -161,6 +162,41 @@ iree_executable_test(
         "--sanitizer=access",
     ],
     data = [":linear_q5k_q8_1_x4_linked"],
+    tags = [
+        "iree-run-requirement=runtime.resource.amd_gpu",
+        "manual",
+        "requires-gpu-amd",
+        "runtime-resource=amd-gpu",
+    ],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/execute:amdgpu_hal",
+    ]),
+)
+
+iree_executable_test(
+    name = "qwen38_greedy_argmax_plan_test",
+    src = "//loom/src/loom/tools/iree-benchmark-loom",
+    args = [
+        "$(location qwen38/greedy_argmax.loom)",
+        "--config=qwen38.greedy_argmax.output_capacity=248320",
+        "--dry-run",
+        "--output-format=jsonl",
+    ],
+    data = ["qwen38/greedy_argmax.loom"],
+    tags = ["hostonly"],
+)
+
+iree_executable_test(
+    name = "qwen38_greedy_argmax_hal_test",
+    src = "//loom/src/loom/tools/iree-test-loom",
+    args = [
+        "$(location qwen38/greedy_argmax.loom)",
+        "--case=@qwen38_greedy_argmax_nontrivial_winner_case",
+        "--config=qwen38.greedy_argmax.output_capacity=248320",
+        "--device=amdgpu://0",
+        "--sanitizer=access",
+    ],
+    data = ["qwen38/greedy_argmax.loom"],
     tags = [
         "iree-run-requirement=runtime.resource.amd_gpu",
         "manual",
