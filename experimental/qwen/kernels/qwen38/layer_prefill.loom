@@ -1,0 +1,124 @@
+// Row-parallel Qwen3.8 prefill primitives. Token count is an issue-time
+// workload value; fixed row widths preserve exact launch geometry and let one
+// compiled entry cover every prefill length through 512.
+
+kernel.def export("qwen38_rmsnorm_f32_prefill") @qwen38_rmsnorm_f32_prefill(%token_count: index) {
+  %bounded_token_count = index.assume %token_count [range(%token_count, 1, 512)] : index
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 256 : index
+  kernel.launch.config workgroups(%unit, %bounded_token_count, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%token_count: index, %epsilon: f32, %input: buffer, %weight: buffer, %output: buffer) {
+  %bounded_token_count = index.assume %token_count [range(%token_count, 1, 512)] : index
+  %token0 = kernel.workgroup.id<y> : index
+  %token = index.assume %token0 [lt(%token0, %bounded_token_count)] : index
+  %lane0 = kernel.workitem.id<x> : index
+  %lane = index.assume %lane0 [range(%lane0, 0, 255)] : index
+  %c0 = index.constant 0 : index
+  %workgroup_size = index.constant 256 : index
+  %c0_offset = index.constant 0 : offset
+  %c0_f32 = scalar.constant 0.0 : f32
+  %element_offsets = vector.iota %c0 step %workgroup_size : vector<20xindex>
+  %input_noalias, %weight_noalias, %output_noalias = buffer.assume.noalias %input, %weight, %output : buffer, buffer, buffer
+  %input_view = buffer.view %input_noalias[%c0_offset] : buffer -> view<[%bounded_token_count]x5120xf32>
+  %weight_view = buffer.view %weight_noalias[%c0_offset] : buffer -> view<5120xf32>
+  %output_view = buffer.view %output_noalias[%c0_offset] : buffer -> view<[%bounded_token_count]x5120xf32>
+  %input_values = vector.gather %input_view[%token, %lane][%element_offsets] : view<[%bounded_token_count]x5120xf32>, vector<20xindex> -> vector<20xf32>
+  %squares = vector.mulf<reassoc|nnan|ninf|nsz|contract> %input_values, %input_values : vector<20xf32>
+  %thread_sum = vector.reduce<addf> %squares, %c0_f32 : vector<20xf32>, f32
+  %sum = kernel.workgroup.reduce<addf> %thread_sum : f32
+  %element_count_f32 = scalar.constant 5120.0 : f32
+  %mean = scalar.divf<nnan|ninf|nsz|arcp> %sum, %element_count_f32 : f32
+  %biased_mean = scalar.addf<nnan|ninf|nsz> %mean, %epsilon : f32
+  %inverse_rms = scalar.rsqrtf<nnan|ninf|nsz|afn> %biased_mean : f32
+  %inverse_rms_vector = vector.splat %inverse_rms : vector<20xf32>
+  %weights = vector.gather %weight_view[%lane][%element_offsets] : view<5120xf32>, vector<20xindex> -> vector<20xf32>
+  %normalized = vector.mulf<nnan|ninf|nsz> %input_values, %inverse_rms_vector : vector<20xf32>
+  %result = vector.mulf<nnan|ninf|nsz> %normalized, %weights : vector<20xf32>
+  vector.scatter %result, %output_view[%token, %lane][%element_offsets] : vector<20xf32>, view<[%bounded_token_count]x5120xf32>, vector<20xindex>
+  kernel.return
+}
+
+kernel.def export("qwen38_residual_add_f32_prefill") @qwen38_residual_add_f32_prefill(%token_count: index) {
+  %bounded_token_count = index.assume %token_count [range(%token_count, 1, 512)] : index
+  %unit = index.constant 1 : index
+  %workgroup_count = index.constant 5 : index
+  %workgroup_size = index.constant 256 : index
+  kernel.launch.config workgroups(%workgroup_count, %bounded_token_count, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%token_count: index, %lhs: buffer, %rhs: buffer, %output: buffer) {
+  %bounded_token_count = index.assume %token_count [range(%token_count, 1, 512)] : index
+  %workgroup = kernel.workgroup.id<x> : index
+  %token0 = kernel.workgroup.id<y> : index
+  %token = index.assume %token0 [lt(%token0, %bounded_token_count)] : index
+  %lane = kernel.workitem.id<x> : index
+  %c4 = index.constant 4 : index
+  %workgroup_size = index.constant 256 : index
+  %c0_offset = index.constant 0 : offset
+  %workgroup_base = index.mul %workgroup, %workgroup_size : index
+  %vector_ordinal = index.add %workgroup_base, %lane : index
+  %element0 = index.mul %vector_ordinal, %c4 : index
+  %element = index.assume %element0 [range(%element0, 0, 5116), mul(%element0, 4)] : index
+  %lhs_view = buffer.view %lhs[%c0_offset] : buffer -> view<[%bounded_token_count]x5120xf32>
+  %rhs_view = buffer.view %rhs[%c0_offset] : buffer -> view<[%bounded_token_count]x5120xf32>
+  %output_view = buffer.view %output[%c0_offset] : buffer -> view<[%bounded_token_count]x5120xf32>
+  %lhs_values = vector.load %lhs_view[%token, %element] : view<[%bounded_token_count]x5120xf32> -> vector<4xf32>
+  %rhs_values = vector.load %rhs_view[%token, %element] : view<[%bounded_token_count]x5120xf32> -> vector<4xf32>
+  %result = vector.addf<nnan|ninf|nsz> %lhs_values, %rhs_values : vector<4xf32>
+  vector.store %result, %output_view[%token, %element] : vector<4xf32>, view<[%bounded_token_count]x5120xf32>
+  kernel.return
+}
+
+kernel.def export("qwen38_swiglu_f32_prefill") @qwen38_swiglu_f32_prefill(%token_count: index) {
+  %bounded_token_count = index.assume %token_count [range(%token_count, 1, 512)] : index
+  %unit = index.constant 1 : index
+  %workgroup_count = index.constant 68 : index
+  %workgroup_size = index.constant 256 : index
+  kernel.launch.config workgroups(%workgroup_count, %bounded_token_count, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%token_count: index, %gate: buffer, %up: buffer, %output: buffer) {
+  %bounded_token_count = index.assume %token_count [range(%token_count, 1, 512)] : index
+  %workgroup = kernel.workgroup.id<x> : index
+  %token0 = kernel.workgroup.id<y> : index
+  %token = index.assume %token0 [lt(%token0, %bounded_token_count)] : index
+  %lane = kernel.workitem.id<x> : index
+  %workgroup_size = index.constant 256 : index
+  %c0_offset = index.constant 0 : offset
+  %workgroup_base = index.mul %workgroup, %workgroup_size : index
+  %element0 = index.add %workgroup_base, %lane : index
+  %element = index.assume %element0 [range(%element0, 0, 17407)] : index
+  %gate_view = buffer.view %gate[%c0_offset] : buffer -> view<[%bounded_token_count]x17408xf32>
+  %up_view = buffer.view %up[%c0_offset] : buffer -> view<[%bounded_token_count]x17408xf32>
+  %output_view = buffer.view %output[%c0_offset] : buffer -> view<[%bounded_token_count]x17408xf32>
+  %gate_value = view.load %gate_view[%token, %element] : view<[%bounded_token_count]x17408xf32> -> f32
+  %up_value = view.load %up_view[%token, %element] : view<[%bounded_token_count]x17408xf32> -> f32
+  %activated_gate = scalar.siluf<afn> %gate_value : f32
+  %result = scalar.mulf<nnan|ninf|nsz> %activated_gate, %up_value : f32
+  view.store %result, %output_view[%token, %element] : f32, view<[%bounded_token_count]x17408xf32>
+  kernel.return
+}
+
+check.case public @qwen38_layer_prefill_known_case {
+  %token_count = check.literal value(3) : index
+  %epsilon = check.literal value(0.000001) : f32
+  %norm_input = check.generate.fill value(2.0) : tensor<3x5120xf32>
+  %norm_weight = check.generate.fill value(0.5) : tensor<5120xf32>
+  %normalized = check.generate.fill value(0.0) : tensor<3x5120xf32>
+  %expected_normalized = check.generate.fill value(0.49999994) : tensor<3x5120xf32>
+  kernel.launch @qwen38_rmsnorm_f32_prefill[%token_count](%token_count, %epsilon, %norm_input, %norm_weight, %normalized) : [index](index, f32, tensor<3x5120xf32>, tensor<5120xf32>, tensor<3x5120xf32>)
+  check.expect.close actual(%normalized) expected(%expected_normalized) atol(0.000001) rtol(0.000001) nan(same) : tensor<3x5120xf32>
+
+  %lhs = check.generate.fill value(0.125) : tensor<3x5120xf32>
+  %rhs = check.generate.fill value(-0.0625) : tensor<3x5120xf32>
+  %sum = check.generate.fill value(0.0) : tensor<3x5120xf32>
+  %expected_sum = check.generate.fill value(0.0625) : tensor<3x5120xf32>
+  kernel.launch @qwen38_residual_add_f32_prefill[%token_count](%token_count, %lhs, %rhs, %sum) : [index](index, tensor<3x5120xf32>, tensor<3x5120xf32>, tensor<3x5120xf32>)
+  check.expect.close actual(%sum) expected(%expected_sum) atol(0.0) rtol(0.0) nan(same) : tensor<3x5120xf32>
+
+  %gate = check.generate.fill value(0.25) : tensor<3x17408xf32>
+  %up = check.generate.fill value(0.5) : tensor<3x17408xf32>
+  %swiglu = check.generate.fill value(0.0) : tensor<3x17408xf32>
+  %expected_swiglu = check.generate.fill value(0.07027235627174377) : tensor<3x17408xf32>
+  kernel.launch @qwen38_swiglu_f32_prefill[%token_count](%token_count, %gate, %up, %swiglu) : [index](index, tensor<3x17408xf32>, tensor<3x17408xf32>, tensor<3x17408xf32>)
+  check.expect.close actual(%swiglu) expected(%expected_swiglu) atol(0.000001) rtol(0.000001) nan(same) : tensor<3x17408xf32>
+  check.return
+}
+
+check.benchmark<@qwen38_layer_prefill_known_case> @qwen38_layer_prefill

@@ -23,8 +23,10 @@ exports_files([
     "ggml/quantize_q8_1_x4.loom",
     "qwen38/attention_decode.loom",
     "qwen38/gdn_decode.loom",
+    "qwen38/gdn_prefill.loom",
     "qwen38/greedy_argmax.loom",
     "qwen38/layer_decode.loom",
+    "qwen38/layer_prefill.loom",
     "qwen38/linear_q5k_f16_wmma.loom",
     "qwen38/linear_q6k_f16_wmma.loom",
 ])

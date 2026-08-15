@@ -1,0 +1,430 @@
+// Qwen3.8-27B batched Gated DeltaNet primitives.
+//
+// The convolution and recurrent kernels preserve causal token order inside
+// each workgroup. Their persistent state is loaded once, advanced across the
+// complete input span in registers, and written once after the final token.
+// Token count remains an issue-time workload value, so one compiled kernel and
+// one recorded command program cover every prefill length in the configured
+// capacity.
+
+// Advances one depthwise-convolution channel by one token. History values are
+// explicit SSA state so the batched kernel does not round-trip them through
+// global memory between tokens.
+func.def inline @qwen38_gdn_conv_step(%current: f32, %history0: f32, %history1: f32, %history2: f32, %weight0: f32, %weight1: f32, %weight2: f32, %weight3: f32) -> (f32, f32, f32, f32) {
+  %product0 = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %history0, %weight0 : f32
+  %product1 = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %history1, %weight1 : f32
+  %product2 = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %history2, %weight2 : f32
+  %product3 = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %current, %weight3 : f32
+  %sum01 = scalar.addf<reassoc|nnan|ninf|nsz|contract> %product0, %product1 : f32
+  %sum23 = scalar.addf<reassoc|nnan|ninf|nsz|contract> %product2, %product3 : f32
+  %convolved = scalar.addf<reassoc|nnan|ninf|nsz|contract> %sum01, %sum23 : f32
+  %activated = scalar.siluf<afn> %convolved : f32
+  func.return %activated, %history1, %history2, %current : f32, f32, f32, f32
+}
+
+// One workgroup owns one Q/K head and its three matching V heads. Every lane
+// carries the histories for its physical channels through the token loop;
+// only Q/K norm reductions rendezvous the workgroup at each causal step.
+kernel.def export("qwen38_gdn_conv_prepare_prefill") @qwen38_gdn_conv_prepare_prefill(%token_count: index) {
+  %bounded_token_count = index.assume %token_count [range(%token_count, 1, 512)] : index
+  %unit = index.constant 1 : index
+  %key_head_count = index.constant 16 : index
+  %workgroup_size = index.constant 256 : index
+  kernel.launch.config workgroups(%key_head_count, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%token_count_data: buffer, %l2_epsilon: f32, %qkv_input: buffer, %conv_weight: buffer, %conv_history: buffer, %qkv_silu: buffer, %qk_inverse_norm: buffer) {
+  %token_count_offset = index.constant 0 : offset
+  %token_count_index = index.constant 0 : index
+  %token_count_view = buffer.view %token_count_data[%token_count_offset] : buffer -> view<1xi32>
+  %token_count_i32 = view.load %token_count_view[%token_count_index] : view<1xi32> -> i32
+  %token_count0 = index.cast %token_count_i32 : i32 to index
+  %bounded_token_count = index.assume %token_count0 [range(%token_count0, 1, 512)] : index
+  %head0 = kernel.workgroup.id<x> : index
+  %head = index.assume %head0 [range(%head0, 0, 15)] : index
+  %thread0 = kernel.workitem.id<x> : index
+  %thread = index.assume %thread0 [range(%thread0, 0, 255)] : index
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %c3 = index.constant 3 : index
+  %c4 = index.constant 4 : index
+  %c128 = index.constant 128 : index
+  %c256 = index.constant 256 : index
+  %c384 = index.constant 384 : index
+  %q_channel_count = index.constant 2048 : index
+  %v_channel_base = index.constant 4096 : index
+  %values_per_key_head = index.constant 384 : index
+  %c0_f32 = scalar.constant 0.0 : f32
+  %c1_f32 = scalar.constant 1.0 : f32
+  %c0_offset = index.constant 0 : offset
+
+  %input_view = buffer.view %qkv_input[%c0_offset] : buffer -> view<[%bounded_token_count]x10240xf32>
+  %weight_view = buffer.view %conv_weight[%c0_offset] : buffer -> view<40960xf32>
+  %history_view = buffer.view %conv_history[%c0_offset] : buffer -> view<30720xf32>
+  %output_view = buffer.view %qkv_silu[%c0_offset] : buffer -> view<[%bounded_token_count]x10240xf32>
+  %inverse_norm_view = buffer.view %qk_inverse_norm[%c0_offset] : buffer -> view<[%bounded_token_count]x32xf32>
+
+  %head_channel_base = index.mul %head, %c128 : index
+  %is_q_lane = index.cmp ult, %thread, %c128 : index
+  %q_or_k_channel = scf.if %is_q_lane -> (index) {
+    %q_channel0 = index.add %head_channel_base, %thread : index
+    %q_channel = index.assume %q_channel0 [range(%q_channel0, 0, 2047)] : index
+    scf.yield %q_channel : index
+  } else {
+    %k_lane = index.sub %thread, %c128 : index
+    %k_head_channel = index.add %head_channel_base, %k_lane : index
+    %k_channel0 = index.add %q_channel_count, %k_head_channel : index
+    %k_channel = index.assume %k_channel0 [range(%k_channel0, 2048, 4095)] : index
+    scf.yield %k_channel : index
+  }
+  %value_head_channel_base = index.mul %head, %values_per_key_head : index
+  %value0_channel_add = index.add %value_head_channel_base, %thread : index
+  %value0_channel0 = index.add %v_channel_base, %value0_channel_add : index
+  %value0_channel = index.assume %value0_channel0 [range(%value0_channel0, 4096, 10239)] : index
+  %value_thread1 = index.add %thread, %c256 : index
+  %has_value1 = index.cmp ult, %value_thread1, %c384 : index
+  %value1_channel_add = index.add %value_head_channel_base, %value_thread1 : index
+  %value1_channel0 = index.add %v_channel_base, %value1_channel_add : index
+  %safe_value1_channel = scf.select %has_value1, %value1_channel0, %c0 : index
+
+  %qk_history_base = index.mul %q_or_k_channel, %c3 : index
+  %qk_history1_index = index.add %qk_history_base, %c1 : index
+  %qk_history2_index = index.add %qk_history_base, %c2 : index
+  %v0_history_base = index.mul %value0_channel, %c3 : index
+  %v0_history1_index = index.add %v0_history_base, %c1 : index
+  %v0_history2_index = index.add %v0_history_base, %c2 : index
+  %v1_history_base = index.mul %safe_value1_channel, %c3 : index
+  %v1_history1_index = index.add %v1_history_base, %c1 : index
+  %v1_history2_index = index.add %v1_history_base, %c2 : index
+  %qk_history0 = view.load %history_view[%qk_history_base] : view<30720xf32> -> f32
+  %qk_history1 = view.load %history_view[%qk_history1_index] : view<30720xf32> -> f32
+  %qk_history2 = view.load %history_view[%qk_history2_index] : view<30720xf32> -> f32
+  %v0_history0 = view.load %history_view[%v0_history_base] : view<30720xf32> -> f32
+  %v0_history1 = view.load %history_view[%v0_history1_index] : view<30720xf32> -> f32
+  %v0_history2 = view.load %history_view[%v0_history2_index] : view<30720xf32> -> f32
+  %v1_history0 = view.load %history_view[%v1_history_base] : view<30720xf32> -> f32
+  %v1_history1 = view.load %history_view[%v1_history1_index] : view<30720xf32> -> f32
+  %v1_history2 = view.load %history_view[%v1_history2_index] : view<30720xf32> -> f32
+
+  %qk_weight_base = index.mul %q_or_k_channel, %c4 : index
+  %qk_weight1_index = index.add %qk_weight_base, %c1 : index
+  %qk_weight2_index = index.add %qk_weight_base, %c2 : index
+  %qk_weight3_index = index.add %qk_weight_base, %c3 : index
+  %v0_weight_base = index.mul %value0_channel, %c4 : index
+  %v0_weight1_index = index.add %v0_weight_base, %c1 : index
+  %v0_weight2_index = index.add %v0_weight_base, %c2 : index
+  %v0_weight3_index = index.add %v0_weight_base, %c3 : index
+  %v1_weight_base = index.mul %safe_value1_channel, %c4 : index
+  %v1_weight1_index = index.add %v1_weight_base, %c1 : index
+  %v1_weight2_index = index.add %v1_weight_base, %c2 : index
+  %v1_weight3_index = index.add %v1_weight_base, %c3 : index
+  %qk_weight0 = view.load %weight_view[%qk_weight_base] : view<40960xf32> -> f32
+  %qk_weight1 = view.load %weight_view[%qk_weight1_index] : view<40960xf32> -> f32
+  %qk_weight2 = view.load %weight_view[%qk_weight2_index] : view<40960xf32> -> f32
+  %qk_weight3 = view.load %weight_view[%qk_weight3_index] : view<40960xf32> -> f32
+  %v0_weight0 = view.load %weight_view[%v0_weight_base] : view<40960xf32> -> f32
+  %v0_weight1 = view.load %weight_view[%v0_weight1_index] : view<40960xf32> -> f32
+  %v0_weight2 = view.load %weight_view[%v0_weight2_index] : view<40960xf32> -> f32
+  %v0_weight3 = view.load %weight_view[%v0_weight3_index] : view<40960xf32> -> f32
+  %v1_weight0 = view.load %weight_view[%v1_weight_base] : view<40960xf32> -> f32
+  %v1_weight1 = view.load %weight_view[%v1_weight1_index] : view<40960xf32> -> f32
+  %v1_weight2 = view.load %weight_view[%v1_weight2_index] : view<40960xf32> -> f32
+  %v1_weight3 = view.load %weight_view[%v1_weight3_index] : view<40960xf32> -> f32
+
+  %final_qk_history0, %final_qk_history1, %final_qk_history2, %final_v0_history0, %final_v0_history1, %final_v0_history2, %final_v1_history0, %final_v1_history1, %final_v1_history2 = scf.for %token = [%c0 to %bounded_token_count step %c1](%old_qk_history0 = %qk_history0, %old_qk_history1 = %qk_history1, %old_qk_history2 = %qk_history2, %old_v0_history0 = %v0_history0, %old_v0_history1 = %v0_history1, %old_v0_history2 = %v0_history2, %old_v1_history0 = %v1_history0, %old_v1_history1 = %v1_history1, %old_v1_history2 = %v1_history2 : f32, f32, f32, f32, f32, f32, f32, f32, f32) -> (f32, f32, f32, f32, f32, f32, f32, f32, f32) {
+    %qk_current = view.load %input_view[%token, %q_or_k_channel] : view<[%bounded_token_count]x10240xf32> -> f32
+    %qk_value, %next_qk_history0, %next_qk_history1, %next_qk_history2 = func.call @qwen38_gdn_conv_step(%qk_current, %old_qk_history0, %old_qk_history1, %old_qk_history2, %qk_weight0, %qk_weight1, %qk_weight2, %qk_weight3) : (f32, f32, f32, f32, f32, f32, f32, f32) -> (f32, f32, f32, f32)
+    view.store %qk_value, %output_view[%token, %q_or_k_channel] : f32, view<[%bounded_token_count]x10240xf32>
+    %qk_square = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %qk_value, %qk_value : f32
+    %q_square = scf.select %is_q_lane, %qk_square, %c0_f32 : f32
+    %k_square = scf.select %is_q_lane, %c0_f32, %qk_square : f32
+
+    %v0_current = view.load %input_view[%token, %value0_channel] : view<[%bounded_token_count]x10240xf32> -> f32
+    %v0_value, %next_v0_history0, %next_v0_history1, %next_v0_history2 = func.call @qwen38_gdn_conv_step(%v0_current, %old_v0_history0, %old_v0_history1, %old_v0_history2, %v0_weight0, %v0_weight1, %v0_weight2, %v0_weight3) : (f32, f32, f32, f32, f32, f32, f32, f32) -> (f32, f32, f32, f32)
+    view.store %v0_value, %output_view[%token, %value0_channel] : f32, view<[%bounded_token_count]x10240xf32>
+
+    %v1_current = view.load %input_view[%token, %safe_value1_channel] : view<[%bounded_token_count]x10240xf32> -> f32
+    %v1_value, %next_v1_history0, %next_v1_history1, %next_v1_history2 = func.call @qwen38_gdn_conv_step(%v1_current, %old_v1_history0, %old_v1_history1, %old_v1_history2, %v1_weight0, %v1_weight1, %v1_weight2, %v1_weight3) : (f32, f32, f32, f32, f32, f32, f32, f32) -> (f32, f32, f32, f32)
+    scf.if %has_value1 {
+      view.store %v1_value, %output_view[%token, %value1_channel0] : f32, view<[%bounded_token_count]x10240xf32>
+    }
+
+    %q_sum = kernel.workgroup.reduce<addf> %q_square : f32
+    %k_sum = kernel.workgroup.reduce<addf> %k_square : f32
+    %is_leader = index.cmp eq, %thread, %c0 : index
+    scf.if %is_leader {
+      %q_length = scalar.sqrtf<nnan|ninf|nsz|afn> %q_sum : f32
+      %k_length = scalar.sqrtf<nnan|ninf|nsz|afn> %k_sum : f32
+      %safe_q_length = scalar.maxnumf %q_length, %l2_epsilon : f32
+      %safe_k_length = scalar.maxnumf %k_length, %l2_epsilon : f32
+      %q_inverse = scalar.divf<nnan|ninf|nsz|arcp> %c1_f32, %safe_q_length : f32
+      %k_inverse = scalar.divf<nnan|ninf|nsz|arcp> %c1_f32, %safe_k_length : f32
+      %norm_base = index.mul %head, %c2 : index
+      %k_norm_index = index.add %norm_base, %c1 : index
+      view.store %q_inverse, %inverse_norm_view[%token, %norm_base] : f32, view<[%bounded_token_count]x32xf32>
+      view.store %k_inverse, %inverse_norm_view[%token, %k_norm_index] : f32, view<[%bounded_token_count]x32xf32>
+    }
+    scf.yield %next_qk_history0, %next_qk_history1, %next_qk_history2, %next_v0_history0, %next_v0_history1, %next_v0_history2, %next_v1_history0, %next_v1_history1, %next_v1_history2 : f32, f32, f32, f32, f32, f32, f32, f32, f32
+  }
+
+  view.store %final_qk_history0, %history_view[%qk_history_base] : f32, view<30720xf32>
+  view.store %final_qk_history1, %history_view[%qk_history1_index] : f32, view<30720xf32>
+  view.store %final_qk_history2, %history_view[%qk_history2_index] : f32, view<30720xf32>
+  view.store %final_v0_history0, %history_view[%v0_history_base] : f32, view<30720xf32>
+  view.store %final_v0_history1, %history_view[%v0_history1_index] : f32, view<30720xf32>
+  view.store %final_v0_history2, %history_view[%v0_history2_index] : f32, view<30720xf32>
+  scf.if %has_value1 {
+    view.store %final_v1_history0, %history_view[%v1_history_base] : f32, view<30720xf32>
+    view.store %final_v1_history1, %history_view[%v1_history1_index] : f32, view<30720xf32>
+    view.store %final_v1_history2, %history_view[%v1_history2_index] : f32, view<30720xf32>
+  }
+  kernel.return
+}
+
+// Four adjacent recurrent-state columns are carried per lane. The complete
+// 128-row state vectors stay resident across all tokens, amortizing the state
+// load/store and preserving the exact causal recurrence.
+kernel.def export("qwen38_gdn_recurrent_prefill_x4") @qwen38_gdn_recurrent_prefill_x4(%token_count: index) {
+  %bounded_token_count = index.assume %token_count [range(%token_count, 1, 512)] : index
+  %unit = index.constant 1 : index
+  %value_head_count = index.constant 48 : index
+  %column_tile_count = index.constant 32 : index
+  %workgroup_size = index.constant 32 : index
+  kernel.launch.config workgroups(%value_head_count, %column_tile_count, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%token_count_data: buffer, %qkv_silu: buffer, %qk_inverse_norm: buffer, %alpha: buffer, %beta: buffer, %ssm_a: buffer, %dt_bias: buffer, %state: buffer, %raw_output: buffer) {
+  %token_count_offset = index.constant 0 : offset
+  %token_count_index = index.constant 0 : index
+  %token_count_view = buffer.view %token_count_data[%token_count_offset] : buffer -> view<1xi32>
+  %token_count_i32 = view.load %token_count_view[%token_count_index] : view<1xi32> -> i32
+  %token_count0 = index.cast %token_count_i32 : i32 to index
+  %bounded_token_count = index.assume %token_count0 [range(%token_count0, 1, 512)] : index
+  %value_head0 = kernel.workgroup.id<x> : index
+  %value_head = index.assume %value_head0 [range(%value_head0, 0, 47)] : index
+  %column_tile0 = kernel.workgroup.id<y> : index
+  %column_tile = index.assume %column_tile0 [range(%column_tile0, 0, 31)] : index
+  %lane0 = kernel.workitem.id<x> : index
+  %lane = index.assume %lane0 [range(%lane0, 0, 31)] : index
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %c4 = index.constant 4 : index
+  %c32 = index.constant 32 : index
+  %c64 = index.constant 64 : index
+  %c96 = index.constant 96 : index
+  %c128 = index.constant 128 : index
+  %q_channel_count = index.constant 2048 : index
+  %v_channel_base = index.constant 4096 : index
+  %value_heads_per_key_head = index.constant 3 : index
+  %c0_offset = index.constant 0 : offset
+  %state_column_offsets = vector.iota %c0 step %c128 : vector<4xindex>
+  %qkv_view = buffer.view %qkv_silu[%c0_offset] : buffer -> view<[%bounded_token_count]x10240xf32>
+  %inverse_norm_view = buffer.view %qk_inverse_norm[%c0_offset] : buffer -> view<[%bounded_token_count]x32xf32>
+  %alpha_view = buffer.view %alpha[%c0_offset] : buffer -> view<[%bounded_token_count]x48xf32>
+  %beta_view = buffer.view %beta[%c0_offset] : buffer -> view<[%bounded_token_count]x48xf32>
+  %a_view = buffer.view %ssm_a[%c0_offset] : buffer -> view<48xf32>
+  %bias_view = buffer.view %dt_bias[%c0_offset] : buffer -> view<48xf32>
+  %state_view = buffer.view %state[%c0_offset] : buffer -> view<786432xf32>
+  %output_view = buffer.view %raw_output[%c0_offset] : buffer -> view<[%bounded_token_count]x6144xf32>
+
+  %key_head = index.div %value_head, %value_heads_per_key_head : index
+  %key_head_channel_base = index.mul %key_head, %c128 : index
+  %q_row0 = index.add %key_head_channel_base, %lane : index
+  %q_row1 = index.add %q_row0, %c32 : index
+  %q_row2 = index.add %q_row0, %c64 : index
+  %q_row3 = index.add %q_row0, %c96 : index
+  %k_row0 = index.add %q_row0, %q_channel_count : index
+  %k_row1 = index.add %q_row1, %q_channel_count : index
+  %k_row2 = index.add %q_row2, %q_channel_count : index
+  %k_row3 = index.add %q_row3, %q_channel_count : index
+  %q_norm_index = index.mul %key_head, %c2 : index
+  %k_norm_index = index.add %q_norm_index, %c1 : index
+  %column_base = index.mul %column_tile, %c4 : index
+  %state_head_base = index.mul %value_head, %c128 : index
+  %state_column = index.add %state_head_base, %column_base : index
+  %state_column_base = index.mul %state_column, %c128 : index
+  %state_index0 = index.add %state_column_base, %lane : index
+  %state_index1 = index.add %state_index0, %c32 : index
+  %state_index2 = index.add %state_index0, %c64 : index
+  %state_index3 = index.add %state_index0, %c96 : index
+  %state0 = vector.gather %state_view[%state_index0][%state_column_offsets] : view<786432xf32>, vector<4xindex> -> vector<4xf32>
+  %state1 = vector.gather %state_view[%state_index1][%state_column_offsets] : view<786432xf32>, vector<4xindex> -> vector<4xf32>
+  %state2 = vector.gather %state_view[%state_index2][%state_column_offsets] : view<786432xf32>, vector<4xindex> -> vector<4xf32>
+  %state3 = vector.gather %state_view[%state_index3][%state_column_offsets] : view<786432xf32>, vector<4xindex> -> vector<4xf32>
+  %a = view.load %a_view[%value_head] : view<48xf32> -> f32
+  %dt_bias_value = view.load %bias_view[%value_head] : view<48xf32> -> f32
+
+  %final_state0, %final_state1, %final_state2, %final_state3 = scf.for %token = [%c0 to %bounded_token_count step %c1](%old_state0 = %state0, %old_state1 = %state1, %old_state2 = %state2, %old_state3 = %state3 : vector<4xf32>, vector<4xf32>, vector<4xf32>, vector<4xf32>) -> (vector<4xf32>, vector<4xf32>, vector<4xf32>, vector<4xf32>) {
+    %q_inverse = view.load %inverse_norm_view[%token, %q_norm_index] : view<[%bounded_token_count]x32xf32> -> f32
+    %k_inverse = view.load %inverse_norm_view[%token, %k_norm_index] : view<[%bounded_token_count]x32xf32> -> f32
+    %q0_raw = view.load %qkv_view[%token, %q_row0] : view<[%bounded_token_count]x10240xf32> -> f32
+    %q1_raw = view.load %qkv_view[%token, %q_row1] : view<[%bounded_token_count]x10240xf32> -> f32
+    %q2_raw = view.load %qkv_view[%token, %q_row2] : view<[%bounded_token_count]x10240xf32> -> f32
+    %q3_raw = view.load %qkv_view[%token, %q_row3] : view<[%bounded_token_count]x10240xf32> -> f32
+    %k0_raw = view.load %qkv_view[%token, %k_row0] : view<[%bounded_token_count]x10240xf32> -> f32
+    %k1_raw = view.load %qkv_view[%token, %k_row1] : view<[%bounded_token_count]x10240xf32> -> f32
+    %k2_raw = view.load %qkv_view[%token, %k_row2] : view<[%bounded_token_count]x10240xf32> -> f32
+    %k3_raw = view.load %qkv_view[%token, %k_row3] : view<[%bounded_token_count]x10240xf32> -> f32
+    %q0 = scalar.mulf<nnan|ninf|nsz> %q0_raw, %q_inverse : f32
+    %q1 = scalar.mulf<nnan|ninf|nsz> %q1_raw, %q_inverse : f32
+    %q2 = scalar.mulf<nnan|ninf|nsz> %q2_raw, %q_inverse : f32
+    %q3 = scalar.mulf<nnan|ninf|nsz> %q3_raw, %q_inverse : f32
+    %k0 = scalar.mulf<nnan|ninf|nsz> %k0_raw, %k_inverse : f32
+    %k1 = scalar.mulf<nnan|ninf|nsz> %k1_raw, %k_inverse : f32
+    %k2 = scalar.mulf<nnan|ninf|nsz> %k2_raw, %k_inverse : f32
+    %k3 = scalar.mulf<nnan|ninf|nsz> %k3_raw, %k_inverse : f32
+    %q0_vector = vector.splat %q0 : vector<4xf32>
+    %q1_vector = vector.splat %q1 : vector<4xf32>
+    %q2_vector = vector.splat %q2 : vector<4xf32>
+    %q3_vector = vector.splat %q3 : vector<4xf32>
+    %k0_vector = vector.splat %k0 : vector<4xf32>
+    %k1_vector = vector.splat %k1 : vector<4xf32>
+    %k2_vector = vector.splat %k2 : vector<4xf32>
+    %k3_vector = vector.splat %k3 : vector<4xf32>
+
+    %alpha_raw = view.load %alpha_view[%token, %value_head] : view<[%bounded_token_count]x48xf32> -> f32
+    %alpha_biased = scalar.addf %alpha_raw, %dt_bias_value : f32
+    %alpha_positive = scalar.softplusf<afn> %alpha_biased : f32
+    %gate = scalar.mulf %alpha_positive, %a : f32
+    %decay = scalar.expf<afn> %gate : f32
+    %decay_vector = vector.splat %decay : vector<4xf32>
+    %decayed0 = vector.mulf<nnan|ninf|nsz> %old_state0, %decay_vector : vector<4xf32>
+    %decayed1 = vector.mulf<nnan|ninf|nsz> %old_state1, %decay_vector : vector<4xf32>
+    %decayed2 = vector.mulf<nnan|ninf|nsz> %old_state2, %decay_vector : vector<4xf32>
+    %decayed3 = vector.mulf<nnan|ninf|nsz> %old_state3, %decay_vector : vector<4xf32>
+    %prediction0 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %decayed0, %k0_vector : vector<4xf32>
+    %prediction1 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %decayed1, %k1_vector : vector<4xf32>
+    %prediction2 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %decayed2, %k2_vector : vector<4xf32>
+    %prediction3 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %decayed3, %k3_vector : vector<4xf32>
+    %prediction01 = vector.addf<reassoc|nnan|ninf|nsz|contract> %prediction0, %prediction1 : vector<4xf32>
+    %prediction23 = vector.addf<reassoc|nnan|ninf|nsz|contract> %prediction2, %prediction3 : vector<4xf32>
+    %prediction_partial = vector.addf<reassoc|nnan|ninf|nsz|contract> %prediction01, %prediction23 : vector<4xf32>
+    %prediction = kernel.workgroup.reduce<addf> %prediction_partial : vector<4xf32>
+    %value_head_channel_base = index.mul %value_head, %c128 : index
+    %value_channel0 = index.add %v_channel_base, %value_head_channel_base : index
+    %value_channel = index.add %value_channel0, %column_base : index
+    %value = vector.load %qkv_view[%token, %value_channel] : view<[%bounded_token_count]x10240xf32> -> vector<4xf32>
+    %residual = vector.subf %value, %prediction : vector<4xf32>
+    %beta_raw = view.load %beta_view[%token, %value_head] : view<[%bounded_token_count]x48xf32> -> f32
+    %beta_value = scalar.logisticf<afn> %beta_raw : f32
+    %beta_vector = vector.splat %beta_value : vector<4xf32>
+    %delta = vector.mulf %residual, %beta_vector : vector<4xf32>
+    %update0 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %k0_vector, %delta : vector<4xf32>
+    %update1 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %k1_vector, %delta : vector<4xf32>
+    %update2 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %k2_vector, %delta : vector<4xf32>
+    %update3 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %k3_vector, %delta : vector<4xf32>
+    %new_state0 = vector.addf<reassoc|nnan|ninf|nsz|contract> %decayed0, %update0 : vector<4xf32>
+    %new_state1 = vector.addf<reassoc|nnan|ninf|nsz|contract> %decayed1, %update1 : vector<4xf32>
+    %new_state2 = vector.addf<reassoc|nnan|ninf|nsz|contract> %decayed2, %update2 : vector<4xf32>
+    %new_state3 = vector.addf<reassoc|nnan|ninf|nsz|contract> %decayed3, %update3 : vector<4xf32>
+    %output0 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %new_state0, %q0_vector : vector<4xf32>
+    %output1 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %new_state1, %q1_vector : vector<4xf32>
+    %output2 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %new_state2, %q2_vector : vector<4xf32>
+    %output3 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %new_state3, %q3_vector : vector<4xf32>
+    %output01 = vector.addf<reassoc|nnan|ninf|nsz|contract> %output0, %output1 : vector<4xf32>
+    %output23 = vector.addf<reassoc|nnan|ninf|nsz|contract> %output2, %output3 : vector<4xf32>
+    %output_partial = vector.addf<reassoc|nnan|ninf|nsz|contract> %output01, %output23 : vector<4xf32>
+    %output4 = kernel.workgroup.reduce<addf> %output_partial : vector<4xf32>
+    %is_leader = index.cmp eq, %lane, %c0 : index
+    scf.if %is_leader {
+      %head_output_base = index.mul %value_head, %c128 : index
+      %output_index = index.add %head_output_base, %column_base : index
+      %attention_scale = vector.constant 0.08838834764831845 : vector<4xf32>
+      %scaled_output = vector.mulf<nnan|ninf|nsz> %output4, %attention_scale : vector<4xf32>
+      vector.store %scaled_output, %output_view[%token, %output_index] : vector<4xf32>, view<[%bounded_token_count]x6144xf32>
+    }
+    scf.yield %new_state0, %new_state1, %new_state2, %new_state3 : vector<4xf32>, vector<4xf32>, vector<4xf32>, vector<4xf32>
+  }
+
+  vector.scatter %final_state0, %state_view[%state_index0][%state_column_offsets] : vector<4xf32>, view<786432xf32>, vector<4xindex>
+  vector.scatter %final_state1, %state_view[%state_index1][%state_column_offsets] : vector<4xf32>, view<786432xf32>, vector<4xindex>
+  vector.scatter %final_state2, %state_view[%state_index2][%state_column_offsets] : vector<4xf32>, view<786432xf32>, vector<4xindex>
+  vector.scatter %final_state3, %state_view[%state_index3][%state_column_offsets] : vector<4xf32>, view<786432xf32>, vector<4xindex>
+  kernel.return
+}
+
+// Applies the per-head output normalization and z gate independently for each
+// token after the causal recurrence has published its complete output matrix.
+kernel.def export("qwen38_gdn_norm_gate_prefill") @qwen38_gdn_norm_gate_prefill(%token_count: index) {
+  %bounded_token_count = index.assume %token_count [range(%token_count, 1, 512)] : index
+  %unit = index.constant 1 : index
+  %value_head_count = index.constant 48 : index
+  %workgroup_size = index.constant 128 : index
+  kernel.launch.config workgroups(%value_head_count, %bounded_token_count, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%token_count: index, %rms_epsilon: f32, %raw_output: buffer, %norm_weight: buffer, %z: buffer, %output: buffer) {
+  %bounded_token_count = index.assume %token_count [range(%token_count, 1, 512)] : index
+  %head0 = kernel.workgroup.id<x> : index
+  %head = index.assume %head0 [range(%head0, 0, 47)] : index
+  %token0 = kernel.workgroup.id<y> : index
+  %token = index.assume %token0 [lt(%token0, %bounded_token_count)] : index
+  %lane0 = kernel.workitem.id<x> : index
+  %lane = index.assume %lane0 [range(%lane0, 0, 127)] : index
+  %c128 = index.constant 128 : index
+  %c128_f32 = scalar.constant 128.0 : f32
+  %c0_offset = index.constant 0 : offset
+  %raw_view = buffer.view %raw_output[%c0_offset] : buffer -> view<[%bounded_token_count]x6144xf32>
+  %weight_view = buffer.view %norm_weight[%c0_offset] : buffer -> view<128xf32>
+  %z_view = buffer.view %z[%c0_offset] : buffer -> view<[%bounded_token_count]x6144xf32>
+  %output_view = buffer.view %output[%c0_offset] : buffer -> view<[%bounded_token_count]x6144xf32>
+  %head_base = index.mul %head, %c128 : index
+  %channel = index.add %head_base, %lane : index
+  %value = view.load %raw_view[%token, %channel] : view<[%bounded_token_count]x6144xf32> -> f32
+  %square = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %value, %value : f32
+  %sum = kernel.workgroup.reduce<addf> %square : f32
+  %mean = scalar.divf<nnan|ninf|nsz|arcp> %sum, %c128_f32 : f32
+  %biased_mean = scalar.addf %mean, %rms_epsilon : f32
+  %inverse_rms = scalar.rsqrtf<nnan|ninf|nsz|afn> %biased_mean : f32
+  %weight = view.load %weight_view[%lane] : view<128xf32> -> f32
+  %normalized0 = scalar.mulf<nnan|ninf|nsz> %value, %inverse_rms : f32
+  %normalized = scalar.mulf<nnan|ninf|nsz> %normalized0, %weight : f32
+  %z_value = view.load %z_view[%token, %channel] : view<[%bounded_token_count]x6144xf32> -> f32
+  %gate = scalar.siluf<afn> %z_value : f32
+  %result = scalar.mulf<nnan|ninf|nsz> %normalized, %gate : f32
+  view.store %result, %output_view[%token, %channel] : f32, view<[%bounded_token_count]x6144xf32>
+  kernel.return
+}
+
+// Materializes the sampled token count for the dynamic-buffer benchmark ABI.
+kernel.def @qwen38_gdn_prefill_store_token_count() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%token_count: index, %token_count_data: buffer) {
+  %zero_offset = index.constant 0 : offset
+  %zero = index.constant 0 : index
+  %token_count_i32 = index.cast %token_count : index to i32
+  %token_count_view = buffer.view %token_count_data[%zero_offset] : buffer -> view<1xi32>
+  view.store %token_count_i32, %token_count_view[%zero] : i32, view<1xi32>
+  kernel.return
+}
+
+check.case public @qwen38_gdn_prefill_benchmark_case {
+  %token_count = check.param.choice values([1, 4, 32, 128, 512]) name("token_count") : index
+  %token_count_data = check.generate.fill value(0) : tensor<1xi32>
+  %l2_epsilon = check.literal value(0.000001) : f32
+  %rms_epsilon = check.literal value(0.000001) : f32
+  %qkv_input = check.generate.fill value(0.125) : tensor<[%token_count]x10240xf32>
+  %conv_weight = check.generate.fill value(0.25) : tensor<40960xf32>
+  %conv_history = check.generate.fill value(-0.0625) : tensor<30720xf32>
+  %qkv_silu = check.generate.fill value(0.0) : tensor<[%token_count]x10240xf32>
+  %qk_inverse_norm = check.generate.fill value(0.0) : tensor<[%token_count]x32xf32>
+  %alpha = check.generate.fill value(0.125) : tensor<[%token_count]x48xf32>
+  %beta = check.generate.fill value(-0.25) : tensor<[%token_count]x48xf32>
+  %ssm_a = check.generate.fill value(-0.5) : tensor<48xf32>
+  %dt_bias = check.generate.fill value(0.0625) : tensor<48xf32>
+  %state = check.generate.fill value(0.03125) : tensor<786432xf32>
+  %raw_output = check.generate.fill value(0.0) : tensor<[%token_count]x6144xf32>
+  %norm_weight = check.generate.fill value(1.0) : tensor<128xf32>
+  %z = check.generate.fill value(0.25) : tensor<[%token_count]x6144xf32>
+  %output = check.generate.fill value(0.0) : tensor<[%token_count]x6144xf32>
+  kernel.launch @qwen38_gdn_prefill_store_token_count(%token_count, %token_count_data) : (index, tensor<1xi32>)
+  kernel.launch @qwen38_gdn_conv_prepare_prefill[%token_count](%token_count_data, %l2_epsilon, %qkv_input, %conv_weight, %conv_history, %qkv_silu, %qk_inverse_norm) : [index](tensor<1xi32>, f32, tensor<[%token_count]x10240xf32>, tensor<40960xf32>, tensor<30720xf32>, tensor<[%token_count]x10240xf32>, tensor<[%token_count]x32xf32>)
+  kernel.launch @qwen38_gdn_recurrent_prefill_x4[%token_count](%token_count_data, %qkv_silu, %qk_inverse_norm, %alpha, %beta, %ssm_a, %dt_bias, %state, %raw_output) : [index](tensor<1xi32>, tensor<[%token_count]x10240xf32>, tensor<[%token_count]x32xf32>, tensor<[%token_count]x48xf32>, tensor<[%token_count]x48xf32>, tensor<48xf32>, tensor<48xf32>, tensor<786432xf32>, tensor<[%token_count]x6144xf32>)
+  kernel.launch @qwen38_gdn_norm_gate_prefill[%token_count](%token_count, %rms_epsilon, %raw_output, %norm_weight, %z, %output) : [index](index, f32, tensor<[%token_count]x6144xf32>, tensor<128xf32>, tensor<[%token_count]x6144xf32>, tensor<[%token_count]x6144xf32>)
+  check.return
+}
+
+check.benchmark<@qwen38_gdn_prefill_benchmark_case> @qwen38_gdn_prefill_1 {token_count = 1}
+
+check.benchmark<@qwen38_gdn_prefill_benchmark_case> @qwen38_gdn_prefill_32 {token_count = 32}
+
+check.benchmark<@qwen38_gdn_prefill_benchmark_case> @qwen38_gdn_prefill_128 {token_count = 128}
+
+check.benchmark<@qwen38_gdn_prefill_benchmark_case> @qwen38_gdn_prefill_512 {token_count = 512}
