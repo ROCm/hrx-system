@@ -21,6 +21,16 @@ func.def @valid_launch(%count: index, %output: tensor<4xi32>) {
 
 // ====
 
+kernel.decl @buffer_argument_contract() launch(%storage: buffer)
+
+func.def @valid_view_launch(%storage: buffer, %offset: offset) {
+  %view = buffer.view %storage[%offset] : buffer -> view<4xi32>
+  kernel.launch @buffer_argument_contract(%view) : (view<4xi32>)
+  func.return
+}
+
+// ====
+
 kernel.decl @host_launch_only() launch()
 
 kernel.def @launch_rejected_inside_device_kernel() {

@@ -172,6 +172,38 @@ low.func.def public retain target<cmd.core> abi(command_program) abi_layout({ent
 
 // ====
 
+// RUN: emit command-program @target_launch
+
+test.target<low_core> @wave32 {abi = hal_kernel, subgroup_size = 32}
+
+kernel.def target(@wave32) @target_sized() {
+  %subgroup_size = target.subgroup.size : index
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%subgroup_size, %c1, %c1) workgroup_size(%subgroup_size, %c1, %c1) : index
+} launch(%storage: buffer) {
+  kernel.return
+}
+
+command.program.def public @target_launch() launch(%storage: buffer) {
+  kernel.launch @target_sized(%storage) : (buffer)
+  command.return
+}
+
+// ----
+low.func.def public retain target<cmd.core> abi(command_program) abi_layout({entry_count = 1, executable_count = 1, fixed_buffer_count = 0, rebindable_binding_count = 1}) @target_launch() asm {
+  %0 = resource<command_input> {index = 0, source_type = buffer} : reg<cmd.binding>
+  %1 = resource<command_input> {index = 0, source_type = index} : reg<cmd.executable>
+  %2 = resource<command_input> {index = 0, source_type = index} : reg<cmd.entry>
+  %3 = cmd.constant.u64 0
+  %4 = cmd.constant.u64 -1
+  %5 = cmd.constant.u32 32
+  %6 = cmd.constant.u32 1
+  cmd.dispatch.direct<%1, %2>[%5, %6, %6]()
+  return
+}
+
+// ====
+
 // RUN: emit command-program @increment_twice,@increment_then_double
 
 kernel.def @increment(%element_count: index) {

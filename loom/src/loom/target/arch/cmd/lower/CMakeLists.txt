@@ -186,11 +186,13 @@ loom_cc_library(
     ::transients
     iree::base
     iree::base::internal::arena
+    loom::analysis::symbol_facts
     loom::error::emitter
     loom::error::error_defs
     loom::ir
     loom::link::linker
     loom::ops::command
+    loom::ops::func_symbol_facts
     loom::ops::kernel
     loom::ops::op_defs
     loom::ops::type_registry
@@ -200,6 +202,7 @@ loom_cc_library(
     loom::pass::registry
     loom::target::arch::cmd::abi_layout
     loom::target::arch::cmd::program
+    loom::target::function_contract
     loom::util::fact_table
   PUBLIC
 )

@@ -8,9 +8,11 @@
 
 #include <string.h>
 
+#include "loom/analysis/symbol_facts.h"
 #include "loom/error/error_catalog.h"
 #include "loom/ir/module.h"
 #include "loom/link/linker.h"
+#include "loom/ops/func_symbol_facts.h"
 #include "loom/ops/kernel/ops.h"
 #include "loom/ops/op_defs.h"
 #include "loom/ops/type_registry.h"
@@ -22,6 +24,7 @@
 #include "loom/target/arch/cmd/lower/program_composition.h"
 #include "loom/target/arch/cmd/lower/schedule.h"
 #include "loom/target/arch/cmd/lower/transients.h"
+#include "loom/target/function_contract.h"
 #include "loom/util/fact_table.h"
 
 static iree_string_view_t loom_cmd_program_plan_symbol_name(
@@ -133,10 +136,34 @@ static iree_status_t loom_cmd_program_plan_prepare_roots(
   return status;
 }
 
+static iree_status_t loom_cmd_program_plan_resolve_function_target_facts(
+    const loom_module_t* module, loom_func_like_t function,
+    loom_symbol_fact_table_t* symbol_facts,
+    iree_diagnostic_emitter_t diagnostic_emitter, iree_arena_allocator_t* arena,
+    bool* out_valid, const loom_target_facts_t** out_target_facts) {
+  *out_valid = true;
+  *out_target_facts = NULL;
+  const loom_symbol_ref_t function_ref = loom_func_like_callee(function);
+  const loom_symbol_facts_base_t* base_facts = NULL;
+  IREE_RETURN_IF_ERROR(loom_symbol_fact_table_lookup_ref(
+      symbol_facts, module, function_ref, &base_facts));
+  const loom_func_symbol_facts_t* function_facts =
+      loom_func_symbol_facts_cast(base_facts);
+  if (!loom_symbol_ref_is_valid(function_facts->target_symbol)) {
+    return iree_ok_status();
+  }
+  return loom_target_function_contract_resolve_facts(
+      module, symbol_facts, function_facts, diagnostic_emitter, arena,
+      out_valid, out_target_facts);
+}
+
 static iree_status_t loom_cmd_program_plan_compute_kernel_config_facts(
     const loom_module_t* module, const loom_cmd_program_root_build_t* roots,
     iree_host_size_t root_count, iree_arena_allocator_t* scratch_arena,
-    loom_value_fact_table_t* facts) {
+    loom_symbol_fact_table_t* symbol_facts,
+    iree_diagnostic_emitter_t diagnostic_emitter,
+    loom_value_fact_table_t* facts, bool* out_valid) {
+  *out_valid = true;
   uint8_t* computed_symbols = NULL;
   if (module->symbols.count != 0) {
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
@@ -166,6 +193,12 @@ static iree_status_t loom_cmd_program_plan_compute_kernel_config_facts(
       IREE_ASSERT(loom_kernel_def_isa(kernel_op));
       loom_region_t* config_region = loom_kernel_def_config(kernel_op);
       if (!config_region) continue;
+      const loom_target_facts_t* target_facts = NULL;
+      IREE_RETURN_IF_ERROR(loom_cmd_program_plan_resolve_function_target_facts(
+          module, loom_func_like_cast(module, kernel_op), symbol_facts,
+          diagnostic_emitter, scratch_arena, out_valid, &target_facts));
+      if (!*out_valid) return iree_ok_status();
+      facts->context.target_facts = target_facts;
       IREE_RETURN_IF_ERROR(loom_value_fact_table_compute_region(
           facts, module, loom_func_like_cast(module, kernel_op), config_region,
           kernel_op));
@@ -645,22 +678,31 @@ iree_status_t loom_cmd_program_plan_prepare(
   }
 
   loom_value_fact_table_t source_facts = {0};
+  loom_symbol_fact_table_t symbol_facts = {0};
   if (valid && iree_status_is_ok(status)) {
     status = loom_value_fact_table_initialize(&source_facts, &scratch_arena,
                                               preparation_module->values.count);
   }
   if (valid && iree_status_is_ok(status)) {
     loom_type_registry_configure_fact_context(&source_facts.context);
+    loom_symbol_fact_table_initialize(&symbol_facts, &scratch_arena);
   }
   for (iree_host_size_t i = 0;
        valid && i < source_program_count && iree_status_is_ok(status); ++i) {
-    status = loom_value_fact_table_compute(&source_facts, preparation_module,
-                                           root_builds[i].program);
+    const loom_target_facts_t* target_facts = NULL;
+    status = loom_cmd_program_plan_resolve_function_target_facts(
+        preparation_module, root_builds[i].program, &symbol_facts,
+        diagnostic_emitter, &scratch_arena, &valid, &target_facts);
+    if (valid && iree_status_is_ok(status)) {
+      source_facts.context.target_facts = target_facts;
+      status = loom_value_fact_table_compute(&source_facts, preparation_module,
+                                             root_builds[i].program);
+    }
   }
   if (valid && iree_status_is_ok(status)) {
     status = loom_cmd_program_plan_compute_kernel_config_facts(
         preparation_module, root_builds, source_program_count, &scratch_arena,
-        &source_facts);
+        &symbol_facts, diagnostic_emitter, &source_facts, &valid);
   }
   for (iree_host_size_t i = 0;
        valid && i < source_program_count && iree_status_is_ok(status); ++i) {
