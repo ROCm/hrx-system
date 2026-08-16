@@ -182,6 +182,67 @@ kernel.def export("qwen38_gdn_conv_prepare_prefill") @qwen38_gdn_conv_prepare_pr
   kernel.return
 }
 
+// Retains the four-row transition inputs needed to commit an accepted MTP
+// prefix without replaying the dense target model. One layer record contains
+// QKV followed by alpha and beta, all in their native row-major F32 layouts.
+kernel.def export("qwen38_gdn_capture_transition_depth4") @qwen38_gdn_capture_transition_depth4() {
+  %workgroup_count = index.constant 41 : index
+  %workgroup_size = index.constant 256 : index
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%workgroup_count, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%qkv: buffer, %alpha: buffer, %beta: buffer, %transition: buffer) {
+  %workgroup0 = kernel.workgroup.id<x> : index
+  %workgroup = index.assume %workgroup0 [range(%workgroup0, 0, 40)] : index
+  %workitem0 = kernel.workitem.id<x> : index
+  %workitem = index.assume %workitem0 [range(%workitem0, 0, 255)] : index
+  %c4 = index.constant 4 : index
+  %c40 = index.constant 40 : index
+  %c48 = index.constant 48 : index
+  %c96 = index.constant 96 : index
+  %c256 = index.constant 256 : index
+  %alpha_element_base = index.constant 40960 : index
+  %beta_element_base = index.constant 41152 : index
+  %c0_offset = index.constant 0 : offset
+  %qkv_view = buffer.view %qkv[%c0_offset] : buffer -> view<40960xf32>
+  %alpha_view = buffer.view %alpha[%c0_offset] : buffer -> view<192xf32>
+  %beta_view = buffer.view %beta[%c0_offset] : buffer -> view<192xf32>
+  %transition_view = buffer.view %transition[%c0_offset] : buffer -> view<41344xf32>
+
+  %is_qkv_workgroup = index.cmp ult, %workgroup, %c40 : index
+  scf.if %is_qkv_workgroup {
+    %packet_base = index.mul %workgroup, %c256 : index
+    %packet = index.add %packet_base, %workitem : index
+    %element0 = index.mul %packet, %c4 : index
+    %element = index.assume %element0 [range(%element0, 0, 40956), mul(%element0, 4)] : index
+    %values = vector.load %qkv_view[%element] : view<40960xf32> -> vector<4xf32>
+    vector.store %values, %transition_view[%element] : vector<4xf32>, view<41344xf32>
+  } else {
+    %is_gate_packet = index.cmp ult, %workitem, %c96 : index
+    scf.if %is_gate_packet {
+      %is_alpha = index.cmp ult, %workitem, %c48 : index
+      %gate_packet = scf.if %is_alpha -> (index) {
+        scf.yield %workitem : index
+      } else {
+        %beta_packet = index.sub %workitem, %c48 : index
+        scf.yield %beta_packet : index
+      }
+      %gate_element = index.mul %gate_packet, %c4 : index
+      %values = scf.if %is_alpha -> (vector<4xf32>) {
+        %alpha_values = vector.load %alpha_view[%gate_element] : view<192xf32> -> vector<4xf32>
+        scf.yield %alpha_values : vector<4xf32>
+      } else {
+        %beta_values = vector.load %beta_view[%gate_element] : view<192xf32> -> vector<4xf32>
+        scf.yield %beta_values : vector<4xf32>
+      }
+      %gate_base = scf.select %is_alpha, %alpha_element_base, %beta_element_base : index
+      %target_element0 = index.add %gate_base, %gate_element : index
+      %target_element = index.assume %target_element0 [range(%target_element0, 40960, 41340), mul(%target_element0, 4)] : index
+      vector.store %values, %transition_view[%target_element] : vector<4xf32>, view<41344xf32>
+    }
+  }
+  kernel.return
+}
+
 // Four adjacent recurrent-state columns are carried per lane. The complete
 // 128-row state vectors stay resident across all tokens, amortizing the state
 // load/store and preserving the exact causal recurrence.
@@ -394,6 +455,21 @@ kernel.def @qwen38_gdn_prefill_store_token_count() {
   %token_count_view = buffer.view %token_count_data[%zero_offset] : buffer -> view<1xi32>
   view.store %token_count_i32, %token_count_view[%zero] : i32, view<1xi32>
   kernel.return
+}
+
+check.case public @qwen38_gdn_capture_transition_depth4_case {
+  %qkv = check.generate.iota offset(-20480.0) step(1.0) : tensor<40960xf32>
+  %alpha = check.generate.iota offset(-96.0) step(1.0) : tensor<192xf32>
+  %beta = check.generate.iota offset(96.0) step(-1.0) : tensor<192xf32>
+  %transition = check.generate.fill value(0.0) : tensor<41344xf32>
+  kernel.launch @qwen38_gdn_capture_transition_depth4(%qkv, %alpha, %beta, %transition) : (tensor<40960xf32>, tensor<192xf32>, tensor<192xf32>, tensor<41344xf32>)
+  %actual_qkv = check.tensor.view %transition offset(0) : tensor<41344xf32> -> tensor<40960xf32>
+  %actual_alpha = check.tensor.view %transition offset(163840) : tensor<41344xf32> -> tensor<192xf32>
+  %actual_beta = check.tensor.view %transition offset(164608) : tensor<41344xf32> -> tensor<192xf32>
+  check.expect.equal actual(%actual_qkv) expected(%qkv) : tensor<40960xf32>
+  check.expect.equal actual(%actual_alpha) expected(%alpha) : tensor<192xf32>
+  check.expect.equal actual(%actual_beta) expected(%beta) : tensor<192xf32>
+  check.return
 }
 
 check.case public @qwen38_gdn_prefill_benchmark_case {

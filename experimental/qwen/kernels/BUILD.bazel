@@ -41,6 +41,8 @@ exports_files([
     "qwen38/linear_q6k_f16_wmma.loom",
     "qwen38/linear_q6k_i8_wmma.loom",
     "qwen38/linear_q6k_i8_wmma_tiled.loom",
+    "qwen38/mtp_control.loom",
+    "qwen38/mtp_prepare.loom",
     "qwen38/q8_tile_64x64.loom",
     "qwen38/token_embedding.loom",
 ])
@@ -67,6 +69,12 @@ loom_link_module(
 )
 
 loom_link_module(
+    name = "qwen38_gdn_prefill_linked",
+    srcs = ["qwen38/gdn_prefill.loom"],
+    libraries = ["qwen38/gdn_common.loom"],
+)
+
+loom_link_module(
     name = "qwen38_token_embedding_linked",
     srcs = ["qwen38/token_embedding.loom"],
     libraries = [
@@ -78,6 +86,16 @@ loom_link_module(
 loom_link_module(
     name = "qwen38_decode_control_linked",
     srcs = ["qwen38/decode_control.loom"],
+)
+
+loom_link_module(
+    name = "qwen38_mtp_control_linked",
+    srcs = ["qwen38/mtp_control.loom"],
+)
+
+loom_link_module(
+    name = "qwen38_mtp_prepare_linked",
+    srcs = ["qwen38/mtp_prepare.loom"],
 )
 
 loom_link_module(
@@ -597,6 +615,27 @@ iree_executable_test(
 )
 
 iree_executable_test(
+    name = "qwen38_gdn_capture_transition_hal_test",
+    src = "//loom/src/loom/tools/iree-test-loom",
+    args = [
+        "$(location :qwen38_gdn_prefill_linked)",
+        "--case=@qwen38_gdn_capture_transition_depth4_case",
+        "--device=amdgpu://0",
+        "--sanitizer=access",
+    ],
+    data = [":qwen38_gdn_prefill_linked"],
+    tags = [
+        "iree-run-requirement=runtime.resource.amd_gpu",
+        "manual",
+        "requires-gpu-amd",
+        "runtime-resource=amd-gpu",
+    ],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/execute:amdgpu_hal",
+    ]),
+)
+
+iree_executable_test(
     name = "qwen38_gdn_decode_plan_test",
     src = "//loom/src/loom/tools/iree-benchmark-loom",
     args = [
@@ -692,6 +731,68 @@ iree_executable_test(
         "--device=amdgpu://0",
     ],
     data = ["qwen38/layer_decode.loom"],
+    tags = [
+        "iree-run-requirement=runtime.resource.amd_gpu",
+        "manual",
+        "requires-gpu-amd",
+        "runtime-resource=amd-gpu",
+    ],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/execute:amdgpu_hal",
+    ]),
+)
+
+iree_executable_test(
+    name = "qwen38_mtp_control_hal_test",
+    src = "//loom/src/loom/tools/iree-test-loom",
+    args = [
+        "$(location :qwen38_mtp_control_linked)",
+        "--case=@qwen38_mtp_control_depth4_case",
+        "--device=amdgpu://0",
+        "--sanitizer=access",
+    ],
+    data = [":qwen38_mtp_control_linked"],
+    tags = [
+        "iree-run-requirement=runtime.resource.amd_gpu",
+        "manual",
+        "requires-gpu-amd",
+        "runtime-resource=amd-gpu",
+    ],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/execute:amdgpu_hal",
+    ]),
+)
+
+iree_executable_test(
+    name = "qwen38_mtp_copy_gdn_state_hal_test",
+    src = "//loom/src/loom/tools/iree-test-loom",
+    args = [
+        "$(location :qwen38_mtp_control_linked)",
+        "--case=@qwen38_copy_gdn_state_case",
+        "--device=amdgpu://0",
+        "--sanitizer=access",
+    ],
+    data = [":qwen38_mtp_control_linked"],
+    tags = [
+        "iree-run-requirement=runtime.resource.amd_gpu",
+        "manual",
+        "requires-gpu-amd",
+        "runtime-resource=amd-gpu",
+    ],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/execute:amdgpu_hal",
+    ]),
+)
+
+iree_executable_test(
+    name = "qwen38_mtp_prepare_hal_test",
+    src = "//loom/src/loom/tools/iree-test-loom",
+    args = [
+        "$(location :qwen38_mtp_prepare_linked)",
+        "--device=amdgpu://0",
+        "--sanitizer=access",
+    ],
+    data = [":qwen38_mtp_prepare_linked"],
     tags = [
         "iree-run-requirement=runtime.resource.amd_gpu",
         "manual",
@@ -815,6 +916,7 @@ test_suite(
         ":linear_q6k_q8_1_x4_plan_test",
         ":quantize_q8_1_x4_hal_test",
         ":quantize_q8_1_x4_plan_test",
+        ":qwen38_gdn_capture_transition_hal_test",
         ":qwen38_gdn_common_hal_test",
         ":qwen38_gdn_conv_prepare_decode_hal_test",
         ":qwen38_gdn_decode_plan_test",
@@ -824,6 +926,9 @@ test_suite(
         ":qwen38_greedy_argmax_plan_test",
         ":qwen38_layer_decode_hal_test",
         ":qwen38_layer_decode_plan_test",
+        ":qwen38_mtp_control_hal_test",
+        ":qwen38_mtp_copy_gdn_state_hal_test",
+        ":qwen38_mtp_prepare_hal_test",
         ":qwen38_token_embedding_hal_test",
         ":qwen38_token_embedding_plan_test",
     ],

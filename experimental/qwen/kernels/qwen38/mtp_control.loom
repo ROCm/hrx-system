@@ -1,0 +1,450 @@
+// Device-resident control for depth-four Qwen3.8 NextN/MTP generation.
+//
+// The draft model proposes four tokens from the target model's pending token
+// and normalized hidden row. The target model then verifies the causal input
+// span [y0, d1, d2, d3]. Acceptance publishes the longest matching draft
+// prefix plus one target correction, or all four drafts on a full match.
+
+// Initializes one proposal from the target model's pending token, position,
+// and normalized hidden row. Draft steps mutate their private hidden copy so
+// target verification can still pair its first row with the committed carry.
+kernel.def export("qwen38_mtp_begin_depth4") @qwen38_mtp_begin_depth4() {
+  %workgroup_count = index.constant 5 : index
+  %workgroup_size = index.constant 256 : index
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%workgroup_count, %c1, %c1) workgroup_size(%workgroup_size, %c1, %c1) : index
+} launch(%target_control: buffer, %target_tokens: buffer, %target_hidden: buffer, %mtp_control: buffer, %current_token: buffer, %draft_hidden: buffer, %verify_tokens: buffer) {
+  %workgroup0 = kernel.workgroup.id<x> : index
+  %workgroup = index.assume %workgroup0 [range(%workgroup0, 0, 4)] : index
+  %workitem0 = kernel.workitem.id<x> : index
+  %workitem = index.assume %workitem0 [range(%workitem0, 0, 255)] : index
+  %c0 = index.constant 0 : index
+  %c4 = index.constant 4 : index
+  %workgroup_size = index.constant 256 : index
+  %c0_offset = index.constant 0 : offset
+  %target_hidden_noalias, %draft_hidden_noalias = buffer.assume.noalias %target_hidden, %draft_hidden : buffer, buffer
+  %target_hidden_view = buffer.view %target_hidden_noalias[%c0_offset] : buffer -> view<5120xf32>
+  %draft_hidden_view = buffer.view %draft_hidden_noalias[%c0_offset] : buffer -> view<5120xf32>
+  %vector_ordinal0 = index.mul %workgroup, %workgroup_size : index
+  %vector_ordinal = index.add %vector_ordinal0, %workitem : index
+  %element0 = index.mul %vector_ordinal, %c4 : index
+  %element = index.assume %element0 [range(%element0, 0, 5116), mul(%element0, 4)] : index
+  %hidden_values = vector.load %target_hidden_view[%element] : view<5120xf32> -> vector<4xf32>
+  vector.store %hidden_values, %draft_hidden_view[%element] : vector<4xf32>, view<5120xf32>
+
+  %is_workgroup_zero = index.cmp eq, %workgroup, %c0 : index
+  %is_workitem_zero = index.cmp eq, %workitem, %c0 : index
+  %is_control_thread = scalar.andi %is_workgroup_zero, %is_workitem_zero : i1
+  scf.if %is_control_thread {
+    %target_control_view = buffer.view %target_control[%c0_offset] : buffer -> view<2xi32>
+    %target_tokens_view = buffer.view %target_tokens[%c0_offset] : buffer -> view<129xi32>
+    %mtp_control_view = buffer.view %mtp_control[%c0_offset] : buffer -> view<2xi32>
+    %current_token_view = buffer.view %current_token[%c0_offset] : buffer -> view<1xi32>
+    %verify_tokens_view = buffer.view %verify_tokens[%c0_offset] : buffer -> view<4xi32>
+    %position = view.load %target_control_view[0] : view<2xi32> -> i32
+    %pending_token = view.load %target_tokens_view[0] : view<129xi32> -> i32
+    %c0_i32 = scalar.constant 0 : i32
+    view.store %position, %mtp_control_view[0] : i32, view<2xi32>
+    view.store %c0_i32, %mtp_control_view[1] : i32, view<2xi32>
+    view.store %pending_token, %current_token_view[0] : i32, view<1xi32>
+    view.store %pending_token, %verify_tokens_view[0] : i32, view<4xi32>
+  }
+  kernel.return
+}
+
+// Records one produced draft token and advances the private draft position.
+// The first three drafts also become the remaining target verification inputs.
+kernel.def export("qwen38_mtp_commit_draft_depth4") @qwen38_mtp_commit_draft_depth4() {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch(%mtp_control: buffer, %current_token: buffer, %draft_tokens: buffer, %verify_tokens: buffer) {
+  %c0_offset = index.constant 0 : offset
+  %mtp_control_view = buffer.view %mtp_control[%c0_offset] : buffer -> view<2xi32>
+  %current_token_view = buffer.view %current_token[%c0_offset] : buffer -> view<1xi32>
+  %draft_tokens_view = buffer.view %draft_tokens[%c0_offset] : buffer -> view<4xi32>
+  %verify_tokens_view = buffer.view %verify_tokens[%c0_offset] : buffer -> view<4xi32>
+  %position = view.load %mtp_control_view[0] : view<2xi32> -> i32
+  %draft_count_i32 = view.load %mtp_control_view[1] : view<2xi32> -> i32
+  %draft_count0 = index.cast %draft_count_i32 : i32 to index
+  %draft_count = index.assume %draft_count0 [range(%draft_count0, 0, 3)] : index
+  %draft_token = view.load %current_token_view[0] : view<1xi32> -> i32
+  view.store %draft_token, %draft_tokens_view[%draft_count] : i32, view<4xi32>
+  %c3 = index.constant 3 : index
+  %has_verify_input = index.cmp ult, %draft_count, %c3 : index
+  scf.if %has_verify_input {
+    %c1 = index.constant 1 : index
+    %verify_index0 = index.add %draft_count, %c1 : index
+    %verify_index = index.assume %verify_index0 [range(%verify_index0, 1, 3)] : index
+    view.store %draft_token, %verify_tokens_view[%verify_index] : i32, view<4xi32>
+  }
+  %c1_i32 = scalar.constant 1 : i32
+  %next_position = scalar.addi %position, %c1_i32 : i32
+  %next_draft_count = scalar.addi %draft_count_i32, %c1_i32 : i32
+  view.store %next_position, %mtp_control_view[0] : i32, view<2xi32>
+  view.store %next_draft_count, %mtp_control_view[1] : i32, view<2xi32>
+  kernel.return
+}
+
+// Initializes the fixed four-row target verification span at the current
+// target position. This buffer uses the prefill control ABI.
+kernel.def export("qwen38_mtp_begin_verify_depth4") @qwen38_mtp_begin_verify_depth4() {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch(%target_control: buffer, %verify_control: buffer) {
+  %c0_offset = index.constant 0 : offset
+  %target_control_view = buffer.view %target_control[%c0_offset] : buffer -> view<2xi32>
+  %verify_control_view = buffer.view %verify_control[%c0_offset] : buffer -> view<2xi32>
+  %position = view.load %target_control_view[0] : view<2xi32> -> i32
+  %c4_i32 = scalar.constant 4 : i32
+  view.store %c4_i32, %verify_control_view[0] : i32, view<2xi32>
+  view.store %position, %verify_control_view[1] : i32, view<2xi32>
+  kernel.return
+}
+
+// Accepts the longest draft prefix matching target predictions. The target
+// control is advanced by the emitted token count, while replay_control retains
+// the old position and uses the prefill ABI [token_count, position_base].
+kernel.def export("qwen38_mtp_accept_depth4") @qwen38_mtp_accept_depth4() {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch(%draft_tokens: buffer, %target_predictions: buffer, %target_control: buffer, %target_tokens: buffer, %replay_control: buffer, %acceptance: buffer, %progress: buffer) {
+  %c0_offset = index.constant 0 : offset
+  %draft_view = buffer.view %draft_tokens[%c0_offset] : buffer -> view<4xi32>
+  %target_view = buffer.view %target_predictions[%c0_offset] : buffer -> view<4xi32>
+  %control_view = buffer.view %target_control[%c0_offset] : buffer -> view<2xi32>
+  %tokens_view = buffer.view %target_tokens[%c0_offset] : buffer -> view<129xi32>
+  %replay_view = buffer.view %replay_control[%c0_offset] : buffer -> view<2xi32>
+  %acceptance_view = buffer.view %acceptance[%c0_offset] : buffer -> view<2xi32>
+  %progress_view = buffer.view %progress[%c0_offset] : buffer -> view<2xi32>
+
+  %draft0 = view.load %draft_view[0] : view<4xi32> -> i32
+  %draft1 = view.load %draft_view[1] : view<4xi32> -> i32
+  %draft2 = view.load %draft_view[2] : view<4xi32> -> i32
+  %draft3 = view.load %draft_view[3] : view<4xi32> -> i32
+  %target0 = view.load %target_view[0] : view<4xi32> -> i32
+  %target1 = view.load %target_view[1] : view<4xi32> -> i32
+  %target2 = view.load %target_view[2] : view<4xi32> -> i32
+  %target3 = view.load %target_view[3] : view<4xi32> -> i32
+  %match0 = scalar.cmpi eq, %draft0, %target0 : i32
+  %match1 = scalar.cmpi eq, %draft1, %target1 : i32
+  %match2 = scalar.cmpi eq, %draft2, %target2 : i32
+  %match3 = scalar.cmpi eq, %draft3, %target3 : i32
+  %prefix2 = scalar.andi %match0, %match1 : i1
+  %prefix3 = scalar.andi %prefix2, %match2 : i1
+  %prefix4 = scalar.andi %prefix3, %match3 : i1
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %prefix1_count = scf.select %match0, %c1, %c0 : index
+  %prefix2_count = scf.select %prefix2, %c1, %c0 : index
+  %prefix3_count = scf.select %prefix3, %c1, %c0 : index
+  %prefix4_count = scf.select %prefix4, %c1, %c0 : index
+  %accepted12 = index.add %prefix1_count, %prefix2_count : index
+  %accepted34 = index.add %prefix3_count, %prefix4_count : index
+  %accepted0 = index.add %accepted12, %accepted34 : index
+  %accepted = index.assume %accepted0 [range(%accepted0, 0, 4)] : index
+  %c3 = index.constant 3 : index
+  %c4 = index.constant 4 : index
+  %corrected_count = index.add %accepted, %c1 : index
+  %commit_count0 = scf.select %prefix4, %c4, %corrected_count : index
+  %commit_count = index.assume %commit_count0 [range(%commit_count0, 1, 4)] : index
+
+  %position = view.load %control_view[0] : view<2xi32> -> i32
+  %generated_count_i32 = view.load %control_view[1] : view<2xi32> -> i32
+  %generated_count0 = index.cast %generated_count_i32 : i32 to index
+  %generated_count = index.assume %generated_count0 [range(%generated_count0, 0, 124)] : index
+  %target_index0 = scf.select %prefix4, %c3, %accepted : index
+  %target_index = index.assume %target_index0 [range(%target_index0, 0, 3)] : index
+  %target_correction = view.load %target_view[%target_index] : view<4xi32> -> i32
+  scf.for %ordinal = [%c0 to %commit_count step %c1] {
+    %uses_draft = index.cmp ult, %ordinal, %accepted : index
+    %draft_index = index.assume %ordinal [range(%ordinal, 0, 3)] : index
+    %draft_value = view.load %draft_view[%draft_index] : view<4xi32> -> i32
+    %emitted = scf.select %uses_draft, %draft_value, %target_correction : i32
+    %history_add = index.add %ordinal, %c1 : index
+    %history_index0 = index.add %generated_count, %history_add : index
+    %history_index = index.assume %history_index0 [range(%history_index0, 1, 128)] : index
+    view.store %emitted, %tokens_view[%history_index] : i32, view<129xi32>
+  }
+  %pending_index0 = index.add %generated_count, %commit_count : index
+  %pending_index = index.assume %pending_index0 [range(%pending_index0, 1, 128)] : index
+  %pending_token = view.load %tokens_view[%pending_index] : view<129xi32> -> i32
+  view.store %pending_token, %tokens_view[0] : i32, view<129xi32>
+
+  %commit_count_i32 = index.cast %commit_count : index to i32
+  %accepted_i32 = index.cast %accepted : index to i32
+  %next_position = scalar.addi %position, %commit_count_i32 : i32
+  %next_generated_count = scalar.addi %generated_count_i32, %commit_count_i32 : i32
+  view.store %next_position, %control_view[0] : i32, view<2xi32>
+  view.store %next_generated_count, %control_view[1] : i32, view<2xi32>
+  view.store %commit_count_i32, %replay_view[0] : i32, view<2xi32>
+  view.store %position, %replay_view[1] : i32, view<2xi32>
+  view.store %accepted_i32, %acceptance_view[0] : i32, view<2xi32>
+  view.store %commit_count_i32, %acceptance_view[1] : i32, view<2xi32>
+
+  // Publish cumulative progress for batched host scheduling. This buffer is
+  // host-local/device-visible, but no host observes it until the timeline
+  // semaphore for an entire queued batch has completed.
+  %accepted_total = view.load %progress_view[1] : view<2xi32> -> i32
+  %next_accepted_total = scalar.addi %accepted_total, %accepted_i32 : i32
+  view.store %next_generated_count, %progress_view[0] : i32, view<2xi32>
+  view.store %next_accepted_total, %progress_view[1] : i32, view<2xi32>
+  kernel.return
+}
+
+// Publishes the normalized target hidden row immediately preceding the next
+// pending token. The acceptance record guarantees a row in [0, 3].
+kernel.def export("qwen38_mtp_select_hidden_depth4") @qwen38_mtp_select_hidden_depth4() {
+  %workgroup_count = index.constant 5 : index
+  %workgroup_size = index.constant 256 : index
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%workgroup_count, %c1, %c1) workgroup_size(%workgroup_size, %c1, %c1) : index
+} launch(%normalized_rows: buffer, %acceptance: buffer, %normalized_hidden: buffer) {
+  %workgroup = kernel.workgroup.id<x> : index
+  %workitem = kernel.workitem.id<x> : index
+  %workgroup_size = index.constant 256 : index
+  %c4 = index.constant 4 : index
+  %vector_ordinal0 = index.mul %workgroup, %workgroup_size : index
+  %vector_ordinal = index.add %vector_ordinal0, %workitem : index
+  %element0 = index.mul %vector_ordinal, %c4 : index
+  %element = index.assume %element0 [range(%element0, 0, 5116), mul(%element0, 4)] : index
+  %c0_offset = index.constant 0 : offset
+  %rows_view = buffer.view %normalized_rows[%c0_offset] : buffer -> view<4x5120xf32>
+  %acceptance_view = buffer.view %acceptance[%c0_offset] : buffer -> view<2xi32>
+  %hidden_view = buffer.view %normalized_hidden[%c0_offset] : buffer -> view<5120xf32>
+  %commit_count_i32 = view.load %acceptance_view[1] : view<2xi32> -> i32
+  %commit_count0 = index.cast %commit_count_i32 : i32 to index
+  %commit_count = index.assume %commit_count0 [range(%commit_count0, 1, 4)] : index
+  %c1 = index.constant 1 : index
+  %row0 = index.sub %commit_count, %c1 : index
+  %row = index.assume %row0 [range(%row0, 0, 3)] : index
+  %values = vector.load %rows_view[%row, %element] : view<4x5120xf32> -> vector<4xf32>
+  vector.store %values, %hidden_view[%element] : vector<4xf32>, view<5120xf32>
+  kernel.return
+}
+
+// Copies the exact 48-layer GDN state into the speculative verification slab.
+// Each workitem transfers one naturally aligned b128 packet.
+kernel.def export("qwen38_copy_gdn_state") @qwen38_copy_gdn_state() {
+  %workgroup_count = index.constant 38304 : index
+  %workgroup_size = index.constant 256 : index
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%workgroup_count, %c1, %c1) workgroup_size(%workgroup_size, %c1, %c1) : index
+} launch(%source: buffer, %target: buffer) {
+  %workgroup0 = kernel.workgroup.id<x> : index
+  %workgroup = index.assume %workgroup0 [range(%workgroup0, 0, 38303)] : index
+  %workitem0 = kernel.workitem.id<x> : index
+  %workitem = index.assume %workitem0 [range(%workitem0, 0, 255)] : index
+  %workgroup_size = index.constant 256 : index
+  %c4 = index.constant 4 : index
+  %packet_base = index.mul %workgroup, %workgroup_size : index
+  %packet0 = index.add %packet_base, %workitem : index
+  %packet = index.assume %packet0 [range(%packet0, 0, 9805823)] : index
+  %word0 = index.mul %packet, %c4 : index
+  %word = index.assume %word0 [range(%word0, 0, 39223292), mul(%word0, 4)] : index
+  %c0_offset = index.constant 0 : offset
+  %source_view = buffer.view %source[%c0_offset] : buffer -> view<39223296xi32>
+  %target_view = buffer.view %target[%c0_offset] : buffer -> view<39223296xi32>
+  %values = vector.load %source_view[%word] : view<39223296xi32> -> vector<4xi32>
+  vector.store %values, %target_view[%word] : vector<4xi32>, view<39223296xi32>
+  kernel.return
+}
+
+// Test-only observers keep the production token-history ABI intact while
+// allowing each committed prefix and pending token to be checked directly.
+kernel.def @qwen38_mtp_read_committed(%token_count0: index) {
+  %token_count = index.assume %token_count0 [range(%token_count0, 1, 4)] : index
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%token_count, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch(%token_count0: index, %tokens: buffer, %committed: buffer) {
+  %token_count = index.assume %token_count0 [range(%token_count0, 1, 4)] : index
+  %ordinal0 = kernel.workgroup.id<x> : index
+  %ordinal = index.assume %ordinal0 [lt(%ordinal0, %token_count)] : index
+  %c1 = index.constant 1 : index
+  %history_index0 = index.add %ordinal, %c1 : index
+  %history_index = index.assume %history_index0 [range(%history_index0, 1, 4)] : index
+  %c0_offset = index.constant 0 : offset
+  %tokens_view = buffer.view %tokens[%c0_offset] : buffer -> view<129xi32>
+  %committed_view = buffer.view %committed[%c0_offset] : buffer -> view<[%token_count]xi32>
+  %token = view.load %tokens_view[%history_index] : view<129xi32> -> i32
+  view.store %token, %committed_view[%ordinal] : i32, view<[%token_count]xi32>
+  kernel.return
+}
+
+kernel.def @qwen38_mtp_read_pending() {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch(%tokens: buffer, %pending: buffer) {
+  %c0_offset = index.constant 0 : offset
+  %tokens_view = buffer.view %tokens[%c0_offset] : buffer -> view<129xi32>
+  %pending_view = buffer.view %pending[%c0_offset] : buffer -> view<1xi32>
+  %token = view.load %tokens_view[0] : view<129xi32> -> i32
+  view.store %token, %pending_view[0] : i32, view<1xi32>
+  kernel.return
+}
+
+// Exercises the full fixed-size state transfer used by one verifier cycle.
+check.case public @qwen38_copy_gdn_state_case {
+  %source = check.generate.iota offset(0) step(1) period(65521) : tensor<39223296xi32>
+  %target = check.generate.fill value(-1) : tensor<39223296xi32>
+  kernel.launch @qwen38_copy_gdn_state(%source, %target) : (tensor<39223296xi32>, tensor<39223296xi32>)
+  check.expect.equal actual(%target) expected(%source) : tensor<39223296xi32>
+  check.return
+}
+
+// Exercises proposal initialization, four draft commits, every acceptance
+// length, and selected-hidden publication as one production-shaped case.
+check.case public @qwen38_mtp_control_depth4_case {
+  %target_control0 = check.generate.iota offset(100) step(-99) : tensor<2xi32>
+  %target_tokens0 = check.generate.fill value(0) : tensor<129xi32>
+  %target_hidden0 = check.generate.iota offset(-2560.0) step(1.0) : tensor<5120xf32>
+  %mtp_control = check.generate.fill value(-1) : tensor<2xi32>
+  %current_token0 = check.generate.fill value(-1) : tensor<1xi32>
+  %draft_hidden0 = check.generate.fill value(0.0) : tensor<5120xf32>
+  %verify_tokens0 = check.generate.fill value(-1) : tensor<4xi32>
+  kernel.launch @qwen38_mtp_begin_depth4(%target_control0, %target_tokens0, %target_hidden0, %mtp_control, %current_token0, %draft_hidden0, %verify_tokens0) : (tensor<2xi32>, tensor<129xi32>, tensor<5120xf32>, tensor<2xi32>, tensor<1xi32>, tensor<5120xf32>, tensor<4xi32>)
+  %expected_current = check.generate.fill value(0) : tensor<1xi32>
+  check.expect.equal actual(%current_token0) expected(%expected_current) : tensor<1xi32>
+  check.expect.close actual(%draft_hidden0) expected(%target_hidden0) atol(0.0) rtol(0.0) nan(same) : tensor<5120xf32>
+
+  %draft_tokens0 = check.generate.fill value(-1) : tensor<4xi32>
+  %draft1 = check.generate.fill value(1) : tensor<1xi32>
+  %draft2 = check.generate.fill value(2) : tensor<1xi32>
+  %draft3 = check.generate.fill value(3) : tensor<1xi32>
+  %draft4 = check.generate.fill value(4) : tensor<1xi32>
+  kernel.launch @qwen38_mtp_commit_draft_depth4(%mtp_control, %draft1, %draft_tokens0, %verify_tokens0) : (tensor<2xi32>, tensor<1xi32>, tensor<4xi32>, tensor<4xi32>)
+  kernel.launch @qwen38_mtp_commit_draft_depth4(%mtp_control, %draft2, %draft_tokens0, %verify_tokens0) : (tensor<2xi32>, tensor<1xi32>, tensor<4xi32>, tensor<4xi32>)
+  kernel.launch @qwen38_mtp_commit_draft_depth4(%mtp_control, %draft3, %draft_tokens0, %verify_tokens0) : (tensor<2xi32>, tensor<1xi32>, tensor<4xi32>, tensor<4xi32>)
+  kernel.launch @qwen38_mtp_commit_draft_depth4(%mtp_control, %draft4, %draft_tokens0, %verify_tokens0) : (tensor<2xi32>, tensor<1xi32>, tensor<4xi32>, tensor<4xi32>)
+  %expected_mtp_end = check.generate.iota offset(104) step(-100) : tensor<2xi32>
+  %expected_drafts = check.generate.iota offset(1) step(1) : tensor<4xi32>
+  %expected_verify = check.generate.iota offset(0) step(1) : tensor<4xi32>
+  check.expect.equal actual(%mtp_control) expected(%expected_mtp_end) : tensor<2xi32>
+  check.expect.equal actual(%draft_tokens0) expected(%expected_drafts) : tensor<4xi32>
+  check.expect.equal actual(%verify_tokens0) expected(%expected_verify) : tensor<4xi32>
+
+  %verify_control = check.generate.fill value(-1) : tensor<2xi32>
+  kernel.launch @qwen38_mtp_begin_verify_depth4(%target_control0, %verify_control) : (tensor<2xi32>, tensor<2xi32>)
+  %expected_verify_control = check.generate.iota offset(4) step(96) : tensor<2xi32>
+  check.expect.equal actual(%verify_control) expected(%expected_verify_control) : tensor<2xi32>
+
+  %targets = check.generate.iota offset(0) step(1) : tensor<4xi32>
+  %progress = check.generate.fill value(0) : tensor<2xi32>
+
+  %drafts_a0 = check.generate.iota offset(1) step(1) : tensor<4xi32>
+  %control_a0 = check.generate.iota offset(100) step(-100) : tensor<2xi32>
+  %tokens_a0 = check.generate.fill value(-1) : tensor<2xi32>
+  %replay_a0 = check.generate.fill value(-1) : tensor<2xi32>
+  %acceptance_a0 = check.generate.fill value(-1) : tensor<2xi32>
+  kernel.launch @qwen38_mtp_accept_depth4(%drafts_a0, %targets, %control_a0, %tokens_a0, %replay_a0, %acceptance_a0, %progress) : (tensor<4xi32>, tensor<4xi32>, tensor<2xi32>, tensor<2xi32>, tensor<2xi32>, tensor<2xi32>, tensor<2xi32>)
+  %committed_a0 = check.generate.fill value(-1) : tensor<1xi32>
+  %pending_a0 = check.generate.fill value(-1) : tensor<1xi32>
+  %c1 = check.literal value(1) : index
+  kernel.launch @qwen38_mtp_read_committed[%c1](%c1, %tokens_a0, %committed_a0) : [index](index, tensor<2xi32>, tensor<1xi32>)
+  kernel.launch @qwen38_mtp_read_pending(%tokens_a0, %pending_a0) : (tensor<2xi32>, tensor<1xi32>)
+  %expected_control_a0 = check.generate.iota offset(101) step(-100) : tensor<2xi32>
+  %expected_replay_a0 = check.generate.iota offset(1) step(99) : tensor<2xi32>
+  %expected_acceptance_a0 = check.generate.iota offset(0) step(1) : tensor<2xi32>
+  %expected_committed_a0 = check.generate.fill value(0) : tensor<1xi32>
+  %expected_pending_a0 = check.generate.fill value(0) : tensor<1xi32>
+  check.expect.equal actual(%control_a0) expected(%expected_control_a0) : tensor<2xi32>
+  check.expect.equal actual(%committed_a0) expected(%expected_committed_a0) : tensor<1xi32>
+  check.expect.equal actual(%pending_a0) expected(%expected_pending_a0) : tensor<1xi32>
+  check.expect.equal actual(%replay_a0) expected(%expected_replay_a0) : tensor<2xi32>
+  check.expect.equal actual(%acceptance_a0) expected(%expected_acceptance_a0) : tensor<2xi32>
+
+  %drafts_a1 = check.generate.fill value(0) : tensor<4xi32>
+  %control_a1 = check.generate.iota offset(100) step(-100) : tensor<2xi32>
+  %tokens_a1 = check.generate.fill value(-1) : tensor<3xi32>
+  %replay_a1 = check.generate.fill value(-1) : tensor<2xi32>
+  %acceptance_a1 = check.generate.fill value(-1) : tensor<2xi32>
+  kernel.launch @qwen38_mtp_accept_depth4(%drafts_a1, %targets, %control_a1, %tokens_a1, %replay_a1, %acceptance_a1, %progress) : (tensor<4xi32>, tensor<4xi32>, tensor<2xi32>, tensor<3xi32>, tensor<2xi32>, tensor<2xi32>, tensor<2xi32>)
+  %committed_a1 = check.generate.fill value(-1) : tensor<2xi32>
+  %pending_a1 = check.generate.fill value(-1) : tensor<1xi32>
+  %c2 = check.literal value(2) : index
+  kernel.launch @qwen38_mtp_read_committed[%c2](%c2, %tokens_a1, %committed_a1) : [index](index, tensor<3xi32>, tensor<2xi32>)
+  kernel.launch @qwen38_mtp_read_pending(%tokens_a1, %pending_a1) : (tensor<3xi32>, tensor<1xi32>)
+  %expected_control_a1 = check.generate.iota offset(102) step(-100) : tensor<2xi32>
+  %expected_replay_a1 = check.generate.iota offset(2) step(98) : tensor<2xi32>
+  %expected_acceptance_a1 = check.generate.iota offset(1) step(1) : tensor<2xi32>
+  %expected_committed_a1 = check.generate.iota offset(0) step(1) : tensor<2xi32>
+  %expected_pending_a1 = check.generate.fill value(1) : tensor<1xi32>
+  check.expect.equal actual(%control_a1) expected(%expected_control_a1) : tensor<2xi32>
+  check.expect.equal actual(%committed_a1) expected(%expected_committed_a1) : tensor<2xi32>
+  check.expect.equal actual(%pending_a1) expected(%expected_pending_a1) : tensor<1xi32>
+  check.expect.equal actual(%replay_a1) expected(%expected_replay_a1) : tensor<2xi32>
+  check.expect.equal actual(%acceptance_a1) expected(%expected_acceptance_a1) : tensor<2xi32>
+
+  %drafts_a2 = check.generate.iota offset(0) step(1) period(2) : tensor<4xi32>
+  %control_a2 = check.generate.iota offset(100) step(-100) : tensor<2xi32>
+  %tokens_a2 = check.generate.fill value(-1) : tensor<4xi32>
+  %replay_a2 = check.generate.fill value(-1) : tensor<2xi32>
+  %acceptance_a2 = check.generate.fill value(-1) : tensor<2xi32>
+  kernel.launch @qwen38_mtp_accept_depth4(%drafts_a2, %targets, %control_a2, %tokens_a2, %replay_a2, %acceptance_a2, %progress) : (tensor<4xi32>, tensor<4xi32>, tensor<2xi32>, tensor<4xi32>, tensor<2xi32>, tensor<2xi32>, tensor<2xi32>)
+  %committed_a2 = check.generate.fill value(-1) : tensor<3xi32>
+  %pending_a2 = check.generate.fill value(-1) : tensor<1xi32>
+  %c3 = check.literal value(3) : index
+  kernel.launch @qwen38_mtp_read_committed[%c3](%c3, %tokens_a2, %committed_a2) : [index](index, tensor<4xi32>, tensor<3xi32>)
+  kernel.launch @qwen38_mtp_read_pending(%tokens_a2, %pending_a2) : (tensor<4xi32>, tensor<1xi32>)
+  %expected_control_a2 = check.generate.iota offset(103) step(-100) : tensor<2xi32>
+  %expected_replay_a2 = check.generate.iota offset(3) step(97) : tensor<2xi32>
+  %expected_acceptance_a2 = check.generate.iota offset(2) step(1) : tensor<2xi32>
+  %expected_committed_a2 = check.generate.iota offset(0) step(1) : tensor<3xi32>
+  %expected_pending_a2 = check.generate.fill value(2) : tensor<1xi32>
+  check.expect.equal actual(%control_a2) expected(%expected_control_a2) : tensor<2xi32>
+  check.expect.equal actual(%committed_a2) expected(%expected_committed_a2) : tensor<3xi32>
+  check.expect.equal actual(%pending_a2) expected(%expected_pending_a2) : tensor<1xi32>
+  check.expect.equal actual(%replay_a2) expected(%expected_replay_a2) : tensor<2xi32>
+  check.expect.equal actual(%acceptance_a2) expected(%expected_acceptance_a2) : tensor<2xi32>
+
+  %drafts_a3 = check.generate.iota offset(0) step(1) period(3) : tensor<4xi32>
+  %control_a3 = check.generate.iota offset(100) step(-100) : tensor<2xi32>
+  %tokens_a3 = check.generate.fill value(-1) : tensor<5xi32>
+  %replay_a3 = check.generate.fill value(-1) : tensor<2xi32>
+  %acceptance_a3 = check.generate.fill value(-1) : tensor<2xi32>
+  kernel.launch @qwen38_mtp_accept_depth4(%drafts_a3, %targets, %control_a3, %tokens_a3, %replay_a3, %acceptance_a3, %progress) : (tensor<4xi32>, tensor<4xi32>, tensor<2xi32>, tensor<5xi32>, tensor<2xi32>, tensor<2xi32>, tensor<2xi32>)
+  %committed_a3 = check.generate.fill value(-1) : tensor<4xi32>
+  %pending_a3 = check.generate.fill value(-1) : tensor<1xi32>
+  %c4 = check.literal value(4) : index
+  kernel.launch @qwen38_mtp_read_committed[%c4](%c4, %tokens_a3, %committed_a3) : [index](index, tensor<5xi32>, tensor<4xi32>)
+  kernel.launch @qwen38_mtp_read_pending(%tokens_a3, %pending_a3) : (tensor<5xi32>, tensor<1xi32>)
+  %expected_control_a3 = check.generate.iota offset(104) step(-100) : tensor<2xi32>
+  %expected_replay_a3 = check.generate.iota offset(4) step(96) : tensor<2xi32>
+  %expected_acceptance_a3 = check.generate.iota offset(3) step(1) : tensor<2xi32>
+  %expected_committed_a3 = check.generate.iota offset(0) step(1) : tensor<4xi32>
+  %expected_pending_a3 = check.generate.fill value(3) : tensor<1xi32>
+  check.expect.equal actual(%control_a3) expected(%expected_control_a3) : tensor<2xi32>
+  check.expect.equal actual(%committed_a3) expected(%expected_committed_a3) : tensor<4xi32>
+  check.expect.equal actual(%pending_a3) expected(%expected_pending_a3) : tensor<1xi32>
+  check.expect.equal actual(%replay_a3) expected(%expected_replay_a3) : tensor<2xi32>
+  check.expect.equal actual(%acceptance_a3) expected(%expected_acceptance_a3) : tensor<2xi32>
+
+  %drafts_a4 = check.generate.iota offset(0) step(1) : tensor<4xi32>
+  %control_a4 = check.generate.iota offset(100) step(-100) : tensor<2xi32>
+  %tokens_a4 = check.generate.fill value(-1) : tensor<5xi32>
+  %replay_a4 = check.generate.fill value(-1) : tensor<2xi32>
+  %acceptance_a4 = check.generate.fill value(-1) : tensor<2xi32>
+  kernel.launch @qwen38_mtp_accept_depth4(%drafts_a4, %targets, %control_a4, %tokens_a4, %replay_a4, %acceptance_a4, %progress) : (tensor<4xi32>, tensor<4xi32>, tensor<2xi32>, tensor<5xi32>, tensor<2xi32>, tensor<2xi32>, tensor<2xi32>)
+  %committed_a4 = check.generate.fill value(-1) : tensor<4xi32>
+  %pending_a4 = check.generate.fill value(-1) : tensor<1xi32>
+  kernel.launch @qwen38_mtp_read_committed[%c4](%c4, %tokens_a4, %committed_a4) : [index](index, tensor<5xi32>, tensor<4xi32>)
+  kernel.launch @qwen38_mtp_read_pending(%tokens_a4, %pending_a4) : (tensor<5xi32>, tensor<1xi32>)
+  %expected_control_a4 = check.generate.iota offset(104) step(-100) : tensor<2xi32>
+  %expected_replay_a4 = check.generate.iota offset(4) step(96) : tensor<2xi32>
+  %expected_acceptance_a4 = check.generate.fill value(4) : tensor<2xi32>
+  %expected_committed_a4 = check.generate.iota offset(0) step(1) : tensor<4xi32>
+  %expected_pending_a4 = check.generate.fill value(3) : tensor<1xi32>
+  check.expect.equal actual(%control_a4) expected(%expected_control_a4) : tensor<2xi32>
+  check.expect.equal actual(%committed_a4) expected(%expected_committed_a4) : tensor<4xi32>
+  check.expect.equal actual(%pending_a4) expected(%expected_pending_a4) : tensor<1xi32>
+  check.expect.equal actual(%replay_a4) expected(%expected_replay_a4) : tensor<2xi32>
+  check.expect.equal actual(%acceptance_a4) expected(%expected_acceptance_a4) : tensor<2xi32>
+  %expected_progress = check.generate.iota offset(4) step(6) : tensor<2xi32>
+  check.expect.equal actual(%progress) expected(%expected_progress) : tensor<2xi32>
+
+  %normalized_rows = check.generate.iota offset(0.0) step(0.0009765625) : tensor<4x5120xf32>
+  %selected_hidden = check.generate.fill value(-1.0) : tensor<5120xf32>
+  kernel.launch @qwen38_mtp_select_hidden_depth4(%normalized_rows, %acceptance_a2, %selected_hidden) : (tensor<4x5120xf32>, tensor<2xi32>, tensor<5120xf32>)
+  %expected_hidden = check.generate.iota offset(10.0) step(0.0009765625) : tensor<5120xf32>
+  check.expect.equal actual(%selected_hidden) expected(%expected_hidden) : tensor<5120xf32>
+  check.return
+}
