@@ -22,6 +22,8 @@ exports_files([
     "qwen38/model_config.loom",
     "qwen38/model_prefill.loom",
     "qwen38/mtp_decode.loom",
+    "qwen38/mtp_prefill.loom",
+    "qwen38/mtp_target.loom",
     "qwen38/output_head_decode.loom",
     "qwen38/prefill_config.loom",
 ])
@@ -32,6 +34,8 @@ loom_link_module(
         "qwen38/model_decode.loom",
         "qwen38/model_prefill.loom",
         "qwen38/mtp_decode.loom",
+        "qwen38/mtp_prefill.loom",
+        "qwen38/mtp_target.loom",
     ],
     libraries = [
         "qwen38/attention_layer_decode.loom",
@@ -60,6 +64,8 @@ loom_link_module(
         "//experimental/qwen/kernels:qwen38/layer_prefill.loom",
         "//experimental/qwen/kernels:qwen38/linear_q5k_f16_wmma.loom",
         "//experimental/qwen/kernels:qwen38/linear_q6k_f16_wmma.loom",
+        "//experimental/qwen/kernels:qwen38/mtp_control.loom",
+        "//experimental/qwen/kernels:qwen38/mtp_prepare.loom",
         "//experimental/qwen/kernels:qwen38/token_embedding.loom",
     ],
     mode = "selective",
@@ -68,7 +74,10 @@ loom_link_module(
         "@qwen38_text_decode_greedy_with_hidden",
         "@qwen38_text_prefill_greedy",
         "@qwen38_text_prefill_greedy_with_hidden",
+        "@qwen38_text_prefill_mtp_greedy",
         "@qwen38_mtp_decode_greedy",
+        "@qwen38_mtp_propose_depth4",
+        "@qwen38_mtp_target_verify_depth4",
     ],
     strip_check = True,
 )

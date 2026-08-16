@@ -1,0 +1,122 @@
+// Exact depth-four target verification and recurrent-state commit for
+// Qwen3.8-27B NextN/MTP generation.
+//
+// Verification runs against a compiler-managed scratch copy of the GDN state.
+// Attention KV writes require no rollback because the next verification
+// overwrites every rejected tail position. Compact per-layer transition inputs
+// advance only the accepted 1-4 row prefix in committed GDN state, avoiding a
+// second execution of the dense target model.
+
+command.program.decl @qwen38_text_prefill_body_impl(%token_count: index, %verification_depth: index) launch(%parameters: buffer, %residual: buffer, %control: buffer, %gdn_state: buffer, %attention_cache: buffer, %transition_capture: buffer) where [range(%token_count, 1, 512), range(%verification_depth, 0, 4)]
+command.program.decl @qwen38_output_head_rows_greedy_depth4() launch(%parameters: buffer, %residual: buffer, %normalized: buffer, %token_ids: buffer)
+command.program.decl @qwen38_mtp_catchup(%token_count: index, %verification_depth: index) launch(%embedding_parameters: buffer, %mtp_input_parameters: buffer, %mtp_layer_parameters: buffer, %residual: buffer, %control: buffer, %attention_cache: buffer, %shifted_hidden: buffer, %token_ids: buffer) where [range(%token_count, 1, 512), range(%verification_depth, 0, 4)]
+
+kernel.decl @qwen38_token_embedding_q5k_f32_prefill(%token_count: index) launch(%token_ids: buffer, %weight: buffer, %output: buffer)
+kernel.decl @qwen38_copy_gdn_state() launch(%source: buffer, %target: buffer)
+kernel.decl @qwen38_mtp_begin_verify_depth4() launch(%target_control: buffer, %verify_control: buffer)
+kernel.decl @qwen38_mtp_accept_depth4() launch(%draft_tokens: buffer, %target_predictions: buffer, %target_control: buffer, %target_tokens: buffer, %replay_control: buffer, %acceptance: buffer, %progress: buffer)
+kernel.decl @qwen38_mtp_select_hidden_depth4() launch(%normalized_rows: buffer, %acceptance: buffer, %normalized_hidden: buffer)
+kernel.decl @qwen38_mtp_shift_hidden_rows(%token_count: index) launch(%token_capacity: index, %normalized_rows: buffer, %pending_hidden: buffer, %shifted_rows: buffer)
+kernel.decl @qwen38_gdn_conv_prepare_prefill(%token_count: index) launch(%token_count_data: buffer, %l2_epsilon: f32, %qkv_input: buffer, %conv_weight: buffer, %conv_history: buffer, %qkv_silu: buffer, %qk_inverse_norm: buffer)
+kernel.decl @qwen38_gdn_recurrent_prefill_x4(%token_count: index) launch(%token_count_data: buffer, %qkv_silu: buffer, %qk_inverse_norm: buffer, %alpha: buffer, %beta: buffer, %ssm_a: buffer, %dt_bias: buffer, %state: buffer, %raw_output: buffer)
+
+// Advances one committed GDN layer from transition inputs retained during
+// target verification. Dense projections and residual outputs are not replayed.
+command.program.def @qwen38_gdn_state_commit_depth4(%layer: index, %gdn_ordinal: index) launch(%parameters: buffer, %replay_control: buffer, %gdn_state: buffer, %transition_capture: buffer) where [range(%layer, 0, 63), range(%gdn_ordinal, 0, 47)] {
+  %token_count = index.constant 4 : index
+  %epsilon = scalar.constant 0.000001 : f32
+  %conv_weight = command.parameter %parameters, "blk.{}.ssm_conv1d.weight"[%layer] : view<40960xf32>
+  %ssm_a = command.parameter %parameters, "blk.{}.ssm_a"[%layer] : view<48xf32>
+  %dt_bias = command.parameter %parameters, "blk.{}.ssm_dt.bias"[%layer] : view<48xf32>
+
+  %qkv_bytes = index.constant 163840 : offset
+  %gate_bytes = index.constant 768 : offset
+  %transition_layer_bytes, %qkv_offset, %alpha_offset, %beta_offset = buffer.pack [align(256) %qkv_bytes, align(256) %gate_bytes, align(256) %gate_bytes] : offset
+  %transition_layer_offset = index.scale %gdn_ordinal, %transition_layer_bytes : index, offset -> offset
+  %layer_qkv_offset = index.add %transition_layer_offset, %qkv_offset : offset
+  %layer_alpha_offset = index.add %transition_layer_offset, %alpha_offset : offset
+  %layer_beta_offset = index.add %transition_layer_offset, %beta_offset : offset
+  %qkv = buffer.view %transition_capture[%layer_qkv_offset] : buffer -> view<40960xf32>
+  %alpha = buffer.view %transition_capture[%layer_alpha_offset] : buffer -> view<192xf32>
+  %beta = buffer.view %transition_capture[%layer_beta_offset] : buffer -> view<192xf32>
+
+  %recurrent_state_bytes = index.constant 3145728 : offset
+  %conv_history_bytes = index.constant 122880 : offset
+  %gdn_layer_state_bytes, %recurrent_state_offset, %conv_history_offset = buffer.pack [align(256) %recurrent_state_bytes, align(256) %conv_history_bytes] : offset
+  %layer_state_offset = index.scale %gdn_ordinal, %gdn_layer_state_bytes : index, offset -> offset
+  %layer_recurrent_state_offset = index.add %layer_state_offset, %recurrent_state_offset : offset
+  %layer_conv_history_offset = index.add %layer_state_offset, %conv_history_offset : offset
+  %recurrent_state = buffer.view %gdn_state[%layer_recurrent_state_offset] : buffer -> view<786432xf32>
+  %conv_history = buffer.view %gdn_state[%layer_conv_history_offset] : buffer -> view<30720xf32>
+
+  %qkv_silu_bytes = index.constant 163840 : offset
+  %qk_inverse_norm_bytes = index.constant 512 : offset
+  %raw_output_bytes = index.constant 98304 : offset
+  %qkv_silu = buffer.alloca<global> align(256) %qkv_silu_bytes : buffer
+  %qk_inverse_norm = buffer.alloca<global> align(256) %qk_inverse_norm_bytes : buffer
+  kernel.launch @qwen38_gdn_conv_prepare_prefill[%token_count](%replay_control, %epsilon, %qkv, %conv_weight, %conv_history, %qkv_silu, %qk_inverse_norm) : [index](buffer, f32, view<40960xf32>, view<40960xf32>, view<30720xf32>, buffer, buffer)
+  %raw_output = buffer.alloca<global> align(256) %raw_output_bytes : buffer
+  kernel.launch @qwen38_gdn_recurrent_prefill_x4[%token_count](%replay_control, %qkv_silu, %qk_inverse_norm, %alpha, %beta, %ssm_a, %dt_bias, %recurrent_state, %raw_output) : [index](buffer, buffer, buffer, view<192xf32>, view<192xf32>, view<48xf32>, view<48xf32>, view<786432xf32>, buffer)
+  command.return
+}
+
+// Commits all 48 GDN states. Independent MTP-cache catch-up is scheduled
+// concurrently by the owning verification root.
+command.program.def @qwen38_mtp_commit_gdn_states_depth4() launch(%parameters: buffer, %replay_control: buffer, %gdn_state: buffer, %transition_capture: buffer) {
+  %group_begin = index.constant 0 : index
+  %group_end = index.constant 16 : index
+  %group_step = index.constant 1 : index
+  %layers_per_group = index.constant 4 : index
+  %gdn_layers_per_group = index.constant 3 : index
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  scf.for %group = [%group_begin to %group_end step %group_step] unroll {
+    %layer0 = index.mul %group, %layers_per_group : index
+    %layer1 = index.add %layer0, %c1 : index
+    %layer2 = index.add %layer0, %c2 : index
+    %gdn_ordinal0 = index.mul %group, %gdn_layers_per_group : index
+    %gdn_ordinal1 = index.add %gdn_ordinal0, %c1 : index
+    %gdn_ordinal2 = index.add %gdn_ordinal0, %c2 : index
+    command.program.launch @qwen38_gdn_state_commit_depth4[%layer0, %gdn_ordinal0](%parameters, %replay_control, %gdn_state, %transition_capture) : [index, index](buffer, buffer, buffer, buffer)
+    command.program.launch @qwen38_gdn_state_commit_depth4[%layer1, %gdn_ordinal1](%parameters, %replay_control, %gdn_state, %transition_capture) : [index, index](buffer, buffer, buffer, buffer)
+    command.program.launch @qwen38_gdn_state_commit_depth4[%layer2, %gdn_ordinal2](%parameters, %replay_control, %gdn_state, %transition_capture) : [index, index](buffer, buffer, buffer, buffer)
+  }
+  command.return
+}
+
+// Verifies [y0, d1, d2, d3], publishes the accepted token span, and selects
+// the target hidden row immediately preceding the next pending token.
+command.program.def public @qwen38_mtp_target_verify_depth4() launch(%target_parameters: buffer, %embedding_parameters: buffer, %mtp_input_parameters: buffer, %mtp_layer_parameters: buffer, %residual: buffer, %target_control: buffer, %gdn_state: buffer, %attention_cache: buffer, %mtp_attention_cache: buffer, %normalized_hidden: buffer, %target_tokens: buffer, %draft_tokens: buffer, %verify_tokens: buffer, %replay_control: buffer, %acceptance: buffer, %progress: buffer) {
+  %token_count = index.constant 4 : index
+  %embedding_weight = command.parameter %target_parameters, "token_embd.weight" : view<874086400xi8>
+  %gdn_state_bytes = index.constant 156893184 : offset
+  %normalized_rows_bytes = index.constant 81920 : offset
+  %shifted_hidden_bytes = index.constant 81920 : offset
+  %token_bytes = index.constant 16 : offset
+  %control_bytes = index.constant 8 : offset
+  %transition_capture_bytes = index.constant 7938048 : offset
+  %scratch_gdn_state = buffer.alloca<global> align(256) %gdn_state_bytes : buffer
+  %normalized_rows = buffer.alloca<global> align(256) %normalized_rows_bytes : buffer
+  %target_predictions = buffer.alloca<global> align(256) %token_bytes : buffer
+  %verify_control = buffer.alloca<global> align(256) %control_bytes : buffer
+  %transition_capture = buffer.alloca<global> align(256) %transition_capture_bytes : buffer
+
+  kernel.launch @qwen38_copy_gdn_state(%gdn_state, %scratch_gdn_state) : (buffer, buffer)
+  kernel.launch @qwen38_mtp_begin_verify_depth4(%target_control, %verify_control) : (buffer, buffer)
+  kernel.launch @qwen38_token_embedding_q5k_f32_prefill[%token_count](%verify_tokens, %embedding_weight, %residual) : [index](buffer, view<874086400xi8>, buffer)
+  command.program.launch @qwen38_text_prefill_body_impl[%token_count, %token_count](%target_parameters, %residual, %verify_control, %scratch_gdn_state, %attention_cache, %transition_capture) : [index, index](buffer, buffer, buffer, buffer, buffer, buffer)
+  command.program.launch @qwen38_output_head_rows_greedy_depth4[](%target_parameters, %residual, %normalized_rows, %target_predictions) : [](buffer, buffer, buffer, buffer)
+  %shifted_hidden = buffer.alloca<global> align(256) %shifted_hidden_bytes : buffer
+  kernel.launch @qwen38_mtp_shift_hidden_rows[%token_count](%token_count, %normalized_rows, %normalized_hidden, %shifted_hidden) : [index](index, buffer, buffer, buffer)
+  kernel.launch @qwen38_mtp_accept_depth4(%draft_tokens, %target_predictions, %target_control, %target_tokens, %replay_control, %acceptance, %progress) : (buffer, buffer, buffer, buffer, buffer, buffer, buffer)
+  command.concurrent {
+    command.serial {
+      command.program.launch @qwen38_mtp_commit_gdn_states_depth4[](%target_parameters, %replay_control, %gdn_state, %transition_capture) : [](buffer, buffer, buffer, buffer)
+    }
+    command.serial {
+      command.program.launch @qwen38_mtp_catchup[%token_count, %token_count](%embedding_parameters, %mtp_input_parameters, %mtp_layer_parameters, %residual, %replay_control, %mtp_attention_cache, %shifted_hidden, %verify_tokens) : [index, index](buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
+    }
+  }
+  kernel.launch @qwen38_mtp_select_hidden_depth4(%normalized_rows, %acceptance, %normalized_hidden) : (buffer, buffer, buffer)
+  command.return
+}

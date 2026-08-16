@@ -12,13 +12,15 @@ kernel.decl @ggml_quantize_q8_1_x4_f32(%token_count: index, %input_size: index) 
 kernel.decl @ggml_linear_q6k_q8_1_x4(%token_count: index, %input_size: index, %output_size: index) launch(%token_count: index, %input_size: index, %output_size: index, %input: buffer, %weight: buffer, %output: buffer)
 kernel.decl @ggml_linear_q8_0_q8_1_x4(%token_count: index, %input_size: index, %output_size: index) launch(%token_count: index, %input_size: index, %output_size: index, %input: buffer, %weight: buffer, %output: buffer)
 kernel.decl @qwen38_rmsnorm_f32_decode() launch(%epsilon: f32, %input: buffer, %weight: buffer, %output: buffer)
-kernel.decl @qwen38_token_embedding_q5k_f32(%token_count: index) launch(%token_count: index, %token_ids: buffer, %weight: buffer, %output: buffer)
+kernel.decl @qwen38_token_embedding_q5k_f32_decode() launch(%token_id: buffer, %weight: buffer, %output: buffer)
 kernel.decl @qwen38_greedy_argmax_f32(%output_size: index) launch(%output_size: index, %logits: buffer, %token_id: buffer)
 kernel.decl @qwen38_decode_commit_token() launch(%control: buffer, %token_ids: buffer)
+kernel.decl @qwen38_mtp_begin_depth4() launch(%target_control: buffer, %target_tokens: buffer, %target_hidden: buffer, %mtp_control: buffer, %current_token: buffer, %draft_hidden: buffer, %verify_tokens: buffer)
+kernel.decl @qwen38_mtp_commit_draft_depth4() launch(%mtp_control: buffer, %current_token: buffer, %draft_tokens: buffer, %verify_tokens: buffer)
 
-// Advances one draft token. The token ID and normalized hidden buffers are
-// updated in place after all consumers of their incoming values complete.
-command.program.def public @qwen38_mtp_decode_greedy() launch(%embedding_parameters: buffer, %output_parameters: buffer, %mtp_parameters: buffer, %residual: buffer, %control: buffer, %attention_cache: buffer, %normalized_hidden: buffer, %token_id: buffer) {
+// Advances the NextN block by one draft token. The current token and normalized
+// hidden buffers are updated in place after all incoming consumers complete.
+command.program.def @qwen38_mtp_decode_body() launch(%embedding_parameters: buffer, %output_parameters: buffer, %mtp_input_parameters: buffer, %mtp_layer_parameters: buffer, %mtp_head_parameters: buffer, %residual: buffer, %control: buffer, %attention_cache: buffer, %normalized_hidden: buffer, %current_token: buffer) {
   %token_count = index.constant 1 : index
   %hidden_size = index.constant 5120 : index
   %concat_size = index.constant 10240 : index
@@ -29,10 +31,10 @@ command.program.def public @qwen38_mtp_decode_greedy() launch(%embedding_paramet
 
   %embedding_weight = command.parameter %embedding_parameters, "token_embd.weight" : view<874086400xi8>
   %output_weight = command.parameter %output_parameters, "output.weight" : view<1042944000xi8>
-  %embedding_norm_weight = command.parameter %mtp_parameters, "blk.64.nextn.enorm.weight" : view<5120xf32>
-  %hidden_norm_weight = command.parameter %mtp_parameters, "blk.64.nextn.hnorm.weight" : view<5120xf32>
-  %embedding_hidden_weight = command.parameter %mtp_parameters, "blk.64.nextn.eh_proj.weight" : view<55705600xi8>
-  %shared_head_norm_weight = command.parameter %mtp_parameters, "blk.64.nextn.shared_head_norm.weight" : view<5120xf32>
+  %embedding_norm_weight = command.parameter %mtp_input_parameters, "blk.64.nextn.enorm.weight" : view<5120xf32>
+  %hidden_norm_weight = command.parameter %mtp_input_parameters, "blk.64.nextn.hnorm.weight" : view<5120xf32>
+  %embedding_hidden_weight = command.parameter %mtp_input_parameters, "blk.64.nextn.eh_proj.weight" : view<55705600xi8>
+  %shared_head_norm_weight = command.parameter %mtp_head_parameters, "blk.64.nextn.shared_head_norm.weight" : view<5120xf32>
 
   %c0_offset = index.constant 0 : offset
   %hidden_bytes = index.constant 20480 : offset
@@ -43,7 +45,7 @@ command.program.def public @qwen38_mtp_decode_greedy() launch(%embedding_paramet
   %logits_bytes = index.constant 993280 : offset
 
   %embedding = buffer.alloca<global> align(256) %hidden_bytes : buffer
-  kernel.launch @qwen38_token_embedding_q5k_f32[%token_count](%token_count, %token_id, %embedding_weight, %embedding) : [index](index, buffer, view<874086400xi8>, buffer)
+  kernel.launch @qwen38_token_embedding_q5k_f32_decode(%current_token, %embedding_weight, %embedding) : (buffer, view<874086400xi8>, buffer)
 
   // Placing both normalized rows in one allocation makes their physical
   // concatenation the exact activation expected by the Q8_0 projection.
@@ -60,14 +62,38 @@ command.program.def public @qwen38_mtp_decode_greedy() launch(%embedding_paramet
   kernel.launch @ggml_linear_q8_0_q8_1_x4[%token_count, %concat_size, %hidden_size](%token_count, %concat_size, %hidden_size, %normalized_concat_q8, %embedding_hidden_weight, %residual) : [index, index, index](index, index, index, buffer, view<55705600xi8>, buffer)
 
   %attention_output = buffer.alloca<global> align(256) %attention_bytes : buffer
-  command.program.launch @qwen38_attention_layer_decode[%mtp_layer, %mtp_attention_ordinal](%mtp_parameters, %residual, %control, %attention_cache, %attention_output) : [index, index](buffer, buffer, buffer, buffer, buffer)
+  command.program.launch @qwen38_attention_layer_decode[%mtp_layer, %mtp_attention_ordinal](%mtp_layer_parameters, %residual, %control, %attention_cache, %attention_output) : [index, index](buffer, buffer, buffer, buffer, buffer)
 
   %normalized_hidden_q8 = buffer.alloca<global> align(256) %hidden_q8_bytes : buffer
   %logits = buffer.alloca<global> align(256) %logits_bytes : buffer
   kernel.launch @qwen38_rmsnorm_f32_decode(%epsilon, %residual, %shared_head_norm_weight, %normalized_hidden) : (f32, buffer, view<5120xf32>, buffer)
   kernel.launch @ggml_quantize_q8_1_x4_f32[%token_count, %hidden_size](%token_count, %hidden_size, %normalized_hidden, %normalized_hidden_q8) : [index, index](index, index, buffer, buffer)
   kernel.launch @ggml_linear_q6k_q8_1_x4[%token_count, %hidden_size, %vocabulary_size](%token_count, %hidden_size, %vocabulary_size, %normalized_hidden_q8, %output_weight, %logits) : [index, index, index](index, index, index, buffer, view<1042944000xi8>, buffer)
-  kernel.launch @qwen38_greedy_argmax_f32[%vocabulary_size](%vocabulary_size, %logits, %token_id) : [index](index, buffer, buffer)
+  kernel.launch @qwen38_greedy_argmax_f32[%vocabulary_size](%vocabulary_size, %logits, %current_token) : [index](index, buffer, buffer)
+  command.return
+}
+
+// Preserves the standalone one-token NextN transition used by the isolated
+// correctness and timing harness.
+command.program.def public @qwen38_mtp_decode_greedy() launch(%embedding_parameters: buffer, %output_parameters: buffer, %mtp_input_parameters: buffer, %mtp_layer_parameters: buffer, %mtp_head_parameters: buffer, %residual: buffer, %control: buffer, %attention_cache: buffer, %normalized_hidden: buffer, %token_id: buffer) {
+  command.program.launch @qwen38_mtp_decode_body[](%embedding_parameters, %output_parameters, %mtp_input_parameters, %mtp_layer_parameters, %mtp_head_parameters, %residual, %control, %attention_cache, %normalized_hidden, %token_id) : [](buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
   kernel.launch @qwen38_decode_commit_token(%control, %token_id) : (buffer, buffer)
+  command.return
+}
+
+// Produces four sequential NextN draft tokens from the current target-model
+// token and normalized hidden row. Proposal control and attention cache are
+// private to the draft model and reset to the target position each cycle.
+command.program.def public @qwen38_mtp_propose_depth4() launch(%embedding_parameters: buffer, %output_parameters: buffer, %mtp_input_parameters: buffer, %mtp_layer_parameters: buffer, %mtp_head_parameters: buffer, %residual: buffer, %target_control: buffer, %mtp_control: buffer, %attention_cache: buffer, %normalized_hidden: buffer, %target_tokens: buffer, %current_token: buffer, %draft_tokens: buffer, %verify_tokens: buffer) {
+  %hidden_bytes = index.constant 20480 : offset
+  %draft_hidden = buffer.alloca<global> align(256) %hidden_bytes : buffer
+  kernel.launch @qwen38_mtp_begin_depth4(%target_control, %target_tokens, %normalized_hidden, %mtp_control, %current_token, %draft_hidden, %verify_tokens) : (buffer, buffer, buffer, buffer, buffer, buffer, buffer)
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %draft_depth = index.constant 4 : index
+  scf.for %draft = [%c0 to %draft_depth step %c1] unroll {
+    command.program.launch @qwen38_mtp_decode_body[](%embedding_parameters, %output_parameters, %mtp_input_parameters, %mtp_layer_parameters, %mtp_head_parameters, %residual, %mtp_control, %attention_cache, %draft_hidden, %current_token) : [](buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
+    kernel.launch @qwen38_mtp_commit_draft_depth4(%mtp_control, %current_token, %draft_tokens, %verify_tokens) : (buffer, buffer, buffer, buffer)
+  }
   command.return
 }

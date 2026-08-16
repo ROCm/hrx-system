@@ -1,0 +1,53 @@
+// Qwen3.8-27B block-64 NextN/MTP cache catch-up.
+//
+// The MTP full-attention cache follows committed target tokens, not the
+// speculative hidden chain used to draft them. Each target batch supplies
+// normalized hidden rows shifted by one position so this program can overwrite
+// the same MTP cache cells before the next proposal.
+
+command.program.decl @qwen38_attention_layer_prefill(%token_count: index, %layer: index, %attention_ordinal: index, %verification_depth: index) launch(%parameters: buffer, %residual: buffer, %attention_cache: buffer, %control: buffer, %attention_output: buffer) where [range(%token_count, 1, 512), range(%layer, 0, 64), range(%attention_ordinal, 0, 15), range(%verification_depth, 0, 4)]
+
+kernel.decl @ggml_quantize_q8_1_x4_f32(%token_count: index, %input_size: index) launch(%token_capacity: index, %input_size_data: index, %input: buffer, %output: buffer)
+kernel.decl @ggml_linear_q8_0_q8_1_x4(%token_count: index, %input_size: index, %output_size: index) launch(%token_capacity: index, %input_size_data: index, %output_size_data: index, %input: buffer, %weight: buffer, %output: buffer)
+kernel.decl @qwen38_mtp_rmsnorm_concat_embedding_f32_prefill(%token_count: index) launch(%token_capacity: index, %epsilon: f32, %input: buffer, %weight: buffer, %output: buffer)
+kernel.decl @qwen38_mtp_rmsnorm_concat_hidden_f32_prefill(%token_count: index) launch(%token_capacity: index, %epsilon: f32, %input: buffer, %weight: buffer, %output: buffer)
+kernel.decl @qwen38_token_embedding_q5k_f32_prefill(%token_count: index) launch(%token_ids: buffer, %weight: buffer, %output: buffer)
+
+// Advances the stored MTP block over one committed target span. The caller
+// supplies target hidden rows already shifted into the MTP pairing contract:
+// [previous carry, target_h[0], ..., target_h[token_count - 2]].
+command.program.def @qwen38_mtp_catchup(%token_count: index, %verification_depth: index) launch(%embedding_parameters: buffer, %mtp_input_parameters: buffer, %mtp_layer_parameters: buffer, %residual: buffer, %control: buffer, %attention_cache: buffer, %shifted_hidden: buffer, %token_ids: buffer) where [range(%token_count, 1, 512), range(%verification_depth, 0, 4)] {
+  %token_capacity = index.constant 512 : index
+  %hidden_size = index.constant 5120 : index
+  %concat_size = index.constant 10240 : index
+  %mtp_layer = index.constant 64 : index
+  %mtp_attention_ordinal = index.constant 0 : index
+  %epsilon = scalar.constant 0.000001 : f32
+
+  %embedding_weight = command.parameter %embedding_parameters, "token_embd.weight" : view<874086400xi8>
+  %embedding_norm_weight = command.parameter %mtp_input_parameters, "blk.64.nextn.enorm.weight" : view<5120xf32>
+  %hidden_norm_weight = command.parameter %mtp_input_parameters, "blk.64.nextn.hnorm.weight" : view<5120xf32>
+  %embedding_hidden_weight = command.parameter %mtp_input_parameters, "blk.64.nextn.eh_proj.weight" : view<55705600xi8>
+
+  %hidden_capacity_bytes = index.constant 10485760 : offset
+  %concat_capacity_bytes = index.constant 20971520 : offset
+  %concat_q8_capacity_bytes = index.constant 5898240 : offset
+  %attention_capacity_bytes = index.constant 12582912 : offset
+
+  %embedding = buffer.alloca<global> align(256) %hidden_capacity_bytes : buffer
+  kernel.launch @qwen38_token_embedding_q5k_f32_prefill[%token_count](%token_ids, %embedding_weight, %embedding) : [index](buffer, view<874086400xi8>, buffer)
+
+  %normalized_concat = buffer.alloca<global> align(256) %concat_capacity_bytes : buffer
+  command.concurrent {
+    kernel.launch @qwen38_mtp_rmsnorm_concat_embedding_f32_prefill[%token_count](%token_capacity, %epsilon, %embedding, %embedding_norm_weight, %normalized_concat) : [index](index, f32, buffer, view<5120xf32>, buffer)
+    kernel.launch @qwen38_mtp_rmsnorm_concat_hidden_f32_prefill[%token_count](%token_capacity, %epsilon, %shifted_hidden, %hidden_norm_weight, %normalized_concat) : [index](index, f32, buffer, view<5120xf32>, buffer)
+  }
+
+  %normalized_concat_q8 = buffer.alloca<global> align(256) %concat_q8_capacity_bytes : buffer
+  kernel.launch @ggml_quantize_q8_1_x4_f32[%token_count, %concat_size](%token_capacity, %concat_size, %normalized_concat, %normalized_concat_q8) : [index, index](index, index, buffer, buffer)
+  kernel.launch @ggml_linear_q8_0_q8_1_x4[%token_count, %concat_size, %hidden_size](%token_capacity, %concat_size, %hidden_size, %normalized_concat_q8, %embedding_hidden_weight, %residual) : [index, index, index](index, index, index, buffer, view<55705600xi8>, buffer)
+
+  %attention_output = buffer.alloca<global> align(256) %attention_capacity_bytes : buffer
+  command.program.launch @qwen38_attention_layer_prefill[%token_count, %mtp_layer, %mtp_attention_ordinal, %verification_depth](%mtp_layer_parameters, %residual, %attention_cache, %control, %attention_output) : [index, index, index, index](buffer, buffer, buffer, buffer, buffer)
+  command.return
+}
