@@ -4,8 +4,6 @@
 // tokens. Both consume the original GGUF Q5_K bytes and F32 activations
 // without a persistent repack.
 
-func.decl @ggml_q5k_scale_min(%weight: buffer, %block_byte_base: offset, %group: index) -> (f32, f32)
-
 kernel.decl @ggml_q5k_f32_reference(%input_size$5: index) launch(%input_size$6: index, %input: buffer, %weight: buffer, %output: buffer)
 
 kernel.decl @ggml_q5k_fix_differential_headers() launch(%weight: buffer)
@@ -65,7 +63,7 @@ func.def inline @qwen38_q5k_f16_vector4(%weight: buffer, %row_byte_base: offset,
   %q5_word = vector.ori %low_codes, %high_codes : vector<1xi32>
   %q5_values = vector.bitcast %q5_word : vector<1xi32> to vector<4xi8>
   %q5_f32 = vector.uitofp %q5_values : vector<4xi8> to vector<4xf32>
-  %d_scale, %dmin_scale = func.call @ggml_q5k_scale_min(%weight, %block_byte_base, %bounded_group) : (buffer, offset, index) -> (f32, f32)
+  %d_scale, %dmin_scale = func.apply<ggml.q5k.scale_min>(%weight, %block_byte_base, %bounded_group) : (buffer, offset, index) -> (f32, f32)
   %d_scale_vector = vector.splat %d_scale : vector<4xf32>
   %dmin_scale_vector = vector.splat %dmin_scale : vector<4xf32>
   %scaled = vector.mulf %q5_f32, %d_scale_vector : vector<4xf32>

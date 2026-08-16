@@ -4,8 +4,6 @@
 // consume the original GGUF Q6_K bytes and F32 activations without a
 // persistent repack.
 
-func.decl @ggml_q6k_f16_vector4(%weight: buffer, %weight_row_byte_base: offset, %q6_block: index, %q6_group: index, %packet: index) -> (vector<4xf16>)
-
 kernel.decl @ggml_quantize_q8_1_x4_f32(%token_count: index, %input_size: index) launch(%token_count$1: index, %input_size$1: index, %input: buffer, %output: buffer)
 
 kernel.decl @ggml_linear_q6k_q8_1_x4(%token_count: index, %input_size: index, %output_size: index) launch(%token_count$1: index, %input_size$1: index, %output_size$1: index, %input: buffer, %weight: buffer, %output: buffer)
@@ -92,7 +90,7 @@ func.template<qwen38.dense_q6k_f16_wmma.body> device @qwen38_dense_q6k_f16_wmma_
           %weight_values = scf.if %valid_channel -> (vector<4xf16>) {
             %channel_byte_index = index.mul %channel, %weight_row_bytes : index
             %row_byte_base = index.cast %channel_byte_index : index to offset
-            %decoded = func.call @ggml_q6k_f16_vector4(%weight_noalias, %row_byte_base, %quant_block, %quant_group, %load_packet) : (buffer, offset, index, index, index) -> (vector<4xf16>)
+            %decoded = func.apply<ggml.q6k.f16_vector4>(%weight_noalias, %row_byte_base, %quant_block, %quant_group, %load_packet) : (buffer, offset, index, index, index) -> (vector<4xf16>)
             scf.yield %decoded : vector<4xf16>
           } else {
             scf.yield %c0_f16x4 : vector<4xf16>
@@ -124,7 +122,7 @@ func.template<qwen38.dense_q6k_f16_wmma.body> device @qwen38_dense_q6k_f16_wmma_
           %weight_values = scf.if %valid_channel -> (vector<4xf16>) {
             %channel_byte_index = index.mul %channel, %weight_row_bytes : index
             %row_byte_base = index.cast %channel_byte_index : index to offset
-            %decoded = func.call @ggml_q6k_f16_vector4(%weight_noalias, %row_byte_base, %quant_block, %quant_group, %load_packet) : (buffer, offset, index, index, index) -> (vector<4xf16>)
+            %decoded = func.apply<ggml.q6k.f16_vector4>(%weight_noalias, %row_byte_base, %quant_block, %quant_group, %load_packet) : (buffer, offset, index, index, index) -> (vector<4xf16>)
             scf.yield %decoded : vector<4xf16>
           } else {
             scf.yield %c0_f16x4 : vector<4xf16>

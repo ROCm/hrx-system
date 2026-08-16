@@ -5,7 +5,7 @@
 // Decodes the physical scale and minimum for one 32-value group. The caller
 // supplies the byte base of a Q4_K or Q5_K block, both of which place `d`,
 // `dmin`, and `scales[12]` at the same offsets.
-func.def inline @ggml_qk_scale_min(%weight: buffer, %block_byte_base: offset, %group: index) -> (f32, f32) {
+func.template<ggml.qk.scale_min> device @ggml_qk_scale_min(%weight: buffer, %block_byte_base: offset, %group: index) -> (f32, f32) {
   %c4 = index.constant 4 : index
   %scale_byte_add = index.constant 4 : offset
   %c4_i32 = scalar.constant 4 : i32
@@ -59,7 +59,7 @@ func.def inline @ggml_qk_scale_min(%weight: buffer, %block_byte_base: offset, %g
 // Contracts one 16-value unsigned K-quant half-group with Q8_1. Paired lanes
 // use the same minimum and each apply half the Q8_1 block sum; their subgroup
 // reduction therefore applies the 32-value minimum correction exactly once.
-func.def inline @ggml_qk_unsigned_q8_1_dot(%quantized_values: vector<16xi8>, %d_scale: f32, %dmin_scale: f32, %q8_values: vector<16xi8>, %q8_d: f32, %q8_s: f32) -> (f32) {
+func.template<ggml.qk.unsigned_q8_1_dot> device @ggml_qk_unsigned_q8_1_dot(%quantized_values: vector<16xi8>, %d_scale: f32, %dmin_scale: f32, %q8_values: vector<16xi8>, %q8_d: f32, %q8_s: f32) -> (f32) {
   %c0_i32 = scalar.constant 0 : i32
   %c0_i32v = vector.constant 0 : vector<4xi32>
   %c0_5_f32 = scalar.constant 0.5 : f32

@@ -11,8 +11,6 @@ kernel.decl @ggml_quantize_q8_1_x4_f32(%token_count0: index, %input_size0: index
 
 kernel.decl @ggml_linear_q6k_q8_1_x4(%token_count0: index, %input_size0: index, %output_size0: index) launch(%token_count1: index, %input_size1: index, %output_size1: index, %input: buffer, %weight: buffer, %output: buffer)
 
-func.decl @ggml_q6k_sign_extend_dot4(%code: vector<1xi32>) -> (vector<4xi8>)
-
 func.decl @qwen38_q8_stage_activation_tile(%token_count: index, %input_size: index, %token_tile_base: index, %q8_group: index, %workitem: index, %q8_input: buffer, %activation_stage: buffer, %activation_metadata: buffer)
 
 config.decl @qwen38.linear_q6k_i8_wmma.input_size : %value: index where [range(%value, 256, 32768), mul(%value, 256)]
@@ -59,8 +57,8 @@ func.def inline @qwen38_q6k_unpack_word_pair(%weight: buffer, %block_byte_base: 
   %raw_codes1 = scalar.ori %high_codes0, %high_bits1 : i32
   %raw_vector0 = vector.from_elements %raw_codes0 : vector<1xi32>
   %raw_vector1 = vector.from_elements %raw_codes1 : vector<1xi32>
-  %signed_vector0 = func.call @ggml_q6k_sign_extend_dot4(%raw_vector0) : (vector<1xi32>) -> (vector<4xi8>)
-  %signed_vector1 = func.call @ggml_q6k_sign_extend_dot4(%raw_vector1) : (vector<1xi32>) -> (vector<4xi8>)
+  %signed_vector0 = func.apply<ggml.q6k.sign_extend_dot4>(%raw_vector0) : (vector<1xi32>) -> (vector<4xi8>)
+  %signed_vector1 = func.apply<ggml.q6k.sign_extend_dot4>(%raw_vector1) : (vector<1xi32>) -> (vector<4xi8>)
   %signed_word_vector0 = vector.bitcast %signed_vector0 : vector<4xi8> to vector<1xi32>
   %signed_word_vector1 = vector.bitcast %signed_vector1 : vector<4xi8> to vector<1xi32>
   %codes0 = vector.extract %signed_word_vector0[0] : vector<1xi32> -> i32

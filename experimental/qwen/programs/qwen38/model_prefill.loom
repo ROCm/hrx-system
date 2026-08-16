@@ -12,7 +12,7 @@ command.program.decl @qwen38_attention_layer_prefill(%token_count: index, %layer
 
 command.program.decl @qwen38_output_head_greedy_with_hidden(%residual_offset: offset) launch(%parameters: buffer, %residual: buffer, %normalized: buffer, %token_id: buffer)
 
-kernel.decl @qwen38_token_embedding_q5k_f32(%token_count: index) launch(%token_capacity: index, %token_ids: buffer, %weight: buffer, %output: buffer)
+kernel.decl @qwen38_token_embedding_q5k_f32_prefill(%token_count: index) launch(%token_ids: buffer, %weight: buffer, %output: buffer)
 
 kernel.decl @qwen38_prefill_finish_control() launch(%control: buffer, %token_ids: buffer)
 
@@ -59,7 +59,7 @@ command.program.def @qwen38_text_prefill_transition(%token_count: index) launch(
   %c1 = index.constant 1 : index
   %hidden_row_bytes = index.constant 20480 : offset
   %embedding_weight = command.parameter %parameters, "token_embd.weight" : view<874086400xi8>
-  kernel.launch @qwen38_token_embedding_q5k_f32[%token_count](%token_count, %token_ids, %embedding_weight, %residual) : [index](index, buffer, view<874086400xi8>, buffer)
+  kernel.launch @qwen38_token_embedding_q5k_f32_prefill[%token_count](%token_ids, %embedding_weight, %residual) : [index](buffer, view<874086400xi8>, buffer)
   command.program.launch @qwen38_text_prefill_body[%token_count](%parameters, %residual, %control, %gdn_state, %attention_cache) : [index](buffer, buffer, buffer, buffer, buffer)
   %last_token = index.sub %token_count, %c1 : index
   %last_residual_offset = index.scale %last_token, %hidden_row_bytes : index, offset -> offset

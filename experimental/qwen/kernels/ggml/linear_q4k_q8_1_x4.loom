@@ -17,10 +17,6 @@ config.decl @ggml.linear_q4k_q8_1_x4.output_capacity : %value: index where [rang
 
 kernel.decl @ggml_quantize_q8_1_x4_f32(%token_count: index, %input_size: index) launch(%token_count: index, %input_size: index, %input: buffer, %output: buffer)
 
-func.decl @ggml_qk_scale_min(%weight: buffer, %block_byte_base: offset, %group: index) -> (f32, f32)
-
-func.decl @ggml_qk_unsigned_q8_1_dot(%quantized_values: vector<16xi8>, %d_scale: f32, %dmin_scale: f32, %q8_values: vector<16xi8>, %q8_d: f32, %q8_s: f32) -> (f32)
-
 // Decodes one 16-value half of a Q4_K scale group.
 func.def inline @ggml_q4k_chunk(%weight: buffer, %row_byte_base: offset, %q4_block: index, %q4_group: index, %q4_half: index) -> (vector<16xi8>, f32, f32) {
   %c4 = index.constant 4 : index
@@ -53,7 +49,7 @@ func.def inline @ggml_q4k_chunk(%weight: buffer, %row_byte_base: offset, %q4_blo
   %shifted_codes = vector.shrui %packed_codes, %nibble_shift : vector<4xi32>
   %q4_words = vector.andi %shifted_codes, %nibble_mask : vector<4xi32>
   %q4_values = vector.bitcast %q4_words : vector<4xi32> to vector<16xi8>
-  %d_scale, %dmin_scale = func.call @ggml_qk_scale_min(%weight, %block_byte_base, %bounded_group) : (buffer, offset, index) -> (f32, f32)
+  %d_scale, %dmin_scale = func.apply<ggml.qk.scale_min>(%weight, %block_byte_base, %bounded_group) : (buffer, offset, index) -> (f32, f32)
   func.return %q4_values, %d_scale, %dmin_scale : vector<16xi8>, f32, f32
 }
 
@@ -119,7 +115,7 @@ func.def inline @ggml_q4k_q8_1_x4_row_lane(%input_size: index, %weight: buffer, 
       %q8_words = vector.load %q8_words_view[%q8_word_index] : view<32xi32> -> vector<4xi32>
       %q8_values = vector.bitcast %q8_words : vector<4xi32> to vector<16xi8>
       %q4_values, %d_scale, %dmin_scale = func.call @ggml_q4k_chunk(%weight, %weight_row_byte_base, %q4_block, %q4_group, %q4_half) : (buffer, offset, index, index, index) -> (vector<16xi8>, f32, f32)
-      %dot = func.call @ggml_qk_unsigned_q8_1_dot(%q4_values, %d_scale, %dmin_scale, %q8_values, %q8_d, %q8_s) : (vector<16xi8>, f32, f32, vector<16xi8>, f32, f32) -> (f32)
+      %dot = func.apply<ggml.qk.unsigned_q8_1_dot>(%q4_values, %d_scale, %dmin_scale, %q8_values, %q8_d, %q8_s) : (vector<16xi8>, f32, f32, vector<16xi8>, f32, f32) -> (f32)
       scf.yield %dot : f32
     } else {
       scf.yield %c0_f32 : f32
@@ -242,7 +238,7 @@ kernel.def @ggml_q4k_f32_reference(%input_size: index) {
       %masked = scalar.andi %packed_code, %c15_i32 : i32
       scf.yield %masked : i32
     }
-    %d_scale, %dmin_scale = func.call @ggml_qk_scale_min(%weight, %block_byte_base, %group) : (buffer, offset, index) -> (f32, f32)
+    %d_scale, %dmin_scale = func.apply<ggml.qk.scale_min>(%weight, %block_byte_base, %group) : (buffer, offset, index) -> (f32, f32)
     %code_f32 = scalar.uitofp %code : i32 to f32
     %scaled_code = scalar.mulf %d_scale, %code_f32 : f32
     %weight_value = scalar.subf %scaled_code, %dmin_scale : f32

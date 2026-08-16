@@ -253,6 +253,28 @@ iree_executable_test(
 )
 
 iree_executable_test(
+    name = "linear_q6k_f32_decode_m4_hal_test",
+    src = "//loom/src/loom/tools/iree-test-loom",
+    args = [
+        "$(location :linear_q6k_f32_decode_linked)",
+        "--case=@ggml_linear_q6k_f32_decode_m4_nonzero_tail_case",
+        "--config=ggml.linear_q6k_f32_decode.output_capacity=9",
+        "--device=amdgpu://0",
+        "--sanitizer=access",
+    ],
+    data = [":linear_q6k_f32_decode_linked"],
+    tags = [
+        "iree-run-requirement=runtime.resource.amd_gpu",
+        "manual",
+        "requires-gpu-amd",
+        "runtime-resource=amd-gpu",
+    ],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/execute:amdgpu_hal",
+    ]),
+)
+
+iree_executable_test(
     name = "linear_q8_0_q8_1_x4_plan_test",
     src = "//loom/src/loom/tools/iree-benchmark-loom",
     args = [
@@ -370,6 +392,30 @@ iree_executable_test(
 )
 
 iree_executable_test(
+    name = "linear_q5k_q8_1_x4_m4_hal_test",
+    src = "//loom/src/loom/tools/iree-test-loom",
+    args = [
+        "$(location :linear_q5k_q8_1_x4_linked)",
+        "--case=@ggml_linear_q5k_q8_1_x4_m4_differential_case",
+        "--config=ggml.linear_q5k_q8_1_x4.output_capacity=65",
+        "--config=ggml.linear_q5k_q8_1_x4.token_capacity=4",
+        "--config=ggml.quantize_q8_1_x4.group_capacity=2",
+        "--device=amdgpu://0",
+        "--sanitizer=access",
+    ],
+    data = [":linear_q5k_q8_1_x4_linked"],
+    tags = [
+        "iree-run-requirement=runtime.resource.amd_gpu",
+        "manual",
+        "requires-gpu-amd",
+        "runtime-resource=amd-gpu",
+    ],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/execute:amdgpu_hal",
+    ]),
+)
+
+iree_executable_test(
     name = "qwen38_greedy_argmax_plan_test",
     src = "//loom/src/loom/tools/iree-benchmark-loom",
     args = [
@@ -380,6 +426,39 @@ iree_executable_test(
     ],
     data = ["qwen38/greedy_argmax.loom"],
     tags = ["hostonly"],
+)
+
+iree_executable_test(
+    name = "qwen38_token_embedding_plan_test",
+    src = "//loom/src/loom/tools/iree-benchmark-loom",
+    args = [
+        "$(location :qwen38_token_embedding_linked)",
+        "--dry-run",
+        "--output-format=jsonl",
+    ],
+    data = [":qwen38_token_embedding_linked"],
+    tags = ["hostonly"],
+)
+
+iree_executable_test(
+    name = "qwen38_token_embedding_hal_test",
+    src = "//loom/src/loom/tools/iree-test-loom",
+    args = [
+        "$(location :qwen38_token_embedding_linked)",
+        "--case=@qwen38_token_embedding_q5k_f32_differential_case",
+        "--device=amdgpu://0",
+        "--sanitizer=access",
+    ],
+    data = [":qwen38_token_embedding_linked"],
+    tags = [
+        "iree-run-requirement=runtime.resource.amd_gpu",
+        "manual",
+        "requires-gpu-amd",
+        "runtime-resource=amd-gpu",
+    ],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/execute:amdgpu_hal",
+    ]),
 )
 
 iree_executable_test(
@@ -698,14 +777,41 @@ iree_executable_test(
     ]),
 )
 
+iree_executable_test(
+    name = "linear_q6k_q8_1_x4_m4_hal_test",
+    src = "//loom/src/loom/tools/iree-test-loom",
+    args = [
+        "$(location :linear_q6k_q8_1_x4_linked)",
+        "--case=@ggml_linear_q6k_q8_1_x4_m4_wave64_block4_differential_case",
+        "--config=ggml.linear_q6k_q8_1_x4.output_capacity=9",
+        "--config=ggml.linear_q6k_q8_1_x4.token_capacity=4",
+        "--config=ggml.quantize_q8_1_x4.group_capacity=16",
+        "--device=amdgpu://0",
+        "--sanitizer=access",
+    ],
+    data = [":linear_q6k_q8_1_x4_linked"],
+    tags = [
+        "iree-run-requirement=runtime.resource.amd_gpu",
+        "manual",
+        "requires-gpu-amd",
+        "runtime-resource=amd-gpu",
+    ],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/execute:amdgpu_hal",
+    ]),
+)
+
 test_suite(
     name = "tests",
     tests = [
         ":linear_q4k_q8_1_x4_hal_test",
         ":linear_q4k_q8_1_x4_plan_test",
         ":linear_q5k_q8_1_x4_hal_test",
+        ":linear_q5k_q8_1_x4_m4_hal_test",
         ":linear_q5k_q8_1_x4_plan_test",
+        ":linear_q6k_f32_decode_m4_hal_test",
         ":linear_q6k_q8_1_x4_hal_test",
+        ":linear_q6k_q8_1_x4_m4_hal_test",
         ":linear_q6k_q8_1_x4_plan_test",
         ":quantize_q8_1_x4_hal_test",
         ":quantize_q8_1_x4_plan_test",
@@ -718,5 +824,7 @@ test_suite(
         ":qwen38_greedy_argmax_plan_test",
         ":qwen38_layer_decode_hal_test",
         ":qwen38_layer_decode_plan_test",
+        ":qwen38_token_embedding_hal_test",
+        ":qwen38_token_embedding_plan_test",
     ],
 )

@@ -4,31 +4,18 @@
 // gathers one immutable GGUF embedding row and expands it directly to the F32
 // residual ABI consumed by the base-model command programs.
 
-func.decl @ggml_q5k_chunk(%weight: buffer, %row_byte_base: offset, %q5_block: index, %q5_group: index, %q5_half: index) -> (vector<16xi8>, f32, f32)
-
-kernel.def export("qwen38_token_embedding_q5k_f32") @qwen38_token_embedding_q5k_f32(%token_count0: index) {
-  %token_count = index.assume %token_count0 [range(%token_count0, 1, 512)] : index
-  %c1 = index.constant 1 : index
-  %workgroup_size = index.constant 256 : index
-  kernel.launch.config workgroups(%token_count, %c1, %c1) workgroup_size(%workgroup_size, %c1, %c1) : index
-} launch(%token_count0: index, %token_ids: buffer, %weight: buffer, %output: buffer) {
-  %token_count = index.assume %token_count0 [range(%token_count0, 1, 512)] : index
-  %token0 = kernel.workgroup.id<x> : index
-  %token = index.assume %token0 [lt(%token0, %token_count)] : index
+// Expands one selected embedding row at an explicit output byte offset. The
+// prefill and decode wrappers differ only in how they select that row.
+func.template<qwen38.token_embedding_q5k_f32.row> device @qwen38_token_embedding_q5k_f32_row(%token_id_i32: i32, %output_byte_offset: offset, %weight: buffer, %output: buffer) {
   %workitem0 = kernel.workitem.id<x> : index
   %workitem = index.assume %workitem0 [range(%workitem0, 0, 255)] : index
-  %c0_offset = index.constant 0 : offset
-  %c1 = index.constant 1 : index
   %c2 = index.constant 2 : index
-  %c8 = index.constant 8 : index
   %c16 = index.constant 16 : index
   %c256 = index.constant 256 : index
   %chunk_count = index.constant 320 : index
   %row_bytes = index.constant 3520 : offset
-  %token_ids_noalias, %weight_noalias, %output_noalias = buffer.assume.noalias %token_ids, %weight, %output : buffer, buffer, buffer
-  %token_ids_view = buffer.view %token_ids_noalias[%c0_offset] : buffer -> view<[%token_count]xi32>
-  %output_view = buffer.view %output_noalias[%c0_offset] : buffer -> view<[%token_count]x5120xf32>
-  %token_id_i32 = view.load %token_ids_view[%token] : view<[%token_count]xi32> -> i32
+  %weight_noalias, %output_noalias = buffer.assume.noalias %weight, %output : buffer, buffer
+  %output_view = buffer.view %output_noalias[%output_byte_offset] : buffer -> view<5120xf32>
   %token_id0 = index.cast %token_id_i32 : i32 to index
   %token_id = index.assume %token_id0 [range(%token_id0, 0, 248319)] : index
   %row_byte_base = index.scale %token_id, %row_bytes : index, offset -> offset
@@ -39,15 +26,45 @@ kernel.def export("qwen38_token_embedding_q5k_f32") @qwen38_token_embedding_q5k_
     %q5_group = index.assume %q5_group0 [range(%q5_group0, 0, 7)] : index
     %q5_half0 = index.rem %block_chunk, %c2 : index
     %q5_half = index.assume %q5_half0 [range(%q5_half0, 0, 1)] : index
-    %quantized, %d_scale, %dmin_scale = func.call @ggml_q5k_chunk(%weight_noalias, %row_byte_base, %q5_block, %q5_group, %q5_half) : (buffer, offset, index, index, index) -> (vector<16xi8>, f32, f32)
+    %quantized, %d_scale, %dmin_scale = func.apply<ggml.q5k.chunk>(%weight_noalias, %row_byte_base, %q5_block, %q5_group, %q5_half) : (buffer, offset, index, index, index) -> (vector<16xi8>, f32, f32)
     %codes = vector.uitofp %quantized : vector<16xi8> to vector<16xf32>
     %d_scale_vector = vector.splat %d_scale : vector<16xf32>
     %dmin_scale_vector = vector.splat %dmin_scale : vector<16xf32>
     %scaled = vector.mulf %codes, %d_scale_vector : vector<16xf32>
     %values = vector.subf %scaled, %dmin_scale_vector : vector<16xf32>
     %element_base = index.mul %chunk, %c16 : index
-    vector.store %values, %output_view[%token, %element_base] : vector<16xf32>, view<[%token_count]x5120xf32>
+    vector.store %values, %output_view[%element_base] : vector<16xf32>, view<5120xf32>
   }
+  func.return
+}
+
+kernel.def export("qwen38_token_embedding_q5k_f32_prefill") @qwen38_token_embedding_q5k_f32_prefill(%token_count0: index) {
+  %token_count = index.assume %token_count0 [range(%token_count0, 1, 512)] : index
+  %c1 = index.constant 1 : index
+  %workgroup_size = index.constant 256 : index
+  kernel.launch.config workgroups(%token_count, %c1, %c1) workgroup_size(%workgroup_size, %c1, %c1) : index
+} launch(%token_ids: buffer, %weight: buffer, %output: buffer) {
+  %token0 = kernel.workgroup.id<x> : index
+  %token = index.assume %token0 [range(%token0, 0, 511)] : index
+  %c0_offset = index.constant 0 : offset
+  %output_row_bytes = index.constant 20480 : offset
+  %token_ids_view = buffer.view %token_ids[%c0_offset] : buffer -> view<512xi32>
+  %token_id_i32 = view.load %token_ids_view[%token] : view<512xi32> -> i32
+  %output_byte_offset = index.scale %token, %output_row_bytes : index, offset -> offset
+  func.apply<qwen38.token_embedding_q5k_f32.row>(%token_id_i32, %output_byte_offset, %weight, %output) : (i32, offset, buffer, buffer)
+  kernel.return
+}
+
+kernel.def export("qwen38_token_embedding_q5k_f32_decode") @qwen38_token_embedding_q5k_f32_decode() {
+  %c1 = index.constant 1 : index
+  %workgroup_size = index.constant 256 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%workgroup_size, %c1, %c1) : index
+} launch(%token_id: buffer, %weight: buffer, %output: buffer) {
+  %c0 = index.constant 0 : index
+  %c0_offset = index.constant 0 : offset
+  %token_id_view = buffer.view %token_id[%c0_offset] : buffer -> view<1xi32>
+  %token_id_i32 = view.load %token_id_view[%c0] : view<1xi32> -> i32
+  func.apply<qwen38.token_embedding_q5k_f32.row>(%token_id_i32, %c0_offset, %weight, %output) : (i32, offset, buffer, buffer)
   kernel.return
 }
 
@@ -215,7 +232,7 @@ check.case public @qwen38_token_embedding_q5k_f32_differential_case {
   %actual = check.generate.fill value(0.0) : tensor<2x5120xf32>
   kernel.launch @qwen38_token_embedding_fix_differential_headers(%weight) : (tensor<4x20x176xi8>)
   kernel.launch @qwen38_token_embedding_q5k_f32_reference[%token_count](%token_count, %token_ids, %weight, %expected) : [index](index, tensor<2xi32>, tensor<4x20x176xi8>, tensor<2x5120xf32>)
-  kernel.launch @qwen38_token_embedding_q5k_f32[%token_count](%token_count, %token_ids, %weight, %actual) : [index](index, tensor<2xi32>, tensor<4x20x176xi8>, tensor<2x5120xf32>)
+  kernel.launch @qwen38_token_embedding_q5k_f32_prefill[%token_count](%token_ids, %weight, %actual) : [index](tensor<2xi32>, tensor<4x20x176xi8>, tensor<2x5120xf32>)
   check.expect.close actual(%actual) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<2x5120xf32>
   check.return
 }
