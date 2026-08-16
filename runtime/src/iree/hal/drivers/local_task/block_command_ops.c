@@ -36,13 +36,18 @@ iree_status_t iree_hal_cmd_build_fill(iree_hal_cmd_block_builder_t* builder,
   IREE_ASSERT_ARGUMENT(pattern);
   IREE_ASSERT_ARGUMENT(out_fixups);
   IREE_ASSERT_ARGUMENT(out_token);
+  const bool has_dynamic_length = length == IREE_HAL_WHOLE_BUFFER;
   if (IREE_UNLIKELY(
+          !has_dynamic_length &&
           !iree_hal_cmd_transfer_tile_count_is_representable(length))) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "fill length exceeds block ISA tile capacity");
   }
 
-  const uint32_t tile_count = iree_hal_cmd_transfer_tile_count(length);
+  // Whole-buffer fills resolve their exact length from the binding span at
+  // issue time. Keep the region potentially active until that resolution.
+  const uint32_t tile_count =
+      has_dynamic_length ? 1 : iree_hal_cmd_transfer_tile_count(length);
 
   iree_hal_cmd_fill_t* cmd = NULL;
   iree_hal_cmd_fixup_t* fixups = NULL;

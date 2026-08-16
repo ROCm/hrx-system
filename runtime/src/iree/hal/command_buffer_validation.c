@@ -126,21 +126,22 @@ static iree_status_t iree_hal_command_buffer_validate_binding_requirements(
   IREE_RETURN_IF_ERROR(iree_hal_buffer_validate_memory_type(
       iree_hal_buffer_memory_type(binding.buffer), requirements.type));
 
-  // Verify that the binding range is valid and that any commands that reference
-  // it are in range.
-  if (requirements.max_byte_offset > 0) {
-    iree_device_size_t end = binding.offset + requirements.max_byte_offset;
-    if (IREE_UNLIKELY(end > binding.offset + binding.length)) {
-      return iree_make_status(
-          IREE_STATUS_OUT_OF_RANGE,
-          "at least one command attempted to access an "
-          "address outside of the valid bound buffer "
-          "range (length=%" PRIdsz ", end(inc)=%" PRIdsz
-          ", binding offset=%" PRIdsz ", binding length=%" PRIdsz
-          ", binding end(inc)=%" PRIdsz ")",
-          requirements.max_byte_offset, end - 1, binding.offset, binding.length,
-          binding.offset + binding.length - 1);
-    }
+  // Resolve and validate the bound range before comparing command extents.
+  // This also normalizes IREE_HAL_WHOLE_BUFFER without sentinel arithmetic.
+  iree_device_size_t resolved_binding_offset = 0;
+  iree_device_size_t resolved_binding_length = 0;
+  IREE_RETURN_IF_ERROR(iree_hal_buffer_calculate_range(
+      /*base_offset=*/0, iree_hal_buffer_byte_length(binding.buffer),
+      binding.offset, binding.length, &resolved_binding_offset,
+      &resolved_binding_length));
+  if (IREE_UNLIKELY(requirements.max_byte_offset > resolved_binding_length)) {
+    return iree_make_status(
+        IREE_STATUS_OUT_OF_RANGE,
+        "at least one command attempted to access an address outside of the "
+        "valid bound buffer range (required length=%" PRIdsz
+        ", binding offset=%" PRIdsz ", binding length=%" PRIdsz ")",
+        requirements.max_byte_offset, resolved_binding_offset,
+        resolved_binding_length);
   }
 
   // Ensure the offset and length have an alignment matching the value length.
@@ -164,12 +165,22 @@ static iree_status_t iree_hal_command_buffer_validate_buffer_requirements(
     iree_hal_command_buffer_validation_state_t* validation_state,
     iree_hal_buffer_ref_t buffer_ref,
     iree_hal_buffer_binding_requirements_t requirements) {
+  // A whole-buffer reference consumes whatever remains in the direct buffer or
+  // issue-time binding after its offset. Only the offset is therefore a static
+  // extent requirement; the sentinel length must not be treated as a literal
+  // byte count when accumulating binding-table requirements.
+  if (buffer_ref.length == IREE_HAL_WHOLE_BUFFER) {
+    requirements.max_byte_offset = buffer_ref.offset;
+  }
+
   // If the buffer is directly specified we can validate it inline.
   if (buffer_ref.buffer) {
     iree_hal_buffer_binding_t binding = {
         .buffer = buffer_ref.buffer,
         .offset = 0,
-        .length = buffer_ref.offset + buffer_ref.length,
+        .length = buffer_ref.length == IREE_HAL_WHOLE_BUFFER
+                      ? iree_hal_buffer_byte_length(buffer_ref.buffer)
+                      : buffer_ref.offset + buffer_ref.length,
     };
     return iree_hal_command_buffer_validate_binding_requirements(
         command_buffer, validation_state, binding, requirements);

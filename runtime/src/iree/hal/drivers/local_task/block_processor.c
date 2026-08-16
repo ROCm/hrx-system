@@ -239,15 +239,22 @@ static uint32_t iree_hal_cmd_dispatch_tile_count(
 }
 
 static iree_hal_fill_params_t iree_hal_cmd_fill_read_params(
-    const iree_hal_cmd_fill_t* fill, void** binding_ptrs) {
+    const iree_hal_cmd_fill_t* fill, void** binding_ptrs,
+    const size_t* binding_lengths) {
+  iree_hal_fill_params_t params;
   if (fill->header.flags & IREE_HAL_CMD_FLAG_INDIRECT) {
     const void* params_buffer =
         binding_ptrs[fill->params.indirect.params_binding];
-    return *(
-        const iree_hal_fill_params_t*)((const uint8_t*)params_buffer +
-                                       fill->params.indirect.params_offset);
+    params =
+        *(const iree_hal_fill_params_t*)((const uint8_t*)params_buffer +
+                                         fill->params.indirect.params_offset);
+  } else {
+    params = fill->params.direct;
   }
-  return fill->params.direct;
+  if (params.length == IREE_HAL_WHOLE_BUFFER) {
+    params.length = binding_lengths[fill->target_binding];
+  }
+  return params;
 }
 
 static iree_hal_copy_params_t iree_hal_cmd_copy_read_params(
@@ -263,7 +270,8 @@ static iree_hal_copy_params_t iree_hal_cmd_copy_read_params(
 }
 
 static uint32_t iree_hal_cmd_region_tile_count(
-    const iree_hal_cmd_barrier_t* barrier, void** binding_ptrs) {
+    const iree_hal_cmd_barrier_t* barrier, void** binding_ptrs,
+    const size_t* binding_lengths) {
   uint32_t tile_count = 0;
   const iree_hal_cmd_header_t* cmd = iree_hal_cmd_next(&barrier->header);
   for (uint8_t d = 0; d < barrier->dispatch_count; ++d) {
@@ -275,7 +283,7 @@ static uint32_t iree_hal_cmd_region_tile_count(
       case IREE_HAL_CMD_FILL: {
         const iree_hal_cmd_fill_t* fill = (const iree_hal_cmd_fill_t*)cmd;
         const iree_hal_fill_params_t params =
-            iree_hal_cmd_fill_read_params(fill, binding_ptrs);
+            iree_hal_cmd_fill_read_params(fill, binding_ptrs, binding_lengths);
         tile_count += iree_hal_cmd_transfer_tile_count(params.length);
         break;
       }
@@ -1086,12 +1094,13 @@ static void iree_hal_cmd_execute_fill_tile(const iree_hal_cmd_fill_t* fill,
 // CAS machinery used for dispatch workgroups.
 static uint32_t iree_hal_cmd_execute_fill(const iree_hal_cmd_fill_t* fill,
                                           void** binding_ptrs,
+                                          const size_t* binding_lengths,
                                           iree_atomic_int64_t* tile_index,
                                           int32_t region_epoch,
                                           uint32_t worker_count) {
   uint8_t* target = (uint8_t*)binding_ptrs[fill->target_binding];
   const iree_hal_fill_params_t params =
-      iree_hal_cmd_fill_read_params(fill, binding_ptrs);
+      iree_hal_cmd_fill_read_params(fill, binding_ptrs, binding_lengths);
   const uint32_t tile_count = iree_hal_cmd_transfer_tile_count(params.length);
   if (tile_count == 0) return 0;
 
@@ -1327,8 +1336,8 @@ static uint32_t iree_hal_cmd_block_processor_process_region(
       }
       case IREE_HAL_CMD_FILL: {
         tiles_completed += iree_hal_cmd_execute_fill(
-            (const iree_hal_cmd_fill_t*)cmd, binding_ptrs, tile_idx,
-            region_epoch, context->worker_count);
+            (const iree_hal_cmd_fill_t*)cmd, binding_ptrs, binding_lengths,
+            tile_idx, region_epoch, context->worker_count);
         break;
       }
       case IREE_HAL_CMD_COPY: {
@@ -1447,7 +1456,8 @@ static int32_t iree_hal_cmd_block_processor_region_warm_retainer_limit(
 // regions are skipped by indexed summary links instead of command-stream scans.
 static int32_t iree_hal_cmd_block_processor_find_active_region(
     const iree_hal_cmd_block_header_t* block, void** binding_ptrs,
-    uint16_t start_region_index, uint32_t* out_remaining_tiles) {
+    const size_t* binding_lengths, uint16_t start_region_index,
+    uint32_t* out_remaining_tiles) {
   const iree_hal_cmd_region_summary_t* summaries =
       iree_hal_cmd_block_region_summaries(block);
   uint16_t region_index = start_region_index;
@@ -1461,7 +1471,7 @@ static int32_t iree_hal_cmd_block_processor_find_active_region(
     const iree_hal_cmd_barrier_t* barrier =
         iree_hal_cmd_block_region_barrier(block, region_index);
     const uint32_t remaining_tiles =
-        iree_hal_cmd_region_tile_count(barrier, binding_ptrs);
+        iree_hal_cmd_region_tile_count(barrier, binding_ptrs, binding_lengths);
     if (remaining_tiles != 0) {
       *out_remaining_tiles = remaining_tiles;
       return region_index;
@@ -1513,10 +1523,14 @@ static void iree_hal_cmd_block_processor_init_block(
       context->binding_table_length);
   void** binding_ptrs = iree_hal_cmd_block_state_binding_ptrs(
       state, context->max_region_dispatch_count);
+  size_t* binding_lengths = iree_hal_cmd_block_state_binding_lengths(
+      state, context->max_region_dispatch_count,
+      context->max_total_binding_count);
 
   uint32_t first_remaining_tiles = 0;
   const int32_t first_active = iree_hal_cmd_block_processor_find_active_region(
-      block, binding_ptrs, /*start_region_index=*/0, &first_remaining_tiles);
+      block, binding_ptrs, binding_lengths, /*start_region_index=*/0,
+      &first_remaining_tiles);
 
   {
     int64_t remaining_tagged =
@@ -1625,7 +1639,8 @@ static iree_status_t iree_hal_cmd_block_processor_execute_single_worker(
         }
         case IREE_HAL_CMD_FILL: {
           *out_tiles_executed += iree_hal_cmd_execute_fill(
-              (const iree_hal_cmd_fill_t*)cmd, binding_ptrs, NULL, 0, 1);
+              (const iree_hal_cmd_fill_t*)cmd, binding_ptrs, binding_lengths,
+              NULL, 0, 1);
           break;
         }
         case IREE_HAL_CMD_COPY: {
@@ -1925,6 +1940,9 @@ static void iree_hal_cmd_block_processor_handle_region_completion(
     iree_hal_cmd_block_processor_drain_result_t* out_result) {
   void** binding_ptrs = iree_hal_cmd_block_state_binding_ptrs(
       state, context->max_region_dispatch_count);
+  size_t* binding_lengths = iree_hal_cmd_block_state_binding_lengths(
+      state, context->max_region_dispatch_count,
+      context->max_total_binding_count);
   const bool profile_command_regions =
       iree_hal_cmd_block_processor_profile_records_regions(context);
   const iree_time_t completed_region_end_host_time =
@@ -1960,8 +1978,8 @@ static void iree_hal_cmd_block_processor_handle_region_completion(
   // produced any dynamic parameters.
   uint32_t next_remaining_tiles = 0;
   const int32_t next_region = iree_hal_cmd_block_processor_find_active_region(
-      block, binding_ptrs, (uint16_t)(completed_region_index + 1),
-      &next_remaining_tiles);
+      block, binding_ptrs, binding_lengths,
+      (uint16_t)(completed_region_index + 1), &next_remaining_tiles);
 
   if (next_region < (int32_t)block->region_count) {
     // Another region in this block. Assign a new global epoch and initialize

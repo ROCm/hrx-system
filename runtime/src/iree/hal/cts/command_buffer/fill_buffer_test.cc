@@ -133,6 +133,29 @@ TEST_P(CommandBufferFillBufferTest, Pattern1_Size16_Offset0_Length8) {
   EXPECT_THAT(actual_data, ContainerEq(reference_buffer));
 }
 
+TEST_P(CommandBufferFillBufferTest, Pattern1_Size16_WholeBuffer) {
+  iree_device_size_t buffer_size = 16;
+  uint8_t pattern = 0x07;
+  std::vector<uint8_t> reference_buffer(buffer_size, pattern);
+  std::vector<uint8_t> actual_data;
+  RunFillBufferTest(buffer_size, /*target_offset=*/0, IREE_HAL_WHOLE_BUFFER,
+                    &pattern, sizeof(pattern), actual_data);
+  EXPECT_THAT(actual_data, ContainerEq(reference_buffer));
+}
+
+TEST_P(CommandBufferFillBufferTest, Pattern1_Size16_Offset2_WholeBuffer) {
+  iree_device_size_t buffer_size = 16;
+  uint8_t pattern = 0x07;
+  std::vector<uint8_t> reference_buffer{0x00, 0x00, 0x07, 0x07,  //
+                                        0x07, 0x07, 0x07, 0x07,  //
+                                        0x07, 0x07, 0x07, 0x07,  //
+                                        0x07, 0x07, 0x07, 0x07};
+  std::vector<uint8_t> actual_data;
+  RunFillBufferTest(buffer_size, /*target_offset=*/2, IREE_HAL_WHOLE_BUFFER,
+                    &pattern, sizeof(pattern), actual_data);
+  EXPECT_THAT(actual_data, ContainerEq(reference_buffer));
+}
+
 TEST_P(CommandBufferFillBufferTest, Pattern1_Size16_Offset2_Length8) {
   iree_device_size_t buffer_size = 16;
   uint8_t pattern = 0x07;
