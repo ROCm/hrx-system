@@ -32,7 +32,9 @@
 #define QWEN38_MTP_ATTENTION_CACHE_BYTE_LENGTH 2097152
 #define QWEN38_CONTROL_BYTE_LENGTH 8
 #define QWEN38_MTP_DRAFT_DEPTH 4
-#define QWEN38_MTP_PROGRESS_BYTE_LENGTH 8
+#define QWEN38_MTP_PROGRESS_WORD_COUNT 7
+#define QWEN38_MTP_PROGRESS_BYTE_LENGTH \
+  (QWEN38_MTP_PROGRESS_WORD_COUNT * sizeof(int32_t))
 #define QWEN38_DECODE_TEXT_CAPACITY 65536
 
 IREE_FLAG(string, tokenizer, "", "Hugging Face tokenizer.json path.");
@@ -726,6 +728,7 @@ static iree_status_t qwen38_text_run(void) {
   int32_t mtp_cycle_count = 0;
   int32_t mtp_committed_count = 0;
   int32_t mtp_accepted_draft_count = 0;
+  int32_t mtp_depth_counts[QWEN38_MTP_DRAFT_DEPTH + 1] = {0};
   // A cycle always emits at least one token, so this conservative batch can
   // execute without observing intermediate acceptance decisions and cannot
   // cross the requested output limit. The host reads cumulative progress only
@@ -789,6 +792,20 @@ static iree_status_t qwen38_text_run(void) {
       mtp_cycle_count += batch_cycle_count;
       mtp_committed_count = generated_count - 1;
       mtp_accepted_draft_count = next_accepted_draft_count;
+      const uint8_t* depth_data =
+          progress_mapping.contents.data + 2 * sizeof(uint32_t);
+      int32_t observed_cycle_count = 0;
+      for (int32_t depth = 0; depth <= QWEN38_MTP_DRAFT_DEPTH; ++depth) {
+        mtp_depth_counts[depth] = (int32_t)iree_unaligned_load_le_u32(
+            depth_data + depth * sizeof(uint32_t));
+        observed_cycle_count += mtp_depth_counts[depth];
+      }
+      if (observed_cycle_count != mtp_cycle_count) {
+        status = iree_make_status(IREE_STATUS_DATA_LOSS,
+                                  "MTP depth histogram accounts for %" PRId32
+                                  " of %" PRId32 " completed cycles",
+                                  observed_cycle_count, mtp_cycle_count);
+      }
     }
   }
 
@@ -890,6 +907,9 @@ static iree_status_t qwen38_text_run(void) {
             "\n"
             "  MTP cycles:           %" PRId32 " (%" PRId32 " tokens, %" PRId32
             " accepted drafts)\n"
+            "  MTP accepted depths:  0:%" PRId32 " 1:%" PRId32 " 2:%" PRId32
+            " 3:%" PRId32 " 4:%" PRId32
+            "\n"
             "  setup to ready:       %.3f ms\n"
             "  prefill:              %.3f ms (%.2f tok/s)\n"
             "  cold time to token:   %.3f ms\n"
@@ -899,6 +919,8 @@ static iree_status_t qwen38_text_run(void) {
             (uint64_t)qwen_tooling_command_program_set_parameter_byte_length(
                 program_set),
             mtp_cycle_count, mtp_committed_count, mtp_accepted_draft_count,
+            mtp_depth_counts[0], mtp_depth_counts[1], mtp_depth_counts[2],
+            mtp_depth_counts[3], mtp_depth_counts[4],
             qwen38_elapsed_ms(run_start, ready_time),
             qwen38_elapsed_ms(prefill_start, first_token_time),
             qwen38_rate(prompt_token_count, prefill_start, first_token_time),

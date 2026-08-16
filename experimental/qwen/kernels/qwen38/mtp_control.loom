@@ -115,7 +115,7 @@ kernel.def export("qwen38_mtp_accept_depth4") @qwen38_mtp_accept_depth4() {
   %tokens_view = buffer.view %target_tokens[%c0_offset] : buffer -> view<129xi32>
   %replay_view = buffer.view %replay_control[%c0_offset] : buffer -> view<2xi32>
   %acceptance_view = buffer.view %acceptance[%c0_offset] : buffer -> view<2xi32>
-  %progress_view = buffer.view %progress[%c0_offset] : buffer -> view<2xi32>
+  %progress_view = buffer.view %progress[%c0_offset] : buffer -> view<7xi32>
 
   %draft0 = view.load %draft_view[0] : view<4xi32> -> i32
   %draft1 = view.load %draft_view[1] : view<4xi32> -> i32
@@ -184,10 +184,17 @@ kernel.def export("qwen38_mtp_accept_depth4") @qwen38_mtp_accept_depth4() {
   // Publish cumulative progress for batched host scheduling. This buffer is
   // host-local/device-visible, but no host observes it until the timeline
   // semaphore for an entire queued batch has completed.
-  %accepted_total = view.load %progress_view[1] : view<2xi32> -> i32
+  %accepted_total = view.load %progress_view[1] : view<7xi32> -> i32
   %next_accepted_total = scalar.addi %accepted_total, %accepted_i32 : i32
-  view.store %next_generated_count, %progress_view[0] : i32, view<2xi32>
-  view.store %next_accepted_total, %progress_view[1] : i32, view<2xi32>
+  %c2 = index.constant 2 : index
+  %depth_index0 = index.add %accepted, %c2 : index
+  %depth_index = index.assume %depth_index0 [range(%depth_index0, 2, 6)] : index
+  %depth_count = view.load %progress_view[%depth_index] : view<7xi32> -> i32
+  %c1_i32 = scalar.constant 1 : i32
+  %next_depth_count = scalar.addi %depth_count, %c1_i32 : i32
+  view.store %next_generated_count, %progress_view[0] : i32, view<7xi32>
+  view.store %next_accepted_total, %progress_view[1] : i32, view<7xi32>
+  view.store %next_depth_count, %progress_view[%depth_index] : i32, view<7xi32>
   kernel.return
 }
 
@@ -328,14 +335,14 @@ check.case public @qwen38_mtp_control_depth4_case {
   check.expect.equal actual(%verify_control) expected(%expected_verify_control) : tensor<2xi32>
 
   %targets = check.generate.iota offset(0) step(1) : tensor<4xi32>
-  %progress = check.generate.fill value(0) : tensor<2xi32>
+  %progress = check.generate.fill value(0) : tensor<7xi32>
 
   %drafts_a0 = check.generate.iota offset(1) step(1) : tensor<4xi32>
   %control_a0 = check.generate.iota offset(100) step(-100) : tensor<2xi32>
   %tokens_a0 = check.generate.fill value(-1) : tensor<2xi32>
   %replay_a0 = check.generate.fill value(-1) : tensor<2xi32>
   %acceptance_a0 = check.generate.fill value(-1) : tensor<2xi32>
-  kernel.launch @qwen38_mtp_accept_depth4(%drafts_a0, %targets, %control_a0, %tokens_a0, %replay_a0, %acceptance_a0, %progress) : (tensor<4xi32>, tensor<4xi32>, tensor<2xi32>, tensor<2xi32>, tensor<2xi32>, tensor<2xi32>, tensor<2xi32>)
+  kernel.launch @qwen38_mtp_accept_depth4(%drafts_a0, %targets, %control_a0, %tokens_a0, %replay_a0, %acceptance_a0, %progress) : (tensor<4xi32>, tensor<4xi32>, tensor<2xi32>, tensor<2xi32>, tensor<2xi32>, tensor<2xi32>, tensor<7xi32>)
   %committed_a0 = check.generate.fill value(-1) : tensor<1xi32>
   %pending_a0 = check.generate.fill value(-1) : tensor<1xi32>
   %c1 = check.literal value(1) : index
@@ -357,7 +364,7 @@ check.case public @qwen38_mtp_control_depth4_case {
   %tokens_a1 = check.generate.fill value(-1) : tensor<3xi32>
   %replay_a1 = check.generate.fill value(-1) : tensor<2xi32>
   %acceptance_a1 = check.generate.fill value(-1) : tensor<2xi32>
-  kernel.launch @qwen38_mtp_accept_depth4(%drafts_a1, %targets, %control_a1, %tokens_a1, %replay_a1, %acceptance_a1, %progress) : (tensor<4xi32>, tensor<4xi32>, tensor<2xi32>, tensor<3xi32>, tensor<2xi32>, tensor<2xi32>, tensor<2xi32>)
+  kernel.launch @qwen38_mtp_accept_depth4(%drafts_a1, %targets, %control_a1, %tokens_a1, %replay_a1, %acceptance_a1, %progress) : (tensor<4xi32>, tensor<4xi32>, tensor<2xi32>, tensor<3xi32>, tensor<2xi32>, tensor<2xi32>, tensor<7xi32>)
   %committed_a1 = check.generate.fill value(-1) : tensor<2xi32>
   %pending_a1 = check.generate.fill value(-1) : tensor<1xi32>
   %c2 = check.literal value(2) : index
@@ -379,7 +386,7 @@ check.case public @qwen38_mtp_control_depth4_case {
   %tokens_a2 = check.generate.fill value(-1) : tensor<4xi32>
   %replay_a2 = check.generate.fill value(-1) : tensor<2xi32>
   %acceptance_a2 = check.generate.fill value(-1) : tensor<2xi32>
-  kernel.launch @qwen38_mtp_accept_depth4(%drafts_a2, %targets, %control_a2, %tokens_a2, %replay_a2, %acceptance_a2, %progress) : (tensor<4xi32>, tensor<4xi32>, tensor<2xi32>, tensor<4xi32>, tensor<2xi32>, tensor<2xi32>, tensor<2xi32>)
+  kernel.launch @qwen38_mtp_accept_depth4(%drafts_a2, %targets, %control_a2, %tokens_a2, %replay_a2, %acceptance_a2, %progress) : (tensor<4xi32>, tensor<4xi32>, tensor<2xi32>, tensor<4xi32>, tensor<2xi32>, tensor<2xi32>, tensor<7xi32>)
   %committed_a2 = check.generate.fill value(-1) : tensor<3xi32>
   %pending_a2 = check.generate.fill value(-1) : tensor<1xi32>
   %c3 = check.literal value(3) : index
@@ -401,7 +408,7 @@ check.case public @qwen38_mtp_control_depth4_case {
   %tokens_a3 = check.generate.fill value(-1) : tensor<5xi32>
   %replay_a3 = check.generate.fill value(-1) : tensor<2xi32>
   %acceptance_a3 = check.generate.fill value(-1) : tensor<2xi32>
-  kernel.launch @qwen38_mtp_accept_depth4(%drafts_a3, %targets, %control_a3, %tokens_a3, %replay_a3, %acceptance_a3, %progress) : (tensor<4xi32>, tensor<4xi32>, tensor<2xi32>, tensor<5xi32>, tensor<2xi32>, tensor<2xi32>, tensor<2xi32>)
+  kernel.launch @qwen38_mtp_accept_depth4(%drafts_a3, %targets, %control_a3, %tokens_a3, %replay_a3, %acceptance_a3, %progress) : (tensor<4xi32>, tensor<4xi32>, tensor<2xi32>, tensor<5xi32>, tensor<2xi32>, tensor<2xi32>, tensor<7xi32>)
   %committed_a3 = check.generate.fill value(-1) : tensor<4xi32>
   %pending_a3 = check.generate.fill value(-1) : tensor<1xi32>
   %c4 = check.literal value(4) : index
@@ -423,7 +430,7 @@ check.case public @qwen38_mtp_control_depth4_case {
   %tokens_a4 = check.generate.fill value(-1) : tensor<5xi32>
   %replay_a4 = check.generate.fill value(-1) : tensor<2xi32>
   %acceptance_a4 = check.generate.fill value(-1) : tensor<2xi32>
-  kernel.launch @qwen38_mtp_accept_depth4(%drafts_a4, %targets, %control_a4, %tokens_a4, %replay_a4, %acceptance_a4, %progress) : (tensor<4xi32>, tensor<4xi32>, tensor<2xi32>, tensor<5xi32>, tensor<2xi32>, tensor<2xi32>, tensor<2xi32>)
+  kernel.launch @qwen38_mtp_accept_depth4(%drafts_a4, %targets, %control_a4, %tokens_a4, %replay_a4, %acceptance_a4, %progress) : (tensor<4xi32>, tensor<4xi32>, tensor<2xi32>, tensor<5xi32>, tensor<2xi32>, tensor<2xi32>, tensor<7xi32>)
   %committed_a4 = check.generate.fill value(-1) : tensor<4xi32>
   %pending_a4 = check.generate.fill value(-1) : tensor<1xi32>
   kernel.launch @qwen38_mtp_read_committed[%c4](%c4, %tokens_a4, %committed_a4) : [index](index, tensor<5xi32>, tensor<4xi32>)
@@ -438,8 +445,12 @@ check.case public @qwen38_mtp_control_depth4_case {
   check.expect.equal actual(%pending_a4) expected(%expected_pending_a4) : tensor<1xi32>
   check.expect.equal actual(%replay_a4) expected(%expected_replay_a4) : tensor<2xi32>
   check.expect.equal actual(%acceptance_a4) expected(%expected_acceptance_a4) : tensor<2xi32>
-  %expected_progress = check.generate.iota offset(4) step(6) : tensor<2xi32>
-  check.expect.equal actual(%progress) expected(%expected_progress) : tensor<2xi32>
+  %progress_header = check.tensor.view %progress offset(0) : tensor<7xi32> -> tensor<2xi32>
+  %depth_histogram = check.tensor.view %progress offset(8) : tensor<7xi32> -> tensor<5xi32>
+  %expected_progress_header = check.generate.iota offset(4) step(6) : tensor<2xi32>
+  %expected_depth_histogram = check.generate.fill value(1) : tensor<5xi32>
+  check.expect.equal actual(%progress_header) expected(%expected_progress_header) : tensor<2xi32>
+  check.expect.equal actual(%depth_histogram) expected(%expected_depth_histogram) : tensor<5xi32>
 
   %normalized_rows = check.generate.iota offset(0.0) step(0.0009765625) : tensor<4x5120xf32>
   %selected_hidden = check.generate.fill value(-1.0) : tensor<5120xf32>
