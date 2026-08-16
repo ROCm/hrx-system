@@ -907,6 +907,7 @@ TEST_F(RemoteSessionTest, DeviceSpecAvailableWithoutConnection) {
 class RemoteBufferTest : public ::testing::Test {
  protected:
   static constexpr uint32_t kAxisTableCapacity = 16;
+  static constexpr iree_host_size_t kServerWriteFileLength = 64;
 
   void SetUp() override {
     // Create a runner-less proactor pool. This fixture owns the explicit
@@ -1074,7 +1075,7 @@ class RemoteBufferTest : public ::testing::Test {
 
     server_write_file_ =
         iree::testing::TempFilePath("iree_hal_remote_server_write");
-    std::string initial_write_contents(64, '\0');
+    std::string initial_write_contents(kServerWriteFileLength, '\0');
     IREE_ASSERT_OK(WriteFileContents(
         server_write_file_.path_view(),
         iree_make_const_byte_span(initial_write_contents.data(),
@@ -2362,7 +2363,7 @@ TEST_F(RemoteBufferTest, ServerFileQueueRead) {
   IREE_ASSERT_OK(iree_hal_remote_client_device_open_file(
       client_device_, IREE_SV("server://read"), IREE_HAL_MEMORY_ACCESS_READ,
       iree_allocator_system(), &source_file));
-  EXPECT_EQ(iree_hal_file_length(source_file), 0);
+  EXPECT_EQ(iree_hal_file_length(source_file), server_read_contents_.size());
 
   iree_hal_allocator_t* allocator = iree_hal_device_allocator(client_device_);
   iree_hal_buffer_params_t params = {0};
@@ -2469,42 +2470,14 @@ TEST_F(RemoteBufferTest, RegisteredClientFileQueueRead) {
   source_path.Remove();
 }
 
-TEST_F(RemoteBufferTest, ServerFileQueueReadOpenFailureSignalsSemaphore) {
+TEST_F(RemoteBufferTest, ServerFileOpenFailureReturnsStatus) {
   iree_hal_file_t* source_file = nullptr;
-  IREE_ASSERT_OK(iree_hal_remote_client_device_open_file(
-      client_device_, IREE_SV("server://missing"), IREE_HAL_MEMORY_ACCESS_READ,
-      iree_allocator_system(), &source_file));
-
-  iree_hal_allocator_t* allocator = iree_hal_device_allocator(client_device_);
-  iree_hal_buffer_params_t params = {0};
-  params.usage =
-      IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_MAPPING_SCOPED;
-  params.access = IREE_HAL_MEMORY_ACCESS_ALL;
-  params.type =
-      IREE_HAL_MEMORY_TYPE_HOST_VISIBLE | IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
-
-  iree_hal_buffer_t* buffer = nullptr;
-  IREE_ASSERT_OK(
-      iree_hal_allocator_allocate_buffer(allocator, params, 16, &buffer));
-
-  iree_hal_semaphore_t* semaphore = nullptr;
-  IREE_ASSERT_OK(
-      iree_hal_semaphore_create(client_device_, IREE_HAL_QUEUE_AFFINITY_ANY, 0,
-                                IREE_HAL_SEMAPHORE_FLAG_NONE, &semaphore));
-  SemaphoreListHelper signal(semaphore, 1);
-  IREE_ASSERT_OK(iree_hal_device_queue_read(
-      client_device_, IREE_HAL_QUEUE_AFFINITY_ANY,
-      iree_hal_semaphore_list_empty(), signal.list, source_file,
-      /*source_offset=*/0, buffer, /*target_offset=*/0, 16,
-      IREE_HAL_READ_FLAG_NONE));
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_PERMISSION_DENIED,
-      iree_hal_semaphore_wait(semaphore, 1, iree_infinite_timeout(),
-                              IREE_ASYNC_WAIT_FLAG_NONE));
-
-  iree_hal_semaphore_release(semaphore);
-  iree_hal_buffer_release(buffer);
-  iree_hal_file_release(source_file);
+      iree_hal_remote_client_device_open_file(
+          client_device_, IREE_SV("server://missing"),
+          IREE_HAL_MEMORY_ACCESS_READ, iree_allocator_system(), &source_file));
+  EXPECT_EQ(source_file, nullptr);
 }
 
 TEST_F(RemoteBufferTest, ClientFileQueueReadLargeHostAllocation) {
@@ -2587,6 +2560,7 @@ TEST_F(RemoteBufferTest, ServerFileQueueWrite) {
       client_device_, IREE_SV("server://write"),
       IREE_HAL_MEMORY_ACCESS_READ | IREE_HAL_MEMORY_ACCESS_WRITE,
       iree_allocator_system(), &target_file));
+  EXPECT_EQ(iree_hal_file_length(target_file), kServerWriteFileLength);
 
   static const char kWriteContents[] = "remote server file write contents";
   iree_hal_allocator_t* allocator = iree_hal_device_allocator(client_device_);

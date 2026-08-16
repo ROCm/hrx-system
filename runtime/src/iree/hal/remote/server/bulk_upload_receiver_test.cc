@@ -91,7 +91,7 @@ static iree_async_buffer_lease_t MakeCountingLease(int* release_count) {
   return lease;
 }
 
-typedef struct failing_queue_read_device_t {
+typedef struct failing_queue_copy_device_t {
   // HAL resource header for the test wrapper device.
   iree_hal_resource_t resource;
 
@@ -100,91 +100,91 @@ typedef struct failing_queue_read_device_t {
 
   // Underlying device used for files and semaphores.
   iree_hal_device_t* base_device;
-} failing_queue_read_device_t;
+} failing_queue_copy_device_t;
 
-extern const iree_hal_device_vtable_t failing_queue_read_device_vtable;
+extern const iree_hal_device_vtable_t failing_queue_copy_device_vtable;
 
-static failing_queue_read_device_t* failing_queue_read_device_cast(
+static failing_queue_copy_device_t* failing_queue_copy_device_cast(
     iree_hal_device_t* base_device) {
-  IREE_HAL_ASSERT_TYPE(base_device, &failing_queue_read_device_vtable);
-  return (failing_queue_read_device_t*)base_device;
+  IREE_HAL_ASSERT_TYPE(base_device, &failing_queue_copy_device_vtable);
+  return (failing_queue_copy_device_t*)base_device;
 }
 
-static void failing_queue_read_device_destroy(iree_hal_device_t* base_device) {
-  failing_queue_read_device_t* device =
-      failing_queue_read_device_cast(base_device);
+static void failing_queue_copy_device_destroy(iree_hal_device_t* base_device) {
+  failing_queue_copy_device_t* device =
+      failing_queue_copy_device_cast(base_device);
   iree_allocator_t host_allocator = device->host_allocator;
   iree_hal_device_release(device->base_device);
   iree_allocator_free(host_allocator, device);
 }
 
-static iree_string_view_t failing_queue_read_device_id(
+static iree_string_view_t failing_queue_copy_device_id(
     iree_hal_device_t* base_device) {
   (void)base_device;
-  return iree_make_cstring_view("failing-queue-read");
+  return iree_make_cstring_view("failing-queue-copy");
 }
 
-static iree_allocator_t failing_queue_read_device_host_allocator(
+static iree_allocator_t failing_queue_copy_device_host_allocator(
     iree_hal_device_t* base_device) {
-  failing_queue_read_device_t* device =
-      failing_queue_read_device_cast(base_device);
+  failing_queue_copy_device_t* device =
+      failing_queue_copy_device_cast(base_device);
   return device->host_allocator;
 }
 
-static iree_status_t failing_queue_read_device_import_file(
+static iree_status_t failing_queue_copy_device_import_file(
     iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
     iree_hal_memory_access_t access, iree_io_file_handle_t* handle,
     iree_hal_external_file_flags_t flags, iree_hal_file_t** out_file) {
-  failing_queue_read_device_t* device =
-      failing_queue_read_device_cast(base_device);
+  failing_queue_copy_device_t* device =
+      failing_queue_copy_device_cast(base_device);
   return iree_hal_file_import(device->base_device, queue_affinity, access,
                               handle, flags, out_file);
 }
 
-static iree_status_t failing_queue_read_device_create_semaphore(
+static iree_status_t failing_queue_copy_device_create_semaphore(
     iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
     uint64_t initial_value, iree_hal_semaphore_flags_t flags,
     iree_hal_semaphore_t** out_semaphore) {
-  failing_queue_read_device_t* device =
-      failing_queue_read_device_cast(base_device);
+  failing_queue_copy_device_t* device =
+      failing_queue_copy_device_cast(base_device);
   return iree_hal_semaphore_create(device->base_device, queue_affinity,
                                    initial_value, flags, out_semaphore);
 }
 
 static iree_hal_semaphore_compatibility_t
-failing_queue_read_device_query_semaphore_compatibility(
+failing_queue_copy_device_query_semaphore_compatibility(
     iree_hal_device_t* base_device, iree_hal_semaphore_t* semaphore) {
-  failing_queue_read_device_t* device =
-      failing_queue_read_device_cast(base_device);
+  failing_queue_copy_device_t* device =
+      failing_queue_copy_device_cast(base_device);
   return iree_hal_device_query_semaphore_compatibility(device->base_device,
                                                        semaphore);
 }
 
-static iree_status_t failing_queue_read_device_queue_read(
+static iree_status_t failing_queue_copy_device_queue_copy(
     iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
     const iree_hal_semaphore_list_t wait_semaphore_list,
     const iree_hal_semaphore_list_t signal_semaphore_list,
-    iree_hal_file_t* source_file, uint64_t source_offset,
+    iree_hal_buffer_t* source_buffer, iree_device_size_t source_offset,
     iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
-    iree_device_size_t length, iree_hal_read_flags_t flags) {
+    iree_device_size_t length, iree_hal_copy_flags_t flags) {
   (void)base_device;
   (void)queue_affinity;
   (void)wait_semaphore_list;
   (void)signal_semaphore_list;
-  (void)source_file;
+  (void)source_buffer;
   (void)source_offset;
   (void)target_buffer;
   (void)target_offset;
   (void)length;
   (void)flags;
   return iree_make_status(IREE_STATUS_UNAVAILABLE,
-                          "injected queue_read failure");
+                          "injected queue_copy failure");
 }
 
-const iree_hal_device_vtable_t failing_queue_read_device_vtable = {
-    /*.destroy=*/failing_queue_read_device_destroy,
-    /*.id=*/failing_queue_read_device_id,
-    /*.host_allocator=*/failing_queue_read_device_host_allocator,
+const iree_hal_device_vtable_t failing_queue_copy_device_vtable = {
+    /*.destroy=*/failing_queue_copy_device_destroy,
+    /*.id=*/failing_queue_copy_device_id,
+    /*.host_allocator=*/failing_queue_copy_device_host_allocator,
     /*.device_allocator=*/nullptr,
     /*.replace_device_allocator=*/nullptr,
     /*.replace_channel_provider=*/nullptr,
@@ -197,29 +197,29 @@ const iree_hal_device_vtable_t failing_queue_read_device_vtable = {
     /*.create_channel=*/nullptr,
     /*.create_command_buffer=*/nullptr,
     /*.load_executable=*/nullptr,
-    /*.import_file=*/failing_queue_read_device_import_file,
-    /*.create_semaphore=*/failing_queue_read_device_create_semaphore,
+    /*.import_file=*/failing_queue_copy_device_import_file,
+    /*.create_semaphore=*/failing_queue_copy_device_create_semaphore,
     /*.query_semaphore_compatibility=*/
-    failing_queue_read_device_query_semaphore_compatibility,
+    failing_queue_copy_device_query_semaphore_compatibility,
     /*.query_queue_pool_backend=*/nullptr,
     /*.queue_alloca=*/nullptr,
     /*.queue_dealloca=*/nullptr,
     /*.queue_fill=*/nullptr,
     /*.queue_update=*/nullptr,
-    /*.queue_copy=*/nullptr,
-    /*.queue_read=*/failing_queue_read_device_queue_read,
+    /*.queue_copy=*/failing_queue_copy_device_queue_copy,
+    /*.queue_read=*/nullptr,
 };
 
-static iree_status_t CreateFailingQueueReadDevice(
+static iree_status_t CreateFailingQueueCopyDevice(
     iree_hal_device_t* base_device, iree_allocator_t host_allocator,
     iree_hal_device_t** out_device) {
   *out_device = nullptr;
-  failing_queue_read_device_t* device = nullptr;
+  failing_queue_copy_device_t* device = nullptr;
   iree_status_t status =
       iree_allocator_malloc(host_allocator, sizeof(*device), (void**)&device);
   if (iree_status_is_ok(status)) {
     memset(device, 0, sizeof(*device));
-    iree_hal_resource_initialize(&failing_queue_read_device_vtable,
+    iree_hal_resource_initialize(&failing_queue_copy_device_vtable,
                                  &device->resource);
     device->host_allocator = host_allocator;
     device->base_device = base_device;
@@ -658,9 +658,9 @@ TEST_F(BulkUploadReceiverSessionTest,
             0u);
 }
 
-TEST_F(BulkUploadReceiverSessionTest, QueueReadFailureFailsSignalSemaphore) {
+TEST_F(BulkUploadReceiverSessionTest, QueueCopyFailureFailsSignalSemaphore) {
   iree_hal_device_t* failing_device = nullptr;
-  IREE_ASSERT_OK(CreateFailingQueueReadDevice(device_, iree_allocator_system(),
+  IREE_ASSERT_OK(CreateFailingQueueCopyDevice(device_, iree_allocator_system(),
                                               &failing_device));
 
   iree_hal_semaphore_t* signal_semaphore = nullptr;

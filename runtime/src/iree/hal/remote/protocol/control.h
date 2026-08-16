@@ -489,21 +489,17 @@ iree_hal_remote_file_registration_capability_for_external_type(
 // client never sees real filesystem paths. The logical namespace may contain
 // operator-configured symlinks; the portable client-controlled suffix grammar
 // rejects absolute paths, parent traversal, empty path segments, and alternate
-// platform separators. The client provides a provisional_id so queue ops
-// (FILE_READ/FILE_WRITE) can reference the file immediately without waiting
-// for the response round-trip. Servers park those queue ops until this control
-// request resolves the provisional ID. Fire-and-forget opens do not produce a
-// response; failures are reported through any parked/subsequent queue ops using
-// the provisional file ID.
+// platform separators. The server response publishes the immutable file extent
+// and granted access together with the resolved resource ID. FILE_OPEN is a
+// request/response operation and must not use FIRE_AND_FORGET.
 typedef struct iree_hal_remote_file_open_request_t {
-  iree_hal_remote_resource_id_t provisional_id;  // PROVISIONAL=1
   uint16_t path_length;  // UTF-8 byte count (not null-terminated).
   uint16_t mode;         // Access mode (read, write, read-write).
   uint32_t flags;        // Reserved, must be 0.
   // Followed by:
   //   uint8_t path[path_length]  (padded to 8-byte alignment)
 } iree_hal_remote_file_open_request_t;
-static_assert(sizeof(iree_hal_remote_file_open_request_t) == 16, "");
+static_assert(sizeof(iree_hal_remote_file_open_request_t) == 8, "");
 
 // FILE_OPEN response. Returns the resolved file ID and metadata.
 typedef struct iree_hal_remote_file_open_response_t {

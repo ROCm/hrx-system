@@ -591,6 +591,9 @@ TEST_P(FileTest, SynchronousReadRejectsRangePastFileEnd) {
   TestFile file;
   ASSERT_TRUE(TryCreateTestFile(provider, IREE_HAL_MEMORY_ACCESS_READ,
                                 std::vector<uint8_t>(16, 0), &file));
+  if (!iree_hal_file_supports_synchronous_io(file.get())) {
+    GTEST_SKIP() << "File does not support synchronous I/O";
+  }
   Ref<iree_hal_buffer_t> target_buffer = CreateZeroedBuffer(16);
 
   IREE_EXPECT_STATUS_IS(
@@ -604,6 +607,9 @@ TEST_P(FileTest, SynchronousWriteRejectsReadOnlyFile) {
   TestFile file;
   ASSERT_TRUE(TryCreateTestFile(provider, IREE_HAL_MEMORY_ACCESS_READ,
                                 std::vector<uint8_t>(16, 0), &file));
+  if (!iree_hal_file_supports_synchronous_io(file.get())) {
+    GTEST_SKIP() << "File does not support synchronous I/O";
+  }
   Ref<iree_hal_buffer_t> source_buffer = CreateZeroedBuffer(16);
 
   IREE_EXPECT_STATUS_IS(

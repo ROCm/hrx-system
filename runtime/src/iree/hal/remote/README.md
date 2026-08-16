@@ -252,11 +252,11 @@ iree-serve-device \
 ```
 
 The client then opens logical names through
-`iree_hal_remote_client_device_open_file`; server path validation and final
-open happen on the server, and failures are reported through the affected queue
-signal semaphores. The allow-list restricts the logical file namespace visible
-through `FILE_OPEN`; it does not authenticate clients or restrict their use of
-the exposed HAL device.
+`iree_hal_remote_client_device_open_file`. The open waits for the server to
+validate the logical path and return the file extent and granted access; data
+movement remains asynchronous and queue ordered. The allow-list restricts the
+logical file namespace visible through `FILE_OPEN`; it does not authenticate
+clients or restrict their use of the exposed HAL device.
 
 ## Protocol Compatibility
 

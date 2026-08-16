@@ -76,8 +76,8 @@ iree_status_t iree_hal_remote_client_file_import(
     iree_async_proactor_t* proactor, iree_allocator_t host_allocator,
     iree_hal_file_t** out_file);
 
-// Opens a provisional server-side file from the server's configured logical
-// namespace.
+// Opens a server-side file from the server's configured logical namespace and
+// returns its resolved metadata.
 iree_status_t iree_hal_remote_client_file_open(
     iree_hal_remote_client_device_t* device, iree_string_view_t logical_name,
     iree_hal_memory_access_t access, iree_allocator_t host_allocator,

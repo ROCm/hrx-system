@@ -1320,7 +1320,8 @@ static iree_status_t iree_hal_remote_server_insert_provisional(
 
 // Prepares a provisional ID for a control-channel operation that will resolve
 // later. Queue commands that arrive first can already have created the pending
-// entry; in that case FILE_OPEN claims the same entry and later resolves it.
+// entry; in that case the control operation claims the same entry and later
+// resolves it.
 static iree_status_t iree_hal_remote_server_prepare_provisional(
     iree_hal_remote_server_session_t* session_slot,
     iree_hal_remote_resource_id_t provisional_id,
@@ -1357,7 +1358,7 @@ static iree_status_t iree_hal_remote_server_prepare_provisional(
 }
 
 // Stores or completes a provisional→resolved resource ID mapping. Used by
-// BUFFER_ALLOCA, FILE_OPEN, and similar operations so later commands
+// BUFFER_ALLOCA, FILE_REGISTER, and similar operations so later commands
 // referencing the provisional ID can be resolved.
 static iree_status_t iree_hal_remote_server_store_provisional(
     iree_hal_remote_server_session_t* session_slot,
@@ -5514,8 +5515,12 @@ static iree_status_t iree_hal_remote_server_handle_file_open(
     iree_hal_remote_server_session_t* entry,
     const iree_hal_remote_control_envelope_t* envelope, const uint8_t* body,
     iree_host_size_t body_length) {
-  const bool fire_and_forget = iree_all_bits_set(
-      envelope->message_flags, IREE_HAL_REMOTE_CONTROL_FLAG_FIRE_AND_FORGET);
+  if (iree_any_bit_set(envelope->message_flags,
+                       IREE_HAL_REMOTE_CONTROL_FLAG_FIRE_AND_FORGET)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "FILE_OPEN requires a response");
+  }
+
   iree_status_t status = iree_ok_status();
   const iree_hal_remote_file_open_request_t* request = NULL;
   iree_string_view_t logical_name = iree_string_view_empty();
@@ -5532,17 +5537,6 @@ static iree_status_t iree_hal_remote_server_handle_file_open(
                                 "FILE_OPEN flags must be 0");
     }
   }
-  if (iree_status_is_ok(status) &&
-      IREE_HAL_REMOTE_RESOURCE_ID_TYPE(request->provisional_id) !=
-          IREE_HAL_REMOTE_RESOURCE_TYPE_FILE) {
-    status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "FILE_OPEN provisional id must have FILE type");
-  }
-  if (iree_status_is_ok(status) &&
-      !IREE_HAL_REMOTE_RESOURCE_ID_IS_PROVISIONAL(request->provisional_id)) {
-    status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "FILE_OPEN provisional id must be provisional");
-  }
   if (iree_status_is_ok(status)) {
     iree_host_size_t path_offset = 0;
     iree_host_size_t path_end = 0;
@@ -5557,13 +5551,6 @@ static iree_status_t iree_hal_remote_server_handle_file_open(
       logical_name = iree_make_string_view((const char*)body + path_offset,
                                            request->path_length);
     }
-  }
-
-  bool provisional_prepared = false;
-  if (iree_status_is_ok(status)) {
-    status = iree_hal_remote_server_prepare_provisional(
-        entry, request->provisional_id, entry->server->host_allocator);
-    provisional_prepared = iree_status_is_ok(status);
   }
 
   iree_hal_memory_access_t granted_access = 0;
@@ -5590,61 +5577,27 @@ static iree_status_t iree_hal_remote_server_handle_file_open(
         &entry->resource_table, IREE_HAL_REMOTE_RESOURCE_TYPE_FILE, file,
         &resolved_id);
   }
-  iree_hal_remote_server_pending_queue_command_t* pending_commands = NULL;
-  if (iree_status_is_ok(status)) {
-    status = iree_hal_remote_server_store_provisional(
-        entry, request->provisional_id, resolved_id,
-        entry->server->host_allocator, &pending_commands);
-  }
-  if (!iree_status_is_ok(status)) {
-    iree_hal_remote_server_free_pending_queue_commands(pending_commands);
-    pending_commands = NULL;
-  }
 
   if (!iree_status_is_ok(status) && resolved_id != 0) {
     iree_hal_remote_resource_table_release(&entry->resource_table, resolved_id);
     resolved_id = 0;
   }
-  iree_status_t pending_failure_status = iree_ok_status();
-  if (!iree_status_is_ok(status) && provisional_prepared) {
-    iree_hal_remote_server_pending_queue_command_t* pending_commands = NULL;
-    iree_hal_remote_server_fail_provisional(
-        entry, request->provisional_id, iree_status_code(status),
-        entry->server->host_allocator, &pending_commands);
-    pending_failure_status = iree_hal_remote_server_fail_pending_queue_commands(
-        entry, pending_commands, iree_status_clone(status));
-  }
 
   iree_hal_file_release(file);
   iree_io_file_handle_release(file_handle);
 
-  iree_status_t send_status = iree_ok_status();
   if (iree_status_is_ok(status)) {
-    if (!fire_and_forget) {
-      iree_hal_remote_file_open_response_t response;
-      memset(&response, 0, sizeof(response));
-      response.resolved_id = resolved_id;
-      response.file_size = file_size;
-      response.granted_access = granted_access;
-      send_status = iree_hal_remote_server_send_response(
-          entry->server->host_allocator, entry->session, envelope,
-          IREE_STATUS_OK, &response, sizeof(response));
-    }
-    send_status = iree_status_join(
-        send_status, iree_hal_remote_server_process_pending_queue_commands(
-                         entry, pending_commands));
-    pending_commands = NULL;
-  } else if (!fire_and_forget) {
-    send_status = iree_hal_remote_server_send_error_response(
-        entry->server->host_allocator, entry->session, envelope, status);
-    status = iree_ok_status();
-  } else {
-    iree_status_ignore(status);
-    status = iree_ok_status();
+    iree_hal_remote_file_open_response_t response;
+    memset(&response, 0, sizeof(response));
+    response.resolved_id = resolved_id;
+    response.file_size = file_size;
+    response.granted_access = granted_access;
+    return iree_hal_remote_server_send_response(
+        entry->server->host_allocator, entry->session, envelope, IREE_STATUS_OK,
+        &response, sizeof(response));
   }
-  send_status = iree_status_join(send_status, pending_failure_status);
-  iree_hal_remote_server_free_pending_queue_commands(pending_commands);
-  return send_status;
+  return iree_hal_remote_server_send_error_response(
+      entry->server->host_allocator, entry->session, envelope, status);
 }
 
 static iree_status_t iree_hal_remote_server_handle_file_close(

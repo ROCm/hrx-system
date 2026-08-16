@@ -325,31 +325,31 @@ typedef struct iree_hal_remote_client_file_open_request_header_t {
   iree_hal_remote_file_open_request_t body;
 } iree_hal_remote_client_file_open_request_header_t;
 
-static void iree_hal_remote_client_file_close_control(
+static iree_status_t iree_hal_remote_client_file_close_control(
     iree_hal_remote_client_device_t* device,
     iree_hal_remote_resource_id_t remote_file_id) {
-  if (device && device->session &&
-      iree_hal_remote_client_device_load_state(device) ==
+  if (!device || !device->session ||
+      iree_hal_remote_client_device_load_state(device) !=
           IREE_HAL_REMOTE_CLIENT_DEVICE_STATE_CONNECTED) {
-    iree_hal_remote_control_envelope_t envelope;
-    memset(&envelope, 0, sizeof(envelope));
-    envelope.message_type = IREE_HAL_REMOTE_CONTROL_FILE_CLOSE;
-    envelope.message_flags = IREE_HAL_REMOTE_CONTROL_FLAG_FIRE_AND_FORGET;
-
-    iree_hal_remote_file_close_t body;
-    memset(&body, 0, sizeof(body));
-    body.file_id = remote_file_id;
-
-    iree_async_span_t spans[2];
-    spans[0] = iree_async_span_from_ptr(&envelope, sizeof(envelope));
-    spans[1] = iree_async_span_from_ptr(&body, sizeof(body));
-    iree_async_span_list_t payload = iree_async_span_list_make(spans, 2);
-    iree_status_t status = iree_net_session_send_control_data_copy(
-        device->session, /*flags=*/0, payload, /*operation_user_data=*/0);
-    if (!iree_status_is_ok(status)) {
-      iree_hal_remote_client_device_fail(device, status);
-    }
+    // Session teardown reclaims all server-side resources.
+    return iree_ok_status();
   }
+
+  iree_hal_remote_control_envelope_t envelope;
+  memset(&envelope, 0, sizeof(envelope));
+  envelope.message_type = IREE_HAL_REMOTE_CONTROL_FILE_CLOSE;
+  envelope.message_flags = IREE_HAL_REMOTE_CONTROL_FLAG_FIRE_AND_FORGET;
+
+  iree_hal_remote_file_close_t body;
+  memset(&body, 0, sizeof(body));
+  body.file_id = remote_file_id;
+
+  iree_async_span_t spans[2];
+  spans[0] = iree_async_span_from_ptr(&envelope, sizeof(envelope));
+  spans[1] = iree_async_span_from_ptr(&body, sizeof(body));
+  iree_async_span_list_t payload = iree_async_span_list_make(spans, 2);
+  return iree_net_session_send_control_data_copy(
+      device->session, /*flags=*/0, payload, /*operation_user_data=*/0);
 }
 
 iree_status_t iree_hal_remote_client_file_open(
@@ -364,7 +364,14 @@ iree_status_t iree_hal_remote_client_file_open(
   iree_host_size_t request_size = 0;
   iree_host_size_t logical_name_offset = 0;
   iree_status_t status = iree_hal_remote_client_device_check_connected(device);
-  if (iree_status_is_ok(status) && logical_name.size > UINT16_MAX) {
+  const iree_hal_memory_access_t allowed_access =
+      IREE_HAL_MEMORY_ACCESS_READ | IREE_HAL_MEMORY_ACCESS_WRITE;
+  if (iree_status_is_ok(status) &&
+      (access == 0 || (access & ~allowed_access) != 0)) {
+    status = iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "remote file access must contain read and/or write bits only");
+  } else if (iree_status_is_ok(status) && logical_name.size > UINT16_MAX) {
     status = iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                               "remote file logical name too long: %" PRIhsz,
                               logical_name.size);
@@ -384,44 +391,75 @@ iree_status_t iree_hal_remote_client_file_open(
   if (iree_status_is_ok(status)) {
     memset(request, 0, sizeof(*request));
     request->envelope.message_type = IREE_HAL_REMOTE_CONTROL_FILE_OPEN;
-    request->envelope.message_flags =
-        IREE_HAL_REMOTE_CONTROL_FLAG_FIRE_AND_FORGET;
-    const uint32_t provisional_generation = (uint32_t)iree_atomic_fetch_add(
-        &device->next_provisional_generation, 1, iree_memory_order_relaxed);
-    request->body.provisional_id = IREE_HAL_REMOTE_RESOURCE_ID_PROVISIONAL(
-        IREE_HAL_REMOTE_RESOURCE_TYPE_FILE, provisional_generation);
     request->body.path_length = (uint16_t)logical_name.size;
     request->body.mode = (uint16_t)access;
     memcpy((uint8_t*)request + logical_name_offset, logical_name.data,
            logical_name.size);
   }
 
-  iree_hal_file_t* file = NULL;
+  iree_const_byte_span_t response_payload = iree_const_byte_span_empty();
+  iree_async_buffer_lease_t response_lease;
+  memset(&response_lease, 0, sizeof(response_lease));
   if (iree_status_is_ok(status)) {
-    // Fire-and-forget FILE_OPEN intentionally does not wait for server
-    // metadata. Use the HAL convention for unknown/non-seekable length and
-    // leave range validation to the server-side file once the queue command is
-    // submitted.
+    status = iree_hal_remote_client_device_control_rpc(
+        device, iree_make_const_byte_span(request, request_size),
+        &response_payload, &response_lease);
+  }
+
+  iree_hal_remote_resource_id_t resolved_id = 0;
+  iree_hal_remote_file_open_response_t response;
+  memset(&response, 0, sizeof(response));
+  if (iree_status_is_ok(status)) {
+    if (response_payload.data_length != sizeof(response)) {
+      status = iree_make_status(IREE_STATUS_INTERNAL,
+                                "FILE_OPEN response length %" PRIhsz
+                                " does not match canonical length %" PRIhsz,
+                                response_payload.data_length, sizeof(response));
+    } else {
+      memcpy(&response, response_payload.data, sizeof(response));
+    }
+  }
+  if (iree_status_is_ok(status)) {
+    if (IREE_HAL_REMOTE_RESOURCE_ID_TYPE(response.resolved_id) !=
+            IREE_HAL_REMOTE_RESOURCE_TYPE_FILE ||
+        IREE_HAL_REMOTE_RESOURCE_ID_IS_PROVISIONAL(response.resolved_id)) {
+      status =
+          iree_make_status(IREE_STATUS_INTERNAL,
+                           "FILE_OPEN response has invalid file resource ID");
+    } else {
+      resolved_id = response.resolved_id;
+    }
+  }
+  if (iree_status_is_ok(status) && response.reserved != 0) {
+    status = iree_make_status(IREE_STATUS_INTERNAL,
+                              "FILE_OPEN response reserved field is nonzero");
+  }
+  if (iree_status_is_ok(status) &&
+      (response.granted_access == 0 ||
+       (response.granted_access & ~allowed_access) != 0 ||
+       !iree_all_bits_set(response.granted_access, access))) {
+    status = iree_make_status(IREE_STATUS_INTERNAL,
+                              "FILE_OPEN response access 0x%08" PRIx32
+                              " does not satisfy requested access 0x%04" PRIx16,
+                              response.granted_access, access);
+  }
+
+  iree_async_buffer_lease_release(&response_lease);
+
+  if (iree_status_is_ok(status)) {
     status = iree_hal_remote_client_file_create(
-        device, IREE_HAL_REMOTE_CLIENT_FILE_KIND_REMOTE_FILE, access,
-        /*length=*/0, /*handle=*/NULL, /*inner_file=*/NULL,
-        iree_byte_span_empty(), request->body.provisional_id,
-        /*owns_remote_resource=*/false, host_allocator, &file);
-  }
-
-  if (iree_status_is_ok(status)) {
-    status = iree_hal_remote_client_device_send_fire_and_forget(
-        device, iree_make_const_byte_span(request, request_size));
+        device, IREE_HAL_REMOTE_CLIENT_FILE_KIND_REMOTE_FILE,
+        (iree_hal_memory_access_t)response.granted_access, response.file_size,
+        /*handle=*/NULL, /*inner_file=*/NULL, iree_byte_span_empty(),
+        resolved_id, /*owns_remote_resource=*/true, host_allocator, out_file);
   }
   if (iree_status_is_ok(status)) {
-    iree_hal_remote_client_file_t* remote_file =
-        iree_hal_remote_client_file_cast(file);
-    remote_file->owns_remote_resource = true;
-    *out_file = file;
-    file = NULL;
+    resolved_id = 0;
+  } else if (resolved_id != 0) {
+    status = iree_status_join(
+        status, iree_hal_remote_client_file_close_control(device, resolved_id));
   }
 
-  iree_hal_file_release(file);
   iree_allocator_free(host_allocator, request);
   IREE_TRACE_ZONE_END(z0);
   return status;
@@ -537,14 +575,18 @@ static void iree_hal_remote_client_file_destroy(
 
   iree_hal_file_release(file->inner_file);
   iree_io_file_handle_release(file->handle);
+  iree_status_t status = iree_ok_status();
   if (file->owns_remote_resource && file->remote_file_id != 0) {
     if (file->queue_referenced) {
-      iree_status_ignore(iree_hal_remote_client_device_release_resource(
-          file->device, file->remote_file_id));
+      status = iree_hal_remote_client_device_release_resource(
+          file->device, file->remote_file_id);
     } else {
-      iree_hal_remote_client_file_close_control(file->device,
-                                                file->remote_file_id);
+      status = iree_hal_remote_client_file_close_control(file->device,
+                                                         file->remote_file_id);
     }
+  }
+  if (!iree_status_is_ok(status)) {
+    iree_hal_remote_client_device_fail(file->device, status);
   }
 
   iree_allocator_free(host_allocator, file);
