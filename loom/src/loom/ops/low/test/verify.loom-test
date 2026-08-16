@@ -20,8 +20,25 @@ low.kernel.def target<test.low.core>(@test_target) workgroup_size(0, 1, 1) @kern
 
 test.target<low_core> @test_target
 
-// ERROR@+1: STRUCTURE/014 {attr_name="workgroup_count_x", actual_value="0", expected_constraint="positive u32"}
-low.kernel.def target<test.low.core>(@test_target) workgroup_count(0, 1, 1) @kernel_rejects_zero_workgroup_count() {
+low.kernel.def target<test.low.core>(@test_target) workgroup_count(0, 1, 1) @kernel_accepts_zero_workgroup_count() {
+  low.return
+}
+
+// ====
+
+test.target<low_core> @test_target
+
+// ERROR@+1: STRUCTURE/014 {attr_name="workgroup_count_x", actual_value="-1", expected_constraint="u32"}
+low.kernel.def target<test.low.core>(@test_target) workgroup_count(-1, 1, 1) @kernel_rejects_negative_workgroup_count() {
+  low.return
+}
+
+// ====
+
+test.target<low_core> @test_target
+
+// ERROR@+1: STRUCTURE/014 {attr_name="workgroup_count_x", actual_value="4294967296", expected_constraint="u32"}
+low.kernel.def target<test.low.core>(@test_target) workgroup_count(4294967296, 1, 1) @kernel_rejects_oversized_workgroup_count() {
   low.return
 }
 
@@ -58,6 +75,15 @@ test.target<low_core> @test_target
 
 // ERROR@+1: STRUCTURE/014 {attr_name="workgroup_count_y", actual_value="3", expected_constraint="a positive multiple of workgroup_cluster_size_y"}
 low.kernel.def target<test.low.core>(@test_target) workgroup_count(4, 3, 1) cluster_size(1, 2, 1) @kernel_rejects_partial_cluster_grid() {
+  low.return
+}
+
+// ====
+
+test.target<low_core> @test_target
+
+// ERROR@+1: STRUCTURE/014 {attr_name="workgroup_count_x", actual_value="0", expected_constraint="a positive multiple of workgroup_cluster_size_x"}
+low.kernel.def target<test.low.core>(@test_target) workgroup_count(0, 2, 1) cluster_size(1, 2, 1) @kernel_rejects_zero_cluster_grid() {
   low.return
 }
 
