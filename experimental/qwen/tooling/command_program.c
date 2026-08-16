@@ -365,8 +365,14 @@ static iree_status_t qwen_tooling_parameter_pack_build(
             existing->span.buffer_offset < parameter_info.byte_offset) {
           status = iree_make_status(
               IREE_STATUS_FAILED_PRECONDITION,
-              "parameter '%.*s' has incompatible command-root layouts",
-              (int)parameter_info.key.size, parameter_info.key.data);
+              "parameter '%.*s' in command root '%.*s' has length %" PRIu64
+              " at root offset %" PRIu64
+              "; the packed occurrence has length %" PRIu64
+              " at slab offset %" PRIu64,
+              (int)parameter_info.key.size, parameter_info.key.data,
+              (int)program_info->name.size, program_info->name.data,
+              parameter_info.byte_length, parameter_info.byte_offset,
+              existing->span.length, existing->span.buffer_offset);
           break;
         }
         const iree_device_size_t candidate_base =
