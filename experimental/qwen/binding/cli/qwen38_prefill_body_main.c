@@ -27,6 +27,7 @@
 #define QWEN38_GDN_STATE_BYTE_LENGTH 156893184
 #define QWEN38_ATTENTION_CACHE_BYTE_LENGTH 33554432
 
+IREE_FLAG(string, input, "", "Optional raw F32 residual input path.");
 IREE_FLAG(string, output, "", "Optional raw F32 residual output path.");
 IREE_FLAG(int32_t, token_count, 1,
           "Number of causal input tokens to process, from 1 through 512.");
@@ -42,6 +43,7 @@ static const char* const qwen38_prefill_body_usage =
     "  --parameters=<Qwen3.8-27B UD-Q5_K_XL GGUF path>\n"
     "\n"
     "Optional input and output:\n"
+    "  --input=<raw token_count-by-5120 F32 residual input>\n"
     "  --token_count=<causal input token count from 1 through 512>\n"
     "  --position_base=<absolute first-token position>\n"
     "  --output=<raw F32 residual output path>\n";
@@ -158,6 +160,35 @@ static iree_status_t qwen38_upload_control(
       IREE_HAL_TRANSFER_BUFFER_FLAG_DEFAULT, iree_infinite_timeout());
 }
 
+static iree_status_t qwen38_initialize_residual(
+    iree_host_size_t hidden_element_count,
+    iree_device_size_t hidden_byte_length, iree_allocator_t host_allocator,
+    float* residual_values) {
+  if (FLAG_input[0] == '\0') {
+    for (iree_host_size_t i = 0; i < hidden_element_count; ++i) {
+      const int32_t centered = (int32_t)(i % 257) - 128;
+      residual_values[i] = (float)centered / 128.0f;
+    }
+    return iree_ok_status();
+  }
+
+  iree_io_file_contents_t* contents = NULL;
+  IREE_RETURN_IF_ERROR(iree_io_file_contents_read(
+      iree_make_cstring_view(FLAG_input), host_allocator, &contents));
+  iree_status_t status = iree_ok_status();
+  if (contents->const_buffer.data_length != hidden_byte_length) {
+    status = iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "--input contains %" PRIhsz " bytes; expected %" PRIu64,
+        contents->const_buffer.data_length, (uint64_t)hidden_byte_length);
+  } else {
+    memcpy(residual_values, contents->const_buffer.data,
+           (iree_host_size_t)hidden_byte_length);
+  }
+  iree_io_file_contents_free(contents);
+  return status;
+}
+
 static iree_status_t qwen38_prefill_body_run(void) {
   const iree_allocator_t host_allocator = iree_allocator_system();
   qwen_tooling_runtime_context_t runtime_context;
@@ -271,10 +302,11 @@ static iree_status_t qwen38_prefill_body_run(void) {
                                          (void**)&residual_values);
   }
   if (iree_status_is_ok(status)) {
-    for (iree_host_size_t i = 0; i < hidden_element_count; ++i) {
-      const int32_t centered = (int32_t)(i % 257) - 128;
-      residual_values[i] = (float)centered / 128.0f;
-    }
+    status =
+        qwen38_initialize_residual(hidden_element_count, hidden_byte_length,
+                                   host_allocator, residual_values);
+  }
+  if (iree_status_is_ok(status)) {
     status = iree_hal_device_transfer_h2d(
         device, residual_values, residual_buffer, 0, hidden_byte_length,
         IREE_HAL_TRANSFER_BUFFER_FLAG_DEFAULT, iree_infinite_timeout());
