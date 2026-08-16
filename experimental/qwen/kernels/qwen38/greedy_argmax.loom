@@ -1,6 +1,7 @@
-// Selects the lowest token ID having the greatest finite logit. One
-// workgroup scans an exact F32 vocabulary row and publishes one device-local
-// token ID, keeping the full row off the host path.
+// Selects the lowest token ID having the greatest finite logit. The baseline
+// reduction provides a one-workgroup oracle. Command programs use the
+// two-stage tiled reduction to expose vocabulary parallelism while keeping
+// logits and intermediate winners device-local.
 
 amdgpu.target<gfx11-generic> @qwen38_greedy_argmax_gfx11_wave64 {subgroup_size = 64}
 
@@ -76,6 +77,122 @@ kernel.def target(@qwen38_greedy_argmax_gfx11_wave64) export("qwen38_greedy_argm
   kernel.return
 }
 
+// First stage of the parallel vocabulary reduction. Each workgroup owns one
+// contiguous 4096-logit tile and publishes its greatest logit and lowest tied
+// token ID. Rows remain independent in the workgroup Y dimension.
+kernel.def target(@qwen38_greedy_argmax_gfx11_wave64) export("qwen38_greedy_argmax_partial_rows_f32") @qwen38_greedy_argmax_partial_rows_f32(%token_count0: index, %output_size: index) {
+  %token_count = index.assume %token_count0 [range(%token_count0, 1, 512)] : index
+  %c1 = index.constant 1 : index
+  %c4095 = index.constant 4095 : index
+  %c4096 = index.constant 4096 : index
+  %padded_output_size = index.add %output_size, %c4095 : index
+  %partial_count = index.div %padded_output_size, %c4096 : index
+  %workgroup_size = index.constant 256 : index
+  kernel.launch.config workgroups(%partial_count, %token_count, %c1) workgroup_size(%workgroup_size, %c1, %c1) : index
+} launch(%token_count0: index, %output_size: index, %logits: buffer, %partial_logits: buffer, %partial_token_ids: buffer) {
+  %token_count = index.assume %token_count0 [range(%token_count0, 1, 512)] : index
+  %output_capacity = config.get @qwen38.greedy_argmax.output_capacity : index
+  %bounded_output_size = index.assume %output_size [range(%output_size, 256, 262144), le(%output_size, %output_capacity)] : index
+  %c0 = index.constant 0 : index
+  %c4095 = index.constant 4095 : index
+  %c4096 = index.constant 4096 : index
+  %workgroup_size = index.constant 256 : index
+  %largest_i32 = scalar.constant 2147483647 : i32
+  %negative_large = scalar.constant -3.4028234663852886e+38 : f32
+  %c0_offset = index.constant 0 : offset
+  %row0 = kernel.workgroup.id<y> : index
+  %row = index.assume %row0 [lt(%row0, %token_count)] : index
+  %partial0 = kernel.workgroup.id<x> : index
+  %padded_output_size = index.add %bounded_output_size, %c4095 : index
+  %partial_count = index.div %padded_output_size, %c4096 : index
+  %partial = index.assume %partial0 [lt(%partial0, %partial_count)] : index
+  %workitem = kernel.workitem.id<x> : index
+  %tile_begin = index.mul %partial, %c4096 : index
+  %tile_end0 = index.add %tile_begin, %c4096 : index
+  %tile_end = index.min %tile_end0, %bounded_output_size : index
+  %candidate0 = index.add %tile_begin, %workitem : index
+  %has_initial = index.cmp ult, %candidate0, %tile_end : index
+  %initial_logit, %initial_id = scf.if %has_initial -> (f32, i32) {
+    %initial_candidate = index.assume %candidate0 [lt(%candidate0, %bounded_output_size)] : index
+    %logits_view = buffer.view %logits[%c0_offset] : buffer -> view<[%token_count]x[%bounded_output_size]xf32>
+    %value = view.load %logits_view[%row, %initial_candidate] : view<[%token_count]x[%bounded_output_size]xf32> -> f32
+    %id = index.cast %initial_candidate : index to i32
+    scf.yield %value, %id : f32, i32
+  } else {
+    scf.yield %negative_large, %largest_i32 : f32, i32
+  }
+  %scan_begin = index.add %candidate0, %workgroup_size : index
+  %local_logit, %local_id = scf.for %candidate = [%scan_begin to %tile_end step %workgroup_size](%best_logit = %initial_logit : f32, %best_id = %initial_id : i32) -> (f32, i32) {
+    %bounded_candidate = index.assume %candidate [lt(%candidate, %bounded_output_size)] : index
+    %logits_view = buffer.view %logits[%c0_offset] : buffer -> view<[%token_count]x[%bounded_output_size]xf32>
+    %candidate_logit = view.load %logits_view[%row, %bounded_candidate] : view<[%token_count]x[%bounded_output_size]xf32> -> f32
+    %candidate_id = index.cast %bounded_candidate : index to i32
+    %is_greater = scalar.cmpf ogt, %candidate_logit, %best_logit : f32
+    %is_equal = scalar.cmpf oeq, %candidate_logit, %best_logit : f32
+    %is_lower_id = scalar.cmpi slt, %candidate_id, %best_id : i32
+    %is_lower_tie = scalar.andi %is_equal, %is_lower_id : i1
+    %is_better = scalar.ori %is_greater, %is_lower_tie : i1
+    %next_logit = scf.select %is_better, %candidate_logit, %best_logit : f32
+    %next_id = scf.select %is_better, %candidate_id, %best_id : i32
+    scf.yield %next_logit, %next_id : f32, i32
+  }
+  %winning_logit = kernel.workgroup.reduce<maxnumf> %local_logit : f32
+  %owns_winning_logit = scalar.cmpf oeq, %local_logit, %winning_logit : f32
+  %candidate_winning_id = scf.select %owns_winning_logit, %local_id, %largest_i32 : i32
+  %winning_id = kernel.workgroup.reduce<minsi> %candidate_winning_id : i32
+  %publishes_partial = index.cmp eq, %workitem, %c0 : index
+  scf.if %publishes_partial {
+    %partial_logits_view = buffer.view %partial_logits[%c0_offset] : buffer -> view<[%token_count]x[%partial_count]xf32>
+    %partial_token_ids_view = buffer.view %partial_token_ids[%c0_offset] : buffer -> view<[%token_count]x[%partial_count]xi32>
+    view.store %winning_logit, %partial_logits_view[%row, %partial] : f32, view<[%token_count]x[%partial_count]xf32>
+    view.store %winning_id, %partial_token_ids_view[%row, %partial] : i32, view<[%token_count]x[%partial_count]xi32>
+  }
+  kernel.return
+}
+
+// Reduces the tile winners produced by qwen38_greedy_argmax_partial_rows_f32.
+kernel.def target(@qwen38_greedy_argmax_gfx11_wave64) export("qwen38_greedy_argmax_reduce_rows_f32") @qwen38_greedy_argmax_reduce_rows_f32(%token_count0: index, %output_size: index) {
+  %token_count = index.assume %token_count0 [range(%token_count0, 1, 512)] : index
+  %c1 = index.constant 1 : index
+  %workgroup_size = index.constant 256 : index
+  kernel.launch.config workgroups(%token_count, %c1, %c1) workgroup_size(%workgroup_size, %c1, %c1) : index
+} launch(%token_count0: index, %output_size: index, %partial_logits: buffer, %partial_token_ids: buffer, %token_ids: buffer) {
+  %token_count = index.assume %token_count0 [range(%token_count0, 1, 512)] : index
+  %output_capacity = config.get @qwen38.greedy_argmax.output_capacity : index
+  %bounded_output_size = index.assume %output_size [range(%output_size, 256, 262144), le(%output_size, %output_capacity)] : index
+  %c0 = index.constant 0 : index
+  %c4095 = index.constant 4095 : index
+  %c4096 = index.constant 4096 : index
+  %largest_i32 = scalar.constant 2147483647 : i32
+  %negative_large = scalar.constant -3.4028234663852886e+38 : f32
+  %c0_offset = index.constant 0 : offset
+  %padded_output_size = index.add %bounded_output_size, %c4095 : index
+  %partial_count = index.div %padded_output_size, %c4096 : index
+  %row0 = kernel.workgroup.id<x> : index
+  %row = index.assume %row0 [lt(%row0, %token_count)] : index
+  %workitem = kernel.workitem.id<x> : index
+  %has_initial = index.cmp ult, %workitem, %partial_count : index
+  %initial_logit, %initial_id = scf.if %has_initial -> (f32, i32) {
+    %partial_logits_view = buffer.view %partial_logits[%c0_offset] : buffer -> view<[%token_count]x[%partial_count]xf32>
+    %partial_token_ids_view = buffer.view %partial_token_ids[%c0_offset] : buffer -> view<[%token_count]x[%partial_count]xi32>
+    %logit = view.load %partial_logits_view[%row, %workitem] : view<[%token_count]x[%partial_count]xf32> -> f32
+    %id = view.load %partial_token_ids_view[%row, %workitem] : view<[%token_count]x[%partial_count]xi32> -> i32
+    scf.yield %logit, %id : f32, i32
+  } else {
+    scf.yield %negative_large, %largest_i32 : f32, i32
+  }
+  %winning_logit = kernel.workgroup.reduce<maxnumf> %initial_logit : f32
+  %owns_winning_logit = scalar.cmpf oeq, %initial_logit, %winning_logit : f32
+  %candidate_winning_id = scf.select %owns_winning_logit, %initial_id, %largest_i32 : i32
+  %winning_id = kernel.workgroup.reduce<minsi> %candidate_winning_id : i32
+  %publishes_token = index.cmp eq, %workitem, %c0 : index
+  scf.if %publishes_token {
+    %token_ids_view = buffer.view %token_ids[%c0_offset] : buffer -> view<[%token_count]xi32>
+    view.store %winning_id, %token_ids_view[%row] : i32, view<[%token_count]xi32>
+  }
+  kernel.return
+}
+
 // Periodic peaks cross both workitem strides and subgroup boundaries. The
 // first greatest logit is token 1008 even though later periods repeat it.
 check.case public @qwen38_greedy_argmax_nontrivial_winner_case {
@@ -111,4 +228,72 @@ check.case public @qwen38_greedy_argmax_rows_nontrivial_winner_case {
   check.return
 }
 
+// Equal maxima in separate tiles must resolve to the lower token ID. The tail
+// also exercises inactive workitems in the final partial workgroup.
+check.case public @qwen38_greedy_argmax_cross_tile_tie_case {
+  %token_count = check.literal value(1) : index
+  %output_size = check.literal value(8201) : index
+  %logits = check.generate.iota offset(0.0) step(1.0) period(4096) : tensor<8201xf32>
+  %token_id = check.generate.fill value(-1) : tensor<1xi32>
+  %parallel_token_id = check.generate.fill value(-1) : tensor<1xi32>
+  %partial_logits = check.generate.fill value(0.0) : tensor<3xf32>
+  %partial_token_ids = check.generate.fill value(-1) : tensor<3xi32>
+  %expected = check.generate.fill value(4095) : tensor<1xi32>
+  kernel.launch @qwen38_greedy_argmax_f32[%output_size](%output_size, %logits, %token_id) : [index](index, tensor<8201xf32>, tensor<1xi32>)
+  kernel.launch @qwen38_greedy_argmax_partial_rows_f32[%token_count, %output_size](%token_count, %output_size, %logits, %partial_logits, %partial_token_ids) : [index, index](index, index, tensor<8201xf32>, tensor<3xf32>, tensor<3xi32>)
+  kernel.launch @qwen38_greedy_argmax_reduce_rows_f32[%token_count, %output_size](%token_count, %output_size, %partial_logits, %partial_token_ids, %parallel_token_id) : [index, index](index, index, tensor<3xf32>, tensor<3xi32>, tensor<1xi32>)
+  check.expect.equal actual(%token_id) expected(%expected) : tensor<1xi32>
+  check.expect.equal actual(%parallel_token_id) expected(%expected) : tensor<1xi32>
+  check.return
+}
+
+check.case public @qwen38_greedy_argmax_vocabulary_baseline_benchmark_case {
+  %output_size = check.literal value(248320) : index
+  %logits = check.generate.iota offset(0.0) step(1.0) period(248320) : tensor<248320xf32>
+  %token_id = check.generate.fill value(-1) : tensor<1xi32>
+  kernel.launch @qwen38_greedy_argmax_f32[%output_size](%output_size, %logits, %token_id) : [index](index, tensor<248320xf32>, tensor<1xi32>)
+  check.return
+}
+
+check.case public @qwen38_greedy_argmax_vocabulary_parallel_benchmark_case {
+  %token_count = check.literal value(1) : index
+  %output_size = check.literal value(248320) : index
+  %logits = check.generate.iota offset(0.0) step(1.0) period(248320) : tensor<248320xf32>
+  %token_id = check.generate.fill value(-1) : tensor<1xi32>
+  %partial_logits = check.generate.fill value(0.0) : tensor<61xf32>
+  %partial_token_ids = check.generate.fill value(-1) : tensor<61xi32>
+  kernel.launch @qwen38_greedy_argmax_partial_rows_f32[%token_count, %output_size](%token_count, %output_size, %logits, %partial_logits, %partial_token_ids) : [index, index](index, index, tensor<248320xf32>, tensor<61xf32>, tensor<61xi32>)
+  kernel.launch @qwen38_greedy_argmax_reduce_rows_f32[%token_count, %output_size](%token_count, %output_size, %partial_logits, %partial_token_ids, %token_id) : [index, index](index, index, tensor<61xf32>, tensor<61xi32>, tensor<1xi32>)
+  check.return
+}
+
+check.case public @qwen38_greedy_argmax_vocabulary_rows_baseline_benchmark_case {
+  %token_count = check.literal value(4) : index
+  %output_size = check.literal value(248320) : index
+  %logits = check.generate.iota offset(0.0) step(1.0) period(248320) : tensor<4x248320xf32>
+  %token_ids = check.generate.fill value(-1) : tensor<4xi32>
+  kernel.launch @qwen38_greedy_argmax_rows_f32[%token_count, %output_size](%token_count, %output_size, %logits, %token_ids) : [index, index](index, index, tensor<4x248320xf32>, tensor<4xi32>)
+  check.return
+}
+
+check.case public @qwen38_greedy_argmax_vocabulary_rows_parallel_benchmark_case {
+  %token_count = check.literal value(4) : index
+  %output_size = check.literal value(248320) : index
+  %logits = check.generate.iota offset(0.0) step(1.0) period(248320) : tensor<4x248320xf32>
+  %token_ids = check.generate.fill value(-1) : tensor<4xi32>
+  %partial_logits = check.generate.fill value(0.0) : tensor<4x61xf32>
+  %partial_token_ids = check.generate.fill value(-1) : tensor<4x61xi32>
+  kernel.launch @qwen38_greedy_argmax_partial_rows_f32[%token_count, %output_size](%token_count, %output_size, %logits, %partial_logits, %partial_token_ids) : [index, index](index, index, tensor<4x248320xf32>, tensor<4x61xf32>, tensor<4x61xi32>)
+  kernel.launch @qwen38_greedy_argmax_reduce_rows_f32[%token_count, %output_size](%token_count, %output_size, %partial_logits, %partial_token_ids, %token_ids) : [index, index](index, index, tensor<4x61xf32>, tensor<4x61xi32>, tensor<4xi32>)
+  check.return
+}
+
 check.benchmark<@qwen38_greedy_argmax_nontrivial_winner_case> @qwen38_greedy_argmax_f32_benchmark
+
+check.benchmark<@qwen38_greedy_argmax_vocabulary_baseline_benchmark_case> @qwen38_greedy_argmax_vocabulary_baseline
+
+check.benchmark<@qwen38_greedy_argmax_vocabulary_parallel_benchmark_case> @qwen38_greedy_argmax_vocabulary_parallel
+
+check.benchmark<@qwen38_greedy_argmax_vocabulary_rows_baseline_benchmark_case> @qwen38_greedy_argmax_vocabulary_rows_baseline
+
+check.benchmark<@qwen38_greedy_argmax_vocabulary_rows_parallel_benchmark_case> @qwen38_greedy_argmax_vocabulary_rows_parallel

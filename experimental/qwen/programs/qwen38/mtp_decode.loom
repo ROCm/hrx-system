@@ -13,7 +13,8 @@ kernel.decl @ggml_linear_q6k_q8_1_x4(%token_count: index, %input_size: index, %o
 kernel.decl @ggml_linear_q8_0_q8_1_x4(%token_count: index, %input_size: index, %output_size: index) launch(%token_count: index, %input_size: index, %output_size: index, %input: buffer, %weight: buffer, %output: buffer)
 kernel.decl @qwen38_rmsnorm_f32_decode() launch(%epsilon: f32, %input: buffer, %weight: buffer, %output: buffer)
 kernel.decl @qwen38_token_embedding_q5k_f32_decode() launch(%token_id: buffer, %weight: buffer, %output: buffer)
-kernel.decl @qwen38_greedy_argmax_f32(%output_size: index) launch(%output_size: index, %logits: buffer, %token_id: buffer)
+kernel.decl @qwen38_greedy_argmax_partial_rows_f32(%token_count: index, %output_size: index) launch(%token_count: index, %output_size: index, %logits: buffer, %partial_logits: buffer, %partial_token_ids: buffer)
+kernel.decl @qwen38_greedy_argmax_reduce_rows_f32(%token_count: index, %output_size: index) launch(%token_count: index, %output_size: index, %partial_logits: buffer, %partial_token_ids: buffer, %token_ids: buffer)
 kernel.decl @qwen38_decode_commit_token() launch(%control: buffer, %token_ids: buffer)
 kernel.decl @qwen38_mtp_begin_depth4() launch(%target_control: buffer, %target_tokens: buffer, %target_hidden: buffer, %mtp_control: buffer, %current_token: buffer, %draft_hidden: buffer, %verify_tokens: buffer)
 kernel.decl @qwen38_mtp_commit_draft_depth4() launch(%mtp_control: buffer, %current_token: buffer, %draft_tokens: buffer, %verify_tokens: buffer)
@@ -43,6 +44,7 @@ command.program.def @qwen38_mtp_decode_body() launch(%embedding_parameters: buff
   %attention_bytes = index.constant 24576 : offset
   %hidden_q8_bytes = index.constant 5760 : offset
   %logits_bytes = index.constant 993280 : offset
+  %partial_bytes = index.constant 244 : offset
 
   %embedding = buffer.alloca<global> align(256) %hidden_bytes : buffer
   kernel.launch @qwen38_token_embedding_q5k_f32_decode(%current_token, %embedding_weight, %embedding) : (buffer, view<874086400xi8>, buffer)
@@ -66,10 +68,13 @@ command.program.def @qwen38_mtp_decode_body() launch(%embedding_parameters: buff
 
   %normalized_hidden_q8 = buffer.alloca<global> align(256) %hidden_q8_bytes : buffer
   %logits = buffer.alloca<global> align(256) %logits_bytes : buffer
+  %partial_logits = buffer.alloca<global> align(256) %partial_bytes : buffer
+  %partial_token_ids = buffer.alloca<global> align(256) %partial_bytes : buffer
   kernel.launch @qwen38_rmsnorm_f32_decode(%epsilon, %residual, %shared_head_norm_weight, %normalized_hidden) : (f32, buffer, view<5120xf32>, buffer)
   kernel.launch @ggml_quantize_q8_1_x4_f32[%token_count, %hidden_size](%token_count, %hidden_size, %normalized_hidden, %normalized_hidden_q8) : [index, index](index, index, buffer, buffer)
   kernel.launch @ggml_linear_q6k_q8_1_x4[%token_count, %hidden_size, %vocabulary_size](%token_count, %hidden_size, %vocabulary_size, %normalized_hidden_q8, %output_weight, %logits) : [index, index, index](index, index, index, buffer, view<1042944000xi8>, buffer)
-  kernel.launch @qwen38_greedy_argmax_f32[%vocabulary_size](%vocabulary_size, %logits, %current_token) : [index](index, buffer, buffer)
+  kernel.launch @qwen38_greedy_argmax_partial_rows_f32[%token_count, %vocabulary_size](%token_count, %vocabulary_size, %logits, %partial_logits, %partial_token_ids) : [index, index](index, index, buffer, buffer, buffer)
+  kernel.launch @qwen38_greedy_argmax_reduce_rows_f32[%token_count, %vocabulary_size](%token_count, %vocabulary_size, %partial_logits, %partial_token_ids, %current_token) : [index, index](index, index, buffer, buffer, buffer)
   command.return
 }
 

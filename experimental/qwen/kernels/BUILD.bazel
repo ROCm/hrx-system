@@ -484,7 +484,7 @@ iree_executable_test(
     src = "//loom/src/loom/tools/iree-test-loom",
     args = [
         "$(location qwen38/greedy_argmax.loom)",
-        "--case=@qwen38_greedy_argmax_nontrivial_winner_case",
+        "--case=@qwen38_greedy_argmax_cross_tile_tie_case",
         "--config=qwen38.greedy_argmax.output_capacity=248320",
         "--device=amdgpu://0",
         "--sanitizer=access",
