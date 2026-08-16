@@ -22,9 +22,9 @@ IREE_API_EXPORT iree_status_t iree_hal_file_from_handle(
   iree_status_t status = iree_ok_status();
   switch (iree_io_file_handle_type(handle)) {
     case IREE_IO_FILE_HANDLE_TYPE_HOST_ALLOCATION:
-      status =
-          iree_hal_memory_file_wrap(device_allocator, queue_affinity, access,
-                                    handle, host_allocator, out_file);
+      status = iree_hal_memory_file_wrap(
+          device_allocator, queue_affinity, access, handle,
+          IREE_HAL_MEMORY_FILE_FLAG_NONE, host_allocator, out_file);
       break;
     case IREE_IO_FILE_HANDLE_TYPE_FD:
       status = iree_hal_fd_file_from_handle(access, handle, proactor,

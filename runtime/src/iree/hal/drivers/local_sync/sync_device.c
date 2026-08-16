@@ -1303,23 +1303,10 @@ static iree_status_t iree_hal_sync_device_queue_read(
     iree_hal_file_t* source_file, uint64_t source_offset,
     iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
     iree_device_size_t length, iree_hal_read_flags_t flags) {
-  IREE_RETURN_IF_ERROR(
-      iree_hal_file_validate_access(source_file, IREE_HAL_MEMORY_ACCESS_READ));
-  if (length == 0) {
-    return iree_hal_device_queue_barrier(
-        base_device, queue_affinity, wait_semaphore_list, signal_semaphore_list,
-        IREE_HAL_EXECUTE_FLAG_NONE);
-  }
-  uint64_t file_length = iree_hal_file_length(source_file);
-  if (file_length > 0 && source_offset + length > file_length) {
-    return iree_make_status(
-        IREE_STATUS_OUT_OF_RANGE,
-        "read range [%" PRIu64 ", %" PRIu64 ") exceeds file length %" PRIu64,
-        source_offset, source_offset + (uint64_t)length, file_length);
-  }
   // Memory file fast path: route to queue_copy via the storage buffer.
   iree_hal_buffer_t* storage_buffer = iree_hal_file_storage_buffer(source_file);
   if (storage_buffer) {
+    IREE_ASSERT(source_offset <= IREE_DEVICE_SIZE_MAX);
     return iree_hal_device_queue_copy(
         base_device, queue_affinity, wait_semaphore_list, signal_semaphore_list,
         storage_buffer, (iree_device_size_t)source_offset, target_buffer,
@@ -1369,16 +1356,10 @@ static iree_status_t iree_hal_sync_device_queue_write(
     iree_hal_buffer_t* source_buffer, iree_device_size_t source_offset,
     iree_hal_file_t* target_file, uint64_t target_offset,
     iree_device_size_t length, iree_hal_write_flags_t flags) {
-  IREE_RETURN_IF_ERROR(
-      iree_hal_file_validate_access(target_file, IREE_HAL_MEMORY_ACCESS_WRITE));
-  if (length == 0) {
-    return iree_hal_device_queue_barrier(
-        base_device, queue_affinity, wait_semaphore_list, signal_semaphore_list,
-        IREE_HAL_EXECUTE_FLAG_NONE);
-  }
   // Memory file fast path: route to queue_copy via the storage buffer.
   iree_hal_buffer_t* storage_buffer = iree_hal_file_storage_buffer(target_file);
   if (storage_buffer) {
+    IREE_ASSERT(target_offset <= IREE_DEVICE_SIZE_MAX);
     return iree_hal_device_queue_copy(
         base_device, queue_affinity, wait_semaphore_list, signal_semaphore_list,
         source_buffer, source_offset, storage_buffer,

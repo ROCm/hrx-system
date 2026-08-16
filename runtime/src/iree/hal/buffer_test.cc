@@ -56,4 +56,45 @@ TEST(MemoryTypeTest, RoundTripsOrthogonalLocalityAndCoherence) {
   }
 }
 
+TEST(BufferRangeTest, AcceptsContainedRanges) {
+  iree_hal_buffer_t buffer = {};
+  buffer.byte_length = 16;
+
+  IREE_EXPECT_OK(iree_hal_buffer_validate_range(&buffer, 0, 16));
+  IREE_EXPECT_OK(iree_hal_buffer_validate_range(&buffer, 7, 9));
+  IREE_EXPECT_OK(iree_hal_buffer_validate_range(&buffer, 16, 0));
+}
+
+TEST(BufferRangeTest, RejectsOutOfRangeAndOverflowingRanges) {
+  iree_hal_buffer_t buffer = {};
+  buffer.byte_length = 16;
+
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_OUT_OF_RANGE,
+                        iree_hal_buffer_validate_range(&buffer, 17, 0));
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_OUT_OF_RANGE,
+                        iree_hal_buffer_validate_range(&buffer, 15, 2));
+
+  buffer.byte_length = IREE_DEVICE_SIZE_MAX;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_OUT_OF_RANGE,
+      iree_hal_buffer_validate_range(&buffer, IREE_DEVICE_SIZE_MAX - 3, 8));
+}
+
+TEST(BufferPermissionTest, ValidatesAccessAndUsage) {
+  IREE_EXPECT_OK(iree_hal_buffer_validate_access(IREE_HAL_MEMORY_ACCESS_READ,
+                                                 IREE_HAL_MEMORY_ACCESS_READ));
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_PERMISSION_DENIED,
+      iree_hal_buffer_validate_access(IREE_HAL_MEMORY_ACCESS_READ,
+                                      IREE_HAL_MEMORY_ACCESS_WRITE));
+
+  IREE_EXPECT_OK(
+      iree_hal_buffer_validate_usage(IREE_HAL_BUFFER_USAGE_TRANSFER_SOURCE,
+                                     IREE_HAL_BUFFER_USAGE_TRANSFER_SOURCE));
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_PERMISSION_DENIED,
+      iree_hal_buffer_validate_usage(IREE_HAL_BUFFER_USAGE_TRANSFER_SOURCE,
+                                     IREE_HAL_BUFFER_USAGE_TRANSFER_TARGET));
+}
+
 }  // namespace

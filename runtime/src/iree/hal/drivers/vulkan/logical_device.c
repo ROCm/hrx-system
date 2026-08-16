@@ -1122,11 +1122,7 @@ static iree_status_t iree_hal_vulkan_logical_device_import_file(
     iree_hal_external_file_flags_t flags, iree_hal_file_t** out_file) {
   IREE_ASSERT_ARGUMENT(out_file);
   *out_file = NULL;
-  if (flags != IREE_HAL_EXTERNAL_FILE_FLAG_NONE) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "unsupported Vulkan external file flags: 0x%" PRIx32, flags);
-  }
+  (void)flags;
   iree_hal_vulkan_logical_device_t* device =
       iree_hal_vulkan_logical_device_cast(base_device);
   IREE_RETURN_IF_ERROR(iree_hal_vulkan_queue_affinity_normalize(

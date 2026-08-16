@@ -15,7 +15,7 @@ static bool amdgpu_registered_ =
     (CtsRegistry::RegisterBackend({
          "amdgpu",
          MakeAmdgpuCtsBackendInfo("amdgpu", AmdgpuCtsBackendMode::kDefault),
-         {"async_queue"},
+         {"async_queue", "file_io"},
      }),
      true);
 

@@ -24,6 +24,11 @@ IREE_API_EXPORT iree_status_t iree_hal_file_import(
   IREE_ASSERT_ARGUMENT(handle);
   IREE_ASSERT_ARGUMENT(out_file);
   *out_file = NULL;
+  if (IREE_UNLIKELY(flags != IREE_HAL_EXTERNAL_FILE_FLAG_NONE)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "unsupported external file flags: 0x%08" PRIx32,
+                            flags);
+  }
   IREE_TRACE_ZONE_BEGIN(z0);
   iree_status_t status =
       IREE_HAL_VTABLE_DISPATCH(device, iree_hal_device, import_file)(
@@ -80,6 +85,21 @@ IREE_API_EXPORT iree_status_t iree_hal_file_validate_access(
 #endif  // IREE_STATUS_MODE
 }
 
+IREE_API_EXPORT iree_status_t iree_hal_file_validate_range(
+    iree_hal_file_t* file, uint64_t byte_offset, uint64_t byte_length) {
+  IREE_ASSERT_ARGUMENT(file);
+  const uint64_t file_length = iree_hal_file_length(file);
+  if (IREE_LIKELY(byte_offset <= file_length &&
+                  byte_length <= file_length - byte_offset)) {
+    return iree_ok_status();
+  }
+  return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                          "file range exceeds the accessible file length "
+                          "(offset=%" PRIu64 ", length=%" PRIu64
+                          ", file_length=%" PRIu64 ")",
+                          byte_offset, byte_length, file_length);
+}
+
 IREE_API_EXPORT bool iree_hal_file_supports_synchronous_io(
     iree_hal_file_t* file) {
   IREE_ASSERT_ARGUMENT(file);
@@ -95,6 +115,21 @@ IREE_API_EXPORT iree_status_t iree_hal_file_read(
   IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, file_offset);
   IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, (int64_t)buffer_offset);
   IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, (int64_t)length);
+  if (IREE_UNLIKELY(!iree_hal_file_supports_synchronous_io(file))) {
+    IREE_TRACE_ZONE_END(z0);
+    return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
+                            "file does not support synchronous I/O");
+  }
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_hal_file_validate_access(file, IREE_HAL_MEMORY_ACCESS_READ));
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_hal_file_validate_range(file, file_offset, length));
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_hal_buffer_validate_range(buffer, buffer_offset, length));
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0,
+      iree_hal_buffer_validate_access(iree_hal_buffer_allowed_access(buffer),
+                                      IREE_HAL_MEMORY_ACCESS_WRITE));
   iree_status_t status = _VTABLE_DISPATCH(file, read)(file, file_offset, buffer,
                                                       buffer_offset, length);
   IREE_TRACE_ZONE_END(z0);
@@ -110,6 +145,21 @@ IREE_API_EXPORT iree_status_t iree_hal_file_write(
   IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, file_offset);
   IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, (int64_t)buffer_offset);
   IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, (int64_t)length);
+  if (IREE_UNLIKELY(!iree_hal_file_supports_synchronous_io(file))) {
+    IREE_TRACE_ZONE_END(z0);
+    return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
+                            "file does not support synchronous I/O");
+  }
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_hal_file_validate_access(file, IREE_HAL_MEMORY_ACCESS_WRITE));
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_hal_file_validate_range(file, file_offset, length));
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_hal_buffer_validate_range(buffer, buffer_offset, length));
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0,
+      iree_hal_buffer_validate_access(iree_hal_buffer_allowed_access(buffer),
+                                      IREE_HAL_MEMORY_ACCESS_READ));
   iree_status_t status = _VTABLE_DISPATCH(file, write)(
       file, file_offset, buffer, buffer_offset, length);
   IREE_TRACE_ZONE_END(z0);

@@ -43,6 +43,12 @@ iree_hsa_fence_scope_t iree_hal_amdgpu_host_queue_signal_list_release_scope(
     const iree_hal_amdgpu_host_queue_t* queue,
     iree_hal_semaphore_list_t semaphores);
 
+// Returns the acquire scope an operation's reads from |source_buffer| require
+// on their own, independent of any semaphore edge. A source the host can map
+// requires SYSTEM scope so host writes are visible to the device operation.
+iree_hsa_fence_scope_t iree_hal_amdgpu_host_queue_buffer_acquire_scope(
+    const iree_hal_buffer_t* source_buffer);
+
 // Returns the release scope an operation's writes into |target_buffer| require
 // on their own, independent of any semaphore edge. A target the host can map
 // must be published at SYSTEM scope: an AGENT release need not make writes

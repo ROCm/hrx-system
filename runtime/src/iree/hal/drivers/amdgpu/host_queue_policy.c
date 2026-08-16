@@ -106,6 +106,14 @@ iree_hsa_fence_scope_t iree_hal_amdgpu_host_queue_signal_list_release_scope(
   return release_scope;
 }
 
+iree_hsa_fence_scope_t iree_hal_amdgpu_host_queue_buffer_acquire_scope(
+    const iree_hal_buffer_t* source_buffer) {
+  return iree_any_bit_set(iree_hal_buffer_memory_type(source_buffer),
+                          IREE_HAL_MEMORY_TYPE_HOST_VISIBLE)
+             ? IREE_HSA_FENCE_SCOPE_SYSTEM
+             : IREE_HSA_FENCE_SCOPE_NONE;
+}
+
 iree_hsa_fence_scope_t iree_hal_amdgpu_host_queue_buffer_release_scope(
     const iree_hal_buffer_t* target_buffer) {
   return iree_any_bit_set(iree_hal_buffer_memory_type(target_buffer),

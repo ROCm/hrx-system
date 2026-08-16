@@ -6929,27 +6929,6 @@ iree_status_t iree_hal_vulkan_queue_submit_copy(
       iree_hal_vulkan_queue_completion_action_null());
 }
 
-static iree_status_t iree_hal_vulkan_queue_validate_file_range(
-    iree_hal_file_t* file, uint64_t offset, iree_device_size_t length,
-    iree_string_view_t operation) {
-  const uint64_t file_length = iree_hal_file_length(file);
-  if (file_length == 0) return iree_ok_status();
-  if (length > UINT64_MAX - offset) {
-    return iree_make_status(
-        IREE_STATUS_OUT_OF_RANGE,
-        "%.*s range [%" PRIu64 ", overflow) exceeds file length %" PRIu64,
-        (int)operation.size, operation.data, offset, file_length);
-  }
-  const uint64_t end_offset = offset + (uint64_t)length;
-  if (end_offset > file_length) {
-    return iree_make_status(
-        IREE_STATUS_OUT_OF_RANGE,
-        "%.*s range [%" PRIu64 ", %" PRIu64 ") exceeds file length %" PRIu64,
-        (int)operation.size, operation.data, offset, end_offset, file_length);
-  }
-  return iree_ok_status();
-}
-
 static bool iree_hal_vulkan_queue_file_supports_staged_transfer(
     iree_hal_file_t* file) {
   return iree_hal_memory_file_isa(file) ||
@@ -7843,27 +7822,11 @@ iree_status_t iree_hal_vulkan_queue_submit_read(
   IREE_TRACE_ZONE_BEGIN(z0);
 
   iree_status_t status = iree_ok_status();
-  if (flags != IREE_HAL_READ_FLAG_NONE) {
-    status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "unsupported Vulkan queue read flags: 0x%" PRIx64,
-                              flags);
-  }
-  if (iree_status_is_ok(status)) {
-    status =
-        iree_hal_file_validate_access(source_file, IREE_HAL_MEMORY_ACCESS_READ);
-  }
-  if (iree_status_is_ok(status)) {
-    status =
-        iree_hal_buffer_validate_range(target_buffer, target_offset, length);
-  }
+  (void)flags;
   if (iree_status_is_ok(status)) {
     status = iree_hal_buffer_validate_memory_type(
         iree_hal_buffer_memory_type(target_buffer),
         IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE);
-  }
-  if (iree_status_is_ok(status)) {
-    status = iree_hal_vulkan_queue_validate_file_range(
-        source_file, source_offset, length, IREE_SV("read"));
   }
   if (iree_status_is_ok(status)) {
     status = iree_hal_vulkan_queue_validate_semaphore_list(
@@ -7873,12 +7836,6 @@ iree_status_t iree_hal_vulkan_queue_submit_read(
     status = iree_hal_vulkan_queue_validate_semaphore_list(
         queue, signal_semaphore_list, IREE_SV("signal"));
   }
-  if (iree_status_is_ok(status) && length == 0) {
-    IREE_TRACE_ZONE_END(z0);
-    return iree_hal_vulkan_queue_submit_barrier(queue, wait_semaphore_list,
-                                                signal_semaphore_list);
-  }
-
   iree_hal_buffer_t* source_storage_buffer =
       iree_status_is_ok(status) ? iree_hal_file_storage_buffer(source_file)
                                 : NULL;
@@ -7937,27 +7894,11 @@ iree_status_t iree_hal_vulkan_queue_submit_write(
   IREE_TRACE_ZONE_BEGIN(z0);
 
   iree_status_t status = iree_ok_status();
-  if (flags != IREE_HAL_WRITE_FLAG_NONE) {
-    status = iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "unsupported Vulkan queue write flags: 0x%" PRIx64, flags);
-  }
-  if (iree_status_is_ok(status)) {
-    status = iree_hal_file_validate_access(target_file,
-                                           IREE_HAL_MEMORY_ACCESS_WRITE);
-  }
-  if (iree_status_is_ok(status)) {
-    status =
-        iree_hal_buffer_validate_range(source_buffer, source_offset, length);
-  }
+  (void)flags;
   if (iree_status_is_ok(status)) {
     status = iree_hal_buffer_validate_memory_type(
         iree_hal_buffer_memory_type(source_buffer),
         IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE);
-  }
-  if (iree_status_is_ok(status)) {
-    status = iree_hal_vulkan_queue_validate_file_range(
-        target_file, target_offset, length, IREE_SV("write"));
   }
   if (iree_status_is_ok(status)) {
     status = iree_hal_vulkan_queue_validate_semaphore_list(
@@ -7967,12 +7908,6 @@ iree_status_t iree_hal_vulkan_queue_submit_write(
     status = iree_hal_vulkan_queue_validate_semaphore_list(
         queue, signal_semaphore_list, IREE_SV("signal"));
   }
-  if (iree_status_is_ok(status) && length == 0) {
-    IREE_TRACE_ZONE_END(z0);
-    return iree_hal_vulkan_queue_submit_barrier(queue, wait_semaphore_list,
-                                                signal_semaphore_list);
-  }
-
   bool source_is_native = false;
   if (iree_status_is_ok(status)) {
     status = iree_hal_vulkan_queue_buffer_is_native(source_buffer,

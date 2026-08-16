@@ -379,30 +379,27 @@ iree_hal_buffer_validate_usage(iree_hal_buffer_usage_t allowed_usage,
 IREE_API_EXPORT iree_status_t iree_hal_buffer_validate_range(
     iree_hal_buffer_t* buffer, iree_device_size_t byte_offset,
     iree_device_size_t byte_length) {
+  const iree_device_size_t buffer_length = iree_hal_buffer_byte_length(buffer);
+
   // Check if the start of the range runs off the end of the buffer.
-  if (IREE_UNLIKELY(byte_offset > iree_hal_buffer_byte_length(buffer))) {
+  if (IREE_UNLIKELY(byte_offset > buffer_length)) {
     return iree_make_status(
         IREE_STATUS_OUT_OF_RANGE,
         "attempted to access an address off the end of the valid buffer range "
         "(offset=%" PRIdsz ", length=%" PRIdsz ", buffer byte_length=%" PRIdsz
         ")",
-        byte_offset, byte_length, iree_hal_buffer_byte_length(buffer));
+        byte_offset, byte_length, buffer_length);
   }
 
-  if (byte_length == 0) {
-    // Fine to have a zero length.
-    return iree_ok_status();
-  }
-
-  // Check if the end runs over the allocation.
-  iree_device_size_t end = byte_offset + byte_length;
-  if (IREE_UNLIKELY(end > iree_hal_buffer_byte_length(buffer))) {
+  // Check the length against the remaining range without forming an end
+  // offset that could wrap.
+  if (IREE_UNLIKELY(byte_length > buffer_length - byte_offset)) {
     return iree_make_status(
         IREE_STATUS_OUT_OF_RANGE,
         "attempted to access an address outside of the valid buffer range "
-        "(offset=%" PRIdsz ", length=%" PRIdsz ", end(inc)=%" PRIdsz
-        ", buffer byte_length=%" PRIdsz ")",
-        byte_offset, byte_length, end - 1, iree_hal_buffer_byte_length(buffer));
+        "(offset=%" PRIdsz ", length=%" PRIdsz ", buffer byte_length=%" PRIdsz
+        ")",
+        byte_offset, byte_length, buffer_length);
   }
 
   return iree_ok_status();

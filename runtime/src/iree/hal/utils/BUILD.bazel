@@ -149,17 +149,6 @@ iree_runtime_cc_library(
 )
 
 iree_runtime_cc_library(
-    name = "file_transfer",
-    srcs = ["file_transfer.c"],
-    hdrs = ["file_transfer.h"],
-    deps = [
-        "//runtime/src/iree/base",
-        "//runtime/src/iree/base/internal",
-        "//runtime/src/iree/hal",
-    ],
-)
-
-iree_runtime_cc_library(
     name = "files",
     srcs = [
         "fd_file.c",
