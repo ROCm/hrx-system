@@ -116,9 +116,10 @@ typedef struct loom_cmd_program_plan_t {
 // retain their ordinary target-compilation path. The source module is unchanged
 // and need not outlive the returned plan.
 //
-// |pass_registry| must provide the standard canonicalize and unroll-scf-for
-// function passes used to resolve root-local source structure. It is a
-// compiler-owned resource rather than part of the authored program contract.
+// |pass_registry| must provide the standard canonicalize, cse, and
+// unroll-scf-for function passes used to resolve root-local source structure.
+// It is a compiler-owned resource rather than part of the authored program
+// contract.
 //
 // Unsupported portable mappings and infrastructure failures return a non-OK
 // status. Source contract violations emit diagnostics, set |out_valid| to

@@ -77,7 +77,10 @@ static iree_status_t loom_cmd_program_plan_build_root_preparation_body(
   IREE_RETURN_IF_ERROR(
       loom_pass_ir_build_run(builder, 0, IREE_SV("unroll-scf-for"),
                              loom_named_attr_slice_empty(), &run_op));
-  return loom_pass_ir_build_run(builder, 0, IREE_SV("canonicalize"),
+  IREE_RETURN_IF_ERROR(
+      loom_pass_ir_build_run(builder, 0, IREE_SV("canonicalize"),
+                             loom_named_attr_slice_empty(), &run_op));
+  return loom_pass_ir_build_run(builder, 0, IREE_SV("cse"),
                                 loom_named_attr_slice_empty(), &run_op);
 }
 
