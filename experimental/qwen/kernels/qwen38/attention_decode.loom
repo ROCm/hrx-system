@@ -4,8 +4,6 @@
 
 config.decl @qwen38.attention.cache_capacity : %value: index where [range(%value, 1, 262144)]
 
-func.decl @qwen38_attention_rope_text_value(%position: i32, %lane: index, %normalized_head: buffer) -> (f32)
-
 // Normalizes and rotates 24 query heads while extracting their colocated
 // sigmoid gates. One workgroup owns one complete 256-wide head.
 kernel.def export("qwen38_attention_query_prepare_decode") @qwen38_attention_query_prepare_decode() {
@@ -49,7 +47,7 @@ kernel.def export("qwen38_attention_query_prepare_decode") @qwen38_attention_que
   view.store %normalized, %scratch_view[%lane] : f32, view<256xf32>
   kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
   %position = view.load %control_view[0] : view<1xi32> -> i32
-  %rotated = func.call @qwen38_attention_rope_text_value(%position, %lane, %scratch) : (i32, index, buffer) -> (f32)
+  %rotated = func.apply<qwen38.attention.rope_text_value>(%position, %lane, %scratch) : (i32, index, buffer) -> (f32)
   %gate_value = scalar.logisticf<afn> %raw_gate : f32
   view.store %rotated, %query_view[%output_index] : f32, view<6144xf32>
   view.store %gate_value, %gate_view[%output_index] : f32, view<6144xf32>
@@ -100,7 +98,7 @@ kernel.def export("qwen38_attention_kv_prepare_decode") @qwen38_attention_kv_pre
   %position_i32 = view.load %control_view[0] : view<1xi32> -> i32
   %position0 = index.cast %position_i32 : i32 to index
   %position = index.assume %position0 [range(%position0, 0, 262143), lt(%position0, %cache_capacity)] : index
-  %rotated = func.call @qwen38_attention_rope_text_value(%position_i32, %lane, %scratch) : (i32, index, buffer) -> (f32)
+  %rotated = func.apply<qwen38.attention.rope_text_value>(%position_i32, %lane, %scratch) : (i32, index, buffer) -> (f32)
   %token_cache_base = index.mul %position, %c1024 : index
   %cache_head_base = index.add %token_cache_base, %head_base : index
   %cache_index = index.add %cache_head_base, %lane : index

@@ -4,7 +4,7 @@
 // identical temporal, height, and width coordinates, reducing the model's
 // interleaved MRoPE to a 64-wide NEOX rotation. The first 64 values use pairs
 // separated by 32; the remaining 192 values pass through.
-func.def inline @qwen38_attention_rope_text_value(%position: i32, %lane0: index, %normalized_head: buffer) -> (f32) {
+func.template<qwen38.attention.rope_text_value> device @qwen38_attention_rope_text_value(%position: i32, %lane0: index, %normalized_head: buffer) -> (f32) {
   %lane = index.assume %lane0 [range(%lane0, 0, 255)] : index
   %c0_offset = index.constant 0 : offset
   %head_view = buffer.view %normalized_head[%c0_offset] : buffer -> view<256xf32>

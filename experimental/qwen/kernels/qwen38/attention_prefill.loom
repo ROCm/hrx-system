@@ -6,8 +6,6 @@
 
 config.decl @qwen38.attention.cache_capacity : %value: index where [range(%value, 1, 262144)]
 
-func.decl @qwen38_attention_rope_text_value(%position: i32, %lane: index, %normalized_head: buffer) -> (f32)
-
 // Normalizes and rotates every query head while extracting its colocated
 // sigmoid gate. One workgroup owns one complete token/head pair.
 kernel.def export("qwen38_attention_query_prepare_prefill") @qwen38_attention_query_prepare_prefill(%token_count: index) {
@@ -31,6 +29,8 @@ kernel.def export("qwen38_attention_query_prepare_prefill") @qwen38_attention_qu
   %token_count_i32 = view.load %control_view[%c0] : view<2xi32> -> i32
   %token_count0 = index.cast %token_count_i32 : i32 to index
   %token_count = index.assume %token_count0 [range(%token_count0, 1, 512)] : index
+  %token_active = index.cmp ult, %token0, %token_count : index
+  scf.if %token_active {
   %token = index.assume %token0 [lt(%token0, %token_count)] : index
   %position_base_i32 = view.load %control_view[%c1] : view<2xi32> -> i32
   %position_base0 = index.cast %position_base_i32 : i32 to index
@@ -63,10 +63,11 @@ kernel.def export("qwen38_attention_query_prepare_prefill") @qwen38_attention_qu
   %scratch_view = buffer.view %scratch[%c0_offset] : buffer -> view<256xf32>
   view.store %normalized, %scratch_view[%lane] : f32, view<256xf32>
   kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
-  %rotated = func.call @qwen38_attention_rope_text_value(%position_i32, %lane, %scratch) : (i32, index, buffer) -> (f32)
+  %rotated = func.apply<qwen38.attention.rope_text_value>(%position_i32, %lane, %scratch) : (i32, index, buffer) -> (f32)
   %gate_value = scalar.logisticf<afn> %raw_gate : f32
   view.store %rotated, %query_view[%token, %output_index] : f32, view<[%token_count]x6144xf32>
   view.store %gate_value, %gate_view[%token, %output_index] : f32, view<[%token_count]x6144xf32>
+  }
   kernel.return
 }
 
@@ -94,6 +95,8 @@ kernel.def export("qwen38_attention_kv_prepare_prefill") @qwen38_attention_kv_pr
   %token_count_i32 = view.load %control_view[%c0] : view<2xi32> -> i32
   %token_count0 = index.cast %token_count_i32 : i32 to index
   %token_count = index.assume %token_count0 [range(%token_count0, 1, 512)] : index
+  %token_active = index.cmp ult, %token0, %token_count : index
+  scf.if %token_active {
   %token = index.assume %token0 [lt(%token0, %token_count)] : index
   %position_base_i32 = view.load %control_view[%c1] : view<2xi32> -> i32
   %position_base0 = index.cast %position_base_i32 : i32 to index
@@ -125,7 +128,7 @@ kernel.def export("qwen38_attention_kv_prepare_prefill") @qwen38_attention_kv_pr
   %scratch_view = buffer.view %scratch[%c0_offset] : buffer -> view<256xf32>
   view.store %normalized, %scratch_view[%lane] : f32, view<256xf32>
   kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
-  %rotated = func.call @qwen38_attention_rope_text_value(%position_i32, %lane, %scratch) : (i32, index, buffer) -> (f32)
+  %rotated = func.apply<qwen38.attention.rope_text_value>(%position_i32, %lane, %scratch) : (i32, index, buffer) -> (f32)
   %token_cache_base = index.mul %position, %c1024 : index
   %cache_head_base = index.add %token_cache_base, %head_base : index
   %cache_index = index.add %cache_head_base, %lane : index
@@ -133,6 +136,7 @@ kernel.def export("qwen38_attention_kv_prepare_prefill") @qwen38_attention_kv_pr
   %value_f16 = scalar.fptrunc %raw_value : f32 to f16
   view.store %key_f16, %key_cache_view[%cache_index] : f16, view<[%cache_element_count]xf16>
   view.store %value_f16, %value_cache_view[%cache_index] : f16, view<[%cache_element_count]xf16>
+  }
   kernel.return
 }
 
