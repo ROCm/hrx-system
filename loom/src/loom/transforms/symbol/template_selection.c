@@ -522,12 +522,14 @@ static iree_status_t loom_template_providers_are_equivalent(
   IREE_RETURN_IF_ERROR(loom_symbol_definitions_equivalent(
       state->module, lhs->symbol, rhs->symbol, state->pass->arena,
       &equivalent));
-  IREE_RETURN_IF_ERROR(
-      iree_arena_grow_array(state->pass->arena, state->equivalence_cache.count,
-                            state->equivalence_cache.count + 1,
-                            sizeof(*state->equivalence_cache.entries),
-                            &state->equivalence_cache.capacity,
-                            (void**)&state->equivalence_cache.entries));
+  if (state->equivalence_cache.count >= state->equivalence_cache.capacity) {
+    IREE_RETURN_IF_ERROR(iree_arena_grow_array(
+        state->pass->arena, state->equivalence_cache.count,
+        state->equivalence_cache.count + 1,
+        sizeof(*state->equivalence_cache.entries),
+        &state->equivalence_cache.capacity,
+        (void**)&state->equivalence_cache.entries));
+  }
   state->equivalence_cache.entries[state->equivalence_cache.count++] =
       (loom_template_provider_equivalence_t){
           .lhs = lhs->symbol,

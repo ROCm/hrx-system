@@ -1,0 +1,73 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+// Twelve equivalent providers require 66 pairwise comparisons. Appending
+// those results while spare capacity remains must reuse the current cache
+// allocation instead of doubling it on every comparison until it overflows.
+// RUN: pass select-templates
+
+func.template<test.cache_capacity> @provider_00(%value: i32) -> (i32) {
+  func.return %value : i32
+}
+
+func.template<test.cache_capacity> @provider_01(%value: i32) -> (i32) {
+  func.return %value : i32
+}
+
+func.template<test.cache_capacity> @provider_02(%value: i32) -> (i32) {
+  func.return %value : i32
+}
+
+func.template<test.cache_capacity> @provider_03(%value: i32) -> (i32) {
+  func.return %value : i32
+}
+
+func.template<test.cache_capacity> @provider_04(%value: i32) -> (i32) {
+  func.return %value : i32
+}
+
+func.template<test.cache_capacity> @provider_05(%value: i32) -> (i32) {
+  func.return %value : i32
+}
+
+func.template<test.cache_capacity> @provider_06(%value: i32) -> (i32) {
+  func.return %value : i32
+}
+
+func.template<test.cache_capacity> @provider_07(%value: i32) -> (i32) {
+  func.return %value : i32
+}
+
+func.template<test.cache_capacity> @provider_08(%value: i32) -> (i32) {
+  func.return %value : i32
+}
+
+func.template<test.cache_capacity> @provider_09(%value: i32) -> (i32) {
+  func.return %value : i32
+}
+
+func.template<test.cache_capacity> @provider_10(%value: i32) -> (i32) {
+  func.return %value : i32
+}
+
+func.template<test.cache_capacity> @provider_11(%value: i32) -> (i32) {
+  func.return %value : i32
+}
+
+func.def public @entry(%value: i32) -> (i32) {
+  %result = func.apply<test.cache_capacity>(%value) : (i32) -> (i32)
+  func.return %result : i32
+}
+
+// ----
+func.template<test.cache_capacity> @provider_00(%value: i32) -> (i32) {
+  func.return %value : i32
+}
+
+func.def public @entry(%value: i32) -> (i32) {
+  %result = func.call inline @provider_00(%value) : (i32) -> (i32)
+  func.return %result : i32
+}
