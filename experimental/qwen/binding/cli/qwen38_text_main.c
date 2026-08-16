@@ -686,11 +686,24 @@ static iree_status_t qwen38_text_run(void) {
   if (iree_status_is_ok(status)) {
     ready_time = iree_time_now();
     fprintf(stderr,
-            "qwen38: materialized prefill=%" PRIhsz " decode=%" PRIhsz
-            " MTP-propose=%" PRIhsz " MTP-verify=%" PRIhsz
-            " commands; executing...\n",
-            prefill_info->command_count, decode_info->command_count,
-            propose_info->command_count, verify_info->command_count);
+            "qwen38: materialized command programs:\n"
+            "  prefill:     %" PRIhsz " commands, %" PRIu64
+            " transient bytes\n"
+            "  decode:      %" PRIhsz " commands, %" PRIu64
+            " transient bytes\n"
+            "  MTP propose: %" PRIhsz " commands, %" PRIu64
+            " transient bytes\n"
+            "  MTP verify:  %" PRIhsz " commands, %" PRIu64
+            " transient bytes\n"
+            "qwen38: executing...\n",
+            prefill_info->command_count,
+            (uint64_t)prefill_info->transient.required_byte_length,
+            decode_info->command_count,
+            (uint64_t)decode_info->transient.required_byte_length,
+            propose_info->command_count,
+            (uint64_t)propose_info->transient.required_byte_length,
+            verify_info->command_count,
+            (uint64_t)verify_info->transient.required_byte_length);
     status =
         iree_hal_begin_profiling_from_flags(device, host_allocator, &profiling);
   }
