@@ -7,6 +7,8 @@
 // one recorded command program cover every prefill length in the configured
 // capacity.
 
+func.decl @qwen38_gdn_key_head_for_value_head(%value_head: index) -> (index)
+
 // Advances one depthwise-convolution channel by one token. History values are
 // explicit SSA state so the batched kernel does not round-trip them through
 // global memory between tokens.
@@ -213,7 +215,6 @@ kernel.def export("qwen38_gdn_recurrent_prefill_x4") @qwen38_gdn_recurrent_prefi
   %c128 = index.constant 128 : index
   %q_channel_count = index.constant 2048 : index
   %v_channel_base = index.constant 4096 : index
-  %value_heads_per_key_head = index.constant 3 : index
   %c0_offset = index.constant 0 : offset
   %state_column_offsets = vector.iota %c0 step %c128 : vector<4xindex>
   %qkv_view = buffer.view %qkv_silu[%c0_offset] : buffer -> view<[%bounded_token_count]x10240xf32>
@@ -225,7 +226,7 @@ kernel.def export("qwen38_gdn_recurrent_prefill_x4") @qwen38_gdn_recurrent_prefi
   %state_view = buffer.view %state[%c0_offset] : buffer -> view<786432xf32>
   %output_view = buffer.view %raw_output[%c0_offset] : buffer -> view<[%bounded_token_count]x6144xf32>
 
-  %key_head = index.div %value_head, %value_heads_per_key_head : index
+  %key_head = func.call @qwen38_gdn_key_head_for_value_head(%value_head) : (index) -> (index)
   %key_head_channel_base = index.mul %key_head, %c128 : index
   %q_row0 = index.add %key_head_channel_base, %lane : index
   %q_row1 = index.add %q_row0, %c32 : index

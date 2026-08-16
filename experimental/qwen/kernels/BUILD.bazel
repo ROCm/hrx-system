@@ -28,6 +28,7 @@ exports_files([
     "qwen38/decode_control.loom",
     "qwen38/ffn_gate_up_q5k_i8_wmma.loom",
     "qwen38/ffn_prepare_q8_1.loom",
+    "qwen38/gdn_common.loom",
     "qwen38/gdn_decode.loom",
     "qwen38/gdn_prefill.loom",
     "qwen38/greedy_argmax.loom",
@@ -57,6 +58,12 @@ loom_link_module(
         "qwen38/attention_prefill_wmma.loom",
     ],
     libraries = ["qwen38/attention_common.loom"],
+)
+
+loom_link_module(
+    name = "qwen38_gdn_decode_linked",
+    srcs = ["qwen38/gdn_decode.loom"],
+    libraries = ["qwen38/gdn_common.loom"],
 )
 
 loom_link_module(
@@ -490,14 +497,35 @@ iree_executable_test(
 )
 
 iree_executable_test(
+    name = "qwen38_gdn_common_hal_test",
+    src = "//loom/src/loom/tools/iree-test-loom",
+    args = [
+        "$(location qwen38/gdn_common.loom)",
+        "--case=@qwen38_gdn_key_head_mapping_case",
+        "--device=amdgpu://0",
+        "--sanitizer=access",
+    ],
+    data = ["qwen38/gdn_common.loom"],
+    tags = [
+        "iree-run-requirement=runtime.resource.amd_gpu",
+        "manual",
+        "requires-gpu-amd",
+        "runtime-resource=amd-gpu",
+    ],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/execute:amdgpu_hal",
+    ]),
+)
+
+iree_executable_test(
     name = "qwen38_gdn_decode_plan_test",
     src = "//loom/src/loom/tools/iree-benchmark-loom",
     args = [
-        "$(location qwen38/gdn_decode.loom)",
+        "$(location :qwen38_gdn_decode_linked)",
         "--dry-run",
         "--output-format=jsonl",
     ],
-    data = ["qwen38/gdn_decode.loom"],
+    data = [":qwen38_gdn_decode_linked"],
     tags = ["hostonly"],
 )
 
@@ -505,12 +533,12 @@ iree_executable_test(
     name = "qwen38_gdn_conv_prepare_decode_hal_test",
     src = "//loom/src/loom/tools/iree-test-loom",
     args = [
-        "$(location qwen38/gdn_decode.loom)",
+        "$(location :qwen38_gdn_decode_linked)",
         "--case=@qwen38_gdn_conv_prepare_decode_known_case",
         "--device=amdgpu://0",
         "--sanitizer=access",
     ],
-    data = ["qwen38/gdn_decode.loom"],
+    data = [":qwen38_gdn_decode_linked"],
     tags = [
         "iree-run-requirement=runtime.resource.amd_gpu",
         "manual",
@@ -526,12 +554,12 @@ iree_executable_test(
     name = "qwen38_gdn_recurrent_decode_hal_test",
     src = "//loom/src/loom/tools/iree-test-loom",
     args = [
-        "$(location qwen38/gdn_decode.loom)",
+        "$(location :qwen38_gdn_decode_linked)",
         "--case=@qwen38_gdn_recurrent_decode_x4_differential_case",
         "--device=amdgpu://0",
         "--sanitizer=access",
     ],
-    data = ["qwen38/gdn_decode.loom"],
+    data = [":qwen38_gdn_decode_linked"],
     tags = [
         "iree-run-requirement=runtime.resource.amd_gpu",
         "manual",
@@ -547,12 +575,12 @@ iree_executable_test(
     name = "qwen38_gdn_norm_gate_decode_hal_test",
     src = "//loom/src/loom/tools/iree-test-loom",
     args = [
-        "$(location qwen38/gdn_decode.loom)",
+        "$(location :qwen38_gdn_decode_linked)",
         "--case=@qwen38_gdn_norm_gate_decode_known_case",
         "--device=amdgpu://0",
         "--sanitizer=access",
     ],
-    data = ["qwen38/gdn_decode.loom"],
+    data = [":qwen38_gdn_decode_linked"],
     tags = [
         "iree-run-requirement=runtime.resource.amd_gpu",
         "manual",
@@ -681,6 +709,7 @@ test_suite(
         ":linear_q6k_q8_1_x4_plan_test",
         ":quantize_q8_1_x4_hal_test",
         ":quantize_q8_1_x4_plan_test",
+        ":qwen38_gdn_common_hal_test",
         ":qwen38_gdn_conv_prepare_decode_hal_test",
         ":qwen38_gdn_decode_plan_test",
         ":qwen38_gdn_norm_gate_decode_hal_test",

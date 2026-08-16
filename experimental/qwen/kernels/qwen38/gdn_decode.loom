@@ -9,6 +9,8 @@
 // The recurrent state is transposed so each 128-value state column is
 // contiguous. No parameter or state repacking is required.
 
+func.decl @qwen38_gdn_key_head_for_value_head(%value_head: index) -> (index)
+
 // Applies the four-tap depthwise convolution for one physical QKV channel,
 // advances its three-value history, and returns the SiLU activation.
 func.def inline @qwen38_gdn_conv_channel(%channel: index, %qkv_input: buffer, %conv_weight: buffer, %conv_history: buffer) -> (f32) {
@@ -156,7 +158,6 @@ kernel.def export("qwen38_gdn_recurrent_decode") @qwen38_gdn_recurrent_decode() 
   %c128 = index.constant 128 : index
   %q_channel_count = index.constant 2048 : index
   %v_channel_base = index.constant 4096 : index
-  %value_heads_per_key_head = index.constant 3 : index
   %c0_offset = index.constant 0 : offset
   %qkv_view = buffer.view %qkv_silu[%c0_offset] : buffer -> view<10240xf32>
   %inverse_norm_view = buffer.view %qk_inverse_norm[%c0_offset] : buffer -> view<32xf32>
@@ -167,7 +168,7 @@ kernel.def export("qwen38_gdn_recurrent_decode") @qwen38_gdn_recurrent_decode() 
   %state_view = buffer.view %state[%c0_offset] : buffer -> view<786432xf32>
   %output_view = buffer.view %raw_output[%c0_offset] : buffer -> view<6144xf32>
 
-  %key_head = index.div %value_head, %value_heads_per_key_head : index
+  %key_head = func.call @qwen38_gdn_key_head_for_value_head(%value_head) : (index) -> (index)
   %key_head_channel_base = index.mul %key_head, %c128 : index
   %q_row0 = index.add %key_head_channel_base, %lane : index
   %q_row1 = index.add %q_row0, %c32 : index
@@ -295,7 +296,6 @@ kernel.def export("qwen38_gdn_recurrent_decode_x4") @qwen38_gdn_recurrent_decode
   %c128 = index.constant 128 : index
   %q_channel_count = index.constant 2048 : index
   %v_channel_base = index.constant 4096 : index
-  %value_heads_per_key_head = index.constant 3 : index
   %c0_offset = index.constant 0 : offset
   %state_column_offsets = vector.iota %c0 step %c128 : vector<4xindex>
   %qkv_view = buffer.view %qkv_silu[%c0_offset] : buffer -> view<10240xf32>
@@ -307,7 +307,7 @@ kernel.def export("qwen38_gdn_recurrent_decode_x4") @qwen38_gdn_recurrent_decode
   %state_view = buffer.view %state[%c0_offset] : buffer -> view<786432xf32>
   %output_view = buffer.view %raw_output[%c0_offset] : buffer -> view<6144xf32>
 
-  %key_head = index.div %value_head, %value_heads_per_key_head : index
+  %key_head = func.call @qwen38_gdn_key_head_for_value_head(%value_head) : (index) -> (index)
   %key_head_channel_base = index.mul %key_head, %c128 : index
   %q_row0 = index.add %key_head_channel_base, %lane : index
   %q_row1 = index.add %q_row0, %c32 : index
