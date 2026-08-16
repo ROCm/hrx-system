@@ -636,6 +636,27 @@ iree_executable_test(
 )
 
 iree_executable_test(
+    name = "qwen38_gdn_read_only_state_hal_test",
+    src = "//loom/src/loom/tools/iree-test-loom",
+    args = [
+        "$(location :qwen38_gdn_prefill_linked)",
+        "--case=@qwen38_gdn_read_only_state_case",
+        "--device=amdgpu://0",
+        "--sanitizer=access",
+    ],
+    data = [":qwen38_gdn_prefill_linked"],
+    tags = [
+        "iree-run-requirement=runtime.resource.amd_gpu",
+        "manual",
+        "requires-gpu-amd",
+        "runtime-resource=amd-gpu",
+    ],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/execute:amdgpu_hal",
+    ]),
+)
+
+iree_executable_test(
     name = "qwen38_gdn_decode_plan_test",
     src = "//loom/src/loom/tools/iree-benchmark-loom",
     args = [
@@ -748,27 +769,6 @@ iree_executable_test(
     args = [
         "$(location :qwen38_mtp_control_linked)",
         "--case=@qwen38_mtp_control_depth4_case",
-        "--device=amdgpu://0",
-        "--sanitizer=access",
-    ],
-    data = [":qwen38_mtp_control_linked"],
-    tags = [
-        "iree-run-requirement=runtime.resource.amd_gpu",
-        "manual",
-        "requires-gpu-amd",
-        "runtime-resource=amd-gpu",
-    ],
-    target_compatible_with = loom_config_compatible_with([
-        "//loom/config/execute:amdgpu_hal",
-    ]),
-)
-
-iree_executable_test(
-    name = "qwen38_mtp_copy_gdn_state_hal_test",
-    src = "//loom/src/loom/tools/iree-test-loom",
-    args = [
-        "$(location :qwen38_mtp_control_linked)",
-        "--case=@qwen38_copy_gdn_state_case",
         "--device=amdgpu://0",
         "--sanitizer=access",
     ],
@@ -921,13 +921,13 @@ test_suite(
         ":qwen38_gdn_conv_prepare_decode_hal_test",
         ":qwen38_gdn_decode_plan_test",
         ":qwen38_gdn_norm_gate_decode_hal_test",
+        ":qwen38_gdn_read_only_state_hal_test",
         ":qwen38_gdn_recurrent_decode_hal_test",
         ":qwen38_greedy_argmax_hal_test",
         ":qwen38_greedy_argmax_plan_test",
         ":qwen38_layer_decode_hal_test",
         ":qwen38_layer_decode_plan_test",
         ":qwen38_mtp_control_hal_test",
-        ":qwen38_mtp_copy_gdn_state_hal_test",
         ":qwen38_mtp_prepare_hal_test",
         ":qwen38_token_embedding_hal_test",
         ":qwen38_token_embedding_plan_test",

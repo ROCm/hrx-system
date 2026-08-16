@@ -32,7 +32,11 @@ kernel.decl @qwen38_swiglu_f32_prefill(%token_count$44: index) launch(%token_cou
 
 kernel.decl @qwen38_gdn_conv_prepare_prefill(%token_count: index) launch(%token_count_data: buffer, %l2_epsilon: f32, %qkv_input: buffer, %conv_weight: buffer, %conv_history: buffer, %qkv_silu: buffer, %qk_inverse_norm: buffer)
 
+kernel.decl @qwen38_gdn_conv_prepare_prefill_read_only(%token_count: index) launch(%token_count_data: buffer, %l2_epsilon: f32, %qkv_input: buffer, %conv_weight: buffer, %conv_history: buffer, %qkv_silu: buffer, %qk_inverse_norm: buffer)
+
 kernel.decl @qwen38_gdn_recurrent_prefill_x4(%token_count: index) launch(%token_count_data: buffer, %qkv_silu: buffer, %qk_inverse_norm: buffer, %alpha: buffer, %beta: buffer, %ssm_a: buffer, %dt_bias: buffer, %state: buffer, %raw_output: buffer)
+
+kernel.decl @qwen38_gdn_recurrent_prefill_x4_read_only(%token_count: index) launch(%token_count_data: buffer, %qkv_silu: buffer, %qk_inverse_norm: buffer, %alpha: buffer, %beta: buffer, %ssm_a: buffer, %dt_bias: buffer, %state: buffer, %raw_output: buffer)
 
 kernel.decl @qwen38_gdn_norm_gate_prefill(%token_count$67: index) launch(%token_count$68: index, %rms_epsilon: f32, %raw_output: buffer, %norm_weight: buffer, %z: buffer, %output: buffer)
 
@@ -155,10 +159,18 @@ command.program.def @qwen38_gdn_layer_prefill(%token_count: index, %layer: index
 
   %qkv_silu = buffer.alloca<global> align(256) %qkv_bytes : buffer
   %qk_inverse_norm = buffer.alloca<global> align(256) %qk_norm_bytes : buffer
-  kernel.launch @qwen38_gdn_conv_prepare_prefill[%token_count](%token_count_data, %epsilon, %qkv, %conv_weight, %conv_history, %qkv_silu, %qk_inverse_norm) : [index](buffer, f32, buffer, view<40960xf32>, view<30720xf32>, buffer, buffer)
+  scf.if %uses_m4 {
+    kernel.launch @qwen38_gdn_conv_prepare_prefill_read_only[%token_count](%token_count_data, %epsilon, %qkv, %conv_weight, %conv_history, %qkv_silu, %qk_inverse_norm) : [index](buffer, f32, buffer, view<40960xf32>, view<30720xf32>, buffer, buffer)
+  } else {
+    kernel.launch @qwen38_gdn_conv_prepare_prefill[%token_count](%token_count_data, %epsilon, %qkv, %conv_weight, %conv_history, %qkv_silu, %qk_inverse_norm) : [index](buffer, f32, buffer, view<40960xf32>, view<30720xf32>, buffer, buffer)
+  }
 
   %raw_gdn = buffer.alloca<global> align(256) %gdn_bytes : buffer
-  kernel.launch @qwen38_gdn_recurrent_prefill_x4[%token_count](%token_count_data, %qkv_silu, %qk_inverse_norm, %alpha, %beta, %ssm_a, %dt_bias, %recurrent_state, %raw_gdn) : [index](buffer, buffer, buffer, buffer, buffer, view<48xf32>, view<48xf32>, view<786432xf32>, buffer)
+  scf.if %uses_m4 {
+    kernel.launch @qwen38_gdn_recurrent_prefill_x4_read_only[%token_count](%token_count_data, %qkv_silu, %qk_inverse_norm, %alpha, %beta, %ssm_a, %dt_bias, %recurrent_state, %raw_gdn) : [index](buffer, buffer, buffer, buffer, buffer, view<48xf32>, view<48xf32>, view<786432xf32>, buffer)
+  } else {
+    kernel.launch @qwen38_gdn_recurrent_prefill_x4[%token_count](%token_count_data, %qkv_silu, %qk_inverse_norm, %alpha, %beta, %ssm_a, %dt_bias, %recurrent_state, %raw_gdn) : [index](buffer, buffer, buffer, buffer, buffer, view<48xf32>, view<48xf32>, view<786432xf32>, buffer)
+  }
 
   %gated_gdn = buffer.alloca<global> align(256) %gdn_bytes : buffer
   kernel.launch @qwen38_gdn_norm_gate_prefill[%token_count](%token_capacity, %epsilon, %raw_gdn, %ssm_norm_weight, %z, %gated_gdn) : [index](index, f32, buffer, view<128xf32>, buffer, buffer)

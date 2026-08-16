@@ -1,10 +1,11 @@
 // Qwen3.8-27B batched Gated DeltaNet primitives.
 //
 // The convolution and recurrent kernels preserve causal token order inside
-// each workgroup. Their persistent state is loaded once, advanced across the
-// complete input span in registers, and written once after the final token.
-// Token count remains an issue-time workload value, so one compiled kernel and
-// one recorded command program cover every prefill length in the configured
+// each workgroup. Persistent state is loaded once and advanced across the
+// complete input span in registers. Committing entries write it once after the
+// final token; speculative verification entries leave it untouched. Token
+// count remains an issue-time workload value, so one compiled kernel and one
+// recorded command program cover every prefill length in the configured
 // capacity.
 
 func.decl @qwen38_gdn_key_head_for_value_head(%value_head: index) -> (index)
@@ -26,24 +27,16 @@ func.def inline @qwen38_gdn_conv_step(%current: f32, %history0: f32, %history1: 
 
 // One workgroup owns one Q/K head and its three matching V heads. Every lane
 // carries the histories for its physical channels through the token loop;
-// only Q/K norm reductions rendezvous the workgroup at each causal step.
-kernel.def export("qwen38_gdn_conv_prepare_prefill") @qwen38_gdn_conv_prepare_prefill(%token_count: index) {
-  %bounded_token_count = index.assume %token_count [range(%token_count, 1, 512)] : index
-  %unit = index.constant 1 : index
-  %key_head_count = index.constant 16 : index
-  %workgroup_size = index.constant 256 : index
-  kernel.launch.config workgroups(%key_head_count, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
-} launch(%token_count_data: buffer, %l2_epsilon: f32, %qkv_input: buffer, %conv_weight: buffer, %conv_history: buffer, %qkv_silu: buffer, %qk_inverse_norm: buffer) {
+// only Q/K norm reductions rendezvous the workgroup at each causal step. The
+// two exported wrappers specialize whether the final histories are published,
+// keeping speculative verification and committed execution on one source body.
+func.template<qwen38.gdn_conv_prepare_prefill.body> device @qwen38_gdn_conv_prepare_prefill_body(%publish_history: i1, %head: index, %thread: index, %token_count_data: buffer, %l2_epsilon: f32, %qkv_input: buffer, %conv_weight: buffer, %conv_history: buffer, %qkv_silu: buffer, %qk_inverse_norm: buffer) {
   %token_count_offset = index.constant 0 : offset
   %token_count_index = index.constant 0 : index
   %token_count_view = buffer.view %token_count_data[%token_count_offset] : buffer -> view<1xi32>
   %token_count_i32 = view.load %token_count_view[%token_count_index] : view<1xi32> -> i32
   %token_count0 = index.cast %token_count_i32 : i32 to index
   %bounded_token_count = index.assume %token_count0 [range(%token_count0, 1, 512)] : index
-  %head0 = kernel.workgroup.id<x> : index
-  %head = index.assume %head0 [range(%head0, 0, 15)] : index
-  %thread0 = kernel.workitem.id<x> : index
-  %thread = index.assume %thread0 [range(%thread0, 0, 255)] : index
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
   %c2 = index.constant 2 : index
@@ -168,17 +161,51 @@ kernel.def export("qwen38_gdn_conv_prepare_prefill") @qwen38_gdn_conv_prepare_pr
     scf.yield %next_qk_history0, %next_qk_history1, %next_qk_history2, %next_v0_history0, %next_v0_history1, %next_v0_history2, %next_v1_history0, %next_v1_history1, %next_v1_history2 : f32, f32, f32, f32, f32, f32, f32, f32, f32
   }
 
-  view.store %final_qk_history0, %history_view[%qk_history_base] : f32, view<30720xf32>
-  view.store %final_qk_history1, %history_view[%qk_history1_index] : f32, view<30720xf32>
-  view.store %final_qk_history2, %history_view[%qk_history2_index] : f32, view<30720xf32>
-  view.store %final_v0_history0, %history_view[%v0_history_base] : f32, view<30720xf32>
-  view.store %final_v0_history1, %history_view[%v0_history1_index] : f32, view<30720xf32>
-  view.store %final_v0_history2, %history_view[%v0_history2_index] : f32, view<30720xf32>
-  scf.if %has_value1 {
-    view.store %final_v1_history0, %history_view[%v1_history_base] : f32, view<30720xf32>
-    view.store %final_v1_history1, %history_view[%v1_history1_index] : f32, view<30720xf32>
-    view.store %final_v1_history2, %history_view[%v1_history2_index] : f32, view<30720xf32>
+  scf.if %publish_history {
+    view.store %final_qk_history0, %history_view[%qk_history_base] : f32, view<30720xf32>
+    view.store %final_qk_history1, %history_view[%qk_history1_index] : f32, view<30720xf32>
+    view.store %final_qk_history2, %history_view[%qk_history2_index] : f32, view<30720xf32>
+    view.store %final_v0_history0, %history_view[%v0_history_base] : f32, view<30720xf32>
+    view.store %final_v0_history1, %history_view[%v0_history1_index] : f32, view<30720xf32>
+    view.store %final_v0_history2, %history_view[%v0_history2_index] : f32, view<30720xf32>
+    scf.if %has_value1 {
+      view.store %final_v1_history0, %history_view[%v1_history_base] : f32, view<30720xf32>
+      view.store %final_v1_history1, %history_view[%v1_history1_index] : f32, view<30720xf32>
+      view.store %final_v1_history2, %history_view[%v1_history2_index] : f32, view<30720xf32>
+    }
   }
+  func.return
+}
+
+kernel.def export("qwen38_gdn_conv_prepare_prefill") @qwen38_gdn_conv_prepare_prefill(%token_count: index) {
+  %bounded_token_count = index.assume %token_count [range(%token_count, 1, 512)] : index
+  %unit = index.constant 1 : index
+  %key_head_count = index.constant 16 : index
+  %workgroup_size = index.constant 256 : index
+  kernel.launch.config workgroups(%key_head_count, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%token_count_data: buffer, %l2_epsilon: f32, %qkv_input: buffer, %conv_weight: buffer, %conv_history: buffer, %qkv_silu: buffer, %qk_inverse_norm: buffer) {
+  %head0 = kernel.workgroup.id<x> : index
+  %head = index.assume %head0 [range(%head0, 0, 15)] : index
+  %thread0 = kernel.workitem.id<x> : index
+  %thread = index.assume %thread0 [range(%thread0, 0, 255)] : index
+  %publish_history = scalar.constant true : i1
+  func.apply<qwen38.gdn_conv_prepare_prefill.body>(%publish_history, %head, %thread, %token_count_data, %l2_epsilon, %qkv_input, %conv_weight, %conv_history, %qkv_silu, %qk_inverse_norm) : (i1, index, index, buffer, f32, buffer, buffer, buffer, buffer, buffer)
+  kernel.return
+}
+
+kernel.def export("qwen38_gdn_conv_prepare_prefill_read_only") @qwen38_gdn_conv_prepare_prefill_read_only(%token_count: index) {
+  %bounded_token_count = index.assume %token_count [range(%token_count, 1, 512)] : index
+  %unit = index.constant 1 : index
+  %key_head_count = index.constant 16 : index
+  %workgroup_size = index.constant 256 : index
+  kernel.launch.config workgroups(%key_head_count, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%token_count_data: buffer, %l2_epsilon: f32, %qkv_input: buffer, %conv_weight: buffer, %conv_history: buffer, %qkv_silu: buffer, %qk_inverse_norm: buffer) {
+  %head0 = kernel.workgroup.id<x> : index
+  %head = index.assume %head0 [range(%head0, 0, 15)] : index
+  %thread0 = kernel.workitem.id<x> : index
+  %thread = index.assume %thread0 [range(%thread0, 0, 255)] : index
+  %publish_history = scalar.constant false : i1
+  func.apply<qwen38.gdn_conv_prepare_prefill.body>(%publish_history, %head, %thread, %token_count_data, %l2_epsilon, %qkv_input, %conv_weight, %conv_history, %qkv_silu, %qk_inverse_norm) : (i1, index, index, buffer, f32, buffer, buffer, buffer, buffer, buffer)
   kernel.return
 }
 
@@ -245,27 +272,16 @@ kernel.def export("qwen38_gdn_capture_transition_depth4") @qwen38_gdn_capture_tr
 
 // Four adjacent recurrent-state columns are carried per lane. The complete
 // 128-row state vectors stay resident across all tokens, amortizing the state
-// load/store and preserving the exact causal recurrence.
-kernel.def export("qwen38_gdn_recurrent_prefill_x4") @qwen38_gdn_recurrent_prefill_x4(%token_count: index) {
-  %bounded_token_count = index.assume %token_count [range(%token_count, 1, 512)] : index
-  %unit = index.constant 1 : index
-  %value_head_count = index.constant 48 : index
-  %column_tile_count = index.constant 32 : index
-  %workgroup_size = index.constant 32 : index
-  kernel.launch.config workgroups(%value_head_count, %column_tile_count, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
-} launch(%token_count_data: buffer, %qkv_silu: buffer, %qk_inverse_norm: buffer, %alpha: buffer, %beta: buffer, %ssm_a: buffer, %dt_bias: buffer, %state: buffer, %raw_output: buffer) {
+// load/store and preserving the exact causal recurrence. The two wrappers
+// specialize whether the final states are published without duplicating the
+// arithmetic or reduction order.
+func.template<qwen38.gdn_recurrent_prefill_x4.body> device @qwen38_gdn_recurrent_prefill_x4_body(%publish_state: i1, %value_head: index, %column_tile: index, %lane: index, %token_count_data: buffer, %qkv_silu: buffer, %qk_inverse_norm: buffer, %alpha: buffer, %beta: buffer, %ssm_a: buffer, %dt_bias: buffer, %state: buffer, %raw_output: buffer) {
   %token_count_offset = index.constant 0 : offset
   %token_count_index = index.constant 0 : index
   %token_count_view = buffer.view %token_count_data[%token_count_offset] : buffer -> view<1xi32>
   %token_count_i32 = view.load %token_count_view[%token_count_index] : view<1xi32> -> i32
   %token_count0 = index.cast %token_count_i32 : i32 to index
   %bounded_token_count = index.assume %token_count0 [range(%token_count0, 1, 512)] : index
-  %value_head0 = kernel.workgroup.id<x> : index
-  %value_head = index.assume %value_head0 [range(%value_head0, 0, 47)] : index
-  %column_tile0 = kernel.workgroup.id<y> : index
-  %column_tile = index.assume %column_tile0 [range(%column_tile0, 0, 31)] : index
-  %lane0 = kernel.workitem.id<x> : index
-  %lane = index.assume %lane0 [range(%lane0, 0, 31)] : index
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
   %c2 = index.constant 2 : index
@@ -396,10 +412,50 @@ kernel.def export("qwen38_gdn_recurrent_prefill_x4") @qwen38_gdn_recurrent_prefi
     scf.yield %new_state0, %new_state1, %new_state2, %new_state3 : vector<4xf32>, vector<4xf32>, vector<4xf32>, vector<4xf32>
   }
 
-  vector.scatter %final_state0, %state_view[%state_index0][%state_column_offsets] : vector<4xf32>, view<786432xf32>, vector<4xindex>
-  vector.scatter %final_state1, %state_view[%state_index1][%state_column_offsets] : vector<4xf32>, view<786432xf32>, vector<4xindex>
-  vector.scatter %final_state2, %state_view[%state_index2][%state_column_offsets] : vector<4xf32>, view<786432xf32>, vector<4xindex>
-  vector.scatter %final_state3, %state_view[%state_index3][%state_column_offsets] : vector<4xf32>, view<786432xf32>, vector<4xindex>
+  scf.if %publish_state {
+    vector.scatter %final_state0, %state_view[%state_index0][%state_column_offsets] : vector<4xf32>, view<786432xf32>, vector<4xindex>
+    vector.scatter %final_state1, %state_view[%state_index1][%state_column_offsets] : vector<4xf32>, view<786432xf32>, vector<4xindex>
+    vector.scatter %final_state2, %state_view[%state_index2][%state_column_offsets] : vector<4xf32>, view<786432xf32>, vector<4xindex>
+    vector.scatter %final_state3, %state_view[%state_index3][%state_column_offsets] : vector<4xf32>, view<786432xf32>, vector<4xindex>
+  }
+  func.return
+}
+
+kernel.def export("qwen38_gdn_recurrent_prefill_x4") @qwen38_gdn_recurrent_prefill_x4(%token_count: index) {
+  %bounded_token_count = index.assume %token_count [range(%token_count, 1, 512)] : index
+  %unit = index.constant 1 : index
+  %value_head_count = index.constant 48 : index
+  %column_tile_count = index.constant 32 : index
+  %workgroup_size = index.constant 32 : index
+  kernel.launch.config workgroups(%value_head_count, %column_tile_count, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%token_count_data: buffer, %qkv_silu: buffer, %qk_inverse_norm: buffer, %alpha: buffer, %beta: buffer, %ssm_a: buffer, %dt_bias: buffer, %state: buffer, %raw_output: buffer) {
+  %value_head0 = kernel.workgroup.id<x> : index
+  %value_head = index.assume %value_head0 [range(%value_head0, 0, 47)] : index
+  %column_tile0 = kernel.workgroup.id<y> : index
+  %column_tile = index.assume %column_tile0 [range(%column_tile0, 0, 31)] : index
+  %lane0 = kernel.workitem.id<x> : index
+  %lane = index.assume %lane0 [range(%lane0, 0, 31)] : index
+  %publish_state = scalar.constant true : i1
+  func.apply<qwen38.gdn_recurrent_prefill_x4.body>(%publish_state, %value_head, %column_tile, %lane, %token_count_data, %qkv_silu, %qk_inverse_norm, %alpha, %beta, %ssm_a, %dt_bias, %state, %raw_output) : (i1, index, index, index, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
+  kernel.return
+}
+
+kernel.def export("qwen38_gdn_recurrent_prefill_x4_read_only") @qwen38_gdn_recurrent_prefill_x4_read_only(%token_count: index) {
+  %bounded_token_count = index.assume %token_count [range(%token_count, 1, 512)] : index
+  %unit = index.constant 1 : index
+  %value_head_count = index.constant 48 : index
+  %column_tile_count = index.constant 32 : index
+  %workgroup_size = index.constant 32 : index
+  kernel.launch.config workgroups(%value_head_count, %column_tile_count, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%token_count_data: buffer, %qkv_silu: buffer, %qk_inverse_norm: buffer, %alpha: buffer, %beta: buffer, %ssm_a: buffer, %dt_bias: buffer, %state: buffer, %raw_output: buffer) {
+  %value_head0 = kernel.workgroup.id<x> : index
+  %value_head = index.assume %value_head0 [range(%value_head0, 0, 47)] : index
+  %column_tile0 = kernel.workgroup.id<y> : index
+  %column_tile = index.assume %column_tile0 [range(%column_tile0, 0, 31)] : index
+  %lane0 = kernel.workitem.id<x> : index
+  %lane = index.assume %lane0 [range(%lane0, 0, 31)] : index
+  %publish_state = scalar.constant false : i1
+  func.apply<qwen38.gdn_recurrent_prefill_x4.body>(%publish_state, %value_head, %column_tile, %lane, %token_count_data, %qkv_silu, %qk_inverse_norm, %alpha, %beta, %ssm_a, %dt_bias, %state, %raw_output) : (i1, index, index, index, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
   kernel.return
 }
 
@@ -469,6 +525,43 @@ check.case public @qwen38_gdn_capture_transition_depth4_case {
   check.expect.equal actual(%actual_qkv) expected(%qkv) : tensor<40960xf32>
   check.expect.equal actual(%actual_alpha) expected(%alpha) : tensor<192xf32>
   check.expect.equal actual(%actual_beta) expected(%beta) : tensor<192xf32>
+  check.return
+}
+
+// Proves that speculative verification produces the same causal outputs as
+// committed execution while preserving both persistent GDN state components.
+check.case public @qwen38_gdn_read_only_state_case {
+  %token_count = check.literal value(4) : index
+  %token_count_data = check.generate.fill value(4) : tensor<1xi32>
+  %l2_epsilon = check.literal value(0.000001) : f32
+  %qkv_input = check.generate.iota offset(-0.5) step(0.0000244140625) period(4096) : tensor<4x10240xf32>
+  %conv_weight = check.generate.iota offset(-0.25) step(0.0000244140625) period(2048) : tensor<40960xf32>
+  %initial_history = check.generate.fill value(-0.0625) : tensor<30720xf32>
+  %committed_history = check.generate.fill value(-0.0625) : tensor<30720xf32>
+  %read_only_history = check.generate.fill value(-0.0625) : tensor<30720xf32>
+  %committed_qkv = check.generate.fill value(0.0) : tensor<4x10240xf32>
+  %read_only_qkv = check.generate.fill value(0.0) : tensor<4x10240xf32>
+  %committed_inverse_norm = check.generate.fill value(0.0) : tensor<4x32xf32>
+  %read_only_inverse_norm = check.generate.fill value(0.0) : tensor<4x32xf32>
+  kernel.launch @qwen38_gdn_conv_prepare_prefill[%token_count](%token_count_data, %l2_epsilon, %qkv_input, %conv_weight, %committed_history, %committed_qkv, %committed_inverse_norm) : [index](tensor<1xi32>, f32, tensor<4x10240xf32>, tensor<40960xf32>, tensor<30720xf32>, tensor<4x10240xf32>, tensor<4x32xf32>)
+  kernel.launch @qwen38_gdn_conv_prepare_prefill_read_only[%token_count](%token_count_data, %l2_epsilon, %qkv_input, %conv_weight, %read_only_history, %read_only_qkv, %read_only_inverse_norm) : [index](tensor<1xi32>, f32, tensor<4x10240xf32>, tensor<40960xf32>, tensor<30720xf32>, tensor<4x10240xf32>, tensor<4x32xf32>)
+  check.expect.equal actual(%read_only_qkv) expected(%committed_qkv) : tensor<4x10240xf32>
+  check.expect.equal actual(%read_only_inverse_norm) expected(%committed_inverse_norm) : tensor<4x32xf32>
+  check.expect.equal actual(%read_only_history) expected(%initial_history) : tensor<30720xf32>
+
+  %alpha = check.generate.iota offset(-0.25) step(0.0026041666666666665) : tensor<4x48xf32>
+  %beta = check.generate.iota offset(0.25) step(-0.0013020833333333333) : tensor<4x48xf32>
+  %ssm_a = check.generate.fill value(-0.5) : tensor<48xf32>
+  %dt_bias = check.generate.fill value(0.0625) : tensor<48xf32>
+  %initial_state = check.generate.fill value(0.03125) : tensor<786432xf32>
+  %committed_state = check.generate.fill value(0.03125) : tensor<786432xf32>
+  %read_only_state = check.generate.fill value(0.03125) : tensor<786432xf32>
+  %committed_output = check.generate.fill value(0.0) : tensor<4x6144xf32>
+  %read_only_output = check.generate.fill value(0.0) : tensor<4x6144xf32>
+  kernel.launch @qwen38_gdn_recurrent_prefill_x4[%token_count](%token_count_data, %committed_qkv, %committed_inverse_norm, %alpha, %beta, %ssm_a, %dt_bias, %committed_state, %committed_output) : [index](tensor<1xi32>, tensor<4x10240xf32>, tensor<4x32xf32>, tensor<4x48xf32>, tensor<4x48xf32>, tensor<48xf32>, tensor<48xf32>, tensor<786432xf32>, tensor<4x6144xf32>)
+  kernel.launch @qwen38_gdn_recurrent_prefill_x4_read_only[%token_count](%token_count_data, %read_only_qkv, %read_only_inverse_norm, %alpha, %beta, %ssm_a, %dt_bias, %read_only_state, %read_only_output) : [index](tensor<1xi32>, tensor<4x10240xf32>, tensor<4x32xf32>, tensor<4x48xf32>, tensor<4x48xf32>, tensor<48xf32>, tensor<48xf32>, tensor<786432xf32>, tensor<4x6144xf32>)
+  check.expect.equal actual(%read_only_output) expected(%committed_output) : tensor<4x6144xf32>
+  check.expect.equal actual(%read_only_state) expected(%initial_state) : tensor<786432xf32>
   check.return
 }
 
