@@ -8,10 +8,8 @@
 // These keep binaries linked against upstream libamdhip64 loadable while
 // preserving a loud unsupported result if one of these paths is executed.
 
-#include <dlfcn.h>
 #include <limits.h>
 #include <stdbool.h>
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -19,7 +17,6 @@
 #include "iree/base/threading/call_once.h"
 #include "iree/base/threading/mutex.h"
 #include "libhrx/src/binding/hip/api.h"
-#include "libhrx/src/binding/hip/binding_internal.h"
 
 // Local compatibility declarations for unsupported ABI entries. These symbols
 // only need type-correct call boundaries here; their implementations below
@@ -172,11 +169,11 @@ typedef struct hipExternalSemaphoreWaitNodeParams
 typedef struct hipFunctionLaunchParams_t hipFunctionLaunchParams;
 typedef struct hipGraphicsResource hipGraphicsResource;
 typedef hipGraphicsResource* hipGraphicsResource_t;
-typedef struct hipKernel_st* hipKernel_t;
 typedef struct hipLaunchConfig_st hipLaunchConfig_t;
 typedef struct hipLaunchParams_t hipLaunchParams;
 typedef struct hipLibrary_st* hipLibrary_t;
 typedef struct ihipLinkState_t* hipLinkState_t;
+typedef struct hipMemcpy3DPeerParms hipMemcpy3DPeerParms;
 typedef enum hipMemcpyFlags {
   hipMemcpyFlagDefault = 0x0,
   hipMemcpyFlagPreferOverlapWithCompute = 0x1,
@@ -237,10 +234,6 @@ typedef struct hipTextureDesc hipTextureDesc;
 typedef struct hipDevResource_st hipDevResource;
 typedef struct hipDevSmResourceGroupParams_st hipDevSmResourceGroupParams;
 typedef int hipDevResourceType;
-typedef int hipDriverEntryPointQueryResult;
-typedef int hipFunction_attribute;
-typedef int hipJitInputType;
-typedef int hipLibraryOption;
 typedef int hipMemRangeHandleType;
 typedef int hipStreamAttrID;
 typedef int hipStreamAttrValue;
@@ -525,47 +518,6 @@ static hipError_t hrx_hip_spt_stream_or_explicit(hipStream_t stream,
     return hipSuccess;
   }
   return hrx_hip_spt_default_stream(resolved_stream);
-}
-
-static hipError_t hrx_hip_driver_entry_point_lookup(const char* symbol,
-                                                    void** function,
-                                                    unsigned long long flags,
-                                                    void* symbol_status) {
-  if (!symbol || symbol[0] == '\0' || !function || flags > 2) {
-    return hipErrorInvalidValue;
-  }
-
-  // Resolve against this library, not the process-global scope; see
-  // iree_hip_self_dl_handle(). Like hipGetProcAddress(), a consumer may dlopen
-  // us with RTLD_LOCAL, so a dlsym(dlopen(NULL), ...) lookup would spuriously
-  // fail. Fall back to the global scope only if the self-handle is unavailable.
-  void* handle = iree_hip_self_dl_handle();
-  bool close_handle = false;
-  if (!handle) {
-    handle = dlopen(NULL, RTLD_LAZY);
-    close_handle = handle != NULL;
-  }
-  if (!handle) {
-    *function = NULL;
-    if (symbol_status) *(int*)symbol_status = 1;
-    return hipErrorSharedObjectInitFailed;
-  }
-
-  char stream_per_thread_symbol[256];
-  void* found = NULL;
-  size_t symbol_length = strlen(symbol);
-  if (flags == 2 && symbol_length < sizeof(stream_per_thread_symbol) - 4 &&
-      (symbol_length < 4 || strcmp(symbol + symbol_length - 4, "_spt") != 0)) {
-    snprintf(stream_per_thread_symbol, sizeof(stream_per_thread_symbol),
-             "%s_spt", symbol);
-    found = dlsym(handle, stream_per_thread_symbol);
-  }
-  if (!found) found = dlsym(handle, symbol);
-  if (close_handle) dlclose(handle);
-
-  *function = found;
-  if (symbol_status) *(int*)symbol_status = found ? 0 : 1;
-  return found ? hipSuccess : hipErrorNotFound;
 }
 
 typedef struct hrx_hip_stream_callback_thunk_t {
@@ -1084,14 +1036,6 @@ HIPAPI hipError_t hipExternalMemoryGetMappedMipmappedArray(
   return hipErrorNotSupported;
 }
 
-HIPAPI hipError_t hipExtLaunchMultiKernelMultiDevice(
-    hipLaunchParams* launchParamsList, int numDevices, unsigned int flags) {
-  (void)launchParamsList;
-  (void)numDevices;
-  (void)flags;
-  return hipErrorNotSupported;
-}
-
 HIPAPI hipError_t hipFreeMipmappedArray(hipMipmappedArray_t mipmappedArray) {
   return hrx_hip_destroy_mipmapped_array(mipmappedArray);
 }
@@ -1104,19 +1048,6 @@ HIPAPI hipError_t hipGetDevicePropertiesR0000(hipDeviceProp_tR0000* prop,
   if (result != hipSuccess) return result;
   iree_hip_convert_device_properties_r0600_to_r0000(&current_properties, prop);
   return hipSuccess;
-}
-
-HIPAPI hipError_t hipGetDriverEntryPoint(
-    const char* symbol, void** funcPtr, unsigned long long flags,
-    hipDriverEntryPointQueryResult* status) {
-  return hrx_hip_driver_entry_point_lookup(symbol, funcPtr, flags, status);
-}
-
-HIPAPI hipError_t hipGetFuncBySymbol(hipFunction_t* functionPtr,
-                                     const void* symbolPtr) {
-  (void)functionPtr;
-  (void)symbolPtr;
-  return hipErrorNotSupported;
 }
 
 HIPAPI hipError_t hipGetMipmappedArrayLevel(
@@ -1219,28 +1150,6 @@ HIPAPI hipError_t hipGreenCtxCreate(hipExecutionCtx_t* ctx,
   return hipErrorNotSupported;
 }
 
-HIPAPI hipError_t hipHccModuleLaunchKernel(
-    hipFunction_t f, uint32_t globalWorkSizeX, uint32_t globalWorkSizeY,
-    uint32_t globalWorkSizeZ, uint32_t localWorkSizeX, uint32_t localWorkSizeY,
-    uint32_t localWorkSizeZ, size_t sharedMemBytes, hipStream_t hStream,
-    void** kernelParams, void** extra, hipEvent_t startEvent,
-    hipEvent_t stopEvent) {
-  (void)f;
-  (void)globalWorkSizeX;
-  (void)globalWorkSizeY;
-  (void)globalWorkSizeZ;
-  (void)localWorkSizeX;
-  (void)localWorkSizeY;
-  (void)localWorkSizeZ;
-  (void)sharedMemBytes;
-  (void)hStream;
-  (void)kernelParams;
-  (void)extra;
-  (void)startEvent;
-  (void)stopEvent;
-  return hipErrorNotSupported;
-}
-
 HIPAPI hipError_t hipGraphicsMapResources(int count,
                                           hipGraphicsResource_t* resources,
                                           hipStream_t stream) {
@@ -1299,54 +1208,6 @@ HIPAPI hipError_t hipImportExternalSemaphore(
   return hipErrorNotSupported;
 }
 
-HIPAPI hipError_t hipKernelGetAttribute(int* pi, hipFunction_attribute attrib,
-                                        hipKernel_t kernel, hipDevice_t dev) {
-  (void)pi;
-  (void)attrib;
-  (void)kernel;
-  (void)dev;
-  return hipErrorNotSupported;
-}
-
-HIPAPI hipError_t hipKernelGetFunction(hipFunction_t* pFunc,
-                                       hipKernel_t kernel) {
-  (void)pFunc;
-  (void)kernel;
-  return hipErrorNotSupported;
-}
-
-HIPAPI hipError_t hipKernelGetLibrary(hipLibrary_t* library,
-                                      hipKernel_t kernel) {
-  (void)library;
-  (void)kernel;
-  return hipErrorNotSupported;
-}
-
-HIPAPI hipError_t hipKernelGetName(const char** name, hipKernel_t kernel) {
-  (void)name;
-  (void)kernel;
-  return hipErrorNotSupported;
-}
-
-HIPAPI hipError_t hipKernelGetParamInfo(hipKernel_t kernel, size_t paramIndex,
-                                        size_t* paramOffset,
-                                        size_t* paramSize) {
-  (void)kernel;
-  (void)paramIndex;
-  (void)paramOffset;
-  (void)paramSize;
-  return hipErrorNotSupported;
-}
-
-HIPAPI hipError_t hipKernelSetAttribute(hipFunction_attribute attrib, int value,
-                                        hipKernel_t kernel, hipDevice_t dev) {
-  (void)attrib;
-  (void)value;
-  (void)kernel;
-  (void)dev;
-  return hipErrorNotSupported;
-}
-
 HIPAPI hipError_t hipLaunchCooperativeKernel(const void* f, dim3 gridDim,
                                              dim3 blockDimX,
                                              void** kernelParams,
@@ -1380,136 +1241,6 @@ HIPAPI hipError_t hipLaunchKernelExC(const hipLaunchConfig_t* config,
   (void)config;
   (void)fPtr;
   (void)args;
-  return hipErrorNotSupported;
-}
-
-HIPAPI hipError_t hipLibraryEnumerateKernels(hipKernel_t* kernels,
-                                             unsigned int numKernels,
-                                             hipLibrary_t library) {
-  (void)kernels;
-  (void)numKernels;
-  (void)library;
-  return hipErrorNotSupported;
-}
-
-HIPAPI hipError_t hipLibraryGetGlobal(void** dptr, size_t* bytes,
-                                      hipLibrary_t library, const char* name) {
-  (void)dptr;
-  (void)bytes;
-  (void)library;
-  (void)name;
-  return hipErrorNotSupported;
-}
-
-HIPAPI hipError_t hipLibraryGetKernel(hipKernel_t* pKernel,
-                                      hipLibrary_t library, const char* name) {
-  (void)pKernel;
-  (void)library;
-  (void)name;
-  return hipErrorNotSupported;
-}
-
-HIPAPI hipError_t hipLibraryGetKernelCount(unsigned int* count,
-                                           hipLibrary_t library) {
-  (void)count;
-  (void)library;
-  return hipErrorNotSupported;
-}
-
-HIPAPI hipError_t hipLibraryGetManaged(void** dptr, size_t* bytes,
-                                       hipLibrary_t library, const char* name) {
-  (void)dptr;
-  (void)bytes;
-  (void)library;
-  (void)name;
-  return hipErrorNotSupported;
-}
-
-HIPAPI hipError_t hipLibraryLoadData(hipLibrary_t* library, const void* code,
-                                     hipJitOption* jitOptions,
-                                     void** jitOptionsValues,
-                                     unsigned int numJitOptions,
-                                     hipLibraryOption* libraryOptions,
-                                     void** libraryOptionValues,
-                                     unsigned int numLibraryOptions) {
-  (void)library;
-  (void)code;
-  (void)jitOptions;
-  (void)jitOptionsValues;
-  (void)numJitOptions;
-  (void)libraryOptions;
-  (void)libraryOptionValues;
-  (void)numLibraryOptions;
-  return hipErrorNotSupported;
-}
-
-HIPAPI hipError_t hipLibraryLoadFromFile(
-    hipLibrary_t* library, const char* fileName, hipJitOption* jitOptions,
-    void** jitOptionsValues, unsigned int numJitOptions,
-    hipLibraryOption* libraryOptions, void** libraryOptionValues,
-    unsigned int numLibraryOptions) {
-  (void)library;
-  (void)fileName;
-  (void)jitOptions;
-  (void)jitOptionsValues;
-  (void)numJitOptions;
-  (void)libraryOptions;
-  (void)libraryOptionValues;
-  (void)numLibraryOptions;
-  return hipErrorNotSupported;
-}
-
-HIPAPI hipError_t hipLibraryUnload(hipLibrary_t library) {
-  (void)library;
-  return hipErrorNotSupported;
-}
-
-HIPAPI hipError_t hipLinkAddData(hipLinkState_t state, hipJitInputType type,
-                                 void* data, size_t size, const char* name,
-                                 unsigned int numOptions, hipJitOption* options,
-                                 void** optionValues) {
-  (void)state;
-  (void)type;
-  (void)data;
-  (void)size;
-  (void)name;
-  (void)numOptions;
-  (void)options;
-  (void)optionValues;
-  return hipErrorNotSupported;
-}
-
-HIPAPI hipError_t hipLinkAddFile(hipLinkState_t state, hipJitInputType type,
-                                 const char* path, unsigned int numOptions,
-                                 hipJitOption* options, void** optionValues) {
-  (void)state;
-  (void)type;
-  (void)path;
-  (void)numOptions;
-  (void)options;
-  (void)optionValues;
-  return hipErrorNotSupported;
-}
-
-HIPAPI hipError_t hipLinkComplete(hipLinkState_t state, void** hipBinOut,
-                                  size_t* sizeOut) {
-  (void)state;
-  (void)hipBinOut;
-  (void)sizeOut;
-  return hipErrorNotSupported;
-}
-
-HIPAPI hipError_t hipLinkCreate(unsigned int numOptions, hipJitOption* options,
-                                void** optionValues, hipLinkState_t* stateOut) {
-  (void)numOptions;
-  (void)options;
-  (void)optionValues;
-  (void)stateOut;
-  return hipErrorNotSupported;
-}
-
-HIPAPI hipError_t hipLinkDestroy(hipLinkState_t state) {
-  (void)state;
   return hipErrorNotSupported;
 }
 
@@ -1913,13 +1644,6 @@ HIPAPI hipError_t hipMipmappedArrayGetLevel(hipArray_t* pLevelArray,
       pLevelArray, (hipMipmappedArray_const_t)hMipMappedArray, level);
 }
 
-HIPAPI hipError_t hipModuleGetFunctionCount(unsigned int* count,
-                                            hipModule_t module) {
-  (void)count;
-  (void)module;
-  return hipErrorNotSupported;
-}
-
 HIPAPI hipError_t hipModuleGetTexRef(textureReference** texRef,
                                      hipModule_t hmod, const char* name) {
   (void)texRef;
@@ -1934,13 +1658,6 @@ HIPAPI hipError_t hipModuleLaunchCooperativeKernelMultiDevice(
   (void)launchParamsList;
   (void)numDevices;
   (void)flags;
-  return hipErrorNotSupported;
-}
-
-HIPAPI hipError_t hipModuleLoadFatBinary(hipModule_t* module,
-                                         const void* fatbin) {
-  (void)module;
-  (void)fatbin;
   return hipErrorNotSupported;
 }
 
@@ -2314,21 +2031,6 @@ HIPAPI hipError_t hipEventRecord_spt(hipEvent_t event, hipStream_t stream) {
   hipError_t result = hrx_hip_spt_stream_or_explicit(stream, &resolved_stream);
   if (result != hipSuccess) return result;
   return hipEventRecord(event, resolved_stream);
-}
-
-HIPAPI hipError_t hipGetDriverEntryPoint_spt(const char* symbol,
-                                             void** function,
-                                             unsigned long long flags,
-                                             void* status) {
-  return hrx_hip_driver_entry_point_lookup(symbol, function, flags, status);
-}
-
-HIPAPI hipError_t hipGetProcAddress_spt(const char* symbol, void** function,
-                                        int hip_version, uint64_t flags,
-                                        void* symbol_status) {
-  (void)hip_version;
-  (void)flags;
-  return hrx_hip_driver_entry_point_lookup(symbol, function, 2, symbol_status);
 }
 
 HIPAPI hipError_t hipLaunchCooperativeKernel_spt(const void* f, dim3 gridDim,

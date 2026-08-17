@@ -4,6 +4,8 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+#include "common/module.h"
+
 #include <stdio.h>
 #include <string.h>
 
@@ -243,6 +245,7 @@ static iree_status_t iree_hal_streaming_module_extract_metadata(
     status = iree_hal_streaming_function_attributes_initialize(
         device_spec, &export_infos[i], &symbol->function_attributes);
     if (!iree_status_is_ok(status)) break;
+    symbol->preferred_shared_memory_carveout = -1;
 
     // Initialize parameter info.
     iree_hal_streaming_parameter_info_t* parameter_info = &symbol->parameters;
@@ -416,6 +419,9 @@ static iree_status_t iree_hal_streaming_module_extract_metadata(
 
 static void iree_hal_streaming_module_destroy(
     iree_hal_streaming_module_t* module);
+static iree_status_t iree_hal_streaming_module_initialize_managed_globals(
+    iree_hal_streaming_module_t* module,
+    const iree_hal_streaming_fat_binary_extract_t* fat_extract);
 
 static iree_status_t iree_hal_streaming_module_load_executable(
     iree_hal_streaming_context_t* context,
@@ -512,6 +518,13 @@ iree_status_t iree_hal_streaming_module_create_from_memory(
     status = iree_hal_streaming_module_extract_metadata(module);
   }
 
+  // Managed pointer slots must be valid before callers can launch a kernel.
+  // Discover and publish their storage while the module is still private.
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_streaming_module_initialize_managed_globals(module,
+                                                                  &fat_extract);
+  }
+
   iree_hal_streaming_fat_binary_extract_reset(&fat_extract);
   if (iree_status_is_ok(status)) {
     *out_module = module;
@@ -531,11 +544,13 @@ iree_status_t iree_hal_streaming_module_create_from_file(
   *out_module = NULL;
   IREE_TRACE_ZONE_BEGIN(z0);
 
-  // Open the file for reading.
+  // Preload the image into owned host memory. Module executables may alias this
+  // data for their lifetime, but loading a module must not retain a descriptor
+  // for the source file.
   iree_io_file_handle_t* file_handle = NULL;
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_io_file_handle_open(IREE_IO_FILE_MODE_READ, path, host_allocator,
-                                   &file_handle));
+      z0, iree_io_file_handle_preload(IREE_IO_FILE_MODE_READ, path,
+                                      host_allocator, &file_handle));
 
   // Map the entire file for read access.
   iree_io_file_mapping_t* file_mapping = NULL;
@@ -543,7 +558,7 @@ iree_status_t iree_hal_streaming_module_create_from_file(
       file_handle, IREE_IO_FILE_ACCESS_READ, 0, IREE_HOST_SIZE_MAX,
       IREE_IO_FILE_MAPPING_FLAG_NONE, host_allocator, &file_mapping);
 
-  // Release the file handle (mapping retains it).
+  // Release the file handle; the mapping retains the preloaded allocation.
   iree_io_file_handle_release(file_handle);
 
   if (!iree_status_is_ok(status)) {
@@ -577,6 +592,8 @@ static void iree_hal_streaming_module_destroy(
   // Release cached executable globals while both the context pointer map and
   // executable-owned global buffers are still live.
   for (iree_host_size_t i = 0; i < module->global_count; ++i) {
+    iree_hal_streaming_memory_release_wrapped_buffer(
+        module->globals[i]->managed_buffer);
     iree_hal_streaming_memory_release_wrapped_buffer(
         module->globals[i]->global_buffer);
     iree_allocator_free(host_allocator, module->globals[i]);
@@ -676,6 +693,20 @@ iree_hal_streaming_module_find_global_locked(
   return NULL;
 }
 
+static iree_hal_streaming_symbol_t*
+iree_hal_streaming_module_find_global_for_executable_locked(
+    iree_hal_streaming_module_t* module, iree_hal_executable_t* executable,
+    iree_string_view_t name) {
+  for (iree_host_size_t i = 0; i < module->global_count; ++i) {
+    iree_hal_streaming_symbol_t* symbol = module->globals[i];
+    if (symbol->executable == executable &&
+        iree_hal_streaming_module_symbol_name_matches(symbol->name, name)) {
+      return symbol;
+    }
+  }
+  return NULL;
+}
+
 static iree_status_t iree_hal_streaming_module_grow_globals_locked(
     iree_hal_streaming_module_t* module, iree_host_size_t minimum_capacity) {
   if (minimum_capacity <= module->global_capacity) return iree_ok_status();
@@ -737,6 +768,44 @@ static iree_status_t iree_hal_streaming_module_create_global_symbol_locked(
     iree_allocator_free(module->host_allocator, symbol);
     iree_hal_streaming_memory_release_wrapped_buffer(streaming_buffer);
   }
+  return status;
+}
+
+static iree_status_t
+iree_hal_streaming_module_try_lookup_global_symbol_for_executable(
+    iree_hal_streaming_module_t* module, iree_hal_executable_t* executable,
+    iree_string_view_t name, bool* out_found,
+    iree_hal_streaming_symbol_t** out_global) {
+  IREE_ASSERT_ARGUMENT(module);
+  IREE_ASSERT_ARGUMENT(executable);
+  IREE_ASSERT_ARGUMENT(out_found);
+  IREE_ASSERT_ARGUMENT(out_global);
+  *out_found = false;
+  *out_global = NULL;
+
+  iree_status_t status = iree_ok_status();
+  iree_slim_mutex_lock(&module->global_mutex);
+
+  iree_hal_streaming_symbol_t* cached_symbol =
+      iree_hal_streaming_module_find_global_for_executable_locked(
+          module, executable, name);
+  if (cached_symbol) {
+    *out_found = true;
+    *out_global = cached_symbol;
+  } else {
+    iree_hal_executable_global_t global_handle =
+        iree_hal_executable_global_invalid();
+    bool found = false;
+    status = iree_hal_executable_try_lookup_global_by_name(
+        executable, name, &found, &global_handle);
+    if (iree_status_is_ok(status) && found) {
+      status = iree_hal_streaming_module_create_global_symbol_locked(
+          module, executable, global_handle, out_global);
+      if (iree_status_is_ok(status)) *out_found = true;
+    }
+  }
+
+  iree_slim_mutex_unlock(&module->global_mutex);
   return status;
 }
 
@@ -833,7 +902,198 @@ iree_status_t iree_hal_streaming_module_global(
   IREE_RETURN_IF_ERROR(
       iree_hal_streaming_module_global_symbol(module, name, &symbol));
 
-  *out_device_ptr = symbol->device_address;
-  if (out_size) *out_size = symbol->size_bytes;
+  if (symbol->managed_buffer) {
+    *out_device_ptr = symbol->managed_buffer->device_ptr;
+    if (out_size) *out_size = symbol->managed_buffer->logical_size;
+  } else {
+    *out_device_ptr = symbol->device_address;
+    if (out_size) *out_size = symbol->size_bytes;
+  }
   return iree_ok_status();
+}
+
+static iree_status_t iree_hal_streaming_module_initialize_managed_symbol_pair(
+    iree_hal_streaming_module_t* module,
+    iree_hal_streaming_symbol_t* pointer_symbol,
+    iree_hal_streaming_symbol_t* initializer_symbol, void** out_host_pointer,
+    iree_device_size_t* out_size) {
+  if (IREE_UNLIKELY(initializer_symbol->size_bytes == 0)) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "managed global initializer `%.*s` has zero byte length",
+        (int)initializer_symbol->name.size, initializer_symbol->name.data);
+  }
+  if (IREE_UNLIKELY(pointer_symbol->size_bytes !=
+                    sizeof(iree_hal_streaming_deviceptr_t))) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "managed global pointer slot `%.*s` has length %" PRIu64
+        "; expected %" PRIhsz,
+        (int)pointer_symbol->name.size, pointer_symbol->name.data,
+        (uint64_t)pointer_symbol->size_bytes,
+        sizeof(iree_hal_streaming_deviceptr_t));
+  }
+
+  iree_status_t status = iree_ok_status();
+  iree_slim_mutex_lock(&module->global_mutex);
+  if (!pointer_symbol->managed_buffer) {
+    iree_hal_streaming_buffer_t* managed_buffer = NULL;
+    status = iree_hal_streaming_memory_allocate_managed(
+        module->context, initializer_symbol->size_bytes,
+        /*allocation_flags=*/0, &managed_buffer);
+    if (iree_status_is_ok(status)) {
+      managed_buffer->logical_size = initializer_symbol->size_bytes;
+    }
+    if (iree_status_is_ok(status) && initializer_symbol->size_bytes > 0) {
+      status = iree_hal_streaming_memcpy_device_to_host(
+          module->context, managed_buffer->host_ptr,
+          initializer_symbol->device_address, initializer_symbol->size_bytes,
+          /*stream=*/NULL);
+    }
+    if (iree_status_is_ok(status)) {
+      const iree_hal_streaming_deviceptr_t managed_device_pointer =
+          managed_buffer->device_ptr;
+      status = iree_hal_streaming_memcpy_host_to_device(
+          module->context, pointer_symbol->device_address,
+          &managed_device_pointer, sizeof(managed_device_pointer),
+          /*stream=*/NULL);
+    }
+    if (iree_status_is_ok(status)) {
+      pointer_symbol->managed_buffer = managed_buffer;
+      managed_buffer = NULL;
+    }
+    iree_hal_streaming_memory_release_wrapped_buffer(managed_buffer);
+  }
+  if (iree_status_is_ok(status)) {
+    if (out_host_pointer) {
+      *out_host_pointer = pointer_symbol->managed_buffer->host_ptr;
+    }
+    if (out_size) *out_size = initializer_symbol->size_bytes;
+  }
+  iree_slim_mutex_unlock(&module->global_mutex);
+  return status;
+}
+
+static bool iree_hal_streaming_module_split_managed_name(
+    iree_string_view_t name, iree_string_view_t* out_pointer_name) {
+  static const iree_string_view_t suffix = IREE_SVL(".managed");
+  *out_pointer_name = iree_string_view_empty();
+  if (!iree_string_view_ends_with(name, suffix) || name.size == suffix.size) {
+    return false;
+  }
+  *out_pointer_name = iree_make_string_view(name.data, name.size - suffix.size);
+  return true;
+}
+
+typedef struct iree_hal_streaming_managed_global_visitor_t {
+  // Module receiving initialized managed global storage.
+  iree_hal_streaming_module_t* module;
+  // Executable loaded from the ELF currently being visited.
+  iree_hal_executable_t* executable;
+} iree_hal_streaming_managed_global_visitor_t;
+
+static iree_status_t iree_hal_streaming_module_visit_managed_global(
+    void* user_data, iree_string_view_t initializer_name) {
+  iree_hal_streaming_managed_global_visitor_t* visitor =
+      (iree_hal_streaming_managed_global_visitor_t*)user_data;
+  iree_string_view_t pointer_name = iree_string_view_empty();
+  if (!iree_hal_streaming_module_split_managed_name(initializer_name,
+                                                    &pointer_name)) {
+    return iree_ok_status();
+  }
+
+  bool pointer_found = false;
+  iree_hal_streaming_symbol_t* pointer_symbol = NULL;
+  IREE_RETURN_IF_ERROR(
+      iree_hal_streaming_module_try_lookup_global_symbol_for_executable(
+          visitor->module, visitor->executable, pointer_name, &pointer_found,
+          &pointer_symbol));
+  if (!pointer_found) return iree_ok_status();
+
+  bool initializer_found = false;
+  iree_hal_streaming_symbol_t* initializer_symbol = NULL;
+  IREE_RETURN_IF_ERROR(
+      iree_hal_streaming_module_try_lookup_global_symbol_for_executable(
+          visitor->module, visitor->executable, initializer_name,
+          &initializer_found, &initializer_symbol));
+  if (IREE_UNLIKELY(!initializer_found)) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "managed initializer `%.*s` was declared but not resolved",
+        (int)initializer_name.size, initializer_name.data);
+  }
+
+  return iree_hal_streaming_module_initialize_managed_symbol_pair(
+      visitor->module, pointer_symbol, initializer_symbol,
+      /*out_host_pointer=*/NULL, /*out_size=*/NULL);
+}
+
+static iree_status_t iree_hal_streaming_module_initialize_managed_globals(
+    iree_hal_streaming_module_t* module,
+    const iree_hal_streaming_fat_binary_extract_t* fat_extract) {
+  IREE_ASSERT_ARGUMENT(fat_extract);
+  const iree_host_size_t executable_count =
+      module->executable_count ? module->executable_count : 1;
+  if (IREE_UNLIKELY(fat_extract->match_count != executable_count)) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "loaded executable and selected ELF counts do not match");
+  }
+  for (iree_host_size_t i = 0; i < executable_count; ++i) {
+    iree_hal_executable_t* executable =
+        module->executables ? module->executables[i] : module->executable;
+    iree_hal_streaming_managed_global_visitor_t visitor = {
+        .module = module,
+        .executable = executable,
+    };
+    IREE_RETURN_IF_ERROR(iree_hal_streaming_fat_binary_visit_elf_global_objects(
+        fat_extract->matches[i].data,
+        iree_hal_streaming_module_visit_managed_global, &visitor));
+  }
+  return iree_ok_status();
+}
+
+iree_status_t iree_hal_streaming_module_try_initialize_managed_global(
+    iree_hal_streaming_module_t* module, const char* pointer_name,
+    const char* initializer_name, bool* out_found, void** out_host_pointer,
+    iree_device_size_t* out_size) {
+  IREE_ASSERT_ARGUMENT(module);
+  IREE_ASSERT_ARGUMENT(pointer_name);
+  IREE_ASSERT_ARGUMENT(initializer_name);
+  IREE_ASSERT_ARGUMENT(out_found);
+  IREE_ASSERT_ARGUMENT(out_host_pointer);
+  IREE_ASSERT_ARGUMENT(out_size);
+  *out_found = false;
+  *out_host_pointer = NULL;
+  *out_size = 0;
+
+  // The initializer companion identifies a managed global. A same-named
+  // pointer slot without this companion is an ordinary device global.
+  iree_hal_streaming_symbol_t* initializer_symbol = NULL;
+  bool initializer_found = false;
+  IREE_RETURN_IF_ERROR(iree_hal_streaming_module_try_lookup_global_symbol(
+      module, initializer_name, &initializer_found, &initializer_symbol));
+  if (!initializer_found) return iree_ok_status();
+  *out_found = true;
+  if (IREE_UNLIKELY(!initializer_symbol->executable)) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "managed initializer `%s` is not owned by an executable",
+        initializer_name);
+  }
+
+  iree_hal_streaming_symbol_t* pointer_symbol = NULL;
+  bool pointer_found = false;
+  IREE_RETURN_IF_ERROR(
+      iree_hal_streaming_module_try_lookup_global_symbol_for_executable(
+          module, initializer_symbol->executable,
+          iree_make_cstring_view(pointer_name), &pointer_found,
+          &pointer_symbol));
+  if (!pointer_found) {
+    return iree_make_status(IREE_STATUS_NOT_FOUND,
+                            "managed global pointer slot `%s` not found",
+                            pointer_name);
+  }
+  return iree_hal_streaming_module_initialize_managed_symbol_pair(
+      module, pointer_symbol, initializer_symbol, out_host_pointer, out_size);
 }

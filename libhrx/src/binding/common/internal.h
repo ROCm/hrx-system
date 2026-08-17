@@ -162,10 +162,11 @@ typedef struct iree_hal_streaming_context_symbol_entry_t {
   bool synchronize_managed_data_to_host;
 } iree_hal_streaming_context_symbol_entry_t;
 
-// Per-context cache of compiled symbols.
-// Lock-free for lookups (thread-local access).
-// Updated via notifications from global registry.
+// Per-context cache of compiled symbols shared by all threads using the
+// context. Mutations include lazy module loading and table growth.
 typedef struct iree_hal_streaming_context_symbol_map_t {
+  // Serializes table access and the loaded-module list.
+  iree_slim_mutex_t mutex;
   // Hash table: host pointer -> compiled symbol on the context device.
   iree_hal_streaming_context_symbol_entry_t* entries;
   // Number of slots allocated in |entries|.
@@ -670,6 +671,8 @@ typedef struct iree_hal_streaming_symbol_t {
   iree_hal_occupancy_info_t occupancy_info;
   // Cached generic facts and mutable compatibility limits.
   iree_hal_streaming_function_attributes_t function_attributes;
+  // Preferred shared-memory carveout percentage, or -1 for the device default.
+  int preferred_shared_memory_carveout;
 
   // Function parameter information used for argument packing and unpacking.
   iree_hal_streaming_parameter_info_t parameters;
@@ -679,6 +682,9 @@ typedef struct iree_hal_streaming_symbol_t {
   iree_hal_executable_global_t global_handle;
   // Cached streaming wrapper around the executable-owned global buffer.
   iree_hal_streaming_buffer_t* global_buffer;
+  // Runtime-owned host/device-visible storage for a managed global pointer
+  // slot, or NULL when this global is not managed or has not been resolved.
+  iree_hal_streaming_buffer_t* managed_buffer;
   // HIP-visible device pointer for the global storage.
   iree_hal_streaming_deviceptr_t device_address;
   // Byte length of the global storage.
@@ -1739,6 +1745,23 @@ iree_status_t iree_hal_streaming_launch_kernel(
     iree_hal_streaming_symbol_t* symbol,
     const iree_hal_streaming_dispatch_params_t* params,
     iree_hal_streaming_stream_t* stream);
+
+typedef struct iree_hal_streaming_kernel_launch_t {
+  // Function symbol to dispatch.
+  iree_hal_streaming_symbol_t* symbol;
+  // Dispatch dimensions and pointer-array arguments.
+  iree_hal_streaming_dispatch_params_t params;
+  // Stream that receives the dispatch.
+  iree_hal_streaming_stream_t* stream;
+} iree_hal_streaming_kernel_launch_t;
+
+// Prepares all argument images and then records the dispatches while holding
+// every participating stream lock. Each launch must use ARGS_ARRAY parameter
+// storage and each stream must appear at most once.
+// Synchronization: atomically enqueues the launch set across its streams.
+iree_status_t iree_hal_streaming_launch_kernel_batch(
+    iree_host_size_t launch_count,
+    const iree_hal_streaming_kernel_launch_t* launches);
 
 // Launches a host function on the stream.
 // The function will be called with user_data when the stream reaches this

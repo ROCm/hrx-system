@@ -40,6 +40,7 @@ iree_cc_library(
     "kpack.h"
     "managed_global.h"
     "memory.h"
+    "module.h"
     "p2p_topology.h"
     "stream.h"
     "tls.h"

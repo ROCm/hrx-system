@@ -456,13 +456,11 @@ bool iree_hal_streaming_global_symbol_registry_query_variable(
 // We assume that this only ever happens on a context map miss and that we have
 // very few of those after startup.
 // Returns NULL if not found.
-// Thread-safe (takes lock internally).
+// The caller must hold |registry->mutex|.
 static const iree_hal_streaming_symbol_registration_t*
-iree_hal_streaming_global_symbol_registry_lookup(
+iree_hal_streaming_global_symbol_registry_lookup_unsafe(
     iree_hal_streaming_global_symbol_registry_t* registry, void* host_pointer) {
   if (!registry || !host_pointer) return NULL;
-
-  iree_slim_mutex_lock(&registry->mutex);
 
   // Linear scan through all modules and their symbols.
   const iree_hal_streaming_symbol_registration_t* result = NULL;
@@ -478,7 +476,6 @@ iree_hal_streaming_global_symbol_registry_lookup(
     if (result) break;
   }
 
-  iree_slim_mutex_unlock(&registry->mutex);
   return result;
 }
 
@@ -521,6 +518,7 @@ iree_status_t iree_hal_streaming_context_symbol_map_initialize(
       z0, iree_allocator_malloc(host_allocator, entries_size,
                                 (void**)&out_map->entries));
   memset(out_map->entries, 0, entries_size);
+  iree_slim_mutex_initialize(&out_map->mutex);
 
   // Register with the global registry (so we can listen for notifications).
   iree_slim_mutex_lock(&registry->mutex);
@@ -544,6 +542,20 @@ void iree_hal_streaming_context_symbol_map_deinitialize(
   iree_allocator_t host_allocator = map->host_allocator;
   iree_hal_streaming_global_symbol_registry_t* registry = map->registry;
 
+  // Unlink before releasing map-owned state. The registry lock excludes module
+  // unregistration while the map lock drains active lookups.
+  if (registry) iree_slim_mutex_lock(&registry->mutex);
+  iree_slim_mutex_lock(&map->mutex);
+
+  if (registry) {
+    if (map->prev) {
+      map->prev->next = map->next;
+    } else if (registry->context_maps_head == map) {
+      registry->context_maps_head = map->next;
+    }
+    if (map->next) map->next->prev = map->prev;
+  }
+
   // Release all loaded modules.
   iree_hal_streaming_context_module_entry_t* module_entry = map->modules;
   while (module_entry) {
@@ -553,21 +565,11 @@ void iree_hal_streaming_context_symbol_map_deinitialize(
     module_entry = next;
   }
 
-  // Unregister from global registry, if registered.
-  if (registry) {
-    iree_slim_mutex_lock(&registry->mutex);
-    if (map->prev) {
-      map->prev->next = map->next;
-    } else if (registry->context_maps_head == map) {
-      registry->context_maps_head = map->next;
-    }
-    if (map->next) {
-      map->next->prev = map->prev;
-    }
-    iree_slim_mutex_unlock(&registry->mutex);
-  }
-
   iree_allocator_free(host_allocator, map->entries);
+  map->entries = NULL;
+  iree_slim_mutex_unlock(&map->mutex);
+  if (registry) iree_slim_mutex_unlock(&registry->mutex);
+  iree_slim_mutex_deinitialize(&map->mutex);
 
   IREE_TRACE_ZONE_END(z0);
 }
@@ -893,6 +895,7 @@ static void iree_hal_streaming_context_symbol_map_expunge_module(
   IREE_ASSERT_ARGUMENT(map);
   IREE_ASSERT_ARGUMENT(registration);
   IREE_TRACE_ZONE_BEGIN(z0);
+  iree_slim_mutex_lock(&map->mutex);
 
   // Find the module in the loaded modules list and unlink it.
   iree_hal_streaming_context_module_entry_t* prev_entry = NULL;
@@ -912,6 +915,7 @@ static void iree_hal_streaming_context_symbol_map_expunge_module(
   }
   if (!module_entry) {
     // Module was not loaded in this context, no-op.
+    iree_slim_mutex_unlock(&map->mutex);
     IREE_TRACE_ZONE_END(z0);
     return;
   }
@@ -923,8 +927,12 @@ static void iree_hal_streaming_context_symbol_map_expunge_module(
     const uint64_t hash = iree_hal_streaming_symbol_pointer_hash(host_pointer);
     uint32_t index = hash & (map->capacity - 1);
     for (iree_host_size_t j = 0; j < map->capacity; ++j) {
-      if (map->entries[index].key == host_pointer) {
-        // Found it - replace with tombstone.
+      if (map->entries[index].key == host_pointer &&
+          map->entries[index].symbol &&
+          map->entries[index].symbol->module == module_entry->module) {
+        // Remove only the entry backed by the module being unloaded. Weak host
+        // stubs can be coalesced across images, producing multiple entries with
+        // the same key but different compiled-module owners.
         if (map->entries[index].synchronize_managed_data_to_host) {
           IREE_ASSERT(map->managed_symbol_count > 0);
           --map->managed_symbol_count;
@@ -946,6 +954,7 @@ static void iree_hal_streaming_context_symbol_map_expunge_module(
   iree_hal_streaming_module_release(module_entry->module);
   iree_allocator_free(map->host_allocator, module_entry);
 
+  iree_slim_mutex_unlock(&map->mutex);
   IREE_TRACE_ZONE_END(z0);
 }
 
@@ -1067,8 +1076,10 @@ iree_status_t iree_hal_streaming_context_symbol_map_lookup(
                             "invalid host pointer");
   }
 
-  // Fast path: check context-local map (no locks).
+  // Fast path: check the context-local map without touching the process-wide
+  // registry.
   const uint64_t hash = iree_hal_streaming_symbol_pointer_hash(host_pointer);
+  iree_slim_mutex_lock(&map->mutex);
   uint32_t index = hash & (map->capacity - 1);
   for (iree_host_size_t i = 0; i < map->capacity; ++i) {
     const void* entry_key = map->entries[index].key;
@@ -1084,17 +1095,37 @@ iree_status_t iree_hal_streaming_context_symbol_map_lookup(
                 (*out_symbol)->name.data);
       }
 #endif
+      iree_slim_mutex_unlock(&map->mutex);
       return iree_ok_status();
     } else if (entry_key == IREE_HAL_STREAMING_SYMBOL_MAP_EMPTY_KEY) {
       break;  // not found in local map
     }
     index = (index + 1) & (map->capacity - 1);  // continue linear probe
   }
+  iree_slim_mutex_unlock(&map->mutex);
 
-  // Slow path: check global registry.
+  // Slow path lock order is registry then map, matching module unregistration.
+  // Recheck the map after acquiring both locks because another thread may have
+  // loaded the module while this thread was waiting.
+  iree_slim_mutex_lock(&map->registry->mutex);
+  iree_slim_mutex_lock(&map->mutex);
+  index = hash & (map->capacity - 1);
+  for (iree_host_size_t i = 0; i < map->capacity; ++i) {
+    const void* entry_key = map->entries[index].key;
+    if (entry_key == host_pointer) {
+      *out_symbol = map->entries[index].symbol;
+      iree_slim_mutex_unlock(&map->mutex);
+      iree_slim_mutex_unlock(&map->registry->mutex);
+      return iree_ok_status();
+    } else if (entry_key == IREE_HAL_STREAMING_SYMBOL_MAP_EMPTY_KEY) {
+      break;
+    }
+    index = (index + 1) & (map->capacity - 1);
+  }
+
   const iree_hal_streaming_symbol_registration_t* registration =
-      iree_hal_streaming_global_symbol_registry_lookup(map->registry,
-                                                       host_pointer);
+      iree_hal_streaming_global_symbol_registry_lookup_unsafe(map->registry,
+                                                              host_pointer);
   if (!registration) {
     // Not found - return identity.
     fprintf(
@@ -1102,13 +1133,20 @@ iree_status_t iree_hal_streaming_context_symbol_map_lookup(
         "[WARN] Symbol %p not found in global registry, returning identity\n",
         host_pointer);
     *out_symbol = (iree_hal_streaming_symbol_t*)host_pointer;
+    iree_slim_mutex_unlock(&map->mutex);
+    iree_slim_mutex_unlock(&map->registry->mutex);
     return iree_ok_status();
   }
 
   // Ensure the module is loaded and its symbols are in the hash table.
-  IREE_RETURN_IF_ERROR(iree_hal_streaming_context_symbol_map_prepare_module(
-                           map, registration->module),
-                       "preparing statically registered module for context");
+  iree_status_t status = iree_hal_streaming_context_symbol_map_prepare_module(
+      map, registration->module);
+  if (!iree_status_is_ok(status)) {
+    iree_slim_mutex_unlock(&map->mutex);
+    iree_slim_mutex_unlock(&map->registry->mutex);
+    return iree_status_annotate_f(
+        status, "preparing statically registered module for context");
+  }
 
   // Now look up again in the hash table using the original hash.
   // The symbol should be there now after module preparation.
@@ -1126,6 +1164,8 @@ iree_status_t iree_hal_streaming_context_symbol_map_lookup(
                 (unsigned)(*out_symbol)->parameters.constant_bytes);
       }
 #endif
+      iree_slim_mutex_unlock(&map->mutex);
+      iree_slim_mutex_unlock(&map->registry->mutex);
       return iree_ok_status();
     } else if (entry_key == IREE_HAL_STREAMING_SYMBOL_MAP_EMPTY_KEY) {
       break;  // still not found (shouldn't happen)
@@ -1139,5 +1179,7 @@ iree_status_t iree_hal_streaming_context_symbol_map_lookup(
           "prepare_module\n",
           host_pointer, registration->device_name);
   *out_symbol = (iree_hal_streaming_symbol_t*)host_pointer;
+  iree_slim_mutex_unlock(&map->mutex);
+  iree_slim_mutex_unlock(&map->registry->mutex);
   return iree_ok_status();
 }
