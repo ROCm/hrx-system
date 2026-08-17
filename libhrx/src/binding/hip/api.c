@@ -12495,9 +12495,6 @@ HIPAPI hipError_t hipEventCreate(hipEvent_t* event) {
     status = iree_hip_event_registry_insert(event_obj);
   }
   if (iree_status_is_ok(status)) {
-    status = iree_hip_event_register(event_obj);
-  }
-  if (iree_status_is_ok(status)) {
     *event = (hipEvent_t)event_obj;
   } else {
     iree_hal_streaming_event_release(event_obj);
@@ -12563,9 +12560,6 @@ HIPAPI hipError_t hipEventCreateWithFlags(hipEvent_t* event,
       &event_obj);
   if (iree_status_is_ok(status)) {
     status = iree_hip_event_registry_insert(event_obj);
-  }
-  if (iree_status_is_ok(status)) {
-    status = iree_hip_event_register(event_obj);
   }
   if (iree_status_is_ok(status)) {
     *event = (hipEvent_t)event_obj;
