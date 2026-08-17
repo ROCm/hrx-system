@@ -396,7 +396,10 @@ IREE_API_EXPORT iree_status_t
 iree_hal_semaphore_query(iree_hal_semaphore_t* semaphore, uint64_t* out_value);
 
 // Signals the |semaphore| to the given payload value.
-// The call is ignored if the current payload value exceeds |new_value|.
+// The payload advances monotonically: |new_value| must be strictly greater
+// than the current payload value, so values may be skipped but never
+// repeated. Returns IREE_STATUS_INVALID_ARGUMENT without advancing the
+// payload if |new_value| is at or below the current payload.
 // |frontier| is an optional causal frontier to merge into the semaphore's
 // accumulated frontier. Pass NULL for local-only signals where cross-device
 // causal tracking is not needed.
