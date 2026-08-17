@@ -304,4 +304,60 @@ TEST(NativeWindowsMcdmCompletionSlotTest, DetectsUnownedReservedSlots) {
       nullptr, 1));
 }
 
+TEST(NativeWindowsMcdmCodeSlotTest, ReusesReleasedContiguousRuns) {
+  uint8_t slots[8] = {};
+  size_t first = 0;
+  ASSERT_TRUE(iree_hal_amdxdna_native_windows_reserve_code_slots(
+      slots, std::size(slots), 3, &first));
+  EXPECT_EQ(first, 0u);
+  ASSERT_TRUE(iree_hal_amdxdna_native_windows_reserve_code_slots(
+      slots, std::size(slots), 2, &first));
+  EXPECT_EQ(first, 3u);
+  EXPECT_EQ(iree_hal_amdxdna_native_windows_code_slot_high_watermark(
+                slots, std::size(slots)),
+            5u);
+
+  ASSERT_TRUE(iree_hal_amdxdna_native_windows_release_code_slots(
+      slots, std::size(slots), 0, 3));
+  ASSERT_TRUE(iree_hal_amdxdna_native_windows_reserve_code_slots(
+      slots, std::size(slots), 2, &first));
+  EXPECT_EQ(first, 0u);
+}
+
+TEST(NativeWindowsMcdmCodeSlotTest, RequiresOneContiguousRun) {
+  uint8_t slots[] = {0, 1, 0, 1, 0};
+  size_t first = 99;
+  EXPECT_FALSE(iree_hal_amdxdna_native_windows_reserve_code_slots(
+      slots, std::size(slots), 2, &first));
+  EXPECT_EQ(first, 99u);
+  EXPECT_EQ(std::vector<uint8_t>(std::begin(slots), std::end(slots)),
+            (std::vector<uint8_t>{0, 1, 0, 1, 0}));
+}
+
+TEST(NativeWindowsMcdmCodeSlotTest,
+     RejectsInvalidReleaseWithoutPartialMutation) {
+  uint8_t slots[] = {1, 1, 0, 1};
+  EXPECT_FALSE(iree_hal_amdxdna_native_windows_release_code_slots(
+      slots, std::size(slots), 1, 2));
+  EXPECT_FALSE(iree_hal_amdxdna_native_windows_release_code_slots(
+      slots, std::size(slots), 3, 2));
+  EXPECT_EQ(std::vector<uint8_t>(std::begin(slots), std::end(slots)),
+            (std::vector<uint8_t>{1, 1, 0, 1}));
+}
+
+TEST(NativeWindowsMcdmCodeSlotTest, ShrinksHighWatermarkAfterTailRelease) {
+  uint8_t slots[] = {1, 1, 0, 1, 1, 0};
+  EXPECT_EQ(iree_hal_amdxdna_native_windows_code_slot_high_watermark(
+                slots, std::size(slots)),
+            5u);
+  ASSERT_TRUE(iree_hal_amdxdna_native_windows_release_code_slots(
+      slots, std::size(slots), 3, 2));
+  EXPECT_EQ(iree_hal_amdxdna_native_windows_code_slot_high_watermark(
+                slots, std::size(slots)),
+            2u);
+  EXPECT_EQ(iree_hal_amdxdna_native_windows_code_slot_high_watermark(nullptr,
+                                                                    0),
+            0u);
+}
+
 }  // namespace

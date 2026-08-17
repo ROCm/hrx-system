@@ -412,6 +412,10 @@ struct iree_hal_amdxdna_native_context_t {
   mcdm::CommandAperture command_aperture;
   bool has_command_aperture = false;
   uint64_t pathb_persistent_code_bytes = 0;
+  uint64_t pathb_persistent_code_slot_size = 0;
+  std::vector<uint8_t> pathb_persistent_code_slots_in_use;
+  std::vector<iree_hal_amdxdna_native_command_t*>
+      pathb_persistent_code_commands;
   uint64_t pathb_chain_aperture_generation = 1;
   size_t pathb_chain_code_cursor = 0;
   size_t pathb_chain_descriptor_cursor = 0;
@@ -441,6 +445,9 @@ struct iree_hal_amdxdna_native_command_t {
   iree_device_size_t pathb_code_staged_size = 0;
   uint64_t pathb_single_code_aperture_offset = 0;
   uint64_t pathb_single_code_aperture_capacity = 0;
+  iree_hal_amdxdna_native_context_t* pathb_single_code_owner_context = nullptr;
+  size_t pathb_single_code_first_slot = 0;
+  size_t pathb_single_code_slot_count = 0;
   uint64_t pathb_chain_descriptor_gpu_va = 0;
   uint32_t pathb_chain_descriptor_bytes = 0;
   uint32_t pathb_chain_first_child_opcode = 0;
@@ -462,6 +469,131 @@ struct iree_hal_amdxdna_native_command_t {
   size_t bound_buffer_count = 0;
   size_t bound_buffer_capacity = 0;
 };
+
+bool iree_hal_amdxdna_native_windows_reserve_code_slots(
+    uint8_t* slots_in_use, size_t slot_capacity, size_t requested_count,
+    size_t* out_first_slot) {
+  if (!slots_in_use || !out_first_slot || requested_count == 0 ||
+      requested_count > slot_capacity) {
+    return false;
+  }
+  for (size_t first = 0; first <= slot_capacity - requested_count; ++first) {
+    size_t count = 0;
+    while (count < requested_count && !slots_in_use[first + count]) ++count;
+    if (count != requested_count) {
+      first += count;
+      continue;
+    }
+    std::fill_n(slots_in_use + first, requested_count, uint8_t{1});
+    *out_first_slot = first;
+    return true;
+  }
+  return false;
+}
+
+bool iree_hal_amdxdna_native_windows_release_code_slots(
+    uint8_t* slots_in_use, size_t slot_capacity, size_t first_slot,
+    size_t slot_count) {
+  if (!slots_in_use || slot_count == 0 || first_slot > slot_capacity ||
+      slot_count > slot_capacity - first_slot) {
+    return false;
+  }
+  for (size_t i = 0; i < slot_count; ++i) {
+    if (!slots_in_use[first_slot + i]) return false;
+  }
+  std::fill_n(slots_in_use + first_slot, slot_count, uint8_t{0});
+  return true;
+}
+
+size_t iree_hal_amdxdna_native_windows_code_slot_high_watermark(
+    const uint8_t* slots_in_use, size_t slot_capacity) {
+  if (!slots_in_use) return 0;
+  while (slot_capacity > 0 && !slots_in_use[slot_capacity - 1]) {
+    --slot_capacity;
+  }
+  return slot_capacity;
+}
+
+void release_command_persistent_code_slots_locked(
+    iree_hal_amdxdna_native_command_t* command) {
+  iree_hal_amdxdna_native_context_t* context =
+      command ? command->pathb_single_code_owner_context : nullptr;
+  if (!context) return;
+  const bool released = iree_hal_amdxdna_native_windows_release_code_slots(
+      context->pathb_persistent_code_slots_in_use.data(),
+      context->pathb_persistent_code_slots_in_use.size(),
+      command->pathb_single_code_first_slot,
+      command->pathb_single_code_slot_count);
+  IREE_ASSERT(released);
+  auto& commands = context->pathb_persistent_code_commands;
+  const auto command_it = std::find(commands.begin(), commands.end(), command);
+  IREE_ASSERT(command_it != commands.end());
+  if (command_it != commands.end()) commands.erase(command_it);
+  context->pathb_persistent_code_bytes =
+      iree_hal_amdxdna_native_windows_code_slot_high_watermark(
+          context->pathb_persistent_code_slots_in_use.data(),
+          context->pathb_persistent_code_slots_in_use.size()) *
+      context->pathb_persistent_code_slot_size;
+  command->pathb_single_code_owner_context = nullptr;
+  command->pathb_single_code_first_slot = 0;
+  command->pathb_single_code_slot_count = 0;
+  command->pathb_single_code_aperture_offset = 0;
+  command->pathb_single_code_aperture_capacity = 0;
+}
+
+void release_command_persistent_code_slots(
+    iree_hal_amdxdna_native_command_t* command) {
+  if (!command) return;
+  std::lock_guard<std::mutex> lock(command->device->pathb_context_mutex);
+  release_command_persistent_code_slots_locked(command);
+}
+
+iree_status_t reserve_command_persistent_code_slots(
+    iree_hal_amdxdna_native_queue_t* queue,
+    iree_hal_amdxdna_native_command_t* command, uint64_t required_capacity) {
+  iree_hal_amdxdna_native_context_t* context = queue->context;
+  std::lock_guard<std::mutex> lock(command->device->pathb_context_mutex);
+  if (command->pathb_single_code_owner_context == context &&
+      command->pathb_single_code_aperture_capacity >= required_capacity) {
+    return iree_ok_status();
+  }
+  release_command_persistent_code_slots_locked(command);
+  const uint64_t slot_size = context->pathb_persistent_code_slot_size;
+  if (!slot_size || required_capacity > UINT64_MAX - (slot_size - 1)) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "amdxdna Windows MCDM command slot size overflow");
+  }
+  const uint64_t requested_count_u64 =
+      (required_capacity + slot_size - 1) / slot_size;
+  if (requested_count_u64 > std::numeric_limits<size_t>::max()) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "amdxdna Windows MCDM command slot count overflow");
+  }
+  const size_t requested_count = static_cast<size_t>(requested_count_u64);
+  size_t first_slot = 0;
+  if (!iree_hal_amdxdna_native_windows_reserve_code_slots(
+          context->pathb_persistent_code_slots_in_use.data(),
+          context->pathb_persistent_code_slots_in_use.size(), requested_count,
+          &first_slot)) {
+    return iree_make_status(
+        IREE_STATUS_RESOURCE_EXHAUSTED,
+        "amdxdna Windows MCDM persistent command code exceeds its aperture "
+        "region");
+  }
+  command->pathb_single_code_owner_context = context;
+  command->pathb_single_code_first_slot = first_slot;
+  command->pathb_single_code_slot_count = requested_count;
+  command->pathb_single_code_aperture_offset =
+      context->command_aperture.code_offset + first_slot * slot_size;
+  command->pathb_single_code_aperture_capacity = requested_count * slot_size;
+  context->pathb_persistent_code_commands.push_back(command);
+  context->pathb_persistent_code_bytes =
+      iree_hal_amdxdna_native_windows_code_slot_high_watermark(
+          context->pathb_persistent_code_slots_in_use.data(),
+          context->pathb_persistent_code_slots_in_use.size()) *
+      slot_size;
+  return iree_ok_status();
+}
 
 iree_status_t materialize_deferred_instruction_buffer(
     iree_hal_amdxdna_native_context_t* context,
@@ -841,27 +973,20 @@ iree_status_t stage_windows_dpu_code_buffer(
       mcdm::GetMcdmSubmissionPolicy(command->device->device.mcdm_abi)
           .uses_shared_command_code_view;
   if (uses_shared_command_code_view) {
+    release_command_persistent_code_slots(command);
     command->pathb_single_code_aperture_offset = aperture.code_offset;
     command->pathb_single_code_aperture_capacity = aperture.code_size;
-  } else if (command->pathb_single_code_aperture_capacity <
-             command->control_buffer_size) {
-    const uint64_t slot_offset =
-        align_up_size(queue->context->pathb_persistent_code_bytes, slot_size);
-    const uint64_t slot_capacity =
-        align_up_size(command->control_buffer_size, slot_size);
-    if (IREE_UNLIKELY(slot_offset > aperture.code_size ||
-                      slot_capacity > aperture.code_size - slot_offset)) {
-      return iree_make_status(
-          IREE_STATUS_RESOURCE_EXHAUSTED,
-          "amdxdna Windows MCDM persistent command code exceeds its aperture "
-          "region");
+  } else {
+    const bool retains_slot =
+        command->pathb_single_code_owner_context == queue->context &&
+        command->pathb_single_code_aperture_capacity >=
+            command->control_buffer_size;
+    IREE_RETURN_IF_ERROR(reserve_command_persistent_code_slots(
+        queue, command, command->control_buffer_size));
+    if (!retains_slot) {
+      command->pathb_code_staged = false;
+      command->pathb_code_staged_size = 0;
     }
-    command->pathb_single_code_aperture_offset =
-        aperture.code_offset + slot_offset;
-    command->pathb_single_code_aperture_capacity = slot_capacity;
-    queue->context->pathb_persistent_code_bytes = slot_offset + slot_capacity;
-    command->pathb_code_staged = false;
-    command->pathb_code_staged_size = 0;
   }
   const uint64_t code_offset = command->pathb_single_code_aperture_offset;
   const uint64_t relative_code_offset = code_offset - aperture.code_offset;
@@ -2515,6 +2640,27 @@ iree_status_t iree_hal_amdxdna_native_device_create_context(
   native_context->context = context;
   native_context->command_aperture = command_aperture;
   native_context->has_command_aperture = has_command_aperture;
+  native_context->pathb_persistent_code_slot_size =
+      mcdm::GetMcdmAbiInfo(device->device.mcdm_abi)
+          .command_aperture_code_slot_size;
+  if (IREE_UNLIKELY(!native_context->pathb_persistent_code_slot_size ||
+                    native_context->pathb_persistent_code_slot_size >
+                        command_aperture.code_size)) {
+    native_context->~iree_hal_amdxdna_native_context_t();
+    iree_allocator_free(device->host_allocator, native_context);
+    mcdm::DestroyContextWithCommandAperture(device->api, device->device,
+                                            &context, &command_aperture);
+    mcdm::ContextBlobInfoDeinitialize(&info);
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "amdxdna Windows MCDM command aperture has no persistent code slots");
+  }
+  native_context->pathb_persistent_code_slots_in_use.resize(
+      static_cast<size_t>(command_aperture.code_size /
+                          native_context->pathb_persistent_code_slot_size),
+      0);
+  native_context->pathb_persistent_code_commands.reserve(
+      native_context->pathb_persistent_code_slots_in_use.size());
   native_context->pathb_completion_slots_in_use.resize(
       mcdm::PathBCompletionCapacity(context), 0);
   if (IREE_UNLIKELY(
@@ -2548,6 +2694,15 @@ void iree_hal_amdxdna_native_context_destroy(
   if (device->pathb_active_context == context) {
     device->pathb_active_context = nullptr;
   }
+  for (iree_hal_amdxdna_native_command_t* command :
+       context->pathb_persistent_code_commands) {
+    command->pathb_single_code_owner_context = nullptr;
+    command->pathb_single_code_first_slot = 0;
+    command->pathb_single_code_slot_count = 0;
+    command->pathb_single_code_aperture_offset = 0;
+    command->pathb_single_code_aperture_capacity = 0;
+  }
+  context->pathb_persistent_code_commands.clear();
   if (context->has_command_aperture) {
     mcdm::DestroyContextWithCommandAperture(
         context->device->api, context->device->device, &context->context,
@@ -2865,6 +3020,7 @@ iree_status_t iree_hal_amdxdna_native_command_create(
 void iree_hal_amdxdna_native_command_destroy(
     iree_hal_amdxdna_native_command_t* command) {
   if (!command) return;
+  release_command_persistent_code_slots(command);
   iree_allocator_free(command->device->host_allocator, command->bound_buffers);
   iree_allocator_free(command->device->host_allocator,
                       command->pathb_chain_child_code_offsets);

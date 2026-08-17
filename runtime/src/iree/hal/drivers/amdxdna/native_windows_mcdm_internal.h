@@ -62,4 +62,20 @@ bool iree_hal_amdxdna_native_windows_release_completion_slots(
 bool iree_hal_amdxdna_native_windows_completion_slots_are_free(
     const uint8_t* slots_in_use, size_t slot_capacity);
 
+// Reserves the first contiguous run of persistent command-code slots.
+// Reservation is all-or-nothing.
+bool iree_hal_amdxdna_native_windows_reserve_code_slots(
+    uint8_t* slots_in_use, size_t slot_capacity, size_t requested_count,
+    size_t* out_first_slot);
+
+// Releases one complete contiguous run. Invalid or already-free ranges leave
+// the allocation table unchanged.
+bool iree_hal_amdxdna_native_windows_release_code_slots(
+    uint8_t* slots_in_use, size_t slot_capacity, size_t first_slot,
+    size_t slot_count);
+
+// Returns one past the highest live slot, or zero when no slots are live.
+size_t iree_hal_amdxdna_native_windows_code_slot_high_watermark(
+    const uint8_t* slots_in_use, size_t slot_capacity);
+
 #endif  // IREE_HAL_DRIVERS_AMDXDNA_NATIVE_WINDOWS_MCDM_INTERNAL_H_
