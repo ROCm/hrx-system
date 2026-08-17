@@ -907,11 +907,11 @@ iree_status_t stage_windows_dpu_code_buffer(
       IREE_RETURN_IF_ERROR(ensure_pathb_single_code_range_active(
           queue, code_offset, command->control_buffer_size));
       IREE_RETURN_IF_ERROR(set_partial_elf_instruction_fields());
-      return iree_ok_status();
+      // Re-publish cached PARTIAL_ELF code for each START_NPU invocation.
     }
     IREE_RETURN_IF_ERROR(publish_pathb_code_write(
         queue, code_offset, command->control_buffer_size));
-    return set_partial_elf_instruction_fields();
+    return iree_ok_status();
   }
   IREE_RETURN_IF_ERROR(close_pathb_single_code_range(queue, code_offset));
   if (is_partial_elf) {
