@@ -228,12 +228,9 @@ iree_status_t iree_hal_streaming_event_record(
       stream->context->device, stream->queue_affinity, wait_semaphores,
       signal_semaphores, IREE_HAL_EXECUTE_FLAG_NONE);
   if (iree_status_is_ok(status)) {
-    status = iree_hal_device_queue_flush(stream->context->device,
-                                         stream->queue_affinity);
-  }
-  if (iree_status_is_ok(status)) {
+    // The accepted barrier owns the value it signals, so the timeline advances
+    // here and stays advanced even when the flush below fails.
     stream->pending_value = stream_signal_value;
-    stream->submitted_value = stream_signal_value;
     // The barrier signals the stream's own timeline, so reaching the point is
     // exactly the stream reaching that value.
     const iree_hal_streaming_recorded_point_t recorded_point = {
@@ -247,6 +244,8 @@ iree_status_t iree_hal_streaming_event_record(
                                                    record_time_ns);
     previous_stream =
         iree_hal_streaming_event_exchange_recording_stream(event, stream);
+    status = iree_hal_device_queue_flush(stream->context->device,
+                                         stream->queue_affinity);
   }
   iree_slim_mutex_unlock(&stream->mutex);
   // Stream teardown re-enters the streaming layer, so the displaced reference

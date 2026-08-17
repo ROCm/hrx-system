@@ -2256,9 +2256,11 @@ static iree_status_t iree_hal_streaming_graph_exec_submit_blocks_locked(
   }
 
   // The base values advance even when a block failed to submit: blocks that did
-  // submit have already signaled their new values, and a timeline value may be
-  // signaled only once, so rewinding the bases would make the next launch
-  // signal those values again and fail the semaphores for good.
+  // submit have already signaled their new values, and a value must name
+  // exactly one submission. Nothing rejects a duplicate signal, so rewinding
+  // the bases would make the next launch re-signal those values silently, and
+  // its blocks would find their waits already satisfied and run ahead of the
+  // work they were ordered behind.
   if (exec->semaphore_count > 0) {
     memcpy(exec->semaphore_base_values, new_base_values,
            exec->semaphore_count * sizeof(uint64_t));
@@ -2376,7 +2378,6 @@ iree_status_t iree_hal_streaming_graph_exec_launch(
 
   if (iree_status_is_ok(status)) {
     stream->pending_value = stream_signal_value;
-    stream->submitted_value = stream_signal_value;
     if (exec->uses_graph_memory_nodes) {
       iree_hal_streaming_stream_release(
           exec->graph_memory_active_launch_stream);

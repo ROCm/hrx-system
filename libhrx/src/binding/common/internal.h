@@ -507,9 +507,7 @@ typedef struct iree_hal_streaming_stream_t {
 
   // Semaphore chain for synchronization.
   iree_hal_semaphore_t* timeline_semaphore;
-  uint64_t pending_value;    // Last stream timeline value reserved.
-  uint64_t submitted_value;  // Last value that was actually submitted (for
-                             // wait_submitted)
+  uint64_t pending_value;    // Last value a submission has been accepted for.
   uint64_t completed_value;  // Last value we've verified as completed
 
   // Queue affinity.
@@ -550,7 +548,14 @@ typedef struct iree_hal_streaming_stream_t {
 // Reserves the next value on |stream|'s timeline for one submission. Callers
 // must hold |stream->mutex| and publish |*out_signal_value| to
 // |stream->pending_value| only once the submission is accepted, so a rejected
-// submission leaves the timeline where it was.
+// submission leaves the timeline where it was and hands the value out again.
+//
+// A value must name exactly one submission, and nothing catches a violation:
+// queues publish their completions with a duplicate-tolerant advance, so the
+// second submission's signal is a silent no-op and the timeline reaches the
+// value when the first submission completes. Every reader treats the timeline
+// reaching a value as "the submission that signals it has completed", so all of
+// them report completion while the second submission is still running.
 //
 // |*out_wait_value| is the value the submission must wait on to stay behind the
 // work in front of it, or 0 when the stream has never submitted, in which case
