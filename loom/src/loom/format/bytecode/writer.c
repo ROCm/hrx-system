@@ -2458,11 +2458,14 @@ static iree_status_t loom_bytecode_symbol_kind_byte(loom_symbol_kind_t kind,
     case LOOM_SYMBOL_FUNC_DECL:
       *out_byte = LOOM_BYTECODE_SYMBOL_FUNC_DECL;
       return iree_ok_status();
-    case LOOM_SYMBOL_FUNC_TEMPLATE:
-      *out_byte = LOOM_BYTECODE_SYMBOL_FUNC_TEMPLATE;
+    case LOOM_SYMBOL_TEMPLATE_DECL:
+      *out_byte = LOOM_BYTECODE_SYMBOL_TEMPLATE_DECL;
       return iree_ok_status();
-    case LOOM_SYMBOL_FUNC_UKERNEL:
-      *out_byte = LOOM_BYTECODE_SYMBOL_FUNC_UKERNEL;
+    case LOOM_SYMBOL_TEMPLATE_DEF:
+      *out_byte = LOOM_BYTECODE_SYMBOL_TEMPLATE_DEF;
+      return iree_ok_status();
+    case LOOM_SYMBOL_TEMPLATE_UKERNEL:
+      *out_byte = LOOM_BYTECODE_SYMBOL_TEMPLATE_UKERNEL;
       return iree_ok_status();
     case LOOM_SYMBOL_GLOBAL:
       *out_byte = LOOM_BYTECODE_SYMBOL_GLOBAL;
@@ -3846,7 +3849,7 @@ static bool loom_bytecode_func_metadata_attr_is_shared(
       attr_index == func_like->predicates_attr_index) {
     return true;
   }
-  if (attr_index == func_like->implements_attr_index ||
+  if (attr_index == func_like->template_family_attr_index ||
       attr_index == func_like->priority_attr_index) {
     return true;
   }
@@ -4013,21 +4016,21 @@ static iree_status_t loom_bytecode_write_func_metadata(
     }
   }
 
-  // Implementation dispatch metadata. Concrete providers and compile-time
-  // provider declarations both carry the contract; declarations encode zero
-  // priority because ranking belongs to concrete providers.
-  loom_string_id_t implements_id = loom_func_like_implements(func_like);
-  if (func_like.vtable->implements_attr_index != LOOM_ATTR_INDEX_NONE) {
-    if (implements_id == LOOM_STRING_ID_INVALID) {
+  // Template provider metadata references the family by module-local symbol
+  // ordinal. This preserves symbol identity across private families and lets
+  // selected materialization project the reference without string lookup.
+  loom_symbol_ref_t template_family = loom_func_like_template_family(func_like);
+  if (func_like.vtable->template_family_attr_index != LOOM_ATTR_INDEX_NONE) {
+    if (!loom_symbol_ref_is_valid(template_family) ||
+        template_family.module_id != 0 ||
+        template_family.symbol_id >= module->symbols.count) {
       return iree_make_status(
           IREE_STATUS_INVALID_ARGUMENT,
-          "function provider symbol must have implements metadata");
+          "template provider symbol must reference a module-local family");
     }
-    uint32_t implements_string_id = 0;
-    IREE_RETURN_IF_ERROR(loom_bytecode_numbering_intern_module_string(
-        numbering, implements_id, &implements_string_id));
-    IREE_RETURN_IF_ERROR(
-        loom_bytecode_emit_uvarint(builder, implements_string_id));
+    IREE_RETURN_IF_ERROR(loom_bytecode_emit_uvarint(
+        builder, loom_bytecode_wire_symbol_ordinal(numbering,
+                                                   template_family.symbol_id)));
     IREE_RETURN_IF_ERROR(loom_bytecode_emit_uvarint(
         builder, (uint64_t)loom_func_like_priority(func_like)));
   }
@@ -4608,8 +4611,7 @@ static uint32_t loom_bytecode_count_dependency_occurrences(
 }
 
 static iree_status_t loom_bytecode_symbol_reference_plan_initialize(
-    const loom_module_t* module, loom_bytecode_numbering_t* numbering,
-    iree_arena_allocator_t* arena,
+    const loom_module_t* module, iree_arena_allocator_t* arena,
     loom_bytecode_symbol_reference_plan_t* out_plan) {
   *out_plan = (loom_bytecode_symbol_reference_plan_t){0};
   IREE_RETURN_IF_ERROR(
@@ -4625,12 +4627,6 @@ static iree_status_t loom_bytecode_symbol_reference_plan_initialize(
       loom_bytecode_count_dependency_occurrences(
           &out_plan->table, out_plan->table.first_module_occurrence_id);
 
-  for (iree_host_size_t i = 0; i < out_plan->table.contract_demand_count; ++i) {
-    uint32_t unused_writer_string_id = 0;
-    IREE_RETURN_IF_ERROR(loom_bytecode_numbering_intern_module_string(
-        numbering, out_plan->table.contract_demands[i].contract_id,
-        &unused_writer_string_id));
-  }
   return iree_ok_status();
 }
 
@@ -4666,7 +4662,7 @@ static iree_status_t loom_bytecode_write_symbol_references_section(
   IREE_RETURN_IF_ERROR(loom_bytecode_page_writer_write_uvarint(
       page_writer, plan->dependency_count));
   IREE_RETURN_IF_ERROR(loom_bytecode_page_writer_write_uvarint(
-      page_writer, table->contract_demand_count));
+      page_writer, table->template_demands.count));
   IREE_RETURN_IF_ERROR(loom_bytecode_write_dependency_row(
       page_writer, numbering, table, table->first_module_occurrence_id,
       plan->module_dependency_count));
@@ -4683,13 +4679,14 @@ static iree_status_t loom_bytecode_write_symbol_references_section(
         page_writer, numbering, table, symbol->first_outgoing_occurrence_id,
         dependency_count));
     IREE_RETURN_IF_ERROR(loom_bytecode_page_writer_write_uvarint(
-        page_writer, symbol->contract_demand_count));
-    loom_func_contract_demand_id_t demand_id = symbol->first_contract_demand_id;
-    while (demand_id != LOOM_FUNC_CONTRACT_DEMAND_ID_INVALID) {
-      const loom_func_contract_demand_t* demand =
-          &table->contract_demands[demand_id];
+        page_writer, symbol->template_demand_count));
+    loom_template_demand_id_t demand_id = symbol->first_template_demand_id;
+    while (demand_id != LOOM_TEMPLATE_DEMAND_ID_INVALID) {
+      const loom_template_demand_t* demand =
+          &table->template_demands.values[demand_id];
       IREE_RETURN_IF_ERROR(loom_bytecode_page_writer_write_uvarint(
-          page_writer, numbering->module_string_map[demand->contract_id]));
+          page_writer, loom_bytecode_wire_symbol_ordinal(
+                           numbering, demand->family_symbol_id)));
       demand_id = demand->next_source_demand_id;
     }
   }
@@ -5288,7 +5285,7 @@ iree_status_t loom_bytecode_write_module(
   loom_bytecode_symbol_reference_plan_t symbol_reference_plan = {0};
   if (iree_status_is_ok(status)) {
     status = loom_bytecode_symbol_reference_plan_initialize(
-        module, &numbering, &arena, &symbol_reference_plan);
+        module, &arena, &symbol_reference_plan);
   }
 
   // File header: magic, version, location mode, module count, producer string.

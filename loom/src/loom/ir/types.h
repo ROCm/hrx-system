@@ -638,6 +638,8 @@ typedef struct loom_type_value_remap_t {
   const loom_value_id_t* target_values;
   // Number of source/target value pairs.
   iree_host_size_t count;
+  // Additional discontiguous value pairs, or NULL when this is the last span.
+  const struct loom_type_value_remap_t* next;
 } loom_type_value_remap_t;
 
 // Returns true if two types have the same element type.

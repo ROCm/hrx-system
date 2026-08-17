@@ -181,7 +181,7 @@
           "--output={tmp}/selected.loom"
         ],
         "stdin": {
-          "text": "func.template<demo.report> priority(10) @aligned(%m: index) -> (index) where [mul(%m, 16)] {\n  func.return %m : index\n}\n\nfunc.template<demo.report> priority(1) @fallback(%m: index) -> (index) {\n  func.return %m : index\n}\n\nfunc.def public @entry() -> (index) {\n  %n = index.constant 15 : index\n  %result = func.apply<demo.report>(%n) : (index) -> (index)\n  func.return %result : index\n}\n"
+          "text": "template.decl @demo.report(%m: index) -> (index)\n\ntemplate.def<@demo.report> priority(10) @aligned(%m: index) -> (index) where [mul(%m, 16)] {\n  template.return %m : index\n}\n\ntemplate.def<@demo.report> priority(1) @fallback(%m: index) -> (index) {\n  template.return %m : index\n}\n\nfunc.def public @entry() -> (index) {\n  %n = index.constant 15 : index\n  %result = template.apply<@demo.report>(%n) : (index) -> (index)\n  func.return %result : index\n}\n"
         }
       },
       "stderr": {
@@ -223,7 +223,7 @@
           "--output={tmp}/target-condition-fallback.loom"
         ],
         "stdin": {
-          "text": "func.template<demo.target_condition_report> requires [#target.subgroup.size<64>] priority(10) @wave64(%value: i32) -> (i32) {\n  func.return %value : i32\n}\n\nfunc.template<demo.target_condition_report> priority(1) @fallback(%value: i32) -> (i32) {\n  func.return %value : i32\n}\n\nfunc.def public @entry(%arg: i32) -> (i32) {\n  %result = func.apply<demo.target_condition_report>(%arg) : (i32) -> (i32)\n  func.return %result : i32\n}\n"
+          "text": "template.decl @demo.target_condition_report(%value: i32) -> (i32)\n\ntemplate.def<@demo.target_condition_report> requires [#target.subgroup.size<64>] priority(10) @wave64(%value: i32) -> (i32) {\n  template.return %value : i32\n}\n\ntemplate.def<@demo.target_condition_report> priority(1) @fallback(%value: i32) -> (i32) {\n  template.return %value : i32\n}\n\nfunc.def public @entry(%arg: i32) -> (i32) {\n  %result = template.apply<@demo.target_condition_report>(%arg) : (i32) -> (i32)\n  func.return %result : i32\n}\n"
         }
       },
       "stderr": {
@@ -266,7 +266,7 @@
           "--output={tmp}/target-identity-fallback.loom"
         ],
         "stdin": {
-          "text": "test.target<low_core> @low_core\n\nfunc.template<demo.target_identity_report> target(@low_core) priority(10) @targeted(%value: i32) -> (i32) {\n  func.return %value : i32\n}\n\nfunc.template<demo.target_identity_report> priority(1) @fallback(%value: i32) -> (i32) {\n  func.return %value : i32\n}\n\nfunc.def public @entry(%arg: i32) -> (i32) {\n  %result = func.apply<demo.target_identity_report>(%arg) : (i32) -> (i32)\n  func.return %result : i32\n}\n"
+          "text": "test.target<low_core> @low_core\n\ntemplate.decl @demo.target_identity_report(%value: i32) -> (i32)\n\ntemplate.def<@demo.target_identity_report> target(@low_core) priority(10) @targeted(%value: i32) -> (i32) {\n  template.return %value : i32\n}\n\ntemplate.def<@demo.target_identity_report> priority(1) @fallback(%value: i32) -> (i32) {\n  template.return %value : i32\n}\n\nfunc.def public @entry(%arg: i32) -> (i32) {\n  %result = template.apply<@demo.target_identity_report>(%arg) : (i32) -> (i32)\n  func.return %result : i32\n}\n"
         }
       },
       "stderr": {

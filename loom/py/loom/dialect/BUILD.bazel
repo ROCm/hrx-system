@@ -35,6 +35,7 @@ iree_py_library(
         "//loom/py/loom/dialect/scalar",
         "//loom/py/loom/dialect/scf",
         "//loom/py/loom/dialect/target",
+        "//loom/py/loom/dialect/template",
         "//loom/py/loom/dialect/tensor",
         "//loom/py/loom/dialect/test",
         "//loom/py/loom/dialect/tile",

@@ -549,7 +549,7 @@
             "scalar.addi %value, %value : i32"
           ],
           "not_contains": [
-            "func.apply",
+            "template.apply",
             "%subgroup_size = target.subgroup.size",
             "scale_i32_subgroup_64",
             "scale_i32_fallback"
@@ -600,7 +600,7 @@
             "scalar.muli %value, %scale_factor : i32"
           ],
           "not_contains": [
-            "func.apply",
+            "template.apply",
             "%subgroup_size = target.subgroup.size",
             "scale_i32_subgroup_32",
             "scale_i32_fallback"
@@ -651,7 +651,7 @@
           ],
           "not_contains": [
             "amdgpu.target<gfx11-generic>",
-            "func.apply",
+            "template.apply",
             "%subgroup_size = target.subgroup.size",
             "scale_i32_subgroup_64",
             "scale_i32_fallback"

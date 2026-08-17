@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import struct
 from collections.abc import Iterable
+from dataclasses import replace
 from typing import Any, ClassVar, Literal, cast
 
 from loom.dsl import FuncLikeInterface
@@ -105,6 +106,7 @@ from loom.ir import (
     TypeKind,
     Value,
     rebuild_value_metadata,
+    replace_canonical_attr_dict,
 )
 from loom.stable_id import stable_id_from_string
 from loom.target.descriptor_sets import DESCRIPTOR_SET_REGISTRATIONS
@@ -983,19 +985,20 @@ class BytecodeReader:
         data: bytes,
         offset: int,
         func_like: FuncLikeInterface,
-    ) -> tuple[str | None, int, int]:
+        symbol_count: int,
+    ) -> tuple[int | None, int, int]:
         """Read the fixed implementation metadata declared by a FuncLike op."""
-        if func_like.implements is None:
+        if func_like.template_family is None:
             return None, 0, offset
-        implements_id, offset = decode_varint(data, offset)
-        if implements_id >= len(self._strings):
+        template_family_symbol_ordinal, offset = decode_varint(data, offset)
+        if template_family_symbol_ordinal >= symbol_count:
             raise BytecodeError(
-                "function implements string_id "
-                f"{implements_id} out of range "
-                f"(string table has {len(self._strings)} entries)"
+                "template family symbol ordinal "
+                f"{template_family_symbol_ordinal} out of range "
+                f"(symbol table has {symbol_count} entries)"
             )
         priority, offset = decode_varint(data, offset)
-        return self._strings[implements_id], priority, offset
+        return template_family_symbol_ordinal, priority, offset
 
     def _read_symbols_section(
         self,
@@ -1014,6 +1017,8 @@ class BytecodeReader:
         # Skip the offset tables (uint64 each).
         offset += import_count * 8
         offset += export_count * 8
+
+        pending_template_families: list[tuple[Symbol, int, str, int]] = []
 
         for _ in range(count):
             name_id, offset = decode_varint(sym_data, offset)
@@ -1039,7 +1044,7 @@ class BytecodeReader:
                 source_module = self._strings[source_module_id]
                 source_symbol = self._strings[source_symbol_id]
 
-            if kind <= 3:  # FUNC_DEF, FUNC_DECL, FUNC_TEMPLATE, FUNC_UKERNEL
+            if kind <= 4:  # Function and template signature symbol kinds.
                 op_table_index_plus1, offset = decode_varint(sym_data, offset)
                 if op_table_index_plus1 == 0:
                     raise BytecodeError(
@@ -1122,9 +1127,9 @@ class BytecodeReader:
                     op_name, flags, predicates
                 )
 
-                implements, priority, offset = (
+                template_family_symbol_ordinal, priority, offset = (
                     self._read_function_implementation_metadata(
-                        sym_data, offset, func_like
+                        sym_data, offset, func_like, count
                     )
                 )
 
@@ -1188,10 +1193,8 @@ class BytecodeReader:
                     op_attrs["import_module"] = source_module
                     if flags & _SYMBOL_FLAG_IMPORT_SYMBOL:
                         op_attrs["import_symbol"] = source_symbol
-                if implements is not None:
-                    op_attrs["implements"] = implements
-                    if priority != 0:
-                        op_attrs["priority"] = priority
+                if priority != 0:
+                    op_attrs["priority"] = priority
                 shared_attr_keys = self._shared_func_metadata_attr_keys(op_name)
                 for key, value in payload_attrs.items():
                     if key in shared_attr_keys:
@@ -1230,7 +1233,18 @@ class BytecodeReader:
                     source_module=source_module,
                     source_symbol=source_symbol,
                 )
+                body_operation_index = len(module.body.ops)
                 module.add_symbol(symbol)
+                if template_family_symbol_ordinal is not None:
+                    assert func_like.template_family is not None
+                    pending_template_families.append(
+                        (
+                            symbol,
+                            body_operation_index,
+                            func_like.template_family,
+                            template_family_symbol_ordinal,
+                        )
+                    )
             elif kind == SymbolKind.GLOBAL.value:
                 op_table_index_plus1, offset = decode_varint(sym_data, offset)
                 if op_table_index_plus1 == 0:
@@ -1313,6 +1327,23 @@ class BytecodeReader:
             else:
                 raise BytecodeError(f"unsupported symbol kind: {kind}")
 
+        for (
+            symbol,
+            body_operation_index,
+            attr_name,
+            source_symbol_ordinal,
+        ) in pending_template_families:
+            assert symbol.op is not None
+            replacement = replace(
+                symbol.op,
+                attributes=replace_canonical_attr_dict(
+                    symbol.op.attributes,
+                    {attr_name: self._wire_symbol_names[source_symbol_ordinal]},
+                ),
+            )
+            symbol.op = replacement
+            module.body.ops[body_operation_index] = replacement
+
         if offset != len(sym_data):
             raise BytecodeError("SYMBOLS section has trailing bytes")
 
@@ -1389,11 +1420,11 @@ class BytecodeReader:
         offset = 0
         symbol_count, offset = decode_varint(data, offset)
         total_dependency_count, offset = decode_varint(data, offset)
-        total_contract_demand_count, offset = decode_varint(data, offset)
+        total_template_demand_count, offset = decode_varint(data, offset)
         if symbol_count != len(self._wire_symbol_names):
             raise BytecodeError("SYMBOL_REFERENCES row count does not match SYMBOLS")
         minimum_encoded_bytes = (
-            1 + symbol_count * 2 + total_dependency_count + total_contract_demand_count
+            1 + symbol_count * 2 + total_dependency_count + total_template_demand_count
         )
         if minimum_encoded_bytes > len(data) - offset:
             raise BytecodeError(
@@ -1415,31 +1446,33 @@ class BytecodeReader:
             return offset
 
         offset = read_dependencies(module_dependency_count, offset)
-        decoded_contract_demand_count = 0
+        decoded_template_demand_count = 0
         for _ in range(symbol_count):
             dependency_count, offset = decode_varint(data, offset)
             if dependency_count > total_dependency_count - decoded_dependency_count:
                 raise BytecodeError("symbol dependency count exceeds declared total")
             offset = read_dependencies(dependency_count, offset)
 
-            contract_demand_count, offset = decode_varint(data, offset)
+            template_demand_count, offset = decode_varint(data, offset)
             if (
-                contract_demand_count
-                > total_contract_demand_count - decoded_contract_demand_count
+                template_demand_count
+                > total_template_demand_count - decoded_template_demand_count
             ):
                 raise BytecodeError(
                     "symbol contract demand count exceeds declared total"
                 )
-            for _ in range(contract_demand_count):
-                contract_string_id, offset = decode_varint(data, offset)
-                if contract_string_id >= len(self._strings):
-                    raise BytecodeError("contract string id is out of range")
-                decoded_contract_demand_count += 1
+            for _ in range(template_demand_count):
+                family_symbol_ordinal, offset = decode_varint(data, offset)
+                if family_symbol_ordinal >= symbol_count:
+                    raise BytecodeError(
+                        "template family symbol ordinal is out of range"
+                    )
+                decoded_template_demand_count += 1
 
         if decoded_dependency_count != total_dependency_count:
             raise BytecodeError("dependency records do not match declared total")
-        if decoded_contract_demand_count != total_contract_demand_count:
-            raise BytecodeError("contract demand records do not match declared total")
+        if decoded_template_demand_count != total_template_demand_count:
+            raise BytecodeError("template demand records do not match declared total")
         if offset != len(data):
             raise BytecodeError("SYMBOL_REFERENCES section has trailing bytes")
 
@@ -1525,7 +1558,7 @@ class BytecodeReader:
             raise BytecodeError(f"unsupported symbol visibility byte: {visibility}")
         if flags & ~_SYMBOL_SUPPORTED_FLAGS:
             raise BytecodeError("symbol has unsupported flag bits")
-        if flags & _SYMBOL_FLAG_PREDICATES and kind > 3:
+        if flags & _SYMBOL_FLAG_PREDICATES and kind > 4:
             raise BytecodeError(
                 "symbol predicates flag requires a function symbol kind"
             )
@@ -1579,7 +1612,7 @@ class BytecodeReader:
                 attr_name = getattr(func_like, field_name, None)
                 if attr_name is not None:
                     keys.add(attr_name)
-            for field_name in ("implements", "priority"):
+            for field_name in ("template_family", "priority"):
                 attr_name = getattr(func_like, field_name, None)
                 if attr_name is not None:
                     keys.add(attr_name)

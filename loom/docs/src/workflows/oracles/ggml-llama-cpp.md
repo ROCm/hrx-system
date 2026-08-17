@@ -103,7 +103,7 @@ Reusable Loom components naturally occupy three layers:
 
 | Layer | Contract |
 | --- | --- |
-| Format motif | `func.def` or `func.template` helpers for block addressing, scale extraction, decoding, encoding, and typed interpretation; no launch ABI. |
+| Format motif | `func.def` or `template.def` helpers for block addressing, scale extraction, decoding, encoding, and typed interpretation; no launch ABI. |
 | GGML compatibility kernel | A `kernel.def` implementing one concrete GGML operation name, bindings, output layout, and overwrite or accumulation behavior. |
 | Model kernel or command program | A model-level semantic cut that composes format motifs directly and may fuse, reorder, or remove GGML operator boundaries. |
 

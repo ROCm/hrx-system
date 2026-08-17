@@ -43,17 +43,16 @@ loom_example_run_tool loom-format "${loom_format}" --check \
 loom_example_section "Inspect the private motif providers"
 loom_example_run_tool loom-link "${loom_link}" motif.loom --list-symbols
 
-loom_example_section "Link and specialize the command root"
+loom_example_section "Archive the explicit program and provider universe"
 loom_example_run_tool loom-link "${loom_link}" \
   model.loom \
   --library=kernel.loom \
   --library=motif.loom \
-  --mode=link \
-  --root=@elementwise_transform \
+  --mode=archive \
   --to=text \
   --output="${output_dir}/elementwise-transform.loom"
 
-loom_example_section "Compile the selected kernel for ${target}"
+loom_example_section "Specialize and compile the selected kernel for ${target}"
 loom_example_run_tool loom-compile "${loom_compile}" \
   "${output_dir}/elementwise-transform.loom" \
   --backend="${LOOM_EXAMPLE_BACKEND}" \

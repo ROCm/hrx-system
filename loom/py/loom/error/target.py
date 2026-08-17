@@ -1216,18 +1216,18 @@ ERR_TARGET_067 = ErrorDef(
     ),
 )
 
-# ERR_TARGET_068: Function provider has an invalid target condition.
+# ERR_TARGET_068: Function has an invalid target condition.
 ERR_TARGET_068 = ErrorDef(
     domain=ErrorDomain.TARGET,
     code=68,
     severity=Severity.ERROR,
-    summary="Function provider has an invalid target condition.",
+    summary="Function has an invalid target condition.",
     message=(
-        "function provider '@{provider_name}' has invalid target condition "
+        "function '@{function_name}' has invalid target condition "
         "{condition_index}: {reason}"
     ),
     params=(
-        ErrorParam("provider_name", ParamKind.STRING),
+        ErrorParam("function_name", ParamKind.STRING),
         ErrorParam("condition_index", ParamKind.U32),
         ErrorParam("reason", ParamKind.STRING),
     ),

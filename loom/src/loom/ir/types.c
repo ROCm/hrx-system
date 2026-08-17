@@ -150,9 +150,12 @@ bool loom_type_equal(loom_type_t a, loom_type_t b) {
 
 static loom_value_id_t loom_type_remap_value(
     const loom_type_value_remap_t* remap, loom_value_id_t value_id) {
-  if (!remap) return value_id;
-  for (iree_host_size_t i = 0; i < remap->count; ++i) {
-    if (remap->source_values[i] == value_id) return remap->target_values[i];
+  for (const loom_type_value_remap_t* span = remap; span; span = span->next) {
+    for (iree_host_size_t i = 0; i < span->count; ++i) {
+      if (span->source_values[i] == value_id) {
+        return span->target_values[i];
+      }
+    }
   }
   return value_id;
 }
@@ -305,9 +308,10 @@ bool loom_type_equal_after_value_remap(const loom_module_t* module,
                                        loom_type_t target_type,
                                        const loom_type_value_remap_t* remap) {
   if (!module) return false;
-  if (remap && remap->count > 0 &&
-      (!remap->source_values || !remap->target_values)) {
-    return false;
+  for (const loom_type_value_remap_t* span = remap; span; span = span->next) {
+    if (span->count > 0 && (!span->source_values || !span->target_values)) {
+      return false;
+    }
   }
 
   loom_type_kind_t source_kind = loom_type_kind(source_type);

@@ -24,15 +24,10 @@ typedef struct loom_link_module_index_name_map_entry_t {
   iree_host_size_t last_symbol_ordinal;
   // Selected global symbol ordinal, or INVALID_ORDINAL when none exists.
   iree_host_size_t selected_global_ordinal;
+  // Dense template family ordinal for this global name, or invalid when this
+  // name has not been used as a family identity.
+  loom_link_template_family_ordinal_t template_family_ordinal;
 } loom_link_module_index_name_map_entry_t;
-
-typedef struct loom_link_module_index_contract_map_entry_t {
-  // Borrowed implementation-contract key.
-  iree_string_view_t name;
-  // Dense contract ordinal, or LOOM_LINK_CONTRACT_ORDINAL_INVALID for an empty
-  // slot.
-  loom_link_contract_ordinal_t contract_ordinal;
-} loom_link_module_index_contract_map_entry_t;
 
 struct loom_link_module_index_t {
   // Context shared by all providers.
@@ -79,22 +74,15 @@ struct loom_link_module_index_t {
     // Allocated entry capacity.
     iree_host_size_t capacity;
   } names;
-  // Dense implementation-contract records.
+  // Dense template-family identity records.
   struct {
     // Growable record storage.
-    loom_link_module_index_contract_t* values;
+    loom_link_module_index_template_family_t* values;
     // Number of live records.
     iree_host_size_t count;
     // Allocated record capacity.
     iree_host_size_t capacity;
-  } contracts;
-  // Open-addressed map from implementation-contract key to dense ordinal.
-  struct {
-    // Hash table storage.
-    loom_link_module_index_contract_map_entry_t* values;
-    // Allocated entry capacity. Occupancy is contracts.count.
-    iree_host_size_t capacity;
-  } contract_map;
+  } template_families;
 };
 
 //===----------------------------------------------------------------------===//
@@ -196,14 +184,15 @@ static iree_status_t loom_link_index_reserve_symbols(
       &index->symbols.capacity, (void**)&index->symbols.values);
 }
 
-static iree_status_t loom_link_index_reserve_contracts(
+static iree_status_t loom_link_index_reserve_template_families(
     loom_link_module_index_t* index, iree_host_size_t count) {
-  if (count <= index->contracts.capacity) {
+  if (count <= index->template_families.capacity) {
     return iree_ok_status();
   }
-  return iree_allocator_grow_array(
-      index->allocator, count, sizeof(*index->contracts.values),
-      &index->contracts.capacity, (void**)&index->contracts.values);
+  return iree_allocator_grow_array(index->allocator, count,
+                                   sizeof(*index->template_families.values),
+                                   &index->template_families.capacity,
+                                   (void**)&index->template_families.values);
 }
 
 static void loom_link_index_name_map_initialize(
@@ -214,6 +203,7 @@ static void loom_link_index_name_map_initialize(
         .first_symbol_ordinal = LOOM_LINK_MODULE_INDEX_INVALID_ORDINAL,
         .last_symbol_ordinal = LOOM_LINK_MODULE_INDEX_INVALID_ORDINAL,
         .selected_global_ordinal = LOOM_LINK_MODULE_INDEX_INVALID_ORDINAL,
+        .template_family_ordinal = LOOM_LINK_TEMPLATE_FAMILY_ORDINAL_INVALID,
     };
   }
 }
@@ -297,64 +287,6 @@ static iree_status_t loom_link_index_reserve_names(
   return iree_ok_status();
 }
 
-static void loom_link_index_contract_map_initialize(
-    loom_link_module_index_contract_map_entry_t* entries,
-    iree_host_size_t capacity) {
-  for (iree_host_size_t i = 0; i < capacity; ++i) {
-    entries[i] = (loom_link_module_index_contract_map_entry_t){
-        .contract_ordinal = LOOM_LINK_CONTRACT_ORDINAL_INVALID,
-    };
-  }
-}
-
-static iree_host_size_t loom_link_index_contract_map_slot(
-    const loom_link_module_index_contract_map_entry_t* entries,
-    iree_host_size_t capacity, iree_string_view_t name) {
-  const iree_host_size_t mask = capacity - 1;
-  iree_host_size_t slot = loom_link_hash_string(name) & mask;
-  while (entries[slot].contract_ordinal != LOOM_LINK_CONTRACT_ORDINAL_INVALID) {
-    if (iree_string_view_equal(entries[slot].name, name)) {
-      return slot;
-    }
-    slot = (slot + 1) & mask;
-  }
-  return slot;
-}
-
-static iree_status_t loom_link_index_reserve_contract_map(
-    loom_link_module_index_t* index, iree_host_size_t count) {
-  if (loom_link_index_hash_map_has_capacity(index->contract_map.capacity,
-                                            count)) {
-    return iree_ok_status();
-  }
-
-  const iree_host_size_t old_capacity = index->contract_map.capacity;
-  loom_link_module_index_contract_map_entry_t* old_entries =
-      index->contract_map.values;
-  iree_host_size_t new_capacity = 0;
-  IREE_RETURN_IF_ERROR(loom_link_index_hash_map_grow_capacity(
-      old_capacity, count, &new_capacity));
-  loom_link_module_index_contract_map_entry_t* new_entries = NULL;
-  IREE_RETURN_IF_ERROR(
-      iree_allocator_malloc_array(index->allocator, new_capacity,
-                                  sizeof(*new_entries), (void**)&new_entries));
-  loom_link_index_contract_map_initialize(new_entries, new_capacity);
-
-  for (iree_host_size_t i = 0; i < old_capacity; ++i) {
-    if (old_entries[i].contract_ordinal == LOOM_LINK_CONTRACT_ORDINAL_INVALID) {
-      continue;
-    }
-    const iree_host_size_t slot = loom_link_index_contract_map_slot(
-        new_entries, new_capacity, old_entries[i].name);
-    new_entries[slot] = old_entries[i];
-  }
-
-  index->contract_map.values = new_entries;
-  index->contract_map.capacity = new_capacity;
-  iree_allocator_free(index->allocator, old_entries);
-  return iree_ok_status();
-}
-
 static bool loom_link_index_symbol_precedes(
     const loom_link_module_index_t* index, iree_host_size_t lhs_ordinal,
     iree_host_size_t rhs_ordinal) {
@@ -409,6 +341,7 @@ static iree_status_t loom_link_index_insert_symbol_name(
         .first_symbol_ordinal = symbol_ordinal,
         .last_symbol_ordinal = symbol_ordinal,
         .selected_global_ordinal = LOOM_LINK_MODULE_INDEX_INVALID_ORDINAL,
+        .template_family_ordinal = LOOM_LINK_TEMPLATE_FAMILY_ORDINAL_INVALID,
     };
     ++index->names.count;
   } else {
@@ -427,70 +360,84 @@ static iree_status_t loom_link_index_insert_symbol_name(
   return iree_ok_status();
 }
 
-static iree_status_t loom_link_index_intern_contract(
-    loom_link_module_index_t* index, iree_string_view_t name,
-    loom_link_contract_ordinal_t* out_ordinal) {
-  *out_ordinal = LOOM_LINK_CONTRACT_ORDINAL_INVALID;
-  if (iree_string_view_is_empty(name)) {
-    return iree_ok_status();
+static iree_status_t loom_link_index_resolve_template_family(
+    loom_link_module_index_t* index, iree_host_size_t family_symbol_ordinal,
+    loom_link_template_family_ordinal_t* out_ordinal) {
+  if (family_symbol_ordinal >= index->symbols.count) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "template family symbol ordinal is out of range");
   }
 
-  if (index->contract_map.capacity != 0) {
-    const iree_host_size_t slot = loom_link_index_contract_map_slot(
-        index->contract_map.values, index->contract_map.capacity, name);
-    if (index->contract_map.values[slot].contract_ordinal !=
-        LOOM_LINK_CONTRACT_ORDINAL_INVALID) {
-      *out_ordinal = index->contract_map.values[slot].contract_ordinal;
-      return iree_ok_status();
-    }
+  loom_link_module_index_symbol_t* family_symbol =
+      &index->symbols.values[family_symbol_ordinal];
+  loom_link_template_family_ordinal_t* identity_ordinal =
+      &family_symbol->template_family_ordinal;
+  iree_host_size_t identity_symbol_ordinal = family_symbol_ordinal;
+  if (family_symbol->identity == LOOM_LINK_SYMBOL_IDENTITY_GLOBAL) {
+    IREE_ASSERT(index->names.capacity != 0);
+    const iree_host_size_t slot = loom_link_index_name_map_slot(
+        index->names.values, index->names.capacity, family_symbol->name);
+    loom_link_module_index_name_map_entry_t* name_entry =
+        &index->names.values[slot];
+    IREE_ASSERT(name_entry->first_symbol_ordinal !=
+                LOOM_LINK_MODULE_INDEX_INVALID_ORDINAL);
+    identity_ordinal = &name_entry->template_family_ordinal;
+    identity_symbol_ordinal = name_entry->selected_global_ordinal;
+    IREE_ASSERT(identity_symbol_ordinal !=
+                LOOM_LINK_MODULE_INDEX_INVALID_ORDINAL);
   }
-  if (index->contracts.count >= UINT32_MAX) {
+
+  if (*identity_ordinal != LOOM_LINK_TEMPLATE_FAMILY_ORDINAL_INVALID) {
+    family_symbol->template_family_ordinal = *identity_ordinal;
+    *out_ordinal = *identity_ordinal;
+    return iree_ok_status();
+  }
+  if (index->template_families.count >= UINT32_MAX) {
     return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                            "link index exceeds %u implementation contracts",
+                            "link index exceeds %u template families",
                             (unsigned)(UINT32_MAX - 1));
   }
 
-  const iree_host_size_t count = index->contracts.count + 1;
-  IREE_RETURN_IF_ERROR(loom_link_index_reserve_contract_map(index, count));
-  IREE_RETURN_IF_ERROR(loom_link_index_reserve_contracts(index, count));
-  const loom_link_contract_ordinal_t ordinal =
-      (loom_link_contract_ordinal_t)index->contracts.count;
-  index->contracts.values[ordinal] = (loom_link_module_index_contract_t){
-      .ordinal = ordinal,
-      .name = name,
-      .providers =
-          {
-              .first_symbol_ordinal = LOOM_LINK_MODULE_INDEX_INVALID_ORDINAL,
-              .last_symbol_ordinal = LOOM_LINK_MODULE_INDEX_INVALID_ORDINAL,
-          },
-  };
-  index->contracts.count = count;
-
-  const iree_host_size_t slot = loom_link_index_contract_map_slot(
-      index->contract_map.values, index->contract_map.capacity, name);
-  index->contract_map.values[slot] =
-      (loom_link_module_index_contract_map_entry_t){
-          .name = name,
-          .contract_ordinal = ordinal,
+  const iree_host_size_t count = index->template_families.count + 1;
+  IREE_RETURN_IF_ERROR(loom_link_index_reserve_template_families(index, count));
+  const loom_link_template_family_ordinal_t ordinal =
+      (loom_link_template_family_ordinal_t)index->template_families.count;
+  index->template_families.values[ordinal] =
+      (loom_link_module_index_template_family_t){
+          .ordinal = ordinal,
+          .identity_symbol_ordinal = identity_symbol_ordinal,
+          .name = family_symbol->name,
+          .providers =
+              {
+                  .first_symbol_ordinal =
+                      LOOM_LINK_MODULE_INDEX_INVALID_ORDINAL,
+                  .last_symbol_ordinal = LOOM_LINK_MODULE_INDEX_INVALID_ORDINAL,
+              },
       };
+  index->template_families.count = count;
+  *identity_ordinal = ordinal;
+  family_symbol->template_family_ordinal = ordinal;
   *out_ordinal = ordinal;
   return iree_ok_status();
 }
 
-static void loom_link_index_append_contract_provider(
-    loom_link_module_index_t* index, loom_link_contract_ordinal_t ordinal,
+static void loom_link_index_append_template_provider(
+    loom_link_module_index_t* index,
+    loom_link_template_family_ordinal_t ordinal,
     iree_host_size_t symbol_ordinal) {
-  if (ordinal == LOOM_LINK_CONTRACT_ORDINAL_INVALID) return;
-  loom_link_module_index_contract_t* contract =
-      &index->contracts.values[ordinal];
-  if (contract->providers.first_symbol_ordinal ==
-      LOOM_LINK_MODULE_INDEX_INVALID_ORDINAL) {
-    contract->providers.first_symbol_ordinal = symbol_ordinal;
-  } else {
-    index->symbols.values[contract->providers.last_symbol_ordinal]
-        .next.contract_provider_ordinal = symbol_ordinal;
+  if (ordinal == LOOM_LINK_TEMPLATE_FAMILY_ORDINAL_INVALID) {
+    return;
   }
-  contract->providers.last_symbol_ordinal = symbol_ordinal;
+  loom_link_module_index_template_family_t* family =
+      &index->template_families.values[ordinal];
+  if (family->providers.first_symbol_ordinal ==
+      LOOM_LINK_MODULE_INDEX_INVALID_ORDINAL) {
+    family->providers.first_symbol_ordinal = symbol_ordinal;
+  } else {
+    index->symbols.values[family->providers.last_symbol_ordinal]
+        .next.template_provider_ordinal = symbol_ordinal;
+  }
+  family->providers.last_symbol_ordinal = symbol_ordinal;
 }
 
 static iree_status_t loom_link_index_append_provider(
@@ -571,8 +518,7 @@ static iree_status_t loom_link_index_append_module(
 static iree_status_t loom_link_index_append_symbol(
     loom_link_module_index_t* index, loom_link_module_index_module_t* module,
     iree_string_view_t name, loom_symbol_kind_t kind,
-    loom_link_symbol_identity_t identity, loom_link_symbol_flags_t flags,
-    iree_string_view_t implementation_contract) {
+    loom_link_symbol_identity_t identity, loom_link_symbol_flags_t flags) {
   const iree_host_size_t symbol_ordinal = index->symbols.count;
   iree_host_size_t symbol_count = 0;
   if (!iree_host_size_checked_add(symbol_ordinal, 1, &symbol_count)) {
@@ -580,11 +526,6 @@ static iree_status_t loom_link_index_append_symbol(
                             "link symbol count overflow");
   }
   IREE_RETURN_IF_ERROR(loom_link_index_reserve_symbols(index, symbol_count));
-  loom_link_contract_ordinal_t implementation_contract_ordinal =
-      LOOM_LINK_CONTRACT_ORDINAL_INVALID;
-  IREE_RETURN_IF_ERROR(loom_link_index_intern_contract(
-      index, implementation_contract, &implementation_contract_ordinal));
-
   loom_link_module_index_symbol_t* symbol =
       &index->symbols.values[symbol_ordinal];
   *symbol = (loom_link_module_index_symbol_t){
@@ -593,13 +534,13 @@ static iree_status_t loom_link_index_append_symbol(
       .module_symbol_ordinal = module->symbol_count,
       .name = name,
       .kind = kind,
-      .implementation_contract_ordinal = implementation_contract_ordinal,
+      .template_family_ordinal = LOOM_LINK_TEMPLATE_FAMILY_ORDINAL_INVALID,
       .identity = identity,
       .flags = flags,
       .next =
           {
               .same_name_ordinal = LOOM_LINK_MODULE_INDEX_INVALID_ORDINAL,
-              .contract_provider_ordinal =
+              .template_provider_ordinal =
                   LOOM_LINK_MODULE_INDEX_INVALID_ORDINAL,
           },
   };
@@ -608,25 +549,7 @@ static iree_status_t loom_link_index_append_symbol(
   index->symbols.count = symbol_count;
   IREE_RETURN_IF_ERROR(
       loom_link_index_insert_symbol_name(index, symbol_ordinal));
-  if (kind == LOOM_SYMBOL_FUNC_TEMPLATE || kind == LOOM_SYMBOL_FUNC_UKERNEL) {
-    loom_link_index_append_contract_provider(
-        index, implementation_contract_ordinal, symbol_ordinal);
-  }
   return iree_ok_status();
-}
-
-static iree_string_view_t loom_link_materialized_symbol_contract(
-    const loom_module_t* module, const loom_symbol_t* symbol) {
-  loom_func_like_t func = loom_func_like_cast(module, symbol->defining_op);
-  if (!loom_func_like_isa(func)) {
-    return iree_string_view_empty();
-  }
-  loom_string_id_t contract_id = loom_func_like_implements(func);
-  if (contract_id == LOOM_STRING_ID_INVALID ||
-      contract_id >= module->strings.count) {
-    return iree_string_view_empty();
-  }
-  return module->strings.entries[contract_id];
 }
 
 //===----------------------------------------------------------------------===//
@@ -663,7 +586,7 @@ static loom_link_symbol_flags_t loom_link_materialized_symbol_flags(
   if (loom_link_materialized_symbol_has_visibility_attr(module, symbol)) {
     flags |= LOOM_LINK_SYMBOL_FLAG_PUBLIC;
   }
-  if (loom_link_symbol_is_declaration(symbol)) {
+  if (!symbol->defining_op || loom_link_symbol_is_declaration(symbol)) {
     flags |= LOOM_LINK_SYMBOL_FLAG_DECLARATION;
   }
   if (loom_link_symbol_is_concrete_definition(symbol)) {
@@ -700,10 +623,12 @@ static loom_symbol_kind_t loom_link_bytecode_symbol_kind(
       return LOOM_SYMBOL_FUNC_DEF;
     case LOOM_BYTECODE_SYMBOL_FUNC_DECL:
       return LOOM_SYMBOL_FUNC_DECL;
-    case LOOM_BYTECODE_SYMBOL_FUNC_TEMPLATE:
-      return LOOM_SYMBOL_FUNC_TEMPLATE;
-    case LOOM_BYTECODE_SYMBOL_FUNC_UKERNEL:
-      return LOOM_SYMBOL_FUNC_UKERNEL;
+    case LOOM_BYTECODE_SYMBOL_TEMPLATE_DECL:
+      return LOOM_SYMBOL_TEMPLATE_DECL;
+    case LOOM_BYTECODE_SYMBOL_TEMPLATE_DEF:
+      return LOOM_SYMBOL_TEMPLATE_DEF;
+    case LOOM_BYTECODE_SYMBOL_TEMPLATE_UKERNEL:
+      return LOOM_SYMBOL_TEMPLATE_UKERNEL;
     case LOOM_BYTECODE_SYMBOL_GLOBAL:
       return LOOM_SYMBOL_GLOBAL;
     case LOOM_BYTECODE_SYMBOL_EXECUTABLE:
@@ -732,7 +657,8 @@ static loom_link_symbol_flags_t loom_link_bytecode_symbol_flags(
   if (is_public && !is_import) {
     flags |= LOOM_LINK_SYMBOL_FLAG_EXPORT;
   }
-  if (iree_any_bit_set(symbol->flags, LOOM_BYTECODE_SYMBOL_FLAG_DECLARATION) ||
+  if (symbol->kind == LOOM_BYTECODE_SYMBOL_ANCHOR ||
+      iree_any_bit_set(symbol->flags, LOOM_BYTECODE_SYMBOL_FLAG_DECLARATION) ||
       is_import) {
     flags |= LOOM_LINK_SYMBOL_FLAG_DECLARATION;
   }
@@ -751,7 +677,8 @@ static loom_link_symbol_flags_t loom_link_bytecode_symbol_flags(
 static loom_link_symbol_identity_t loom_link_bytecode_symbol_identity(
     const loom_bytecode_symbol_metadata_t* symbol,
     loom_link_symbol_flags_t flags) {
-  if (iree_any_bit_set(flags, LOOM_LINK_SYMBOL_FLAG_PUBLIC |
+  if (symbol->kind == LOOM_BYTECODE_SYMBOL_ANCHOR ||
+      iree_any_bit_set(flags, LOOM_LINK_SYMBOL_FLAG_PUBLIC |
                                   LOOM_LINK_SYMBOL_FLAG_IMPORT |
                                   LOOM_LINK_SYMBOL_FLAG_DECLARATION |
                                   LOOM_LINK_SYMBOL_FLAG_CONFIG)) {
@@ -780,12 +707,84 @@ static iree_status_t loom_link_index_module_materialized_symbols(
         loom_link_symbol_has_global_identity(source_module, symbol)
             ? LOOM_LINK_SYMBOL_IDENTITY_GLOBAL
             : LOOM_LINK_SYMBOL_IDENTITY_PRIVATE;
-    iree_string_view_t implementation_contract =
-        loom_link_materialized_symbol_contract(source_module, symbol);
     IREE_RETURN_IF_ERROR(loom_link_index_append_symbol(
         index, module, name, symbol->kind, identity,
-        loom_link_materialized_symbol_flags(source_module, symbol),
-        implementation_contract));
+        loom_link_materialized_symbol_flags(source_module, symbol)));
+  }
+  return iree_ok_status();
+}
+
+static bool loom_link_symbol_is_template_provider(loom_symbol_kind_t kind) {
+  return kind == LOOM_SYMBOL_TEMPLATE_DEF ||
+         kind == LOOM_SYMBOL_TEMPLATE_UKERNEL;
+}
+
+static iree_status_t loom_link_index_project_materialized_template_families(
+    loom_link_module_index_t* index, loom_link_module_index_module_t* module,
+    const loom_module_t* source_module) {
+  for (iree_host_size_t i = 0; i < source_module->symbols.count; ++i) {
+    const loom_symbol_t* source_symbol = &source_module->symbols.entries[i];
+    loom_link_module_index_symbol_t* symbol =
+        &index->symbols.values[module->symbol_start_ordinal + i];
+    if (source_symbol->kind == LOOM_SYMBOL_TEMPLATE_DECL) {
+      IREE_RETURN_IF_ERROR(loom_link_index_resolve_template_family(
+          index, symbol->ordinal, &symbol->template_family_ordinal));
+      continue;
+    }
+    if (!loom_link_symbol_is_template_provider(source_symbol->kind)) {
+      continue;
+    }
+
+    loom_func_like_t function =
+        loom_func_like_cast(source_module, source_symbol->defining_op);
+    const loom_symbol_ref_t family = loom_func_like_template_family(function);
+    if (!loom_func_like_isa(function) || !loom_symbol_ref_is_valid(family) ||
+        family.module_id != 0 ||
+        family.symbol_id >= source_module->symbols.count) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "template provider '%.*s' has an invalid family symbol",
+          (int)symbol->name.size, symbol->name.data);
+    }
+    IREE_RETURN_IF_ERROR(loom_link_index_resolve_template_family(
+        index, module->symbol_start_ordinal + family.symbol_id,
+        &symbol->template_family_ordinal));
+    loom_link_index_append_template_provider(
+        index, symbol->template_family_ordinal, symbol->ordinal);
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t loom_link_index_project_bytecode_template_families(
+    loom_link_module_index_t* index, loom_link_module_index_module_t* module,
+    const loom_bytecode_module_metadata_t* bytecode_module) {
+  for (iree_host_size_t i = 0; i < bytecode_module->symbol_count; ++i) {
+    const loom_bytecode_symbol_metadata_t* source_symbol =
+        &bytecode_module->symbols[i];
+    loom_link_module_index_symbol_t* symbol =
+        &index->symbols.values[module->symbol_start_ordinal + i];
+    if (source_symbol->kind == LOOM_BYTECODE_SYMBOL_TEMPLATE_DECL) {
+      IREE_RETURN_IF_ERROR(loom_link_index_resolve_template_family(
+          index, symbol->ordinal, &symbol->template_family_ordinal));
+      continue;
+    }
+    if (!loom_link_symbol_is_template_provider(symbol->kind)) {
+      continue;
+    }
+    if (source_symbol->template_family_symbol_ordinal >=
+        bytecode_module->symbol_count) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "template provider '%.*s' has an invalid family symbol ordinal",
+          (int)symbol->name.size, symbol->name.data);
+    }
+    IREE_RETURN_IF_ERROR(loom_link_index_resolve_template_family(
+        index,
+        module->symbol_start_ordinal +
+            source_symbol->template_family_symbol_ordinal,
+        &symbol->template_family_ordinal));
+    loom_link_index_append_template_provider(
+        index, symbol->template_family_ordinal, symbol->ordinal);
   }
   return iree_ok_status();
 }
@@ -829,7 +828,7 @@ static iree_status_t loom_link_index_project_materialized_references(
 
   loom_symbol_reference_table_t table = {0};
   uint32_t* dependency_values = NULL;
-  loom_link_contract_ordinal_t* contract_demand_values = NULL;
+  loom_link_template_family_ordinal_t* template_demand_values = NULL;
   iree_status_t status =
       loom_symbol_reference_table_build(source_module, &scratch_arena, &table);
   if (iree_status_is_ok(status)) {
@@ -853,17 +852,17 @@ static iree_status_t loom_link_index_project_materialized_references(
   }
 
   if (iree_status_is_ok(status)) {
-    module->contract_demands.count = table.contract_demand_count;
-    if (table.contract_demand_count > 0) {
+    module->template_demands.count = table.template_demands.count;
+    if (table.template_demands.count > 0) {
       status = iree_arena_allocate_array(
-          &index->arena, table.contract_demand_count,
-          sizeof(*contract_demand_values), (void**)&contract_demand_values);
-      module->contract_demands.values = contract_demand_values;
+          &index->arena, table.template_demands.count,
+          sizeof(*template_demand_values), (void**)&template_demand_values);
+      module->template_demands.values = template_demand_values;
     }
   }
 
   iree_host_size_t dependency_position = 0;
-  iree_host_size_t contract_position = 0;
+  iree_host_size_t template_demand_position = 0;
   if (iree_status_is_ok(status)) {
     loom_link_index_copy_dependency_occurrences(
         &table, table.first_module_occurrence_id, dependency_values,
@@ -882,21 +881,20 @@ static iree_status_t loom_link_index_project_materialized_references(
           &table, source->first_outgoing_occurrence_id, dependency_values,
           &dependency_position);
 
-      symbol->contract_demands.first = (uint32_t)contract_position;
-      symbol->contract_demands.count = source->contract_demand_count;
-      loom_func_contract_demand_id_t demand_id =
-          source->first_contract_demand_id;
-      while (demand_id != LOOM_FUNC_CONTRACT_DEMAND_ID_INVALID &&
+      symbol->template_demands.first = (uint32_t)template_demand_position;
+      symbol->template_demands.count = source->template_demand_count;
+      loom_template_demand_id_t demand_id = source->first_template_demand_id;
+      while (demand_id != LOOM_TEMPLATE_DEMAND_ID_INVALID &&
              iree_status_is_ok(status)) {
-        const loom_func_contract_demand_t* demand =
-            &table.contract_demands[demand_id];
-        loom_link_contract_ordinal_t contract_ordinal =
-            LOOM_LINK_CONTRACT_ORDINAL_INVALID;
-        status = loom_link_index_intern_contract(
-            index, source_module->strings.entries[demand->contract_id],
-            &contract_ordinal);
+        const loom_template_demand_t* demand =
+            &table.template_demands.values[demand_id];
+        loom_link_template_family_ordinal_t family_ordinal =
+            LOOM_LINK_TEMPLATE_FAMILY_ORDINAL_INVALID;
+        status = loom_link_index_resolve_template_family(
+            index, module->symbol_start_ordinal + demand->family_symbol_id,
+            &family_ordinal);
         if (iree_status_is_ok(status)) {
-          contract_demand_values[contract_position++] = contract_ordinal;
+          template_demand_values[template_demand_position++] = family_ordinal;
         }
         demand_id = demand->next_source_demand_id;
       }
@@ -917,8 +915,7 @@ static iree_status_t loom_link_index_module_bytecode_symbols(
     IREE_RETURN_IF_ERROR(loom_link_index_append_symbol(
         index, module, symbol->name,
         loom_link_bytecode_symbol_kind(symbol->kind),
-        loom_link_bytecode_symbol_identity(symbol, flags), flags,
-        symbol->implementation_contract));
+        loom_link_bytecode_symbol_identity(symbol, flags), flags));
   }
   return iree_ok_status();
 }
@@ -929,13 +926,13 @@ static iree_status_t loom_link_index_project_bytecode_references(
   module->dependencies.root_count = bytecode_module->module_dependency_count;
   module->dependencies.count = bytecode_module->dependency_count;
   module->dependencies.values = bytecode_module->dependency_symbol_indices;
-  module->contract_demands.count = bytecode_module->contract_demand_count;
-  loom_link_contract_ordinal_t* contract_demand_values = NULL;
-  if (bytecode_module->contract_demand_count > 0) {
+  module->template_demands.count = bytecode_module->template_demand_count;
+  loom_link_template_family_ordinal_t* template_demand_values = NULL;
+  if (bytecode_module->template_demand_count > 0) {
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        &index->arena, bytecode_module->contract_demand_count,
-        sizeof(*contract_demand_values), (void**)&contract_demand_values));
-    module->contract_demands.values = contract_demand_values;
+        &index->arena, bytecode_module->template_demand_count,
+        sizeof(*template_demand_values), (void**)&template_demand_values));
+    module->template_demands.values = template_demand_values;
   }
 
   for (iree_host_size_t symbol_index = 0;
@@ -946,16 +943,19 @@ static iree_status_t loom_link_index_project_bytecode_references(
         &bytecode_module->symbol_references[symbol_index];
     symbol->dependencies.first = source->first_dependency_index;
     symbol->dependencies.count = source->dependency_count;
-    symbol->contract_demands.first = source->first_contract_demand_index;
-    symbol->contract_demands.count = source->contract_demand_count;
+    symbol->template_demands.first = source->first_template_demand_index;
+    symbol->template_demands.count = source->template_demand_count;
   }
-  for (iree_host_size_t i = 0; i < bytecode_module->contract_demand_count;
+  for (iree_host_size_t i = 0; i < bytecode_module->template_demand_count;
        ++i) {
-    loom_link_contract_ordinal_t contract_ordinal =
-        LOOM_LINK_CONTRACT_ORDINAL_INVALID;
-    IREE_RETURN_IF_ERROR(loom_link_index_intern_contract(
-        index, bytecode_module->contract_demands[i], &contract_ordinal));
-    contract_demand_values[i] = contract_ordinal;
+    const uint32_t family_symbol_ordinal =
+        bytecode_module->template_demand_family_symbol_ordinals[i];
+    loom_link_template_family_ordinal_t family_ordinal =
+        LOOM_LINK_TEMPLATE_FAMILY_ORDINAL_INVALID;
+    IREE_RETURN_IF_ERROR(loom_link_index_resolve_template_family(
+        index, module->symbol_start_ordinal + family_symbol_ordinal,
+        &family_ordinal));
+    template_demand_values[i] = family_ordinal;
   }
   return iree_ok_status();
 }
@@ -1191,8 +1191,7 @@ void loom_link_module_index_free(loom_link_module_index_t* index) {
           (loom_module_t*)index->modules.values[i].materialized_module);
     }
   }
-  iree_allocator_free(index->allocator, index->contract_map.values);
-  iree_allocator_free(index->allocator, index->contracts.values);
+  iree_allocator_free(index->allocator, index->template_families.values);
   iree_allocator_free(index->allocator, index->names.values);
   iree_allocator_free(index->allocator, index->symbols.values);
   iree_allocator_free(index->allocator, index->modules.values);
@@ -1224,6 +1223,8 @@ iree_status_t loom_link_module_index_add_materialized(
       loom_link_materialized_module_name(module), module,
       /*owns_materialized_module=*/false, &indexed_module));
   IREE_RETURN_IF_ERROR(loom_link_index_module_materialized_symbols(
+      index, indexed_module, module));
+  IREE_RETURN_IF_ERROR(loom_link_index_project_materialized_template_families(
       index, indexed_module, module));
   IREE_RETURN_IF_ERROR(loom_link_index_project_materialized_references(
       index, indexed_module, module));
@@ -1280,6 +1281,8 @@ iree_status_t loom_link_module_index_add_bytecode(
         &indexed_module));
     IREE_RETURN_IF_ERROR(loom_link_index_module_bytecode_symbols(
         index, indexed_module, &metadata.modules[i]));
+    IREE_RETURN_IF_ERROR(loom_link_index_project_bytecode_template_families(
+        index, indexed_module, &metadata.modules[i]));
     IREE_RETURN_IF_ERROR(loom_link_index_project_bytecode_references(
         index, indexed_module, &metadata.modules[i]));
     IREE_RETURN_IF_ERROR(loom_link_index_project_bytecode_provider_imports(
@@ -1327,6 +1330,10 @@ iree_status_t loom_link_module_index_add_text(
     module_owned_by_index = iree_status_is_ok(status);
     if (iree_status_is_ok(status)) {
       status = loom_link_index_module_materialized_symbols(
+          index, indexed_module, module);
+    }
+    if (iree_status_is_ok(status)) {
+      status = loom_link_index_project_materialized_template_families(
           index, indexed_module, module);
     }
     if (iree_status_is_ok(status)) {
@@ -1594,16 +1601,19 @@ const loom_link_module_index_symbol_t* loom_link_module_index_lookup_private(
   return NULL;
 }
 
-iree_host_size_t loom_link_module_index_contract_count(
+iree_host_size_t loom_link_module_index_template_family_count(
     const loom_link_module_index_t* index) {
-  return index ? index->contracts.count : 0;
+  return index ? index->template_families.count : 0;
 }
 
-const loom_link_module_index_contract_t* loom_link_module_index_contract_at(
+const loom_link_module_index_template_family_t*
+loom_link_module_index_template_family_at(
     const loom_link_module_index_t* index,
-    loom_link_contract_ordinal_t ordinal) {
-  if (!index || ordinal >= index->contracts.count) return NULL;
-  return &index->contracts.values[ordinal];
+    loom_link_template_family_ordinal_t ordinal) {
+  if (!index || ordinal >= index->template_families.count) {
+    return NULL;
+  }
+  return &index->template_families.values[ordinal];
 }
 
 iree_status_t loom_link_module_index_duplicate_global_status(

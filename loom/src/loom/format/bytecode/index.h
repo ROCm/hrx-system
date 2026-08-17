@@ -109,8 +109,9 @@ typedef struct loom_bytecode_symbol_metadata_t {
   uint16_t tied_result_count;
   // Global declaration-local value count, or zero for non-global symbols.
   uint64_t local_value_count;
-  // Borrowed implementation-contract key for provider symbols/declarations.
-  iree_string_view_t implementation_contract;
+  // Source SYMBOLS ordinal naming the provider's template family, or
+  // UINT32_MAX for non-provider symbols.
+  uint32_t template_family_symbol_ordinal;
   // Concrete provider priority value, or zero when not applicable.
   uint64_t priority;
   // True when the symbol carries an IR body reference.
@@ -145,10 +146,10 @@ typedef struct loom_bytecode_symbol_reference_metadata_t {
   uint32_t first_dependency_index;
   // Number of dependency occurrences in this symbol's slice.
   uint32_t dependency_count;
-  // First entry in contract_demands.
-  uint32_t first_contract_demand_index;
+  // First entry in template_demands.
+  uint32_t first_template_demand_index;
   // Number of abstract provider demands in this symbol's slice.
-  uint32_t contract_demand_count;
+  uint32_t template_demand_count;
 } loom_bytecode_symbol_reference_metadata_t;
 
 // Validated module directory entry and lightweight per-module index.
@@ -213,6 +214,9 @@ typedef struct loom_bytecode_module_metadata_t {
   iree_host_size_t symbol_count;
   // Arena-owned symbol metadata array.
   loom_bytecode_symbol_metadata_t* symbols;
+  // Dense STRINGS ordinal to SYMBOLS ordinal projection. Entries without a
+  // symbol contain UINT32_MAX.
+  uint32_t* symbol_ordinal_by_string_index;
   // Number of import offset table entries.
   iree_host_size_t import_count;
   // Arena-owned symbol indices in import offset table order.
@@ -238,14 +242,31 @@ typedef struct loom_bytecode_module_metadata_t {
   // The module-root slice begins at zero; symbol slices are described by
   // symbol_references. Targets may repeat within a slice.
   uint32_t* dependency_symbol_indices;
-  // One dependency and contract-demand slice per SYMBOLS ordinal.
+  // One dependency and template-demand slice per SYMBOLS ordinal.
   loom_bytecode_symbol_reference_metadata_t* symbol_references;
-  // Total number of abstract provider demand occurrences.
-  iree_host_size_t contract_demand_count;
-  // Arena-owned borrowed STRINGS views in deterministic demand order and
-  // sliced by symbol_references. Contract keys may repeat within a slice.
-  iree_string_view_t* contract_demands;
+  // Total number of template-family demand occurrences.
+  iree_host_size_t template_demand_count;
+  // Arena-owned family SYMBOLS ordinals in deterministic demand order and
+  // sliced by symbol_references. Ordinals may repeat within a slice.
+  uint32_t* template_demand_family_symbol_ordinals;
 } loom_bytecode_module_metadata_t;
+
+// Resolves a source STRINGS ordinal to its module-local SYMBOLS ordinal.
+static inline bool loom_bytecode_module_metadata_lookup_symbol_ordinal(
+    const loom_bytecode_module_metadata_t* metadata,
+    uint32_t source_name_string_ordinal, uint32_t* out_source_symbol_ordinal) {
+  if (source_name_string_ordinal >= metadata->strings.count ||
+      metadata->symbol_ordinal_by_string_index == NULL) {
+    return false;
+  }
+  const uint32_t symbol_ordinal =
+      metadata->symbol_ordinal_by_string_index[source_name_string_ordinal];
+  if (symbol_ordinal == UINT32_MAX) {
+    return false;
+  }
+  *out_source_symbol_ordinal = symbol_ordinal;
+  return true;
+}
 
 // Validated file-level bytecode index.
 //

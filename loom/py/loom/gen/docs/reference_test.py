@@ -96,8 +96,8 @@ def test_reference_renders_semantics_and_canonical_examples() -> None:
     assert "`SameElementType(view, result)`" in vector_load
     assert "%v = vector.load" in vector_load
 
-    func_template = files["dialects/func/ops/template.md"]
-    assert "requires [#target.subgroup.size<64>]" in func_template
+    template_def = files["dialects/template/ops/def.md"]
+    assert "requires [#target.subgroup.size<32>]" in template_def
 
     subgroup_size = files["attributes/families/target-subgroup-size.md"]
     assert "static target-applicability requirement" in subgroup_size

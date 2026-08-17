@@ -20,6 +20,7 @@
 #include "loom/ops/global/ops.h"
 #include "loom/ops/op_defs.h"
 #include "loom/ops/target/ops.h"
+#include "loom/ops/template/ops.h"
 #include "loom/ops/test/ops.h"
 #include "loom/ops/test/registry.h"
 #include "loom/testing/module_ptr.h"
@@ -39,6 +40,7 @@ class SymbolReferencesTest : public ::testing::Test {
     RegisterDialect(LOOM_DIALECT_FUNC, loom_func_dialect_vtables);
     RegisterDialect(LOOM_DIALECT_GLOBAL, loom_global_dialect_vtables);
     RegisterDialect(LOOM_DIALECT_TARGET, loom_target_dialect_vtables);
+    RegisterDialect(LOOM_DIALECT_TEMPLATE, loom_template_dialect_vtables);
     IREE_ASSERT_OK(loom_test_dialect_register(&context_));
     RegisterParameterizedAttrs(LOOM_DIALECT_TARGET,
                                loom_target_dialect_parameterized_attrs);
@@ -240,19 +242,22 @@ func.def @entry() -> (index) {
   EXPECT_EQ(table.symbols[reader].incoming_count, 1u);
 }
 
-TEST_F(SymbolReferencesTest, ContractDemandsRetainOwningSymbol) {
+TEST_F(SymbolReferencesTest, TemplateDemandsRetainOwningSymbol) {
   ModulePtr module = ParseModule(R"(
-func.template<outer.contract> @outer_provider(%value: i32) -> (i32) {
-  %result = func.apply<demo.contract>(%value) : (i32) -> (i32)
-  func.return %result : i32
+template.decl @outer.contract(%value: i32) -> (i32)
+template.decl @demo.contract(%value: i32) -> (i32)
+
+template.def<@outer.contract> @outer_provider(%value: i32) -> (i32) {
+  %result = template.apply<@demo.contract>(%value) : (i32) -> (i32)
+  template.return %result : i32
 }
 
-func.template<demo.contract> @demo_provider(%value: i32) -> (i32) {
-  func.return %value : i32
+template.def<@demo.contract> @demo_provider(%value: i32) -> (i32) {
+  template.return %value : i32
 }
 
 func.def public @entry(%arg: i32) -> (i32) {
-  %result = func.apply<demo.contract>(%arg) : (i32) -> (i32)
+  %result = template.apply<@demo.contract>(%arg) : (i32) -> (i32)
   func.return %result : i32
 }
 )");
@@ -260,50 +265,54 @@ func.def public @entry(%arg: i32) -> (i32) {
   const loom_symbol_id_t outer_provider =
       FindSymbol(module.get(), IREE_SV("outer_provider"));
   const loom_symbol_id_t entry = FindSymbol(module.get(), IREE_SV("entry"));
-  const loom_string_id_t contract_id =
-      loom_module_lookup_string(module.get(), IREE_SV("demo.contract"));
-  const loom_string_id_t undemanded_contract_id =
-      loom_module_lookup_string(module.get(), IREE_SV("outer.contract"));
-  ASSERT_NE(contract_id, LOOM_STRING_ID_INVALID);
-  ASSERT_NE(undemanded_contract_id, LOOM_STRING_ID_INVALID);
+  const loom_symbol_id_t family_symbol_id =
+      FindSymbol(module.get(), IREE_SV("demo.contract"));
+  const loom_symbol_id_t undemanded_family_symbol_id =
+      FindSymbol(module.get(), IREE_SV("outer.contract"));
 
   const loom_symbol_reference_table_t table = BuildTable(module.get());
 
-  ASSERT_EQ(table.contract_demand_count, 2u);
-  EXPECT_TRUE(loom_symbol_reference_contract_is_demanded(&table, contract_id));
-  EXPECT_FALSE(loom_symbol_reference_contract_is_demanded(
-      &table, undemanded_contract_id));
+  ASSERT_EQ(table.template_demands.count, 2u);
+  EXPECT_TRUE(loom_symbol_reference_template_family_is_demanded(
+      &table, family_symbol_id));
+  EXPECT_FALSE(loom_symbol_reference_template_family_is_demanded(
+      &table, undemanded_family_symbol_id));
   const loom_symbol_id_t source_symbol_ids[] = {outer_provider, entry};
   for (loom_symbol_id_t source_symbol_id : source_symbol_ids) {
-    ASSERT_EQ(table.symbols[source_symbol_id].contract_demand_count, 1u);
-    loom_func_contract_demand_id_t demand_id =
-        table.symbols[source_symbol_id].first_contract_demand_id;
-    ASSERT_NE(demand_id, LOOM_FUNC_CONTRACT_DEMAND_ID_INVALID);
-    const loom_func_contract_demand_t& demand =
-        table.contract_demands[demand_id];
+    ASSERT_EQ(table.symbols[source_symbol_id].template_demand_count, 1u);
+    loom_template_demand_id_t demand_id =
+        table.symbols[source_symbol_id].first_template_demand_id;
+    ASSERT_NE(demand_id, LOOM_TEMPLATE_DEMAND_ID_INVALID);
+    const loom_template_demand_t& demand =
+        table.template_demands.values[demand_id];
     EXPECT_EQ(demand.source_symbol_id, source_symbol_id);
-    EXPECT_EQ(demand.contract_id, contract_id);
+    EXPECT_EQ(demand.family_symbol_id, family_symbol_id);
     ASSERT_NE(demand.apply_op, nullptr);
-    EXPECT_EQ(demand.apply_op->kind, LOOM_OP_FUNC_APPLY);
-    EXPECT_EQ(demand.next_source_demand_id,
-              LOOM_FUNC_CONTRACT_DEMAND_ID_INVALID);
+    EXPECT_EQ(demand.apply_op->kind, LOOM_OP_TEMPLATE_APPLY);
+    EXPECT_EQ(demand.next_source_demand_id, LOOM_TEMPLATE_DEMAND_ID_INVALID);
   }
 }
 
 TEST_F(SymbolReferencesTest, OpenParameterizedArraysAreNotSymbolReferences) {
   ModulePtr module = ParseModule(R"(
-func.template<demo.contract> requires [#target.subgroup.size<64>] @conditional(%arg: i32) -> (i32) {
-  func.return %arg : i32
+template.decl @demo.contract(%arg: i32) -> (i32)
+
+template.def<@demo.contract> requires [#target.subgroup.size<64>] @conditional(%arg: i32) -> (i32) {
+  template.return %arg : i32
 }
 )");
 
   loom_symbol_id_t conditional =
       FindSymbol(module.get(), IREE_SV("conditional"));
+  loom_symbol_id_t family = FindSymbol(module.get(), IREE_SV("demo.contract"));
   loom_symbol_reference_table_t table = BuildTable(module.get());
 
-  ASSERT_EQ(table.symbol_count, 1u);
-  EXPECT_EQ(table.symbols[conditional].outgoing_count, 0u);
-  EXPECT_EQ(table.occurrence_count, 0u);
+  ASSERT_EQ(table.symbol_count, 2u);
+  EXPECT_EQ(table.symbols[conditional].outgoing_count, 1u);
+  EXPECT_EQ(table.occurrence_count, 1u);
+  EXPECT_NE(FindOccurrence(table, conditional, family,
+                           LOOM_SYMBOL_REFERENCE_OCCURRENCE_SYMBOL_ATTR),
+            nullptr);
 }
 
 TEST_F(SymbolReferencesTest, ConfigReadsUseNormalSymbolAttrOccurrences) {

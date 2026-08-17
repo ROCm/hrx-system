@@ -154,10 +154,10 @@ belong to different stages and answer different questions.
 Templates can state the same dependency as an eligibility requirement:
 
 ```loom
-func.template<guide.elementwise_transform> requires [#target.subgroup.size<32>] priority(20) @wave32_elementwise_transform(%value: f32) -> (f32) {
+template.def<@guide.elementwise_transform> requires [#target.subgroup.size<32>] priority(20) @wave32_elementwise_transform(%value: f32) -> (f32) {
   %two = scalar.constant 2.0 : f32
   %result = scalar.mulf %value, %two : f32
-  func.return %result : f32
+  template.return %result : f32
 }
 ```
 

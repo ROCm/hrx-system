@@ -83,7 +83,8 @@ static void BM_MaterializeTypeChain(benchmark::State& state) {
     loom_bytecode_selected_table_materializer_t materializer;
     loom_bytecode_selected_table_materializer_initialize(
         &decoder, iree_make_const_byte_span(bytecode.data(), bytecode.size()),
-        &context, &metadata, &scratch_arena, module, iree_allocator_system(),
+        &context, &metadata, &scratch_arena, module,
+        loom_bytecode_selected_symbol_resolver_empty(), iree_allocator_system(),
         &materializer);
     state.ResumeTiming();
 
@@ -148,7 +149,8 @@ static void BM_MaterializeWideFunction(benchmark::State& state) {
     loom_bytecode_selected_table_materializer_t materializer;
     loom_bytecode_selected_table_materializer_initialize(
         &decoder, iree_make_const_byte_span(bytecode.data(), bytecode.size()),
-        &context, &metadata, &scratch_arena, module, iree_allocator_system(),
+        &context, &metadata, &scratch_arena, module,
+        loom_bytecode_selected_symbol_resolver_empty(), iree_allocator_system(),
         &materializer);
     state.ResumeTiming();
 
@@ -216,7 +218,8 @@ static void BM_MaterializeLocationChain(benchmark::State& state) {
     loom_bytecode_selected_table_materializer_t materializer;
     loom_bytecode_selected_table_materializer_initialize(
         &decoder, iree_make_const_byte_span(bytecode.data(), bytecode.size()),
-        &context, &metadata, &scratch_arena, module, iree_allocator_system(),
+        &context, &metadata, &scratch_arena, module,
+        loom_bytecode_selected_symbol_resolver_empty(), iree_allocator_system(),
         &materializer);
     state.ResumeTiming();
 

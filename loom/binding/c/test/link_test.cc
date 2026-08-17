@@ -797,7 +797,7 @@ func.def @c(%x: i32) -> (i32) {
   ProviderLinkArtifact unresolved = LinkProviderSourcesToBytecode(
       partial_a.bytecode.get(), /*providers=*/{}, /*flags=*/0);
   EXPECT_EQ(unresolved.bytecode.get(), nullptr);
-  ExpectFailedResultCode(unresolved.result.get(), "LINK/PLAN");
+  ExpectFailedResultCode(unresolved.result.get(), "LINK/MATERIALIZE");
 
   ProviderLinkArtifact final_ab =
       LinkProviderSourcesToBytecode(partial_a.bytecode.get(),
@@ -860,8 +860,10 @@ TEST(LinkTest, SelectiveRootPullsBytecodeApplyProviders) {
   ContextPtr context = CreateContext();
   BuilderPtr builder = CreateBuilder(context.get());
   SourcePtr harness = CreateTextSource("harness.loom", R"(
+template.decl @demo.targeted(%x: i32) -> (i32)
+
 func.def public @caller(%x: i32) -> (i32) {
-  %y = func.apply<demo.targeted>(%x) : (i32) -> (i32)
+  %y = template.apply<@demo.targeted>(%x) : (i32) -> (i32)
   func.return %y : i32
 }
 
@@ -870,16 +872,19 @@ func.def public @unused_harness(%x: i32) -> (i32) {
 }
 )");
   std::vector<uint8_t> library_bytes = WriteBytecodeModule(R"(
-func.template<demo.targeted> priority(20) @fast_provider(%x: i32) -> (i32) {
-  func.return %x : i32
+template.decl @demo.targeted(%x: i32) -> (i32)
+template.decl @demo.unused(%x: i32) -> (i32)
+
+template.def<@demo.targeted> priority(20) @fast_provider(%x: i32) -> (i32) {
+  template.return %x : i32
 }
 
-func.template<demo.targeted> priority(1) @fallback_provider(%x: i32) -> (i32) {
-  func.return %x : i32
+template.def<@demo.targeted> priority(1) @fallback_provider(%x: i32) -> (i32) {
+  template.return %x : i32
 }
 
-func.template<demo.unused> @unused_provider(%x: i32) -> (i32) {
-  func.return %x : i32
+template.def<@demo.unused> @unused_provider(%x: i32) -> (i32) {
+  template.return %x : i32
 }
 )");
   SourcePtr library =
@@ -918,7 +923,7 @@ func.template<demo.unused> @unused_provider(%x: i32) -> (i32) {
   VerifyModule(internal_module);
   EXPECT_TRUE(ModuleHasSymbol(internal_module, "caller"));
   EXPECT_TRUE(ModuleHasSymbol(internal_module, "fast_provider"));
-  EXPECT_TRUE(ModuleHasSymbol(internal_module, "fallback_provider"));
+  EXPECT_FALSE(ModuleHasSymbol(internal_module, "fallback_provider"));
   EXPECT_FALSE(ModuleHasSymbol(internal_module, "unused_harness"));
   EXPECT_FALSE(ModuleHasSymbol(internal_module, "unused_provider"));
 }
@@ -1080,8 +1085,12 @@ TEST(LinkTest, LinkThenCompileSpecializesEntryForTemplateSelection) {
   ContextPtr context = CreateContext(target_environment.get());
   BuilderPtr builder = CreateBuilder(context.get());
   SourcePtr root_source = CreateTextSource("root.loom", R"(
-func.def public @entry(%arg: i32) -> (i32) {
-  %result = func.apply<demo.capi_selected>(%arg) : (i32) -> (i32)
+target.decl @selected_link_target
+
+template.decl @demo.capi_selected(%arg: i32) -> (i32)
+
+func.def public target(@selected_link_target) @entry(%arg: i32) -> (i32) {
+  %result = template.apply<@demo.capi_selected>(%arg) : (i32) -> (i32)
   func.return %result : i32
 }
 )");
@@ -1089,17 +1098,19 @@ func.def public @entry(%arg: i32) -> (i32) {
 test.target<low_core> @selected_link_target
 test.target<quirky> @other_target
 
-func.template<demo.capi_selected> target(@selected_link_target) priority(20) @selected_provider(%value: i32) -> (i32) {
+template.decl @demo.capi_selected(%value: i32) -> (i32)
+
+template.def<@demo.capi_selected> target(@selected_link_target) priority(20) @selected_provider(%value: i32) -> (i32) {
   %selected = test.addi %value, %value : i32
-  func.return %selected : i32
+  template.return %selected : i32
 }
 
-func.template<demo.capi_selected> target(@other_target) priority(30) @other_provider(%value: i32) -> (i32) {
-  func.return %value : i32
+template.def<@demo.capi_selected> target(@other_target) priority(30) @other_provider(%value: i32) -> (i32) {
+  template.return %value : i32
 }
 
-func.template<demo.capi_selected> priority(1) @fallback_provider(%value: i32) -> (i32) {
-  func.return %value : i32
+template.def<@demo.capi_selected> priority(1) @fallback_provider(%value: i32) -> (i32) {
+  template.return %value : i32
 }
 )");
   AddSource(builder.get(), root_source.get(), "root",
@@ -1134,8 +1145,8 @@ func.template<demo.capi_selected> priority(1) @fallback_provider(%value: i32) ->
   ASSERT_NE(linked_module, nullptr);
   VerifyModule(linked_module);
   EXPECT_TRUE(ModuleHasSymbol(linked_module, "selected_provider"));
-  EXPECT_TRUE(ModuleHasSymbol(linked_module, "other_provider"));
-  EXPECT_TRUE(ModuleHasSymbol(linked_module, "fallback_provider"));
+  EXPECT_FALSE(ModuleHasSymbol(linked_module, "other_provider"));
+  EXPECT_FALSE(ModuleHasSymbol(linked_module, "fallback_provider"));
 
   CompilerPtr compiler = CreateCompiler(context.get());
   PassProgramPtr pass_program = CreatePassProgramFromPipelineText(
@@ -1179,7 +1190,7 @@ func.template<demo.capi_selected> priority(1) @fallback_provider(%value: i32) ->
             std::string::npos);
   EXPECT_NE(compiled_text.find("test.addi %arg, %arg : i32"), std::string::npos)
       << compiled_text;
-  EXPECT_EQ(compiled_text.find("func.apply<demo.capi_selected>"),
+  EXPECT_EQ(compiled_text.find("template.apply<@demo.capi_selected>"),
             std::string::npos);
   EXPECT_EQ(compiled_text.find("@selected_provider"), std::string::npos);
   EXPECT_EQ(compiled_text.find("@other_provider"), std::string::npos);

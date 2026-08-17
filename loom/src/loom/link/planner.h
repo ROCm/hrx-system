@@ -55,8 +55,7 @@ typedef enum loom_link_plan_live_reason_e {
   LOOM_LINK_PLAN_LIVE_ROOT = 1,
   // Selected because another live symbol references it.
   LOOM_LINK_PLAN_LIVE_DEPENDENCY = 2,
-  // Selected because another live symbol contains a func.apply for the
-  // provider's implementation contract.
+  // Selected explicitly after template specialization chose this provider.
   LOOM_LINK_PLAN_LIVE_PROVIDER = 3,
 } loom_link_plan_live_reason_t;
 
@@ -84,6 +83,15 @@ typedef struct loom_link_plan_options_t {
   void* strip_symbol_user_data;
   // Optional resolver prepared against this plan's module index provider set.
   const loom_link_provider_resolver_t* provider_resolver;
+  // Exact template providers already chosen by specialization. These are
+  // additional selective roots whose ordinary dependencies and nested
+  // template-family demands participate in the same closure.
+  struct {
+    // Number of index-wide symbol ordinals.
+    iree_host_size_t count;
+    // Index-wide template.def/template.ukernel symbol ordinals.
+    const iree_host_size_t* values;
+  } selected_template_providers;
 } loom_link_plan_options_t;
 
 // One live symbol selection in a plan.
@@ -124,6 +132,15 @@ iree_host_size_t loom_link_plan_symbol_count(const loom_link_plan_t* plan);
 
 // Returns live symbol selection |ordinal|, or NULL if out of range.
 const loom_link_plan_symbol_t* loom_link_plan_symbol_at(
+    const loom_link_plan_t* plan, iree_host_size_t ordinal);
+
+// Returns the number of reachable template-family demands.
+iree_host_size_t loom_link_plan_demanded_template_family_count(
+    const loom_link_plan_t* plan);
+
+// Returns demanded template-family ordinal |ordinal|, or INVALID when out of
+// range. Each family appears once in first-reachable order.
+loom_link_template_family_ordinal_t loom_link_plan_demanded_template_family_at(
     const loom_link_plan_t* plan, iree_host_size_t ordinal);
 
 // Returns true when |symbol_ordinal| is live in |plan|.

@@ -124,8 +124,9 @@ FUNCTION_SYMBOL_KINDS = frozenset(
     {
         SymbolKind.FUNC_DEF,
         SymbolKind.FUNC_DECL,
-        SymbolKind.FUNC_TEMPLATE,
-        SymbolKind.FUNC_UKERNEL,
+        SymbolKind.TEMPLATE_DECL,
+        SymbolKind.TEMPLATE_DEF,
+        SymbolKind.TEMPLATE_UKERNEL,
     }
 )
 
@@ -179,7 +180,7 @@ BYTECODE_IR_KIND_BY_TYPE_KIND: dict[int, TypeKind] = {
 
 # File magic and version.
 MAGIC = b"LOOM"
-FORMAT_VERSION = 28
+FORMAT_VERSION = 29
 PRODUCER = "loom-py"
 
 SOURCE_TRIVIA_LEADING_BLANK_LINE = 1
@@ -193,7 +194,7 @@ SYMBOL_FLAG_RETAIN = 0x0008
 SYMBOL_FLAG_DECLARATION = 0x0010
 SYMBOL_FLAG_TEST_ONLY = 0x0020
 _SYMBOL_FLAG_PREDICATES = 0x0040
-SYMBOL_KIND_ANCHOR = 7
+SYMBOL_KIND_ANCHOR = 8
 
 
 # ============================================================================
@@ -287,7 +288,7 @@ class _SymbolReferenceProjectionBuilder:
         self._numbering = numbering
         self._module_dependencies: list[int] = []
         self._symbol_dependencies: list[list[int]] = [[] for _ in wire_symbol_indices]
-        self._symbol_contract_demands: list[list[str]] = [
+        self._symbol_template_demands: list[list[int]] = [
             [] for _ in wire_symbol_indices
         ]
 
@@ -296,7 +297,7 @@ class _SymbolReferenceProjectionBuilder:
     ) -> tuple[
         tuple[int, ...],
         tuple[tuple[int, ...], ...],
-        tuple[tuple[str, ...], ...],
+        tuple[tuple[int, ...], ...],
     ]:
         """Builds rows in the linked-list order used by the C analysis."""
         for operation in self._module.body.ops:
@@ -306,7 +307,7 @@ class _SymbolReferenceProjectionBuilder:
         return (
             tuple(reversed(self._module_dependencies)),
             tuple(tuple(reversed(row)) for row in self._symbol_dependencies),
-            tuple(tuple(reversed(row)) for row in self._symbol_contract_demands),
+            tuple(tuple(reversed(row)) for row in self._symbol_template_demands),
         )
 
     def _add_dependency(self, source_symbol_index: int | None, name: str) -> None:
@@ -425,14 +426,21 @@ class _SymbolReferenceProjectionBuilder:
                         f"unindexed symbol {symbol_name!r}"
                     ) from exc
 
-        if operation.name == "func.apply":
-            contract = operation.attributes.get("contract")
+        if operation.name == "template.apply":
+            family = operation.attributes.get("family")
             if nested_source_symbol_index is None:
-                raise ValueError("func.apply is not owned by a module symbol")
-            if not isinstance(contract, str):
-                raise ValueError("func.apply contract must be a string")
-            self._symbol_contract_demands[nested_source_symbol_index].append(contract)
-            self._numbering.intern_string(contract)
+                raise ValueError("template.apply is not owned by a module symbol")
+            if not isinstance(family, str):
+                raise ValueError("template.apply family must be a symbol")
+            try:
+                family_symbol_ordinal = self._wire_symbol_indices[family]
+            except KeyError as exc:
+                raise ValueError(
+                    f"template.apply references unknown family {family!r}"
+                ) from exc
+            self._symbol_template_demands[nested_source_symbol_index].append(
+                family_symbol_ordinal
+            )
 
         for value_id in (*operation.operands, *operation.results):
             self._visit_value(nested_source_symbol_index, value_id)
@@ -493,7 +501,7 @@ class BytecodeWriter:
         (
             self._module_dependencies,
             self._symbol_dependencies,
-            self._symbol_contract_demands,
+            self._symbol_template_demands,
         ) = _SymbolReferenceProjectionBuilder(
             self._module,
             self._wire_symbol_indices,
@@ -612,10 +620,6 @@ class BytecodeWriter:
                 if arg.tag == "value" and isinstance(arg.value, str):
                     self._ctx.intern_string(arg.value)
 
-        implements = op.attributes.get("implements")
-        if isinstance(implements, str):
-            self._ctx.intern_string(implements)
-
         for key, value in op.attributes.items():
             if key in shared_attr_keys:
                 continue
@@ -714,7 +718,7 @@ class BytecodeWriter:
                 attr_name = getattr(func_like, field_name, None)
                 if attr_name is not None:
                     keys.add(attr_name)
-            for field_name in ("implements", "priority"):
+            for field_name in ("template_family", "priority"):
                 attr_name = getattr(func_like, field_name, None)
                 if attr_name is not None:
                     keys.add(attr_name)
@@ -2006,13 +2010,20 @@ class BytecodeWriter:
         func_like: FuncLikeInterface,
     ) -> None:
         """Write the fixed implementation metadata declared by a FuncLike op."""
-        if func_like.implements is None:
+        if func_like.template_family is None:
             return
-        implements = op.attributes.get(func_like.implements)
-        if not isinstance(implements, str):
+        template_family = op.attributes.get(func_like.template_family)
+        if not isinstance(template_family, str):
             raise ValueError(
-                f"{op.name} symbol {symbol_name!r} must have a string implements attr"
+                f"{op.name} symbol {symbol_name!r} must have a template family symbol"
             )
+        try:
+            template_family_symbol_ordinal = self._wire_symbol_indices[template_family]
+        except KeyError as exc:
+            raise ValueError(
+                f"{op.name} symbol {symbol_name!r} references unknown template "
+                f"family {template_family!r}"
+            ) from exc
         priority = (
             op.attributes.get(func_like.priority, 0)
             if func_like.priority is not None
@@ -2023,7 +2034,7 @@ class BytecodeWriter:
                 f"{op.name} symbol {symbol_name!r} priority "
                 "must be a non-negative integer"
             )
-        buf.write_varint(self._ctx.strings[implements])
+        buf.write_varint(template_family_symbol_ordinal)
         buf.write_varint(priority)
 
     def _write_symbols(self, ir_offsets: dict[int, tuple[int, int]]) -> bytes:
@@ -2329,26 +2340,26 @@ class BytecodeWriter:
         total_dependency_count = len(self._module_dependencies) + sum(
             len(row) for row in self._symbol_dependencies
         )
-        total_contract_demand_count = sum(
-            len(row) for row in self._symbol_contract_demands
+        total_template_demand_count = sum(
+            len(row) for row in self._symbol_template_demands
         )
         buf.write_varint(len(self._wire_symbols))
         buf.write_varint(total_dependency_count)
-        buf.write_varint(total_contract_demand_count)
+        buf.write_varint(total_template_demand_count)
         buf.write_varint(len(self._module_dependencies))
         for target_symbol_index in self._module_dependencies:
             buf.write_varint(target_symbol_index)
-        for dependencies, contract_demands in zip(
+        for dependencies, template_demands in zip(
             self._symbol_dependencies,
-            self._symbol_contract_demands,
+            self._symbol_template_demands,
             strict=True,
         ):
             buf.write_varint(len(dependencies))
             for target_symbol_index in dependencies:
                 buf.write_varint(target_symbol_index)
-            buf.write_varint(len(contract_demands))
-            for contract in contract_demands:
-                buf.write_varint(self._ctx.strings[contract])
+            buf.write_varint(len(template_demands))
+            for family_symbol_ordinal in template_demands:
+                buf.write_varint(family_symbol_ordinal)
         return buf.get_bytes()
 
     # --- File assembly ---

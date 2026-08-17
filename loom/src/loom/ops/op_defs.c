@@ -946,13 +946,13 @@ int64_t loom_func_like_specialization_count(loom_func_like_t func) {
       loom_op_attrs(func.op)[func.vtable->specialization_count_attr_index]);
 }
 
-loom_string_id_t loom_func_like_implements(loom_func_like_t func) {
-  if (!func.vtable) return LOOM_STRING_ID_INVALID;
-  if (func.vtable->implements_attr_index == LOOM_ATTR_INDEX_NONE) {
-    return LOOM_STRING_ID_INVALID;
+loom_symbol_ref_t loom_func_like_template_family(loom_func_like_t func) {
+  if (!func.vtable ||
+      func.vtable->template_family_attr_index == LOOM_ATTR_INDEX_NONE) {
+    return loom_symbol_ref_null();
   }
-  return loom_attr_as_string_id(
-      loom_op_attrs(func.op)[func.vtable->implements_attr_index]);
+  return loom_attr_as_symbol(
+      loom_op_attrs(func.op)[func.vtable->template_family_attr_index]);
 }
 
 int64_t loom_func_like_priority(loom_func_like_t func) {

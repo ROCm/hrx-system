@@ -310,8 +310,8 @@ static void fuzz_strategy_grammar_aware(fuzz_input_t* input) {
       "scalar.addf",
       "func.def",
       "func.decl",
-      "func.template",
-      "func.ukernel",
+      "template.def",
+      "template.ukernel",
       "hal.buffer",
 
       // Boundary triggers: prefix characters alone.

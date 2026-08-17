@@ -62,7 +62,7 @@
 //
 //   offset  size  field
 //   0       4     magic: "LOOM" (0x4C 0x4F 0x4F 0x4D)
-//   4       1     format_version (currently 28)
+//   4       1     format_version (currently 29)
 //   5       1     location_mode (see loom_bytecode_location_mode_t)
 //   6       2     module_count
 //   8       4     file_string_pool_length (bytes)
@@ -85,7 +85,7 @@ extern "C" {
 
 #define LOOM_BYTECODE_MAGIC "LOOM"
 #define LOOM_BYTECODE_MAGIC_LENGTH 4
-#define LOOM_BYTECODE_FORMAT_VERSION 28
+#define LOOM_BYTECODE_FORMAT_VERSION 29
 
 #define LOOM_BYTECODE_SOURCE_TRIVIA_LEADING_BLANK_LINE (1u << 0)
 #define LOOM_BYTECODE_SOURCE_TRIVIA_COMMENT_COUNT_SHIFT 1
@@ -538,9 +538,9 @@ typedef enum loom_bytecode_section_kind_e {
 //
 //   [name_id: varint]
 //   [kind: byte]            (FUNC_DEF=0, FUNC_DECL=1,
-//                            FUNC_TEMPLATE=2, FUNC_UKERNEL=3,
-//                            GLOBAL=4, EXECUTABLE=5, RECORD=6,
-//                            ANCHOR=7)
+//                            TEMPLATE_DECL=2, TEMPLATE_DEF=3,
+//                            TEMPLATE_UKERNEL=4, GLOBAL=5,
+//                            EXECUTABLE=6, RECORD=7, ANCHOR=8)
 //   [visibility: byte]      (PUBLIC=0, PRIVATE=1)
 //   [flags: u16]            (see loom_bytecode_symbol_flag_bits_e)
 //
@@ -555,7 +555,8 @@ typedef enum loom_bytecode_section_kind_e {
 //                                  in text is preserved by
 //                                  LOOM_BYTECODE_SYMBOL_FLAG_IMPORT_SYMBOL)
 //
-//   For FUNC_DEF / FUNC_DECL / FUNC_TEMPLATE / FUNC_UKERNEL:
+//   For FUNC_DEF / FUNC_DECL / TEMPLATE_DECL / TEMPLATE_DEF /
+//       TEMPLATE_UKERNEL:
 //     [def_op_table_index_plus1: varint]
 //                         0 is invalid. N > 0 means the defining func-like op
 //                         name is OPS[N - 1]. The symbol kind is semantic
@@ -605,11 +606,10 @@ typedef enum loom_bytecode_section_kind_e {
 //         (VALUE:   [value_ref: varint] signature-local value number)
 //         (CONST:   [value: signed_varint])
 //
-//     // Implementation-provider metadata. Present when the defining FuncLike
-//     // operation declares an implements field. This includes concrete
-//     // templates/ukernels and compile-time provider declarations.
+//     // Template-provider metadata. Present for template.def and
+//     // template.ukernel operations.
 //     (if defining op declares implements:
-//       [implementation_contract: varint]  (string table index)
+//       [template_family: varint]     (string table index)
 //       [priority: varint])            0 when the op has no priority field
 //
 //     [attr_count: varint]      Present attributes except the identity symbol
@@ -719,7 +719,7 @@ typedef enum loom_bytecode_section_kind_e {
 //
 // Canonical dependency metadata used to plan a selected symbol closure without
 // reading IR bodies. Dependency targets are direct SYMBOLS ordinals. Abstract
-// provider demands are STRINGS IDs naming func.apply contract keys.
+// provider demands are STRINGS IDs naming template.apply contract keys.
 //
 // Availability-only references, including module.import anchors, are excluded.
 // Those remain represented solely by PROVIDER_IMPORTS. Rows preserve every
@@ -735,7 +735,7 @@ typedef enum loom_bytecode_section_kind_e {
 //
 //   [symbol_count: varint]
 //   [total_dependency_count: varint]
-//   [total_contract_demand_count: varint]
+//   [total_template_demand_count: varint]
 //   [module_dependency_count: varint]
 //   For each module dependency:
 //     [target_symbol_index: varint]
@@ -743,7 +743,7 @@ typedef enum loom_bytecode_section_kind_e {
 //     [dependency_count: varint]
 //     For each dependency:
 //       [target_symbol_index: varint]
-//     [contract_demand_count: varint]
+//     [template_demand_count: varint]
 //     For each abstract provider demand:
 //       [contract_string_id: varint]
 
@@ -1143,12 +1143,13 @@ typedef struct loom_bytecode_section_dir_entry_t {
 typedef enum loom_bytecode_symbol_kind_e {
   LOOM_BYTECODE_SYMBOL_FUNC_DEF = 0,
   LOOM_BYTECODE_SYMBOL_FUNC_DECL = 1,
-  LOOM_BYTECODE_SYMBOL_FUNC_TEMPLATE = 2,
-  LOOM_BYTECODE_SYMBOL_FUNC_UKERNEL = 3,
-  LOOM_BYTECODE_SYMBOL_GLOBAL = 4,
-  LOOM_BYTECODE_SYMBOL_EXECUTABLE = 5,
-  LOOM_BYTECODE_SYMBOL_RECORD = 6,
-  LOOM_BYTECODE_SYMBOL_ANCHOR = 7,
+  LOOM_BYTECODE_SYMBOL_TEMPLATE_DECL = 2,
+  LOOM_BYTECODE_SYMBOL_TEMPLATE_DEF = 3,
+  LOOM_BYTECODE_SYMBOL_TEMPLATE_UKERNEL = 4,
+  LOOM_BYTECODE_SYMBOL_GLOBAL = 5,
+  LOOM_BYTECODE_SYMBOL_EXECUTABLE = 6,
+  LOOM_BYTECODE_SYMBOL_RECORD = 7,
+  LOOM_BYTECODE_SYMBOL_ANCHOR = 8,
   LOOM_BYTECODE_SYMBOL_COUNT_,
 } loom_bytecode_symbol_kind_t;
 

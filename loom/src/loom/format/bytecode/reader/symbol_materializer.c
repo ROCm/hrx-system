@@ -9,6 +9,7 @@
 #include <string.h>
 
 #include "loom/error/error_catalog.h"
+#include "loom/format/bytecode/function_header.h"
 #include "loom/format/bytecode/index.h"
 #include "loom/format/bytecode/reader/attribute.h"
 #include "loom/format/bytecode/reader/source_trivia.h"
@@ -82,6 +83,19 @@ static uint16_t loom_bytecode_symbol_policy_lookup_symbol(
     uint32_t source_name_id) {
   return loom_symbol_map_find(&materializer->view.symbols.map,
                               (loom_string_id_t)source_name_id);
+}
+
+static iree_status_t loom_bytecode_symbol_policy_project_symbol_ordinal(
+    const loom_bytecode_symbol_policy_materializer_t* materializer,
+    uint32_t source_symbol_ordinal, loom_symbol_ref_t* out_target_ref) {
+  IREE_ASSERT(source_symbol_ordinal < materializer->view.symbols.count);
+  *out_target_ref = (loom_symbol_ref_t){
+      .module_id = 0,
+      .symbol_id = loom_bytecode_symbol_policy_lookup_symbol(
+          materializer,
+          materializer->view.symbols.name_ids[source_symbol_ordinal]),
+  };
+  return iree_ok_status();
 }
 
 static void loom_bytecode_symbol_policy_resolve_defining_op(
@@ -202,10 +216,12 @@ static loom_symbol_kind_t loom_bytecode_reader_decode_symbol_kind(
       return LOOM_SYMBOL_FUNC_DEF;
     case LOOM_BYTECODE_SYMBOL_FUNC_DECL:
       return LOOM_SYMBOL_FUNC_DECL;
-    case LOOM_BYTECODE_SYMBOL_FUNC_TEMPLATE:
-      return LOOM_SYMBOL_FUNC_TEMPLATE;
-    case LOOM_BYTECODE_SYMBOL_FUNC_UKERNEL:
-      return LOOM_SYMBOL_FUNC_UKERNEL;
+    case LOOM_BYTECODE_SYMBOL_TEMPLATE_DECL:
+      return LOOM_SYMBOL_TEMPLATE_DECL;
+    case LOOM_BYTECODE_SYMBOL_TEMPLATE_DEF:
+      return LOOM_SYMBOL_TEMPLATE_DEF;
+    case LOOM_BYTECODE_SYMBOL_TEMPLATE_UKERNEL:
+      return LOOM_SYMBOL_TEMPLATE_UKERNEL;
     case LOOM_BYTECODE_SYMBOL_GLOBAL:
       return LOOM_SYMBOL_GLOBAL;
     case LOOM_BYTECODE_SYMBOL_EXECUTABLE:

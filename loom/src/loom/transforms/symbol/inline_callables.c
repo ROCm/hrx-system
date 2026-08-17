@@ -80,7 +80,7 @@ typedef enum loom_inline_blocker_e {
   LOOM_INLINE_BLOCKER_CALLEE_BODY_NOT_SINGLE_BLOCK = 11,
   LOOM_INLINE_BLOCKER_RECURSIVE_BODY = 12,
   LOOM_INLINE_BLOCKER_CALLEE_BODY_MISSING_TERMINATOR = 13,
-  LOOM_INLINE_BLOCKER_CALLEE_BODY_MISSING_RETURN = 14,
+  LOOM_INLINE_BLOCKER_CALLEE_BODY_INVALID_TERMINATOR = 14,
   LOOM_INLINE_BLOCKER_OPERAND_COUNT_MISMATCH = 15,
   LOOM_INLINE_BLOCKER_INVALID_OPERAND_OR_ARGUMENT = 16,
   LOOM_INLINE_BLOCKER_OPERAND_TYPE_MISMATCH = 17,
@@ -229,8 +229,8 @@ static iree_string_view_t loom_inline_blocker_code(
       return IREE_SV("recursive_body");
     case LOOM_INLINE_BLOCKER_CALLEE_BODY_MISSING_TERMINATOR:
       return IREE_SV("callee_body_missing_terminator");
-    case LOOM_INLINE_BLOCKER_CALLEE_BODY_MISSING_RETURN:
-      return IREE_SV("callee_body_missing_return");
+    case LOOM_INLINE_BLOCKER_CALLEE_BODY_INVALID_TERMINATOR:
+      return IREE_SV("callee_body_invalid_terminator");
     case LOOM_INLINE_BLOCKER_OPERAND_COUNT_MISMATCH:
       return IREE_SV("operand_count_mismatch");
     case LOOM_INLINE_BLOCKER_INVALID_OPERAND_OR_ARGUMENT:
@@ -328,6 +328,13 @@ static uint8_t loom_inline_effective_temperature(uint8_t callee_temperature,
 
 static void loom_inline_resolve_entry_policy(loom_inline_state_t* state,
                                              loom_inline_plan_entry_t* entry) {
+  if (loom_call_like_kind(entry->call) == LOOM_CALL_LIKE_KIND_TEMPLATE) {
+    entry->effective_policy = LOOM_INLINE_POLICY_INLINE;
+    entry->action = LOOM_INLINE_PLAN_ACTION_REQUIRED;
+    ++state->statistics->required_edges;
+    return;
+  }
+
   const bool callee_inline = loom_inline_policy_is_inline(entry->callee_policy);
   const bool callee_noinline =
       loom_inline_policy_is_noinline(entry->callee_policy);
@@ -506,6 +513,7 @@ static loom_inline_blocker_t loom_inline_validate_call_kind(
     const loom_inline_plan_entry_t* entry) {
   switch (loom_call_like_kind(entry->call)) {
     case LOOM_CALL_LIKE_KIND_SEMANTIC:
+    case LOOM_CALL_LIKE_KIND_TEMPLATE:
       if (loom_func_like_isa(entry->callee)) {
         return LOOM_INLINE_BLOCKER_NONE;
       }
@@ -558,8 +566,17 @@ static loom_inline_blocker_t loom_inline_validate_inline_body(
     return LOOM_INLINE_BLOCKER_CALLEE_BODY_MISSING_TERMINATOR;
   }
   loom_op_t* return_op = loom_block_op(entry_block, entry_block->op_count - 1);
-  if (!loom_func_return_isa(return_op)) {
-    return LOOM_INLINE_BLOCKER_CALLEE_BODY_MISSING_RETURN;
+  const uint8_t body_region_index =
+      loom_func_like_body_region_index(entry->callee);
+  const loom_op_vtable_t* callee_vtable =
+      loom_op_vtable(module, entry->callee.op);
+  const loom_region_descriptor_t* body_descriptor =
+      loom_op_vtable_region_descriptor(callee_vtable, body_region_index);
+  if (!body_descriptor ||
+      !loom_op_has_trait(module, return_op, LOOM_TRAIT_TERMINATOR) ||
+      (body_descriptor->terminator != LOOM_OP_KIND_UNKNOWN &&
+       return_op->kind != body_descriptor->terminator)) {
+    return LOOM_INLINE_BLOCKER_CALLEE_BODY_INVALID_TERMINATOR;
   }
 
   uint16_t arg_count = 0;
@@ -582,7 +599,10 @@ static loom_inline_blocker_t loom_inline_validate_inline_body(
     }
   }
 
-  loom_value_slice_t return_operands = loom_func_return_operands(return_op);
+  loom_value_slice_t return_operands = {
+      .values = loom_op_operands(return_op),
+      .count = return_op->operand_count,
+  };
   loom_value_slice_t call_results = loom_call_like_results(entry->call);
   if (return_operands.count != call_results.count) {
     return LOOM_INLINE_BLOCKER_RETURN_COUNT_MISMATCH;
@@ -691,11 +711,11 @@ static bool loom_inline_symbol_can_transfer(const loom_inline_state_t* state,
   if (!loom_inline_symbol_is_transferable(state->module, info->symbol)) {
     return false;
   }
-  const loom_string_id_t contract_id =
-      loom_func_like_implements(info->function);
-  if (contract_id != LOOM_STRING_ID_INVALID &&
-      loom_symbol_reference_contract_is_demanded(&state->references,
-                                                 contract_id)) {
+  const loom_symbol_ref_t family =
+      loom_func_like_template_family(info->function);
+  if (loom_symbol_ref_is_valid(family) &&
+      loom_symbol_reference_template_family_is_demanded(&state->references,
+                                                        family.symbol_id)) {
     return false;
   }
   return loom_func_like_body(info->function) != NULL;

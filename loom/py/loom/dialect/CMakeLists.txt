@@ -35,6 +35,7 @@ iree_py_library(
     loom::py::loom::dialect::scalar::scalar
     loom::py::loom::dialect::scf::scf
     loom::py::loom::dialect::target::target
+    loom::py::loom::dialect::template::template
     loom::py::loom::dialect::tensor::tensor
     loom::py::loom::dialect::test::test
     loom::py::loom::dialect::tile::tile

@@ -45,6 +45,25 @@ static iree_status_t AcceptDiagnostic(void* user_data,
   return iree_ok_status();
 }
 
+struct ExternalSymbolResolver {
+  uint32_t expected_source_ordinal;
+  loom_symbol_ref_t target_ref;
+  iree_host_size_t invocation_count;
+};
+
+static iree_status_t ResolveExternalSymbol(
+    void* user_data, uint32_t source_symbol_ordinal,
+    loom_symbol_ref_t* out_target_symbol_ref) {
+  auto* resolver = static_cast<ExternalSymbolResolver*>(user_data);
+  if (source_symbol_ordinal != resolver->expected_source_ordinal) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "unexpected source symbol ordinal");
+  }
+  ++resolver->invocation_count;
+  *out_target_symbol_ref = resolver->target_ref;
+  return iree_ok_status();
+}
+
 static void AppendUVarint(uint64_t value, std::vector<uint8_t>* bytes) {
   do {
     uint8_t byte = value & 0x7Fu;
@@ -87,7 +106,8 @@ class BytecodeSelectedTablesTest : public ::testing::Test {
     loom_bytecode_selected_table_materializer_t materializer;
     loom_bytecode_selected_table_materializer_initialize(
         &decoder_, iree_make_const_byte_span(bytecode.data(), bytecode.size()),
-        &context_, metadata, &scratch_arena_, module_, iree_allocator_system(),
+        &context_, metadata, &scratch_arena_, module_,
+        loom_bytecode_selected_symbol_resolver_empty(), iree_allocator_system(),
         &materializer);
     return materializer;
   }
@@ -202,6 +222,66 @@ TEST_F(BytecodeSelectedTablesTest, MaterializesOnlyReachedMixedTableFacts) {
 
   EXPECT_EQ(materializer.projection.slots.count, 5u);
   EXPECT_EQ(error_count_, 0u);
+  loom_bytecode_selected_table_materializer_deinitialize(&materializer);
+}
+
+TEST_F(BytecodeSelectedTablesTest, ResolvesExternalSymbolsByDenseSourceIndex) {
+  iree_string_view_t strings[] = {
+      IREE_SV("unused"),
+      IREE_SV("external"),
+  };
+  loom_bytecode_symbol_metadata_t symbols[1] = {};
+  symbols[0].name = strings[1];
+  symbols[0].name_string_index = 1;
+  uint32_t symbol_ordinal_by_string_index[] = {UINT32_MAX, 0};
+  loom_bytecode_module_metadata_t metadata = {};
+  metadata.strings = {IREE_ARRAYSIZE(strings), strings};
+  metadata.symbol_count = IREE_ARRAYSIZE(symbols);
+  metadata.symbols = symbols;
+  metadata.symbol_ordinal_by_string_index = symbol_ordinal_by_string_index;
+
+  loom_string_id_t target_name_id = LOOM_STRING_ID_INVALID;
+  IREE_ASSERT_OK(loom_module_intern_string(module_, IREE_SV("projected"),
+                                           &target_name_id));
+  loom_symbol_id_t target_symbol_id = LOOM_SYMBOL_ID_INVALID;
+  IREE_ASSERT_OK(
+      loom_module_add_symbol(module_, target_name_id, &target_symbol_id));
+  ExternalSymbolResolver resolver = {
+      /*.expected_source_ordinal=*/0,
+      /*.target_ref=*/{/*.module_id=*/0, /*.symbol_id=*/target_symbol_id},
+      /*.invocation_count=*/0,
+  };
+  loom_bytecode_selected_table_materializer_t materializer;
+  loom_bytecode_selected_table_materializer_initialize(
+      &decoder_, iree_const_byte_span_empty(), &context_, &metadata,
+      &scratch_arena_, module_,
+      loom_bytecode_selected_symbol_resolver_make(ResolveExternalSymbol,
+                                                  &resolver),
+      iree_allocator_system(), &materializer);
+
+  loom_symbol_ref_t resolved = loom_symbol_ref_null();
+  bool found = false;
+  IREE_ASSERT_OK(loom_bytecode_selected_table_resolve_symbol(
+      &materializer, /*source_name_ordinal=*/1, &resolved, &found));
+  EXPECT_TRUE(found);
+  EXPECT_EQ(resolved.symbol_id, target_symbol_id);
+  EXPECT_EQ(resolver.invocation_count, 1u);
+
+  resolved = loom_symbol_ref_null();
+  found = false;
+  IREE_ASSERT_OK(loom_bytecode_selected_table_resolve_symbol(
+      &materializer, /*source_name_ordinal=*/1, &resolved, &found));
+  EXPECT_TRUE(found);
+  EXPECT_EQ(resolved.symbol_id, target_symbol_id);
+  EXPECT_EQ(resolver.invocation_count, 1u);
+
+  resolved = loom_symbol_ref_null();
+  found = true;
+  IREE_ASSERT_OK(loom_bytecode_selected_table_resolve_symbol(
+      &materializer, /*source_name_ordinal=*/0, &resolved, &found));
+  EXPECT_FALSE(found);
+  EXPECT_FALSE(loom_symbol_ref_is_valid(resolved));
+
   loom_bytecode_selected_table_materializer_deinitialize(&materializer);
 }
 

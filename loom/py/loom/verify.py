@@ -765,7 +765,7 @@ class ModuleVerifier:
     ) -> bool:
         for operation in reversed(parent_stack):
             declaration = self.registry.op(operation.name)
-            if operation.name == "func.template":
+            if operation.name == "template.def":
                 return True
             if declaration:
                 for interface in declaration.interfaces:

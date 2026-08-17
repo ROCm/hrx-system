@@ -32,9 +32,11 @@ func.def target(@target) @unsupported_source_op(%lhs: i32, %rhs: i32) -> (i32) {
 
 spirv.target<vulkan1_3> @target
 
+template.decl @demo.missing(%value: i32) -> (i32)
+
 func.def target(@target) @unresolved_apply_rejected_at_source_low(%value: i32) -> (i32) {
-  // ERROR@+1: LOWERING/045 {op_name="func.apply", phase_name="select-templates", contract_key="demo.missing", failure_code="no_provider"}
-  %result = func.apply<demo.missing>(%value) : (i32) -> (i32)
+  // ERROR@+1: LOWERING/045 {op_name="template.apply", phase_name="select-templates", contract_key="demo.missing", failure_code="no_provider"}
+  %result = template.apply<@demo.missing>(%value) : (i32) -> (i32)
   func.return %result : i32
 }
 

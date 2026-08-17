@@ -110,17 +110,16 @@ static iree_status_t loom_bytecode_reader_resolve_function_low_descriptor_set(
   return iree_ok_status();
 }
 
-IREE_ATTRIBUTE_NOINLINE static iree_status_t
-loom_bytecode_reader_materialize_function_symbol(
+static iree_status_t loom_bytecode_reader_materialize_function_header(
     loom_bytecode_symbol_policy_materializer_t* reader,
     loom_bytecode_reader_cursor_t* cursor,
-    const loom_bytecode_symbol_policy_body_source_t* body_source,
     iree_host_size_t symbol_ordinal, uint64_t name_id, uint16_t flags,
     loom_string_id_t import_module_id, loom_string_id_t import_symbol_id,
-    loom_builder_t* builder) {
-  uint16_t symbol_id =
+    loom_bytecode_function_header_t* out_header) {
+  *out_header = (loom_bytecode_function_header_t){0};
+  const uint16_t symbol_id =
       loom_bytecode_symbol_policy_lookup_symbol(reader, (uint32_t)name_id);
-  loom_symbol_ref_t callee_ref = {0, symbol_id};
+  const loom_symbol_ref_t callee_ref = {0, symbol_id};
   const iree_string_view_t symbol_name =
       loom_bytecode_symbol_policy_source_string(reader, (uint32_t)name_id);
 
@@ -152,7 +151,7 @@ loom_bytecode_reader_materialize_function_symbol(
       loom_bytecode_reader_read_uvarint(&reader->decoder, cursor, &arg_count));
   IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_uvarint(
       &reader->decoder, cursor, &result_count));
-  uint64_t signature_value_count =
+  const uint64_t signature_value_count =
       workload_arg_count + arg_count + result_count;
   loom_value_id_t* signature_values = NULL;
   if (signature_value_count > 0) {
@@ -221,20 +220,17 @@ loom_bytecode_reader_materialize_function_symbol(
   const bool has_predicates =
       iree_any_bit_set(flags, LOOM_BYTECODE_SYMBOL_FLAG_PREDICATES);
 
-  loom_string_id_t implements_id = LOOM_STRING_ID_INVALID;
+  loom_symbol_ref_t template_family = loom_symbol_ref_null();
   int64_t priority = 0;
-  if (func_like->implements_attr_index != LOOM_ATTR_INDEX_NONE) {
-    const uint64_t implements_offset =
-        loom_bytecode_reader_cursor_absolute_position(cursor);
-    uint64_t implements_string_id = 0;
+  if (func_like->template_family_attr_index != LOOM_ATTR_INDEX_NONE) {
+    uint64_t template_family_symbol_ordinal = 0;
     uint64_t priority_value = 0;
     IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_uvarint(
-        &reader->decoder, cursor, &implements_string_id));
+        &reader->decoder, cursor, &template_family_symbol_ordinal));
     IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_uvarint(
         &reader->decoder, cursor, &priority_value));
-    IREE_RETURN_IF_ERROR(loom_bytecode_symbol_policy_project_string(
-        reader, implements_string_id, IREE_SV("implements"), implements_offset,
-        &implements_id));
+    IREE_RETURN_IF_ERROR(loom_bytecode_symbol_policy_project_symbol_ordinal(
+        reader, (uint32_t)template_family_symbol_ordinal, &template_family));
     priority = (int64_t)priority_value;
   }
 
@@ -300,10 +296,10 @@ loom_bytecode_reader_materialize_function_symbol(
   if (has_predicates) {
     func_attrs[func_like->predicates_attr_index] = predicates_attr;
   }
-  if (implements_id != LOOM_STRING_ID_INVALID &&
-      func_like->implements_attr_index != LOOM_ATTR_INDEX_NONE) {
-    func_attrs[func_like->implements_attr_index] =
-        loom_attr_string(implements_id);
+  if (loom_symbol_ref_is_valid(template_family) &&
+      func_like->template_family_attr_index != LOOM_ATTR_INDEX_NONE) {
+    func_attrs[func_like->template_family_attr_index] =
+        loom_attr_symbol(template_family);
   }
   if (priority != 0 && func_like->priority_attr_index != LOOM_ATTR_INDEX_NONE) {
     func_attrs[func_like->priority_attr_index] = loom_attr_i64(priority);
@@ -312,12 +308,6 @@ loom_bytecode_reader_materialize_function_symbol(
   uint8_t has_body = 0;
   IREE_RETURN_IF_ERROR(
       loom_bytecode_reader_read_u8(&reader->decoder, cursor, &has_body));
-  const loom_low_repr_descriptor_set_t* low_descriptor_set = NULL;
-  if (has_body) {
-    IREE_RETURN_IF_ERROR(
-        loom_bytecode_reader_resolve_function_low_descriptor_set(
-            reader, symbol_id, func_like, func_attrs, &low_descriptor_set));
-  }
   uint64_t ir_offset = 0;
   uint32_t ir_length = 0;
   if (has_body) {
@@ -325,6 +315,58 @@ loom_bytecode_reader_materialize_function_symbol(
         loom_bytecode_reader_read_u64_le(&reader->decoder, cursor, &ir_offset));
     IREE_RETURN_IF_ERROR(
         loom_bytecode_reader_read_u32_le(&reader->decoder, cursor, &ir_length));
+  }
+
+  *out_header = (loom_bytecode_function_header_t){
+      .source_symbol_ordinal = symbol_ordinal,
+      .symbol_id = symbol_id,
+      .name = symbol_name,
+      .vtable = vtable,
+      .func_like = func_like,
+      .op_kind = op_kind,
+      .source_trivia = source_trivia,
+      .calling_convention = calling_convention,
+      .purity = purity,
+      .workload_argument_count = (uint16_t)workload_arg_count,
+      .argument_count = (uint16_t)arg_count,
+      .result_count = (uint16_t)result_count,
+      .tied_result_count = tied_result_count,
+      .signature_values = signature_values,
+      .tied_results = tied_results,
+      .attributes = func_attrs,
+      .has_body = has_body != 0,
+      .body_offset = ir_offset,
+      .body_length = ir_length,
+  };
+  return iree_ok_status();
+}
+
+IREE_ATTRIBUTE_NOINLINE static iree_status_t
+loom_bytecode_reader_materialize_function_symbol(
+    loom_bytecode_symbol_policy_materializer_t* reader,
+    loom_bytecode_reader_cursor_t* cursor,
+    const loom_bytecode_symbol_policy_body_source_t* body_source,
+    iree_host_size_t symbol_ordinal, uint64_t name_id, uint16_t flags,
+    loom_string_id_t import_module_id, loom_string_id_t import_symbol_id,
+    loom_builder_t* builder) {
+  loom_bytecode_function_header_t header;
+  IREE_RETURN_IF_ERROR(loom_bytecode_reader_materialize_function_header(
+      reader, cursor, symbol_ordinal, name_id, flags, import_module_id,
+      import_symbol_id, &header));
+
+  const loom_op_vtable_t* vtable = header.vtable;
+  const loom_func_like_vtable_t* func_like = header.func_like;
+  const uint64_t workload_arg_count = header.workload_argument_count;
+  const uint64_t arg_count = header.argument_count;
+  const uint64_t result_count = header.result_count;
+  const uint16_t tied_result_count = header.tied_result_count;
+  loom_value_id_t* signature_values = header.signature_values;
+  const loom_low_repr_descriptor_set_t* low_descriptor_set = NULL;
+  if (header.has_body) {
+    IREE_RETURN_IF_ERROR(
+        loom_bytecode_reader_resolve_function_low_descriptor_set(
+            reader, header.symbol_id, func_like, header.attributes,
+            &low_descriptor_set));
   }
 
   uint64_t operand_count = 0;
@@ -357,25 +399,28 @@ loom_bytecode_reader_materialize_function_symbol(
   }
   if (operand_count > UINT16_MAX) {
     return loom_bytecode_reader_emit_invalid_field(
-        &reader->decoder, IREE_SV("SYMBOLS"), IREE_SV("symbol"), symbol_id,
+        &reader->decoder, IREE_SV("SYMBOLS"), IREE_SV("symbol"),
+        header.symbol_id,
         IREE_SV("signature_count"),
         loom_bytecode_reader_cursor_absolute_position(cursor),
         IREE_SV("declaration_signature_exceeds_operand_count_field_width"));
   }
-  uint8_t region_count = has_body ? vtable->region_count : 0;
+  const uint8_t region_count = header.has_body ? vtable->region_count : 0;
   loom_op_t* op = NULL;
   if (operand_segment_count > 0) {
     IREE_RETURN_IF_ERROR(loom_builder_allocate_segmented_op(
-        builder, op_kind, (uint16_t)operand_count, operand_segment_counts,
-        operand_segment_count, (uint16_t)result_count, region_count,
+        builder, header.op_kind, (uint16_t)operand_count,
+        operand_segment_counts, operand_segment_count, (uint16_t)result_count,
+        region_count,
         tied_result_count, vtable->attribute_count, LOOM_LOCATION_NONE, &op));
   } else {
     IREE_RETURN_IF_ERROR(loom_builder_allocate_op(
-        builder, op_kind, (uint16_t)operand_count, (uint16_t)result_count,
-        region_count, tied_result_count, vtable->attribute_count,
+        builder, header.op_kind, (uint16_t)operand_count,
+        (uint16_t)result_count, region_count, tied_result_count,
+        vtable->attribute_count,
         LOOM_LOCATION_NONE, &op));
   }
-  if (source_trivia.leading_blank_line) {
+  if (header.source_trivia.leading_blank_line) {
     op->flags |= LOOM_OP_FLAG_LEADING_BLANK_LINE;
   }
   if (workload_operand_field_index != LOOM_OPERAND_INDEX_NONE) {
@@ -395,7 +440,7 @@ loom_bytecode_reader_materialize_function_symbol(
     }
   }
   if (vtable->attribute_count > 0) {
-    memcpy(loom_op_attrs(op), func_attrs,
+    memcpy(loom_op_attrs(op), header.attributes,
            vtable->attribute_count * sizeof(loom_attribute_t));
   }
 
@@ -404,10 +449,10 @@ loom_bytecode_reader_materialize_function_symbol(
         signature_values[workload_arg_count + arg_count + i];
   }
   if (tied_result_count > 0) {
-    memcpy(loom_op_tied_results(op), tied_results,
+    memcpy(loom_op_tied_results(op), header.tied_results,
            tied_result_count * sizeof(loom_tied_result_t));
   }
-  if (has_body) {
+  if (header.has_body) {
     loom_bytecode_predefined_region_values_t predefined_regions[2];
     uint8_t predefined_region_count = 0;
     if (func_like->body_region_index != LOOM_REGION_INDEX_NONE) {
@@ -429,15 +474,15 @@ loom_bytecode_reader_materialize_function_symbol(
           };
     }
     IREE_RETURN_IF_ERROR(loom_bytecode_symbol_policy_materialize_body(
-        reader, symbol_name, body_source, symbol_ordinal, ir_offset, ir_length,
-        builder, op, func_like->body_region_index, predefined_regions,
-        predefined_region_count, low_descriptor_set));
+        reader, header.name, body_source, symbol_ordinal, header.body_offset,
+        header.body_length, builder, op, func_like->body_region_index,
+        predefined_regions, predefined_region_count, low_descriptor_set));
   }
   IREE_RETURN_IF_ERROR(loom_builder_finalize_op(builder, op));
-  if (source_trivia.comment_count > 0) {
+  if (header.source_trivia.comment_count > 0) {
     IREE_RETURN_IF_ERROR(loom_module_attach_op_comments(
-        reader->output_module, op, source_trivia.comments,
-        source_trivia.comment_count));
+        reader->output_module, op, header.source_trivia.comments,
+        header.source_trivia.comment_count));
   }
   return iree_ok_status();
 }
@@ -701,11 +746,12 @@ loom_bytecode_reader_materialize_record_symbol(
   return iree_ok_status();
 }
 
-static iree_status_t loom_bytecode_symbol_materialize_entry(
+static iree_status_t loom_bytecode_reader_materialize_symbol_entry_header(
     loom_bytecode_symbol_policy_materializer_t* reader,
     loom_bytecode_reader_cursor_t* cursor,
-    const loom_bytecode_symbol_policy_body_source_t* body_source,
-    iree_host_size_t symbol_ordinal, loom_builder_t* builder) {
+    iree_host_size_t symbol_ordinal,
+    loom_bytecode_symbol_entry_header_t* out_header) {
+  *out_header = (loom_bytecode_symbol_entry_header_t){0};
   uint64_t unused_name_id = 0;
   const uint64_t name_id =
       loom_bytecode_symbol_policy_source_name_id(reader, symbol_ordinal);
@@ -745,22 +791,45 @@ static iree_status_t loom_bytecode_symbol_materialize_entry(
         reader, encoded_import_symbol_id, IREE_SV("import_symbol"),
         import_symbol_offset, &import_symbol_id));
   }
-  if (kind <= LOOM_BYTECODE_SYMBOL_FUNC_UKERNEL) {
+
+  *out_header = (loom_bytecode_symbol_entry_header_t){
+      .name_string_ordinal = (uint32_t)name_id,
+      .kind = kind,
+      .kind_offset = kind_offset,
+      .visibility = visibility,
+      .flags = flags,
+      .import_module_id = import_module_id,
+      .import_symbol_id = import_symbol_id,
+  };
+  return iree_ok_status();
+}
+
+static iree_status_t loom_bytecode_symbol_materialize_entry(
+    loom_bytecode_symbol_policy_materializer_t* reader,
+    loom_bytecode_reader_cursor_t* cursor,
+    const loom_bytecode_symbol_policy_body_source_t* body_source,
+    iree_host_size_t symbol_ordinal, loom_builder_t* builder) {
+  loom_bytecode_symbol_entry_header_t header;
+  IREE_RETURN_IF_ERROR(loom_bytecode_reader_materialize_symbol_entry_header(
+      reader, cursor, symbol_ordinal, &header));
+  if (header.kind <= LOOM_BYTECODE_SYMBOL_TEMPLATE_UKERNEL) {
     return loom_bytecode_reader_materialize_function_symbol(
-        reader, cursor, body_source, symbol_ordinal, name_id, flags,
-        import_module_id, import_symbol_id, builder);
-  } else if (kind == LOOM_BYTECODE_SYMBOL_GLOBAL) {
+        reader, cursor, body_source, symbol_ordinal, header.name_string_ordinal,
+        header.flags, header.import_module_id, header.import_symbol_id,
+        builder);
+  } else if (header.kind == LOOM_BYTECODE_SYMBOL_GLOBAL) {
     return loom_bytecode_reader_materialize_global_symbol(
-        reader, cursor, name_id, symbol_ordinal, builder);
-  } else if (kind == LOOM_BYTECODE_SYMBOL_RECORD) {
+        reader, cursor, header.name_string_ordinal, symbol_ordinal, builder);
+  } else if (header.kind == LOOM_BYTECODE_SYMBOL_RECORD) {
     return loom_bytecode_reader_materialize_record_symbol(
-        reader, cursor, body_source, name_id, symbol_ordinal, builder);
-  } else if (kind == LOOM_BYTECODE_SYMBOL_ANCHOR) {
+        reader, cursor, body_source, header.name_string_ordinal, symbol_ordinal,
+        builder);
+  } else if (header.kind == LOOM_BYTECODE_SYMBOL_ANCHOR) {
     return iree_ok_status();
   } else {
     return loom_bytecode_reader_emit_invalid_field(
         &reader->decoder, IREE_SV("SYMBOLS"), IREE_SV("symbol"), symbol_ordinal,
-        IREE_SV("kind"), kind_offset,
+        IREE_SV("kind"), header.kind_offset,
         IREE_SV("module_materialization_does_not_support_this_symbol_kind"));
   }
 }

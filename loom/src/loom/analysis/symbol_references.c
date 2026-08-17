@@ -13,6 +13,7 @@
 #include "loom/ir/parameterized_type.h"
 #include "loom/ops/func/ops.h"
 #include "loom/ops/op_defs.h"
+#include "loom/ops/template/ops.h"
 
 typedef struct loom_symbol_reference_builder_t {
   // Module being scanned.
@@ -31,14 +32,17 @@ typedef struct loom_symbol_reference_builder_t {
   loom_symbol_reference_occurrence_id_t first_module_occurrence_id;
   // Number of module-root occurrences.
   uint32_t module_occurrence_count;
-  // Mutable abstract contract-demand storage.
-  loom_func_contract_demand_t* contract_demands;
-  // Number of live contract-demand entries.
-  iree_host_size_t contract_demand_count;
-  // Number of allocated contract-demand slots.
-  iree_host_size_t contract_demand_capacity;
-  // Dense bitset indexed by module string ID for demanded contracts.
-  uint64_t* contract_demand_bits;
+  // Mutable template-demand storage and family summary.
+  struct {
+    // Demand entries.
+    loom_template_demand_t* values;
+    // Number of live entries.
+    iree_host_size_t count;
+    // Number of allocated entries.
+    iree_host_size_t capacity;
+    // Dense bitset indexed by module symbol ID for demanded families.
+    uint64_t* family_bits;
+  } template_demands;
 } loom_symbol_reference_builder_t;
 
 static void loom_symbol_reference_initialize_symbol_occurrences(
@@ -50,7 +54,7 @@ static void loom_symbol_reference_initialize_symbol_occurrences(
             LOOM_SYMBOL_REFERENCE_OCCURRENCE_ID_INVALID,
         .first_incoming_occurrence_id =
             LOOM_SYMBOL_REFERENCE_OCCURRENCE_ID_INVALID,
-        .first_contract_demand_id = LOOM_FUNC_CONTRACT_DEMAND_ID_INVALID,
+        .first_template_demand_id = LOOM_TEMPLATE_DEMAND_ID_INVALID,
     };
   }
 }
@@ -151,56 +155,61 @@ static iree_status_t loom_symbol_reference_add_ref(
       user_op);
 }
 
-static iree_status_t loom_symbol_reference_append_contract_demand(
+static iree_status_t loom_symbol_reference_append_template_demand(
     loom_symbol_reference_builder_t* builder, loom_symbol_id_t source_symbol_id,
     const loom_op_t* apply_op) {
   if (source_symbol_id >= builder->module->symbols.count) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "func.apply is not owned by a module symbol");
+                            "template.apply is not owned by a module symbol");
   }
-  const loom_string_id_t contract_id = loom_func_apply_contract(apply_op);
-  if (contract_id == LOOM_STRING_ID_INVALID ||
-      contract_id >= builder->module->strings.count) {
+  const loom_symbol_ref_t family = loom_template_apply_family(apply_op);
+  if (!loom_symbol_ref_is_valid(family) || family.module_id != 0 ||
+      family.symbol_id >= builder->module->symbols.count) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "func.apply has an invalid contract string id");
+                            "template.apply has an invalid family symbol");
   }
-  if (builder->contract_demand_count >= UINT32_MAX) {
+  if (builder->template_demands.count >= UINT32_MAX) {
     return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
                             "symbol reference table exceeds %u abstract "
                             "provider demands",
                             (unsigned)(UINT32_MAX - 1));
   }
-  if (builder->contract_demand_count >= builder->contract_demand_capacity) {
-    IREE_RETURN_IF_ERROR(iree_arena_grow_array(
-        builder->arena, builder->contract_demand_count,
-        builder->contract_demand_count + 1, sizeof(*builder->contract_demands),
-        &builder->contract_demand_capacity,
-        (void**)&builder->contract_demands));
+  if (builder->template_demands.count >= builder->template_demands.capacity) {
+    IREE_RETURN_IF_ERROR(
+        iree_arena_grow_array(builder->arena, builder->template_demands.count,
+                              builder->template_demands.count + 1,
+                              sizeof(*builder->template_demands.values),
+                              &builder->template_demands.capacity,
+                              (void**)&builder->template_demands.values));
   }
-  if (!builder->contract_demand_bits) {
-    const iree_host_size_t word_count =
-        (builder->module->strings.count + 63u) / 64u;
-    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        builder->arena, word_count, sizeof(*builder->contract_demand_bits),
-        (void**)&builder->contract_demand_bits));
-    memset(builder->contract_demand_bits, 0,
-           word_count * sizeof(*builder->contract_demand_bits));
+  if (!builder->template_demands.family_bits) {
+    iree_host_size_t rounded_symbol_count = 0;
+    if (!iree_host_size_checked_add(builder->module->symbols.count, 63,
+                                    &rounded_symbol_count)) {
+      return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                              "template demand bitmap size overflow");
+    }
+    const iree_host_size_t word_count = rounded_symbol_count / 64;
+    IREE_RETURN_IF_ERROR(iree_allocator_malloc_array(
+        iree_arena_allocator(builder->arena), word_count,
+        sizeof(*builder->template_demands.family_bits),
+        (void**)&builder->template_demands.family_bits));
   }
 
-  const loom_func_contract_demand_id_t demand_id =
-      (loom_func_contract_demand_id_t)builder->contract_demand_count++;
+  const loom_template_demand_id_t demand_id =
+      (loom_template_demand_id_t)builder->template_demands.count++;
   loom_symbol_reference_symbol_occurrences_t* source =
       &builder->symbols[source_symbol_id];
-  builder->contract_demands[demand_id] = (loom_func_contract_demand_t){
-      .contract_id = contract_id,
+  builder->template_demands.values[demand_id] = (loom_template_demand_t){
+      .family_symbol_id = family.symbol_id,
       .source_symbol_id = source_symbol_id,
       .apply_op = apply_op,
-      .next_source_demand_id = source->first_contract_demand_id,
+      .next_source_demand_id = source->first_template_demand_id,
   };
-  source->first_contract_demand_id = demand_id;
-  ++source->contract_demand_count;
-  builder->contract_demand_bits[contract_id >> 6] |= UINT64_C(1)
-                                                     << (contract_id & 63u);
+  source->first_template_demand_id = demand_id;
+  ++source->template_demand_count;
+  builder->template_demands.family_bits[family.symbol_id >> 6] |=
+      UINT64_C(1) << (family.symbol_id & 63u);
   return iree_ok_status();
 }
 
@@ -526,8 +535,8 @@ static iree_status_t loom_symbol_reference_visit_region(
       if (loom_op_defining_symbol_ref(builder->module, op, &op_symbol_ref)) {
         nested_source_symbol_id = op_symbol_ref.symbol_id;
       }
-      if (loom_func_apply_isa(op)) {
-        IREE_RETURN_IF_ERROR(loom_symbol_reference_append_contract_demand(
+      if (loom_template_apply_isa(op)) {
+        IREE_RETURN_IF_ERROR(loom_symbol_reference_append_template_demand(
             builder, nested_source_symbol_id, op));
       }
       IREE_RETURN_IF_ERROR(loom_symbol_reference_visit_op_value_types(
@@ -587,9 +596,12 @@ iree_status_t loom_symbol_reference_table_build(
       .occurrence_count = builder.occurrence_count,
       .first_module_occurrence_id = builder.first_module_occurrence_id,
       .module_occurrence_count = builder.module_occurrence_count,
-      .contract_demands = builder.contract_demands,
-      .contract_demand_count = builder.contract_demand_count,
-      .contract_demand_bits = builder.contract_demand_bits,
+      .template_demands =
+          {
+              .values = builder.template_demands.values,
+              .count = builder.template_demands.count,
+              .family_bits = builder.template_demands.family_bits,
+          },
   };
   return iree_ok_status();
 }

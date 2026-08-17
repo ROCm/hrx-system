@@ -570,6 +570,11 @@ iree_status_t loom_verify_module(const loom_module_t* module,
     loom_verify_state_deinitialize(&state);
     return diagnostic_status;
   }
+  diagnostic_status = loom_verify_prepare_available_symbols(&state);
+  if (!iree_status_is_ok(diagnostic_status)) {
+    loom_verify_state_deinitialize(&state);
+    return diagnostic_status;
+  }
 
   // Interned parameterized types are module-level values. Verify their symbol
   // parameters once instead of rediscovering the same type graph from every
@@ -660,6 +665,11 @@ iree_status_t loom_verify_function(const loom_module_t* module,
       loom_verify_state_initialize(&state, module, options, out_result));
 
   iree_status_t verify_status = loom_verify_prepare_static_encodings(&state);
+  if (!iree_status_is_ok(verify_status)) {
+    loom_verify_state_deinitialize(&state);
+    return verify_status;
+  }
+  verify_status = loom_verify_prepare_available_symbols(&state);
   if (!iree_status_is_ok(verify_status)) {
     loom_verify_state_deinitialize(&state);
     return verify_status;

@@ -74,8 +74,9 @@ static iree_status_t loom_bytecode_selected_module_prepare(
     switch (symbol->kind) {
       case LOOM_BYTECODE_SYMBOL_FUNC_DEF:
       case LOOM_BYTECODE_SYMBOL_FUNC_DECL:
-      case LOOM_BYTECODE_SYMBOL_FUNC_TEMPLATE:
-      case LOOM_BYTECODE_SYMBOL_FUNC_UKERNEL: {
+      case LOOM_BYTECODE_SYMBOL_TEMPLATE_DECL:
+      case LOOM_BYTECODE_SYMBOL_TEMPLATE_DEF:
+      case LOOM_BYTECODE_SYMBOL_TEMPLATE_UKERNEL: {
         const iree_host_size_t prefix_count =
             symbol->has_body
                 ? (iree_host_size_t)symbol->result_count
@@ -151,6 +152,7 @@ iree_status_t loom_bytecode_selected_module_materialize(
     loom_bytecode_selected_table_materializer_initialize(
         materializer->decoder, materializer->bytecode, materializer->context,
         materializer->metadata, materializer->scratch_arena, output_module,
+        loom_bytecode_selected_symbol_resolver_empty(),
         materializer->host_allocator, &tables);
     loom_bytecode_selected_symbol_materializer_t symbols;
     loom_bytecode_selected_symbol_materializer_initialize(

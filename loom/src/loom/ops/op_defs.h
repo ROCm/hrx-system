@@ -1230,7 +1230,7 @@ loom_func_like_t loom_func_like_cast(const loom_module_t* module,
                                      loom_op_t* op);
 
 // Returns the body region of a func-like op, or NULL for bodyless ops
-// (func.decl, func.ukernel) or if |func| is not valid.
+// (func.decl, template.ukernel) or if |func| is not valid.
 loom_region_t* loom_func_like_body(loom_func_like_t func);
 
 // Returns the body region index, or LOOM_REGION_INDEX_NONE for bodyless ops or
@@ -1351,10 +1351,9 @@ loom_parameterized_attr_array_t loom_func_like_requires(loom_func_like_t func);
 // has no distinct specialization arguments or |func| is invalid.
 int64_t loom_func_like_specialization_count(loom_func_like_t func);
 
-// Returns the implementation-contract string ID for concrete providers and
-// compile-time provider declarations. Returns LOOM_STRING_ID_INVALID for ops
-// with no implements attr or if |func| is not valid.
-loom_string_id_t loom_func_like_implements(loom_func_like_t func);
+// Returns the template family implemented by |func|, or an invalid reference
+// when the function-like symbol is not a template provider.
+loom_symbol_ref_t loom_func_like_template_family(loom_func_like_t func);
 
 // Returns the dispatch priority for concrete providers. Returns 0 for ops with
 // no priority attr or if |func| is not valid.

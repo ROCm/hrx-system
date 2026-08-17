@@ -15,7 +15,7 @@ from loom.dsl import Op
 from loom.format.bytecode.reader import read_module
 from loom.format.bytecode.writer import write_module
 from loom.format.text.tokenizer import ParseError
-from loom.ir import Module, ParameterizedAttrArray
+from loom.ir import Module
 
 
 def _all_roundtrip_ops() -> Sequence[Op]:
@@ -99,7 +99,6 @@ class TestFuncDeclRoundTrip:
         from loom.builtin_types import ALL_BUILTIN_TYPES
         from loom.dialect.test import ALL_TEST_OPS
         from loom.format.text.parser import Parser
-        from loom.format.text.tokenizer import ParseError
 
         parser = Parser()
         parser.register_ops(list(ALL_TEST_OPS) + list(ALL_FUNC_OPS))
@@ -111,28 +110,12 @@ class TestFuncDeclRoundTrip:
         from loom.builtin_types import ALL_BUILTIN_TYPES
         from loom.dialect.test import ALL_TEST_OPS
         from loom.format.text.parser import Parser
-        from loom.format.text.tokenizer import ParseError
 
         parser = Parser()
         parser.register_ops(list(ALL_TEST_OPS) + list(ALL_FUNC_OPS))
         parser.register_types(ALL_BUILTIN_TYPES)
         with pytest.raises(ParseError, match=r"LBRACE|top-level op"):
             parser.parse("func.decl @bad(%a: f32) -> (f32) {\n  func.return %a : f32\n}\n")
-
-
-class TestFuncProviderDeclRoundTrip:
-    def test_simple(self) -> None:
-        _roundtrip("func.provider.decl<qwen.routed_down> @routed_down(%a: f32) -> (f32)\n")
-
-    def test_with_predicates(self) -> None:
-        _roundtrip("func.provider.decl<qwen.quantize> @quantize(%K: index, %a: tensor<[%K]xf32>) -> (tensor<[%K]xi8>) where [mul(%K, 32)]\n")
-
-    def test_contract_stored(self) -> None:
-        module = _parse_module(_module_text("func.provider.decl<qwen.routed_down> @routed_down(%a: f32) -> (f32)"))
-        symbol = module.symbols[0]
-        assert symbol.op is not None
-        assert symbol.op.name == "func.provider.decl"
-        assert symbol.op.attributes.get("implements") == "qwen.routed_down"
 
 
 class TestFuncImportParsing:
@@ -260,20 +243,12 @@ class TestFuncImportCrossFormatRoundTrip:
             ),
         )
 
-    def test_provider_declaration_survives_bytecode(self) -> None:
-        self._cross_roundtrip(
-            _module_text("func.provider.decl<qwen.routed_down> @routed_down(%a: f32) -> (f32)"),
-        )
 
-
-class TestFuncCallApplyRoundTrip:
-    """func.call and func.apply are body ops — they appear inside functions."""
+class TestFuncCallRoundTrip:
+    """func.call operations appear inside function bodies."""
 
     def test_call_in_function(self) -> None:
         _roundtrip("func.def @caller(%a: f32) -> (f32) {\n  %r = func.call @callee(%a) : (f32) -> (f32)\n  func.return %r : f32\n}\n")
-
-    def test_apply_in_function(self) -> None:
-        _roundtrip("func.def @test_template(%a: f32) -> (f32) {\n  %r = func.apply<my.template>(%a) : (f32) -> (f32)\n  func.return %r : f32\n}\n")
 
     def test_call_multiple_args_and_results(self) -> None:
         _roundtrip("func.def @multi(%a: f32, %b: i32) -> (f32, i32) {\n  %r0, %r1 = func.call @process(%a, %b) : (f32, i32) -> (f32, i32)\n  func.return %r0, %r1 : f32, i32\n}\n")
@@ -299,149 +274,3 @@ class TestMultipleFunctions:
 
     def test_multiple_defs(self) -> None:
         _roundtrip("func.def @f1(%a: f32) -> (f32) {\n  func.return %a : f32\n}\n\nfunc.def @f2(%a: i32) -> (i32) {\n  func.return %a : i32\n}\n")
-
-
-class TestFuncTemplateUkernelRoundTrip:
-    def test_template_basic(self) -> None:
-        _roundtrip(
-            _module_text(
-                "func.template<tile.contract> @impl(%a: tile<4xf32>) -> (tile<4xf32>) {",
-                "  func.return %a : tile<4xf32>",
-                "}",
-            )
-        )
-
-    def test_template_with_priority(self) -> None:
-        _roundtrip(
-            _module_text(
-                "func.template<tile.contract> priority(10) @high_priority(%a: tile<4xf32>) -> (tile<4xf32>) {",
-                "  func.return %a : tile<4xf32>",
-                "}",
-            )
-        )
-
-    def test_template_with_requirements(self) -> None:
-        text = _module_text(
-            "func.template<tile.contract> requires [#target.subgroup.size<64>] priority(10) @wave64(%a: f32) -> (f32) {",
-            "  func.return %a : f32",
-            "}",
-        )
-        _roundtrip(text)
-        assert _print_module(read_module(write_module(_parse_module(text)))) == text
-
-    def test_template_with_requirements_and_where_predicates(self) -> None:
-        text = _module_text(
-            "func.template<tile.contract> requires [#target.subgroup.size<64>] @wave64_tile(%tile: index, %a: f32) -> (f32) where [eq(%tile, 32)] {",
-            "  func.return %a : f32",
-            "}",
-        )
-        module = _parse_module(text)
-        assert _print_module(module) == text
-        op = module.symbols[0].op
-        assert op is not None
-        requirements = op.attributes.get("requires")
-        predicates = op.attributes.get("predicates")
-        assert isinstance(requirements, ParameterizedAttrArray)
-        assert len(requirements) == 1
-        assert requirements.values[0].family_name == "target.subgroup.size"
-        assert isinstance(predicates, list)
-        assert len(predicates) == 1
-
-    def test_template_provider_contract_has_canonical_order(self) -> None:
-        _roundtrip(
-            _module_text(
-                "func.template<tile.contract> target(@gfx11_generic) requires [#target.subgroup.size<64>] priority(10) @wave64_tile(%tile: index, %a: f32) -> (f32) where [eq(%tile, 32)] {",
-                "  func.return %a : f32",
-                "}",
-            )
-        )
-
-    def test_template_rejects_requirements_after_priority(self) -> None:
-        with pytest.raises(ParseError):
-            _parse_module(
-                _module_text(
-                    "func.template<tile.contract> priority(10) requires [#target.subgroup.size<64>] @wave64(%a: f32) -> (f32) {",
-                    "  func.return %a : f32",
-                    "}",
-                )
-            )
-
-    def test_template_rejects_predicate_as_requirement(self) -> None:
-        with pytest.raises(ParseError):
-            _parse_module(
-                _module_text(
-                    "func.template<tile.contract> requires [eq(%tile, 32)] @impl(%tile: index) {",
-                    "  func.return",
-                    "}",
-                )
-            )
-
-    def test_definition_rejects_typed_requirement_in_where(self) -> None:
-        with pytest.raises(ParseError):
-            _parse_module(
-                _module_text(
-                    "func.def @not_a_provider() where [#target.subgroup.size<64>] {",
-                    "  func.return",
-                    "}",
-                )
-            )
-
-    def test_definition_rejects_requires(self) -> None:
-        with pytest.raises(ParseError):
-            _parse_module(
-                _module_text(
-                    "func.def requires [#target.subgroup.size<64>] @not_a_provider() {",
-                    "  func.return",
-                    "}",
-                )
-            )
-
-    def test_ukernel_with_explicit_empty_requirements(self) -> None:
-        _roundtrip(_module_text("func.ukernel<tile.contract> requires [] @unconditional(%a: f32) -> (f32)"))
-
-    def test_ukernel_with_explicit_empty_where_clause(self) -> None:
-        _roundtrip(_module_text("func.ukernel<tile.contract> @unconditional(%a: f32) -> (f32) where []"))
-
-    def test_template_device_cc(self) -> None:
-        _roundtrip(
-            _module_text(
-                "func.template<tile.contract> device @device_impl(%a: tile<4xf32>) -> (tile<4xf32>) {",
-                "  func.return %a : tile<4xf32>",
-                "}",
-            )
-        )
-
-    def test_ukernel_basic(self) -> None:
-        _roundtrip(_module_text("func.ukernel<tile.contract> @asm_impl(%a: tile<4xf32>) -> (tile<4xf32>)"))
-
-    def test_ukernel_device(self) -> None:
-        _roundtrip(_module_text("func.ukernel<tile.contract> device @asm_device(%a: tile<4xf32>) -> (tile<4xf32>)"))
-
-    def test_ukernel_with_priority(self) -> None:
-        _roundtrip(_module_text("func.ukernel<tile.contract> priority(5) @prioritized(%a: f32) -> (f32)"))
-
-    def test_template_implements_stored(self) -> None:
-        module = _parse_module(
-            _module_text(
-                "func.template<tile.contract> @impl(%a: f32) -> (f32) {",
-                "  func.return %a : f32",
-                "}",
-            )
-        )
-        op = module.symbols[0].op
-        assert op is not None
-        assert op.attributes.get("implements") == "tile.contract"
-        assert op.attributes.get("priority") is None
-
-    def test_template_priority_stored(self) -> None:
-        module = _parse_module(
-            _module_text(
-                "func.template<tile.contract> priority(42) @impl(%a: f32) -> (f32) {",
-                "  func.return %a : f32",
-                "}",
-            )
-        )
-        op = module.symbols[0].op
-        assert op is not None
-        assert op.attributes.get("implements") == "tile.contract"
-        assert op.attributes.get("priority") == 42

@@ -151,6 +151,84 @@
       ]
     },
     {
+      "name": "selects nested templates from bytecode library",
+      "steps": [
+        {
+          "name": "write-root",
+          "write": {
+            "path": "{tmp}/template-root.loom",
+            "text": "template.decl @demo.outer(%x: i32) -> (i32)\ntemplate.decl @demo.inner(%x: i32) -> (i32)\n\nfunc.def public @entry(%x: i32) -> (i32) {\n  %result = template.apply<@demo.outer>(%x) : (i32) -> (i32)\n  func.return %result : i32\n}\n"
+          }
+        },
+        {
+          "name": "write-library",
+          "write": {
+            "path": "{tmp}/template-library.loom",
+            "text": "template.decl @demo.outer(%x: i32) -> (i32)\ntemplate.decl @demo.inner(%x: i32) -> (i32)\ntemplate.decl @demo.unused(%x: i32) -> (i32)\n\ntemplate.def<@demo.outer> priority(20) @outer_fast(%x: i32) -> (i32) {\n  %result = template.apply<@demo.inner>(%x) : (i32) -> (i32)\n  template.return %result : i32\n}\n\ntemplate.def<@demo.outer> priority(1) @outer_fallback(%x: i32) -> (i32) {\n  template.return %x : i32\n}\n\ntemplate.def<@demo.inner> priority(20) @inner_fast(%x: i32) -> (i32) {\n  template.return %x : i32\n}\n\ntemplate.def<@demo.inner> priority(1) @inner_fallback(%x: i32) -> (i32) {\n  template.return %x : i32\n}\n\ntemplate.def<@demo.unused> @unused(%x: i32) -> (i32) {\n  template.return %x : i32\n}\n"
+          }
+        },
+        {
+          "name": "encode-library",
+          "run": {
+            "tool": "loom-format",
+            "args": [
+              "--from=text",
+              "--to=bc",
+              "--output={tmp}/template-library.loombc",
+              "{tmp}/template-library.loom"
+            ]
+          }
+        },
+        {
+          "name": "link",
+          "run": {
+            "tool": "loom-link",
+            "args": [
+              "{tmp}/template-root.loom",
+              "--library={tmp}/template-library.loombc",
+              "--root=@entry"
+            ]
+          },
+          "stdout": {
+            "contains": {
+              "unordered": [
+                "template.apply<@demo.outer>",
+                "template.def<@demo.outer> priority(20) @outer_fast",
+                "template.apply<@demo.inner>",
+                "template.def<@demo.inner> priority(20) @inner_fast"
+              ]
+            },
+            "not_contains": [
+              "@outer_fallback",
+              "@inner_fallback",
+              "@unused"
+            ]
+          }
+        },
+        {
+          "name": "archive-library",
+          "run": {
+            "tool": "loom-link",
+            "args": [
+              "{tmp}/template-library.loombc",
+              "--mode=archive"
+            ]
+          },
+          "stdout": {
+            "contains": {
+              "unordered": [
+                "@outer_fast",
+                "@outer_fallback",
+                "@inner_fast",
+                "@inner_fallback",
+                "@unused"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
       "name": "relinks partial provider bytecode",
       "steps": [
         {

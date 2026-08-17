@@ -27,6 +27,7 @@
 #include "loom/ops/scalar/ops.h"
 #include "loom/ops/target/facts.h"
 #include "loom/ops/target/ops.h"
+#include "loom/ops/template/ops.h"
 #include "loom/ops/test/ops.h"
 #include "loom/pass/registry.h"
 #include "loom/pass/tooling.h"
@@ -84,6 +85,7 @@ class LowLowerPassTest : public ::testing::Test {
     RegisterDialect(LOOM_DIALECT_FUNC, loom_func_dialect_vtables);
     RegisterDialect(LOOM_DIALECT_LOW, loom_low_dialect_vtables);
     RegisterDialect(LOOM_DIALECT_SCALAR, loom_scalar_dialect_vtables);
+    RegisterDialect(LOOM_DIALECT_TEMPLATE, loom_template_dialect_vtables);
     RegisterDialect(LOOM_DIALECT_TEST, loom_test_dialect_vtables);
     IREE_ASSERT_OK(loom_context_finalize(&context_));
     loom_test_low_descriptor_registry_initialize(&registry_);
@@ -439,17 +441,18 @@ TEST_F(LowLowerPassTest,
   ModulePtr module = Parse(IREE_SV(
       "test.target<low_core> @available_target\n"
       "test.target<quirky> @other_target\n"
-      "func.template<demo.targeted> target(@available_target) priority(20) "
+      "template.decl @demo.targeted(%value: i32) -> (i32)\n"
+      "template.def<@demo.targeted> target(@available_target) priority(20) "
       "@selected(%value: i32) -> (i32) {\n"
       "  %sum = scalar.addi %value, %value : i32\n"
-      "  func.return %sum : i32\n"
+      "  template.return %sum : i32\n"
       "}\n"
-      "func.template<demo.targeted> target(@other_target) priority(30) "
+      "template.def<@demo.targeted> target(@other_target) priority(30) "
       "@other(%value: i32) -> (i32) {\n"
-      "  func.return %value : i32\n"
+      "  template.return %value : i32\n"
       "}\n"
       "func.def public @entry(%arg: i32) -> (i32) {\n"
-      "  %result = func.apply<demo.targeted>(%arg) : (i32) -> (i32)\n"
+      "  %result = template.apply<@demo.targeted>(%arg) : (i32) -> (i32)\n"
       "  func.return %result : i32\n"
       "}\n"));
   iree_arena_allocator_t arena;
@@ -531,28 +534,29 @@ TEST_F(LowLowerPassTest,
 TEST_F(LowLowerPassTest,
        DurableFunctionTargetPrunesOffTargetProvidersBeforeLowering) {
   ModulePtr module = Parse(IREE_SV(
-      "func.template<demo.targeted> target(@quirky) priority(20) "
+      "template.decl @demo.targeted(%value: i32) -> (i32)\n"
+      "template.def<@demo.targeted> target(@quirky) priority(20) "
       "@quirky_bad(%value: i32) -> (i32) {\n"
       "  test.use %value : i32\n"
-      "  func.return %value : i32\n"
+      "  template.return %value : i32\n"
       "}\n"
       "\n"
-      "func.template<demo.targeted> target(@low_core) priority(10) "
+      "template.def<@demo.targeted> target(@low_core) priority(10) "
       "@low_core_good(%value: i32) -> (i32) {\n"
       "  %doubled = scalar.addi %value, %value : i32\n"
-      "  func.return %doubled : i32\n"
+      "  template.return %doubled : i32\n"
       "}\n"
       "\n"
-      "func.template<demo.targeted> priority(1) @fallback(%value: i32) -> "
+      "template.def<@demo.targeted> priority(1) @fallback(%value: i32) -> "
       "(i32) {\n"
-      "  func.return %value : i32\n"
+      "  template.return %value : i32\n"
       "}\n"
       "\n"
       "test.target<low_core> @low_core\n"
       "test.target<quirky> @quirky\n"
       "\n"
       "func.def public target(@low_core) @entry(%arg: i32) -> (i32) {\n"
-      "  %result = func.apply<demo.targeted>(%arg) : (i32) -> (i32)\n"
+      "  %result = template.apply<@demo.targeted>(%arg) : (i32) -> (i32)\n"
       "  func.return %result : i32\n"
       "}\n"));
   IREE_ASSERT_OK(RunFlatPipeline(

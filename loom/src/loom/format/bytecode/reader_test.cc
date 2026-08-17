@@ -24,6 +24,7 @@
 #include "loom/ops/func/ops.h"
 #include "loom/ops/global/ops.h"
 #include "loom/ops/module/ops.h"
+#include "loom/ops/template/ops.h"
 #include "loom/ops/test/ops.h"
 #include "loom/ops/test/registry.h"
 #include "loom/ops/test/types.h"
@@ -121,14 +122,14 @@ class ReaderTest : public ::testing::Test {
   struct SymbolReferenceLayout {
     // Byte offset of the declared total dependency occurrence count.
     size_t total_dependency_count = 0;
-    // Byte offset of the declared total contract demand count.
-    size_t total_contract_demand_count = 0;
+    // Byte offset of the declared total template-family demand count.
+    size_t total_template_demand_count = 0;
     // Byte offsets of module-root dependency target ordinals.
     std::vector<size_t> module_dependencies;
     // Byte offsets of dependency target ordinals by source symbol.
     std::vector<std::vector<size_t>> symbol_dependencies;
-    // Byte offsets of contract string IDs by source symbol.
-    std::vector<std::vector<size_t>> symbol_contract_demands;
+    // Byte offsets of template-family symbol ordinals by source symbol.
+    std::vector<std::vector<size_t>> symbol_template_demands;
   };
 
   void SetUp() override {
@@ -155,6 +156,9 @@ class ReaderTest : public ::testing::Test {
                     loom_global_dialect_op_semantics);
     RegisterDialect(context, LOOM_DIALECT_MODULE, loom_module_dialect_vtables,
                     loom_module_dialect_op_semantics);
+    RegisterDialect(context, LOOM_DIALECT_TEMPLATE,
+                    loom_template_dialect_vtables,
+                    loom_template_dialect_op_semantics);
     IREE_ASSERT_OK(loom_test_dialect_register(context));
     IREE_ASSERT_OK(loom_context_finalize(context));
   }
@@ -411,6 +415,29 @@ class ReaderTest : public ::testing::Test {
     return symbol;
   }
 
+  loom_symbol_ref_t AddTemplateFamily(loom_module_t* module,
+                                      loom_builder_t* builder,
+                                      iree_string_view_t name) {
+    loom_string_id_t name_id = LOOM_STRING_ID_INVALID;
+    IREE_CHECK_OK(loom_builder_intern_string(builder, name, &name_id));
+    loom_symbol_id_t symbol_id = LOOM_SYMBOL_ID_INVALID;
+    IREE_CHECK_OK(loom_module_add_symbol(module, name_id, &symbol_id));
+    const loom_symbol_ref_t family = {
+        /*.module_id=*/0,
+        /*.symbol_id=*/symbol_id,
+    };
+    loom_op_t* family_op = nullptr;
+    IREE_CHECK_OK(loom_template_decl_build(
+        builder, /*build_flags=*/0, /*visibility=*/0, /*retain=*/0, /*cc=*/0,
+        /*purity=*/0, /*temperature=*/0, loom_symbol_ref_null(),
+        loom_parameterized_attr_array_empty(), family, /*arg_types=*/nullptr,
+        /*arg_types_count=*/0, /*result_types=*/nullptr, /*result_count=*/0,
+        /*tied_results=*/nullptr, /*tied_result_count=*/0,
+        /*predicates=*/nullptr, /*predicates_count=*/0, LOOM_LOCATION_UNKNOWN,
+        &family_op));
+    return family;
+  }
+
   loom_module_t* CreateSymbolArrayModule() {
     loom_module_t* module = CreateModule("reader_symbol_array");
     loom_builder_t builder;
@@ -447,19 +474,21 @@ class ReaderTest : public ::testing::Test {
     return module;
   }
 
-  loom_module_t* CreateContractDemandModule() {
-    loom_module_t* module = CreateModule("reader_contract_demands");
+  loom_module_t* CreateTemplateDemandModule() {
+    loom_module_t* module = CreateModule("reader_template_demands");
+    loom_builder_t module_builder;
+    loom_builder_initialize(module, &module->arena, loom_module_block(module),
+                            &module_builder);
+    const loom_symbol_ref_t family =
+        AddTemplateFamily(module, &module_builder, IREE_SV("test.contract"));
     loom_region_t* body = AddVoidFunction(module, "entry");
     loom_builder_t body_builder;
     loom_builder_initialize(module, &module->arena,
                             loom_region_entry_block(body), &body_builder);
-    loom_string_id_t contract_id = LOOM_STRING_ID_INVALID;
-    IREE_CHECK_OK(loom_module_intern_string(module, IREE_SV("test.contract"),
-                                            &contract_id));
     for (int i = 0; i < 2; ++i) {
       loom_op_t* apply_op = nullptr;
-      IREE_CHECK_OK(loom_func_apply_build(
-          &body_builder, /*build_flags=*/0, contract_id,
+      IREE_CHECK_OK(loom_template_apply_build(
+          &body_builder, /*build_flags=*/0, family,
           /*operands=*/nullptr, /*operands_count=*/0, /*purity=*/0,
           /*temperature=*/0, /*result_types=*/nullptr, /*result_count=*/0,
           /*tied_results=*/nullptr, /*tied_result_count=*/0,
@@ -1741,7 +1770,7 @@ class ReaderTest : public ::testing::Test {
         ReadUVarint(bytes, &offset);
         ReadUVarint(bytes, &offset);
       }
-      EXPECT_LE(kind, LOOM_BYTECODE_SYMBOL_FUNC_UKERNEL);
+      EXPECT_LE(kind, LOOM_BYTECODE_SYMBOL_TEMPLATE_UKERNEL);
       ReadUVarint(bytes, &offset);  // def_op_table_index_plus1
       SkipSourceTrivia(bytes, &offset);
       offset += 1;  // calling_convention
@@ -1762,9 +1791,9 @@ class ReaderTest : public ::testing::Test {
       }
       ReadUVarint(bytes, &offset);  // tied_result_count
       SkipPredicateList(bytes, &offset);
-      if (kind == LOOM_BYTECODE_SYMBOL_FUNC_TEMPLATE ||
-          kind == LOOM_BYTECODE_SYMBOL_FUNC_UKERNEL) {
-        ReadUVarint(bytes, &offset);  // implementation_contract
+      if (kind == LOOM_BYTECODE_SYMBOL_TEMPLATE_DEF ||
+          kind == LOOM_BYTECODE_SYMBOL_TEMPLATE_UKERNEL) {
+        ReadUVarint(bytes, &offset);  // template_family
         ReadUVarint(bytes, &offset);  // priority
       }
       SkipAttributeEntries(bytes, &offset);
@@ -1930,7 +1959,7 @@ class ReaderTest : public ::testing::Test {
     SymbolReferenceLayout layout;
     layout.total_dependency_count = offset;
     ReadUVarint(bytes, &offset);
-    layout.total_contract_demand_count = offset;
+    layout.total_template_demand_count = offset;
     ReadUVarint(bytes, &offset);
 
     const uint64_t module_dependency_count = ReadUVarint(bytes, &offset);
@@ -1941,7 +1970,7 @@ class ReaderTest : public ::testing::Test {
     }
 
     layout.symbol_dependencies.reserve((size_t)symbol_count);
-    layout.symbol_contract_demands.reserve((size_t)symbol_count);
+    layout.symbol_template_demands.reserve((size_t)symbol_count);
     for (uint64_t i = 0; i < symbol_count; ++i) {
       const uint64_t dependency_count = ReadUVarint(bytes, &offset);
       std::vector<size_t>& dependency_offsets =
@@ -1952,12 +1981,12 @@ class ReaderTest : public ::testing::Test {
         ReadUVarint(bytes, &offset);
       }
 
-      const uint64_t contract_demand_count = ReadUVarint(bytes, &offset);
-      std::vector<size_t>& contract_offsets =
-          layout.symbol_contract_demands.emplace_back();
-      contract_offsets.reserve((size_t)contract_demand_count);
-      for (uint64_t j = 0; j < contract_demand_count; ++j) {
-        contract_offsets.push_back(offset);
+      const uint64_t template_demand_count = ReadUVarint(bytes, &offset);
+      std::vector<size_t>& family_ordinal_offsets =
+          layout.symbol_template_demands.emplace_back();
+      family_ordinal_offsets.reserve((size_t)template_demand_count);
+      for (uint64_t j = 0; j < template_demand_count; ++j) {
+        family_ordinal_offsets.push_back(offset);
         ReadUVarint(bytes, &offset);
       }
     }
@@ -2853,6 +2882,11 @@ TEST_F(ReaderTest, ReadsFunctionModuleIndex) {
   ASSERT_LT(symbol.name_string_index, module_metadata.strings.count);
   EXPECT_TRUE(iree_string_view_equal(
       module_metadata.strings.values[symbol.name_string_index], symbol.name));
+  ASSERT_NE(module_metadata.symbol_ordinal_by_string_index, nullptr);
+  uint32_t resolved_symbol_ordinal = UINT32_MAX;
+  EXPECT_TRUE(loom_bytecode_module_metadata_lookup_symbol_ordinal(
+      &module_metadata, symbol.name_string_index, &resolved_symbol_ordinal));
+  EXPECT_EQ(resolved_symbol_ordinal, 0u);
   EXPECT_EQ(symbol.kind, LOOM_BYTECODE_SYMBOL_FUNC_DEF);
   EXPECT_EQ(symbol.visibility, LOOM_BYTECODE_SYMBOL_VISIBILITY_PUBLIC);
   EXPECT_TRUE(
@@ -2922,13 +2956,13 @@ TEST_F(ReaderTest, IndexesRawDependencyOccurrencesBySourceSymbol) {
   const loom_bytecode_module_metadata_t& module_metadata = metadata.modules[0];
   ASSERT_EQ(module_metadata.symbol_count, 3u);
   EXPECT_EQ(module_metadata.summary.dependency_count, 3u);
-  EXPECT_EQ(module_metadata.summary.contract_demand_count, 0u);
+  EXPECT_EQ(module_metadata.summary.template_demand_count, 0u);
   EXPECT_EQ(module_metadata.module_dependency_count, 0u);
   ASSERT_EQ(module_metadata.dependency_count, 3u);
   ASSERT_NE(module_metadata.dependency_symbol_indices, nullptr);
   ASSERT_NE(module_metadata.symbol_references, nullptr);
-  EXPECT_EQ(module_metadata.contract_demand_count, 0u);
-  EXPECT_EQ(module_metadata.contract_demands, nullptr);
+  EXPECT_EQ(module_metadata.template_demand_count, 0u);
+  EXPECT_EQ(module_metadata.template_demand_family_symbol_ordinals, nullptr);
 
   EXPECT_EQ(module_metadata.symbol_references[0].dependency_count, 0u);
   EXPECT_EQ(module_metadata.symbol_references[1].dependency_count, 0u);
@@ -2943,7 +2977,7 @@ TEST_F(ReaderTest, IndexesRawDependencyOccurrencesBySourceSymbol) {
 }
 
 TEST_F(ReaderTest, IndexesEveryAbstractProviderDemand) {
-  loom_module_t* module = CreateContractDemandModule();
+  loom_module_t* module = CreateTemplateDemandModule();
   auto bytes = WriteModule(module);
 
   iree_arena_allocator_t metadata_arena;
@@ -2957,21 +2991,23 @@ TEST_F(ReaderTest, IndexesEveryAbstractProviderDemand) {
   ASSERT_TRUE(error_ids.empty());
   ASSERT_EQ(metadata.module_count, 1u);
   const loom_bytecode_module_metadata_t& module_metadata = metadata.modules[0];
-  ASSERT_EQ(module_metadata.symbol_count, 1u);
-  EXPECT_EQ(module_metadata.summary.dependency_count, 0u);
-  EXPECT_EQ(module_metadata.summary.contract_demand_count, 2u);
-  EXPECT_EQ(module_metadata.dependency_count, 0u);
-  EXPECT_EQ(module_metadata.dependency_symbol_indices, nullptr);
-  ASSERT_EQ(module_metadata.contract_demand_count, 2u);
-  ASSERT_NE(module_metadata.contract_demands, nullptr);
+  ASSERT_EQ(module_metadata.symbol_count, 2u);
+  EXPECT_EQ(module_metadata.summary.dependency_count, 2u);
+  EXPECT_EQ(module_metadata.summary.template_demand_count, 2u);
+  ASSERT_EQ(module_metadata.dependency_count, 2u);
+  ASSERT_NE(module_metadata.dependency_symbol_indices, nullptr);
+  ASSERT_EQ(module_metadata.template_demand_count, 2u);
+  ASSERT_NE(module_metadata.template_demand_family_symbol_ordinals, nullptr);
   ASSERT_NE(module_metadata.symbol_references, nullptr);
-  EXPECT_EQ(module_metadata.symbol_references[0].first_contract_demand_index,
+  EXPECT_EQ(module_metadata.symbol_references[1].first_template_demand_index,
             0u);
-  EXPECT_EQ(module_metadata.symbol_references[0].contract_demand_count, 2u);
-  EXPECT_TRUE(iree_string_view_equal(module_metadata.contract_demands[0],
-                                     IREE_SV("test.contract")));
-  EXPECT_TRUE(iree_string_view_equal(module_metadata.contract_demands[1],
-                                     IREE_SV("test.contract")));
+  EXPECT_EQ(module_metadata.symbol_references[1].template_demand_count, 2u);
+  EXPECT_EQ(module_metadata.symbol_references[1].first_dependency_index, 0u);
+  EXPECT_EQ(module_metadata.symbol_references[1].dependency_count, 2u);
+  EXPECT_EQ(module_metadata.dependency_symbol_indices[0], 0u);
+  EXPECT_EQ(module_metadata.dependency_symbol_indices[1], 0u);
+  EXPECT_EQ(module_metadata.template_demand_family_symbol_ordinals[0], 0u);
+  EXPECT_EQ(module_metadata.template_demand_family_symbol_ordinals[1], 0u);
 
   iree_arena_deinitialize(&metadata_arena);
   loom_module_free(module);
@@ -5050,17 +5086,17 @@ TEST_F(ReaderTest, RejectsSymbolReferenceCountBeyondSectionPayload) {
   loom_module_free(module);
 }
 
-TEST_F(ReaderTest, RejectsInvalidContractDemandStringReference) {
-  loom_module_t* module = CreateContractDemandModule();
+TEST_F(ReaderTest, RejectsTemplateDemandFamilyOutsideSymbolTable) {
+  loom_module_t* module = CreateTemplateDemandModule();
   auto bytes = WriteModule(module);
   SymbolReferenceLayout layout = ReadSymbolReferenceLayout(bytes);
-  ASSERT_EQ(layout.symbol_contract_demands.size(), 1u);
-  ASSERT_EQ(layout.symbol_contract_demands[0].size(), 2u);
-  const size_t contract_offset = layout.symbol_contract_demands[0][0];
-  ASSERT_LT(contract_offset, bytes.size());
-  bytes[contract_offset] = 0x7F;
+  ASSERT_EQ(layout.symbol_template_demands.size(), 2u);
+  ASSERT_EQ(layout.symbol_template_demands[1].size(), 2u);
+  const size_t family_ordinal_offset = layout.symbol_template_demands[1][0];
+  ASSERT_LT(family_ordinal_offset, bytes.size());
+  bytes[family_ordinal_offset] = 0x7F;
 
-  ExpectReadError(bytes, "ERR_BYTECODE_010");
+  ExpectReadError(bytes, "ERR_BYTECODE_006");
 
   loom_module_free(module);
 }

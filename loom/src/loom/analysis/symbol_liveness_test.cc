@@ -14,6 +14,7 @@
 #include "loom/ir/module.h"
 #include "loom/ops/func/ops.h"
 #include "loom/ops/op_defs.h"
+#include "loom/ops/template/ops.h"
 #include "loom/ops/test/ops.h"
 #include "loom/testing/module_ptr.h"
 
@@ -23,7 +24,7 @@ namespace {
 using ModulePtr = ::loom::testing::ModulePtr;
 
 typedef struct ApplyEdgeTestState {
-  loom_string_id_t contract_id;
+  loom_symbol_id_t family_symbol_id;
   loom_symbol_id_t provider_symbol_id;
 } ApplyEdgeTestState;
 
@@ -40,9 +41,9 @@ static bool RootPublicFunc(void* user_data, const loom_module_t* module,
 
 static iree_status_t MarkProviderForDemand(
     void* user_data, loom_symbol_liveness_contributor_context_t* context,
-    const loom_func_contract_demand_t* demand) {
+    const loom_template_demand_t* demand) {
   ApplyEdgeTestState* state = (ApplyEdgeTestState*)user_data;
-  if (demand->contract_id != state->contract_id) {
+  if (demand->family_symbol_id != state->family_symbol_id) {
     return iree_ok_status();
   }
   return loom_symbol_liveness_mark_symbol_id(context,
@@ -56,6 +57,7 @@ class SymbolLivenessTest : public ::testing::Test {
                                      &block_pool_);
     loom_context_initialize(iree_allocator_system(), &context_);
     RegisterDialect(LOOM_DIALECT_FUNC, loom_func_dialect_vtables);
+    RegisterDialect(LOOM_DIALECT_TEMPLATE, loom_template_dialect_vtables);
     RegisterDialect(LOOM_DIALECT_TEST, loom_test_dialect_vtables);
     IREE_ASSERT_OK(loom_context_finalize(&context_));
     iree_arena_initialize(&block_pool_, &analysis_arena_);
@@ -169,12 +171,15 @@ func.def public @entry() {
 
 TEST_F(SymbolLivenessTest, ContributorsScanReachableBodiesOnly) {
   ModulePtr module = ParseModule(R"(
-func.template<demo.contract> @provider(%arg0: i32) -> (i32) {
-  func.return %arg0 : i32
+template.decl @demo.contract(%arg0: i32) -> (i32)
+template.decl @dead.contract(%arg0: i32) -> (i32)
+
+template.def<@demo.contract> @provider(%arg0: i32) -> (i32) {
+  template.return %arg0 : i32
 }
 
-func.template<dead.contract> @dead_provider(%arg0: i32) -> (i32) {
-  func.return %arg0 : i32
+template.def<@dead.contract> @dead_provider(%arg0: i32) -> (i32) {
+  template.return %arg0 : i32
 }
 
 func.def public @entry(%arg0: i32) -> (i32) {
@@ -183,24 +188,23 @@ func.def public @entry(%arg0: i32) -> (i32) {
 }
 
 func.def @live_user(%arg0: i32) -> (i32) {
-  %result = func.apply<demo.contract>(%arg0) : (i32) -> (i32)
+  %result = template.apply<@demo.contract>(%arg0) : (i32) -> (i32)
   func.return %result : i32
 }
 
 func.def @dead_user(%arg0: i32) -> (i32) {
-  %result = func.apply<dead.contract>(%arg0) : (i32) -> (i32)
+  %result = template.apply<@dead.contract>(%arg0) : (i32) -> (i32)
   func.return %result : i32
 }
 )");
 
   ApplyEdgeTestState apply_state = {
-      /*.contract_id=*/
-      loom_module_lookup_string(module.get(), IREE_SV("demo.contract")),
+      /*.family_symbol_id=*/
+      FindSymbol(module.get(), IREE_SV("demo.contract")),
       /*.provider_symbol_id=*/FindSymbol(module.get(), IREE_SV("provider")),
   };
-  ASSERT_NE(apply_state.contract_id, LOOM_STRING_ID_INVALID);
   loom_symbol_liveness_contributor_t contributor = {
-      /*.visit_contract_demand=*/MarkProviderForDemand,
+      /*.visit_template_demand=*/MarkProviderForDemand,
       /*.user_data=*/&apply_state,
   };
   loom_symbol_liveness_options_t options = {

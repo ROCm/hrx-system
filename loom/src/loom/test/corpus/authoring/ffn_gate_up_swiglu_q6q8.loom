@@ -22,7 +22,9 @@ func.def inline @q6_signed_pack_dot4i(%code: vector<1xi32>) -> (vector<4xi8>) {
 // either gate or up weights. This is a provider boundary instead of a concrete
 // call: future libraries can offer different implementations of the same
 // packed accumulation contract without changing the model-shaped kernel body.
-func.template<model.q6q8.accumulate_part> device priority(10) @q6q8_accumulate_part(%acc: f32, %weight_i8: view<55695360xi8>, %weight_i16: view<27847680xi16>, %weight_f16: view<27847680xf16>, %q8_i32: view<31248xi32>, %q8_f16: view<62496xf16>, %row_i8_base: index, %row_i16_base: index, %q8_i32_row_base: index, %q8_f16_row_base: index, %block: index, %part: index, %lane: index, %vh_index: index, %vh_shift_i32: i32, %bq8_offset: index, %q8_qword: index, %scale_lane_base: index) -> (f32) {
+template.decl @model.q6q8.accumulate_part(%acc: f32, %weight_i8: view<55695360xi8>, %weight_i16: view<27847680xi16>, %weight_f16: view<27847680xf16>, %q8_i32: view<31248xi32>, %q8_f16: view<62496xf16>, %row_i8_base: index, %row_i16_base: index, %q8_i32_row_base: index, %q8_f16_row_base: index, %block: index, %part: index, %lane: index, %vh_index: index, %vh_shift_i32: i32, %bq8_offset: index, %q8_qword: index, %scale_lane_base: index) -> (f32)
+
+template.def<@model.q6q8.accumulate_part> device priority(10) @q6q8_accumulate_part(%acc: f32, %weight_i8: view<55695360xi8>, %weight_i16: view<27847680xi16>, %weight_f16: view<27847680xf16>, %q8_i32: view<31248xi32>, %q8_f16: view<62496xf16>, %row_i8_base: index, %row_i16_base: index, %q8_i32_row_base: index, %q8_f16_row_base: index, %block: index, %part: index, %lane: index, %vh_index: index, %vh_shift_i32: i32, %bq8_offset: index, %q8_qword: index, %scale_lane_base: index) -> (f32) {
   %i16_elements_per_i32 = index.constant 2 : index
   %q8_blocks_per_part = index.constant 2 : index
   %part_shift_bits = index.constant 4 : index
@@ -97,7 +99,7 @@ func.template<model.q6q8.accumulate_part> device priority(10) @q6q8_accumulate_p
   %scaled1 = scalar.mulf<reassoc|nnan|ninf|nsz> %scaled0, %d : f32
   %scaled2 = scalar.mulf<reassoc|nnan|ninf|nsz> %scaled1, %q8_d : f32
   %next = scalar.addf<reassoc|nnan|ninf|nsz> %acc, %scaled2 : f32
-  func.return %next : f32
+  template.return %next : f32
 }
 
 kernel.def @ffn_gate_up_swiglu_q6q8() {
@@ -178,8 +180,8 @@ kernel.def @ffn_gate_up_swiglu_q6q8() {
   %gate_acc, %up_acc = scf.if %is_active_lane -> (f32, f32) {
     %gate_result, %up_result = scf.for %block = [%loop_begin to %q6_block_count step %loop_step](%gate_block_acc = %dot_initial : f32, %up_block_acc = %dot_initial : f32) -> (f32, f32) unroll {
       %gate_next, %up_next = scf.for %part = [%loop_begin to %part_count step %loop_step](%gate_part_acc = %gate_block_acc : f32, %up_part_acc = %up_block_acc : f32) -> (f32, f32) unroll {
-        %gate_step = func.apply<model.q6q8.accumulate_part>(%gate_part_acc, %gate_i8_view, %gate_i16_view, %gate_f16_view, %q8_i32_view, %q8_f16_view, %gate_row_i8_base, %gate_row_i16_base, %q8_i32_row_base, %q8_f16_row_base, %block, %part, %active_lane, %vh_index, %vh_shift_i32, %bq8_offset, %q8_qword, %scale_lane_base) : (f32, view<55695360xi8>, view<27847680xi16>, view<27847680xf16>, view<31248xi32>, view<62496xf16>, index, index, index, index, index, index, index, index, i32, index, index, index) -> (f32)
-        %up_step = func.apply<model.q6q8.accumulate_part>(%up_part_acc, %up_i8_view, %up_i16_view, %up_f16_view, %q8_i32_view, %q8_f16_view, %up_row_i8_base, %up_row_i16_base, %q8_i32_row_base, %q8_f16_row_base, %block, %part, %active_lane, %vh_index, %vh_shift_i32, %bq8_offset, %q8_qword, %scale_lane_base) : (f32, view<55695360xi8>, view<27847680xi16>, view<27847680xf16>, view<31248xi32>, view<62496xf16>, index, index, index, index, index, index, index, index, i32, index, index, index) -> (f32)
+        %gate_step = template.apply<@model.q6q8.accumulate_part>(%gate_part_acc, %gate_i8_view, %gate_i16_view, %gate_f16_view, %q8_i32_view, %q8_f16_view, %gate_row_i8_base, %gate_row_i16_base, %q8_i32_row_base, %q8_f16_row_base, %block, %part, %active_lane, %vh_index, %vh_shift_i32, %bq8_offset, %q8_qword, %scale_lane_base) : (f32, view<55695360xi8>, view<27847680xi16>, view<27847680xf16>, view<31248xi32>, view<62496xf16>, index, index, index, index, index, index, index, index, i32, index, index, index) -> (f32)
+        %up_step = template.apply<@model.q6q8.accumulate_part>(%up_part_acc, %up_i8_view, %up_i16_view, %up_f16_view, %q8_i32_view, %q8_f16_view, %up_row_i8_base, %up_row_i16_base, %q8_i32_row_base, %q8_f16_row_base, %block, %part, %active_lane, %vh_index, %vh_shift_i32, %bq8_offset, %q8_qword, %scale_lane_base) : (f32, view<55695360xi8>, view<27847680xi16>, view<27847680xf16>, view<31248xi32>, view<62496xf16>, index, index, index, index, index, index, index, index, i32, index, index, index) -> (f32)
         scf.yield %gate_step, %up_step : f32, f32
       }
       scf.yield %gate_next, %up_next : f32, f32

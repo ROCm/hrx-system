@@ -172,14 +172,17 @@ loom_cc_test(
 )
 
 loom_cc_library(
-    name = "func_provider_catalog",
-    srcs = ["func_provider_catalog.c"],
-    hdrs = ["func_provider_catalog.h"],
+    name = "template_provider_catalog",
+    srcs = ["template_provider_catalog.c"],
+    hdrs = ["template_provider_catalog.h"],
     deps = [
         ":symbol_facts",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:func_symbol_facts",
         "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops/target",
+        "//loom/src/loom/rewrite:remap",
+        "//loom/src/loom/target:facts",
         "//loom/src/loom/util:adaptive_sort",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
@@ -187,16 +190,17 @@ loom_cc_library(
 )
 
 loom_cc_test(
-    name = "func_provider_catalog_test",
-    srcs = ["func_provider_catalog_test.cc"],
+    name = "template_provider_catalog_test",
+    srcs = ["template_provider_catalog_test.cc"],
     deps = [
-        ":func_provider_catalog",
         ":symbol_facts",
+        ":template_provider_catalog",
         "//loom/src/loom/format/text:parser",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:op_defs",
         "//loom/src/loom/ops/func",
         "//loom/src/loom/ops/target",
+        "//loom/src/loom/ops/template",
         "//loom/src/loom/ops/test",
         "//loom/src/loom/testing:module_ptr",
         "//runtime/src/iree/base/internal:arena",
@@ -672,6 +676,7 @@ loom_cc_library(
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:op_defs",
         "//loom/src/loom/ops/func",
+        "//loom/src/loom/ops/template",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
     ],
@@ -689,6 +694,7 @@ loom_cc_test(
         "//loom/src/loom/ops/func",
         "//loom/src/loom/ops/global",
         "//loom/src/loom/ops/target",
+        "//loom/src/loom/ops/template",
         "//loom/src/loom/ops/test",
         "//loom/src/loom/testing:module_ptr",
         "//runtime/src/iree/base/internal:arena",
@@ -747,6 +753,7 @@ loom_cc_test(
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:op_defs",
         "//loom/src/loom/ops/func",
+        "//loom/src/loom/ops/template",
         "//loom/src/loom/ops/test",
         "//loom/src/loom/testing:module_ptr",
         "//runtime/src/iree/base/internal:arena",

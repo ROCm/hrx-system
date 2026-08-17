@@ -24,6 +24,7 @@
 #include "loom/ops/func/ops.h"
 #include "loom/ops/module/ops.h"
 #include "loom/ops/target/ops.h"
+#include "loom/ops/template/ops.h"
 #include "loom/ops/test/ops.h"
 #include "loom/ops/test/registry.h"
 
@@ -70,6 +71,8 @@ class ModuleIndexTest : public ::testing::Test {
                     loom_module_dialect_op_semantics);
     RegisterDialect(LOOM_DIALECT_TARGET, loom_target_dialect_vtables,
                     loom_target_dialect_op_semantics);
+    RegisterDialect(LOOM_DIALECT_TEMPLATE, loom_template_dialect_vtables,
+                    loom_template_dialect_op_semantics);
     IREE_ASSERT_OK(loom_test_dialect_register(&context_));
     IREE_ASSERT_OK(loom_context_finalize(&context_));
   }
@@ -103,7 +106,7 @@ class ModuleIndexTest : public ::testing::Test {
                        iree_string_view_t filename = IREE_SV("test.loom")) {
     loom_module_t* module = nullptr;
     loom_text_parse_options_t parse_options = {
-        /*.diagnostic_sink=*/{},
+        /*.diagnostic_sink=*/{loom_diagnostic_stderr_sink, nullptr},
         /*.max_errors=*/20,
     };
     IREE_EXPECT_OK(loom_text_parse(source, filename, &context_, &block_pool_,
@@ -380,7 +383,7 @@ TEST_F(ModuleIndexTest, ProjectsMaterializedAndBytecodeReferenceMetadata) {
   loom_module_t* module = Parse(IREE_SV(R"(
 func.def public @entry(%x: i32) -> (i32) {
   %y = func.call @helper(%x) : (i32) -> (i32)
-  %z = func.apply<demo.contract>(%y) : (i32) -> (i32)
+  %z = template.apply<@demo.contract>(%y) : (i32) -> (i32)
   func.return %z : i32
 }
 
@@ -388,10 +391,10 @@ func.def @helper(%x: i32) -> (i32) {
   func.return %x : i32
 }
 
-func.provider.decl<demo.contract> @provider_anchor(%x: i32) -> (i32)
+template.decl @demo.contract(%x: i32) -> (i32)
 
-func.template<demo.contract> @provider(%x: i32) -> (i32) {
-  func.return %x : i32
+template.def<@demo.contract> @provider(%x: i32) -> (i32) {
+  template.return %x : i32
 }
 )"));
   std::vector<uint8_t> bytes = WriteModule(module);
@@ -401,8 +404,8 @@ func.template<demo.contract> @provider(%x: i32) -> (i32) {
         loom_link_module_index_module_at(index, 0);
     ASSERT_NE(indexed_module, nullptr);
     EXPECT_EQ(indexed_module->dependencies.root_count, 0u);
-    ASSERT_EQ(indexed_module->dependencies.count, 1u);
-    ASSERT_EQ(indexed_module->contract_demands.count, 1u);
+    ASSERT_EQ(indexed_module->dependencies.count, 3u);
+    ASSERT_EQ(indexed_module->template_demands.count, 1u);
 
     const loom_link_module_index_symbol_t* entry =
         loom_link_module_index_lookup_global(index, IREE_SV("entry"));
@@ -412,34 +415,46 @@ func.template<demo.contract> @provider(%x: i32) -> (i32) {
     const loom_link_module_index_symbol_t* provider =
         loom_link_module_index_lookup_private(index, indexed_module,
                                               IREE_SV("provider"));
-    const loom_link_module_index_symbol_t* provider_declaration =
-        loom_link_module_index_lookup_global(index, IREE_SV("provider_anchor"));
+    const loom_link_module_index_symbol_t* family_declaration =
+        loom_link_module_index_lookup_global(index, IREE_SV("demo.contract"));
     ASSERT_NE(entry, nullptr);
     ASSERT_NE(helper, nullptr);
     ASSERT_NE(provider, nullptr);
-    ASSERT_NE(provider_declaration, nullptr);
-    ASSERT_EQ(entry->dependencies.count, 1u);
-    EXPECT_EQ(indexed_module->dependencies.values[entry->dependencies.first],
-              helper->module_symbol_ordinal);
-    ASSERT_EQ(entry->contract_demands.count, 1u);
+    ASSERT_NE(family_declaration, nullptr);
+    auto has_dependency = [&](const loom_link_module_index_symbol_t* source,
+                              const loom_link_module_index_symbol_t* target) {
+      for (iree_host_size_t i = 0; i < source->dependencies.count; ++i) {
+        if (indexed_module->dependencies
+                .values[source->dependencies.first + i] ==
+            target->module_symbol_ordinal) {
+          return true;
+        }
+      }
+      return false;
+    };
+    ASSERT_EQ(entry->dependencies.count, 2u);
+    EXPECT_TRUE(has_dependency(entry, helper));
+    EXPECT_TRUE(has_dependency(entry, family_declaration));
+    ASSERT_EQ(provider->dependencies.count, 1u);
+    EXPECT_TRUE(has_dependency(provider, family_declaration));
+    ASSERT_EQ(entry->template_demands.count, 1u);
 
-    ASSERT_EQ(loom_link_module_index_contract_count(index), 1u);
-    const loom_link_contract_ordinal_t contract_ordinal =
-        indexed_module->contract_demands.values[entry->contract_demands.first];
-    const loom_link_module_index_contract_t* contract =
-        loom_link_module_index_contract_at(index, contract_ordinal);
-    ASSERT_NE(contract, nullptr);
-    EXPECT_EQ(StringViewToString(contract->name), "demo.contract");
-    EXPECT_EQ(provider->implementation_contract_ordinal, contract_ordinal);
-    EXPECT_EQ(provider_declaration->implementation_contract_ordinal,
-              contract_ordinal);
-    EXPECT_TRUE(iree_all_bits_set(provider_declaration->flags,
+    ASSERT_EQ(loom_link_module_index_template_family_count(index), 1u);
+    const loom_link_template_family_ordinal_t family_ordinal =
+        indexed_module->template_demands.values[entry->template_demands.first];
+    const loom_link_module_index_template_family_t* family =
+        loom_link_module_index_template_family_at(index, family_ordinal);
+    ASSERT_NE(family, nullptr);
+    EXPECT_EQ(StringViewToString(family->name), "demo.contract");
+    EXPECT_EQ(provider->template_family_ordinal, family_ordinal);
+    EXPECT_EQ(family_declaration->template_family_ordinal, family_ordinal);
+    EXPECT_TRUE(iree_all_bits_set(family_declaration->flags,
                                   LOOM_LINK_SYMBOL_FLAG_DECLARATION));
-    EXPECT_FALSE(iree_any_bit_set(provider_declaration->flags,
+    EXPECT_FALSE(iree_any_bit_set(family_declaration->flags,
                                   LOOM_LINK_SYMBOL_FLAG_HAS_BODY));
-    EXPECT_EQ(contract->providers.first_symbol_ordinal, provider->ordinal);
-    EXPECT_EQ(contract->providers.last_symbol_ordinal, provider->ordinal);
-    EXPECT_EQ(provider->next.contract_provider_ordinal,
+    EXPECT_EQ(family->providers.first_symbol_ordinal, provider->ordinal);
+    EXPECT_EQ(family->providers.last_symbol_ordinal, provider->ordinal);
+    EXPECT_EQ(provider->next.template_provider_ordinal,
               LOOM_LINK_MODULE_INDEX_INVALID_ORDINAL);
   };
 

@@ -54,6 +54,10 @@ enum loom_symbol_interface_bits_e {
   LOOM_SYMBOL_INTERFACE_CALLABLE = 1u << 8,
   // Function-like symbol defines or declares a reusable command program.
   LOOM_SYMBOL_INTERFACE_COMMAND_PROGRAM = 1u << 9,
+  // Symbol defines an abstract compile-time callable family.
+  LOOM_SYMBOL_INTERFACE_TEMPLATE_FAMILY = 1u << 10,
+  // Symbol defines a concrete compile-time template implementation.
+  LOOM_SYMBOL_INTERFACE_TEMPLATE_PROVIDER = 1u << 11,
 };
 
 enum loom_symbol_reference_role_e {

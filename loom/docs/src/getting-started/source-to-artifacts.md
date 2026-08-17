@@ -52,12 +52,14 @@ that satisfies a contract.
 | Source construct | Meaning |
 | --- | --- |
 | [`func.def`](../reference/dialects/func/ops/def.md) and [`func.call`](../reference/dialects/func/ops/call.md) | Define and call an exact helper by symbol. |
-| [`func.template`](../reference/dialects/func/ops/template.md) | Provide a visible implementation of a named contract. |
-| [`func.apply`](../reference/dialects/func/ops/apply.md) | Request an implementation of that contract at compile time. |
+| [`template.decl`](../reference/dialects/template/ops/decl.md) | Declare a stable compile-time family contract in the module that uses or implements it. |
+| [`template.def`](../reference/dialects/template/ops/def.md) | Provide one selectable implementation of that family. |
+| [`template.apply`](../reference/dialects/template/ops/apply.md) | Request an implementation of that family at compile time. |
+| [`template.call`](../reference/dialects/template/ops/call.md) | Call one named template implementation without candidate ranking. |
 
 An exact bit-manipulation helper is naturally a `func.call`. An operation whose
 best implementation depends on element format, shape facts, subgroup size, or
-target capabilities is naturally a `func.apply`. During specialization, Loom
+target capabilities is naturally a `template.apply`. During specialization, Loom
 matches the reachable providers, their predicates and requirements, and the
 known facts. The selected provider becomes an ordinary callable boundary that
 normal inlining and optimization can remove.
@@ -84,8 +86,9 @@ The wave32 provider is eligible only when the selected target establishes a
 subgroup size of 32. The fallback stays targetless, so the motif remains useful
 to targets that know nothing about AMDGPU.
 
-The complete operation inventory lives in the generated
-[`func` dialect reference](../reference/dialects/func/index.md).
+The complete operation inventories live in the generated
+[`func`](../reference/dialects/func/index.md) and
+[`template`](../reference/dialects/template/index.md) dialect references.
 
 ## A kernel owns two contracts
 
@@ -226,20 +229,22 @@ constructs that exist today.
 ## Follow one composition to Low
 
 The three source listings above are repository `.loom` files, not prose copies.
-With the Loom tools on `PATH`, this command formats them, links and specializes
-the `@elementwise_transform` root, compiles its kernel for the generic GFX11
-profile, and
-prints every Loom command it runs:
+With the Loom tools on `PATH`, this command formats them, archives the explicit
+program and provider universe, then specializes and compiles the kernel for the
+generic GFX11 profile. It prints every Loom command it runs:
 
 ```shell
 loom/docs/examples/elementwise-transform/run.sh \
   gfx11-generic build/elementwise-transform/gfx11-generic
 ```
 
-The resulting directory contains the specialized `elementwise-transform.loom`,
-a VMFB, an HSACO, and the captured target Low IR. The documentation build
-invokes that same script and regenerates the views below; neither output is
-checked-in source.
+The resulting directory contains the linkable `elementwise-transform.loom`
+archive, a VMFB, an HSACO, and the captured target Low IR. Archive mode matters
+here because target facts arrive at the following `loom-compile` boundary: a
+closed targetless selective link would correctly choose the portable fallback
+and discard the wave32 alternative before those facts exist. The documentation
+build invokes the same script and regenerates the views below; neither output
+is checked-in source.
 
 === "GFX11 kernel Low"
 
@@ -254,8 +259,8 @@ checked-in source.
     ```
 
 The GFX11 tab comes directly from the installed-tool workflow above. The
-command-program tab shows compiler-owned materialization of the same linked
-root. Until command-program materialization has a published installed-tool
+command-program tab shows compiler-owned materialization from the same archived
+program. Until command-program materialization has a published installed-tool
 surface, treat that tab as verified compiler output rather than a CLI recipe.
 
 ## Embedding chooses the deployment policy

@@ -10,18 +10,20 @@ func.def @single_group_wait() {
 
 // RUN: pass select-templates,inline-callables,kernel-async-legality
 
-func.template<test.async.stage> priority(20) @selected_stage() -> (kernel.async.group) {
+template.decl @test.async.stage() -> (kernel.async.group)
+
+template.def<@test.async.stage> priority(20) @selected_stage() -> (kernel.async.group) {
   %group = kernel.async.group -> kernel.async.group
-  func.return %group : kernel.async.group
+  template.return %group : kernel.async.group
 }
 
-func.template<test.async.stage> priority(10) @fallback_stage() -> (kernel.async.group) {
+template.def<@test.async.stage> priority(10) @fallback_stage() -> (kernel.async.group) {
   %group = kernel.async.group -> kernel.async.group
-  func.return %group : kernel.async.group
+  template.return %group : kernel.async.group
 }
 
 func.def public @waits_selected_template_group() {
-  %group = func.apply<test.async.stage>() : () -> (kernel.async.group)
+  %group = template.apply<@test.async.stage>() : () -> (kernel.async.group)
   %independent = scalar.constant 1 : i32
   test.use %independent : i32
   kernel.async.wait %group {newer_groups = 0} : kernel.async.group
@@ -29,6 +31,8 @@ func.def public @waits_selected_template_group() {
 }
 
 // ----
+template.decl @test.async.stage() -> (kernel.async.group)
+
 func.def public @waits_selected_template_group() {
   %group = kernel.async.group -> kernel.async.group
   %independent = scalar.constant 1 : i32
@@ -41,13 +45,15 @@ func.def public @waits_selected_template_group() {
 
 // RUN: pass select-templates,inline-callables,kernel-async-legality
 
-func.template<test.async.duplicate> @duplicate_stage() -> (kernel.async.group) {
+template.decl @test.async.duplicate() -> (kernel.async.group)
+
+template.def<@test.async.duplicate> @duplicate_stage() -> (kernel.async.group) {
   %group = kernel.async.group -> kernel.async.group
-  func.return %group : kernel.async.group
+  template.return %group : kernel.async.group
 }
 
 func.def public @rejects_duplicate_wait_after_template_inline() {
-  %group = func.apply<test.async.duplicate>() : () -> (kernel.async.group)
+  %group = template.apply<@test.async.duplicate>() : () -> (kernel.async.group)
   kernel.async.wait %group {newer_groups = 0} : kernel.async.group
   // ERROR@+1: LOWERING/030 {op_name="kernel.async.wait", phase_name="kernel-async-legality"}
   kernel.async.wait %group {newer_groups = 0} : kernel.async.group
@@ -58,14 +64,16 @@ func.def public @rejects_duplicate_wait_after_template_inline() {
 
 // RUN: pass select-templates,inline-callables,kernel-async-legality
 
-func.template<test.async.dropped> @dropped_stage() -> (kernel.async.group) {
+template.decl @test.async.dropped() -> (kernel.async.group)
+
+template.def<@test.async.dropped> @dropped_stage() -> (kernel.async.group) {
   // ERROR@+1: LOWERING/022 {op_name="kernel.async.group", phase_name="kernel-async-legality"}
   %group = kernel.async.group -> kernel.async.group
-  func.return %group : kernel.async.group
+  template.return %group : kernel.async.group
 }
 
 func.def public @rejects_dropped_group_after_template_inline() {
-  %group = func.apply<test.async.dropped>() : () -> (kernel.async.group)
+  %group = template.apply<@test.async.dropped>() : () -> (kernel.async.group)
   func.return
 }
 
@@ -73,14 +81,16 @@ func.def public @rejects_dropped_group_after_template_inline() {
 
 // RUN: pass select-templates,inline-callables,kernel-async-legality
 
-func.template<test.async.escape> @escaping_stage() -> (kernel.async.group) {
+template.decl @test.async.escape() -> (kernel.async.group)
+
+template.def<@test.async.escape> @escaping_stage() -> (kernel.async.group) {
   // ERROR@+1: LOWERING/023 {op_name="kernel.async.group", phase_name="kernel-async-legality"}
   %group = kernel.async.group -> kernel.async.group
-  func.return %group : kernel.async.group
+  template.return %group : kernel.async.group
 }
 
 func.def public @rejects_group_escape_after_template_inline() {
-  %group = func.apply<test.async.escape>() : () -> (kernel.async.group)
+  %group = template.apply<@test.async.escape>() : () -> (kernel.async.group)
   test.use %group : kernel.async.group
   func.return
 }

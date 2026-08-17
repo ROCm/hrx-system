@@ -47,9 +47,12 @@ or provided from memory through the C API.
 
 The same rule applies to exact [`func.call`](../reference/dialects/func/ops/call.md)
 and [`func.decl`](../reference/dialects/func/ops/decl.md) pairs. Contract-based
-[`func.apply`](../reference/dialects/func/ops/apply.md) is different: it asks the
-visible provider set for an implementation of a named contract rather than
-naming one exact function symbol.
+[`template.apply`](../reference/dialects/template/ops/apply.md) is different:
+the using module carries a [`template.decl`](../reference/dialects/template/ops/decl.md)
+for the stable family signature, then asks the explicitly supplied library set
+for an implementation. Template families are not `module.import` anchors:
+callers do not know which target libraries may eventually contribute
+implementations, and provider paths never participate in matching.
 
 ## Definitions, declarations, and roots
 

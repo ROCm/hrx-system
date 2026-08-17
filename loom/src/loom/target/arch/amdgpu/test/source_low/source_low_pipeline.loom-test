@@ -168,35 +168,37 @@ pass.pipeline<module> @__loom_check_source_low pipeline {
 amdgpu.target<gfx11-generic> @gfx11
 amdgpu.target<gfx1200> @gfx12
 
-func.template<demo.target_prune> target(@gfx12) priority(20) @gfx12_provider(%codes: vector<8xi32>) -> (vector<4xi8>) {
-  %packed = vector.bitpack<4> %codes : vector<8xi32> -> vector<4xi8>
-  func.return %packed : vector<4xi8>
+template.decl @demo.target_prune(%codes: vector<4xi32>) -> (vector<4xi8>)
+
+template.def<@demo.target_prune> target(@gfx12) priority(20) @gfx12_provider(%codes: vector<4xi32>) -> (vector<4xi8>) {
+  %packed = vector.bitpack<8> %codes : vector<4xi32> -> vector<4xi8>
+  template.return %packed : vector<4xi8>
 }
 
-func.template<demo.target_prune> target(@gfx11) priority(10) @gfx11_provider(%codes: vector<4xi32>) -> (vector<4xi8>) {
+template.def<@demo.target_prune> target(@gfx11) priority(10) @gfx11_provider(%codes: vector<4xi32>) -> (vector<4xi8>) {
   %packed = vector.bitpack<8> %codes : vector<4xi32> -> vector<4xi8>
-  func.return %packed : vector<4xi8>
+  template.return %packed : vector<4xi8>
 }
 
-func.template<demo.target_prune> priority(1) @fallback_provider(%codes: vector<4xi32>) -> (vector<4xi8>) {
+template.def<@demo.target_prune> priority(1) @fallback_provider(%codes: vector<4xi32>) -> (vector<4xi8>) {
   %packed = vector.bitpack<8> %codes : vector<4xi32> -> vector<4xi8>
-  func.return %packed : vector<4xi8>
+  template.return %packed : vector<4xi8>
 }
 
 func.def target(@gfx11) @target_template_prunes_nonmatching_provider(%codes: vector<4xi32>) -> (vector<4xi8>) {
-  %packed = func.apply<demo.target_prune>(%codes) : (vector<4xi32>) -> (vector<4xi8>)
+  %packed = template.apply<@demo.target_prune>(%codes) : (vector<4xi32>) -> (vector<4xi8>)
   func.return %packed : vector<4xi8>
 }
 
 // ----
 low.func.def target<amdgpu.gfx11.generic.core>(@gfx11) abi(hal_kernel) @target_template_prunes_nonmatching_provider(%codes: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr>) asm {
-  %15 = slice %codes[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %16 = slice %codes[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %17 = slice %codes[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %18 = slice %codes[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %19 = v_perm_b32_src2_lit %15, %16, 4
-  %20 = v_perm_b32_src2_lit %17, %18, 4
-  %packed = v_perm_b32_src2_lit %19, %20, 16778500
+  %17 = slice %codes[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %18 = slice %codes[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %19 = slice %codes[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %20 = slice %codes[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %21 = v_perm_b32_src2_lit %17, %18, 4
+  %22 = v_perm_b32_src2_lit %19, %20, 4
+  %packed = v_perm_b32_src2_lit %21, %22, 16778500
   return %packed
 }
 
@@ -318,7 +320,9 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @module_
 
 amdgpu.target<gfx11-generic> @target
 
-func.template<pipeline.late_fragment_epilogue> target(@target) @late_fragment_epilogue_provider(%payload0: vector<8xf32>, %payload1: vector<8xf32>, %payload2: vector<8xf32>, %payload3: vector<8xf32>, %output: buffer, %column_count: index) {
+template.decl @pipeline.late_fragment_epilogue(%payload0: vector<8xf32>, %payload1: vector<8xf32>, %payload2: vector<8xf32>, %payload3: vector<8xf32>, %output: buffer, %column_count: index)
+
+template.def<@pipeline.late_fragment_epilogue> target(@target) @late_fragment_epilogue_provider(%payload0: vector<8xf32>, %payload1: vector<8xf32>, %payload2: vector<8xf32>, %payload3: vector<8xf32>, %output: buffer, %column_count: index) {
   %base = index.constant 0 : offset
   %m = index.constant 16 : index
   %n = index.constant 16 : index
@@ -333,7 +337,7 @@ func.template<pipeline.late_fragment_epilogue> target(@target) @late_fragment_ep
   vector.fragment.store<result> %epilogue1, %output_view[0, 16] shape [%m, %n] : vector<8xf32>, view<16x[%column_count]xbf16>
   vector.fragment.store<result> %epilogue2, %output_view[0, 32] shape [%m, %n] : vector<8xf32>, view<16x[%column_count]xbf16>
   vector.fragment.store<result> %epilogue3, %output_view[0, 48] shape [%m, %n] : vector<8xf32>, view<16x[%column_count]xbf16>
-  func.return
+  template.return
 }
 
 kernel.def target(@target) @target_legalization_precedes_cfg_finalization() {
@@ -346,54 +350,54 @@ kernel.def target(@target) @target_legalization_precedes_cfg_finalization() {
   %payload2 = vector.constant 3.0 : vector<8xf32>
   %payload3 = vector.constant 4.0 : vector<8xf32>
   %column_count = index.constant 64 : index
-  func.apply<pipeline.late_fragment_epilogue>(%payload0, %payload1, %payload2, %payload3, %output, %column_count) : (vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, buffer, index)
+  template.apply<@pipeline.late_fragment_epilogue>(%payload0, %payload1, %payload2, %payload3, %output, %column_count) : (vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, buffer, index)
   kernel.return
 }
 
 // ----
 low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @target_legalization_precedes_cfg_finalization() asm {
-  %293 = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %299 = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %output_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 2048} : reg<amdgpu.sgpr x2>
-  %295 = v_mov_b32 16256
-  %296 = v_lshrrev_b32_lit %293, 4
-  %298 = v_mov_b32 15
-  %299 = v_and_b32 %293, %298
-  %300 = v_lshl_add_u32_shift_imm %296, %299, 6
-  %301 = v_lshlrev_b32_src0_inline %300, 1
-  global_store_short_saddr %301, %295, %output_view
-  %302 = v_mov_b32 16512
-  global_store_short_saddr %301, %302, %output_view {offset = 32}
-  %305 = v_mov_b32 16656
-  global_store_short_saddr %301, %305, %output_view {offset = 64}
-  %308 = v_mov_b32 16768
-  global_store_short_saddr %301, %308, %output_view {offset = 96}
-  global_store_short_saddr %301, %295, %output_view {offset = 256}
-  global_store_short_saddr %301, %302, %output_view {offset = 288}
-  global_store_short_saddr %301, %305, %output_view {offset = 320}
-  global_store_short_saddr %301, %308, %output_view {offset = 352}
-  global_store_short_saddr %301, %295, %output_view {offset = 512}
-  global_store_short_saddr %301, %302, %output_view {offset = 544}
-  global_store_short_saddr %301, %305, %output_view {offset = 576}
-  global_store_short_saddr %301, %308, %output_view {offset = 608}
-  global_store_short_saddr %301, %295, %output_view {offset = 768}
-  global_store_short_saddr %301, %302, %output_view {offset = 800}
-  global_store_short_saddr %301, %305, %output_view {offset = 832}
-  global_store_short_saddr %301, %308, %output_view {offset = 864}
-  global_store_short_saddr %301, %295, %output_view {offset = 1024}
-  global_store_short_saddr %301, %302, %output_view {offset = 1056}
-  global_store_short_saddr %301, %305, %output_view {offset = 1088}
-  global_store_short_saddr %301, %308, %output_view {offset = 1120}
-  global_store_short_saddr %301, %295, %output_view {offset = 1280}
-  global_store_short_saddr %301, %302, %output_view {offset = 1312}
-  global_store_short_saddr %301, %305, %output_view {offset = 1344}
-  global_store_short_saddr %301, %308, %output_view {offset = 1376}
-  global_store_short_saddr %301, %295, %output_view {offset = 1536}
-  global_store_short_saddr %301, %302, %output_view {offset = 1568}
-  global_store_short_saddr %301, %305, %output_view {offset = 1600}
-  global_store_short_saddr %301, %308, %output_view {offset = 1632}
-  global_store_short_saddr %301, %295, %output_view {offset = 1792}
-  global_store_short_saddr %301, %302, %output_view {offset = 1824}
-  global_store_short_saddr %301, %305, %output_view {offset = 1856}
-  global_store_short_saddr %301, %308, %output_view {offset = 1888}
+  %301 = v_mov_b32 16256
+  %302 = v_lshrrev_b32_lit %299, 4
+  %304 = v_mov_b32 15
+  %305 = v_and_b32 %299, %304
+  %306 = v_lshl_add_u32_shift_imm %302, %305, 6
+  %307 = v_lshlrev_b32_src0_inline %306, 1
+  global_store_short_saddr %307, %301, %output_view
+  %308 = v_mov_b32 16512
+  global_store_short_saddr %307, %308, %output_view {offset = 32}
+  %311 = v_mov_b32 16656
+  global_store_short_saddr %307, %311, %output_view {offset = 64}
+  %314 = v_mov_b32 16768
+  global_store_short_saddr %307, %314, %output_view {offset = 96}
+  global_store_short_saddr %307, %301, %output_view {offset = 256}
+  global_store_short_saddr %307, %308, %output_view {offset = 288}
+  global_store_short_saddr %307, %311, %output_view {offset = 320}
+  global_store_short_saddr %307, %314, %output_view {offset = 352}
+  global_store_short_saddr %307, %301, %output_view {offset = 512}
+  global_store_short_saddr %307, %308, %output_view {offset = 544}
+  global_store_short_saddr %307, %311, %output_view {offset = 576}
+  global_store_short_saddr %307, %314, %output_view {offset = 608}
+  global_store_short_saddr %307, %301, %output_view {offset = 768}
+  global_store_short_saddr %307, %308, %output_view {offset = 800}
+  global_store_short_saddr %307, %311, %output_view {offset = 832}
+  global_store_short_saddr %307, %314, %output_view {offset = 864}
+  global_store_short_saddr %307, %301, %output_view {offset = 1024}
+  global_store_short_saddr %307, %308, %output_view {offset = 1056}
+  global_store_short_saddr %307, %311, %output_view {offset = 1088}
+  global_store_short_saddr %307, %314, %output_view {offset = 1120}
+  global_store_short_saddr %307, %301, %output_view {offset = 1280}
+  global_store_short_saddr %307, %308, %output_view {offset = 1312}
+  global_store_short_saddr %307, %311, %output_view {offset = 1344}
+  global_store_short_saddr %307, %314, %output_view {offset = 1376}
+  global_store_short_saddr %307, %301, %output_view {offset = 1536}
+  global_store_short_saddr %307, %308, %output_view {offset = 1568}
+  global_store_short_saddr %307, %311, %output_view {offset = 1600}
+  global_store_short_saddr %307, %314, %output_view {offset = 1632}
+  global_store_short_saddr %307, %301, %output_view {offset = 1792}
+  global_store_short_saddr %307, %308, %output_view {offset = 1824}
+  global_store_short_saddr %307, %311, %output_view {offset = 1856}
+  global_store_short_saddr %307, %314, %output_view {offset = 1888}
   return
 }

@@ -13,18 +13,20 @@ loom_cc_library(
   NAME
     template_selection
   HDRS
+    "template_applicability.h"
     "template_selection.h"
   SRCS
+    "template_applicability.c"
     "template_selection.c"
   DEPS
     ::symbol_pruning
     iree::base
     iree::base::internal::arena
     loom::analysis::condition_facts
-    loom::analysis::func_provider_catalog
     loom::analysis::symbol_facts
     loom::analysis::symbol_liveness
     loom::analysis::symbol_references
+    loom::analysis::template_provider_catalog
     loom::error::error_defs
     loom::ir
     loom::ir::facts
@@ -32,6 +34,7 @@ loom_cc_library(
     loom::ops::op_defs
     loom::ops::scf
     loom::ops::target
+    loom::ops::template
     loom::pass::pipeline
     loom::pass::registry
     loom::pass::report
@@ -39,9 +42,31 @@ loom_cc_library(
     loom::pass::value_facts
     loom::rewrite::rewriter
     loom::target::condition
+    loom::target::facts
+    loom::target::function_version
     loom::target::pass_environment
     loom::util::bstring
   PUBLIC
+)
+
+loom_cc_test(
+  NAME
+    template_selection_query_test
+  SRCS
+    "template_selection_query_test.cc"
+  DEPS
+    ::template_selection
+    iree::base::internal::arena
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::analysis::symbol_facts
+    loom::analysis::template_provider_catalog
+    loom::format::text::parser
+    loom::format::text::printer
+    loom::ir
+    loom::ops::func
+    loom::ops::template
+    loom::testing::module_ptr
 )
 
 loom_cc_library(

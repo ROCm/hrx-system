@@ -67,6 +67,19 @@ typedef struct loom_linker_source_symbol_list_t {
   const iree_host_size_t* ordinals;
 } loom_linker_source_symbol_list_t;
 
+// Caller-provided output storage for projected target symbol references.
+typedef struct loom_linker_target_symbol_list_t {
+  // Number of writable entries in values.
+  iree_host_size_t count;
+  // Target references written in source-selection order.
+  loom_symbol_ref_t* values;
+} loom_linker_target_symbol_list_t;
+
+static inline loom_linker_target_symbol_list_t
+loom_linker_target_symbol_list_empty(void) {
+  return (loom_linker_target_symbol_list_t){0};
+}
+
 // One provider import projected into the source module's symbol domain.
 typedef struct loom_linker_source_provider_import_t {
   // Opaque resolver-defined provider key.
@@ -134,12 +147,16 @@ iree_status_t loom_linker_add_module(loom_linker_t* linker,
 // |source_symbols| must be strictly increasing. The caller owns dependency
 // closure: references from selected IR to omitted source symbols fail rather
 // than triggering reachability discovery. |provider_imports| names retained
-// availability rows in the same source ordinal domain. The linker retains no
-// pointers into any source storage after this call returns.
+// availability rows in the same source ordinal domain. When
+// |out_target_symbols| is non-empty it must have one entry per selected source
+// symbol and receives the corresponding stable linked-module references. The
+// linker retains no pointers into any source or output storage after this call
+// returns.
 iree_status_t loom_linker_add_module_symbols(
     loom_linker_t* linker, const loom_module_t* source_module,
     loom_linker_source_symbol_list_t source_symbols,
-    loom_linker_source_provider_import_list_t provider_imports);
+    loom_linker_source_provider_import_list_t provider_imports,
+    loom_linker_target_symbol_list_t out_target_symbols);
 
 // Adds every symbol from an exact dependency-closed source module.
 //
@@ -149,11 +166,14 @@ iree_status_t loom_linker_add_module_symbols(
 // exact target-symbol projection. Non-symbol module metadata is also cloned,
 // except that authored module.import operations are replaced by the exact
 // |provider_imports| projection. |provider_imports| must use the compact
-// module's dense symbol ordinal domain. The linker retains no pointers into any
-// source storage after this call returns.
+// module's dense symbol ordinal domain. When |out_target_symbols| is non-empty
+// it must have one entry per source symbol and receives the corresponding
+// stable linked-module references. The linker retains no pointers into any
+// source or output storage after this call returns.
 iree_status_t loom_linker_add_exact_module(
     loom_linker_t* linker, const loom_module_t* source_module,
-    loom_linker_source_provider_import_list_t provider_imports);
+    loom_linker_source_provider_import_list_t provider_imports,
+    loom_linker_target_symbol_list_t out_target_symbols);
 
 // Finalizes explicit output |root_symbols| after all modules have been added.
 //

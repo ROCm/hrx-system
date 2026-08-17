@@ -572,6 +572,8 @@ _VALID_SYMBOL_INTERFACES = frozenset(
     {
         "func_like",
         "callable",
+        "template_family",
+        "template_provider",
         "global",
         "executable",
         "record",
@@ -4851,6 +4853,8 @@ class CallLikeKind(Enum):
     # Command-program invocation edge. Its operands are staged specialization
     # values followed by issue-time buffer bindings.
     COMMAND_PROGRAM = "command_program"
+    # Exact compile-time template implementation call.
+    TEMPLATE = "template"
 
 
 class InlinePolicy(Enum):
@@ -4947,9 +4951,9 @@ class FuncLikeInterface(NamedTuple):
     # Region name for the function body. None for bodyless ops that
     # only declare a signature without providing an implementation.
     body: str | None = None
-    # String attr naming the abstract op this function implements
-    # (for template/ukernel dispatch). None for def/decl.
-    implements: str | None = None
+    # Symbol attr naming the template family implemented by this function.
+    # None for function kinds that are not template providers.
+    template_family: str | None = None
     # I64 attr for dispatch priority among competing implementations.
     # None for def/decl.
     priority: str | None = None

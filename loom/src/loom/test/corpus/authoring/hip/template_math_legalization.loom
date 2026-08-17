@@ -14,10 +14,12 @@
 // Loom spelling: keep the semantic operation in the provider. The target
 // pipeline selects and materializes this body before legalizing `expf` to the
 // target's supported operation and approximation policy.
-func.template<hip.recipe.exp_f32> device @exp_f32_provider(%scalar: f32, %values: vector<4xf32>) -> (f32, vector<4xf32>) {
+template.decl @hip.recipe.exp_f32(%scalar: f32, %values: vector<4xf32>) -> (f32, vector<4xf32>)
+
+template.def<@hip.recipe.exp_f32> device @exp_f32_provider(%scalar: f32, %values: vector<4xf32>) -> (f32, vector<4xf32>) {
   %scalar_result = scalar.expf<afn> %scalar : f32
   %vector_result = vector.expf<afn> %values : vector<4xf32>
-  func.return %scalar_result, %vector_result : f32, vector<4xf32>
+  template.return %scalar_result, %vector_result : f32, vector<4xf32>
 }
 
 kernel.def @template_math_legalization() {
@@ -33,7 +35,7 @@ kernel.def @template_math_legalization() {
   %vector_output_view = buffer.view %vector_output_noalias[%base] : buffer -> view<4xf32>
   %scalar = view.load %scalar_input_view[%element_index] : view<1xf32> -> f32
   %values = vector.load %vector_input_view[%element_index] : view<4xf32> -> vector<4xf32>
-  %scalar_result, %vector_result = func.apply<hip.recipe.exp_f32>(%scalar, %values) : (f32, vector<4xf32>) -> (f32, vector<4xf32>)
+  %scalar_result, %vector_result = template.apply<@hip.recipe.exp_f32>(%scalar, %values) : (f32, vector<4xf32>) -> (f32, vector<4xf32>)
   view.store %scalar_result, %scalar_output_view[%element_index] : f32, view<1xf32>
   vector.store %vector_result, %vector_output_view[%element_index] : vector<4xf32>, view<4xf32>
   kernel.return

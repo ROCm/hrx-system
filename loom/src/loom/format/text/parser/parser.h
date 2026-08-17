@@ -41,8 +41,9 @@ typedef struct loom_text_parse_options_t {
 // (same .rodata tables the printer uses). Two arenas: module arena
 // (persistent IR), parser arena (transient scope/accumulator storage).
 // Symbol references may precede their declaration or definition within the
-// source, but a clean parse never exposes an unresolved symbol-table entry.
-// Missing declarations or definitions produce ERR_SYMBOL_002.
+// source. An unresolved symbol is retained when availability metadata names an
+// external source that may provide it; otherwise a missing declaration or
+// definition produces ERR_SYMBOL_002.
 //
 // Security model: input is untrusted. Every token, integer, and index
 // is validated before use. Failures produce structured diagnostics

@@ -19,6 +19,7 @@
 #include "loom/ops/func/ops.h"
 #include "loom/ops/module/ops.h"
 #include "loom/ops/op_defs.h"
+#include "loom/ops/template/ops.h"
 #include "loom/rewrite/materialize.h"
 #include "loom/rewrite/remap.h"
 #include "loom/util/walk.h"
@@ -965,6 +966,11 @@ static iree_status_t loom_link_merge_func_contract(
           .field_name = IREE_SV("target"),
       },
       {
+          .source_attr_index = source_func.vtable->requires_attr_index,
+          .target_attr_index = target_func.vtable->requires_attr_index,
+          .field_name = IREE_SV("requires"),
+      },
+      {
           .source_attr_index = source_func.vtable->repr_contract_attr_index,
           .target_attr_index = target_func.vtable->repr_contract_attr_index,
           .field_name = IREE_SV("repr_contract"),
@@ -1000,8 +1006,8 @@ static iree_status_t loom_link_merge_func_contract(
           .field_name = IREE_SV("predicates"),
       },
       {
-          .source_attr_index = source_func.vtable->implements_attr_index,
-          .target_attr_index = target_func.vtable->implements_attr_index,
+          .source_attr_index = source_func.vtable->template_family_attr_index,
+          .target_attr_index = target_func.vtable->template_family_attr_index,
           .field_name = IREE_SV("implements"),
       },
       {
@@ -1342,32 +1348,42 @@ static iree_status_t loom_linker_mark_source_symbol_live(
   return iree_ok_status();
 }
 
-static bool loom_linker_source_symbol_is_func_provider(
+static bool loom_linker_source_symbol_is_template_provider(
     const loom_symbol_t* symbol) {
-  return symbol && (symbol->kind == LOOM_SYMBOL_FUNC_TEMPLATE ||
-                    symbol->kind == LOOM_SYMBOL_FUNC_UKERNEL);
+  return symbol && (symbol->kind == LOOM_SYMBOL_TEMPLATE_DEF ||
+                    symbol->kind == LOOM_SYMBOL_TEMPLATE_UKERNEL);
 }
 
-static iree_status_t loom_linker_mark_contract_providers_live(
-    loom_linker_source_t* source, iree_string_view_t contract) {
-  if (iree_string_view_is_empty(contract)) return iree_ok_status();
+static iree_status_t loom_linker_mark_template_providers_live(
+    loom_linker_source_t* source, iree_string_view_t family_name) {
+  if (iree_string_view_is_empty(family_name)) {
+    return iree_ok_status();
+  }
   for (uint16_t symbol_id = 0; symbol_id < source->source_symbol_count;
        ++symbol_id) {
     const loom_symbol_t* symbol = &source->module->symbols.entries[symbol_id];
-    if (!loom_linker_source_symbol_is_func_provider(symbol)) continue;
+    if (!loom_linker_source_symbol_is_template_provider(symbol)) {
+      continue;
+    }
     loom_func_like_t provider =
         loom_func_like_cast(source->module, symbol->defining_op);
     if (!loom_func_like_isa(provider)) continue;
 
-    const loom_string_id_t contract_id = loom_func_like_implements(provider);
-    if (contract_id == LOOM_STRING_ID_INVALID ||
-        contract_id >= source->module->strings.count) {
+    const loom_symbol_ref_t family = loom_func_like_template_family(provider);
+    if (!loom_symbol_ref_is_valid(family) || family.module_id != 0 ||
+        family.symbol_id >= source->module->symbols.count) {
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "func provider symbol has an invalid "
-                              "implementation contract key");
+                              "template provider has an invalid family symbol");
     }
-    if (!iree_string_view_equal(source->module->strings.entries[contract_id],
-                                contract)) {
+    const loom_symbol_t* family_symbol =
+        &source->module->symbols.entries[family.symbol_id];
+    if (family_symbol->name_id >= source->module->strings.count) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "template family symbol has an invalid name");
+    }
+    if (!iree_string_view_equal(
+            source->module->strings.entries[family_symbol->name_id],
+            family_name)) {
       continue;
     }
     IREE_RETURN_IF_ERROR(
@@ -1380,7 +1396,7 @@ typedef struct loom_linker_apply_dependency_walk_t {
   // Source module currently being selectively linked.
   loom_linker_source_t* source;
 
-  // Module containing the func.apply operations being scanned.
+  // Module containing the template.apply operations being scanned.
   const loom_module_t* apply_module;
 } loom_linker_apply_dependency_walk_t;
 
@@ -1389,19 +1405,27 @@ static iree_status_t loom_linker_visit_apply_dependency(
     loom_walk_result_t* out_result) {
   (void)context;
   *out_result = LOOM_WALK_CONTINUE;
-  if (!loom_func_apply_isa(op)) return iree_ok_status();
+  if (!loom_template_apply_isa(op)) {
+    return iree_ok_status();
+  }
 
   loom_linker_apply_dependency_walk_t* walk =
       (loom_linker_apply_dependency_walk_t*)user_data;
   loom_linker_source_t* source = walk->source;
-  const loom_string_id_t contract_id = loom_func_apply_contract(op);
-  if (contract_id == LOOM_STRING_ID_INVALID ||
-      contract_id >= walk->apply_module->strings.count) {
+  const loom_symbol_ref_t family = loom_template_apply_family(op);
+  if (!loom_symbol_ref_is_valid(family) || family.module_id != 0 ||
+      family.symbol_id >= walk->apply_module->symbols.count) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "func.apply has an invalid contract string id");
+                            "template.apply has an invalid family symbol");
   }
-  return loom_linker_mark_contract_providers_live(
-      source, walk->apply_module->strings.entries[contract_id]);
+  const loom_symbol_t* family_symbol =
+      &walk->apply_module->symbols.entries[family.symbol_id];
+  if (family_symbol->name_id >= walk->apply_module->strings.count) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "template family symbol has an invalid name");
+  }
+  return loom_linker_mark_template_providers_live(
+      source, walk->apply_module->strings.entries[family_symbol->name_id]);
 }
 
 static iree_status_t loom_linker_mark_function_apply_dependencies_live(
@@ -1848,7 +1872,16 @@ iree_status_t loom_linker_add_module(loom_linker_t* linker,
 static iree_status_t loom_linker_add_exact_selection(
     loom_linker_t* linker, const loom_module_t* source_module,
     loom_linker_exact_selection_t selection,
-    loom_linker_source_provider_import_list_t provider_imports) {
+    loom_linker_source_provider_import_list_t provider_imports,
+    loom_linker_target_symbol_list_t out_target_symbols) {
+  if (out_target_symbols.count != 0 &&
+      (out_target_symbols.count != selection.count ||
+       out_target_symbols.values == NULL)) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "target symbol output has %zu entries but selection has %zu",
+        out_target_symbols.count, selection.count);
+  }
   iree_arena_allocator_t source_arena;
   iree_arena_initialize(linker->block_pool, &source_arena);
   loom_linker_source_t source = {
@@ -1864,7 +1897,9 @@ static iree_status_t loom_linker_add_exact_selection(
       &source);
 
   iree_status_t status = iree_ok_status();
-  if (source.exact.count > 0) {
+  if (out_target_symbols.count > 0) {
+    source.target_symbols = out_target_symbols.values;
+  } else if (source.exact.count > 0) {
     status = iree_arena_allocate_array(&source_arena, source.exact.count,
                                        sizeof(*source.target_symbols),
                                        (void**)&source.target_symbols);
@@ -1949,28 +1984,27 @@ static iree_status_t loom_linker_add_exact_selection(
 iree_status_t loom_linker_add_module_symbols(
     loom_linker_t* linker, const loom_module_t* source_module,
     loom_linker_source_symbol_list_t source_symbols,
-    loom_linker_source_provider_import_list_t provider_imports) {
+    loom_linker_source_provider_import_list_t provider_imports,
+    loom_linker_target_symbol_list_t out_target_symbols) {
   IREE_RETURN_IF_ERROR(
       loom_linker_validate_source_module(linker, source_module));
   IREE_RETURN_IF_ERROR(
       loom_linker_validate_source_symbols(source_module, source_symbols));
   IREE_RETURN_IF_ERROR(loom_linker_validate_source_provider_imports(
       linker, source_module, provider_imports));
-  if (source_symbols.count == 0 && provider_imports.count == 0) {
-    return iree_ok_status();
-  }
   return loom_linker_add_exact_selection(
       linker, source_module,
       (loom_linker_exact_selection_t){
           .ordinals = source_symbols.ordinals,
           .count = source_symbols.count,
       },
-      provider_imports);
+      provider_imports, out_target_symbols);
 }
 
 iree_status_t loom_linker_add_exact_module(
     loom_linker_t* linker, const loom_module_t* source_module,
-    loom_linker_source_provider_import_list_t provider_imports) {
+    loom_linker_source_provider_import_list_t provider_imports,
+    loom_linker_target_symbol_list_t out_target_symbols) {
   IREE_RETURN_IF_ERROR(
       loom_linker_validate_source_module(linker, source_module));
   IREE_RETURN_IF_ERROR(loom_linker_validate_source_provider_imports(
@@ -1981,7 +2015,7 @@ iree_status_t loom_linker_add_exact_module(
           .count = source_module->symbols.count,
           .dense = true,
       },
-      provider_imports);
+      provider_imports, out_target_symbols);
 }
 
 iree_status_t loom_linker_finalize_roots(loom_linker_t* linker,

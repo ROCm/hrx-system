@@ -93,6 +93,7 @@ void loom_bytecode_selected_table_materializer_initialize(
     loom_bytecode_reader_decoder_t* decoder, iree_const_byte_span_t bytecode,
     loom_context_t* context, const loom_bytecode_module_metadata_t* metadata,
     iree_arena_allocator_t* scratch_arena, loom_module_t* output_module,
+    loom_bytecode_selected_symbol_resolver_t symbol_resolver,
     iree_allocator_t allocator,
     loom_bytecode_selected_table_materializer_t* out_materializer) {
   *out_materializer = (loom_bytecode_selected_table_materializer_t){
@@ -102,6 +103,7 @@ void loom_bytecode_selected_table_materializer_initialize(
       .metadata = metadata,
       .scratch_arena = scratch_arena,
       .output_module = output_module,
+      .symbol_resolver = symbol_resolver,
       .allocator = allocator,
   };
   loom_bytecode_selected_projection_initialize(allocator,
@@ -150,6 +152,40 @@ bool loom_bytecode_selected_table_lookup_symbol(
       .symbol_id = (uint16_t)target_symbol_id,
   };
   return true;
+}
+
+iree_status_t loom_bytecode_selected_table_resolve_symbol(
+    loom_bytecode_selected_table_materializer_t* materializer,
+    uint32_t source_name_ordinal, loom_symbol_ref_t* out_target_symbol_ref,
+    bool* out_found) {
+  *out_target_symbol_ref = loom_symbol_ref_null();
+  *out_found = loom_bytecode_selected_table_lookup_symbol(
+      materializer, source_name_ordinal, out_target_symbol_ref);
+  if (*out_found || materializer->symbol_resolver.fn == NULL) {
+    return iree_ok_status();
+  }
+
+  uint32_t source_symbol_ordinal = UINT32_MAX;
+  if (!loom_bytecode_module_metadata_lookup_symbol_ordinal(
+          materializer->metadata, source_name_ordinal,
+          &source_symbol_ordinal)) {
+    return iree_ok_status();
+  }
+  loom_symbol_ref_t target_ref = loom_symbol_ref_null();
+  IREE_RETURN_IF_ERROR(
+      materializer->symbol_resolver.fn(materializer->symbol_resolver.user_data,
+                                       source_symbol_ordinal, &target_ref));
+  if (!loom_symbol_ref_is_valid(target_ref) || target_ref.module_id != 0 ||
+      target_ref.symbol_id >= materializer->output_module->symbols.count) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "external bytecode symbol resolver returned an "
+                            "invalid output-module reference");
+  }
+  IREE_RETURN_IF_ERROR(loom_bytecode_selected_table_bind_symbol(
+      materializer, source_name_ordinal, target_ref.symbol_id));
+  *out_target_symbol_ref = target_ref;
+  *out_found = true;
+  return iree_ok_status();
 }
 
 iree_status_t loom_bytecode_selected_table_project_encoding(

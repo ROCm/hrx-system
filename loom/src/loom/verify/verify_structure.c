@@ -301,7 +301,7 @@ static bool loom_verify_has_deferred_required_ancestor(
     const loom_op_vtable_t* parent_vtable =
         loom_context_resolve_op(state->module->context, parent->kind);
     if (parent_vtable &&
-        parent_vtable->symbol_kind == LOOM_SYMBOL_FUNC_TEMPLATE) {
+        parent_vtable->symbol_kind == LOOM_SYMBOL_TEMPLATE_DEF) {
       return true;
     }
     if (parent_vtable && parent_vtable->func_like) {
@@ -1730,6 +1730,141 @@ void loom_verify_block_arg_encoding_refs(loom_verify_state_t* state,
   }
 }
 
+static void loom_verify_record_available_symbol(loom_verify_state_t* state,
+                                                loom_symbol_ref_t ref) {
+  if (!loom_symbol_ref_is_valid(ref) || ref.module_id != 0 ||
+      ref.symbol_id >= state->module->symbols.count) {
+    return;
+  }
+  loom_bitset_set(state->available_symbols.bits,
+                  state->available_symbols.word_count, ref.symbol_id);
+}
+
+static void loom_verify_collect_available_symbols_from_attr(
+    loom_verify_state_t* state, const loom_attr_descriptor_t* descriptor,
+    loom_attribute_t attr, uint8_t aggregate_depth) {
+  switch ((loom_attr_kind_t)attr.kind) {
+    case LOOM_ATTR_SYMBOL:
+      if (descriptor && descriptor->attr_kind == LOOM_ATTR_SYMBOL &&
+          descriptor->reference.symbol_ref &&
+          descriptor->reference.symbol_ref->role ==
+              LOOM_SYMBOL_REFERENCE_ROLE_AVAILABILITY) {
+        loom_verify_record_available_symbol(state, loom_attr_as_symbol(attr));
+      }
+      return;
+    case LOOM_ATTR_SYMBOL_ARRAY:
+    case LOOM_ATTR_SYMBOL_SET: {
+      if (!descriptor || descriptor->attr_kind != attr.kind ||
+          !descriptor->reference.symbol_ref ||
+          descriptor->reference.symbol_ref->role !=
+              LOOM_SYMBOL_REFERENCE_ROLE_AVAILABILITY) {
+        return;
+      }
+      loom_symbol_ref_array_t refs = attr.kind == LOOM_ATTR_SYMBOL_SET
+                                         ? loom_attr_as_symbol_set(attr)
+                                         : loom_attr_as_symbol_array(attr);
+      if (refs.count > 0 && !refs.values) {
+        return;
+      }
+      for (uint16_t i = 0; i < refs.count; ++i) {
+        loom_verify_record_available_symbol(state, refs.values[i]);
+      }
+      return;
+    }
+    case LOOM_ATTR_PARAMETERIZED: {
+      if (aggregate_depth >= LOOM_ATTR_AGGREGATE_MAX_NESTING_DEPTH ||
+          (attr.count > 0 && !attr.parameterized_slots)) {
+        return;
+      }
+      const loom_parameterized_attr_descriptor_t* family_descriptor =
+          loom_context_resolve_parameterized_attr(
+              state->module->context, loom_attr_as_parameterized_kind(attr));
+      if (!family_descriptor ||
+          attr.count != family_descriptor->parameter_count) {
+        return;
+      }
+      for (uint16_t i = 0; i < attr.count; ++i) {
+        loom_verify_collect_available_symbols_from_attr(
+            state, &family_descriptor->parameter_descriptors[i],
+            attr.parameterized_slots[i], (uint8_t)(aggregate_depth + 1));
+      }
+      return;
+    }
+    case LOOM_ATTR_PARAMETERIZED_ARRAY:
+      if (aggregate_depth >= LOOM_ATTR_AGGREGATE_MAX_NESTING_DEPTH ||
+          (attr.count > 0 && !attr.parameterized_array)) {
+        return;
+      }
+      for (uint16_t i = 0; i < attr.count; ++i) {
+        loom_verify_collect_available_symbols_from_attr(
+            state, /*descriptor=*/NULL, attr.parameterized_array[i],
+            (uint8_t)(aggregate_depth + 1));
+      }
+      return;
+    default:
+      return;
+  }
+}
+
+static void loom_verify_collect_available_symbols_from_op(
+    loom_verify_state_t* state, const loom_op_t* op) {
+  const loom_op_vtable_t* vtable = loom_verify_lookup_vtable(state, op->kind);
+  if (vtable && vtable->attr_descriptors) {
+    const loom_attribute_t* attrs = loom_op_const_attrs(op);
+    const uint8_t attribute_count =
+        op->attribute_count < vtable->attribute_count ? op->attribute_count
+                                                      : vtable->attribute_count;
+    for (uint8_t i = 0; i < attribute_count; ++i) {
+      loom_verify_collect_available_symbols_from_attr(
+          state, &vtable->attr_descriptors[i], attrs[i],
+          /*aggregate_depth=*/0);
+    }
+  }
+
+  loom_region_t* const* regions = loom_op_regions(op);
+  for (uint8_t region_index = 0; region_index < op->region_count;
+       ++region_index) {
+    const loom_region_t* region = regions[region_index];
+    if (!region || (region->block_count > 0 && !region->blocks)) {
+      continue;
+    }
+    const loom_block_t* block = NULL;
+    loom_region_for_each_block(region, block) {
+      const loom_op_t* child_op = NULL;
+      loom_block_for_each_op(block, child_op) {
+        loom_verify_collect_available_symbols_from_op(state, child_op);
+      }
+    }
+  }
+}
+
+iree_status_t loom_verify_prepare_available_symbols(
+    loom_verify_state_t* state) {
+  state->available_symbols.word_count =
+      loom_bitset_word_count(state->module->symbols.count);
+  if (state->available_symbols.word_count == 0) {
+    return iree_ok_status();
+  }
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      &state->arena, state->available_symbols.word_count,
+      sizeof(*state->available_symbols.bits),
+      (void**)&state->available_symbols.bits));
+  memset(state->available_symbols.bits, 0,
+         state->available_symbols.word_count *
+             sizeof(*state->available_symbols.bits));
+
+  if (!state->module->body || state->module->body->block_count == 0) {
+    return iree_ok_status();
+  }
+  const loom_block_t* entry =
+      loom_region_const_entry_block(state->module->body);
+  const loom_op_t* op = NULL;
+  loom_block_for_each_op(entry, op) {
+    loom_verify_collect_available_symbols_from_op(state, op);
+  }
+  return iree_ok_status();
+}
+
 static void loom_verify_symbol_reference(
     loom_verify_state_t* state, const loom_op_t* op,
     const loom_symbol_reference_descriptor_t* reference_descriptor,
@@ -1759,6 +1894,18 @@ static void loom_verify_symbol_reference(
   if (symbol->definition == NULL || symbol->defining_op == NULL) {
     if (reference_descriptor &&
         reference_descriptor->role == LOOM_SYMBOL_REFERENCE_ROLE_AVAILABILITY) {
+      return;
+    }
+    // Template families are authored contracts, not discoverable
+    // implementations. Every module that applies or implements a family must
+    // carry its declaration so library placement never controls matching.
+    const bool requires_local_definition =
+        reference_descriptor &&
+        iree_any_bit_set(reference_descriptor->interfaces,
+                         LOOM_SYMBOL_INTERFACE_TEMPLATE_FAMILY);
+    if (!requires_local_definition && state->available_symbols.bits &&
+        loom_bitset_test(state->available_symbols.bits,
+                         state->available_symbols.word_count, ref.symbol_id)) {
       return;
     }
     loom_diagnostic_param_t params[] = {

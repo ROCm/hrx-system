@@ -78,19 +78,23 @@ loom-link model.loom \
   --output=elementwise-transform.loom
 ```
 
-This is the exact composition exercised by the [source-to-artifacts
-walkthrough](../getting-started/source-to-artifacts.md#follow-one-composition-to-low).
-`@elementwise_transform` reaches its declared kernel and the template providers
-needed for `guide.elementwise_transform`; unrelated private symbols can
-disappear.
+This produces a closed program for the facts known at the link boundary. In
+the targetless `elementwise-transform` example it selects the portable provider
+and discards the unresolved wave32 alternative. When target facts arrive only
+at compilation, the [source-to-artifacts
+walkthrough](../getting-started/source-to-artifacts.md#follow-one-composition-to-low)
+uses archive mode instead and lets `loom-compile` perform the target-aware
+selection. In either mode, unrelated private symbols can disappear as soon as
+the chosen boundary no longer needs them.
 
 Repeated `--root=@symbol` options select several roots from one catalog. Add
 `--include-exported-roots` when the module's exported symbols should join the
 explicit root set.
 
-Configuration bindings are applied to each materialized input before dependency
-walking. This lets value and target predicates eliminate provider alternatives
-whose requirements are impossible for the selected configuration:
+Configuration bindings are applied to the composed analysis module before each
+reachability and template-selection step. This lets newly reachable code expose
+additional demands while value and target predicates eliminate provider
+alternatives that are impossible for the selected configuration:
 
 ```shell
 loom-link root.loom \
@@ -165,10 +169,12 @@ later invocation can use `partial.loombc` as its positional input and supply the
 remaining paths with `--library`. The linker does not chase a filesystem import
 graph or silently add a missing module.
 
-`func.apply` follows the parallel contract-provider model. A library makes
-provider candidates visible; specialization selects an eligible provider from
-the explicit set. The source path and library order never stand in for matching
-rules.
+`template.apply` follows the parallel family-provider model. The using module
+declares the family with `template.decl`; each explicitly supplied library may
+repeat that declaration and contribute providers. Specialization selects an
+eligible provider from that explicit universe. `module.import` is not used for
+template families, and source path and library order never stand in for
+matching rules.
 
 ## Choose the output for the next boundary
 

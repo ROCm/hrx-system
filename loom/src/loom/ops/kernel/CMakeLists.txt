@@ -48,6 +48,7 @@ loom_generated_cc_library(
     loom::ops::op_defs
     loom::ops::scf
     loom::ops::target
+    loom::ops::template
     loom::ops::view
     loom::rewrite::rewriter
     loom::target::facts

@@ -262,7 +262,7 @@ def generate_ops_h(
 
     # Enum attr C enums. When the same EnumDef object is shared by
     # multiple ops (e.g., CallingConv used by func.def, func.decl,
-    # func.template, func.ukernel), emit it once with a dialect-level
+    # template.def, template.ukernel), emit it once with a dialect-level
     # name (loom_func_cc_t) instead of duplicating per-op.
     open_enum_ids = {
         id(attr_def.enum_def) for op in ops for attr_def in op.attrs if (attr_def.attr_type in ("enum", "enum_array", "signed_enum_set") and attr_def.open_enum and attr_def.enum_def is not None)

@@ -344,7 +344,7 @@ typedef struct loom_bytecode_symbol_reference_table_t {
   // Declared dependency occurrence count.
   iree_host_size_t dependency_count;
   // Declared abstract provider demand occurrence count.
-  iree_host_size_t contract_demand_count;
+  iree_host_size_t template_demand_count;
 } loom_bytecode_symbol_reference_table_t;
 
 static inline iree_status_t loom_bytecode_reader_begin_symbol_references(
@@ -360,13 +360,13 @@ static inline iree_status_t loom_bytecode_reader_begin_symbol_references(
       loom_bytecode_reader_cursor_absolute_position(&table.cursor);
   uint64_t symbol_count = 0;
   uint64_t dependency_count = 0;
-  uint64_t contract_demand_count = 0;
+  uint64_t template_demand_count = 0;
   IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_uvarint(
       &reader->decoder, &table.cursor, &symbol_count));
   IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_uvarint(
       &reader->decoder, &table.cursor, &dependency_count));
   IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_uvarint(
-      &reader->decoder, &table.cursor, &contract_demand_count));
+      &reader->decoder, &table.cursor, &template_demand_count));
   if (symbol_count != reader->view.symbols.count) {
     return loom_bytecode_reader_emit_invalid_field(
         &reader->decoder, IREE_SV("SYMBOL_REFERENCES"), IREE_SV("header"), 0,
@@ -379,18 +379,30 @@ static inline iree_status_t loom_bytecode_reader_begin_symbol_references(
         IREE_SV("total_dependency_count"), table.header_offset,
         IREE_SV("dependency_count_exceeds_index_width"));
   }
-  if (contract_demand_count > UINT32_MAX ||
-      contract_demand_count > IREE_HOST_SIZE_MAX) {
+  if (template_demand_count > UINT32_MAX ||
+      template_demand_count > IREE_HOST_SIZE_MAX) {
     return loom_bytecode_reader_emit_invalid_field(
         &reader->decoder, IREE_SV("SYMBOL_REFERENCES"), IREE_SV("header"), 0,
-        IREE_SV("total_contract_demand_count"), table.header_offset,
-        IREE_SV("contract_demand_count_exceeds_index_width"));
+        IREE_SV("total_template_demand_count"), table.header_offset,
+        IREE_SV("template_demand_count_exceeds_index_width"));
   }
 
   // Every row count and referenced ordinal consumes at least one byte. Bound
   // retained allocations by the section payload before allocating them.
-  const uint64_t minimum_encoded_bytes =
-      1 + symbol_count * 2 + dependency_count + contract_demand_count;
+  iree_host_size_t minimum_encoded_bytes = 0;
+  if (!iree_host_size_checked_mul_add(1, (iree_host_size_t)symbol_count, 2,
+                                      &minimum_encoded_bytes) ||
+      !iree_host_size_checked_add(minimum_encoded_bytes,
+                                  (iree_host_size_t)dependency_count,
+                                  &minimum_encoded_bytes) ||
+      !iree_host_size_checked_add(minimum_encoded_bytes,
+                                  (iree_host_size_t)template_demand_count,
+                                  &minimum_encoded_bytes)) {
+    return loom_bytecode_reader_emit_invalid_field(
+        &reader->decoder, IREE_SV("SYMBOL_REFERENCES"), IREE_SV("header"), 0,
+        IREE_SV("record_counts"), table.header_offset,
+        IREE_SV("declared_reference_records_exceed_host_size"));
+  }
   if (minimum_encoded_bytes >
       loom_bytecode_cursor_remaining(&table.cursor.cursor)) {
     return loom_bytecode_reader_emit_invalid_field(
@@ -401,7 +413,7 @@ static inline iree_status_t loom_bytecode_reader_begin_symbol_references(
 
   table.symbol_count = (iree_host_size_t)symbol_count;
   table.dependency_count = (iree_host_size_t)dependency_count;
-  table.contract_demand_count = (iree_host_size_t)contract_demand_count;
+  table.template_demand_count = (iree_host_size_t)template_demand_count;
   *out_table = table;
   return iree_ok_status();
 }
@@ -426,38 +438,33 @@ static inline iree_status_t loom_bytecode_reader_decode_dependency(
   return iree_ok_status();
 }
 
-static inline iree_status_t loom_bytecode_reader_decode_contract_demand(
+static inline iree_status_t loom_bytecode_reader_decode_template_demand(
     loom_bytecode_module_reader_t* reader,
     loom_bytecode_symbol_reference_table_t* table,
-    iree_string_view_t* out_contract) {
-  const uint64_t contract_offset =
-      loom_bytecode_reader_cursor_absolute_position(&table->cursor);
-  uint64_t contract_string_id = 0;
-  IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_uvarint(
-      &reader->decoder, &table->cursor, &contract_string_id));
-  return loom_bytecode_reader_validate_string_ref(
-      reader, contract_string_id, IREE_SV("contract_string_id"),
-      contract_offset, out_contract);
+    iree_host_size_t demand_index, uint32_t* out_family_symbol_ordinal) {
+  return loom_bytecode_reader_decode_dependency(
+      reader, table, IREE_SV("template_demand"), demand_index,
+      out_family_symbol_ordinal);
 }
 
 static inline iree_status_t loom_bytecode_reader_finish_symbol_references(
     loom_bytecode_module_reader_t* reader,
     loom_bytecode_symbol_reference_table_t* table,
-    iree_host_size_t dependency_index, iree_host_size_t contract_demand_index) {
+    iree_host_size_t dependency_index, iree_host_size_t template_demand_index) {
   if (dependency_index != table->dependency_count) {
     return loom_bytecode_reader_emit_invalid_field(
         &reader->decoder, IREE_SV("SYMBOL_REFERENCES"), IREE_SV("header"), 0,
         IREE_SV("total_dependency_count"), table->header_offset,
         IREE_SV("dependency_records_do_not_match_declared_total"));
   }
-  if (contract_demand_index != table->contract_demand_count) {
+  if (template_demand_index != table->template_demand_count) {
     return loom_bytecode_reader_emit_invalid_field(
         &reader->decoder, IREE_SV("SYMBOL_REFERENCES"), IREE_SV("header"), 0,
-        IREE_SV("total_contract_demand_count"), table->header_offset,
-        IREE_SV("contract_records_do_not_match_declared_total"));
+        IREE_SV("total_template_demand_count"), table->header_offset,
+        IREE_SV("template_demand_records_do_not_match_declared_total"));
   }
   reader->view.summary.dependency_count = table->dependency_count;
-  reader->view.summary.contract_demand_count = table->contract_demand_count;
+  reader->view.summary.template_demand_count = table->template_demand_count;
   return loom_bytecode_reader_expect_empty(&reader->decoder, &table->cursor,
                                            IREE_SV("SYMBOL_REFERENCES"));
 }
@@ -489,7 +496,7 @@ static iree_status_t loom_bytecode_reader_read_symbol_references(
         reader, &table, IREE_SV("module_dependency"), i, &dependency));
   }
 
-  iree_host_size_t contract_demand_index = 0;
+  iree_host_size_t template_demand_index = 0;
   for (iree_host_size_t symbol_index = 0; symbol_index < table.symbol_count;
        ++symbol_index) {
     const uint64_t dependency_count_offset =
@@ -510,27 +517,29 @@ static iree_status_t loom_bytecode_reader_read_symbol_references(
           reader, &table, IREE_SV("dependency"), i, &dependency));
     }
 
-    const uint64_t contract_count_offset =
+    const uint64_t template_demand_count_offset =
         loom_bytecode_reader_cursor_absolute_position(&table.cursor);
-    uint64_t contract_count = 0;
+    uint64_t template_demand_count = 0;
     IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_uvarint(
-        &reader->decoder, &table.cursor, &contract_count));
-    if (contract_count > table.contract_demand_count - contract_demand_index) {
+        &reader->decoder, &table.cursor, &template_demand_count));
+    if (template_demand_count >
+        table.template_demand_count - template_demand_index) {
       return loom_bytecode_reader_emit_invalid_field(
           &reader->decoder, IREE_SV("SYMBOL_REFERENCES"), IREE_SV("symbol"),
-          symbol_index, IREE_SV("contract_demand_count"), contract_count_offset,
-          IREE_SV("row_contract_count_exceeds_declared_total"));
+          symbol_index, IREE_SV("template_demand_count"),
+          template_demand_count_offset,
+          IREE_SV("row_template_demand_count_exceeds_declared_total"));
     }
-    for (iree_host_size_t i = 0; i < (iree_host_size_t)contract_count;
-         ++i, ++contract_demand_index) {
-      iree_string_view_t contract = iree_string_view_empty();
-      IREE_RETURN_IF_ERROR(loom_bytecode_reader_decode_contract_demand(
-          reader, &table, &contract));
+    for (iree_host_size_t i = 0; i < (iree_host_size_t)template_demand_count;
+         ++i, ++template_demand_index) {
+      uint32_t family_symbol_ordinal = 0;
+      IREE_RETURN_IF_ERROR(loom_bytecode_reader_decode_template_demand(
+          reader, &table, template_demand_index, &family_symbol_ordinal));
     }
   }
 
   return loom_bytecode_reader_finish_symbol_references(
-      reader, &table, dependency_index, contract_demand_index);
+      reader, &table, dependency_index, template_demand_index);
 }
 
 static iree_status_t loom_bytecode_reader_validate_file_header(
@@ -1039,7 +1048,7 @@ static iree_status_t loom_bytecode_reader_index_symbol_references(
       loom_bytecode_reader_begin_symbol_references(reader, section, &table));
 
   metadata->dependency_count = table.dependency_count;
-  metadata->contract_demand_count = table.contract_demand_count;
+  metadata->template_demand_count = table.template_demand_count;
   if (table.symbol_count > 0) {
     IREE_RETURN_IF_ERROR(
         iree_arena_allocate_array(retained_arena, table.symbol_count,
@@ -1052,11 +1061,11 @@ static iree_status_t loom_bytecode_reader_index_symbol_references(
         sizeof(*metadata->dependency_symbol_indices),
         (void**)&metadata->dependency_symbol_indices));
   }
-  if (table.contract_demand_count > 0) {
-    IREE_RETURN_IF_ERROR(
-        iree_arena_allocate_array(retained_arena, table.contract_demand_count,
-                                  sizeof(*metadata->contract_demands),
-                                  (void**)&metadata->contract_demands));
+  if (table.template_demand_count > 0) {
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        retained_arena, table.template_demand_count,
+        sizeof(*metadata->template_demand_family_symbol_ordinals),
+        (void**)&metadata->template_demand_family_symbol_ordinals));
   }
 
   const uint64_t module_dependency_count_offset =
@@ -1080,7 +1089,7 @@ static iree_status_t loom_bytecode_reader_index_symbol_references(
         &metadata->dependency_symbol_indices[dependency_index]));
   }
 
-  iree_host_size_t contract_demand_index = 0;
+  iree_host_size_t template_demand_index = 0;
   for (iree_host_size_t symbol_index = 0; symbol_index < table.symbol_count;
        ++symbol_index) {
     const uint64_t dependency_count_offset =
@@ -1105,28 +1114,32 @@ static iree_status_t loom_bytecode_reader_index_symbol_references(
           &metadata->dependency_symbol_indices[dependency_index]));
     }
 
-    const uint64_t contract_count_offset =
+    const uint64_t template_demand_count_offset =
         loom_bytecode_reader_cursor_absolute_position(&table.cursor);
-    uint64_t contract_count = 0;
+    uint64_t template_demand_count = 0;
     IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_uvarint(
-        &reader->decoder, &table.cursor, &contract_count));
-    if (contract_count > table.contract_demand_count - contract_demand_index) {
+        &reader->decoder, &table.cursor, &template_demand_count));
+    if (template_demand_count >
+        table.template_demand_count - template_demand_index) {
       return loom_bytecode_reader_emit_invalid_field(
           &reader->decoder, IREE_SV("SYMBOL_REFERENCES"), IREE_SV("symbol"),
-          symbol_index, IREE_SV("contract_demand_count"), contract_count_offset,
-          IREE_SV("row_contract_count_exceeds_declared_total"));
+          symbol_index, IREE_SV("template_demand_count"),
+          template_demand_count_offset,
+          IREE_SV("row_template_demand_count_exceeds_declared_total"));
     }
-    row->first_contract_demand_index = (uint32_t)contract_demand_index;
-    row->contract_demand_count = (uint32_t)contract_count;
-    for (iree_host_size_t i = 0; i < (iree_host_size_t)contract_count;
-         ++i, ++contract_demand_index) {
-      IREE_RETURN_IF_ERROR(loom_bytecode_reader_decode_contract_demand(
-          reader, &table, &metadata->contract_demands[contract_demand_index]));
+    row->first_template_demand_index = (uint32_t)template_demand_index;
+    row->template_demand_count = (uint32_t)template_demand_count;
+    for (iree_host_size_t i = 0; i < (iree_host_size_t)template_demand_count;
+         ++i, ++template_demand_index) {
+      IREE_RETURN_IF_ERROR(loom_bytecode_reader_decode_template_demand(
+          reader, &table, template_demand_index,
+          &metadata->template_demand_family_symbol_ordinals
+               [template_demand_index]));
     }
   }
 
   return loom_bytecode_reader_finish_symbol_references(
-      reader, &table, dependency_index, contract_demand_index);
+      reader, &table, dependency_index, template_demand_index);
 }
 
 static iree_status_t loom_bytecode_reader_index_module(

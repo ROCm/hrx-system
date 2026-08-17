@@ -27,10 +27,10 @@ extern "C" {
 // Sentinel used when no provider/module/symbol ordinal is present.
 #define LOOM_LINK_MODULE_INDEX_INVALID_ORDINAL IREE_HOST_SIZE_MAX
 
-// Dense ordinal assigned to one implementation-contract key.
-typedef uint32_t loom_link_contract_ordinal_t;
-#define LOOM_LINK_CONTRACT_ORDINAL_INVALID \
-  ((loom_link_contract_ordinal_t)UINT32_MAX)
+// Dense ordinal assigned to one template-family key.
+typedef uint32_t loom_link_template_family_ordinal_t;
+#define LOOM_LINK_TEMPLATE_FAMILY_ORDINAL_INVALID \
+  ((loom_link_template_family_ordinal_t)UINT32_MAX)
 
 typedef struct loom_link_module_index_t loom_link_module_index_t;
 
@@ -89,7 +89,7 @@ enum loom_link_symbol_flag_bits_e {
   LOOM_LINK_SYMBOL_FLAG_IMPORT = 1u << 1,
   // Symbol is exported from its provider/module.
   LOOM_LINK_SYMBOL_FLAG_EXPORT = 1u << 2,
-  // Symbol is declaration-like and may be superseded by a concrete definition.
+  // Symbol declares an externally supplied object or compile-time contract.
   LOOM_LINK_SYMBOL_FLAG_DECLARATION = 1u << 3,
   // Symbol has materializable IR owned by its provider.
   LOOM_LINK_SYMBOL_FLAG_HAS_BODY = 1u << 4,
@@ -161,14 +161,14 @@ typedef struct loom_link_module_index_module_t {
     // Targets may repeat within a source row.
     const uint32_t* values;
   } dependencies;
-  // Abstract implementation-contract demand occurrences owned by this module.
+  // Abstract template-family demand occurrences owned by this module.
   struct {
     // Total number of occurrences.
     iree_host_size_t count;
-    // Dense index contract ordinals in deterministic demand order. Ordinals
-    // may repeat within a source row.
-    const loom_link_contract_ordinal_t* values;
-  } contract_demands;
+    // Dense index family ordinals in deterministic demand order. Ordinals may
+    // repeat within a source row.
+    const loom_link_template_family_ordinal_t* values;
+  } template_demands;
   // Compile-time provider imports and their symbol-to-import projection.
   struct {
     // Number of source provider-import records.
@@ -197,9 +197,9 @@ typedef struct loom_link_module_index_symbol_t {
   iree_string_view_t name;
   // Canonical in-memory symbol kind.
   loom_symbol_kind_t kind;
-  // Implementation-contract group for provider declarations and concrete
-  // func.template/func.ukernel providers, or INVALID when absent.
-  loom_link_contract_ordinal_t implementation_contract_ordinal;
+  // Dense family identity for template family symbols and providers, or
+  // INVALID when this symbol has no template-family role.
+  loom_link_template_family_ordinal_t template_family_ordinal;
   // Link identity class.
   loom_link_symbol_identity_t identity;
   // Linker-index symbol flags.
@@ -211,27 +211,29 @@ typedef struct loom_link_module_index_symbol_t {
     // Number of occurrences.
     uint32_t count;
   } dependencies;
-  // Slice in the owning module's flat contract-demand array.
+  // Slice in the owning module's flat template-demand array.
   struct {
     // First demand index.
     uint32_t first;
     // Number of demands.
     uint32_t count;
-  } contract_demands;
+  } template_demands;
   // Intrusive index-owned chains.
   struct {
     // Next index symbol with the same name, or INVALID_ORDINAL.
     iree_host_size_t same_name_ordinal;
-    // Next concrete provider for implementation_contract_ordinal, or invalid.
-    iree_host_size_t contract_provider_ordinal;
+    // Next concrete provider for template_family_ordinal, or invalid.
+    iree_host_size_t template_provider_ordinal;
   } next;
 } loom_link_module_index_symbol_t;
 
-// One unique abstract implementation-contract key and its provider chain.
-typedef struct loom_link_module_index_contract_t {
-  // Dense index-wide contract ordinal.
-  loom_link_contract_ordinal_t ordinal;
-  // Borrowed implementation-contract key.
+// One unique template-family symbol identity and its provider chain.
+typedef struct loom_link_module_index_template_family_t {
+  // Dense index-wide family ordinal.
+  loom_link_template_family_ordinal_t ordinal;
+  // Indexed symbol carrying this family's private or global identity.
+  iree_host_size_t identity_symbol_ordinal;
+  // Borrowed family symbol name for diagnostics.
   iree_string_view_t name;
   // Provider-symbol chain in stable index order.
   struct {
@@ -240,7 +242,7 @@ typedef struct loom_link_module_index_contract_t {
     // Last symbol ordinal, or INVALID_ORDINAL.
     iree_host_size_t last_symbol_ordinal;
   } providers;
-} loom_link_module_index_contract_t;
+} loom_link_module_index_template_family_t;
 
 // Creates an empty module index over |context|.
 //
@@ -382,14 +384,15 @@ const loom_link_module_index_symbol_t* loom_link_module_index_lookup_private(
     const loom_link_module_index_t* index,
     const loom_link_module_index_module_t* module, iree_string_view_t name);
 
-// Returns the number of unique implementation-contract keys.
-iree_host_size_t loom_link_module_index_contract_count(
+// Returns the number of unique template-family identities.
+iree_host_size_t loom_link_module_index_template_family_count(
     const loom_link_module_index_t* index);
 
-// Returns implementation contract |ordinal|, or NULL if out of range.
-const loom_link_module_index_contract_t* loom_link_module_index_contract_at(
+// Returns template family |ordinal|, or NULL if out of range.
+const loom_link_module_index_template_family_t*
+loom_link_module_index_template_family_at(
     const loom_link_module_index_t* index,
-    loom_link_contract_ordinal_t ordinal);
+    loom_link_template_family_ordinal_t ordinal);
 
 // Returns a status that names the two provider locations for a duplicate
 // global symbol. This is a diagnostic helper for planner conflict reporting.

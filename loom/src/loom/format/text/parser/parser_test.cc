@@ -1401,18 +1401,22 @@ TEST_F(ParserTest, UnresolvedSymbolReferenceIsParseError) {
   EXPECT_EQ(diagnostics[0].emitter, LOOM_EMITTER_PARSER);
 }
 
-TEST_F(ParserTest, DependencyKeepsAvailabilityPlaceholderStrict) {
-  const char* source =
+TEST_F(ParserTest, AvailabilityAuthorizesUnresolvedDependencies) {
+  loom_module_t* module = ParseOk(
       "test.func @main() {\n"
       "  test.symbol_array_attrs [] using [@missing]\n"
       "  test.symbol_array_attrs [@missing]\n"
       "  test.yield\n"
-      "}\n";
-  const auto& diagnostics = ParseExpectErrors(source);
-  ASSERT_EQ(diagnostics.size(), 1u);
-  ExpectError(diagnostics[0],
-              loom_error_def_lookup(LOOM_ERROR_DOMAIN_SYMBOL, 2));
-  EXPECT_EQ(GetStringParam(diagnostics[0], 0), "missing");
+      "}\n");
+  ASSERT_NE(module, nullptr);
+  const loom_string_id_t missing_name_id =
+      loom_module_lookup_string(module, IREE_SV("missing"));
+  ASSERT_NE(missing_name_id, LOOM_STRING_ID_INVALID);
+  const loom_symbol_id_t missing_id =
+      loom_module_find_symbol(module, missing_name_id);
+  ASSERT_NE(missing_id, LOOM_SYMBOL_ID_INVALID);
+  EXPECT_EQ(module->symbols.entries[missing_id].defining_op, nullptr);
+  loom_module_free(module);
 }
 
 TEST_F(ParserTest, AttrDictNestedDictRoundTripInCanonicalOrder) {

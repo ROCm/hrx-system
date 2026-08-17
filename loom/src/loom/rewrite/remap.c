@@ -586,9 +586,9 @@ iree_status_t loom_ir_remap_location_id(
                                   out_target_location_id);
 }
 
-static iree_status_t loom_ir_remap_symbol_ref(
-    loom_ir_remap_t* remap, loom_symbol_ref_t source_ref,
-    loom_symbol_ref_t* out_target_ref) {
+iree_status_t loom_ir_remap_symbol_ref(loom_ir_remap_t* remap,
+                                       loom_symbol_ref_t source_ref,
+                                       loom_symbol_ref_t* out_target_ref) {
   *out_target_ref = loom_symbol_ref_null();
   if (!loom_symbol_ref_is_valid(source_ref)) {
     *out_target_ref = source_ref;

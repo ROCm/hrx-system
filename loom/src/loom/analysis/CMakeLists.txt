@@ -192,11 +192,11 @@ loom_cc_test(
 
 loom_cc_library(
   NAME
-    func_provider_catalog
+    template_provider_catalog
   HDRS
-    "func_provider_catalog.h"
+    "template_provider_catalog.h"
   SRCS
-    "func_provider_catalog.c"
+    "template_provider_catalog.c"
   DEPS
     ::symbol_facts
     iree::base
@@ -204,18 +204,21 @@ loom_cc_library(
     loom::ir
     loom::ops::func_symbol_facts
     loom::ops::op_defs
+    loom::ops::target
+    loom::rewrite::remap
+    loom::target::facts
     loom::util::adaptive_sort
   PUBLIC
 )
 
 loom_cc_test(
   NAME
-    func_provider_catalog_test
+    template_provider_catalog_test
   SRCS
-    "func_provider_catalog_test.cc"
+    "template_provider_catalog_test.cc"
   DEPS
-    ::func_provider_catalog
     ::symbol_facts
+    ::template_provider_catalog
     iree::base::internal::arena
     iree::testing::gtest
     iree::testing::gtest_main
@@ -224,6 +227,7 @@ loom_cc_test(
     loom::ops::func
     loom::ops::op_defs
     loom::ops::target
+    loom::ops::template
     loom::ops::test
     loom::testing::module_ptr
 )
@@ -775,6 +779,7 @@ loom_cc_library(
     loom::ir
     loom::ops::func
     loom::ops::op_defs
+    loom::ops::template
   PUBLIC
 )
 
@@ -795,6 +800,7 @@ loom_cc_test(
     loom::ops::global
     loom::ops::op_defs
     loom::ops::target
+    loom::ops::template
     loom::ops::test
     loom::testing::module_ptr
 )
@@ -861,6 +867,7 @@ loom_cc_test(
     loom::ir
     loom::ops::func
     loom::ops::op_defs
+    loom::ops::template
     loom::ops::test
     loom::testing::module_ptr
 )

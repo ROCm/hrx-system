@@ -46,7 +46,7 @@ typedef struct loom_bytecode_module_metadata_summary_t {
   // Dependency occurrence count across module and symbol rows.
   uint64_t dependency_count;
   // Abstract provider demand occurrence count across symbol rows.
-  uint64_t contract_demand_count;
+  uint64_t template_demand_count;
 } loom_bytecode_module_metadata_summary_t;
 
 #ifdef __cplusplus

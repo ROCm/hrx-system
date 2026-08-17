@@ -182,6 +182,12 @@ bool loom_ir_remap_try_lookup_block(const loom_ir_remap_t* remap,
                                     const loom_block_t* source_block,
                                     loom_block_t** out_target_block);
 
+// Remaps one source-module symbol reference according to the configured symbol
+// policy. Invalid references remain invalid.
+iree_status_t loom_ir_remap_symbol_ref(loom_ir_remap_t* remap,
+                                       loom_symbol_ref_t source_ref,
+                                       loom_symbol_ref_t* out_target_ref);
+
 // Resolves one successor block reference according to the remap's missing-block
 // policy. Same-module remaps keep unmapped blocks unchanged; cross-module
 // remaps require every successor target to have an explicit block mapping.

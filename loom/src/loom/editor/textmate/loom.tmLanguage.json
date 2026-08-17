@@ -137,7 +137,7 @@
         },
         {
           "name": "meta.operation-name.loom",
-          "match": "\\b(func)\\.(provider\\.decl|template|ukernel|return|apply|call|decl|def)\\b",
+          "match": "\\b(func)\\.(return|call|decl|def)\\b",
           "captures": {
             "1": {
               "name": "support.namespace.dialect.loom"

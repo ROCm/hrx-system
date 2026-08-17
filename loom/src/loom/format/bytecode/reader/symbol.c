@@ -528,6 +528,7 @@ loom_bytecode_symbol_decode(loom_bytecode_symbol_validator_t* reader,
   uint64_t entry_relative_offset = entry_offset - table->entries.base;
   loom_bytecode_symbol_metadata_t* symbol_metadata = out_metadata;
   symbol_metadata->entry_offset = entry_offset;
+  symbol_metadata->template_family_symbol_ordinal = UINT32_MAX;
   uint64_t name_offset =
       loom_bytecode_reader_cursor_absolute_position(&table->cursor);
   uint64_t name_id = 0;
@@ -592,7 +593,7 @@ loom_bytecode_symbol_decode(loom_bytecode_symbol_validator_t* reader,
         IREE_SV("explicit_import_symbol_flag_requires_import_flag"));
   }
   if (iree_any_bit_set(flags, LOOM_BYTECODE_SYMBOL_FLAG_PREDICATES) &&
-      kind > LOOM_BYTECODE_SYMBOL_FUNC_UKERNEL) {
+      kind > LOOM_BYTECODE_SYMBOL_TEMPLATE_UKERNEL) {
     return loom_bytecode_reader_emit_invalid_field(
         &reader->decoder, IREE_SV("SYMBOLS"), IREE_SV("symbol"), symbol_index,
         IREE_SV("flags"), kind_offset + 2,
@@ -672,7 +673,7 @@ loom_bytecode_symbol_decode(loom_bytecode_symbol_validator_t* reader,
     symbol_metadata->import_symbol = import_symbol;
   }
 
-  if (kind <= LOOM_BYTECODE_SYMBOL_FUNC_UKERNEL) {
+  if (kind <= LOOM_BYTECODE_SYMBOL_TEMPLATE_UKERNEL) {
     uint64_t op_ref_offset =
         loom_bytecode_reader_cursor_absolute_position(&table->cursor);
     uint64_t op_table_index_plus1 = 0;
@@ -819,21 +820,24 @@ loom_bytecode_symbol_decode(loom_bytecode_symbol_validator_t* reader,
           loom_bytecode_reader_cursor_absolute_position(&table->cursor),
           IREE_SV("predicate_flag_requires_funclike_predicates_attr"));
     }
-    if (func_like->implements_attr_index != LOOM_ATTR_INDEX_NONE) {
-      uint64_t implements_offset =
+    if (func_like->template_family_attr_index != LOOM_ATTR_INDEX_NONE) {
+      uint64_t template_family_offset =
           loom_bytecode_reader_cursor_absolute_position(&table->cursor);
-      uint64_t implements_string_id = 0;
+      uint64_t template_family_symbol_ordinal = 0;
       uint64_t priority = 0;
       IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_uvarint_inline(
-          &reader->decoder, &table->cursor, &implements_string_id));
+          &reader->decoder, &table->cursor, &template_family_symbol_ordinal));
       IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_uvarint_inline(
           &reader->decoder, &table->cursor, &priority));
-      iree_string_view_t implements_name = iree_string_view_empty();
-      IREE_RETURN_IF_ERROR(loom_bytecode_symbol_validate_string_ref(
-          &reader->decoder, &reader->view, implements_string_id,
-          IREE_SV("implementation_contract"), implements_offset,
-          &implements_name));
-      symbol_metadata->implementation_contract = implements_name;
+      if (template_family_symbol_ordinal >= table->count) {
+        return loom_bytecode_reader_emit_invalid_field(
+            &reader->decoder, IREE_SV("SYMBOLS"), IREE_SV("symbol"),
+            symbol_index, IREE_SV("template_family_symbol_ordinal"),
+            template_family_offset,
+            IREE_SV("template_family_symbol_ordinal_out_of_range"));
+      }
+      symbol_metadata->template_family_symbol_ordinal =
+          (uint32_t)template_family_symbol_ordinal;
       symbol_metadata->priority = priority;
     }
     IREE_RETURN_IF_ERROR(loom_bytecode_reader_skip_func_payload_attrs(
@@ -946,6 +950,15 @@ iree_status_t loom_bytecode_symbols_index(
     memset(out_metadata->symbols, 0,
            table.count * sizeof(*out_metadata->symbols));
   }
+  if (out_metadata->strings.count > 0) {
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        retained_arena, out_metadata->strings.count,
+        sizeof(*out_metadata->symbol_ordinal_by_string_index),
+        (void**)&out_metadata->symbol_ordinal_by_string_index));
+    for (iree_host_size_t i = 0; i < out_metadata->strings.count; ++i) {
+      out_metadata->symbol_ordinal_by_string_index[i] = UINT32_MAX;
+    }
+  }
   if (table.imports.count > 0) {
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
         retained_arena, table.imports.count,
@@ -963,6 +976,14 @@ iree_status_t loom_bytecode_symbols_index(
        ++symbol_index) {
     IREE_RETURN_IF_ERROR(loom_bytecode_symbol_decode(
         validator, &table, symbol_index, &out_metadata->symbols[symbol_index]));
+    const uint32_t name_string_index =
+        out_metadata->symbols[symbol_index].name_string_index;
+    IREE_ASSERT(name_string_index < out_metadata->strings.count);
+    IREE_ASSERT(
+        out_metadata->symbol_ordinal_by_string_index[name_string_index] ==
+        UINT32_MAX);
+    out_metadata->symbol_ordinal_by_string_index[name_string_index] =
+        (uint32_t)symbol_index;
     const loom_bytecode_symbol_flags_t flags =
         out_metadata->symbols[symbol_index].flags;
     if (iree_any_bit_set(flags, LOOM_BYTECODE_SYMBOL_FLAG_IMPORT)) {

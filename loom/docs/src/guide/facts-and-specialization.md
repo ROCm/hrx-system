@@ -155,10 +155,10 @@ in its control-flow context:
 %tile_size_sixteen = index.constant 16 : index
 %is_tile_size_sixteen = index.cmp eq, %tile_size, %tile_size_sixteen : index
 %result = scf.if %is_tile_size_sixteen -> (i32) {
-  %specialized = func.apply<guide.scale>(%tile_size, %value) : (index, i32) -> (i32)
+  %specialized = template.apply<@guide.scale>(%tile_size, %value) : (index, i32) -> (i32)
   scf.yield %specialized : i32
 } else {
-  %fallback = func.apply<guide.scale>(%tile_size, %value) : (index, i32) -> (i32)
+  %fallback = template.apply<@guide.scale>(%tile_size, %value) : (index, i32) -> (i32)
   scf.yield %fallback : i32
 }
 ```
@@ -169,28 +169,31 @@ compile-time application site a stronger context. This lets a structured
 program preserve the reason a specialization is valid instead of cloning a
 function under an opaque generated name.
 
-## A template provides an implementation contract
+## A template family selects an implementation
 
-[`func.apply`](../reference/dialects/func/ops/apply.md) requests an
-implementation by contract key. [`func.template`](../reference/dialects/func/ops/template.md)
-provides one visible implementation whose signature and predicates may satisfy
-that demand:
+[`template.decl`](../reference/dialects/template/ops/decl.md) defines the
+stable family signature. [`template.apply`](../reference/dialects/template/ops/apply.md)
+requests an implementation of that family, and
+[`template.def`](../reference/dialects/template/ops/def.md) provides one
+candidate whose signature and predicates may satisfy that demand:
 
 ```loom
-func.template<guide.scale> priority(20) @tile16_scale(%tile_size: index, %value: i32) -> (i32) where [eq(%tile_size, 16)] {
+template.decl @guide.scale(%tile_size: index, %value: i32) -> (i32)
+
+template.def<@guide.scale> priority(20) @tile16_scale(%tile_size: index, %value: i32) -> (i32) where [eq(%tile_size, 16)] {
   %result = scalar.addi %value, %value : i32
-  func.return %result : i32
+  template.return %result : i32
 }
 
-func.template<guide.scale> priority(1) @portable_scale(%tile_size: index, %value: i32) -> (i32) {
-  func.return %value : i32
+template.def<@guide.scale> priority(1) @portable_scale(%tile_size: index, %value: i32) -> (i32) {
+  template.return %value : i32
 }
 ```
 
 An explicitly supplied library makes providers visible. For every reachable
 apply, specialization evaluates candidates in this order:
 
-1. Contract key and exact operand/result types must match.
+1. Family symbol and exact operand/result types must match.
 2. Calling context and any explicit target identity must be compatible.
 3. Value predicates in `where` must be proven at the application site.
 4. Typed target requirements in `requires` must be proven by the active
@@ -204,28 +207,26 @@ device program.
 
 Distinct providers tied at the best priority are ambiguous. File order,
 library order, and symbol spelling never become accidental tie breakers.
-Structurally equivalent duplicate providers may be coalesced because choosing
-either cannot change the program.
 
 ## Requirements filter; they do not manufacture facts
 
 A target requirement states when a provider is valid:
 
 ```loom
-func.template<guide.elementwise_transform> requires [#target.subgroup.size<32>] priority(20) @wave32_elementwise_transform(%value: f32) -> (f32) {
+template.def<@guide.elementwise_transform> requires [#target.subgroup.size<32>] priority(20) @wave32_elementwise_transform(%value: f32) -> (f32) {
   %result = func.call @double(%value) : (f32) -> (f32)
-  func.return %result : f32
+  template.return %result : f32
 }
 ```
 
 `requires [#target.subgroup.size<32>]` does not force wave32, select AMDGPU, or
 teach the caller that subgroup size is 32. It filters this provider against the
-facts of the function version containing the `func.apply`.
+facts of the function version containing the `template.apply`.
 
-Use an exact `target(@symbol)` provider only when target identity itself is
-part of the implementation contract. Most reusable providers stay targetless
-and name the narrow normalized capability they need. The same requirement can
-then match AMDGPU, SPIR-V, or another target family that establishes it.
+Use an exact `target(@symbol)` provider only when target identity itself is an
+applicability requirement. Most reusable providers stay targetless and name the
+narrow normalized capability they need. The same requirement can then match
+AMDGPU, SPIR-V, or another target family that establishes it.
 
 The composition example's motif contains both the wave32 provider and its
 portable fallback:

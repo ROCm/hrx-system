@@ -24,6 +24,7 @@
 #include "loom/ops/func/ops.h"
 #include "loom/ops/module/ops.h"
 #include "loom/ops/target/ops.h"
+#include "loom/ops/template/ops.h"
 #include "loom/ops/test/ops.h"
 #include "loom/ops/test/registry.h"
 
@@ -62,6 +63,8 @@ class LinkPlannerTest : public ::testing::Test {
                     loom_module_dialect_op_semantics);
     RegisterDialect(LOOM_DIALECT_TARGET, loom_target_dialect_vtables,
                     loom_target_dialect_op_semantics);
+    RegisterDialect(LOOM_DIALECT_TEMPLATE, loom_template_dialect_vtables,
+                    loom_template_dialect_op_semantics);
     IREE_ASSERT_OK(loom_test_dialect_register(&context_));
     IREE_ASSERT_OK(loom_context_finalize(&context_));
   }
@@ -199,6 +202,17 @@ class LinkPlannerTest : public ::testing::Test {
   bool ContainsSymbol(const loom_link_plan_t* plan,
                       const loom_link_module_index_symbol_t* symbol) {
     return symbol && loom_link_plan_contains_symbol(plan, symbol->ordinal);
+  }
+
+  const loom_link_module_index_template_family_t* DemandedTemplateFamily(
+      const loom_link_plan_t* plan, iree_host_size_t ordinal) {
+    const loom_link_template_family_ordinal_t family_ordinal =
+        loom_link_plan_demanded_template_family_at(plan, ordinal);
+    if (family_ordinal == LOOM_LINK_TEMPLATE_FAMILY_ORDINAL_INVALID) {
+      return nullptr;
+    }
+    return loom_link_module_index_template_family_at(loom_link_plan_index(plan),
+                                                     family_ordinal);
   }
 
   std::vector<std::string> PlannedNames(const loom_link_plan_t* plan) {
@@ -424,21 +438,27 @@ func.def public @unused(%x: i32) -> (i32) {
   EXPECT_EQ(unused_module->materialized_module, nullptr);
 }
 
-TEST_F(LinkPlannerTest, SelectiveApplyUsesBytecodeProviderContractIndex) {
+TEST_F(LinkPlannerTest, SelectiveApplyReportsBytecodeFamilyDemand) {
   loom_module_t* harness = Parse(IREE_SV(R"(
+template.decl @demo.bytecode(%x: i32) -> (i32)
+
 func.def public @entry(%x: i32) -> (i32) {
-  %y = func.apply<demo.bytecode>(%x) : (i32) -> (i32)
+  %y = template.apply<@demo.bytecode>(%x) : (i32) -> (i32)
   func.return %y : i32
 }
 )"));
   loom_module_t* used = Parse(IREE_SV(R"(
-func.template<demo.bytecode> @bytecode_provider(%x: i32) -> (i32) {
-  func.return %x : i32
+template.decl @demo.bytecode(%x: i32) -> (i32)
+
+template.def<@demo.bytecode> @bytecode_provider(%x: i32) -> (i32) {
+  template.return %x : i32
 }
 )"));
   loom_module_t* unused = Parse(IREE_SV(R"(
-func.template<demo.unused> @unused_provider(%x: i32) -> (i32) {
-  func.return %x : i32
+template.decl @demo.unused(%x: i32) -> (i32)
+
+template.def<@demo.unused> @unused_provider(%x: i32) -> (i32) {
+  template.return %x : i32
 }
 )"));
   std::vector<uint8_t> used_bytes = WriteModule(used);
@@ -493,8 +513,13 @@ func.template<demo.unused> @unused_provider(%x: i32) -> (i32) {
                                             IREE_SV("unused_provider"));
 
   EXPECT_TRUE(ContainsSymbol(plan.get(), entry));
-  EXPECT_TRUE(ContainsSymbol(plan.get(), bytecode_provider));
+  EXPECT_FALSE(ContainsSymbol(plan.get(), bytecode_provider));
   EXPECT_FALSE(ContainsSymbol(plan.get(), unused_provider));
+  ASSERT_EQ(loom_link_plan_demanded_template_family_count(plan.get()), 1u);
+  const loom_link_module_index_template_family_t* demanded_family =
+      DemandedTemplateFamily(plan.get(), 0);
+  ASSERT_NE(demanded_family, nullptr);
+  EXPECT_EQ(StringViewToString(demanded_family->name), "demo.bytecode");
   EXPECT_EQ(used_module->materialized_module, nullptr);
   EXPECT_EQ(unused_module->materialized_module, nullptr);
 }
@@ -677,6 +702,83 @@ func.def @callee(%x: i32) -> (i32) {
   EXPECT_TRUE(ContainsSymbol(plan.get(), chosen));
   EXPECT_TRUE(
       loom_link_plan_symbol_imports_resolved(plan.get(), declaration->ordinal));
+}
+
+TEST_F(LinkPlannerTest, ProviderImportDoesNotBindTemplateFamily) {
+  loom_module_t* harness = Parse(IREE_SV(R"(
+module.import "family-library" [@demo.apply]
+
+template.decl @demo.apply(%x: i32) -> (i32)
+
+func.def public @entry(%x: i32) -> (i32) {
+  %y = template.apply<@demo.apply>(%x) : (i32) -> (i32)
+  func.return %y : i32
+}
+)"));
+  loom_module_t* library = Parse(IREE_SV(R"(
+template.decl @demo.apply(%x: i32) -> (i32)
+
+template.def<@demo.apply> @provider(%x: i32) -> (i32) {
+  template.return %x : i32
+}
+
+template.decl @demo.unused(%x: i32) -> (i32)
+
+template.def<@demo.unused> @unused_provider(%x: i32) -> (i32) {
+  template.return %x : i32
+}
+)"));
+
+  IndexPtr index = CreateIndex();
+  AddMaterialized(index.get(), harness, IREE_SV("harness"),
+                  LOOM_LINK_PROVIDER_ROLE_INPUT);
+  const iree_host_size_t library_provider =
+      AddMaterialized(index.get(), library, IREE_SV("library"),
+                      LOOM_LINK_PROVIDER_ROLE_LIBRARY);
+  loom_link_provider_binding_t bindings[] = {
+      {IREE_SV("family-library"), library_provider},
+  };
+  loom_link_provider_resolver_t resolver = {0};
+  IREE_ASSERT_OK(loom_link_provider_resolver_prepare(
+      loom_link_module_index_provider_count(index.get()), bindings,
+      IREE_ARRAYSIZE(bindings), &resolver));
+  iree_string_view_t roots[] = {IREE_SV("@entry")};
+  loom_link_plan_options_t options = {
+      /*.mode=*/LOOM_LINK_PLAN_SELECTIVE,
+      /*.root_symbols=*/{/*.count=*/IREE_ARRAYSIZE(roots), /*.values=*/roots},
+  };
+  options.provider_resolver = &resolver;
+  PlanPtr plan = BuildPlan(index.get(), &options);
+
+  const loom_link_module_index_symbol_t* local_family =
+      loom_link_module_index_lookup_global(index.get(), IREE_SV("demo.apply"));
+  ASSERT_NE(local_family, nullptr);
+  const loom_link_module_index_symbol_t* family_declaration =
+      loom_link_module_index_next_same_name(index.get(), local_family);
+  ASSERT_NE(family_declaration, nullptr);
+  EXPECT_EQ(family_declaration->kind, LOOM_SYMBOL_TEMPLATE_DECL);
+  const loom_link_module_index_symbol_t* provider =
+      loom_link_module_index_lookup_private(
+          index.get(), loom_link_module_index_module_at(index.get(), 1),
+          IREE_SV("provider"));
+  const loom_link_module_index_symbol_t* unused_provider =
+      loom_link_module_index_lookup_private(
+          index.get(), loom_link_module_index_module_at(index.get(), 1),
+          IREE_SV("unused_provider"));
+  ASSERT_NE(provider, nullptr);
+  ASSERT_NE(unused_provider, nullptr);
+
+  EXPECT_TRUE(ContainsSymbol(plan.get(), local_family));
+  EXPECT_FALSE(ContainsSymbol(plan.get(), family_declaration));
+  EXPECT_FALSE(ContainsSymbol(plan.get(), provider));
+  EXPECT_FALSE(ContainsSymbol(plan.get(), unused_provider));
+  ASSERT_EQ(loom_link_plan_demanded_template_family_count(plan.get()), 1u);
+  const loom_link_module_index_template_family_t* demanded_family =
+      DemandedTemplateFamily(plan.get(), 0);
+  ASSERT_NE(demanded_family, nullptr);
+  EXPECT_EQ(StringViewToString(demanded_family->name), "demo.apply");
+  EXPECT_FALSE(loom_link_plan_symbol_imports_resolved(plan.get(),
+                                                      local_family->ordinal));
 }
 
 TEST_F(LinkPlannerTest, UnboundProviderImportNeverFallsBackByInputOrder) {
@@ -912,33 +1014,39 @@ func.def @helper(%x: i32) -> (i32) {
   EXPECT_TRUE(ContainsSymbol(plan.get(), helper));
 }
 
-TEST_F(LinkPlannerTest, SelectiveApplyPullsProviderContractImplementations) {
+TEST_F(LinkPlannerTest, SelectiveApplyRequiresExplicitProviderSelection) {
   loom_module_t* harness = Parse(IREE_SV(R"(
 test.target<low_core> @root_target
 
+template.decl @demo.targeted(%x: i32) -> (i32)
+
 func.def public target(@root_target) @entry(%x: i32) -> (i32) {
-  %y = func.apply<demo.targeted>(%x) : (i32) -> (i32)
+  %y = template.apply<@demo.targeted>(%x) : (i32) -> (i32)
   func.return %y : i32
 }
 )"));
   loom_module_t* library = Parse(IREE_SV(R"(
+template.decl @demo.targeted(%x: i32) -> (i32)
+
+template.decl @demo.unused(%x: i32) -> (i32)
+
 test.target<low_core> @gfx11
 test.target<low_core> @gfx12
 
-func.template<demo.targeted> target(@gfx11) priority(20) @gfx11_provider(%x: i32) -> (i32) {
-  func.return %x : i32
+template.def<@demo.targeted> target(@gfx11) priority(20) @gfx11_provider(%x: i32) -> (i32) {
+  template.return %x : i32
 }
 
-func.template<demo.targeted> target(@gfx12) priority(20) @gfx12_provider(%x: i32) -> (i32) {
-  func.return %x : i32
+template.def<@demo.targeted> target(@gfx12) priority(20) @gfx12_provider(%x: i32) -> (i32) {
+  template.return %x : i32
 }
 
-func.template<demo.targeted> priority(1) @fallback_provider(%x: i32) -> (i32) {
-  func.return %x : i32
+template.def<@demo.targeted> priority(1) @fallback_provider(%x: i32) -> (i32) {
+  template.return %x : i32
 }
 
-func.template<demo.unused> @unused_provider(%x: i32) -> (i32) {
-  func.return %x : i32
+template.def<@demo.unused> @unused_provider(%x: i32) -> (i32) {
+  template.return %x : i32
 }
 )"));
 
@@ -956,7 +1064,7 @@ func.template<demo.unused> @unused_provider(%x: i32) -> (i32) {
           /*.values=*/roots,
       },
   };
-  PlanPtr plan = BuildPlan(index.get(), &options);
+  PlanPtr demand_plan = BuildPlan(index.get(), &options);
 
   const loom_link_module_index_symbol_t* entry =
       loom_link_module_index_lookup_global(index.get(), IREE_SV("entry"));
@@ -982,22 +1090,194 @@ func.template<demo.unused> @unused_provider(%x: i32) -> (i32) {
       loom_link_module_index_lookup_private(index.get(), library_module,
                                             IREE_SV("unused_provider"));
 
-  EXPECT_TRUE(ContainsSymbol(plan.get(), entry));
-  EXPECT_TRUE(ContainsSymbol(plan.get(), gfx11_provider));
-  EXPECT_TRUE(ContainsSymbol(plan.get(), gfx12_provider));
-  EXPECT_TRUE(ContainsSymbol(plan.get(), fallback_provider));
-  EXPECT_FALSE(ContainsSymbol(plan.get(), unused_provider));
-  EXPECT_TRUE(ContainsSymbol(plan.get(), gfx11));
-  EXPECT_TRUE(ContainsSymbol(plan.get(), gfx12));
+  EXPECT_TRUE(ContainsSymbol(demand_plan.get(), entry));
+  EXPECT_FALSE(ContainsSymbol(demand_plan.get(), gfx11_provider));
+  EXPECT_FALSE(ContainsSymbol(demand_plan.get(), gfx12_provider));
+  EXPECT_FALSE(ContainsSymbol(demand_plan.get(), fallback_provider));
+  EXPECT_FALSE(ContainsSymbol(demand_plan.get(), unused_provider));
+  EXPECT_FALSE(ContainsSymbol(demand_plan.get(), gfx11));
+  EXPECT_FALSE(ContainsSymbol(demand_plan.get(), gfx12));
+  ASSERT_EQ(loom_link_plan_demanded_template_family_count(demand_plan.get()),
+            1u);
+  const loom_link_module_index_template_family_t* demanded_family =
+      DemandedTemplateFamily(demand_plan.get(), 0);
+  ASSERT_NE(demanded_family, nullptr);
+  EXPECT_EQ(StringViewToString(demanded_family->name), "demo.targeted");
 
-  const loom_link_plan_symbol_t* planned_entry =
-      FindPlannedSymbol(plan.get(), entry);
+  const iree_host_size_t selected_provider_ordinals[] = {
+      gfx11_provider->ordinal,
+  };
+  options.selected_template_providers = {
+      /*.count=*/IREE_ARRAYSIZE(selected_provider_ordinals),
+      /*.values=*/selected_provider_ordinals,
+  };
+  PlanPtr selected_plan = BuildPlan(index.get(), &options);
+  EXPECT_TRUE(ContainsSymbol(selected_plan.get(), entry));
+  EXPECT_TRUE(ContainsSymbol(selected_plan.get(), gfx11_provider));
+  EXPECT_FALSE(ContainsSymbol(selected_plan.get(), gfx12_provider));
+  EXPECT_FALSE(ContainsSymbol(selected_plan.get(), fallback_provider));
+  EXPECT_FALSE(ContainsSymbol(selected_plan.get(), unused_provider));
+  EXPECT_TRUE(ContainsSymbol(selected_plan.get(), gfx11));
+  EXPECT_FALSE(ContainsSymbol(selected_plan.get(), gfx12));
+  ASSERT_EQ(loom_link_plan_demanded_template_family_count(selected_plan.get()),
+            1u);
+
   const loom_link_plan_symbol_t* planned_gfx11_provider =
-      FindPlannedSymbol(plan.get(), gfx11_provider);
-  ASSERT_NE(planned_entry, nullptr);
+      FindPlannedSymbol(selected_plan.get(), gfx11_provider);
   ASSERT_NE(planned_gfx11_provider, nullptr);
   EXPECT_EQ(planned_gfx11_provider->reason, LOOM_LINK_PLAN_LIVE_PROVIDER);
-  EXPECT_EQ(planned_gfx11_provider->cause_ordinal, planned_entry->ordinal);
+  EXPECT_EQ(planned_gfx11_provider->cause_ordinal,
+            LOOM_LINK_MODULE_INDEX_INVALID_ORDINAL);
+}
+
+TEST_F(LinkPlannerTest, SelectedProvidersExposeTransitiveDiamondDemands) {
+  loom_module_t* harness = Parse(IREE_SV(R"(
+template.decl @demo.left(%x: i32) -> (i32)
+template.decl @demo.right(%x: i32) -> (i32)
+
+func.def public @entry(%x: i32) -> (i32) {
+  %left = template.apply<@demo.left>(%x) : (i32) -> (i32)
+  %right = template.apply<@demo.right>(%left) : (i32) -> (i32)
+  func.return %right : i32
+}
+)"));
+  loom_module_t* library = Parse(IREE_SV(R"(
+template.decl @demo.left(%x: i32) -> (i32)
+template.decl @demo.right(%x: i32) -> (i32)
+template.decl @demo.shared(%x: i32) -> (i32)
+
+template.def<@demo.left> @left_provider(%x: i32) -> (i32) {
+  %y = template.apply<@demo.shared>(%x) : (i32) -> (i32)
+  template.return %y : i32
+}
+
+template.def<@demo.right> @right_provider(%x: i32) -> (i32) {
+  %y = template.apply<@demo.shared>(%x) : (i32) -> (i32)
+  template.return %y : i32
+}
+
+template.def<@demo.shared> @shared_provider(%x: i32) -> (i32) {
+  %y = func.call @helper(%x) : (i32) -> (i32)
+  template.return %y : i32
+}
+
+func.def @helper(%x: i32) -> (i32) {
+  func.return %x : i32
+}
+)"));
+
+  IndexPtr index = CreateIndex();
+  AddMaterialized(index.get(), harness, IREE_SV("harness"),
+                  LOOM_LINK_PROVIDER_ROLE_INPUT);
+  AddMaterialized(index.get(), library, IREE_SV("library"),
+                  LOOM_LINK_PROVIDER_ROLE_LIBRARY);
+  const loom_link_module_index_module_t* library_module =
+      loom_link_module_index_module_at(index.get(), 1);
+  ASSERT_NE(library_module, nullptr);
+  const loom_link_module_index_symbol_t* left_provider =
+      loom_link_module_index_lookup_private(index.get(), library_module,
+                                            IREE_SV("left_provider"));
+  const loom_link_module_index_symbol_t* right_provider =
+      loom_link_module_index_lookup_private(index.get(), library_module,
+                                            IREE_SV("right_provider"));
+  const loom_link_module_index_symbol_t* shared_provider =
+      loom_link_module_index_lookup_private(index.get(), library_module,
+                                            IREE_SV("shared_provider"));
+  const loom_link_module_index_symbol_t* helper =
+      loom_link_module_index_lookup_private(index.get(), library_module,
+                                            IREE_SV("helper"));
+  ASSERT_NE(left_provider, nullptr);
+  ASSERT_NE(right_provider, nullptr);
+  ASSERT_NE(shared_provider, nullptr);
+  ASSERT_NE(helper, nullptr);
+
+  iree_string_view_t roots[] = {IREE_SV("@entry")};
+  const iree_host_size_t first_provider_ordinals[] = {
+      left_provider->ordinal,
+      right_provider->ordinal,
+  };
+  loom_link_plan_options_t options = {
+      /*.mode=*/LOOM_LINK_PLAN_SELECTIVE,
+      /*.root_symbols=*/{/*.count=*/IREE_ARRAYSIZE(roots), /*.values=*/roots},
+  };
+  options.selected_template_providers = {
+      /*.count=*/IREE_ARRAYSIZE(first_provider_ordinals),
+      /*.values=*/first_provider_ordinals,
+  };
+  PlanPtr first_plan = BuildPlan(index.get(), &options);
+
+  EXPECT_TRUE(ContainsSymbol(first_plan.get(), left_provider));
+  EXPECT_TRUE(ContainsSymbol(first_plan.get(), right_provider));
+  EXPECT_FALSE(ContainsSymbol(first_plan.get(), shared_provider));
+  EXPECT_FALSE(ContainsSymbol(first_plan.get(), helper));
+  ASSERT_EQ(loom_link_plan_demanded_template_family_count(first_plan.get()),
+            3u);
+  const std::string first_family =
+      StringViewToString(DemandedTemplateFamily(first_plan.get(), 0)->name);
+  const std::string second_family =
+      StringViewToString(DemandedTemplateFamily(first_plan.get(), 1)->name);
+  EXPECT_TRUE((first_family == "demo.left" && second_family == "demo.right") ||
+              (first_family == "demo.right" && second_family == "demo.left"));
+  EXPECT_EQ(
+      StringViewToString(DemandedTemplateFamily(first_plan.get(), 2)->name),
+      "demo.shared");
+
+  const iree_host_size_t complete_provider_ordinals[] = {
+      left_provider->ordinal,
+      right_provider->ordinal,
+      shared_provider->ordinal,
+      shared_provider->ordinal,
+  };
+  options.selected_template_providers = {
+      /*.count=*/IREE_ARRAYSIZE(complete_provider_ordinals),
+      /*.values=*/complete_provider_ordinals,
+  };
+  PlanPtr complete_plan = BuildPlan(index.get(), &options);
+
+  EXPECT_TRUE(ContainsSymbol(complete_plan.get(), shared_provider));
+  EXPECT_TRUE(ContainsSymbol(complete_plan.get(), helper));
+  // Source-local family declarations remain in the exact closure needed to
+  // decode each provider module and merge to canonical output identities.
+  EXPECT_EQ(loom_link_plan_symbol_count(complete_plan.get()), 10u);
+  EXPECT_EQ(loom_link_plan_demanded_template_family_count(complete_plan.get()),
+            3u);
+}
+
+TEST_F(LinkPlannerTest, SelectedProviderOrdinalsAreValidated) {
+  loom_module_t* module = Parse(IREE_SV(R"(
+func.def public @entry(%x: i32) -> (i32) {
+  func.return %x : i32
+}
+)"));
+  IndexPtr index = CreateIndex();
+  AddMaterialized(index.get(), module, IREE_SV("input"),
+                  LOOM_LINK_PROVIDER_ROLE_INPUT);
+  const loom_link_module_index_symbol_t* entry =
+      loom_link_module_index_lookup_global(index.get(), IREE_SV("entry"));
+  ASSERT_NE(entry, nullptr);
+
+  iree_string_view_t roots[] = {IREE_SV("@entry")};
+  loom_link_plan_options_t options = {
+      /*.mode=*/LOOM_LINK_PLAN_SELECTIVE,
+      /*.root_symbols=*/{/*.count=*/IREE_ARRAYSIZE(roots), /*.values=*/roots},
+  };
+  options.selected_template_providers = {
+      /*.count=*/1,
+      /*.values=*/nullptr,
+  };
+  PlanPtr plan;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        BuildPlanStatus(index.get(), &options, &plan));
+
+  const iree_host_size_t out_of_range_ordinal =
+      loom_link_module_index_symbol_count(index.get());
+  options.selected_template_providers.values = &out_of_range_ordinal;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_OUT_OF_RANGE,
+                        BuildPlanStatus(index.get(), &options, &plan));
+
+  options.selected_template_providers.values = &entry->ordinal;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        BuildPlanStatus(index.get(), &options, &plan));
 }
 
 TEST_F(LinkPlannerTest, SelectiveRootIgnoresUnreachableDuplicateDefinition) {

@@ -22,6 +22,8 @@
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
 #include "loom/ops/low/ops.h"
+#include "loom/ops/module/ops.h"
+#include "loom/ops/template/ops.h"
 #include "loom/ops/test/ops.h"
 #include "loom/ops/test/registry.h"
 #include "loom/target/low_descriptor_registry_core_test.h"
@@ -97,6 +99,21 @@ static void RegisterLowDialect(loom_context_t* context) {
                                                vtables, (uint16_t)count));
 }
 
+static void RegisterModuleDialect(loom_context_t* context) {
+  iree_host_size_t count = 0;
+  const loom_op_vtable_t* const* vtables = loom_module_dialect_vtables(&count);
+  IREE_ASSERT_OK(loom_context_register_dialect(context, LOOM_DIALECT_MODULE,
+                                               vtables, (uint16_t)count));
+}
+
+static void RegisterTemplateDialect(loom_context_t* context) {
+  iree_host_size_t count = 0;
+  const loom_op_vtable_t* const* vtables =
+      loom_template_dialect_vtables(&count);
+  IREE_ASSERT_OK(loom_context_register_dialect(context, LOOM_DIALECT_TEMPLATE,
+                                               vtables, (uint16_t)count));
+}
+
 static const loom_op_vtable_t* TestVtable(loom_op_kind_t kind) {
   iree_host_size_t count = 0;
   const loom_op_vtable_t* const* vtables = loom_test_dialect_vtables(&count);
@@ -115,6 +132,8 @@ class VerifyTest : public ::testing::Test {
     loom_context_initialize(iree_allocator_system(), &context_);
     RegisterTestDialect(&context_);
     RegisterLowDialect(&context_);
+    RegisterModuleDialect(&context_);
+    RegisterTemplateDialect(&context_);
     IREE_ASSERT_OK(loom_context_finalize(&context_));
     loom_target_core_test_low_descriptor_registry_initialize(&low_registry_);
     IREE_ASSERT_OK(loom_module_allocate(&context_, IREE_SV("verify_test"),
@@ -2117,6 +2136,58 @@ TEST_F(VerifyTest, AcceptsUnresolvedAvailabilitySymbolArrayElement) {
   auto result = Verify();
   EXPECT_EQ(result.error_count, 0u)
       << (collector_.errors.empty() ? "" : collector_.errors[0]);
+}
+
+TEST_F(VerifyTest, AcceptsUnresolvedDependencyNamedByModuleAvailability) {
+  loom_string_id_t symbol_name_id = LOOM_STRING_ID_INVALID;
+  IREE_ASSERT_OK(loom_builder_intern_string(&builder_, IREE_SV("provider_fn"),
+                                            &symbol_name_id));
+  uint16_t symbol_id = LOOM_SYMBOL_ID_INVALID;
+  IREE_ASSERT_OK(loom_module_add_symbol(module_, symbol_name_id, &symbol_id));
+  loom_symbol_ref_t ref = {/*.module_id=*/0, /*.symbol_id=*/symbol_id};
+
+  loom_string_id_t provider_id = LOOM_STRING_ID_INVALID;
+  IREE_ASSERT_OK(loom_builder_intern_string(&builder_, IREE_SV("provider.loom"),
+                                            &provider_id));
+  loom_op_t* import_op = nullptr;
+  IREE_ASSERT_OK(loom_module_import_build(&builder_, provider_id,
+                                          loom_make_symbol_ref_array(&ref, 1),
+                                          LOOM_LOCATION_UNKNOWN, &import_op));
+
+  EnterTestFunc(nullptr, 0, nullptr);
+  loom_op_t* dependency_op = nullptr;
+  IREE_ASSERT_OK(loom_test_symbol_array_attrs_build(
+      &builder_, 0, loom_make_symbol_ref_array(&ref, 1),
+      loom_symbol_ref_array_empty(), LOOM_LOCATION_UNKNOWN, &dependency_op));
+  TerminateFunc();
+
+  auto result = Verify();
+  EXPECT_EQ(result.error_count, 0u)
+      << (collector_.errors.empty() ? "" : collector_.errors[0]);
+}
+
+TEST_F(VerifyTest, RejectsImportedTemplateFamilyContract) {
+  static const char kSource[] =
+      "module.import \"providers.loom\" [@family]\n"
+      "test.func @test(%value: i32) {\n"
+      "  %result = template.apply<@family>(%value) : (i32) -> (i32)\n"
+      "  test.yield\n"
+      "}\n";
+  loom_module_t* parsed_module =
+      ParseSourceModule(kSource, "imported_template_family.loom");
+  ASSERT_NE(parsed_module, nullptr);
+
+  DiagnosticCapture capture;
+  loom_verify_result_t result = VerifyParsedSourceModuleStructured(
+      parsed_module, kSource, "imported_template_family.loom", &capture);
+  EXPECT_EQ(result.error_count, 1u);
+  const CapturedDiagnostic* diagnostic = FindDiagnostic(
+      capture, loom_error_def_lookup(LOOM_ERROR_DOMAIN_SYMBOL, 2));
+  ASSERT_NE(diagnostic, nullptr)
+      << "Expected unresolved template-family diagnostic";
+  EXPECT_EQ(GetStringParam(*diagnostic, 0), "family");
+
+  loom_module_free(parsed_module);
 }
 
 TEST_F(VerifyTest, AcceptsUnconstrainedAvailabilitySymbolTarget) {

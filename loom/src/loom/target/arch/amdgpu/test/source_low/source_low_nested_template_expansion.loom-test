@@ -7,52 +7,58 @@
 // their required kernel ancestry until the outer provider reaches its caller.
 amdgpu.target<gfx11-generic> @target
 
-func.template<nested.leaf> priority(20) @leaf_specialized(%value: index) -> (index) where [range(%value, 1, 256)] {
+template.decl @nested.kernel_inner()
+template.decl @nested.kernel_outer()
+template.decl @nested.leaf(%value: index) -> (index)
+template.decl @nested.middle(%value: index) -> (index)
+template.decl @nested.outer(%value: index) -> (index)
+
+template.def<@nested.leaf> priority(20) @leaf_specialized(%value: index) -> (index) where [range(%value, 1, 256)] {
   %increment = index.constant 1 : index
   %result = index.add %value, %increment : index
-  func.return %result : index
+  template.return %result : index
 }
 
-func.template<nested.leaf> priority(10) @leaf_fallback(%value: index) -> (index) {
+template.def<@nested.leaf> priority(10) @leaf_fallback(%value: index) -> (index) {
   %fallback_value = index.constant 0 : index
-  func.return %fallback_value : index
+  template.return %fallback_value : index
 }
 
-func.template<nested.middle> priority(20) @middle_specialized(%value: index) -> (index) where [range(%value, 1, 256)] {
-  %result = func.apply<nested.leaf>(%value) : (index) -> (index)
-  func.return %result : index
+template.def<@nested.middle> priority(20) @middle_specialized(%value: index) -> (index) where [range(%value, 1, 256)] {
+  %result = template.apply<@nested.leaf>(%value) : (index) -> (index)
+  template.return %result : index
 }
 
-func.template<nested.middle> priority(10) @middle_fallback(%value: index) -> (index) {
+template.def<@nested.middle> priority(10) @middle_fallback(%value: index) -> (index) {
   %fallback_value = index.constant 0 : index
-  func.return %fallback_value : index
+  template.return %fallback_value : index
 }
 
-func.template<nested.outer> @outer(%value: index) -> (index) {
-  %result = func.apply<nested.middle>(%value) : (index) -> (index)
-  func.return %result : index
+template.def<@nested.outer> @outer(%value: index) -> (index) {
+  %result = template.apply<@nested.middle>(%value) : (index) -> (index)
+  template.return %result : index
 }
 
-func.template<nested.kernel_inner> device @kernel_inner() {
+template.def<@nested.kernel_inner> device @kernel_inner() {
   %workitem = kernel.workitem.id<x> : index
-  func.return
+  template.return
 }
 
-func.template<nested.kernel_outer> device @kernel_outer() {
+template.def<@nested.kernel_outer> device @kernel_outer() {
   kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
-  func.apply<nested.kernel_inner>() : ()
-  func.return
+  template.apply<@nested.kernel_inner>() : ()
+  template.return
 }
 
 func.def target(@target) @nested_template_expansion() -> (index) {
   %value = index.constant 64 : index
-  %result = func.apply<nested.outer>(%value) : (index) -> (index)
+  %result = template.apply<@nested.outer>(%value) : (index) -> (index)
   func.return %result : index
 }
 
 func.def target(@target) @nested_template_fallback() -> (index) {
   %value = index.constant 512 : index
-  %result = func.apply<nested.outer>(%value) : (index) -> (index)
+  %result = template.apply<@nested.outer>(%value) : (index) -> (index)
   func.return %result : index
 }
 
@@ -61,8 +67,8 @@ kernel.def target(@target) @nested_kernel_template_expansion() {
   %workgroup_size = index.constant 32 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
 } launch() {
-  func.apply<nested.kernel_outer>() : ()
-  func.apply<nested.kernel_inner>() : ()
+  template.apply<@nested.kernel_outer>() : ()
+  template.apply<@nested.kernel_inner>() : ()
   kernel.return
 }
 

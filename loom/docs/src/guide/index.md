@@ -69,7 +69,7 @@ semantically because it is a guide.
 
 ## Reading source at library scale
 
-A reusable motif is usually a `func.def` or `func.template`: it carries an
+A reusable motif is usually a `func.def` or `template.def`: it carries an
 algorithm or physical representation contract but no launch ABI. A concrete
 `kernel.def` composes motifs behind a workload and launch contract. A
 `command.program.def` composes kernels behind a reusable scheduling and resource

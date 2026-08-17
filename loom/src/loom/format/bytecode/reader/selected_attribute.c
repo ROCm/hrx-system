@@ -390,8 +390,10 @@ static iree_status_t loom_bytecode_selected_attribute_decode_at_depth(
           materializer, source_name_id, IREE_SV("attribute_symbol"),
           name_offset, &source_name));
       loom_symbol_ref_t target_ref = loom_symbol_ref_null();
-      if (!loom_bytecode_selected_table_lookup_symbol(
-              materializer, (uint32_t)source_name_id, &target_ref)) {
+      bool found = false;
+      IREE_RETURN_IF_ERROR(loom_bytecode_selected_table_resolve_symbol(
+          materializer, (uint32_t)source_name_id, &target_ref, &found));
+      if (!found) {
         return loom_bytecode_reader_emit_invalid_field(
             materializer->decoder, cursor->range_name, IREE_SV("attribute"), 0,
             IREE_SV("symbol"), name_offset,
@@ -448,8 +450,10 @@ static iree_status_t loom_bytecode_selected_attribute_decode_at_depth(
               IREE_SV("symbol_set_elements_are_not_sorted_and_unique"));
         }
         previous_name = source_name;
-        if (!loom_bytecode_selected_table_lookup_symbol(
-                materializer, (uint32_t)source_name_id, &values[i])) {
+        bool found = false;
+        IREE_RETURN_IF_ERROR(loom_bytecode_selected_table_resolve_symbol(
+            materializer, (uint32_t)source_name_id, &values[i], &found));
+        if (!found) {
           return loom_bytecode_reader_emit_invalid_field(
               materializer->decoder, cursor->range_name, collection_name, i,
               IREE_SV("symbol"), name_offset,

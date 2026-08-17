@@ -10,10 +10,10 @@
 
 iree_status_t loom_target_low_legality_provider_list_verify(
     loom_target_low_legality_provider_list_t list) {
-  static_assert(LOOM_DIALECT_BUILTIN_COUNT_ <= 32,
-                "low legality dialect masks are 32 bits");
-  const uint32_t valid_builtin_dialect_bits =
-      (uint32_t)((UINT64_C(1) << LOOM_DIALECT_BUILTIN_COUNT_) - 1);
+  static_assert(LOOM_DIALECT_BUILTIN_COUNT_ <= 64,
+                "low legality dialect masks are 64 bits");
+  const uint64_t valid_builtin_dialect_bits =
+      UINT64_MAX >> (64 - LOOM_DIALECT_BUILTIN_COUNT_);
   if (loom_target_low_legality_provider_list_is_empty(list)) {
     return iree_ok_status();
   }

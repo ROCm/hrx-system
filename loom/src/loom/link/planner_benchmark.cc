@@ -739,7 +739,8 @@ static void BM_Link_ImportedCandidateEndToEnd(benchmark::State& state) {
           index, selection.source_module, fixture.context(),
           fixture.block_pool());
       CheckStatus(loom_linker_add_exact_module(
-          linker, materialized_module, import_projection.modules.values[i]));
+          linker, materialized_module, import_projection.modules.values[i],
+          loom_linker_target_symbol_list_empty()));
       loom_module_free(materialized_module);
     }
     CheckStatus(loom_linker_finalize_roots(linker, roots));
@@ -974,7 +975,8 @@ static void BenchmarkExactLink(benchmark::State& state,
     state.ResumeTiming();
     CheckStatus(loom_linker_add_module_symbols(
         linker, fixture.module(), source_symbols,
-        loom_linker_source_provider_import_list_empty()));
+        loom_linker_source_provider_import_list_empty(),
+        loom_linker_target_symbol_list_empty()));
     benchmark::DoNotOptimize(linker);
     state.PauseTiming();
     loom_linker_free(linker);
@@ -1006,7 +1008,8 @@ static void BM_LinkExactDense_Catalog(benchmark::State& state) {
     state.ResumeTiming();
     CheckStatus(loom_linker_add_exact_module(
         linker, fixture.module(),
-        loom_linker_source_provider_import_list_empty()));
+        loom_linker_source_provider_import_list_empty(),
+        loom_linker_target_symbol_list_empty()));
     benchmark::DoNotOptimize(linker);
     state.PauseTiming();
     loom_linker_free(linker);
@@ -1155,7 +1158,8 @@ static void BenchmarkSelectiveMaterializeAndLink(
     }
     CheckStatus(loom_linker_add_exact_module(
         linker, selected_module,
-        loom_linker_source_provider_import_list_empty()));
+        loom_linker_source_provider_import_list_empty(),
+        loom_linker_target_symbol_list_empty()));
     loom_module_free(selected_module);
     benchmark::DoNotOptimize(linker);
     state.PauseTiming();

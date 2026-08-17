@@ -117,7 +117,7 @@ bool loom_bytecode_symbol_func_metadata_attr_is_shared(
       attr_index == func_like->predicates_attr_index) {
     return true;
   }
-  if (attr_index == func_like->implements_attr_index ||
+  if (attr_index == func_like->template_family_attr_index ||
       attr_index == func_like->priority_attr_index) {
     return true;
   }

@@ -446,6 +446,7 @@ loom_cc_library(
     iree::base
     iree::base::internal::arena
     loom::format::bytecode::format
+    loom::format::bytecode::function_header
     loom::format::bytecode::index
     loom::format::low_repr
     loom::ir
@@ -484,6 +485,25 @@ loom_cc_test(
     iree::testing::gtest_main
     loom::format::bytecode::format
     loom::ir
+)
+
+loom_cc_test(
+  NAME
+    selected_function_header_test
+  SRCS
+    "selected_function_header_test.cc"
+  DEPS
+    iree::base::internal::arena
+    iree::io::stream
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::format::bytecode::index
+    loom::format::bytecode::reader
+    loom::format::bytecode::symbol_header_reader
+    loom::format::bytecode::writer
+    loom::format::text::parser
+    loom::ir
+    loom::ops::template
 )
 
 loom_cc_test(
@@ -606,6 +626,7 @@ loom_cc_library(
     iree::base::internal::arena
     loom::error::error_defs
     loom::format::bytecode::format
+    loom::format::bytecode::function_header
     loom::format::bytecode::index
     loom::format::low_repr
     loom::ir

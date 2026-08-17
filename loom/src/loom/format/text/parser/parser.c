@@ -294,20 +294,22 @@ static iree_status_t loom_parser_verify_symbols_resolved(
     if (symbol->definition && symbol->defining_op) continue;
 
     bool has_reference = false;
-    bool has_dependency = false;
+    bool has_availability = false;
     loom_symbol_reference_occurrence_id_t occurrence_id =
         reference_table.symbols[origin.symbol_id].first_incoming_occurrence_id;
     while (occurrence_id != LOOM_SYMBOL_REFERENCE_OCCURRENCE_ID_INVALID) {
       const loom_symbol_reference_occurrence_t* occurrence =
           &reference_table.occurrences[occurrence_id];
       has_reference = true;
-      if (loom_symbol_reference_occurrence_is_dependency(occurrence)) {
-        has_dependency = true;
+      if (occurrence->role == LOOM_SYMBOL_REFERENCE_ROLE_AVAILABILITY) {
+        has_availability = true;
         break;
       }
       occurrence_id = occurrence->next_incoming_occurrence_id;
     }
-    if (has_reference && !has_dependency) continue;
+    if (has_reference && has_availability) {
+      continue;
+    }
 
     loom_diagnostic_param_t params[] = {
         loom_param_string(origin.token.text),

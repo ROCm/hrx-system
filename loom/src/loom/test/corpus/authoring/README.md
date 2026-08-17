@@ -48,9 +48,9 @@ views, q6 gate/up weight views, shared q8 load, gate/up accumulation, subgroup
 reduction, SiLU, and final store.
 
 The q6 sign-pack helper is a direct `func.call` because the call site wants that
-specific bit helper. The q6/q8 part accumulator is a `func.template` provider
+specific bit helper. The q6/q8 part accumulator is a `template.def` provider
 for the `model.q6q8.accumulate_part` contract and the kernel uses
-`func.apply<model.q6q8.accumulate_part>`. Selection rewrites the apply to an
+`template.apply<@model.q6q8.accumulate_part>`. Selection rewrites the apply to an
 inline call to the selected provider, then normal callable inlining removes the
 boundary before executable lowering. That is the intended library shape for
 layout, target, or algorithm families: the model kernel asks for a contract,
@@ -222,7 +222,7 @@ loom-compile \
 
 The JSONL trace is the scriptable index. The adjacent `.loom` snapshots are the
 human-readable IR. `select-templates` should remove residual
-`func.apply<model.q6q8.accumulate_part>` sites, `inline-callables` should remove
+`template.apply<@model.q6q8.accumulate_part>` sites, `inline-callables` should remove
 the selected provider boundary, and `legalize-math` should rewrite semantic
 SiLU before target-low emission.
 
@@ -243,7 +243,7 @@ priority fallback, failed before selection, or left unresolved applies because
 more predicate facts are needed.
 
 The same report includes one `template-selection` detail row per analyzed
-`func.apply` site when pass reporting is enabled. The row records the enclosing
+`template.apply` site when pass reporting is enabled. The row records the enclosing
 function, contract key, selected provider when present, effective target when
 known, candidate counts, and an outcome such as `selected`,
 `fallback_selected`, `target_mismatch`, `missing_facts`, or `ambiguous`.
@@ -591,9 +591,9 @@ the source already has.
 caller wants one specific helper or declaration, as with
 `@q6_signed_pack_dot4i` and `@bf16_dot32`.
 
-`func.apply<K>` is a compile-time implementation demand. The key is a contract,
+`template.apply<@K>` is a compile-time implementation demand. The key is a contract,
 not a symbol. The selection pass resolves live applies against visible
-`func.template` providers, prunes dead private providers, rewrites selected
+`template.def` providers, prunes dead private providers, rewrites selected
 sites to inline calls, and leaves normal inlining to splice the body. Good
 contract names describe a reusable motif or layout operation rather than a
 particular model brand.
@@ -693,7 +693,7 @@ checked `.loom` case.
 
 | Signal | Mechanism to inspect |
 | --- | --- |
-| Residual `func.apply` after final selection | No provider implemented the contract, every provider was rejected by signature or predicates, or multiple highest-priority providers tied. |
+| Residual `template.apply` after final selection | No provider implemented the contract, every provider was rejected by signature or predicates, or multiple highest-priority providers tied. |
 | Template ambiguity | Matching providers need distinct priorities, sharper predicates, or separate contract keys. |
 | Unresolved unroll intent | The loop trip count or requested factor was not known where the unroller ran; add facts earlier or leave the loop structured. |
 | Inline/noinline conflict | Caller and callee policy disagree about whether the boundary may survive lowering. Fix the authored policy instead of relying on pass ordering. |

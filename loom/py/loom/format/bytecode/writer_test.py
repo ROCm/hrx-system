@@ -30,6 +30,7 @@ from loom.dialect.low import ALL_LOW_OPS
 from loom.dialect.pass_ import ALL_PASS_OPS
 from loom.dialect.scalar import ALL_SCALAR_OPS
 from loom.dialect.target import ALL_TARGET_OPS, ALL_TARGET_PARAMETERIZED_ATTRS
+from loom.dialect.template import ALL_TEMPLATE_OPS
 from loom.dialect.test import (
     ALL_TEST_OPS,
     ALL_TEST_PARAMETERIZED_ATTRS,
@@ -187,7 +188,12 @@ def _text_parser(
     include_pass: bool = False,
 ) -> Parser:
     parser = Parser()
-    ops = list(ALL_FUNC_OPS) + list(ALL_CFG_OPS) + list(ALL_TEST_OPS)
+    ops = (
+        list(ALL_FUNC_OPS)
+        + list(ALL_TEMPLATE_OPS)
+        + list(ALL_CFG_OPS)
+        + list(ALL_TEST_OPS)
+    )
     if include_encoding:
         _append_unique(ops, ALL_ENCODING_OPS)
     if include_global:
@@ -229,7 +235,12 @@ def _text_printer(
     include_pass: bool = False,
 ) -> Printer:
     printer = Printer()
-    ops = list(ALL_FUNC_OPS) + list(ALL_CFG_OPS) + list(ALL_TEST_OPS)
+    ops = (
+        list(ALL_FUNC_OPS)
+        + list(ALL_TEMPLATE_OPS)
+        + list(ALL_CFG_OPS)
+        + list(ALL_TEST_OPS)
+    )
     if include_encoding:
         _append_unique(ops, ALL_ENCODING_OPS)
     if include_global:
@@ -1893,21 +1904,23 @@ class TestCrossFormatRoundTrip:
             "priority": 3,
         }
 
-    def test_func_template_metadata_survives_bytecode(self) -> None:
+    def test_template_metadata_survives_bytecode(self) -> None:
         text = (
-            "func.template<tile.contract> device "
+            "template.decl @tile.contract(%input: f32) -> (f32)\n"
+            "\n"
+            "template.def<@tile.contract> device "
             "requires [#target.subgroup.size<64>] "
             "priority(7) @kernel(%input: f32) -> (f32) {\n"
-            "  func.return %input : f32\n"
+            "  template.return %input : f32\n"
             "}\n"
         )
 
         loaded = _parse_write_read(text)
-        assert len(loaded.symbols) == 1
-        symbol = loaded.symbols[0]
-        assert symbol.kind == SymbolKind.FUNC_TEMPLATE
+        assert len(loaded.symbols) == 2
+        symbol = loaded.symbols[1]
+        assert symbol.kind == SymbolKind.TEMPLATE_DEF
         assert symbol.op is not None
-        assert symbol.op.attributes["implements"] == "tile.contract"
+        assert symbol.op.attributes["family"] == "tile.contract"
         assert symbol.op.attributes["priority"] == 7
         assert symbol.op.attributes["cc"] == "device"
         requirements = symbol.op.attributes["requires"]

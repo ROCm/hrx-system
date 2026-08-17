@@ -571,7 +571,7 @@ class ResolvedFields:
         """Get the SSA name of the operand or func arg a result is tied to.
 
         For body ops, tied.operand_index indexes into op.operands. For
-        func-like ops with a body region (func.def, func.template), there
+        func-like ops with a body region (func.def, template.def), there
         are no op-level operands — tied.operand_index indexes into the
         entry block's arguments instead.
         """
@@ -598,9 +598,9 @@ class ResolvedFields:
     ) -> tuple[list[str], list[Type], list[int]]:
         """Get function argument data for the FuncArgs format element.
 
-        For ops with a body region (func.def, func.template), args are the
+        For ops with a body region (func.def, template.def), args are the
         entry block's arguments. For declaration-style ops (func.decl,
-        func.ukernel), args are the op's operands.
+        template.ukernel), args are the op's operands.
         """
         field_desc = self._layout.fields.get(field) if field is not None else None
         if field_desc is not None:

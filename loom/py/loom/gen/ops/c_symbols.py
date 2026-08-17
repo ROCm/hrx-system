@@ -27,6 +27,8 @@ _SYMBOL_INTERFACE_MAP: dict[str, str] = {
     "config": "LOOM_SYMBOL_INTERFACE_CONFIG",
     "kernel": "LOOM_SYMBOL_INTERFACE_KERNEL",
     "command_program": "LOOM_SYMBOL_INTERFACE_COMMAND_PROGRAM",
+    "template_family": "LOOM_SYMBOL_INTERFACE_TEMPLATE_FAMILY",
+    "template_provider": "LOOM_SYMBOL_INTERFACE_TEMPLATE_PROVIDER",
 }
 
 _SYMBOL_REFERENCE_ROLE_MAP: dict[SymbolReferenceRole, str] = {

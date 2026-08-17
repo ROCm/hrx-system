@@ -9,6 +9,7 @@
 #ifndef LOOM_FORMAT_BYTECODE_READER_SELECTED_SYMBOL_H_
 #define LOOM_FORMAT_BYTECODE_READER_SELECTED_SYMBOL_H_
 
+#include "loom/format/bytecode/function_header.h"
 #include "loom/format/bytecode/reader/selected_body.h"
 
 #ifdef __cplusplus
@@ -58,6 +59,16 @@ iree_status_t loom_bytecode_selected_symbols_materialize(
     loom_bytecode_selected_symbol_materializer_t* materializer,
     const loom_bytecode_selected_symbol_t* selected_symbols,
     iree_host_size_t selected_symbol_count);
+
+// Decodes one function-like symbol header without reading its body bytes.
+//
+// Shared types, attributes, and external symbol references are projected
+// through materializer->tables. The source symbol itself must be resolvable by
+// that table's predeclared bindings or external resolver.
+iree_status_t loom_bytecode_selected_function_header_materialize(
+    loom_bytecode_selected_symbol_materializer_t* materializer,
+    uint32_t source_symbol_ordinal,
+    loom_bytecode_function_header_t* out_header);
 
 #ifdef __cplusplus
 }  // extern "C"

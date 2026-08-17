@@ -36,6 +36,35 @@ typedef enum loom_bytecode_selected_reference_state_e {
   LOOM_BYTECODE_SELECTED_REFERENCE_SCHEDULED = 1,
 } loom_bytecode_selected_reference_state_t;
 
+// Resolves one module-local source symbol ordinal into the output module.
+typedef iree_status_t (*loom_bytecode_selected_symbol_resolver_fn_t)(
+    void* user_data, uint32_t source_symbol_ordinal,
+    loom_symbol_ref_t* out_target_symbol_ref);
+
+// Optional external symbol projection used by metadata-only readers.
+typedef struct loom_bytecode_selected_symbol_resolver_t {
+  // Resolver invoked when a symbol was not predeclared by this materializer.
+  loom_bytecode_selected_symbol_resolver_fn_t fn;
+  // Caller-owned payload passed to fn.
+  void* user_data;
+} loom_bytecode_selected_symbol_resolver_t;
+
+// Returns an empty external symbol resolver.
+static inline loom_bytecode_selected_symbol_resolver_t
+loom_bytecode_selected_symbol_resolver_empty(void) {
+  return (loom_bytecode_selected_symbol_resolver_t){0};
+}
+
+// Returns a resolver wrapping fn and user_data.
+static inline loom_bytecode_selected_symbol_resolver_t
+loom_bytecode_selected_symbol_resolver_make(
+    loom_bytecode_selected_symbol_resolver_fn_t fn, void* user_data) {
+  return (loom_bytecode_selected_symbol_resolver_t){
+      .fn = fn,
+      .user_data = user_data,
+  };
+}
+
 // One entry on the explicit shared-table materialization stack.
 typedef struct loom_bytecode_selected_table_frame_t {
   // Shared-table domain containing the source entry.
@@ -62,6 +91,8 @@ typedef struct loom_bytecode_selected_table_materializer_t {
   iree_arena_allocator_t* scratch_arena;
   // Module receiving compact canonical table entries.
   loom_module_t* output_module;
+  // Optional projection for references to symbols outside the selection.
+  loom_bytecode_selected_symbol_resolver_t symbol_resolver;
   // Allocator owning transient projections and worklist storage.
   iree_allocator_t allocator;
   // Reached source identity to compact output identity map.
@@ -82,6 +113,7 @@ void loom_bytecode_selected_table_materializer_initialize(
     loom_bytecode_reader_decoder_t* decoder, iree_const_byte_span_t bytecode,
     loom_context_t* context, const loom_bytecode_module_metadata_t* metadata,
     iree_arena_allocator_t* scratch_arena, loom_module_t* output_module,
+    loom_bytecode_selected_symbol_resolver_t symbol_resolver,
     iree_allocator_t allocator,
     loom_bytecode_selected_table_materializer_t* out_materializer);
 
@@ -104,6 +136,17 @@ iree_status_t loom_bytecode_selected_table_intern_string(
 bool loom_bytecode_selected_table_lookup_symbol(
     const loom_bytecode_selected_table_materializer_t* materializer,
     uint32_t source_name_ordinal, loom_symbol_ref_t* out_target_symbol_ref);
+
+// Resolves a source symbol by STRINGS ordinal.
+//
+// Predeclared bindings are returned directly. Otherwise the validated dense
+// string-to-symbol projection identifies the exact source symbol passed to the
+// optional external resolver. |out_found| is false when no binding or resolver
+// exists; resolver and allocation failures propagate as statuses.
+iree_status_t loom_bytecode_selected_table_resolve_symbol(
+    loom_bytecode_selected_table_materializer_t* materializer,
+    uint32_t source_name_ordinal, loom_symbol_ref_t* out_target_symbol_ref,
+    bool* out_found);
 
 // Projects one source encoding reference, scheduling it when not yet reached.
 iree_status_t loom_bytecode_selected_table_project_encoding(

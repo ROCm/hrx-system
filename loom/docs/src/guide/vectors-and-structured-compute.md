@@ -218,7 +218,7 @@ Structured compute belongs in the narrowest boundary that owns it:
 
 | Concern | Owning source construct |
 | --- | --- |
-| Decode a block format, reduce lanes, or compute one logical tile | `func.def` or `func.template` motif. |
+| Decode a block format, reduce lanes, or compute one logical tile | `func.def` or `template.def` motif. |
 | Map work across workgroups and workitems, access buffers, and synchronize | `kernel.def`. |
 | Sequence launches and bind reusable resources | `command.program.def`. |
 | Choose a target-specific implementation of a shared contract | Template provider plus target requirements. |

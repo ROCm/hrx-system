@@ -591,7 +591,7 @@ class Tokenizer:
         name_start = self._position
         if not _is_ident_start(self._char()):
             raise ParseError("expected identifier after '@'", location, self._filename)
-        while _is_ident_continue_no_dot(self._char()):
+        while _is_ident_continue(self._char()):
             self._advance()
         text = self._source[name_start : self._position]
         return self._make_token(TokenKind.SYMBOL, text, location)

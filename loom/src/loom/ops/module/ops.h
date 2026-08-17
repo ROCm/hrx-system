@@ -23,7 +23,7 @@ enum {
   LOOM_OP_MODULE_COUNT_ = 1,
 };
 
-// LOOM_OP_MODULE_IMPORT: Name a source provider that may define the listed module symbols. The provider is an opaque resolver-defined key, and the symbol list records availability without creating dependency or liveness edges. Provider identity and import order never participate in template or symbol selection. This metadata is consumed only by compile-time linking.
+// LOOM_OP_MODULE_IMPORT: Name a source provider that may define the listed module symbols. The provider is an opaque resolver-defined key, and the symbol list records availability without creating dependency or liveness edges. Provider identity and import order never participate in template provider matching. Template families are declared locally by every using module rather than sourced through imports. This metadata is consumed only by compile-time linking.
 // module.import "motif/format/ggml.loom" [@decode_q4, @decode_q6]
 LOOM_DEFINE_ISA(loom_module_import_isa, LOOM_OP_MODULE_IMPORT)
 LOOM_DEFINE_ATTR_STRING(loom_module_import_provider, 0)

@@ -265,6 +265,17 @@ iree_py_library(
 
 iree_py_library(
   NAME
+    c_tables_template_generator
+  MAIN_MODULE
+    "loom.gen.ops.c_tables"
+  DEPS
+    loom::py::loom::gen::ops::c_tables
+    loom::py::loom::dialect::func::func
+    loom::py::loom::dialect::template::template
+)
+
+iree_py_library(
+  NAME
     c_tables_pass_generator
   MAIN_MODULE
     "loom.gen.ops.c_tables"

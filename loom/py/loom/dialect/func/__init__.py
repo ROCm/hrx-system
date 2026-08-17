@@ -6,34 +6,26 @@
 
 """Func dialect: program structure operations.
 
-Provides function definitions, declarations, calls, template
-expansion, and returns. See defs.py for the full op declarations.
+Provides runtime function definitions, declarations, calls, and returns. See
+defs.py for the full operation declarations.
 """
 
 from loom.dialect.func.defs import (
     ALL_FUNC_OPS,
     CallingConv,
     Visibility,
-    func_apply,
     func_call,
     func_decl,
     func_def,
     func_ops,
-    func_provider_decl,
     func_return,
-    func_template,
-    func_ukernel,
 )
 
 __all__ = [
     "func_ops",
     "func_def",
     "func_decl",
-    "func_provider_decl",
-    "func_template",
-    "func_ukernel",
     "func_call",
-    "func_apply",
     "func_return",
     "Visibility",
     "CallingConv",

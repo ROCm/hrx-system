@@ -40,9 +40,10 @@ module_import = Op(
         "Name a source provider that may define the listed module symbols. "
         "The provider is an opaque resolver-defined key, and the symbol list "
         "records availability without creating dependency or liveness edges. "
-        "Provider identity and import order never participate in template or "
-        "symbol selection. This metadata is consumed only by compile-time "
-        "linking."
+        "Provider identity and import order never participate in template "
+        "provider matching. Template families are declared locally by every "
+        "using module rather than sourced through imports. This metadata is "
+        "consumed only by compile-time linking."
     ),
     traits=[MODULE_SCOPE, KeyedModuleRecord("provider")],
     attrs=[

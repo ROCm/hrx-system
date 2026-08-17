@@ -72,6 +72,18 @@ loom_cc_library(
 
 loom_cc_library(
   NAME
+    function_header
+  HDRS
+    "function_header.h"
+  DEPS
+    iree::base
+    loom::format::bytecode::reader::source_trivia
+    loom::ops::op_defs
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
     module_summary
   HDRS
     "module_summary.h"
@@ -145,6 +157,26 @@ loom_cc_library(
   PUBLIC
 )
 
+loom_cc_library(
+  NAME
+    symbol_header_reader
+  HDRS
+    "symbol_header_reader.h"
+  SRCS
+    "symbol_header_reader.c"
+  DEPS
+    ::function_header
+    ::index
+    iree::base
+    iree::base::internal::arena
+    loom::format::bytecode::reader::decoder
+    loom::format::bytecode::reader::selected_symbol
+    loom::format::bytecode::reader::selected_tables
+    loom::format::low_repr
+    loom::ir
+  PUBLIC
+)
+
 loom_cc_test(
   NAME
     reader_test
@@ -164,6 +196,7 @@ loom_cc_test(
     loom::ops::func
     loom::ops::global
     loom::ops::module
+    loom::ops::template
     loom::ops::test
     loom::ops::type_registry
 )

@@ -584,6 +584,7 @@ typedef enum loom_dialect_id_e {
   LOOM_DIALECT_SANITIZER = 0x1D,
   LOOM_DIALECT_COMMAND = 0x1E,
   LOOM_DIALECT_MODULE = 0x1F,
+  LOOM_DIALECT_TEMPLATE = 0x20,
   LOOM_DIALECT_RESERVED = 0xFF,
 } loom_dialect_id_t;
 #define LOOM_OP_KIND_UNKNOWN ((loom_op_kind_t)0)
@@ -595,7 +596,7 @@ typedef enum loom_dialect_id_e {
 
 // Maximum number of built-in dialects. Dialect IDs must be less than
 // this value. Matches the size of the dialect vtable registry array.
-#define LOOM_DIALECT_BUILTIN_COUNT_ 32
+#define LOOM_DIALECT_BUILTIN_COUNT_ 33
 
 // Extracts the dialect ID (high byte) from an op kind.
 static inline uint8_t loom_op_dialect_id(loom_op_kind_t kind) {
@@ -982,6 +983,8 @@ enum loom_call_like_kind_e {
   LOOM_CALL_LIKE_KIND_LOW_INVOKE = 3,
   // Command-program materialization with specialization and binding operands.
   LOOM_CALL_LIKE_KIND_COMMAND_PROGRAM = 4,
+  // Exact compile-time template implementation call.
+  LOOM_CALL_LIKE_KIND_TEMPLATE = 5,
 };
 
 // Interface descriptor for direct symbol call-like ops. The operand field and
@@ -1108,12 +1111,12 @@ typedef struct loom_func_like_vtable_t {
   uint8_t specialization_count_attr_index;
 
   // Body region index. LOOM_REGION_INDEX_NONE for bodyless ops
-  // (func.decl, func.ukernel) that only declare a signature.
+  // (func.decl, template.ukernel) that only declare a signature.
   uint8_t body_region_index;
 
-  // Index of the implements string attr (for template/ukernel dispatch).
-  // LOOM_ATTR_INDEX_NONE for def/decl.
-  uint8_t implements_attr_index;
+  // Index of the template-family symbol attr on implementation providers.
+  // LOOM_ATTR_INDEX_NONE for non-provider function-like operations.
+  uint8_t template_family_attr_index;
 
   // Index of the priority i64 attr (for template/ukernel dispatch).
   // LOOM_ATTR_INDEX_NONE for def/decl.
@@ -1952,19 +1955,18 @@ typedef enum loom_symbol_kind_e {
   LOOM_SYMBOL_NONE = 0,
   LOOM_SYMBOL_FUNC_DEF = 1,
   LOOM_SYMBOL_FUNC_DECL = 2,
-  LOOM_SYMBOL_FUNC_TEMPLATE = 3,
-  LOOM_SYMBOL_FUNC_UKERNEL = 4,
+  LOOM_SYMBOL_TEMPLATE_DECL = 3,
+  LOOM_SYMBOL_TEMPLATE_DEF = 4,
+  LOOM_SYMBOL_TEMPLATE_UKERNEL = 5,
   // Sentinel: first non-function-like symbol kind.
-  LOOM_SYMBOL_FUNC_COUNT_ = 5,
-  LOOM_SYMBOL_GLOBAL = 5,
-  LOOM_SYMBOL_EXECUTABLE = 6,
-  LOOM_SYMBOL_RECORD = 7,
+  LOOM_SYMBOL_FUNC_COUNT_ = 6,
+  LOOM_SYMBOL_GLOBAL = 6,
+  LOOM_SYMBOL_EXECUTABLE = 7,
+  LOOM_SYMBOL_RECORD = 8,
   LOOM_SYMBOL_COUNT_,
 } loom_symbol_kind_e;
 
-// Returns true if the symbol kind is a function-like (def, decl,
-// template, or ukernel). Function-like symbols carry a defining_op
-// pointer to the op that implements them.
+// Returns true if the symbol kind carries a function-like signature.
 static inline bool loom_symbol_kind_is_function_like(loom_symbol_kind_t kind) {
   return kind >= LOOM_SYMBOL_FUNC_DEF && kind < LOOM_SYMBOL_FUNC_COUNT_;
 }

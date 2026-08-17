@@ -84,7 +84,8 @@ TEST_F(BytecodeSelectedBodyTest, ProjectsHighValueReferencesToCompactIds) {
   loom_bytecode_selected_table_materializer_t tables;
   loom_bytecode_selected_table_materializer_initialize(
       &decoder_, iree_make_const_byte_span(bytecode.data(), bytecode.size()),
-      &context_, &metadata, &table_arena_, module_, iree_allocator_system(),
+      &context_, &metadata, &table_arena_, module_,
+      loom_bytecode_selected_symbol_resolver_empty(), iree_allocator_system(),
       &tables);
   loom_bytecode_selected_body_materializer_t materializer = {
       /*.tables=*/&tables,

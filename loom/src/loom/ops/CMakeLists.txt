@@ -76,6 +76,21 @@ loom_cc_library(
 
 loom_cc_library(
   NAME
+    callable_effects
+  HDRS
+    "callable_effects.h"
+  SRCS
+    "callable_effects.c"
+  DEPS
+    ::op_defs
+    iree::base
+    loom::ir
+    loom::rewrite::rewriter
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
     storage_facts
   HDRS
     "storage_facts.h"
@@ -109,6 +124,7 @@ loom_cc_test(
     loom::ops::kernel
     loom::ops::low
     loom::ops::target
+    loom::ops::template
     loom::ops::test
     loom::target::low_descriptor_registry_core_test
     loom::target::types
@@ -216,6 +232,7 @@ loom_cc_library(
     loom::ops::scalar
     loom::ops::scf
     loom::ops::target
+    loom::ops::template
     loom::ops::vector
     loom::ops::view
   PUBLIC
@@ -289,6 +306,7 @@ loom_cc_test(
     loom::ops::index
     loom::ops::kernel
     loom::ops::module
+    loom::ops::template
     loom::ops::test
     loom::ops::vector
     loom::util::fact_table

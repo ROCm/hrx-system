@@ -148,8 +148,7 @@ static iree_status_t loom_symbol_liveness_mark_module_root_edges(
 
 static iree_status_t loom_symbol_liveness_visit_contributors(
     loom_symbol_liveness_state_t* state, loom_symbol_id_t source_symbol_id,
-    const loom_symbol_t* source_symbol,
-    const loom_func_contract_demand_t* demand) {
+    const loom_symbol_t* source_symbol, const loom_template_demand_t* demand) {
   if (!state->has_contributors) {
     return iree_ok_status();
   }
@@ -164,8 +163,10 @@ static iree_status_t loom_symbol_liveness_visit_contributors(
   for (iree_host_size_t i = 0; i < state->options.contributor_count; ++i) {
     const loom_symbol_liveness_contributor_t* contributor =
         &state->options.contributors[i];
-    if (!contributor->visit_contract_demand) continue;
-    IREE_RETURN_IF_ERROR(contributor->visit_contract_demand(
+    if (!contributor->visit_template_demand) {
+      continue;
+    }
+    IREE_RETURN_IF_ERROR(contributor->visit_template_demand(
         contributor->user_data, &context, demand));
   }
   return iree_ok_status();
@@ -192,11 +193,11 @@ static iree_status_t loom_symbol_liveness_traverse_symbol(
 
   if (!state->has_contributors) return iree_ok_status();
   const loom_symbol_t* symbol = &state->module->symbols.entries[symbol_id];
-  loom_func_contract_demand_id_t demand_id =
-      state->references->symbols[symbol_id].first_contract_demand_id;
-  while (demand_id != LOOM_FUNC_CONTRACT_DEMAND_ID_INVALID) {
-    const loom_func_contract_demand_t* demand =
-        &state->references->contract_demands[demand_id];
+  loom_template_demand_id_t demand_id =
+      state->references->symbols[symbol_id].first_template_demand_id;
+  while (demand_id != LOOM_TEMPLATE_DEMAND_ID_INVALID) {
+    const loom_template_demand_t* demand =
+        &state->references->template_demands.values[demand_id];
     IREE_RETURN_IF_ERROR(loom_symbol_liveness_visit_contributors(
         state, symbol_id, symbol, demand));
     demand_id = demand->next_source_demand_id;
@@ -210,7 +211,9 @@ static bool loom_symbol_liveness_options_have_contributors(
     return false;
   }
   for (iree_host_size_t i = 0; i < options->contributor_count; ++i) {
-    if (options->contributors[i].visit_contract_demand) return true;
+    if (options->contributors[i].visit_template_demand) {
+      return true;
+    }
   }
   return false;
 }

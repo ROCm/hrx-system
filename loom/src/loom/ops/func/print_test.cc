@@ -104,19 +104,6 @@ TEST_F(FuncPrinterTest, Call) {
   EXPECT_EQ(PrintOp(op), "%1 = func.call @callee(%0) : (f32) -> (f32)\n");
 }
 
-TEST_F(FuncPrinterTest, Apply) {
-  loom_string_id_t contract = Intern("my.template");
-  loom_type_t f32 = loom_type_scalar(LOOM_SCALAR_TYPE_F32);
-  loom_value_id_t input = DefineValue(f32);
-
-  loom_type_t result_types[] = {f32};
-  loom_op_t* op = NULL;
-  IREE_ASSERT_OK(loom_func_apply_build(&builder_, 0, contract, &input, 1, 0, 0,
-                                       result_types, 1, NULL, 0,
-                                       LOOM_LOCATION_UNKNOWN, &op));
-  EXPECT_EQ(PrintOp(op), "%1 = func.apply<my.template>(%0) : (f32) -> (f32)\n");
-}
-
 TEST_F(FuncPrinterTest, Return) {
   loom_type_t f32 = loom_type_scalar(LOOM_SCALAR_TYPE_F32);
   loom_value_id_t input = DefineValue(f32);
@@ -149,58 +136,6 @@ TEST_F(FuncPrinterTest, Definition) {
   EXPECT_EQ(PrintOp(op),
             "func.def public @entry(%0: f32) -> (f32) {\n"
             "}\n");
-}
-
-TEST_F(FuncPrinterTest, TemplateKeyRef) {
-  loom_symbol_ref_t callee = MakeSymbol("vnni_q8");
-  loom_type_t f32 = loom_type_scalar(LOOM_SCALAR_TYPE_F32);
-  loom_string_id_t implements_id = Intern("tile.contract");
-
-  loom_type_t arg_types[] = {f32};
-  loom_type_t result_types[] = {f32};
-  loom_op_t* op = NULL;
-  IREE_ASSERT_OK(loom_func_template_build(
-      &builder_, 0, implements_id, 0, 0, 0, 0, 0, 0, loom_symbol_ref_null(),
-      loom_parameterized_attr_array_empty(), /*priority=*/0, callee, arg_types,
-      1, result_types, 1, NULL, 0, NULL, 0, LOOM_LOCATION_UNKNOWN, &op));
-
-  EXPECT_NE(PrintOp(op).find("func.template<tile.contract>"),
-            std::string::npos);
-}
-
-TEST_F(FuncPrinterTest, TemplateWithPriority) {
-  loom_symbol_ref_t callee = MakeSymbol("fast_matmul");
-  loom_type_t f32 = loom_type_scalar(LOOM_SCALAR_TYPE_F32);
-  loom_string_id_t implements_id = Intern("tile.contract");
-
-  loom_type_t arg_types[] = {f32};
-  loom_type_t result_types[] = {f32};
-  loom_op_t* op = NULL;
-  IREE_ASSERT_OK(loom_func_template_build(
-      &builder_, LOOM_FUNC_TEMPLATE_BUILD_FLAG_HAS_PRIORITY, implements_id, 0,
-      0, 0, 0, 0, 0, loom_symbol_ref_null(),
-      loom_parameterized_attr_array_empty(), /*priority=*/10, callee, arg_types,
-      1, result_types, 1, NULL, 0, NULL, 0, LOOM_LOCATION_UNKNOWN, &op));
-
-  EXPECT_NE(PrintOp(op).find("priority(10)"), std::string::npos);
-}
-
-TEST_F(FuncPrinterTest, TemplateWithTarget) {
-  loom_symbol_ref_t target = MakeSymbol("gfx1100");
-  loom_symbol_ref_t callee = MakeSymbol("gfx11_matmul");
-  loom_type_t f32 = loom_type_scalar(LOOM_SCALAR_TYPE_F32);
-  loom_string_id_t implements_id = Intern("tile.contract");
-
-  loom_type_t arg_types[] = {f32};
-  loom_type_t result_types[] = {f32};
-  loom_op_t* op = NULL;
-  IREE_ASSERT_OK(loom_func_template_build(
-      &builder_, LOOM_FUNC_TEMPLATE_BUILD_FLAG_HAS_TARGET, implements_id, 0, 0,
-      0, 0, 0, 0, target, loom_parameterized_attr_array_empty(),
-      /*priority=*/0, callee, arg_types, 1, result_types, 1, NULL, 0, NULL, 0,
-      LOOM_LOCATION_UNKNOWN, &op));
-
-  EXPECT_NE(PrintOp(op).find("target(@gfx1100)"), std::string::npos);
 }
 
 }  // namespace

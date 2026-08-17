@@ -30,6 +30,7 @@ loom_generated_cc_library(
   DEPS
     loom::error::error_defs
     loom::ir
+    loom::ops::callable_effects
     loom::ops::func_symbol_facts
     loom::ops::function_contract_verify
     loom::ops::op_defs

@@ -31,10 +31,9 @@ typedef uint32_t loom_symbol_reference_occurrence_id_t;
 #define LOOM_SYMBOL_REFERENCE_OCCURRENCE_ID_INVALID \
   ((loom_symbol_reference_occurrence_id_t)UINT32_MAX)
 
-// Index into a symbol reference table's abstract contract-demand array.
-typedef uint32_t loom_func_contract_demand_id_t;
-#define LOOM_FUNC_CONTRACT_DEMAND_ID_INVALID \
-  ((loom_func_contract_demand_id_t)UINT32_MAX)
+// Index into a symbol reference table's template-demand array.
+typedef uint32_t loom_template_demand_id_t;
+#define LOOM_TEMPLATE_DEMAND_ID_INVALID ((loom_template_demand_id_t)UINT32_MAX)
 
 // Sentinel for occurrences not attached to a concrete op attribute.
 #define LOOM_SYMBOL_REFERENCE_ATTR_INDEX_NONE ((uint16_t)UINT16_MAX)
@@ -91,19 +90,20 @@ static inline bool loom_symbol_reference_occurrence_is_dependency(
   return occurrence->role == LOOM_SYMBOL_REFERENCE_ROLE_DEPENDENCY;
 }
 
-// One abstract func.apply provider demand.
-typedef struct loom_func_contract_demand_t {
-  // Interned provider contract requested by the application.
-  loom_string_id_t contract_id;
-  // Symbol whose definition owns the application.
-  loom_symbol_id_t source_symbol_id;
-  // Reserved padding.
-  uint16_t reserved;
-  // func.apply operation carrying this demand.
+// One abstract template.apply provider demand.
+typedef struct loom_template_demand_t {
+  // template.apply operation carrying this demand.
   const loom_op_t* apply_op;
   // Next demand owned by the same source symbol.
-  loom_func_contract_demand_id_t next_source_demand_id;
-} loom_func_contract_demand_t;
+  loom_template_demand_id_t next_source_demand_id;
+  // Module-local template family requested by the application.
+  loom_symbol_id_t family_symbol_id;
+  // Symbol whose definition owns the application.
+  loom_symbol_id_t source_symbol_id;
+} loom_template_demand_t;
+
+static_assert(sizeof(loom_template_demand_t) == 16,
+              "template demands must remain 16 bytes");
 
 // Incoming/outgoing occurrence-list heads for one symbol.
 typedef struct loom_symbol_reference_symbol_occurrences_t {
@@ -116,9 +116,9 @@ typedef struct loom_symbol_reference_symbol_occurrences_t {
   // Number of incoming occurrences across all graph roles.
   uint32_t incoming_count;
   // First abstract provider demand owned by this symbol.
-  loom_func_contract_demand_id_t first_contract_demand_id;
+  loom_template_demand_id_t first_template_demand_id;
   // Number of abstract provider demands owned by this symbol.
-  uint32_t contract_demand_count;
+  uint32_t template_demand_count;
 } loom_symbol_reference_symbol_occurrences_t;
 
 // Built reference table for one module snapshot.
@@ -137,22 +137,26 @@ typedef struct loom_symbol_reference_table_t {
   loom_symbol_reference_occurrence_id_t first_module_occurrence_id;
   // Number of module-root occurrences.
   uint32_t module_occurrence_count;
-  // Abstract func.apply provider demands owned by module symbols.
-  const loom_func_contract_demand_t* contract_demands;
-  // Number of entries in contract_demands.
-  iree_host_size_t contract_demand_count;
-  // Dense bitset indexed by module string ID for demanded contracts, or NULL
-  // when the module contains no abstract contract demands.
-  const uint64_t* contract_demand_bits;
+  // Abstract template.apply provider demands owned by module symbols.
+  struct {
+    // Demand records owned by the caller-provided arena.
+    const loom_template_demand_t* values;
+    // Number of entries in values.
+    iree_host_size_t count;
+    // Dense bitset indexed by module symbol ID for demanded families, or NULL
+    // when the module contains no template demands.
+    const uint64_t* family_bits;
+  } template_demands;
 } loom_symbol_reference_table_t;
 
-// Returns true when at least one func.apply demands |contract_id|.
-// |contract_id| must be valid in the table's module string table.
-static inline bool loom_symbol_reference_contract_is_demanded(
-    const loom_symbol_reference_table_t* table, loom_string_id_t contract_id) {
-  return table->contract_demand_bits &&
-         (table->contract_demand_bits[contract_id >> 6] &
-          (UINT64_C(1) << (contract_id & 63u))) != 0;
+// Returns true when at least one template.apply demands |family_symbol_id|.
+// |family_symbol_id| must be valid in the table's module symbol table.
+static inline bool loom_symbol_reference_template_family_is_demanded(
+    const loom_symbol_reference_table_t* table,
+    loom_symbol_id_t family_symbol_id) {
+  return table->template_demands.family_bits &&
+         (table->template_demands.family_bits[family_symbol_id >> 6] &
+          (UINT64_C(1) << (family_symbol_id & 63u))) != 0;
 }
 
 // Builds the symbol reference table for |module| into |arena|.

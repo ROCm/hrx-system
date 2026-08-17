@@ -26,6 +26,7 @@ void loom_verify_type_constraints(loom_verify_state_t* state,
                                   const loom_op_t* op,
                                   const loom_op_vtable_t* vtable);
 iree_status_t loom_verify_prepare_static_encodings(loom_verify_state_t* state);
+iree_status_t loom_verify_prepare_available_symbols(loom_verify_state_t* state);
 void loom_verify_static_encoding_refs(loom_verify_state_t* state,
                                       const loom_op_t* op);
 void loom_verify_block_arg_static_encoding_refs(loom_verify_state_t* state,
