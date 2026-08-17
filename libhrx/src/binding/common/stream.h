@@ -15,6 +15,13 @@ extern "C" {
 
 typedef struct iree_hal_streaming_stream_t iree_hal_streaming_stream_t;
 
+// Orders future work on |stream| after work already enqueued on
+// |source_stream|. The dependency is submitted to the device queue and does
+// not wait for either stream on the calling thread.
+iree_status_t iree_hal_streaming_stream_wait_stream(
+    iree_hal_streaming_stream_t* stream,
+    iree_hal_streaming_stream_t* source_stream);
+
 // Enqueues a HAL host call at the current stream timeline point.
 // Synchronization: flushes pending stream commands before enqueueing.
 iree_status_t iree_hal_streaming_queue_host_call(

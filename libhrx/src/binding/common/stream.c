@@ -305,8 +305,6 @@ iree_status_t iree_hal_streaming_stream_create(
   stream->synchronization_policy =
       IREE_HAL_STREAMING_SYNCHRONIZATION_POLICY_AUTO;
   stream->priority = priority;
-  stream->cu_mask_count = 0;
-  stream->cu_mask = NULL;
   stream->stream_id = 0;
   stream->command_buffer = NULL;
   stream->pending_launch_count = 0;
@@ -372,8 +370,6 @@ static void iree_hal_streaming_stream_destroy(
 
   // Release command buffer.
   iree_hal_command_buffer_release(stream->command_buffer);
-
-  iree_allocator_free(stream->host_allocator, stream->cu_mask);
 
   if (stream->capture_graph_owned) {
     iree_hal_streaming_graph_release(stream->capture_graph);
@@ -555,6 +551,103 @@ iree_status_t iree_hal_streaming_stream_query(
   iree_slim_mutex_unlock(&stream->mutex);
 
   return iree_ok_status();
+}
+
+iree_status_t iree_hal_streaming_stream_wait_stream(
+    iree_hal_streaming_stream_t* stream,
+    iree_hal_streaming_stream_t* source_stream) {
+  IREE_ASSERT_ARGUMENT(stream);
+  IREE_ASSERT_ARGUMENT(source_stream);
+  if (stream == source_stream) return iree_ok_status();
+  if (stream->context != source_stream->context) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "stream dependency crosses contexts");
+  }
+
+  IREE_TRACE_ZONE_BEGIN(z0);
+
+  // Make the source timeline point concrete before reading it. A source with
+  // no submitted work cannot contribute a dependency.
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_hal_streaming_stream_flush(source_stream));
+  iree_slim_mutex_lock(&source_stream->mutex);
+  const uint64_t source_timeline_value = source_stream->pending_value;
+  iree_slim_mutex_unlock(&source_stream->mutex);
+  if (source_timeline_value == 0) {
+    IREE_TRACE_ZONE_END(z0);
+    return iree_ok_status();
+  }
+  if (iree_hal_streaming_stream_has_memory_reuse_dependency(
+          stream, source_stream->stream_id, source_timeline_value)) {
+    IREE_TRACE_ZONE_END(z0);
+    return iree_ok_status();
+  }
+
+  bool added_memory_reuse_dependency = false;
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0,
+      iree_hal_streaming_stream_reserve_memory_reuse_dependency(
+          stream, source_stream->stream_id, &added_memory_reuse_dependency));
+
+  // Submit prior destination work before appending a queue dependency. The
+  // barrier advances the destination timeline only after both streams reach
+  // their captured points, so later command buffers naturally wait on it.
+  bool submitted = false;
+  iree_status_t status = iree_hal_streaming_stream_flush(stream);
+  if (iree_status_is_ok(status)) {
+    iree_slim_mutex_lock(&stream->mutex);
+    uint64_t destination_timeline_value = 0;
+    uint64_t signal_value = 0;
+    status = iree_hal_streaming_stream_reserve_next_value_locked(
+        stream, &destination_timeline_value, &signal_value);
+    if (iree_status_is_ok(status)) {
+      iree_hal_semaphore_t* wait_semaphores_storage[] = {
+          stream->timeline_semaphore,
+          source_stream->timeline_semaphore,
+      };
+      uint64_t wait_values_storage[] = {
+          destination_timeline_value,
+          source_timeline_value,
+      };
+      const iree_hal_semaphore_list_t wait_semaphores = {
+          .count = destination_timeline_value > 0 ? 2 : 1,
+          .semaphores = destination_timeline_value > 0
+                            ? wait_semaphores_storage
+                            : &wait_semaphores_storage[1],
+          .payload_values = destination_timeline_value > 0
+                                ? wait_values_storage
+                                : &wait_values_storage[1],
+      };
+      const iree_hal_semaphore_list_t signal_semaphores = {
+          .count = 1,
+          .semaphores = &stream->timeline_semaphore,
+          .payload_values = &signal_value,
+      };
+      status = iree_hal_device_queue_barrier(
+          stream->context->device, stream->queue_affinity, wait_semaphores,
+          signal_semaphores, IREE_HAL_EXECUTE_FLAG_NONE);
+      if (iree_status_is_ok(status)) {
+        // The accepted barrier owns the value it signals, so the timeline
+        // advances here and stays advanced even when the flush below fails.
+        submitted = true;
+        stream->pending_value = signal_value;
+        status = iree_hal_device_queue_flush(stream->context->device,
+                                             stream->queue_affinity);
+      }
+    }
+    iree_slim_mutex_unlock(&stream->mutex);
+  }
+
+  if (submitted) {
+    iree_hal_streaming_stream_record_memory_reuse_dependency(
+        stream, source_stream->stream_id, source_timeline_value);
+  } else if (added_memory_reuse_dependency) {
+    iree_hal_streaming_stream_remove_uncommitted_memory_reuse_dependency(
+        stream, source_stream->stream_id);
+  }
+
+  IREE_TRACE_ZONE_END(z0);
+  return status;
 }
 
 static iree_status_t iree_hal_streaming_stream_synchronize_impl(
