@@ -6,7 +6,9 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cstddef>
 #include <cstdlib>
+#include <thread>
 #include <vector>
 
 #include "binding/hip/api.h"
@@ -47,6 +49,9 @@ using HipEventElapsedTimeFn = hipError_t (*)(float* ms, hipEvent_t start,
                                              hipEvent_t stop);
 using HipLaunchHostFuncFn = hipError_t (*)(hipStream_t stream, hipHostFn_t fn,
                                            void* user_data);
+using HipMallocAsyncFn = hipError_t (*)(void** device_ptr, size_t size,
+                                        hipStream_t stream);
+using HipFreeAsyncFn = hipError_t (*)(void* device_ptr, hipStream_t stream);
 using HipGraphCreateFn = hipError_t (*)(hipGraph_t* graph, unsigned int flags);
 using HipGraphDestroyFn = hipError_t (*)(hipGraph_t graph);
 using HipGraphAddEventRecordNodeFn = hipError_t (*)(
@@ -194,6 +199,10 @@ class HipEventTest : public ::testing::Test {
         library_, "hipEventElapsedTime");
     hip_.launch_host_func =
         ResolveHipSymbol<HipLaunchHostFuncFn>(library_, "hipLaunchHostFunc");
+    hip_.malloc_async =
+        ResolveHipSymbol<HipMallocAsyncFn>(library_, "hipMallocAsync");
+    hip_.free_async =
+        ResolveHipSymbol<HipFreeAsyncFn>(library_, "hipFreeAsync");
     hip_.graph_create =
         ResolveHipSymbol<HipGraphCreateFn>(library_, "hipGraphCreate");
     hip_.graph_destroy =
@@ -227,6 +236,8 @@ class HipEventTest : public ::testing::Test {
     ASSERT_NE(nullptr, hip_.event_synchronize);
     ASSERT_NE(nullptr, hip_.event_elapsed_time);
     ASSERT_NE(nullptr, hip_.launch_host_func);
+    ASSERT_NE(nullptr, hip_.malloc_async);
+    ASSERT_NE(nullptr, hip_.free_async);
     ASSERT_NE(nullptr, hip_.graph_create);
     ASSERT_NE(nullptr, hip_.graph_destroy);
     ASSERT_NE(nullptr, hip_.graph_add_event_record_node);
@@ -333,6 +344,49 @@ class HipEventTest : public ::testing::Test {
     ASSERT_EQ(hipSuccess, hip_.stream_synchronize(stream));
   }
 
+  // Instantiates a graph whose only node records |event|, so the record is the
+  // launch's last block and its point lands on the launching stream timeline.
+  hipGraphExec_t InstantiateGraphRecordingAtTheEnd(hipEvent_t event) {
+    hipGraph_t graph = CreateGraph();
+    EXPECT_NE(nullptr, graph);
+    if (!graph) return nullptr;
+    hipGraphNode_t record_node = nullptr;
+    EXPECT_EQ(hipSuccess, hip_.graph_add_event_record_node(
+                              &record_node, graph, /*dependencies=*/nullptr,
+                              /*dependency_count=*/0, event));
+    return InstantiateGraph(graph);
+  }
+
+  // Instantiates a graph that records |event| and then runs a host node, which
+  // puts the record in a partition of its own so its point lands on a timeline
+  // internal to the launch. The host node stores |host_node_ran|, which must
+  // outlive every launch of the returned executable.
+  hipGraphExec_t InstantiateGraphRecordingBeforeAHostNode(
+      hipEvent_t event, std::atomic<bool>* host_node_ran) {
+    hipGraph_t graph = CreateGraph();
+    EXPECT_NE(nullptr, graph);
+    if (!graph) return nullptr;
+    hipGraphNode_t record_node = nullptr;
+    EXPECT_EQ(hipSuccess, hip_.graph_add_event_record_node(
+                              &record_node, graph, /*dependencies=*/nullptr,
+                              /*dependency_count=*/0, event));
+    hipHostNodeParams host_params = {};
+    host_params.fn = &RanHostFunction;
+    host_params.userData = host_node_ran;
+    hipGraphNode_t host_node = nullptr;
+    EXPECT_EQ(hipSuccess,
+              hip_.graph_add_host_node(&host_node, graph, &record_node,
+                                       /*dependency_count=*/1, &host_params));
+    return InstantiateGraph(graph);
+  }
+
+  // Allocates |size| bytes from the device's default pool on |stream|.
+  void* AllocateAsync(hipStream_t stream, size_t size) {
+    void* device_ptr = nullptr;
+    EXPECT_EQ(hipSuccess, hip_.malloc_async(&device_ptr, size, stream));
+    return device_ptr;
+  }
+
   // Enqueues |gate| on |stream|, registers it with |callbacks|, and returns
   // once the callback is running and the stream provably holds unfinished work.
   void EnqueueGateAndWaitUntilEntered(hipStream_t stream, StreamGate* gate,
@@ -366,6 +420,8 @@ class HipEventTest : public ::testing::Test {
     HipEventSynchronizeFn event_synchronize;
     HipEventElapsedTimeFn event_elapsed_time;
     HipLaunchHostFuncFn launch_host_func;
+    HipMallocAsyncFn malloc_async;
+    HipFreeAsyncFn free_async;
     HipGraphCreateFn graph_create;
     HipGraphDestroyFn graph_destroy;
     HipGraphAddEventRecordNodeFn graph_add_event_record_node;
@@ -784,6 +840,333 @@ TEST_F(HipEventTest, ElapsedTimeRejectsEventsRecordedOnlyDuringCapture) {
   float ms = -1.0f;
   EXPECT_EQ(hipErrorInvalidHandle, hip_.event_elapsed_time(&ms, start, stop))
       << "an interval was reported for records that were never submitted";
+}
+
+// Bytes taken from the default pool by the reuse tests below. A pending free is
+// only reused for a request of exactly its own size, so every one of them uses
+// this constant on both sides of the free.
+constexpr size_t kReuseAllocationSize = 4096;
+
+// A stream that waits on an event is ordered behind the stream timeline point
+// that reaching the event's recorded point implies, and a pending free on that
+// stream up to that point may be handed to it. A record inside a graph launch
+// implies nothing about the stream that last recorded the event through the
+// stream API, so a free queued on that stream stays unavailable.
+TEST_F(HipEventTest, GraphInternalRecordDeniesReuseFromTheLastStreamRecorder) {
+  hipStream_t producer = CreateStream();
+  ASSERT_NE(nullptr, producer);
+  hipStream_t launch_stream = CreateStream();
+  ASSERT_NE(nullptr, launch_stream);
+  hipStream_t consumer = CreateStream();
+  ASSERT_NE(nullptr, consumer);
+  hipEvent_t event = CreateEvent();
+  ASSERT_NE(nullptr, event);
+
+  std::atomic<bool> host_node_ran{false};
+  hipGraphExec_t graph_exec =
+      InstantiateGraphRecordingBeforeAHostNode(event, &host_node_ran);
+  ASSERT_NE(nullptr, graph_exec);
+
+  // Makes the producer the event's last stream recorder while leaving its
+  // timeline far behind the launch timeline the record node goes on to name.
+  ASSERT_NO_FATAL_FAILURE(AdvanceEventOnStream(event, producer, /*count=*/1));
+  for (int i = 0; i < 8; ++i) {
+    ASSERT_EQ(hipSuccess, hip_.graph_launch(graph_exec, launch_stream));
+  }
+  ASSERT_EQ(hipSuccess, hip_.stream_synchronize(launch_stream));
+  ASSERT_TRUE(host_node_ran.load(std::memory_order_acquire));
+
+  // The gate parks the producer ahead of the free, so the free's host callback
+  // provably has not run and only an event dependency could release its
+  // allocation.
+  StreamGate gate;
+  ScopedHostCallbacks callbacks;
+  ASSERT_NO_FATAL_FAILURE(
+      EnqueueGateAndWaitUntilEntered(producer, &gate, &callbacks));
+
+  void* freed = AllocateAsync(producer, kReuseAllocationSize);
+  ASSERT_NE(nullptr, freed);
+  ASSERT_EQ(hipSuccess, hip_.free_async(freed, producer));
+
+  ASSERT_EQ(hipSuccess, hip_.stream_wait_event(consumer, event, /*flags=*/0));
+  void* reallocated = AllocateAsync(consumer, kReuseAllocationSize);
+  ASSERT_NE(nullptr, reallocated);
+  EXPECT_NE(freed, reallocated)
+      << "an allocation still queued for free on the producer was handed to a "
+         "stream that only waited on a record made inside a graph launch";
+
+  EXPECT_EQ(hipSuccess, hip_.free_async(reallocated, consumer));
+  callbacks.ReleaseGate();
+  EXPECT_EQ(hipSuccess, hip_.stream_synchronize(producer));
+  EXPECT_EQ(hipSuccess, hip_.stream_synchronize(consumer));
+}
+
+// The case the reuse policy exists for: the event's last record is a stream
+// record on the producer, behind the free, so waiting on it does order the
+// consumer after the free.
+TEST_F(HipEventTest, StreamRecordBehindAFreeGrantsReuseToTheWaitingStream) {
+  hipStream_t producer = CreateStream();
+  ASSERT_NE(nullptr, producer);
+  hipStream_t launch_stream = CreateStream();
+  ASSERT_NE(nullptr, launch_stream);
+  hipStream_t consumer = CreateStream();
+  ASSERT_NE(nullptr, consumer);
+  hipEvent_t event = CreateEvent();
+  ASSERT_NE(nullptr, event);
+
+  std::atomic<bool> host_node_ran{false};
+  hipGraphExec_t graph_exec =
+      InstantiateGraphRecordingBeforeAHostNode(event, &host_node_ran);
+  ASSERT_NE(nullptr, graph_exec);
+
+  ASSERT_NO_FATAL_FAILURE(AdvanceEventOnStream(event, producer, /*count=*/1));
+  for (int i = 0; i < 8; ++i) {
+    ASSERT_EQ(hipSuccess, hip_.graph_launch(graph_exec, launch_stream));
+  }
+  ASSERT_EQ(hipSuccess, hip_.stream_synchronize(launch_stream));
+  ASSERT_TRUE(host_node_ran.load(std::memory_order_acquire));
+
+  StreamGate gate;
+  ScopedHostCallbacks callbacks;
+  ASSERT_NO_FATAL_FAILURE(
+      EnqueueGateAndWaitUntilEntered(producer, &gate, &callbacks));
+
+  void* freed = AllocateAsync(producer, kReuseAllocationSize);
+  ASSERT_NE(nullptr, freed);
+  ASSERT_EQ(hipSuccess, hip_.free_async(freed, producer));
+  ASSERT_EQ(hipSuccess, hip_.event_record(event, producer));
+
+  ASSERT_EQ(hipSuccess, hip_.stream_wait_event(consumer, event, /*flags=*/0));
+  void* reallocated = AllocateAsync(consumer, kReuseAllocationSize);
+  ASSERT_NE(nullptr, reallocated);
+  EXPECT_EQ(freed, reallocated)
+      << "a stream ordered behind the free by an event wait was denied the "
+         "freed allocation";
+
+  EXPECT_EQ(hipSuccess, hip_.free_async(reallocated, consumer));
+  callbacks.ReleaseGate();
+  EXPECT_EQ(hipSuccess, hip_.stream_synchronize(producer));
+  EXPECT_EQ(hipSuccess, hip_.stream_synchronize(consumer));
+}
+
+// A stream record names the timeline value it reserved and nothing later. A
+// free queued on that same stream after the record lands past that value, so
+// waiting on the record does not order the waiter behind the free and the
+// allocation stays unavailable.
+TEST_F(HipEventTest, StreamRecordAheadOfAFreeDeniesReuseToTheWaitingStream) {
+  hipStream_t producer = CreateStream();
+  ASSERT_NE(nullptr, producer);
+  hipStream_t consumer = CreateStream();
+  ASSERT_NE(nullptr, consumer);
+  hipEvent_t event = CreateEvent();
+  ASSERT_NE(nullptr, event);
+
+  StreamGate gate;
+  ScopedHostCallbacks callbacks;
+  ASSERT_NO_FATAL_FAILURE(
+      EnqueueGateAndWaitUntilEntered(producer, &gate, &callbacks));
+
+  ASSERT_EQ(hipSuccess, hip_.event_record(event, producer));
+
+  // Queued behind the record, so the free lands on the producer timeline past
+  // the value the record named.
+  void* freed = AllocateAsync(producer, kReuseAllocationSize);
+  ASSERT_NE(nullptr, freed);
+  ASSERT_EQ(hipSuccess, hip_.free_async(freed, producer));
+
+  ASSERT_EQ(hipSuccess, hip_.stream_wait_event(consumer, event, /*flags=*/0));
+  void* reallocated = AllocateAsync(consumer, kReuseAllocationSize);
+  ASSERT_NE(nullptr, reallocated);
+  EXPECT_NE(freed, reallocated)
+      << "an allocation freed past the value the record named was handed to a "
+         "stream that only waited on that record";
+
+  EXPECT_EQ(hipSuccess, hip_.free_async(reallocated, consumer));
+  callbacks.ReleaseGate();
+  EXPECT_EQ(hipSuccess, hip_.stream_synchronize(producer));
+  EXPECT_EQ(hipSuccess, hip_.stream_synchronize(consumer));
+}
+
+// A record that is the launch's last block names a point on the launching
+// stream's own timeline, which is a stream point regardless of which stream
+// last recorded the event through the stream API.
+TEST_F(HipEventTest, GraphRecordEndingALaunchGrantsReuseOfTheLaunchingStream) {
+  hipStream_t producer = CreateStream();
+  ASSERT_NE(nullptr, producer);
+  hipStream_t other_recorder = CreateStream();
+  ASSERT_NE(nullptr, other_recorder);
+  hipStream_t consumer = CreateStream();
+  ASSERT_NE(nullptr, consumer);
+  hipEvent_t event = CreateEvent();
+  ASSERT_NE(nullptr, event);
+
+  hipGraphExec_t graph_exec = InstantiateGraphRecordingAtTheEnd(event);
+  ASSERT_NE(nullptr, graph_exec);
+
+  StreamGate gate;
+  ScopedHostCallbacks callbacks;
+  ASSERT_NO_FATAL_FAILURE(
+      EnqueueGateAndWaitUntilEntered(producer, &gate, &callbacks));
+
+  void* freed = AllocateAsync(producer, kReuseAllocationSize);
+  ASSERT_NE(nullptr, freed);
+  ASSERT_EQ(hipSuccess, hip_.free_async(freed, producer));
+
+  // The stream record leaves a recorder that has nothing to do with the launch
+  // that follows it.
+  ASSERT_EQ(hipSuccess, hip_.event_record(event, other_recorder));
+  ASSERT_EQ(hipSuccess, hip_.graph_launch(graph_exec, producer));
+
+  ASSERT_EQ(hipSuccess, hip_.stream_wait_event(consumer, event, /*flags=*/0));
+  void* reallocated = AllocateAsync(consumer, kReuseAllocationSize);
+  ASSERT_NE(nullptr, reallocated);
+  EXPECT_EQ(freed, reallocated)
+      << "a stream ordered behind the free by a graph record on the producer "
+         "was denied the freed allocation";
+
+  EXPECT_EQ(hipSuccess, hip_.free_async(reallocated, consumer));
+  callbacks.ReleaseGate();
+  EXPECT_EQ(hipSuccess, hip_.stream_synchronize(producer));
+  EXPECT_EQ(hipSuccess, hip_.stream_synchronize(other_recorder));
+  EXPECT_EQ(hipSuccess, hip_.stream_synchronize(consumer));
+}
+
+// A record internal to a launch names no stream timeline value, but every block
+// of the launch is chained behind the tail the launch waited on, so the free
+// queued ahead of the launch is still covered.
+TEST_F(HipEventTest, GraphInternalRecordGrantsReuseBehindTheLaunchTail) {
+  hipStream_t producer = CreateStream();
+  ASSERT_NE(nullptr, producer);
+  hipStream_t other_recorder = CreateStream();
+  ASSERT_NE(nullptr, other_recorder);
+  hipStream_t consumer = CreateStream();
+  ASSERT_NE(nullptr, consumer);
+  hipEvent_t event = CreateEvent();
+  ASSERT_NE(nullptr, event);
+
+  std::atomic<bool> host_node_ran{false};
+  hipGraphExec_t graph_exec =
+      InstantiateGraphRecordingBeforeAHostNode(event, &host_node_ran);
+  ASSERT_NE(nullptr, graph_exec);
+
+  StreamGate gate;
+  ScopedHostCallbacks callbacks;
+  ASSERT_NO_FATAL_FAILURE(
+      EnqueueGateAndWaitUntilEntered(producer, &gate, &callbacks));
+
+  void* freed = AllocateAsync(producer, kReuseAllocationSize);
+  ASSERT_NE(nullptr, freed);
+  ASSERT_EQ(hipSuccess, hip_.free_async(freed, producer));
+
+  ASSERT_EQ(hipSuccess, hip_.event_record(event, other_recorder));
+  ASSERT_EQ(hipSuccess, hip_.graph_launch(graph_exec, producer));
+  callbacks.Add(host_node_ran);
+
+  ASSERT_EQ(hipSuccess, hip_.stream_wait_event(consumer, event, /*flags=*/0));
+  void* reallocated = AllocateAsync(consumer, kReuseAllocationSize);
+  ASSERT_NE(nullptr, reallocated);
+  EXPECT_EQ(freed, reallocated)
+      << "a stream ordered behind the free by the tail the launch waited on "
+         "was denied the freed allocation";
+
+  EXPECT_EQ(hipSuccess, hip_.free_async(reallocated, consumer));
+  callbacks.ReleaseGate();
+  EXPECT_EQ(hipSuccess, hip_.stream_synchronize(producer));
+  EXPECT_EQ(hipSuccess, hip_.stream_synchronize(other_recorder));
+  EXPECT_EQ(hipSuccess, hip_.stream_synchronize(consumer));
+}
+
+// The tail a launch waited on is a lower bound on the stream ordering a record
+// inside the launch implies, never the point itself. A free queued on the
+// launching stream after the launch completes past that tail, so waiting on the
+// record does not order the waiter behind it and the allocation stays
+// unavailable.
+TEST_F(HipEventTest, GraphInternalRecordDeniesReuseAheadOfTheLaunchTail) {
+  hipStream_t producer = CreateStream();
+  ASSERT_NE(nullptr, producer);
+  hipStream_t consumer = CreateStream();
+  ASSERT_NE(nullptr, consumer);
+  hipEvent_t event = CreateEvent();
+  ASSERT_NE(nullptr, event);
+
+  std::atomic<bool> host_node_ran{false};
+  hipGraphExec_t graph_exec =
+      InstantiateGraphRecordingBeforeAHostNode(event, &host_node_ran);
+  ASSERT_NE(nullptr, graph_exec);
+
+  StreamGate gate;
+  ScopedHostCallbacks callbacks;
+  ASSERT_NO_FATAL_FAILURE(
+      EnqueueGateAndWaitUntilEntered(producer, &gate, &callbacks));
+
+  ASSERT_EQ(hipSuccess, hip_.graph_launch(graph_exec, producer));
+  callbacks.Add(host_node_ran);
+
+  // Queued behind the launch, so the free lands on the producer timeline past
+  // the tail the launch waited on.
+  void* freed = AllocateAsync(producer, kReuseAllocationSize);
+  ASSERT_NE(nullptr, freed);
+  ASSERT_EQ(hipSuccess, hip_.free_async(freed, producer));
+
+  ASSERT_EQ(hipSuccess, hip_.stream_wait_event(consumer, event, /*flags=*/0));
+  void* reallocated = AllocateAsync(consumer, kReuseAllocationSize);
+  ASSERT_NE(nullptr, reallocated);
+  EXPECT_NE(freed, reallocated)
+      << "an allocation freed past the tail the launch waited on was handed to "
+         "a stream that only waited on a record made inside that launch";
+
+  EXPECT_EQ(hipSuccess, hip_.free_async(reallocated, consumer));
+  callbacks.ReleaseGate();
+  EXPECT_EQ(hipSuccess, hip_.stream_synchronize(producer));
+  EXPECT_EQ(hipSuccess, hip_.stream_synchronize(consumer));
+}
+
+// A record landing between a waiter's read of the event and its submission has
+// to leave the waiter waiting on the point it read. The interleaving is
+// unordered by contract, so there is nothing to assert about which record wins;
+// unaided this pins only that every call succeeds and every stream drains. It
+// is also a manual race detector probe: no configured job runs it under one, so
+// checking that the concurrent reads are synchronized means running it under
+// one by hand.
+TEST_F(HipEventTest, ConcurrentRecordsDoNotDisturbAConcurrentStreamWait) {
+  hipStream_t stream_a = CreateStream();
+  ASSERT_NE(nullptr, stream_a);
+  hipStream_t stream_b = CreateStream();
+  ASSERT_NE(nullptr, stream_b);
+  hipStream_t consumer = CreateStream();
+  ASSERT_NE(nullptr, consumer);
+  hipEvent_t event = CreateEvent();
+  ASSERT_NE(nullptr, event);
+
+  // Gives the event a submitted record before either loop starts so the waiter
+  // exercises a populated point from its first iteration.
+  ASSERT_NO_FATAL_FAILURE(AdvanceEventOnStream(event, stream_a, /*count=*/1));
+
+  constexpr int kIterationCount = 100;
+  std::atomic<hipError_t> record_result{hipSuccess};
+  std::thread recorder([&] {
+    for (int i = 0; i < kIterationCount; ++i) {
+      const hipError_t result =
+          hip_.event_record(event, (i % 2 == 0) ? stream_a : stream_b);
+      if (result != hipSuccess) {
+        record_result.store(result, std::memory_order_release);
+        return;
+      }
+    }
+  });
+
+  hipError_t wait_result = hipSuccess;
+  for (int i = 0; i < kIterationCount && wait_result == hipSuccess; ++i) {
+    wait_result = hip_.stream_wait_event(consumer, event, /*flags=*/0);
+  }
+  recorder.join();
+
+  EXPECT_EQ(hipSuccess, record_result.load(std::memory_order_acquire));
+  EXPECT_EQ(hipSuccess, wait_result);
+  EXPECT_EQ(hipSuccess, hip_.stream_synchronize(stream_a));
+  EXPECT_EQ(hipSuccess, hip_.stream_synchronize(stream_b));
+  EXPECT_EQ(hipSuccess, hip_.stream_synchronize(consumer));
+  EXPECT_EQ(hipSuccess, hip_.event_synchronize(event));
 }
 
 }  // namespace
