@@ -60,8 +60,8 @@ static inline loom_bytecode_selected_symbol_resolver_t
 loom_bytecode_selected_symbol_resolver_make(
     loom_bytecode_selected_symbol_resolver_fn_t fn, void* user_data) {
   return (loom_bytecode_selected_symbol_resolver_t){
-      .fn = fn,
-      .user_data = user_data,
+      /*.fn=*/fn,
+      /*.user_data=*/user_data,
   };
 }
 

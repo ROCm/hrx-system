@@ -34,12 +34,12 @@ static inline void loom_bytecode_reader_decoder_initialize(
     loom_diagnostic_sink_t sink, iree_string_view_t filename,
     uint32_t* error_count, loom_bytecode_reader_decoder_t* out_decoder) {
   *out_decoder = (loom_bytecode_reader_decoder_t){
-      .diagnostic_context =
-          {
-              .sink = sink,
-              .filename = filename,
-          },
-      .error_count = error_count,
+      /*.diagnostic_context=*/
+      {
+          /*.sink=*/sink,
+          /*.filename=*/filename,
+      },
+      /*.error_count=*/error_count,
   };
 }
 
