@@ -40,7 +40,118 @@ typedef struct hipArrayMemoryRequirements {
   size_t alignment;
   size_t size;
 } hipArrayMemoryRequirements;
-typedef struct hipDeviceProp_tR0000 hipDeviceProp_tR0000;
+typedef struct hipDeviceProp_tR0000 {
+  // Device name.
+  char name[256];
+  // Global memory size in bytes.
+  size_t totalGlobalMem;
+  // Workgroup-local memory size in bytes.
+  size_t sharedMemPerBlock;
+  // Registers available per workgroup.
+  int regsPerBlock;
+  // Hardware wavefront size.
+  int warpSize;
+  // Maximum invocations per workgroup.
+  int maxThreadsPerBlock;
+  // Maximum workgroup dimensions.
+  int maxThreadsDim[3];
+  // Maximum grid dimensions.
+  int maxGridSize[3];
+  // Maximum core clock rate in kHz.
+  int clockRate;
+  // Maximum memory clock rate in kHz.
+  int memoryClockRate;
+  // Global memory bus width in bits.
+  int memoryBusWidth;
+  // Constant memory size in bytes.
+  size_t totalConstMem;
+  // Major compute capability.
+  int major;
+  // Minor compute capability.
+  int minor;
+  // Number of execution units.
+  int multiProcessorCount;
+  // L2 cache size in bytes.
+  int l2CacheSize;
+  // Maximum resident invocations per execution unit.
+  int maxThreadsPerMultiProcessor;
+  // Device compute mode.
+  int computeMode;
+  // Device clock-instruction rate in kHz.
+  int clockInstructionRate;
+  // Architectural feature flags.
+  hipDeviceArch_t arch;
+  // Whether concurrent kernel execution is supported.
+  int concurrentKernels;
+  // PCI domain identifier.
+  int pciDomainID;
+  // PCI bus identifier.
+  int pciBusID;
+  // PCI device identifier.
+  int pciDeviceID;
+  // Maximum shared memory per execution unit in bytes.
+  size_t maxSharedMemoryPerMultiProcessor;
+  // Whether this device belongs to a multi-GPU board.
+  int isMultiGpuBoard;
+  // Whether host memory can be mapped.
+  int canMapHostMemory;
+  // Deprecated numeric architecture identifier.
+  int gcnArch;
+  // Architecture target identifier.
+  char gcnArchName[256];
+  // Whether the device shares memory with the host.
+  int integrated;
+  // Whether cooperative launch is supported.
+  int cooperativeLaunch;
+  // Whether multi-device cooperative launch is supported.
+  int cooperativeMultiDeviceLaunch;
+  // Maximum linear one-dimensional texture size.
+  int maxTexture1DLinear;
+  // Maximum one-dimensional texture size.
+  int maxTexture1D;
+  // Maximum two-dimensional texture dimensions.
+  int maxTexture2D[2];
+  // Maximum three-dimensional texture dimensions.
+  int maxTexture3D[3];
+  // HDP memory-flush register address, when available.
+  unsigned int* hdpMemFlushCntl;
+  // HDP register-flush address, when available.
+  unsigned int* hdpRegFlushCntl;
+  // Maximum memory-copy pitch in bytes.
+  size_t memPitch;
+  // Texture base-address alignment in bytes.
+  size_t textureAlignment;
+  // Texture pitch alignment in bytes.
+  size_t texturePitchAlignment;
+  // Whether kernels have an execution timeout.
+  int kernelExecTimeoutEnabled;
+  // Whether error-correcting memory is enabled.
+  int ECCEnabled;
+  // Whether the device uses a compute-only driver mode.
+  int tccDriver;
+  // Whether cooperative devices may use different functions.
+  int cooperativeMultiDeviceUnmatchedFunc;
+  // Whether cooperative devices may use different grid dimensions.
+  int cooperativeMultiDeviceUnmatchedGridDim;
+  // Whether cooperative devices may use different block dimensions.
+  int cooperativeMultiDeviceUnmatchedBlockDim;
+  // Whether cooperative devices may use different shared-memory sizes.
+  int cooperativeMultiDeviceUnmatchedSharedMem;
+  // Whether the entire device allocation is host-addressable.
+  int isLargeBar;
+  // Hardware revision identifier.
+  int asicRevision;
+  // Whether managed allocation is supported.
+  int managedMemory;
+  // Whether the host can directly access managed allocations.
+  int directManagedMemAccessFromHost;
+  // Whether managed memory supports concurrent host and device access.
+  int concurrentManagedAccess;
+  // Whether pageable host memory is directly accessible.
+  int pageableMemoryAccess;
+  // Whether pageable access uses host page tables.
+  int pageableMemoryAccessUsesHostPageTables;
+} hipDeviceProp_tR0000;
 typedef hipDeviceProp_t hipDeviceProp_tR0600;
 typedef struct ihipDevResourceDesc_t* hipDevResourceDesc_t;
 typedef struct ihipExecutionCtx_t* hipExecutionCtx_t;
@@ -416,9 +527,13 @@ static hipError_t hrx_hip_spt_stream_or_explicit(hipStream_t stream,
   return hrx_hip_spt_default_stream(resolved_stream);
 }
 
-static hipError_t hrx_hip_spt_lookup(const char* symbol, void** function,
-                                     void* symbol_status) {
-  if (!symbol || !function) return hipErrorInvalidValue;
+static hipError_t hrx_hip_driver_entry_point_lookup(const char* symbol,
+                                                    void** function,
+                                                    unsigned long long flags,
+                                                    void* symbol_status) {
+  if (!symbol || symbol[0] == '\0' || !function || flags > 2) {
+    return hipErrorInvalidValue;
+  }
 
   // Resolve against this library, not the process-global scope; see
   // iree_hip_self_dl_handle(). Like hipGetProcAddress(), a consumer may dlopen
@@ -439,7 +554,7 @@ static hipError_t hrx_hip_spt_lookup(const char* symbol, void** function,
   char stream_per_thread_symbol[256];
   void* found = NULL;
   size_t symbol_length = strlen(symbol);
-  if (symbol_length < sizeof(stream_per_thread_symbol) - 4 &&
+  if (flags == 2 && symbol_length < sizeof(stream_per_thread_symbol) - 4 &&
       (symbol_length < 4 || strcmp(symbol + symbol_length - 4, "_spt") != 0)) {
     snprintf(stream_per_thread_symbol, sizeof(stream_per_thread_symbol),
              "%s_spt", symbol);
@@ -471,7 +586,9 @@ static void hrx_hip_stream_callback_host_fn(void* user_data) {
 
 HIPAPI const char* hipApiName(uint32_t id) {
   (void)id;
-  return NULL;
+  // API callback identifiers are an external sparse namespace. Keep unknown
+  // identifiers string-valued until authoritative metadata is available.
+  return "unknown";
 }
 
 HIPAPI hipError_t hipBindTexture(size_t* offset, const textureReference* tex,
@@ -518,27 +635,149 @@ HIPAPI hipError_t hipBindTextureToMipmappedArray(
   return hipErrorNotSupported;
 }
 
+static void iree_hip_convert_device_properties_r0600_to_r0000(
+    const hipDeviceProp_tR0600* source, hipDeviceProp_tR0000* target) {
+  memset(target, 0, sizeof(*target));
+  memcpy(target->name, source->name, sizeof(target->name));
+  target->totalGlobalMem = source->totalGlobalMem;
+  target->sharedMemPerBlock = source->sharedMemPerBlock;
+  target->regsPerBlock = source->regsPerBlock;
+  target->warpSize = source->warpSize;
+  target->maxThreadsPerBlock = source->maxThreadsPerBlock;
+  memcpy(target->maxThreadsDim, source->maxThreadsDim,
+         sizeof(target->maxThreadsDim));
+  memcpy(target->maxGridSize, source->maxGridSize, sizeof(target->maxGridSize));
+  target->clockRate = source->clockRate;
+  target->memoryClockRate = source->memoryClockRate;
+  target->memoryBusWidth = source->memoryBusWidth;
+  target->totalConstMem = source->totalConstMem;
+  target->major = source->major;
+  target->minor = source->minor;
+  target->multiProcessorCount = source->multiProcessorCount;
+  target->l2CacheSize = source->l2CacheSize;
+  target->maxThreadsPerMultiProcessor = source->maxThreadsPerMultiProcessor;
+  target->computeMode = source->computeMode;
+  target->clockInstructionRate = source->clockInstructionRate;
+  target->arch = source->arch;
+  target->concurrentKernels = source->concurrentKernels;
+  target->pciDomainID = source->pciDomainID;
+  target->pciBusID = source->pciBusID;
+  target->pciDeviceID = source->pciDeviceID;
+  target->maxSharedMemoryPerMultiProcessor =
+      source->maxSharedMemoryPerMultiProcessor;
+  target->isMultiGpuBoard = source->isMultiGpuBoard;
+  target->canMapHostMemory = source->canMapHostMemory;
+  memcpy(target->gcnArchName, source->gcnArchName, sizeof(target->gcnArchName));
+  target->integrated = source->integrated;
+  target->cooperativeLaunch = source->cooperativeLaunch;
+  target->cooperativeMultiDeviceLaunch = source->cooperativeMultiDeviceLaunch;
+  target->maxTexture1DLinear = source->maxTexture1DLinear;
+  target->maxTexture1D = source->maxTexture1D;
+  memcpy(target->maxTexture2D, source->maxTexture2D,
+         sizeof(target->maxTexture2D));
+  memcpy(target->maxTexture3D, source->maxTexture3D,
+         sizeof(target->maxTexture3D));
+  target->hdpMemFlushCntl = source->hdpMemFlushCntl;
+  target->hdpRegFlushCntl = source->hdpRegFlushCntl;
+  target->memPitch = source->memPitch;
+  target->textureAlignment = source->textureAlignment;
+  target->texturePitchAlignment = source->texturePitchAlignment;
+  target->kernelExecTimeoutEnabled = source->kernelExecTimeoutEnabled;
+  target->ECCEnabled = source->ECCEnabled;
+  target->tccDriver = source->tccDriver;
+  target->cooperativeMultiDeviceUnmatchedFunc =
+      source->cooperativeMultiDeviceUnmatchedFunc;
+  target->cooperativeMultiDeviceUnmatchedGridDim =
+      source->cooperativeMultiDeviceUnmatchedGridDim;
+  target->cooperativeMultiDeviceUnmatchedBlockDim =
+      source->cooperativeMultiDeviceUnmatchedBlockDim;
+  target->cooperativeMultiDeviceUnmatchedSharedMem =
+      source->cooperativeMultiDeviceUnmatchedSharedMem;
+  target->isLargeBar = source->isLargeBar;
+  target->asicRevision = source->asicRevision;
+  target->managedMemory = source->managedMemory;
+  target->directManagedMemAccessFromHost =
+      source->directManagedMemAccessFromHost;
+  target->concurrentManagedAccess = source->concurrentManagedAccess;
+  target->pageableMemoryAccess = source->pageableMemoryAccess;
+  target->pageableMemoryAccessUsesHostPageTables =
+      source->pageableMemoryAccessUsesHostPageTables;
+}
+
+static hipError_t iree_hip_choose_device_r0600(
+    int* device, const hipDeviceProp_tR0600* properties) {
+  if (!device || !properties) return hipErrorInvalidValue;
+
+  int device_count = 0;
+  hipError_t result = hipGetDeviceCount(&device_count);
+  if (result != hipSuccess) return result;
+
+  *device = 0;
+  unsigned int best_match_count = 0;
+  for (int i = 0; i < device_count; ++i) {
+    hipDeviceProp_t current = {0};
+    result = hipGetDeviceProperties(&current, i);
+    if (result != hipSuccess) return result;
+
+    unsigned int requested_count = 0;
+    unsigned int match_count = 0;
+#define HRX_HIP_MATCH_MINIMUM(field)                         \
+  do {                                                       \
+    if (properties->field != 0) {                            \
+      ++requested_count;                                     \
+      if (current.field >= properties->field) ++match_count; \
+    }                                                        \
+  } while (0)
+    HRX_HIP_MATCH_MINIMUM(major);
+    HRX_HIP_MATCH_MINIMUM(minor);
+    HRX_HIP_MATCH_MINIMUM(totalGlobalMem);
+    HRX_HIP_MATCH_MINIMUM(sharedMemPerBlock);
+    HRX_HIP_MATCH_MINIMUM(maxThreadsPerBlock);
+    HRX_HIP_MATCH_MINIMUM(totalConstMem);
+    HRX_HIP_MATCH_MINIMUM(multiProcessorCount);
+    HRX_HIP_MATCH_MINIMUM(maxThreadsPerMultiProcessor);
+    HRX_HIP_MATCH_MINIMUM(memoryClockRate);
+    HRX_HIP_MATCH_MINIMUM(memoryBusWidth);
+    HRX_HIP_MATCH_MINIMUM(l2CacheSize);
+    HRX_HIP_MATCH_MINIMUM(regsPerBlock);
+    HRX_HIP_MATCH_MINIMUM(maxSharedMemoryPerMultiProcessor);
+    HRX_HIP_MATCH_MINIMUM(warpSize);
+#undef HRX_HIP_MATCH_MINIMUM
+
+    if (requested_count == match_count && match_count > best_match_count) {
+      *device = i;
+      best_match_count = match_count;
+    }
+  }
+  return hipSuccess;
+}
+
 HIPAPI hipError_t hipChooseDeviceR0000(int* device,
                                        const hipDeviceProp_tR0000* properties) {
-  (void)device;
-  (void)properties;
-  return hipErrorNotSupported;
+  if (!device || !properties) return hipErrorInvalidValue;
+  hipDeviceProp_tR0600 current_properties = {0};
+  current_properties.major = properties->major;
+  current_properties.minor = properties->minor;
+  current_properties.totalGlobalMem = properties->totalGlobalMem;
+  current_properties.sharedMemPerBlock = properties->sharedMemPerBlock;
+  current_properties.maxThreadsPerBlock = properties->maxThreadsPerBlock;
+  current_properties.totalConstMem = properties->totalConstMem;
+  current_properties.multiProcessorCount = properties->multiProcessorCount;
+  current_properties.maxThreadsPerMultiProcessor =
+      properties->maxThreadsPerMultiProcessor;
+  current_properties.memoryClockRate = properties->memoryClockRate;
+  current_properties.memoryBusWidth = properties->memoryBusWidth;
+  current_properties.l2CacheSize = properties->l2CacheSize;
+  current_properties.regsPerBlock = properties->regsPerBlock;
+  current_properties.maxSharedMemoryPerMultiProcessor =
+      properties->maxSharedMemoryPerMultiProcessor;
+  current_properties.warpSize = properties->warpSize;
+  return iree_hip_choose_device_r0600(device, &current_properties);
 }
 
 HIPAPI hipError_t hipChooseDeviceR0600(int* device,
                                        const hipDeviceProp_tR0600* properties) {
-  (void)device;
-  (void)properties;
-  return hipErrorNotSupported;
-}
-
-HIPAPI hipError_t hipConfigureCall(dim3 gridDim, dim3 blockDim,
-                                   size_t sharedMem, hipStream_t stream) {
-  (void)gridDim;
-  (void)blockDim;
-  (void)sharedMem;
-  (void)stream;
-  return hipErrorNotSupported;
+  return iree_hip_choose_device_r0600(device, properties);
 }
 
 HIPAPI hipError_t hipCreateSurfaceObject(hipSurfaceObject_t* pSurfObject,
@@ -646,10 +885,12 @@ HIPAPI hipError_t hipDevSmResourceSplitByCount(
 
 HIPAPI hipError_t hipDeviceComputeCapability(int* major, int* minor,
                                              hipDevice_t device) {
-  (void)major;
-  (void)minor;
-  (void)device;
-  return hipErrorNotSupported;
+  if (!major || !minor) return hipErrorInvalidValue;
+  hipError_t result = hipDeviceGetAttribute(
+      major, hipDeviceAttributeComputeCapabilityMajor, device);
+  if (result != hipSuccess) return result;
+  return hipDeviceGetAttribute(minor, hipDeviceAttributeComputeCapabilityMinor,
+                               device);
 }
 
 HIPAPI hipError_t hipDeviceGetDevResource(hipDevice_t device,
@@ -843,23 +1084,11 @@ HIPAPI hipError_t hipExternalMemoryGetMappedMipmappedArray(
   return hipErrorNotSupported;
 }
 
-HIPAPI hipError_t hipExtDisableLogging(void) { return hipErrorNotSupported; }
-
-HIPAPI hipError_t hipExtEnableLogging(void) { return hipErrorNotSupported; }
-
 HIPAPI hipError_t hipExtLaunchMultiKernelMultiDevice(
     hipLaunchParams* launchParamsList, int numDevices, unsigned int flags) {
   (void)launchParamsList;
   (void)numDevices;
   (void)flags;
-  return hipErrorNotSupported;
-}
-
-HIPAPI hipError_t hipExtSetLoggingParams(size_t log_level, size_t log_size,
-                                         size_t log_mask) {
-  (void)log_level;
-  (void)log_size;
-  (void)log_mask;
   return hipErrorNotSupported;
 }
 
@@ -869,19 +1098,18 @@ HIPAPI hipError_t hipFreeMipmappedArray(hipMipmappedArray_t mipmappedArray) {
 
 HIPAPI hipError_t hipGetDevicePropertiesR0000(hipDeviceProp_tR0000* prop,
                                               int device) {
-  (void)prop;
-  (void)device;
-  return hipErrorNotSupported;
+  if (!prop) return hipErrorInvalidValue;
+  hipDeviceProp_tR0600 current_properties = {0};
+  hipError_t result = hipGetDeviceProperties(&current_properties, device);
+  if (result != hipSuccess) return result;
+  iree_hip_convert_device_properties_r0600_to_r0000(&current_properties, prop);
+  return hipSuccess;
 }
 
 HIPAPI hipError_t hipGetDriverEntryPoint(
     const char* symbol, void** funcPtr, unsigned long long flags,
     hipDriverEntryPointQueryResult* status) {
-  (void)symbol;
-  (void)funcPtr;
-  (void)flags;
-  (void)status;
-  return hipErrorNotSupported;
+  return hrx_hip_driver_entry_point_lookup(symbol, funcPtr, flags, status);
 }
 
 HIPAPI hipError_t hipGetFuncBySymbol(hipFunction_t* functionPtr,
@@ -1119,16 +1347,14 @@ HIPAPI hipError_t hipKernelSetAttribute(hipFunction_attribute attrib, int value,
   return hipErrorNotSupported;
 }
 
-HIPAPI hipError_t hipLaunchByPtr(const void* func) {
-  (void)func;
-  return hipErrorNotSupported;
-}
-
 HIPAPI hipError_t hipLaunchCooperativeKernel(const void* f, dim3 gridDim,
                                              dim3 blockDimX,
                                              void** kernelParams,
                                              unsigned int sharedMemBytes,
                                              hipStream_t stream) {
+  int device_count = 0;
+  hipError_t init_result = hipGetDeviceCount(&device_count);
+  if (init_result != hipSuccess) return init_result;
   (void)f;
   (void)gridDim;
   (void)blockDimX;
@@ -1140,6 +1366,9 @@ HIPAPI hipError_t hipLaunchCooperativeKernel(const void* f, dim3 gridDim,
 
 HIPAPI hipError_t hipLaunchCooperativeKernelMultiDevice(
     hipLaunchParams* launchParamsList, int numDevices, unsigned int flags) {
+  int device_count = 0;
+  hipError_t init_result = hipGetDeviceCount(&device_count);
+  if (init_result != hipSuccess) return init_result;
   (void)launchParamsList;
   (void)numDevices;
   (void)flags;
@@ -1728,20 +1957,6 @@ HIPAPI hipError_t hipProfilerStart(void) { return hipErrorNotSupported; }
 
 HIPAPI hipError_t hipProfilerStop(void) { return hipErrorNotSupported; }
 
-HIPAPI hipError_t hipSetValidDevices(int* device_arr, int len) {
-  (void)device_arr;
-  (void)len;
-  return hipErrorNotSupported;
-}
-
-HIPAPI hipError_t hipSetupArgument(const void* arg, size_t size,
-                                   size_t offset) {
-  (void)arg;
-  (void)size;
-  (void)offset;
-  return hipErrorNotSupported;
-}
-
 HIPAPI hipError_t hipSignalExternalSemaphoresAsync(
     const hipExternalSemaphore_t* extSemArray,
     const hipExternalSemaphoreSignalParams* paramsArray,
@@ -2105,8 +2320,7 @@ HIPAPI hipError_t hipGetDriverEntryPoint_spt(const char* symbol,
                                              void** function,
                                              unsigned long long flags,
                                              void* status) {
-  (void)flags;
-  return hrx_hip_spt_lookup(symbol, function, status);
+  return hrx_hip_driver_entry_point_lookup(symbol, function, flags, status);
 }
 
 HIPAPI hipError_t hipGetProcAddress_spt(const char* symbol, void** function,
@@ -2114,7 +2328,7 @@ HIPAPI hipError_t hipGetProcAddress_spt(const char* symbol, void** function,
                                         void* symbol_status) {
   (void)hip_version;
   (void)flags;
-  return hrx_hip_spt_lookup(symbol, function, symbol_status);
+  return hrx_hip_driver_entry_point_lookup(symbol, function, 2, symbol_status);
 }
 
 HIPAPI hipError_t hipLaunchCooperativeKernel_spt(const void* f, dim3 gridDim,

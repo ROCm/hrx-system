@@ -106,16 +106,36 @@ hrx_cc_library(
     ],
 )
 
+hrx_cc_library(
+    name = "legacy_launch_state",
+    srcs = ["legacy_launch_state.c"],
+    hdrs = ["legacy_launch_state.h"],
+    includes = [
+        "../..",
+        "../../../include",
+        "../../libhrx",
+    ],
+    target_compatible_with = _LINUX_COMPATIBILITY,
+    deps = [
+        ":launch_params",
+        "//libhrx/src/binding/common",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/threading",
+    ],
+)
+
 hrx_cc_shared_library(
     name = "amdhip64",
     srcs = [
         "abi_stubs.c",
         "api.c",
+        "dynamic_logging.c",
         "vmm.c",
     ],
     hdrs = [
         "api.h",
         "binding_internal.h",
+        "dynamic_logging.h",
         "vmm.h",
     ],
     additional_linker_inputs = ["amdhip64.map"],
@@ -136,10 +156,23 @@ hrx_cc_shared_library(
     deps = [
         ":blocking_printf_provider",
         ":launch_params",
+        ":legacy_launch_state",
         "//libhrx/src/binding/common",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
         "//runtime/src/iree/base/threading",
         "//runtime/src/iree/hal",
+    ],
+)
+
+hrx_cc_test(
+    name = "legacy_launch_state_test",
+    srcs = ["legacy_launch_state_test.cc"],
+    target_compatible_with = _LINUX_COMPATIBILITY,
+    deps = [
+        ":legacy_launch_state",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
     ],
 )
 

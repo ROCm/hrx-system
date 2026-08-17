@@ -490,7 +490,8 @@ typedef struct iree_hal_streaming_stream_t {
   // Reference counting.
   iree_atomic_ref_count_t ref_count;
 
-  // Parent context, unowned (to avoid cycles).
+  // Parent context, unowned. Remains valid while the stream is registered or
+  // while a context operation holds a retained snapshot of the stream.
   iree_hal_streaming_context_t* context;
 
   // HIP stream creation flags.
@@ -1517,8 +1518,7 @@ iree_status_t iree_hal_streaming_context_disable_peer_access(
 iree_status_t iree_hal_streaming_context_register_stream(
     iree_hal_streaming_context_t* context, iree_hal_streaming_stream_t* stream);
 
-// Unregisters a stream from the context.
-// Called during stream destruction.
+// Unregisters a stream from the context and releases the list reference.
 // Synchronization: none (thread-safe internal locking).
 void iree_hal_streaming_context_unregister_stream(
     iree_hal_streaming_context_t* context, iree_hal_streaming_stream_t* stream);

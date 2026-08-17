@@ -40,6 +40,10 @@ using HipExtLaunchKernelFn = hipError_t (*)(const void* function, dim3 grid_dim,
                                             hipStream_t stream,
                                             hipEvent_t start_event,
                                             hipEvent_t stop_event, int flags);
+using HipEventCreateWithFlagsFn = hipError_t (*)(hipEvent_t* event,
+                                                 unsigned int flags);
+using HipEventDestroyFn = hipError_t (*)(hipEvent_t event);
+using HipEventRecordFn = hipError_t (*)(hipEvent_t event, hipStream_t stream);
 using HipModuleLaunchKernelFn = hipError_t (*)(
     hipFunction_t function, unsigned int grid_dim_x, unsigned int grid_dim_y,
     unsigned int grid_dim_z, unsigned int block_dim_x, unsigned int block_dim_y,
@@ -76,6 +80,12 @@ struct HipRuntimeApi {
   HipLaunchKernelFn launch_kernel = nullptr;
   // Launches a registered runtime kernel with extended launch arguments.
   HipExtLaunchKernelFn ext_launch_kernel = nullptr;
+  // Creates an event with explicit synchronization flags.
+  HipEventCreateWithFlagsFn event_create_with_flags = nullptr;
+  // Destroys a live event handle.
+  HipEventDestroyFn event_destroy = nullptr;
+  // Records an event on a stream.
+  HipEventRecordFn event_record = nullptr;
   // Launches a module kernel with prepacked or pointer-array arguments.
   HipModuleLaunchKernelFn module_launch_kernel = nullptr;
   // Queries a cached function compatibility attribute.
@@ -118,6 +128,13 @@ class HipLaunchValidationApiTest : public testing::Test {
           ResolveHipSymbol<HipLaunchKernelFn>(api_.library, "hipLaunchKernel");
       api_.ext_launch_kernel = ResolveHipSymbol<HipExtLaunchKernelFn>(
           api_.library, "hipExtLaunchKernel");
+      api_.event_create_with_flags =
+          ResolveHipSymbol<HipEventCreateWithFlagsFn>(
+              api_.library, "hipEventCreateWithFlags");
+      api_.event_destroy =
+          ResolveHipSymbol<HipEventDestroyFn>(api_.library, "hipEventDestroy");
+      api_.event_record =
+          ResolveHipSymbol<HipEventRecordFn>(api_.library, "hipEventRecord");
       api_.module_launch_kernel = ResolveHipSymbol<HipModuleLaunchKernelFn>(
           api_.library, "hipModuleLaunchKernel");
       api_.function_get_attribute = ResolveHipSymbol<HipFuncGetAttributeFn>(
@@ -143,6 +160,9 @@ class HipLaunchValidationApiTest : public testing::Test {
     ASSERT_NE(nullptr, api_.stream_destroy);
     ASSERT_NE(nullptr, api_.launch_kernel);
     ASSERT_NE(nullptr, api_.ext_launch_kernel);
+    ASSERT_NE(nullptr, api_.event_create_with_flags);
+    ASSERT_NE(nullptr, api_.event_destroy);
+    ASSERT_NE(nullptr, api_.event_record);
     ASSERT_NE(nullptr, api_.module_launch_kernel);
     ASSERT_NE(nullptr, api_.function_get_attribute);
     ASSERT_NE(nullptr, api_.function_set_attribute);
@@ -272,6 +292,31 @@ TEST_F(HipLaunchValidationApiTest,
 }
 
 TEST_F(HipLaunchValidationApiTest,
+       EventHandlesRejectInvalidFlagsAndDestroyedReferences) {
+  hipEvent_t event = nullptr;
+  EXPECT_EQ(hipErrorInvalidValue,
+            api_.event_create_with_flags(&event, hipEventInterprocess));
+  EXPECT_EQ(nullptr, event);
+
+  ASSERT_EQ(hipSuccess,
+            api_.event_create_with_flags(&event, hipEventDisableTiming));
+  ASSERT_NE(nullptr, event);
+  ASSERT_EQ(hipSuccess, api_.event_destroy(event));
+  EXPECT_EQ(hipErrorInvalidResourceHandle, api_.event_destroy(event));
+  EXPECT_EQ(hipErrorInvalidResourceHandle, api_.event_record(event, stream_));
+
+  iree_hal_streaming_symbol_t symbol = {};
+  symbol.type = IREE_HAL_STREAMING_SYMBOL_TYPE_FUNCTION;
+  const void* function = iree_hal_streaming_symbol_tag(&symbol);
+  const dim3 valid_dimension = {1, 1, 1};
+  EXPECT_EQ(hipErrorInvalidValue,
+            api_.ext_launch_kernel(function, valid_dimension, valid_dimension,
+                                   /*arguments=*/nullptr,
+                                   /*shared_memory_bytes=*/0, stream_, event,
+                                   /*stop_event=*/nullptr, /*flags=*/0));
+}
+
+TEST_F(HipLaunchValidationApiTest,
        LaunchEntryPointsRejectOutOfRangeSharedMemory) {
   if (sizeof(size_t) <= sizeof(uint32_t)) {
     GTEST_SKIP() << "size_t cannot represent a value above uint32_t";
@@ -284,21 +329,21 @@ TEST_F(HipLaunchValidationApiTest,
   const size_t largest_dispatch_shared_memory = UINT32_MAX;
   const size_t oversized_shared_memory = (size_t)UINT32_MAX + 1;
 
-  EXPECT_EQ(hipErrorInvalidConfiguration,
+  EXPECT_EQ(hipErrorInvalidValue,
             api_.launch_kernel(function, valid_dimension, valid_dimension,
                                /*arguments=*/nullptr,
                                largest_dispatch_shared_memory, stream_));
-  EXPECT_EQ(hipErrorInvalidConfiguration,
+  EXPECT_EQ(hipErrorInvalidValue,
             api_.ext_launch_kernel(function, valid_dimension, valid_dimension,
                                    /*arguments=*/nullptr,
                                    largest_dispatch_shared_memory, stream_,
                                    nullptr, nullptr, /*flags=*/0));
-  EXPECT_EQ(hipErrorInvalidConfiguration,
+  EXPECT_EQ(hipErrorInvalidValue,
             api_.launch_kernel(function, valid_dimension, valid_dimension,
                                /*arguments=*/nullptr, oversized_shared_memory,
                                stream_));
   EXPECT_EQ(
-      hipErrorInvalidConfiguration,
+      hipErrorInvalidValue,
       api_.ext_launch_kernel(function, valid_dimension, valid_dimension,
                              /*arguments=*/nullptr, oversized_shared_memory,
                              stream_, nullptr, nullptr, /*flags=*/0));

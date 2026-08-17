@@ -131,6 +131,31 @@ iree_cc_library(
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
 iree_cc_library(
   NAME
+    legacy_launch_state
+  HDRS
+    "legacy_launch_state.h"
+  SRCS
+    "legacy_launch_state.c"
+  DEPS
+    ::launch_params
+    iree::base
+    iree::base::threading
+    libhrx::src::binding::common
+    libhrx_defs
+  INCLUDES
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../..>"
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/../..>"
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../../include>"
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/../../../include>"
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../libhrx>"
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/../../libhrx>"
+  PUBLIC
+)
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+iree_cc_library(
+  NAME
     amdhip64
   COPTS
     "-DIREE_HAL_STREAMING_HIP_EXPORTS"
@@ -138,15 +163,19 @@ iree_cc_library(
   HDRS
     "api.h"
     "binding_internal.h"
+    "dynamic_logging.h"
     "vmm.h"
   SRCS
     "abi_stubs.c"
     "api.c"
+    "dynamic_logging.c"
     "vmm.c"
   DEPS
     ::blocking_printf_provider
     ::launch_params
+    ::legacy_launch_state
     iree::base
+    iree::base::internal
     iree::base::threading
     iree::hal
     libhrx::src::binding::common
@@ -163,6 +192,20 @@ iree_cc_library(
     "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../libhrx>"
     "$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/../../libhrx>"
   PUBLIC
+)
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+iree_cc_test(
+  NAME
+    legacy_launch_state_test
+  SRCS
+    "legacy_launch_state_test.cc"
+  DEPS
+    ::legacy_launch_state
+    iree::testing::gtest
+    iree::testing::gtest_main
+    libhrx_defs
 )
 endif()
 
