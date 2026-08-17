@@ -24,6 +24,8 @@ typedef struct iree_hal_amdgpu_virtual_memory_range_t {
   // Byte length of the ROCr virtual reservation.
   iree_device_size_t size;
 
+  // HAL queues permitted to access the reservation.
+  iree_hal_queue_affinity_t queue_affinity;
 } iree_hal_amdgpu_virtual_memory_range_t;
 
 struct iree_hal_physical_memory_t {
@@ -209,6 +211,7 @@ static iree_status_t iree_hal_amdgpu_virtual_memory_resolve_range(
   *out_range = (iree_hal_amdgpu_virtual_memory_range_t){
       .base_ptr = base_ptr,
       .size = iree_hal_buffer_allocation_size(virtual_buffer),
+      .queue_affinity = placement.queue_affinity,
   };
   return iree_ok_status();
 }
