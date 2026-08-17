@@ -80,14 +80,32 @@ typedef struct hrx_graph_exec_block_t {
   uint32_t node_count;
   uint16_t wait_semaphore_count;
   uint16_t signal_semaphore_count;
+  // Type-specific attributes, stored inline so the compiler supplies the
+  // pointer alignment the union requires and the block header ends on that
+  // same boundary.
+  hrx_graph_block_attrs_t attrs;
   // Variable-length trailing data follows.
 } hrx_graph_exec_block_t;
 
+// Blocks are carved out of an arena, which guarantees iree_max_align_t and
+// nothing stronger.
+static_assert(iree_alignof(hrx_graph_exec_block_t) <= iree_max_align_t,
+              "block alignment must be satisfiable by an arena allocation");
+
+// The first trailing region begins at the end of the header and holds
+// uint32_t, so the header's size decides whether that region is aligned.
+// The region order only keeps the regions aligned relative to each other;
+// this assert is what pins the offset they start from.
+static_assert(sizeof(hrx_graph_exec_block_t) % iree_alignof(uint32_t) == 0,
+              "block header must end on the first trailing region's alignment");
+
+// Resolved pointers to a block's payload: the attributes stored inline in the
+// block and the variable-length arrays trailing it.
 typedef struct hrx_graph_block_ptrs_t {
-  uint16_t* wait_semaphore_indices;
   uint32_t* wait_payload_deltas;
-  uint16_t* signal_semaphore_indices;
   uint32_t* signal_payload_deltas;
+  uint16_t* wait_semaphore_indices;
+  uint16_t* signal_semaphore_indices;
   hrx_graph_block_attrs_t* attrs;
 } hrx_graph_block_ptrs_t;
 
@@ -95,18 +113,23 @@ typedef struct hrx_graph_block_ptrs_t {
 // Block helpers
 //===----------------------------------------------------------------------===//
 
+// Resolves the payload pointers for |block|. The trailing arrays run in
+// descending alignment order - both payload delta arrays before both semaphore
+// index arrays - starting at the end of the block header, whose size is a
+// multiple of the block's own alignment. Every region therefore lands on its
+// natural alignment and the block holds no interior padding.
+// hrx_graph_block_allocate sizes the allocation from this same order.
 static inline void hrx_graph_block_get_ptrs(hrx_graph_exec_block_t* block,
                                             hrx_graph_block_ptrs_t* out_ptrs) {
   uint8_t* ptr = (uint8_t*)block + sizeof(*block);
-  out_ptrs->wait_semaphore_indices = (uint16_t*)ptr;
-  ptr += block->wait_semaphore_count * sizeof(uint16_t);
   out_ptrs->wait_payload_deltas = (uint32_t*)ptr;
   ptr += block->wait_semaphore_count * sizeof(uint32_t);
-  out_ptrs->signal_semaphore_indices = (uint16_t*)ptr;
-  ptr += block->signal_semaphore_count * sizeof(uint16_t);
   out_ptrs->signal_payload_deltas = (uint32_t*)ptr;
   ptr += block->signal_semaphore_count * sizeof(uint32_t);
-  out_ptrs->attrs = (hrx_graph_block_attrs_t*)ptr;
+  out_ptrs->wait_semaphore_indices = (uint16_t*)ptr;
+  ptr += block->wait_semaphore_count * sizeof(uint16_t);
+  out_ptrs->signal_semaphore_indices = (uint16_t*)ptr;
+  out_ptrs->attrs = &block->attrs;
 }
 
 static iree_status_t hrx_graph_block_allocate(
@@ -114,12 +137,12 @@ static iree_status_t hrx_graph_block_allocate(
     uint32_t node_start_index, uint32_t node_count,
     uint16_t wait_semaphore_count, uint16_t signal_semaphore_count,
     hrx_graph_exec_block_t** out_block, hrx_graph_block_ptrs_t* out_ptrs) {
+  // Region order matches hrx_graph_block_get_ptrs.
   iree_host_size_t size = sizeof(hrx_graph_exec_block_t);
-  size += wait_semaphore_count * sizeof(uint16_t);
   size += wait_semaphore_count * sizeof(uint32_t);
-  size += signal_semaphore_count * sizeof(uint16_t);
   size += signal_semaphore_count * sizeof(uint32_t);
-  size += sizeof(hrx_graph_block_attrs_t);
+  size += wait_semaphore_count * sizeof(uint16_t);
+  size += signal_semaphore_count * sizeof(uint16_t);
 
   hrx_graph_exec_block_t* block = NULL;
   IREE_RETURN_IF_ERROR(iree_arena_allocate(arena, size, (void**)&block));
