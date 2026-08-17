@@ -133,6 +133,8 @@ void HrxLoader::load(const std::string& path) {
   LOAD(semaphore_signal);
 
   LOAD(stream_create);
+  LOAD(stream_create_on_queue);
+  LOAD(stream_get_queue_affinity);
   LOAD(stream_retain);
   LOAD(stream_release);
   LOAD(stream_synchronize);

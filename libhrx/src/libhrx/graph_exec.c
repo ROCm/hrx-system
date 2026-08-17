@@ -553,7 +553,8 @@ hrx_status_t hrx_graph_exec_launch(hrx_graph_exec_t exec, hrx_stream_t stream) {
     HRX_RETURN_AND_END_ZONE_IF_IREE_ERROR(
         z0,
         iree_hal_device_queue_execute(
-            stream->device->hal_device, IREE_HAL_QUEUE_AFFINITY_ANY, wait_list,
+            stream->device->hal_device,
+            hrx_normalize_queue_affinity(stream->queue_affinity), wait_list,
             signal_list, stream->pending_cb,
             iree_hal_buffer_binding_table_empty(), IREE_HAL_EXECUTE_FLAG_NONE));
     stream->timepoint = next_value;
@@ -645,6 +646,10 @@ hrx_status_t hrx_graph_exec_launch(hrx_graph_exec_t exec, hrx_stream_t stream) {
         .payload_values = signal_vals,
     };
 
+    // Graph blocks stay on any queue even when |stream| names one: the block
+    // command buffers were recorded at instantiate time, when no stream was
+    // known. Ordering still holds through the stream's timeline semaphore.
+    // Honouring the stream's affinity here needs the affinity at instantiate.
     switch (block->type) {
       case HRX_GRAPH_BLOCK_TYPE_QUEUE_BARRIER:
         status = iree_hal_device_queue_barrier(

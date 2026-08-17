@@ -31,6 +31,23 @@ hrx_status_t hrx_device_query_total_memory_from_spec(
   return hrx_ok_status();
 }
 
+hrx_status_t hrx_device_query_queue_count(hrx_device_t device,
+                                          uint32_t* out_count) {
+  if (!device || !out_count) {
+    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT, "NULL argument");
+  }
+  const iree_hal_device_queue_spec_t* queues =
+      iree_hal_device_spec_queues(iree_hal_device_spec(device->hal_device));
+  uint64_t total = 0;
+  for (iree_host_size_t i = 0; queues && i < queues->family_count; ++i) {
+    total += queues->families[i].queue_count;
+  }
+  // A queue past the width of an affinity mask cannot be named at all.
+  if (total > IREE_HAL_MAX_QUEUES) total = IREE_HAL_MAX_QUEUES;
+  *out_count = total > 0 ? (uint32_t)total : 1u;
+  return hrx_ok_status();
+}
+
 static hrx_status_t hrx_device_sample_memory(
     hrx_device_t device, iree_device_size_t* out_total,
     iree_device_size_t* out_available) {
@@ -106,6 +123,13 @@ hrx_status_t hrx_device_get_property(hrx_device_t device,
       }
       *(uint64_t*)value = (uint64_t)total_bytes;
       return status;
+    }
+    case HRX_DEVICE_PROPERTY_QUEUE_COUNT: {
+      if (value_size < sizeof(uint32_t)) {
+        return hrx_make_status(HRX_STATUS_OUT_OF_RANGE,
+                               "buffer too small for uint32_t");
+      }
+      return hrx_device_query_queue_count(device, (uint32_t*)value);
     }
     case HRX_DEVICE_PROPERTY_COMPUTE_UNITS:
     case HRX_DEVICE_PROPERTY_MAX_WORKGROUP_SIZE: {

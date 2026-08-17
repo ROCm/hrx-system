@@ -166,6 +166,13 @@ static inline hrx_status_t hrx_iree_dispatch_flags_from_hrx(
   return hrx_ok_status();
 }
 
+// The hrx ABI spells "any queue" as zero; the HAL spells it as all bits set.
+static inline iree_hal_queue_affinity_t hrx_normalize_queue_affinity(
+    hrx_queue_affinity_t affinity) {
+  return affinity == 0 ? IREE_HAL_QUEUE_AFFINITY_ANY
+                       : (iree_hal_queue_affinity_t)affinity;
+}
+
 // Buffer view metadata.
 static_assert(HRX_ELEMENT_TYPE_NONE == IREE_HAL_ELEMENT_TYPE_NONE,
               "element type mismatch");
@@ -280,6 +287,9 @@ typedef struct hrx_stream_s {
   iree_hal_command_buffer_t* pending_cb;
   bool has_pending_work;
   uint32_t flags;
+  // Fixed at creation and used by every submission the stream makes; recording
+  // and submitting must name the same queue. Zero means any.
+  hrx_queue_affinity_t queue_affinity;
 } hrx_stream_s;
 
 //===----------------------------------------------------------------------===//
@@ -634,6 +644,13 @@ hrx_status_t hrx_ensure_shared_state(void);
 // cannot be represented.
 hrx_status_t hrx_device_query_total_memory_from_spec(
     hrx_device_t device, bool* out_known, iree_device_size_t* out_total);
+
+// Queues the device declares, flattened into the queue-affinity bit space.
+//
+// Returns 1 when the HAL spec declares no queue families: every device services
+// at least one queue, and hrx will not hand out a bit it cannot vouch for.
+hrx_status_t hrx_device_query_queue_count(hrx_device_t device,
+                                          uint32_t* out_count);
 
 // Convert iree_status_t to hrx_status_t.
 hrx_status_t hrx_status_from_iree(iree_status_t iree_status);

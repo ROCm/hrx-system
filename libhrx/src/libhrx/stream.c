@@ -13,10 +13,13 @@
 static hrx_status_t hrx_stream_begin_cb(hrx_stream_t stream) {
   if (stream->pending_cb) return hrx_ok_status();
 
+  // The affinity given here also picks the physical device the buffer is
+  // recorded against, so it must be the one hrx_stream_flush() submits with.
   iree_status_t status = iree_hal_command_buffer_create(
       stream->device->hal_device, IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT,
       IREE_HAL_COMMAND_CATEGORY_TRANSFER | IREE_HAL_COMMAND_CATEGORY_DISPATCH,
-      IREE_HAL_QUEUE_AFFINITY_ANY, /*binding_capacity=*/0, &stream->pending_cb);
+      hrx_normalize_queue_affinity(stream->queue_affinity),
+      /*binding_capacity=*/0, &stream->pending_cb);
   if (!iree_status_is_ok(status)) {
     return hrx_status_from_iree(status);
   }
@@ -42,12 +45,42 @@ static iree_status_t hrx_stream_record_ordering_barrier(hrx_stream_t stream) {
       IREE_HAL_EXECUTION_BARRIER_FLAG_NONE, 1, &memory_barrier, 0, NULL);
 }
 
+// Rejects affinity bits naming queues the device does not have. Zero (any) is
+// always valid.
+static hrx_status_t hrx_stream_validate_queue_affinity(
+    hrx_device_t device, hrx_queue_affinity_t affinity) {
+  if (affinity == 0) return hrx_ok_status();
+  uint32_t queue_count = 0;
+  hrx_status_t status = hrx_device_query_queue_count(device, &queue_count);
+  if (!hrx_status_is_ok(status)) return status;
+  const hrx_queue_affinity_t supported =
+      queue_count >= IREE_HAL_MAX_QUEUES
+          ? ~(hrx_queue_affinity_t)0
+          : (((hrx_queue_affinity_t)1 << queue_count) - 1);
+  if ((affinity & ~supported) != 0) {
+    return hrx_make_status(HRX_STATUS_OUT_OF_RANGE,
+                           "queue affinity names a queue the device lacks");
+  }
+  return hrx_ok_status();
+}
+
 hrx_status_t hrx_stream_create(hrx_device_t device, uint32_t flags,
                                hrx_stream_t* stream) {
+  return hrx_stream_create_on_queue(device, flags, /*queue_affinity=*/0,
+                                    stream);
+}
+
+hrx_status_t hrx_stream_create_on_queue(hrx_device_t device, uint32_t flags,
+                                        hrx_queue_affinity_t queue_affinity,
+                                        hrx_stream_t* stream) {
   if (!device || !stream) {
     return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
                            "device or stream is NULL");
   }
+
+  hrx_status_t affinity_status =
+      hrx_stream_validate_queue_affinity(device, queue_affinity);
+  if (!hrx_status_is_ok(affinity_status)) return affinity_status;
 
   hrx_stream_s* s = (hrx_stream_s*)calloc(1, sizeof(hrx_stream_s));
   if (!s) {
@@ -59,6 +92,7 @@ hrx_status_t hrx_stream_create(hrx_device_t device, uint32_t flags,
   s->device = device;
   hrx_device_retain(s->device);
   s->flags = flags;
+  s->queue_affinity = queue_affinity;
   s->timepoint = 0;
   s->has_pending_work = false;
   s->pending_cb = NULL;
@@ -139,7 +173,8 @@ hrx_status_t hrx_stream_flush(hrx_stream_t stream) {
   iree_hal_buffer_binding_table_t binding_table =
       iree_hal_buffer_binding_table_empty();
   status = iree_hal_device_queue_execute(
-      stream->device->hal_device, IREE_HAL_QUEUE_AFFINITY_ANY, wait_list,
+      stream->device->hal_device,
+      hrx_normalize_queue_affinity(stream->queue_affinity), wait_list,
       signal_list, stream->pending_cb, binding_table, /*flags=*/0);
   if (!iree_status_is_ok(status)) {
     HRX_RETURN_AND_END_ZONE(z0, hrx_status_from_iree(status));
@@ -213,6 +248,16 @@ hrx_status_t hrx_stream_get_device(hrx_stream_t stream, hrx_device_t* device) {
   return hrx_ok_status();
 }
 
+hrx_status_t hrx_stream_get_queue_affinity(
+    hrx_stream_t stream, hrx_queue_affinity_t* queue_affinity) {
+  if (!stream || !queue_affinity) {
+    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
+                           "stream or queue_affinity is NULL");
+  }
+  *queue_affinity = stream->queue_affinity;
+  return hrx_ok_status();
+}
+
 hrx_status_t hrx_stream_get_timeline_position(hrx_stream_t stream,
                                               hrx_timeline_point_t* position) {
   if (!stream || !position) {
@@ -269,7 +314,8 @@ hrx_status_t hrx_stream_wait_on(hrx_stream_t stream,
   };
 
   iree_status_t iree_status = iree_hal_device_queue_barrier(
-      stream->device->hal_device, IREE_HAL_QUEUE_AFFINITY_ANY, wait_list,
+      stream->device->hal_device,
+      hrx_normalize_queue_affinity(stream->queue_affinity), wait_list,
       signal_list, /*flags=*/0);
   if (!iree_status_is_ok(iree_status)) {
     HRX_RETURN_AND_END_ZONE(z0, hrx_status_from_iree(iree_status));
@@ -461,9 +507,23 @@ hrx_status_t hrx_stream_dispatch(hrx_stream_t stream,
     HRX_RETURN_AND_END_ZONE(z0, hrx_status_from_iree(iree_status));
   }
 
-  iree_status = hrx_stream_record_ordering_barrier(stream);
-  if (!iree_status_is_ok(iree_status)) {
-    HRX_RETURN_AND_END_ZONE(z0, hrx_status_from_iree(iree_status));
+  // Dispatch->dispatch + write->read, not retire->issue / ALL. The old
+  // barrier drained the pipe between every kernel. Decode is hundreds of
+  // launches; that drain was the wall. This is the visibility the next
+  // kernel actually needs.
+  {
+    iree_hal_memory_barrier_t memory_barrier = {
+        .source_scope = IREE_HAL_ACCESS_SCOPE_DISPATCH_WRITE,
+        .target_scope = IREE_HAL_ACCESS_SCOPE_DISPATCH_READ |
+                        IREE_HAL_ACCESS_SCOPE_CONSTANT_READ,
+    };
+    iree_status = iree_hal_command_buffer_execution_barrier(
+        stream->pending_cb, IREE_HAL_EXECUTION_STAGE_DISPATCH,
+        IREE_HAL_EXECUTION_STAGE_DISPATCH, IREE_HAL_EXECUTION_BARRIER_FLAG_NONE,
+        1, &memory_barrier, 0, NULL);
+    if (!iree_status_is_ok(iree_status)) {
+      HRX_RETURN_AND_END_ZONE(z0, hrx_status_from_iree(iree_status));
+    }
   }
 
   stream->has_pending_work = true;

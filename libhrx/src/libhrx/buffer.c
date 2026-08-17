@@ -82,7 +82,8 @@ hrx_status_t hrx_buffer_allocate(hrx_stream_t stream, size_t size,
                                       params, &buf->hal_pool);
   if (iree_status_is_ok(status)) {
     status = iree_hal_device_queue_alloca(
-        stream->device->hal_device, IREE_HAL_QUEUE_AFFINITY_ANY, wait_list,
+        stream->device->hal_device,
+        hrx_normalize_queue_affinity(stream->queue_affinity), wait_list,
         signal_list, buf->hal_pool, params, (iree_device_size_t)size,
         IREE_HAL_ALLOCA_FLAG_NONE, &buf->hal_buffer);
   }

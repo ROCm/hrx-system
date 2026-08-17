@@ -28,12 +28,6 @@ static iree_hal_semaphore_list_t hrx_to_iree_semaphore_list(
 // Max semaphores per direct queue op (stack-allocated arrays).
 #define HRX_MAX_QUEUE_SEMAPHORES 16
 
-static iree_hal_queue_affinity_t hrx_normalize_queue_affinity(
-    hrx_queue_affinity_t affinity) {
-  return affinity == 0 ? IREE_HAL_QUEUE_AFFINITY_ANY
-                       : (iree_hal_queue_affinity_t)affinity;
-}
-
 typedef struct hrx_host_call_thunk_t {
   hrx_host_call_fn_t callback;
   void* user_data;

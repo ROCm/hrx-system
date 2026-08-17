@@ -190,6 +190,9 @@ typedef enum hrx_device_property_t {
   HRX_DEVICE_PROPERTY_MAX_SHARED_MEMORY,
   HRX_DEVICE_PROPERTY_CLOCK_RATE,
   HRX_DEVICE_PROPERTY_PCI_BUS_ID,
+  // uint32_t. Hardware queues that can be named individually; defines the
+  // valid bit range of a hrx_queue_affinity_t on this device.
+  HRX_DEVICE_PROPERTY_QUEUE_COUNT,
 } hrx_device_property_t;
 
 // Memory type bitfield. Values match iree_hal_memory_type_t.
@@ -252,6 +255,9 @@ typedef struct hrx_semaphore_list_t {
   size_t count;
 } hrx_semaphore_list_t;
 
+// Selects hardware queues: bit i is queue i of HRX_DEVICE_PROPERTY_QUEUE_COUNT.
+// Zero means any queue. Multiple bits mean any one of them, chosen by the
+// implementation.
 typedef uint64_t hrx_queue_affinity_t;
 
 // Borrowed string storage valid only for the duration documented by the
@@ -570,6 +576,21 @@ HRX_API hrx_status_t hrx_semaphore_signal(hrx_semaphore_t semaphore,
 HRX_API hrx_status_t hrx_stream_create(hrx_device_t device, uint32_t flags,
                                        hrx_stream_t* stream);
 
+// Creates a stream whose every submission is issued on |queue_affinity|: its
+// command buffers, flushes, timeline barriers and stream-ordered allocations.
+// Zero is what hrx_stream_create() passes and leaves the queue to the
+// implementation.
+//
+// The affinity is fixed at creation because a command buffer is recorded for
+// the queue it will later run on; a stream that recorded on one queue and
+// submitted on another would be recorded against the wrong physical device.
+//
+// Returns HRX_STATUS_OUT_OF_RANGE if a bit names a queue the device does not
+// have.
+HRX_API hrx_status_t hrx_stream_create_on_queue(
+    hrx_device_t device, uint32_t flags, hrx_queue_affinity_t queue_affinity,
+    hrx_stream_t* stream);
+
 HRX_API void hrx_stream_retain(hrx_stream_t stream);
 HRX_API void hrx_stream_release(hrx_stream_t stream);
 
@@ -591,6 +612,10 @@ HRX_API hrx_status_t hrx_stream_get_semaphore(hrx_stream_t stream,
 // longer-lived reference is needed.
 HRX_API hrx_status_t hrx_stream_get_device(hrx_stream_t stream,
                                            hrx_device_t* device);
+
+// Returns the affinity the stream was created with; zero means any queue.
+HRX_API hrx_status_t hrx_stream_get_queue_affinity(
+    hrx_stream_t stream, hrx_queue_affinity_t* queue_affinity);
 
 HRX_API hrx_status_t hrx_stream_get_timeline_position(
     hrx_stream_t stream, hrx_timeline_point_t* position);

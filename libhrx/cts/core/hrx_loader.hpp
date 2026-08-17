@@ -91,6 +91,8 @@ class HrxLoader {
 
   // Streams.
   decltype(&hrx_stream_create) stream_create;
+  decltype(&hrx_stream_create_on_queue) stream_create_on_queue;
+  decltype(&hrx_stream_get_queue_affinity) stream_get_queue_affinity;
   decltype(&hrx_stream_retain) stream_retain;
   decltype(&hrx_stream_release) stream_release;
   decltype(&hrx_stream_synchronize) stream_synchronize;

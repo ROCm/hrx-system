@@ -1915,12 +1915,13 @@ static iree_status_t iree_hal_amdgpu_logical_device_create_device_spec(
     const iree_hal_amdgpu_physical_device_t* physical_device =
         logical_device->physical_devices[i];
     if (IREE_UNLIKELY(physical_device->device_ordinal > UINT32_MAX ||
-                      physical_device->host_queue_count > UINT32_MAX)) {
+                      physical_device->host_queue_capacity > UINT32_MAX)) {
       status = iree_make_status(
           IREE_STATUS_OUT_OF_RANGE,
           "AMDGPU device spec physical row out of range: "
           "device_ordinal=%" PRIhsz ", queue_count=%" PRIhsz,
-          physical_device->device_ordinal, physical_device->host_queue_count);
+          physical_device->device_ordinal,
+          physical_device->host_queue_capacity);
       break;
     }
 
@@ -1947,7 +1948,11 @@ static iree_status_t iree_hal_amdgpu_logical_device_create_device_spec(
     physical_params->numa.node_id = physical_device->host_numa_node;
     physical_params->physical_ordinal =
         (uint32_t)physical_device->device_ordinal;
-    physical_params->queue_count = (uint32_t)physical_device->host_queue_count;
+    // Capacity, not count: the spec is built before the frontier is assigned,
+    // and the AQL queues are only created there, so host_queue_count is still
+    // zero here. Capacity is how many queues the device will have.
+    physical_params->queue_count =
+        (uint32_t)physical_device->host_queue_capacity;
     physical_params->compute_unit_count = physical_device->compute_unit_count;
     physical_params->wavefront_size = physical_device->wavefront_size;
     physical_params->maximum_waves_per_compute_unit =
