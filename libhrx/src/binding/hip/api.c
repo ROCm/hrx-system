@@ -14276,9 +14276,8 @@ HIPAPI hipError_t hipExtLaunchMultiKernelMultiDevice(
     }
 
     iree_hal_streaming_stream_t* stream = NULL;
-    result = iree_hip_resolve_stream(launch->stream, &stream);
+    result = iree_hip_resolve_registered_stream(launch->stream, &stream);
     if (result != hipSuccess) break;
-    iree_hal_streaming_stream_retain(stream);
     ++retained_stream_count;
     launches[i].stream = stream;
 
@@ -14763,7 +14762,9 @@ HIPAPI hipError_t hipExtModuleLaunchKernel(
     unsigned int localWorkSizeY, unsigned int localWorkSizeZ,
     size_t sharedMemBytes, hipStream_t stream, void** kernelParams,
     void** extra, hipEvent_t startEvent, hipEvent_t stopEvent, uint32_t flags) {
-  (void)flags;
+  if ((flags & ~hipExtAnyOrderLaunch) != 0) {
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
   if (!globalWorkSizeX || !globalWorkSizeY || !globalWorkSizeZ ||
       !localWorkSizeX || !localWorkSizeY || !localWorkSizeZ) {
     HIP_RETURN_ERROR(hipErrorInvalidValue);

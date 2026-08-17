@@ -144,9 +144,9 @@ typedef struct iree_hal_streaming_limits_t {
 
 // Tracks a module loaded into a context symbol map.
 typedef struct iree_hal_streaming_context_module_entry_t {
-  // Module registration from the global registry (for identification).
+  // Module registration used for lazy-load identity, or NULL once retired.
   iree_hal_streaming_module_registration_t* registration;
-  // Compiled module for this context's device (retained).
+  // Compiled module retained until the context is destroyed.
   iree_hal_streaming_module_t* module;
   // Linked list pointers.
   struct iree_hal_streaming_context_module_entry_t* next;
@@ -647,8 +647,8 @@ typedef struct iree_hal_streaming_parameter_info_t {
   uint16_t binding_count;
   // Total number of parameter copy operations to perform during unpacking.
   uint16_t copy_count;
-  // Copy and resolve ops.
-  // Ordered by copies first (copy_count) followed by bindings (binding_count).
+  // Copy and resolve ops, partitioned in that order and source-ordered within
+  // each partition.
   iree_hal_streaming_parameter_op_t* ops;
 } iree_hal_streaming_parameter_info_t;
 

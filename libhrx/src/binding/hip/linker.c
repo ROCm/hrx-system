@@ -158,19 +158,21 @@ static hipError_t iree_hip_link_copy_options(unsigned int count,
       state->option_count = i;
       return hipErrorInvalidValue;
     }
-    const size_t option_length = strlen(source_options[i]);
-    if (option_length == SIZE_MAX) {
+    const iree_host_size_t option_length = strlen(source_options[i]);
+    iree_host_size_t option_size = 0;
+    if (IREE_UNLIKELY(
+            !iree_host_size_checked_add(option_length, 1, &option_size))) {
       state->option_count = i;
       return hipErrorOutOfMemory;
     }
-    status = iree_allocator_malloc(iree_allocator_system(), option_length + 1,
+    status = iree_allocator_malloc(iree_allocator_system(), option_size,
                                    (void**)&state->options[i]);
     if (!iree_status_is_ok(status)) {
       iree_status_ignore(status);
       state->option_count = i;
       return hipErrorOutOfMemory;
     }
-    memcpy(state->options[i], source_options[i], option_length + 1);
+    memcpy(state->options[i], source_options[i], option_size);
   }
   state->option_count = source_option_count;
   return hipSuccess;
@@ -179,11 +181,14 @@ static hipError_t iree_hip_link_copy_options(unsigned int count,
 static hipError_t iree_hip_link_append_input(hipLinkState_t state,
                                              const void* data, size_t size,
                                              const char* name) {
-  if (state->input_count == SIZE_MAX) return hipErrorOutOfMemory;
+  if (state->input_count == IREE_HOST_SIZE_MAX) return hipErrorOutOfMemory;
   static const char kDefaultName[] = "LinkerProgram.spv";
   if (!name) name = kDefaultName;
-  const size_t name_length = strlen(name);
-  if (name_length == SIZE_MAX) return hipErrorOutOfMemory;
+  const iree_host_size_t name_length = strlen(name);
+  iree_host_size_t name_size = 0;
+  if (IREE_UNLIKELY(!iree_host_size_checked_add(name_length, 1, &name_size))) {
+    return hipErrorOutOfMemory;
+  }
 
   iree_hip_link_input_t* input = NULL;
   iree_status_t status = iree_allocator_malloc(iree_allocator_system(),
@@ -194,7 +199,7 @@ static hipError_t iree_hip_link_append_input(hipLinkState_t state,
                                    (void**)&input->data);
   }
   if (iree_status_is_ok(status)) {
-    status = iree_allocator_malloc(iree_allocator_system(), name_length + 1,
+    status = iree_allocator_malloc(iree_allocator_system(), name_size,
                                    (void**)&input->name);
   }
   if (!iree_status_is_ok(status)) {
@@ -207,7 +212,7 @@ static hipError_t iree_hip_link_append_input(hipLinkState_t state,
   }
   memcpy(input->data, data, size);
   input->data_size = size;
-  memcpy(input->name, name, name_length + 1);
+  memcpy(input->name, name, name_size);
 
   *state->input_tail = input;
   state->input_tail = &input->next;
@@ -271,6 +276,7 @@ HIPAPI hipError_t hipLinkAddData(hipLinkState_t state, hipJitInputType type,
   hipError_t result =
       iree_hip_link_validate_options(numOptions, options, optionValues);
   if (result != hipSuccess) return result;
+  if (numOptions != 0) return hipErrorNotSupported;
 
   hipLinkState_t retained_state = NULL;
   result = iree_hip_link_state_acquire(state, &retained_state);
@@ -290,6 +296,7 @@ HIPAPI hipError_t hipLinkAddFile(hipLinkState_t state, hipJitInputType type,
   hipError_t result =
       iree_hip_link_validate_options(numOptions, options, optionValues);
   if (result != hipSuccess) return result;
+  if (numOptions != 0) return hipErrorNotSupported;
 
   hipLinkState_t retained_state = NULL;
   result = iree_hip_link_state_acquire(state, &retained_state);

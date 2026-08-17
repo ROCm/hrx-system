@@ -475,7 +475,13 @@ iree_status_t iree_hal_streaming_stream_flush_in_context(
     // split across multiple command buffers (e.g. by an intervening
     // hipMemcpy) still execute in order.
     uint64_t wait_value = stream->pending_value;
-    stream->pending_value++;
+    if (IREE_UNLIKELY(wait_value == UINT64_MAX)) {
+      iree_slim_mutex_unlock(&stream->mutex);
+      IREE_TRACE_ZONE_END(z0);
+      return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                              "stream timeline value overflow");
+    }
+    uint64_t signal_value = wait_value + 1;
 
     // Submit to device queue with timeline semaphore.
     // Wait for the previous submission to complete before executing.
@@ -490,7 +496,7 @@ iree_status_t iree_hal_streaming_stream_flush_in_context(
     iree_hal_semaphore_list_t signal_semaphores = {
         .count = 1,
         .semaphores = &stream->timeline_semaphore,
-        .payload_values = &stream->pending_value,
+        .payload_values = &signal_value,
     };
 
     timing_step_ns = timing_enabled ? hrx_launch_timing_now_ns() : 0;
@@ -511,7 +517,8 @@ iree_status_t iree_hal_streaming_stream_flush_in_context(
 
     // Track the submitted value for wait_submitted.
     if (iree_status_is_ok(status)) {
-      stream->submitted_value = stream->pending_value;
+      stream->pending_value = signal_value;
+      stream->submitted_value = signal_value;
     }
 
     // Release command buffer (we're done with it).
@@ -1005,6 +1012,12 @@ iree_status_t iree_hal_streaming_stream_wait_event(
   // Reserve the next stream timeline value and submit a barrier that completes
   // only after the event is signaled. The value is submitted, not completed;
   // query/synchronize advance completed_value after observing the semaphore.
+  if (IREE_UNLIKELY(stream->pending_value == UINT64_MAX)) {
+    iree_slim_mutex_unlock(&stream->mutex);
+    IREE_TRACE_ZONE_END(z0);
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "stream timeline value overflow");
+  }
   uint64_t signal_value = stream->pending_value + 1;
   iree_hal_semaphore_list_t wait_semaphores = {
       .count = 1,
@@ -1311,44 +1324,60 @@ static iree_status_t iree_hal_streaming_pack_raw_argument_list(
   }
 
   uint8_t* constants = (uint8_t*)out_constants;
-  const iree_hal_streaming_parameter_op_t* op = &parameters->ops[0];
-  for (uint32_t i = 0; i < parameters->copy_count; ++i, ++op) {
-    const iree_hal_streaming_parameter_copy_op_t copy_op = op->copy;
-    void* param_ptr = parameter_list[copy_op.source_ordinal];
-    if (!param_ptr) {
-      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "kernel argument %" PRIu32 " is NULL",
-                              (uint32_t)copy_op.source_ordinal);
+  const iree_hal_streaming_parameter_op_t* copy_ops = parameters->ops;
+  const iree_hal_streaming_parameter_op_t* resolve_ops =
+      parameters->ops + parameters->copy_count;
+  uint16_t copy_index = 0;
+  uint16_t resolve_index = 0;
+  iree_host_size_t written_end = 0;
+  while (copy_index < parameters->copy_count ||
+         resolve_index < parameters->binding_count) {
+    const bool use_copy =
+        resolve_index == parameters->binding_count ||
+        (copy_index < parameters->copy_count &&
+         copy_ops[copy_index].copy.source_ordinal <
+             resolve_ops[resolve_index].resolve.source_ordinal);
+    const uint16_t source_ordinal =
+        use_copy ? copy_ops[copy_index].copy.source_ordinal
+                 : resolve_ops[resolve_index].resolve.source_ordinal;
+    const iree_host_size_t destination_offset =
+        use_copy
+            ? copy_ops[copy_index].copy.native_abi_destination_offset
+            : resolve_ops[resolve_index].resolve.native_abi_destination_offset;
+    const iree_host_size_t argument_size =
+        use_copy ? copy_ops[copy_index].copy.size
+                 : sizeof(iree_hal_streaming_deviceptr_t);
+    if (IREE_UNLIKELY(destination_offset < written_end ||
+                      destination_offset > *out_constants_size ||
+                      argument_size >
+                          *out_constants_size - destination_offset)) {
+      return iree_make_status(
+          IREE_STATUS_OUT_OF_RANGE,
+          "kernel argument layout overlaps or exceeds kernarg size");
     }
-    if ((iree_host_size_t)copy_op.native_abi_destination_offset >
-            *out_constants_size ||
-        (iree_host_size_t)copy_op.size >
-            *out_constants_size - copy_op.native_abi_destination_offset) {
-      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                              "kernel argument copy exceeds kernarg size");
+    if (destination_offset > written_end) {
+      memset(constants + written_end, 0, destination_offset - written_end);
     }
-    memcpy(constants + copy_op.native_abi_destination_offset, param_ptr,
-           copy_op.size);
-  }
 
-  for (uint32_t i = 0; i < parameters->binding_count; ++i, ++op) {
-    const iree_hal_streaming_parameter_resolve_op_t resolve_op = op->resolve;
-    void* param_ptr = parameter_list[resolve_op.source_ordinal];
+    void* param_ptr = parameter_list[source_ordinal];
     if (!param_ptr) {
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "kernel argument %" PRIu32 " is NULL",
-                              (uint32_t)resolve_op.source_ordinal);
+                              (uint32_t)source_ordinal);
     }
-    void* device_ptr = *(void**)param_ptr;
-    if ((iree_host_size_t)resolve_op.native_abi_destination_offset >
-            *out_constants_size ||
-        sizeof(device_ptr) >
-            *out_constants_size - resolve_op.native_abi_destination_offset) {
-      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                              "kernel pointer argument exceeds kernarg size");
+    if (use_copy) {
+      memcpy(constants + destination_offset, param_ptr, argument_size);
+      ++copy_index;
+    } else {
+      const iree_hal_streaming_deviceptr_t device_ptr =
+          (iree_hal_streaming_deviceptr_t)(uintptr_t)(*(void**)param_ptr);
+      memcpy(constants + destination_offset, &device_ptr, sizeof(device_ptr));
+      ++resolve_index;
     }
-    memcpy(constants + resolve_op.native_abi_destination_offset, &device_ptr,
-           sizeof(void*));
+    written_end = destination_offset + argument_size;
+  }
+  if (written_end < *out_constants_size) {
+    memset(constants + written_end, 0, *out_constants_size - written_end);
   }
 
   return iree_ok_status();
@@ -1543,7 +1572,6 @@ iree_status_t iree_hal_streaming_launch_kernel(
       constants_size = symbol->parameters.buffer_size;
     }
     constants = constants_size ? iree_alloca(constants_size) : NULL;
-    if (constants) memset(constants, 0, constants_size);
     iree_status_t pack_status = iree_hal_streaming_pack_raw_argument_list(
         &symbol->parameters, (void**)params->buffer, constants,
         &constants_size);
@@ -1652,6 +1680,12 @@ iree_status_t iree_hal_streaming_launch_kernel(
   iree_slim_mutex_lock(&stream->mutex);
   if (dispatch_directly) {
     uint64_t wait_value = stream->pending_value;
+    if (IREE_UNLIKELY(wait_value == UINT64_MAX)) {
+      iree_slim_mutex_unlock(&stream->mutex);
+      IREE_TRACE_ZONE_END(z0);
+      return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                              "stream timeline value overflow");
+    }
     uint64_t signal_value = wait_value + 1;
     const iree_hal_semaphore_list_t wait_semaphores = {
         .count = wait_value > 0 ? 1 : 0,
@@ -1818,9 +1852,6 @@ iree_status_t iree_hal_streaming_launch_kernel_batch(
             : launch->symbol->parameters.constant_bytes;
     if (prepared[i].constants_size == 0) {
       prepared[i].constants_size = launch->symbol->parameters.buffer_size;
-    }
-    if (prepared[i].constants_size > 0) {
-      memset(constants, 0, prepared[i].constants_size);
     }
     status = iree_hal_streaming_pack_raw_argument_list(
         &launch->symbol->parameters, (void**)launch->params.buffer, constants,
