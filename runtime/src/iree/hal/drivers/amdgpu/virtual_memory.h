@@ -9,8 +9,8 @@
 
 #include "iree/base/api.h"
 #include "iree/hal/allocator.h"
-#include "iree/hal/drivers/amdgpu/atomic_memory.h"
 #include "iree/hal/drivers/amdgpu/allocator.h"
+#include "iree/hal/drivers/amdgpu/atomic_memory.h"
 #include "iree/hal/drivers/amdgpu/util/libhsa.h"
 
 #ifdef __cplusplus

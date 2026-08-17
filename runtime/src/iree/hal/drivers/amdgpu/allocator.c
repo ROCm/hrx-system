@@ -420,6 +420,9 @@ static const iree_hal_amdgpu_allocator_memory_pool_t*
 iree_hal_amdgpu_allocator_match_imported_device_pool(
     const iree_hal_amdgpu_allocator_t* allocator,
     iree_host_size_t owner_ordinal, uint32_t global_flags) {
+  if (IREE_UNLIKELY(owner_ordinal >= allocator->topology->gpu_agent_count)) {
+    return NULL;
+  }
   const uint32_t pool_class =
       global_flags & IREE_HAL_AMDGPU_ATOMIC_MEMORY_POOL_CLASS_FLAGS;
   const iree_hal_amdgpu_allocator_memory_pool_t* candidate_pools[] = {

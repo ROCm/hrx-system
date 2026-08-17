@@ -657,7 +657,8 @@ TEST_F(AllocatorTest,
   IREE_ASSERT_OK(mapping.Map(physical_memory.get()));
   IREE_ASSERT_OK(iree_hal_allocator_virtual_memory_protect(
       allocator, virtual_memory.get(), /*virtual_offset=*/0, mapping_size,
-      kQueueAffinity0, IREE_HAL_MEMORY_PROTECTION_READ_WRITE));
+      kQueueAffinity0, IREE_HAL_VIRTUAL_MEMORY_ACCESS_SCOPE_ALL,
+      IREE_HAL_MEMORY_PROTECTION_READ_WRITE));
 
   constexpr iree_device_size_t kTouchedSize = 256;
   constexpr uint32_t kPattern = 0xC2055DE1u;
@@ -1796,6 +1797,62 @@ TEST_F(AllocatorTest, DeviceAllocationImportWrapsHsaAllocation) {
   EXPECT_EQ(release_count, 1);
 }
 
+TEST_F(AllocatorTest, DeviceAllocationImportAcceptsExternalGpuOwner) {
+  if (topology_.gpu_agent_count < 2) {
+    GTEST_SKIP() << "requires two GPU devices";
+  }
+
+  iree_hal_amdgpu_topology_t local_topology;
+  iree_hal_amdgpu_topology_initialize(&local_topology);
+  IREE_ASSERT_OK(
+      iree_hal_amdgpu_topology_insert_gpu_agent_with_nearest_cpu_agent(
+          &local_topology, &libhsa_, topology_.gpu_agents[0]));
+  {
+    TestLogicalDevice test_device;
+    IREE_ASSERT_OK(
+        test_device.Initialize(&libhsa_, &local_topology, host_allocator_));
+
+    hsa_amd_memory_pool_t external_memory_pool = {0};
+    IREE_ASSERT_OK(iree_hal_amdgpu_find_coarse_global_memory_pool(
+        &libhsa_, topology_.gpu_agents[1], &external_memory_pool));
+
+    constexpr iree_device_size_t kAllocationSize = 4096;
+    HsaAllocation allocation(&libhsa_);
+    IREE_ASSERT_OK(allocation.Allocate(external_memory_pool, kAllocationSize));
+
+    iree_hal_buffer_params_t params = {0};
+    params.type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
+    params.usage =
+        IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_DISPATCH;
+    params.queue_affinity = kQueueAffinity0;
+
+    iree_hal_external_buffer_t external_buffer = {};
+    external_buffer.type = IREE_HAL_EXTERNAL_BUFFER_TYPE_DEVICE_ALLOCATION;
+    external_buffer.size = kAllocationSize;
+    external_buffer.handle.device_allocation.ptr =
+        (uint64_t)(uintptr_t)allocation.ptr();
+
+    Ref<iree_hal_buffer_t> buffer;
+    IREE_ASSERT_OK(iree_hal_allocator_import_buffer(
+        test_device.allocator(), params, &external_buffer,
+        iree_hal_buffer_release_callback_null(), buffer.out()));
+    EXPECT_EQ(iree_hal_amdgpu_buffer_atomic_memory_cells(buffer),
+              IREE_HAL_AMDGPU_ATOMIC_MEMORY_CELL_FLAG_NONE);
+
+    constexpr uint32_t kPattern = 0xE715A1u;
+    IREE_ASSERT_OK(QueueFillAndWait(test_device.device(), kQueueAffinity0,
+                                    buffer, kAllocationSize, &kPattern,
+                                    sizeof(kPattern)));
+    std::array<uint32_t, kAllocationSize / sizeof(uint32_t)> observed = {};
+    IREE_ASSERT_OK(iree_hsa_memory_copy(IREE_LIBHSA(&libhsa_), observed.data(),
+                                        allocation.ptr(), kAllocationSize));
+    for (uint32_t value : observed) {
+      EXPECT_EQ(value, kPattern);
+    }
+  }
+  iree_hal_amdgpu_topology_deinitialize(&local_topology);
+}
+
 TEST_F(AllocatorTest, AsanDeviceAllocationImportPublishesShadow) {
   iree_hal_amdgpu_logical_device_options_t options;
   iree_hal_amdgpu_logical_device_options_initialize(&options);
@@ -2074,7 +2131,7 @@ TEST_F(AllocatorTest, HostAllocationExportsAndImportsAsDevicePointer) {
       IREE_HAL_MEMORY_TYPE_HOST_LOCAL | IREE_HAL_MEMORY_TYPE_HOST_VISIBLE |
       IREE_HAL_MEMORY_TYPE_HOST_COHERENT | IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE;
   params.usage = IREE_HAL_BUFFER_USAGE_TRANSFER |
-                 IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE |
+                 IREE_HAL_BUFFER_USAGE_STORAGE |
                  IREE_HAL_BUFFER_USAGE_MAPPING_SCOPED;
 
   constexpr iree_device_size_t kAllocationSize = 4096;
