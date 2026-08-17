@@ -276,23 +276,13 @@ iree_hal_amdxdna_native_c_command_chain_status_t select_command_chain_status(
     }
   }
 
-  switch (IREE_HAL_AMDXDNA_COMMAND_CHAIN_OVERRIDE) {
-    case IREE_HAL_AMDXDNA_NATIVE_C_COMMAND_CHAIN_OVERRIDE_FORCE_ENABLED:
-      return IREE_HAL_AMDXDNA_NATIVE_C_COMMAND_CHAIN_STATUS_ENABLED_FOR_TESTING;
-    case IREE_HAL_AMDXDNA_NATIVE_C_COMMAND_CHAIN_OVERRIDE_FORCE_DISABLED:
-      return IREE_HAL_AMDXDNA_NATIVE_C_COMMAND_CHAIN_STATUS_DISABLED_FOR_TESTING;
-    case IREE_HAL_AMDXDNA_NATIVE_C_COMMAND_CHAIN_OVERRIDE_AUTO:
-    default:
-      return status;
-  }
+  return status;
 }
 
 bool command_chain_enabled(
     iree_hal_amdxdna_native_c_command_chain_status_t status) {
   return status ==
-             IREE_HAL_AMDXDNA_NATIVE_C_COMMAND_CHAIN_STATUS_ENABLED_BY_DEFAULT ||
-         status ==
-             IREE_HAL_AMDXDNA_NATIVE_C_COMMAND_CHAIN_STATUS_ENABLED_FOR_TESTING;
+         IREE_HAL_AMDXDNA_NATIVE_C_COMMAND_CHAIN_STATUS_ENABLED_BY_DEFAULT;
 }
 
 void record_driver_stack_info(iree_hal_amdxdna_native_device_t* device,
@@ -594,17 +584,6 @@ bool iree_hal_amdxdna_native_device_uses_npu_payload_dispatch(
           IREE_HAL_AMDXDNA_NATIVE_C_DISPATCH_MODEL_START_NPU) != 0;
 }
 
-bool iree_hal_amdxdna_native_device_syncs_bindings_on_submit(
-    iree_hal_amdxdna_native_device_t* device) {
-  iree_hal_amdxdna_native_c_device_caps_t caps;
-  if (!iree_status_is_ok(
-          iree_hal_amdxdna_native_device_query_caps(device, &caps))) {
-    return false;
-  }
-  return caps.buffer_sync_model ==
-         IREE_HAL_AMDXDNA_NATIVE_C_BUFFER_SYNC_MODEL_SUBMIT_SYNCS_BINDINGS;
-}
-
 iree_hal_amdxdna_native_c_command_opcode_t
 iree_hal_amdxdna_native_device_dispatch_opcode(
     iree_hal_amdxdna_native_device_t* device) {
@@ -622,13 +601,14 @@ iree_status_t iree_hal_amdxdna_native_device_query_caps(
   IREE_ASSERT_ARGUMENT(device);
   IREE_ASSERT_ARGUMENT(out_caps);
   iree_hal_amdxdna_native_c_device_caps_t caps = {};
-  caps.ddi_version = 1;
   caps.max_effective_queues = 1;
   caps.max_command_chain_slots =
       device->supports_command_chain
           ? std::min(chain_slot_capacity(kMaxExecBoSize),
                      kKmqDefaultChainSlots)
           : 0;
+  // Zero selects the common conservative chain-cache retention budget.
+  caps.max_cached_chain_child_commands = 0;
   caps.context_image_models = IREE_HAL_AMDXDNA_NATIVE_C_CONTEXT_IMAGE_MODEL_PDI;
   // START_NPU is used for command-chain children and is correct on Linux KMQ.
   // Do not advertise PARTIAL_ELF here: its resident-instruction path currently
@@ -641,14 +621,12 @@ iree_status_t iree_hal_amdxdna_native_device_query_caps(
     caps.dispatch_models |=
         IREE_HAL_AMDXDNA_NATIVE_C_DISPATCH_MODEL_COMMAND_CHAIN;
   }
-  caps.buffer_sync_model =
-      IREE_HAL_AMDXDNA_NATIVE_C_BUFFER_SYNC_MODEL_CALLER_SYNCS_BINDINGS;
   caps.completion_models =
       IREE_HAL_AMDXDNA_NATIVE_C_COMPLETION_MODEL_SYNCHRONOUS_WAIT |
       IREE_HAL_AMDXDNA_NATIVE_C_COMPLETION_MODEL_NATIVE_FENCE;
-  caps.supports_command_chain = device->supports_command_chain;
-  caps.supports_submit_many = device->supports_command_chain;
-  caps.supports_async_submit = true;
+  caps.supports_host_buffer_reuse = true;
+  caps.native_owns_control_code_publication = false;
+  caps.submit_completion_is_deferred = true;
   caps.supports_external_buffer_import = false;
   caps.supports_external_buffer_export = false;
   caps.supports_real_multi_queue = false;

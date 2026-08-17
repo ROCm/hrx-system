@@ -189,7 +189,7 @@ TEST(ContextBlobTest, DeviceHelperBuildsNegotiatedLegacyContext) {
       iree_allocator_system(), &private_data, &info, &context_buffer, &error))
       << ErrorMessage(&error);
   EXPECT_EQ(context_buffer.allocation, 0u);
-  EXPECT_GT(private_data.data_length, xclbin.size());
+  EXPECT_EQ(private_data.data_length, 0xE8 + xclbin.size() + 0x370);
   EXPECT_EQ(std::memcmp(private_data.data, xclbin.data() + 0x1A0, 16), 0);
 
   ContextBlobInfoDeinitialize(&info);

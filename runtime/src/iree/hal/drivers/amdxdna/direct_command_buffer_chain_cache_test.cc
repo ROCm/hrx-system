@@ -288,6 +288,74 @@ TEST(ChainCommandCacheTest,
 }
 
 TEST(ChainCommandCacheTest,
+     DescriptorTemplateMatchAcceptsDynamicStateForSameExecutableRun) {
+  uint32_t cached_control_data[] = {0xA, 0x1000, 0x0, 0xD};
+  uint32_t fresh_control_data[] = {0xB, 0x2000, 0x1, 0xE};
+  iree_hal_amdxdna_u32_list_t cached_control = {
+      cached_control_data,
+      IREE_ARRAYSIZE(cached_control_data),
+  };
+  iree_hal_amdxdna_u32_list_t fresh_control = {
+      fresh_control_data,
+      IREE_ARRAYSIZE(fresh_control_data),
+  };
+  auto cached_cmd = MakeCmd(FakeBuffer(0x10), /*device_addr=*/0x80000000);
+  auto fresh_cmd = MakeCmd(FakeBuffer(0x20), /*device_addr=*/0x90000000);
+  cached_cmd.src_executable_identity = 7;
+  fresh_cmd.src_executable_identity = 7;
+  cached_cmd.src_entry_point = 2;
+  fresh_cmd.src_entry_point = 2;
+  cached_cmd.src_run_ordinal = 3;
+  fresh_cmd.src_run_ordinal = 3;
+  cached_cmd.src_asm_inst = &cached_control;
+  fresh_cmd.src_asm_inst = &fresh_control;
+  const uint8_t fresh_constants[] = {5, 6, 7, 8};
+  SetCmdConstants(&fresh_cmd, fresh_constants, IREE_ARRAYSIZE(fresh_constants));
+  auto cached_group = MakeGroup1(&cached_cmd);
+  auto fresh_group = MakeGroup1(&fresh_cmd);
+  auto entry = MakeCacheEntry(&cached_group);
+
+  EXPECT_FALSE(iree_hal_amdxdna_chain_command_cache_descriptor_matches(
+      &entry, &fresh_group, /*max_slots=*/24));
+  EXPECT_TRUE(iree_hal_amdxdna_chain_command_cache_descriptor_template_matches(
+      &entry, &fresh_group, /*max_slots=*/24));
+}
+
+TEST(ChainCommandCacheTest,
+     DescriptorMatchesRejectDifferentExecutableOrRunWithSameShape) {
+  auto cached_cmd = MakeCmd(FakeBuffer(0x10), /*device_addr=*/0x80000000);
+  cached_cmd.src_executable_identity = 7;
+  cached_cmd.src_entry_point = 2;
+  cached_cmd.src_run_ordinal = 3;
+  auto cached_group = MakeGroup1(&cached_cmd);
+  auto entry = MakeCacheEntry(&cached_group);
+
+  auto different_executable_cmd =
+      MakeCmd(FakeBuffer(0x10), /*device_addr=*/0x80000000);
+  different_executable_cmd.src_executable_identity = 8;
+  different_executable_cmd.src_entry_point = 2;
+  different_executable_cmd.src_run_ordinal = 3;
+  auto different_executable_group = MakeGroup1(&different_executable_cmd);
+  EXPECT_FALSE(iree_hal_amdxdna_chain_command_cache_descriptor_matches(
+      &entry, &different_executable_group, /*max_slots=*/24));
+  EXPECT_FALSE(
+      iree_hal_amdxdna_chain_command_cache_descriptor_template_matches(
+          &entry, &different_executable_group, /*max_slots=*/24));
+
+  auto different_run_cmd =
+      MakeCmd(FakeBuffer(0x10), /*device_addr=*/0x80000000);
+  different_run_cmd.src_executable_identity = 7;
+  different_run_cmd.src_entry_point = 2;
+  different_run_cmd.src_run_ordinal = 4;
+  auto different_run_group = MakeGroup1(&different_run_cmd);
+  EXPECT_FALSE(iree_hal_amdxdna_chain_command_cache_descriptor_matches(
+      &entry, &different_run_group, /*max_slots=*/24));
+  EXPECT_FALSE(
+      iree_hal_amdxdna_chain_command_cache_descriptor_template_matches(
+          &entry, &different_run_group, /*max_slots=*/24));
+}
+
+TEST(ChainCommandCacheTest,
      DescriptorTemplateMatchRejectsChangedConstantShape) {
   auto cached_cmd = MakeCmd(FakeBuffer(0x10), /*device_addr=*/0x80000000);
   auto fresh_cmd = MakeCmd(FakeBuffer(0x20), /*device_addr=*/0x90000000);
@@ -472,7 +540,7 @@ TEST(ChainCommandCacheTest, AllocateEntryRejectsOverBudgetRequest) {
   iree_hal_amdxdna_device_chain_command_cache_t cache = {};
   cache.host_allocator = TestAllocator();
   auto request_group =
-      MakeResourceGroup(kAmdxdnaChainCommandCacheMaxChildCommands + 1);
+      MakeResourceGroup(kAmdxdnaChainCommandCacheDefaultMaxChildCommands + 1);
 
   EXPECT_EQ(iree_hal_amdxdna_chain_command_cache_allocate_entry(
                 &cache, &request_group, /*max_slots=*/24),
@@ -488,7 +556,7 @@ TEST(ChainCommandCacheTest, AllocateEntryEvictsLruToFitResourceBudget) {
   iree_hal_amdxdna_chain_group_initialize(&cache.entries[0].group);
   iree_hal_amdxdna_chain_group_initialize(&cache.entries[1].group);
   SetResourceEntry(&cache.entries[0],
-                   kAmdxdnaChainCommandCacheMaxChildCommands - 1,
+                   kAmdxdnaChainCommandCacheDefaultMaxChildCommands - 1,
                    /*last_use=*/1);
   SetResourceEntry(&cache.entries[1], 1, /*last_use=*/2);
   auto request_group = MakeResourceGroup(1);
@@ -499,6 +567,24 @@ TEST(ChainCommandCacheTest, AllocateEntryEvictsLruToFitResourceBudget) {
 
   EXPECT_EQ(entry, &cache.entries[0]);
   EXPECT_EQ(cache.entries[1].group.cmd_count, 1u);
+
+  iree_hal_amdxdna_chain_group_deinitialize(TestAllocator(), &request_group);
+  for (iree_host_size_t i = 0; i < cache.entry_count; ++i) {
+    iree_hal_amdxdna_chain_group_deinitialize(TestAllocator(),
+                                              &cache.entries[i].group);
+  }
+}
+
+TEST(ChainCommandCacheTest, AllocateEntryUsesConfiguredChildBudget) {
+  iree_hal_amdxdna_device_chain_command_cache_t cache = {};
+  cache.host_allocator = TestAllocator();
+  cache.max_child_commands =
+      kAmdxdnaChainCommandCacheDefaultMaxChildCommands + 128;
+  auto request_group = MakeResourceGroup(cache.max_child_commands);
+
+  EXPECT_NE(iree_hal_amdxdna_chain_command_cache_allocate_entry(
+                &cache, &request_group, /*max_slots=*/24),
+            nullptr);
 
   iree_hal_amdxdna_chain_group_deinitialize(TestAllocator(), &request_group);
   for (iree_host_size_t i = 0; i < cache.entry_count; ++i) {

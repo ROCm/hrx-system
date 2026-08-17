@@ -22,9 +22,9 @@ typedef struct iree_hal_amdxdna_chain_cache_resources_t {
 // BOs a context can retain. Bound the device-global cache by the resources it
 // owns instead of by entries alone. The child-command budget leaves headroom
 // for in-flight miss construction, single-dispatch caches, and application
-// buffers; if a future native API exposes real limits these constants should
-// become native caps. The constants live in the internal header so host-only
-// tests can exercise the same admission policy.
+// buffers. Native backends may advertise a larger validated child-command
+// budget; the remaining conservative limits live in the internal header so
+// host-only tests can exercise the same admission policy.
 
 static iree_status_t iree_hal_amdxdna_reserve_array(
     iree_allocator_t host_allocator, iree_host_size_t element_size,
@@ -60,9 +60,13 @@ static void iree_hal_amdxdna_chain_cache_resources_add(
 }
 
 static bool iree_hal_amdxdna_chain_cache_resources_fit(
+    const iree_hal_amdxdna_device_chain_command_cache_t* cache,
     const iree_hal_amdxdna_chain_cache_resources_t* resources) {
-  return resources->child_command_count <=
-             kAmdxdnaChainCommandCacheMaxChildCommands &&
+  const iree_host_size_t max_child_commands =
+      cache->max_child_commands
+          ? cache->max_child_commands
+          : kAmdxdnaChainCommandCacheDefaultMaxChildCommands;
+  return resources->child_command_count <= max_child_commands &&
          resources->parent_command_count <=
              kAmdxdnaChainCommandCacheMaxParentCommands &&
          resources->instruction_bytes <=
@@ -624,7 +628,7 @@ iree_status_t iree_hal_amdxdna_chain_accum_append_group(
 }
 
 static iree_status_t iree_hal_amdxdna_chain_command_cache_create(
-    iree_allocator_t host_allocator,
+    iree_allocator_t host_allocator, iree_host_size_t max_child_commands,
     iree_hal_amdxdna_device_chain_command_cache_t** out_cache) {
   *out_cache = NULL;
   iree_hal_amdxdna_device_chain_command_cache_t* cache = NULL;
@@ -632,6 +636,9 @@ static iree_status_t iree_hal_amdxdna_chain_command_cache_create(
       iree_allocator_malloc(host_allocator, sizeof(*cache), (void**)&cache));
   memset(cache, 0, sizeof(*cache));
   cache->host_allocator = host_allocator;
+  cache->max_child_commands =
+      max_child_commands ? max_child_commands
+                         : kAmdxdnaChainCommandCacheDefaultMaxChildCommands;
   iree_slim_mutex_initialize(&cache->mutex);
   *out_cache = cache;
   return iree_ok_status();
@@ -643,7 +650,9 @@ iree_hal_amdxdna_get_chain_command_cache(iree_hal_amdxdna_device* device) {
   iree_slim_mutex_lock(&device->command_cache_mutex);
   if (!device->chain_command_cache) {
     (void)iree_hal_amdxdna_chain_command_cache_create(
-        device->host_allocator, &device->chain_command_cache);
+        device->host_allocator,
+        device->native_caps.max_cached_chain_child_commands,
+        &device->chain_command_cache);
   }
   iree_slim_mutex_unlock(&device->command_cache_mutex);
   return device->chain_command_cache;
@@ -666,6 +675,17 @@ static void iree_hal_amdxdna_chain_command_cache_entry_deinitialize(
   iree_allocator_free(host_allocator, entry->chains);
   iree_hal_amdxdna_chain_group_deinitialize(host_allocator, &entry->group);
   memset(entry, 0, sizeof(*entry));
+}
+
+void iree_hal_amdxdna_chain_command_cache_entry_discard(
+    iree_hal_amdxdna_device_chain_command_cache_t* cache,
+    iree_hal_amdxdna_chain_command_cache_entry_t* entry) {
+  IREE_ASSERT_ARGUMENT(cache);
+  IREE_ASSERT_ARGUMENT(entry);
+  IREE_ASSERT(entry->in_flight_count == 0);
+  iree_hal_amdxdna_chain_command_cache_entry_deinitialize(
+      cache->host_allocator, entry);
+  iree_hal_amdxdna_chain_command_cache_entry_prepare_empty(entry);
 }
 
 void iree_hal_amdxdna_device_destroy_chain_command_cache(
@@ -766,9 +786,20 @@ bool iree_hal_amdxdna_chain_command_cache_shape_matches(
 bool iree_hal_amdxdna_chain_cmd_descriptor_matches(
     const iree_hal_amdxdna_chain_cmd_t* lhs,
     const iree_hal_amdxdna_chain_cmd_t* rhs) {
-  return iree_hal_amdxdna_u32_list_equal(lhs->src_asm_inst,
-                                         rhs->src_asm_inst) &&
-         iree_hal_amdxdna_u32_list_equal(lhs->src_patches, rhs->src_patches) &&
+  const bool same_immutable_source =
+      lhs->src_executable_identity != 0 &&
+      lhs->src_executable_identity == rhs->src_executable_identity &&
+      lhs->src_entry_point == rhs->src_entry_point &&
+      lhs->src_run_ordinal == rhs->src_run_ordinal;
+  const bool has_immutable_source =
+      lhs->src_executable_identity != 0 ||
+      rhs->src_executable_identity != 0;
+  return ((has_immutable_source && same_immutable_source) ||
+          (!has_immutable_source &&
+           iree_hal_amdxdna_u32_list_equal(lhs->src_asm_inst,
+                                           rhs->src_asm_inst) &&
+           iree_hal_amdxdna_u32_list_equal(lhs->src_patches,
+                                           rhs->src_patches))) &&
          lhs->src_use_native_partial_elf == rhs->src_use_native_partial_elf &&
          lhs->src_cu_idx.index == rhs->src_cu_idx.index &&
          iree_hal_amdxdna_u8_span_equal(
@@ -810,8 +841,17 @@ bool iree_hal_amdxdna_chain_command_cache_descriptor_matches(
 bool iree_hal_amdxdna_chain_cmd_descriptor_template_matches(
     const iree_hal_amdxdna_chain_cmd_t* lhs,
     const iree_hal_amdxdna_chain_cmd_t* rhs) {
-  return lhs->src_asm_inst && rhs->src_asm_inst &&
-         lhs->src_asm_inst->count == rhs->src_asm_inst->count &&
+  const bool same_immutable_source =
+      lhs->src_executable_identity != 0 &&
+      lhs->src_executable_identity == rhs->src_executable_identity &&
+      lhs->src_entry_point == rhs->src_entry_point &&
+      lhs->src_run_ordinal == rhs->src_run_ordinal;
+  const bool has_immutable_source =
+      lhs->src_executable_identity != 0 ||
+      rhs->src_executable_identity != 0;
+  return ((has_immutable_source && same_immutable_source) ||
+          (!has_immutable_source && lhs->src_asm_inst && rhs->src_asm_inst &&
+           lhs->src_asm_inst->count == rhs->src_asm_inst->count)) &&
          lhs->src_use_native_partial_elf == rhs->src_use_native_partial_elf &&
          lhs->src_cu_idx.index == rhs->src_cu_idx.index &&
          lhs->src_constant_count == rhs->src_constant_count &&
@@ -842,7 +882,7 @@ bool iree_hal_amdxdna_chain_command_cache_trim_for_group(
     const iree_hal_amdxdna_chain_group_t* group, uint32_t max_slots) {
   const iree_hal_amdxdna_chain_cache_resources_t requested =
       iree_hal_amdxdna_chain_group_estimate_cache_resources(group, max_slots);
-  if (!iree_hal_amdxdna_chain_cache_resources_fit(&requested)) {
+  if (!iree_hal_amdxdna_chain_cache_resources_fit(cache, &requested)) {
     return false;
   }
 
@@ -850,7 +890,7 @@ bool iree_hal_amdxdna_chain_command_cache_trim_for_group(
     iree_hal_amdxdna_chain_cache_resources_t total =
         iree_hal_amdxdna_chain_command_cache_total_resources(cache);
     iree_hal_amdxdna_chain_cache_resources_add(&total, &requested);
-    if (iree_hal_amdxdna_chain_cache_resources_fit(&total)) return true;
+    if (iree_hal_amdxdna_chain_cache_resources_fit(cache, &total)) return true;
 
     iree_hal_amdxdna_chain_command_cache_entry_t* evict_entry =
         iree_hal_amdxdna_chain_command_cache_find_lru_evictable_entry(cache);

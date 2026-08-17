@@ -68,11 +68,6 @@ typedef enum iree_hal_amdxdna_native_c_context_image_type_t {
   IREE_HAL_AMDXDNA_NATIVE_C_CONTEXT_IMAGE_TYPE_XCLBIN = 1,
 } iree_hal_amdxdna_native_c_context_image_type_t;
 
-typedef enum iree_hal_amdxdna_native_c_buffer_sync_model_t {
-  IREE_HAL_AMDXDNA_NATIVE_C_BUFFER_SYNC_MODEL_CALLER_SYNCS_BINDINGS = 0,
-  IREE_HAL_AMDXDNA_NATIVE_C_BUFFER_SYNC_MODEL_SUBMIT_SYNCS_BINDINGS = 1,
-} iree_hal_amdxdna_native_c_buffer_sync_model_t;
-
 enum iree_hal_amdxdna_native_c_context_image_model_bits_t {
   IREE_HAL_AMDXDNA_NATIVE_C_CONTEXT_IMAGE_MODEL_PDI = 1u << 0,
   IREE_HAL_AMDXDNA_NATIVE_C_CONTEXT_IMAGE_MODEL_XCLBIN = 1u << 1,
@@ -92,29 +87,9 @@ enum iree_hal_amdxdna_native_c_completion_model_bits_t {
   IREE_HAL_AMDXDNA_NATIVE_C_COMPLETION_MODEL_COMPLETION_SLOT = 1u << 3,
 };
 
-typedef enum iree_hal_amdxdna_native_c_command_chain_override_t {
-  IREE_HAL_AMDXDNA_NATIVE_C_COMMAND_CHAIN_OVERRIDE_AUTO = 0,
-  IREE_HAL_AMDXDNA_NATIVE_C_COMMAND_CHAIN_OVERRIDE_FORCE_ENABLED = 1,
-  IREE_HAL_AMDXDNA_NATIVE_C_COMMAND_CHAIN_OVERRIDE_FORCE_DISABLED = 2,
-} iree_hal_amdxdna_native_c_command_chain_override_t;
-
-// Compile-time test override for the generic command-chain capability. This
-// does not force platform-specific dispatch models such as Windows PARTIAL_ELF.
-#ifndef IREE_HAL_AMDXDNA_COMMAND_CHAIN_OVERRIDE
-#define IREE_HAL_AMDXDNA_COMMAND_CHAIN_OVERRIDE 0
-#endif  // IREE_HAL_AMDXDNA_COMMAND_CHAIN_OVERRIDE
-
-#if IREE_HAL_AMDXDNA_COMMAND_CHAIN_OVERRIDE != 0 && \
-    IREE_HAL_AMDXDNA_COMMAND_CHAIN_OVERRIDE != 1 && \
-    IREE_HAL_AMDXDNA_COMMAND_CHAIN_OVERRIDE != 2
-#error "IREE_HAL_AMDXDNA_COMMAND_CHAIN_OVERRIDE must be AUTO, FORCE_ENABLED, or FORCE_DISABLED"
-#endif  // IREE_HAL_AMDXDNA_COMMAND_CHAIN_OVERRIDE
-
 typedef enum iree_hal_amdxdna_native_c_command_chain_status_t {
   IREE_HAL_AMDXDNA_NATIVE_C_COMMAND_CHAIN_STATUS_UNKNOWN = 0,
   IREE_HAL_AMDXDNA_NATIVE_C_COMMAND_CHAIN_STATUS_ENABLED_BY_DEFAULT = 1,
-  IREE_HAL_AMDXDNA_NATIVE_C_COMMAND_CHAIN_STATUS_ENABLED_FOR_TESTING = 2,
-  IREE_HAL_AMDXDNA_NATIVE_C_COMMAND_CHAIN_STATUS_DISABLED_FOR_TESTING = 3,
   IREE_HAL_AMDXDNA_NATIVE_C_COMMAND_CHAIN_STATUS_DISABLED_KNOWN_BAD_STACK = 4,
   IREE_HAL_AMDXDNA_NATIVE_C_COMMAND_CHAIN_STATUS_DISABLED_OLD_FIRMWARE = 5,
   IREE_HAL_AMDXDNA_NATIVE_C_COMMAND_CHAIN_STATUS_DISABLED_UNIDENTIFIED_STACK = 6,
@@ -135,16 +110,24 @@ typedef struct iree_hal_amdxdna_native_c_driver_stack_t {
 } iree_hal_amdxdna_native_c_driver_stack_t;
 
 typedef struct iree_hal_amdxdna_native_c_device_caps_t {
-  uint32_t ddi_version;
   uint32_t max_effective_queues;
   uint32_t max_command_chain_slots;
+  // Maximum number of native child commands that the device-level chain cache
+  // may retain. Zero selects the common conservative default.
+  uint32_t max_cached_chain_child_commands;
   uint32_t context_image_models;
   uint32_t dispatch_models;
-  iree_hal_amdxdna_native_c_buffer_sync_model_t buffer_sync_model;
   uint32_t completion_models;
-  bool supports_command_chain;
-  bool supports_submit_many;
-  bool supports_async_submit;
+  // Host-only native buffers may be retained and reused after their HAL buffer
+  // wrapper is released. False requires immediate native-buffer destruction.
+  bool supports_host_buffer_reuse;
+  // Native submission owns publication of command control code. Common code
+  // must not publish the source control BO when this is true.
+  bool native_owns_control_code_publication;
+  // Native issue may return before completion. Common code must retain
+  // submission resources and defer signal semaphores until native completion.
+  // This does not imply multiple hardware queues or concurrent queue access.
+  bool submit_completion_is_deferred;
   bool supports_external_buffer_import;
   bool supports_external_buffer_export;
   bool supports_real_multi_queue;

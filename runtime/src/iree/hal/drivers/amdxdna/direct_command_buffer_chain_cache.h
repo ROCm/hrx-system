@@ -36,9 +36,11 @@ extern "C" {
 // a structural guard: each entry may retain many native child command BOs,
 // instruction/control BOs, and parent chain BOs. Admission is therefore also
 // resource-budgeted in the cache implementation and evicts LRU non-in-flight
-// entries before retaining a new template.
+// entries before retaining a new template. Child, parent, and instruction
+// limits bound distinct native resources until backends expose queryable
+// retention limits through native capabilities.
 enum { kAmdxdnaChainCommandCacheCapacity = 64 };
-enum { kAmdxdnaChainCommandCacheMaxChildCommands = 896 };
+enum { kAmdxdnaChainCommandCacheDefaultMaxChildCommands = 896 };
 enum { kAmdxdnaChainCommandCacheMaxParentCommands = 96 };
 enum { kAmdxdnaChainCommandCacheMaxInstructionBytes = 32 * 1024 * 1024 };
 
@@ -63,6 +65,9 @@ typedef struct iree_hal_amdxdna_chain_cmd_t {
   const iree_hal_amdxdna_u32_list_t* src_asm_inst;
   const iree_hal_amdxdna_u32_list_t* src_patches;
   const iree_hal_amdxdna_write32_constant_patch_list_t* src_constant_patches;
+  uint64_t src_executable_identity;
+  uint32_t src_entry_point;
+  uint32_t src_run_ordinal;
   // Device-cache entries clone executable-owned template lists here before
   // they outlive the executable or one-shot command buffer that recorded them.
   iree_hal_amdxdna_u32_list_t owned_src_asm_inst;
@@ -132,6 +137,7 @@ typedef struct iree_hal_amdxdna_device_chain_command_cache_t {
   iree_slim_mutex_t mutex;
   iree_hal_amdxdna_chain_command_cache_entry_t
       entries[kAmdxdnaChainCommandCacheCapacity];
+  iree_host_size_t max_child_commands;
   iree_host_size_t entry_count;
   uint64_t use_clock;
 } iree_hal_amdxdna_device_chain_command_cache_t;
@@ -255,6 +261,12 @@ void iree_hal_amdxdna_chain_command_cache_entry_acquire_in_flight(
     iree_hal_amdxdna_chain_command_cache_entry_t* entry);
 
 void iree_hal_amdxdna_chain_command_cache_entry_release_in_flight(
+    iree_hal_amdxdna_device_chain_command_cache_t* cache,
+    iree_hal_amdxdna_chain_command_cache_entry_t* entry);
+
+// Discards a non-in-flight entry after a failed in-place rewrite. The caller
+// must hold cache->mutex.
+void iree_hal_amdxdna_chain_command_cache_entry_discard(
     iree_hal_amdxdna_device_chain_command_cache_t* cache,
     iree_hal_amdxdna_chain_command_cache_entry_t* entry);
 

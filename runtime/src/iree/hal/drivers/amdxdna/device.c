@@ -519,7 +519,8 @@ static iree_status_t iree_hal_amdxdna_queue_execute_op_create(
     status = iree_hal_semaphore_list_clone(&signal_list, device->host_allocator,
                                            &op->signal_list);
   }
-  if (iree_status_is_ok(status) && device->native_caps.supports_async_submit &&
+  if (iree_status_is_ok(status) &&
+      device->native_caps.submit_completion_is_deferred &&
       command_buffer) {
     status = iree_hal_amdxdna_completion_batch_create(
         device->completion_queue, signal_list, &op->completion_batch);
@@ -1489,7 +1490,8 @@ static iree_status_t iree_hal_amdxdna_device_queue_dispatch(
     status = iree_hal_semaphore_list_clone(
         &signal_semaphore_list, device->host_allocator, &op->signal_list);
   }
-  if (iree_status_is_ok(status) && device->native_caps.supports_async_submit) {
+  if (iree_status_is_ok(status) &&
+      device->native_caps.submit_completion_is_deferred) {
     status = iree_hal_amdxdna_completion_batch_create(
         device->completion_queue, signal_semaphore_list, &op->completion_batch);
   }

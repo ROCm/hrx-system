@@ -30,6 +30,14 @@ _AMDXDNA_UNIT_TEST_TAGS = [
 ]
 
 iree_runtime_cc_library(
+    name = "planning",
+    srcs = ["direct_command_buffer_planning.c"],
+    hdrs = ["direct_command_buffer_planning.h"],
+    target_compatible_with = _AMDXDNA_COMPATIBLE_WITH,
+    deps = ["//runtime/src/iree/base"],
+)
+
+iree_runtime_cc_library(
     name = "native_linux_kmq",
     srcs = ["native_linux_kmq.cc"],
     hdrs = [
@@ -56,6 +64,7 @@ iree_runtime_cc_library(
     ],
     target_compatible_with = ["@platforms//os:windows"],
     deps = [
+        ":planning",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal",
         "//runtime/src/iree/hal",
@@ -88,7 +97,6 @@ iree_runtime_cc_library(
         "device.c",
         "direct_command_buffer.c",
         "direct_command_buffer_chain_cache.c",
-        "direct_command_buffer_planning.c",
         "direct_command_buffer_single_cache.c",
         "driver.c",
         "event.c",
@@ -109,7 +117,6 @@ iree_runtime_cc_library(
         "device_internal.h",
         "direct_command_buffer.h",
         "direct_command_buffer_chain_cache.h",
-        "direct_command_buffer_planning.h",
         "direct_command_buffer_single_cache.h",
         "event.h",
         "executable.h",
@@ -122,6 +129,7 @@ iree_runtime_cc_library(
     ],
     target_compatible_with = _AMDXDNA_COMPATIBLE_WITH,
     deps = [
+        ":planning",
         "//runtime/src/iree/async",
         "//runtime/src/iree/async/util:proactor_pool",
         "//runtime/src/iree/base",
@@ -199,7 +207,7 @@ iree_runtime_cc_test(
     tags = _AMDXDNA_UNIT_TEST_TAGS,
     target_compatible_with = _AMDXDNA_COMPATIBLE_WITH,
     deps = [
-        ":amdxdna",
+        ":planning",
         "//runtime/src/iree/base",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",

@@ -24,7 +24,9 @@
 
 namespace iree::hal::amdxdna::mcdm {
 
-constexpr size_t kMaxRetainedAdapterHandles = 256;
+// D3DKMT adapter enumeration is bounded so discovery uses fixed storage and
+// retains pre-selection handles without allocation during device bring-up.
+constexpr size_t kMaxComputeAdapterHandles = 256;
 constexpr size_t kMaxMcdmPrivateDataSize = 0x280;
 constexpr size_t kMaxPathBBoTableEntries = 6;
 constexpr size_t kCompactPathBChainHandleSize = 0x120;
@@ -82,6 +84,15 @@ enum class McdmAbi {
   legacy,
   compact,
 };
+
+struct McdmSubmissionPolicy {
+  bool supports_command_chaining = false;
+  bool uses_shared_command_code_view = false;
+  bool submit_completion_is_deferred = false;
+};
+
+McdmSubmissionPolicy GetMcdmSubmissionPolicy(McdmAbi abi);
+bool SupportsHostBufferReuse(McdmAbi abi);
 
 enum class McdmAbiSource {
   unknown,
@@ -143,9 +154,10 @@ struct McdmAbiInfo {
 
 McdmAbiInfo GetMcdmAbiInfo(McdmAbi abi);
 
-McdmAbi SelectMcdmAbiForDriverVersion(McdmAbi probed_abi,
-                                       bool has_driver_version,
-                                       const DriverVersion& driver_version);
+bool SelectMcdmAbiForDriverVersion(McdmAbi probed_abi,
+                                   bool has_driver_version,
+                                   const DriverVersion& driver_version,
+                                   McdmAbi* out_abi, Error* out_error);
 
 struct BufferKindInfo {
   const char* name;
@@ -193,13 +205,13 @@ bool QueryMcdmAbiDiagnostics(const KmtApi& api, D3DKMT_HANDLE adapter,
 struct Adapter {
   D3DKMT_HANDLE handle = 0;
   LUID luid = {};
-  D3DKMT_HANDLE retained_handles[kMaxRetainedAdapterHandles] = {};
+  D3DKMT_HANDLE retained_handles[kMaxComputeAdapterHandles] = {};
   size_t retained_handle_count = 0;
 };
 
 struct Device {
   D3DKMT_HANDLE adapter = 0;
-  D3DKMT_HANDLE retained_adapter_handles[kMaxRetainedAdapterHandles] = {};
+  D3DKMT_HANDLE retained_adapter_handles[kMaxComputeAdapterHandles] = {};
   size_t retained_adapter_handle_count = 0;
   D3DKMT_HANDLE device = 0;
   D3DKMT_HANDLE paging_queue = 0;
@@ -241,6 +253,10 @@ struct Context {
   void* progress_fence_cpu = nullptr;
   D3DGPU_VIRTUAL_ADDRESS progress_fence_gpu = 0;
   uint64_t next_fence_id = 1;
+  // Highest paging-queue fence ordered onto this hardware queue. Queue order
+  // preserves that dependency for later submits, so only newly encountered
+  // paging work needs another GPU wait.
+  uint64_t ordered_paging_fence_value = 0;
   // Driver writeback in the context-private packet. XRT folds this cookie into
   // the 64 MiB command-aperture allocation private flags.
   uint32_t command_aperture_cookie = 0;
@@ -253,7 +269,6 @@ struct Context {
   D3DKMT_HANDLE completion_ring_resource = 0;
   bool completion_ring_ready = false;
   bool completion_ring_owned = false;
-  uint32_t completion_ring_offset = 0;
   uint64_t next_command_id = 1;
 };
 
@@ -268,7 +283,11 @@ struct CommandAperture {
   D3DKMT_HANDLE resource = 0;
   D3DKMT_HANDLE gpu_resource = 0;
   D3DGPU_VIRTUAL_ADDRESS status_gpu_va = 0;
+  // Allocator-selected process VA used by KMT for mapping and bootstrap.
   D3DGPU_VIRTUAL_ADDRESS gpu_va = 0;
+  // Context-local address advertised to the MCDM protocol. Each context sees
+  // its command aperture at this address even when KMT assigns distinct VAs.
+  D3DGPU_VIRTUAL_ADDRESS protocol_gpu_va = 0;
   void* cpu_ptr = nullptr;
   void* gpu_cpu_ptr = nullptr;
   uint64_t cpu_ptr_size = 0;
@@ -310,11 +329,37 @@ McdmPrivateData BuildPathBSubmitPrivateData(
 
 struct PathBPendingSubmit {
   uint64_t fence_id = 0;
+  uint32_t command_state = 0;
   uint8_t* slot_cpu = nullptr;
   uint32_t slot_offset = 0;
   volatile uint32_t* packet_header = nullptr;
   Buffer exec_buffer;
   Buffer ring;
+};
+
+// Returns the number of simultaneously pending Path-B submissions supported
+// by the context's completion ring after reserving the protocol-owned slot.
+size_t PathBCompletionCapacity(const Context& context);
+
+bool IsValidPathBCompletionSlot(uint64_t ring_size, uint32_t slot_offset);
+
+// Clears all completion records reserved for one native submission before any
+// command is issued. The completion ring is a driver-owned coherent mapping;
+// callers must not apply ordinary BO cache maintenance to it.
+bool InitializePathBCompletionSlots(Context* context,
+                                    const uint32_t* completion_slot_offsets,
+                                    size_t completion_slot_count,
+                                    Error* out_error);
+
+struct CpuWriteRange {
+  uint64_t offset = 0;
+  uint64_t length = 0;
+};
+
+struct CpuCopyRange {
+  uint64_t offset = 0;
+  const void* source = nullptr;
+  uint64_t length = 0;
 };
 
 bool FindNpuAdapter(const KmtApi& api, Adapter* out_adapter, Error* out_error);
@@ -331,6 +376,11 @@ bool CreateBuffer(const KmtApi& api, const Device& device, BufferKind kind,
 // Buffer ownership must synchronize all writers into the calling thread.
 bool PublishBufferCpuWrites(const Buffer& buffer, uint64_t offset,
                             uint64_t length, Error* out_error);
+
+// Invalidates CPU cache lines for a Lock2-mapped buffer after device execution.
+// The caller must first wait for the device write to complete.
+bool InvalidateBufferCpuReads(const Buffer& buffer, uint64_t offset,
+                              uint64_t length, Error* out_error);
 
 // Returns the miniport-facing child handle stored in an ERT_CMD_CHAIN entry.
 // The negotiated device contract selects the record shape inside this DDI.
@@ -352,19 +402,11 @@ bool RefreshCommandApertureGpuMapping(const KmtApi& api, const Device& device,
                                       CommandAperture* aperture,
                                       Error* out_error);
 
-bool EnsureCommandApertureGpuMapping(const KmtApi& api, const Device& device,
-                                     CommandAperture* aperture,
-                                     Error* out_error);
-
-bool ReleaseCommandApertureGpuMapping(const KmtApi& api, const Device& device,
-                                      CommandAperture* aperture,
-                                      Error* out_error);
-
 bool RefreshBufferCpuMapping(const KmtApi& api, const Device& device,
                              Buffer* buffer, Error* out_error);
 
 bool WaitForBufferResidency(const KmtApi& api, const Device& device,
-                             const Context& context, const Buffer& buffer,
+                            Context& context, const Buffer& buffer,
                             const char* label, Error* out_error);
 
 void DestroyBuffer(const KmtApi& api, const Device& device, Buffer* buffer);
@@ -395,6 +437,14 @@ bool CreateCommandAperture(const KmtApi& api, const Device& device,
 bool ConfigurePathBCodeRangeForSetupPayload(
     McdmAbi abi, size_t aperture_payload_size, CommandAperture* aperture,
     Error* out_error);
+
+bool EnsureCommandApertureGpuMapping(const KmtApi& api, const Device& device,
+                                     CommandAperture* aperture,
+                                     Error* out_error);
+
+bool ReleaseCommandApertureGpuMapping(const KmtApi& api, const Device& device,
+                                      CommandAperture* aperture,
+                                      Error* out_error);
 
 bool SubmitAndWaitCommandAperture(const KmtApi& api, const Device& device,
                                   Context* context, CommandAperture* aperture,
@@ -427,7 +477,18 @@ bool CommitPathBCodeWrite(const KmtApi& api, const Device& device,
                            const CommandAperture& aperture, uint64_t offset,
                            uint64_t length, Error* out_error);
 
-bool RefreshPathBSingleCodeMappingAfterWrite(
+bool CommitPathBCodeWrites(const KmtApi& api, const Device& device,
+                           const CommandAperture& aperture,
+                           const CpuWriteRange* ranges, size_t range_count,
+                           Error* out_error);
+
+// Copies CPU source ranges into the command aperture with non-temporal stores
+// and publishes them before a later opcode-9 marker submission.
+bool CopyAndCommitPathBCodeWrites(const CommandAperture& aperture,
+                                  const CpuCopyRange* ranges,
+                                  size_t range_count, Error* out_error);
+
+bool RefreshPathBCodeMappingAfterWrite(
     const KmtApi& api, const Device& device, CommandAperture* aperture,
     Error* out_error);
 
@@ -446,36 +507,20 @@ bool ReleasePathBCodeRange(const KmtApi& api, const Device& device,
 // and submit the exec BO via SubmitCommandToHwQueue. `ert_packet`/`ert_bytes`
 // are the command BO's ERT packet; `packet_header` is updated with the firmware
 // completion state read back from the ring slot.
-bool SubmitAndWaitPathB(const KmtApi& api, const Device& device,
-                        Context* context, const Buffer& exec_buffer,
-                        const void* ert_packet, uint32_t ert_bytes,
-                        uint32_t command_state, uint32_t* packet_header,
-                        Error* out_error);
-
-// Path B parent ERT_CMD_CHAIN submit. This is the same completion protocol as
-// SubmitAndWaitPathB, but uses the recovered xrt_core opcode-6 private
-// envelope. The negotiated ABI selects the descriptor metadata offsets.
-bool SubmitAndWaitPathBChain(const KmtApi& api, const Device& device,
-                             Context* context, const Buffer& exec_buffer,
-                             const void* ert_packet, uint32_t ert_bytes,
-                             const PathBChainSubmitInfo& chain_info,
-                             uint32_t* packet_header, Error* out_error);
-
 bool SubmitPathBChain(const KmtApi& api, const Device& device, Context* context,
                       const Buffer& exec_buffer, const void* ert_packet,
                       uint32_t ert_bytes,
                       const PathBChainSubmitInfo& chain_info,
-                      uint32_t* packet_header, PathBPendingSubmit* out_pending,
-                      Error* out_error);
+                      uint32_t completion_slot_offset, uint32_t* packet_header,
+                      PathBPendingSubmit* out_pending, Error* out_error);
 
-// Single-dispatch path-B issue (no wait); the async counterpart of
-// SubmitAndWaitPathB. Returns the in-flight fence token in `out_pending`; wait
-// for it with WaitForPathBSubmits.
+// Single-dispatch path-B issue. Returns the in-flight fence token in
+// `out_pending`; wait for it with WaitForPathBSubmits.
 bool SubmitPathB(const KmtApi& api, const Device& device, Context* context,
-                 const Buffer& exec_buffer, const void* ert_packet,
-                 uint32_t ert_bytes, uint32_t command_state,
-                 uint32_t* packet_header, PathBPendingSubmit* out_pending,
-                 Error* out_error);
+                  const Buffer& exec_buffer, const void* ert_packet,
+                  uint32_t ert_bytes, uint32_t command_state,
+                  uint32_t completion_slot_offset, uint32_t* packet_header,
+                  PathBPendingSubmit* out_pending, Error* out_error);
 
 bool WaitForPathBSubmits(const KmtApi& api, const Device& device,
                          Context* context, PathBPendingSubmit* pending,

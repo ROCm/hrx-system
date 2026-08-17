@@ -9,6 +9,20 @@
 
 iree_add_all_subdirs()
 
+if(IREE_HAL_DRIVER_AMDXDNA AND (CMAKE_SYSTEM_NAME STREQUAL "Linux" OR CMAKE_SYSTEM_NAME STREQUAL "Windows"))
+  iree_cc_library(
+    NAME
+      planning
+    HDRS
+      "direct_command_buffer_planning.h"
+    SRCS
+      "direct_command_buffer_planning.c"
+    DEPS
+      iree::base
+    PUBLIC
+  )
+endif()
+
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND IREE_HAL_DRIVER_AMDXDNA)
 iree_cc_library(
   NAME
@@ -16,7 +30,6 @@ iree_cc_library(
   HDRS
     "api.h"
     "native.h"
-    "native_windows_mcdm_internal.h"
     "util.h"
   SRCS
     "native_linux_kmq.cc"
@@ -36,9 +49,11 @@ iree_cc_library(
   HDRS
     "api.h"
     "native.h"
+    "native_windows_mcdm_internal.h"
   SRCS
     "native_windows_mcdm.cc"
   DEPS
+    ::planning
     iree::base
     iree::base::internal
     iree::hal
@@ -70,7 +85,6 @@ iree_cc_library(
     "device_internal.h"
     "direct_command_buffer.h"
     "direct_command_buffer_chain_cache.h"
-    "direct_command_buffer_planning.h"
     "direct_command_buffer_single_cache.h"
     "event.h"
     "executable.h"
@@ -90,7 +104,6 @@ iree_cc_library(
     "device.c"
     "direct_command_buffer.c"
     "direct_command_buffer_chain_cache.c"
-    "direct_command_buffer_planning.c"
     "direct_command_buffer_single_cache.c"
     "driver.c"
     "event.c"
@@ -99,6 +112,7 @@ iree_cc_library(
     "semaphore.c"
     "xclbin_util.c"
   DEPS
+    ::planning
     iree::async
     iree::async::util::proactor_pool
     iree::base
@@ -195,7 +209,7 @@ iree_cc_test(
   SRCS
     "direct_command_buffer_planning_test.cc"
   DEPS
-    ::amdxdna
+    ::planning
     iree::base
     iree::testing::gtest
     iree::testing::gtest_main

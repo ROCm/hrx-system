@@ -52,6 +52,15 @@ static void iree_hal_amdxdna_single_command_cache_entry_deinitialize(
   memset(entry, 0, sizeof(*entry));
 }
 
+void iree_hal_amdxdna_single_command_cache_entry_discard(
+    iree_hal_amdxdna_device_single_command_cache_t* cache,
+    iree_hal_amdxdna_single_command_cache_entry_t* entry) {
+  IREE_ASSERT_ARGUMENT(cache);
+  IREE_ASSERT_ARGUMENT(entry);
+  IREE_ASSERT(entry->in_flight_count == 0);
+  iree_hal_amdxdna_single_command_cache_entry_deinitialize(cache, entry);
+}
+
 static iree_status_t iree_hal_amdxdna_single_command_cache_copy_signature(
     iree_hal_amdxdna_device_single_command_cache_t* cache,
     iree_hal_amdxdna_single_command_cache_entry_t* entry,
@@ -166,6 +175,7 @@ static bool iree_hal_amdxdna_single_command_cache_shape_matches(
     const iree_device_size_t* binding_lengths, iree_host_size_t binding_count) {
   return cache->command && cache->queue == queue &&
          cache->in_flight_count == 0 && cache->cu_index == cu_index &&
+         cache->src_asm_inst == NULL && cache->src_patches == NULL &&
          cache->ctrl_word_count == ctrl_word_count &&
          cache->binding_count == binding_count &&
          iree_hal_amdxdna_device_size_span_equal(
@@ -189,7 +199,7 @@ static bool iree_hal_amdxdna_single_command_cache_descriptor_template_matches(
          cache->binding_count == binding_count;
 }
 
-static iree_status_t iree_hal_amdxdna_update_single_command_cache_entry(
+iree_status_t iree_hal_amdxdna_update_single_command_cache_entry(
     iree_hal_amdxdna_device_single_command_cache_t* cache,
     iree_hal_amdxdna_single_command_cache_entry_t* entry,
     const uint32_t* ctrl_words, iree_host_size_t ctrl_word_count,

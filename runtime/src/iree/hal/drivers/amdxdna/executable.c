@@ -19,6 +19,8 @@
 #include "iree/schemas/pdi_executable_def_verifier.h"
 
 static const iree_hal_executable_vtable_t iree_hal_amdxdna_executable_vtable;
+static iree_atomic_int64_t iree_hal_amdxdna_next_executable_cache_identity =
+    IREE_ATOMIC_VAR_INIT(1);
 
 static const iree_string_view_t kAmdxdnaPdiExecutableFormat = {"amdxdna-pdi-fb",
                                                                14};
@@ -541,6 +543,9 @@ static iree_status_t iree_hal_amdxdna_executable_allocate(
   iree_hal_resource_initialize(&iree_hal_amdxdna_executable_vtable,
                                &executable->resource);
   executable->host_allocator = host_allocator;
+  executable->cache_identity = (uint64_t)iree_atomic_fetch_add(
+      &iree_hal_amdxdna_next_executable_cache_identity, 1,
+      iree_memory_order_relaxed);
   executable->entry_point_count = entry_point_count;
   iree_slim_mutex_initialize(&executable->context_mutex);
   if (entry_point_count > 0) {

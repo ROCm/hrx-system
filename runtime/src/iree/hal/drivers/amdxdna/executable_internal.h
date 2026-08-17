@@ -63,6 +63,10 @@ typedef struct iree_hal_amdxdna_executable {
   // at offset 0.
   iree_hal_resource_t resource;
   iree_allocator_t host_allocator;
+  // Process-unique identity used by native command caches. Unlike the object
+  // address this is never reused after destruction, so cached immutable
+  // entry-point descriptors cannot alias a later executable allocation.
+  uint64_t cache_identity;
   iree_host_size_t entry_point_count;
   iree_hal_amdxdna_kernel_params_t* entry_points;
   // Protects the cached control-packet context below. Multiple command buffers

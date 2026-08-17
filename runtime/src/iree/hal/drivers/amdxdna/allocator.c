@@ -305,16 +305,16 @@ iree_status_t iree_hal_amdxdna_allocator_create(
   allocator->host_allocator = host_allocator;
   allocator->native_device = native_device;
   iree_slim_mutex_initialize(&allocator->cache_mutex);
-  allocator->cached_buffer_capacity = kAmdxdnaAllocatorCacheCapacity;
-  iree_hal_amdxdna_native_c_device_caps_t native_caps;
+  // Fail closed: retaining native allocations is permitted only when the
+  // backend explicitly guarantees that reuse is safe for its object lifecycle.
+  allocator->cached_buffer_capacity = 0;
+  iree_hal_amdxdna_native_c_device_caps_t native_caps = {0};
   if (native_device &&
       iree_status_is_ok(iree_hal_amdxdna_native_device_c_query_caps(
           native_device, &native_caps))) {
-    if (!native_caps.supports_command_chain &&
-        native_caps.default_dispatch_opcode ==
-            IREE_HAL_AMDXDNA_NATIVE_C_COMMAND_OPCODE_START_NPU) {
-      allocator->cached_buffer_capacity = 0;
-    }
+    allocator->cached_buffer_capacity = native_caps.supports_host_buffer_reuse
+                                            ? kAmdxdnaAllocatorCacheCapacity
+                                            : 0;
   }
 
   *out_allocator = (iree_hal_allocator_t*)allocator;
