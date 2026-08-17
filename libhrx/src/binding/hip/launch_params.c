@@ -53,7 +53,7 @@ hipError_t iree_hip_validate_launch_block_configuration(
     unsigned int block_dim_x, unsigned int block_dim_y,
     unsigned int block_dim_z, size_t shared_memory_bytes) {
   if (!device) return hipErrorInvalidDevice;
-  if (shared_memory_bytes > UINT32_MAX) return hipErrorInvalidValue;
+  if (shared_memory_bytes > UINT32_MAX) return hipErrorInvalidConfiguration;
 
   const unsigned int block_dim[3] = {block_dim_x, block_dim_y, block_dim_z};
   for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(block_dim); ++i) {
@@ -89,11 +89,11 @@ hipError_t iree_hip_validate_launch_block_configuration(
         iree_hal_streaming_function_attributes_dynamic_shared_memory_size(
             &symbol->function_attributes);
     if (shared_memory_bytes > configured_limit) {
-      return hipErrorInvalidValue;
+      return hipErrorInvalidConfiguration;
     }
   } else if (device->max_shared_memory_per_block != 0 &&
              shared_memory_bytes > device->max_shared_memory_per_block) {
-    return hipErrorInvalidValue;
+    return hipErrorInvalidConfiguration;
   }
   return hipSuccess;
 }

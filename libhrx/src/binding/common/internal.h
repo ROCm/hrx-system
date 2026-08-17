@@ -506,11 +506,6 @@ typedef struct iree_hal_streaming_stream_t {
   iree_hal_streaming_synchronization_policy_t synchronization_policy;
   // HIP stream scheduling priority hint.
   int priority;
-  // Number of 32-bit entries in |cu_mask|.
-  iree_host_size_t cu_mask_count;
-  // Optional compute-unit mask owned by this stream; NULL selects the device
-  // default. This records the requested stream property for API queries.
-  uint32_t* cu_mask;
   // Stable HIP stream identifier, unique within this context.
   unsigned long long stream_id;
 

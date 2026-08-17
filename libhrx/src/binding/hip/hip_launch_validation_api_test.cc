@@ -329,21 +329,21 @@ TEST_F(HipLaunchValidationApiTest,
   const size_t largest_dispatch_shared_memory = UINT32_MAX;
   const size_t oversized_shared_memory = (size_t)UINT32_MAX + 1;
 
-  EXPECT_EQ(hipErrorInvalidValue,
+  EXPECT_EQ(hipErrorInvalidConfiguration,
             api_.launch_kernel(function, valid_dimension, valid_dimension,
                                /*arguments=*/nullptr,
                                largest_dispatch_shared_memory, stream_));
-  EXPECT_EQ(hipErrorInvalidValue,
+  EXPECT_EQ(hipErrorInvalidConfiguration,
             api_.ext_launch_kernel(function, valid_dimension, valid_dimension,
                                    /*arguments=*/nullptr,
                                    largest_dispatch_shared_memory, stream_,
                                    nullptr, nullptr, /*flags=*/0));
-  EXPECT_EQ(hipErrorInvalidValue,
+  EXPECT_EQ(hipErrorInvalidConfiguration,
             api_.launch_kernel(function, valid_dimension, valid_dimension,
                                /*arguments=*/nullptr, oversized_shared_memory,
                                stream_));
   EXPECT_EQ(
-      hipErrorInvalidValue,
+      hipErrorInvalidConfiguration,
       api_.ext_launch_kernel(function, valid_dimension, valid_dimension,
                              /*arguments=*/nullptr, oversized_shared_memory,
                              stream_, nullptr, nullptr, /*flags=*/0));

@@ -1899,6 +1899,25 @@ static bool iree_hip_stream_unregister(iree_hal_streaming_stream_t* stream) {
                                          (uintptr_t)stream);
 }
 
+static bool iree_hip_stream_lookup_retain(
+    hipStream_t stream, iree_hal_streaming_stream_t** out_stream) {
+  IREE_ASSERT_ARGUMENT(out_stream);
+  *out_stream = NULL;
+  if (!stream || stream == hipStreamLegacy || stream == hipStreamPerThread) {
+    return false;
+  }
+
+  iree_call_once(&iree_hip_stream_registry_once,
+                 iree_hip_stream_registry_initialize);
+  if (!iree_hip_handle_registry_lookup_retain(&iree_hip_stream_registry,
+                                              (uintptr_t)stream,
+                                              iree_hip_stream_handle_retain)) {
+    return false;
+  }
+  *out_stream = (iree_hal_streaming_stream_t*)stream;
+  return true;
+}
+
 static void iree_hip_stream_discard_unpublished(
     iree_hal_streaming_stream_t* stream) {
   if (!stream) return;
@@ -1912,6 +1931,20 @@ static hipError_t iree_hip_resolve_registered_stream(
     hipStream_t stream, iree_hal_streaming_stream_t** out_stream) {
   IREE_ASSERT_ARGUMENT(out_stream);
   *out_stream = NULL;
+
+  if (stream && stream != hipStreamLegacy && stream != hipStreamPerThread) {
+    hipError_t result = iree_hip_ensure_initialized();
+    if (result != hipSuccess) return result;
+    if (!iree_hip_stream_lookup_retain(stream, out_stream)) {
+      return hipErrorInvalidResourceHandle;
+    }
+    if (!(*out_stream)->context) {
+      iree_hal_streaming_stream_release(*out_stream);
+      *out_stream = NULL;
+      return hipErrorContextIsDestroyed;
+    }
+    return hipSuccess;
+  }
 
   iree_hal_streaming_context_t* context = NULL;
   hipError_t result = iree_hip_ensure_context(&context);
@@ -1928,22 +1961,7 @@ static hipError_t iree_hip_resolve_registered_stream(
     return hipSuccess;
   }
 
-  iree_hal_streaming_stream_t* stream_object =
-      (iree_hal_streaming_stream_t*)stream;
-  iree_call_once(&iree_hip_stream_registry_once,
-                 iree_hip_stream_registry_initialize);
-  if (!iree_hip_handle_registry_lookup_retain(&iree_hip_stream_registry,
-                                              (uintptr_t)stream_object,
-                                              iree_hip_stream_handle_retain)) {
-    return hipErrorInvalidResourceHandle;
-  }
-  if (!stream_object->context) {
-    iree_hal_streaming_stream_release(stream_object);
-    return hipErrorContextIsDestroyed;
-  }
-
-  *out_stream = stream_object;
-  return hipSuccess;
+  return hipErrorInvalidResourceHandle;
 }
 
 static hipError_t iree_hip_order_legacy_stream_dependencies(
@@ -11396,21 +11414,27 @@ HIPAPI hipError_t hipStreamDestroy(hipStream_t stream) {
     HIP_RETURN_ERROR(hipErrorInvalidResourceHandle);
   }
 
-  iree_hal_streaming_stream_t* streaming_stream = NULL;
-  hipError_t result =
-      iree_hip_resolve_registered_stream(stream, &streaming_stream);
+  hipError_t result = iree_hip_ensure_initialized();
   if (result != hipSuccess) {
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(result);
   }
-
-  iree_status_t status =
-      iree_hal_streaming_stream_synchronize(streaming_stream);
-  if (!iree_status_is_ok(status)) {
-    iree_hal_streaming_stream_release(streaming_stream);
-    result = iree_status_to_hip_result(status);
+  iree_hal_streaming_stream_t* streaming_stream = NULL;
+  if (!iree_hip_stream_lookup_retain(stream, &streaming_stream)) {
     IREE_TRACE_ZONE_END(z0);
-    return result;
+    HIP_RETURN_ERROR(hipErrorInvalidResourceHandle);
+  }
+
+  iree_hal_streaming_context_t* context = streaming_stream->context;
+  if (context) {
+    iree_status_t status =
+        iree_hal_streaming_stream_synchronize(streaming_stream);
+    if (!iree_status_is_ok(status)) {
+      iree_hal_streaming_stream_release(streaming_stream);
+      result = iree_status_to_hip_result(status);
+      IREE_TRACE_ZONE_END(z0);
+      return result;
+    }
   }
   if (!iree_hip_stream_unregister(streaming_stream)) {
     iree_hal_streaming_stream_release(streaming_stream);
@@ -11418,12 +11442,13 @@ HIPAPI hipError_t hipStreamDestroy(hipStream_t stream) {
     HIP_RETURN_ERROR(hipErrorInvalidResourceHandle);
   }
 
-  // Removing the handle prevents new API calls from retaining the stream.
-  // Keep the context association intact for operations that already retained
-  // the stream, including context-wide synchronization snapshots. Context
-  // teardown detaches any streams that outlive their owning context.
-  iree_hal_streaming_context_t* context = streaming_stream->context;
-  iree_hal_streaming_context_unregister_stream(context, streaming_stream);
+  // Removing the public handle prevents new API calls from retaining the
+  // stream. A context reset may already have detached it; in that case the
+  // remaining public ownership must still be released so the stale handle
+  // does not stay registered indefinitely.
+  if (context) {
+    iree_hal_streaming_context_unregister_stream(context, streaming_stream);
+  }
   // Release the registry lookup reference and the public handle reference.
   iree_hal_streaming_stream_release(streaming_stream);
   iree_hal_streaming_stream_release(streaming_stream);
@@ -12310,68 +12335,17 @@ static void iree_hip_fill_default_cu_mask(
   }
 }
 
-static bool iree_hip_cu_mask_has_enabled_compute_unit(
-    const iree_hal_streaming_context_t* context, uint32_t mask_count,
-    const uint32_t* mask) {
-  const iree_host_size_t compute_unit_count =
-      context && context->device_entry
-          ? context->device_entry->multiprocessor_count
-          : 0;
-  for (iree_host_size_t compute_unit = 0; compute_unit < compute_unit_count;
-       ++compute_unit) {
-    const iree_host_size_t word = compute_unit / 32;
-    if (word >= mask_count) return false;
-    if (mask[word] & (1u << (compute_unit % 32))) return true;
-  }
-  return false;
-}
-
 HIPAPI hipError_t hipExtStreamCreateWithCUMask(hipStream_t* stream,
                                                uint32_t mask_count,
                                                const uint32_t* mask) {
-  iree_hal_streaming_context_t* context = NULL;
-  hipError_t result = iree_hip_ensure_context(&context);
-  if (result != hipSuccess) HIP_RETURN_ERROR(result);
-
   if (!stream || mask_count == 0 || !mask) {
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
   *stream = NULL;
-
-  iree_host_size_t byte_count = 0;
-  if (IREE_UNLIKELY(!iree_host_size_checked_mul(mask_count, sizeof(*mask),
-                                                &byte_count))) {
-    HIP_RETURN_ERROR(hipErrorInvalidValue);
-  }
-
-  uint32_t* copied_mask = NULL;
-  iree_status_t status = iree_allocator_malloc(
-      context->host_allocator, byte_count, (void**)&copied_mask);
-  if (!iree_status_is_ok(status)) {
-    iree_status_ignore(status);
-    HIP_RETURN_ERROR(hipErrorOutOfMemory);
-  }
-  if (iree_hip_cu_mask_has_enabled_compute_unit(context, mask_count, mask)) {
-    memcpy(copied_mask, mask, byte_count);
-  } else {
-    // An all-clear mask selects the device's default compute-unit set.
-    iree_hip_fill_default_cu_mask(context, mask_count, copied_mask);
-  }
-
-  result = hipStreamCreate(stream);
-  if (result != hipSuccess) {
-    iree_allocator_free(context->host_allocator, copied_mask);
-    HIP_RETURN_ERROR(result);
-  }
-
-  iree_hal_streaming_stream_t* stream_object =
-      (iree_hal_streaming_stream_t*)*stream;
-  iree_slim_mutex_lock(&stream_object->mutex);
-  iree_allocator_free(stream_object->host_allocator, stream_object->cu_mask);
-  stream_object->cu_mask = copied_mask;
-  stream_object->cu_mask_count = mask_count;
-  iree_slim_mutex_unlock(&stream_object->mutex);
-  return hipSuccess;
+  // A masked stream requires queue selection that enforces the requested
+  // compute-unit set. Recording the mask on a virtual stream without applying
+  // it to submitted work would expose a stream that violates its contract.
+  HIP_RETURN_ERROR(hipErrorNotSupported);
 }
 
 HIPAPI hipError_t hipExtStreamGetCUMask(hipStream_t stream, uint32_t mask_count,
@@ -12385,17 +12359,15 @@ HIPAPI hipError_t hipExtStreamGetCUMask(hipStream_t stream, uint32_t mask_count,
       iree_hip_resolve_registered_stream(stream, &stream_object);
   if (result != hipSuccess) HIP_RETURN_ERROR(result);
 
-  iree_slim_mutex_lock(&stream_object->mutex);
-  if (stream_object->cu_mask) {
-    memset(mask, 0, mask_count * sizeof(*mask));
-    const iree_host_size_t copy_count =
-        iree_min(stream_object->cu_mask_count, mask_count);
-    memcpy(mask, stream_object->cu_mask, copy_count * sizeof(*mask));
-    iree_slim_mutex_unlock(&stream_object->mutex);
+  const iree_host_size_t compute_unit_count =
+      stream_object->context->device_entry
+          ? stream_object->context->device_entry->multiprocessor_count
+          : 0;
+  const iree_host_size_t required_mask_count = (compute_unit_count + 31) / 32;
+  if (mask_count < required_mask_count) {
     iree_hal_streaming_stream_release(stream_object);
-    return hipSuccess;
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
-  iree_slim_mutex_unlock(&stream_object->mutex);
 
   iree_hip_fill_default_cu_mask(stream_object->context, mask_count, mask);
   iree_hal_streaming_stream_release(stream_object);
@@ -14097,16 +14069,9 @@ static hipError_t iree_hip_launch_kernel(const void* function_address,
     HIP_RETURN_ERROR(hipErrorInvalidDeviceFunction);
   }
 
-  // Ensure initialization and get context.
-  iree_hal_streaming_context_t* context = NULL;
-  hipError_t init_result = iree_hip_ensure_context(&context);
-  if (init_result != hipSuccess) {
-    IREE_TRACE_ZONE_END(z0);
-    HIP_RETURN_ERROR(init_result);
-  }
-
   iree_hal_streaming_stream_t* stream_obj = NULL;
-  init_result = iree_hip_resolve_registered_stream(stream, &stream_obj);
+  hipError_t init_result =
+      iree_hip_resolve_registered_stream(stream, &stream_obj);
   if (init_result != hipSuccess) {
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(init_result == hipErrorInvalidResourceHandle
@@ -14117,7 +14082,7 @@ static hipError_t iree_hip_launch_kernel(const void* function_address,
   // Explicit streams retain their device association independently of the
   // calling thread's current context. Use that association for symbol lookup
   // and stream-ordering decisions.
-  context = stream_obj->context;
+  iree_hal_streaming_context_t* context = stream_obj->context;
   if (!context) {
     iree_hal_streaming_stream_release(stream_obj);
     IREE_TRACE_ZONE_END(z0);
@@ -14131,14 +14096,6 @@ static hipError_t iree_hip_launch_kernel(const void* function_address,
     iree_hal_streaming_stream_release(stream_obj);
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(symbol_result);
-  }
-
-  if (stream_obj->context->device_entry->max_shared_memory_per_block != 0 &&
-      sharedMemBytes >
-          stream_obj->context->device_entry->max_shared_memory_per_block) {
-    iree_hal_streaming_stream_release(stream_obj);
-    IREE_TRACE_ZONE_END(z0);
-    HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
 
   hipError_t launch_config_result = iree_hip_validate_launch_configuration(
@@ -14414,8 +14371,7 @@ HIPAPI hipError_t hipExtLaunchKernel(const void* function_address,
 
   iree_hal_streaming_event_t* start_event = NULL;
   if (startEvent) {
-    result =
-        iree_hip_event_registry_lookup_retain(startEvent, &start_event);
+    result = iree_hip_event_registry_lookup_retain(startEvent, &start_event);
     if (result != hipSuccess ||
         start_event->context != stream_object->context) {
       if (start_event) iree_hal_streaming_event_release(start_event);

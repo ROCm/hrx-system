@@ -168,7 +168,9 @@ iree_cc_library(
     "$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/../../libhrx>"
   PUBLIC
 )
+endif()
 
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
 iree_cc_library(
   NAME
     spirv_linker_compiler
@@ -235,6 +237,18 @@ iree_cc_library(
 )
 endif()
 
+iree_cc_test(
+  NAME
+    handle_registry_test
+  SRCS
+    "handle_registry_test.cc"
+  DEPS
+    ::handle_registry
+    iree::testing::gtest
+    iree::testing::gtest_main
+    libhrx_defs
+)
+
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
 iree_cc_test(
   NAME
@@ -248,18 +262,6 @@ iree_cc_test(
     libhrx_defs
 )
 endif()
-
-iree_cc_test(
-  NAME
-    handle_registry_test
-  SRCS
-    "handle_registry_test.cc"
-  DEPS
-    ::handle_registry
-    iree::testing::gtest
-    iree::testing::gtest_main
-    libhrx_defs
-)
 
 if(TARGET libhrx_src_binding_hip_amdhip64)
 set_target_properties(libhrx_src_binding_hip_amdhip64 PROPERTIES
