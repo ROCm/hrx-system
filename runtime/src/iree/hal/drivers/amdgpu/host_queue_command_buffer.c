@@ -732,11 +732,15 @@ iree_status_t iree_hal_amdgpu_host_queue_submit_command_buffer(
   }
   iree_hal_resource_t* command_buffer_resource =
       (iree_hal_resource_t*)command_buffer;
+  const iree_hal_amdgpu_aql_static_indirect_replay_mode_t static_indirect_mode =
+      iree_hal_amdgpu_aql_command_buffer_select_static_indirect_replay_mode(
+          command_buffer, binding_table);
   bool ready = false;
   iree_status_t status = iree_hal_amdgpu_host_queue_submit_command_buffer_block(
       queue, resolution, signal_semaphore_list, command_buffer, binding_table,
-      /*binding_ptrs=*/NULL, program->first_block, inout_binding_resource_set,
-      (iree_hal_amdgpu_reclaim_action_t){0}, &command_buffer_resource,
+      /*binding_ptrs=*/NULL, program->first_block, static_indirect_mode,
+      inout_binding_resource_set, (iree_hal_amdgpu_reclaim_action_t){0},
+      &command_buffer_resource,
       /*operation_resource_count=*/1,
       IREE_HAL_AMDGPU_HOST_QUEUE_SUBMISSION_FLAG_RETAIN_RESOURCES, &ready);
   if (!iree_status_is_ok(status)) {

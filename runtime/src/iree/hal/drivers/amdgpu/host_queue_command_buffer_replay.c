@@ -39,6 +39,8 @@ typedef struct iree_hal_amdgpu_command_buffer_replay_t {
   iree_hal_resource_set_t* binding_resource_set;
   // Immutable recorded AQL program borrowed from |command_buffer|.
   const iree_hal_amdgpu_aql_program_t* program;
+  // Static-indirect strategy selected once for the complete queue issue.
+  iree_hal_amdgpu_aql_static_indirect_replay_mode_t static_indirect_mode;
   // Next command-buffer block to evaluate or submit.
   const iree_hal_amdgpu_command_buffer_block_header_t* current_block;
   // Wait resolution that prefixes the next packet submission.
@@ -153,6 +155,9 @@ static iree_status_t iree_hal_amdgpu_command_buffer_replay_create(
     }
     replay->binding_ptrs = binding_ptrs;
   }
+  replay->static_indirect_mode =
+      iree_hal_amdgpu_aql_command_buffer_select_static_indirect_replay_mode(
+          command_buffer, replay->binding_table);
 
   *out_replay = replay;
   return iree_ok_status();
@@ -329,7 +334,8 @@ static iree_status_t iree_hal_amdgpu_command_buffer_replay_resume_under_lock(
       status = iree_hal_amdgpu_host_queue_submit_command_buffer_block(
           replay->queue, current_resolution, replay->signal_semaphore_list,
           replay->command_buffer, replay->binding_table, replay->binding_ptrs,
-          replay->current_block, /*inout_binding_resource_set=*/NULL,
+          replay->current_block, replay->static_indirect_mode,
+          /*inout_binding_resource_set=*/NULL,
           (iree_hal_amdgpu_reclaim_action_t){0}, &replay_resource,
           /*operation_resource_count=*/1,
           IREE_HAL_AMDGPU_HOST_QUEUE_SUBMISSION_FLAG_RETAIN_RESOURCES, &ready);
@@ -354,7 +360,8 @@ static iree_status_t iree_hal_amdgpu_command_buffer_replay_resume_under_lock(
     status = iree_hal_amdgpu_host_queue_submit_command_buffer_block(
         replay->queue, current_resolution, iree_hal_semaphore_list_empty(),
         replay->command_buffer, replay->binding_table, replay->binding_ptrs,
-        replay->current_block, /*inout_binding_resource_set=*/NULL,
+        replay->current_block, replay->static_indirect_mode,
+        /*inout_binding_resource_set=*/NULL,
         (iree_hal_amdgpu_reclaim_action_t){0}, &replay_resource,
         /*operation_resource_count=*/1,
         IREE_HAL_AMDGPU_HOST_QUEUE_SUBMISSION_FLAG_RETAIN_RESOURCES, &ready);

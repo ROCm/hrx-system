@@ -155,6 +155,20 @@ static iree_status_t CreateHostVisibleIndirectParameterBuffer(
                                             out_buffer);
 }
 
+static iree_status_t CreateHostLocalIndirectParameterBuffer(
+    iree_hal_allocator_t* allocator, iree_device_size_t buffer_size,
+    iree_hal_buffer_t** out_buffer) {
+  iree_hal_buffer_params_t params = {0};
+  params.type = IREE_HAL_MEMORY_TYPE_HOST_LOCAL |
+                IREE_HAL_MEMORY_TYPE_HOST_COHERENT |
+                IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE;
+  params.access = IREE_HAL_MEMORY_ACCESS_ALL;
+  params.usage = IREE_HAL_BUFFER_USAGE_DISPATCH_INDIRECT_PARAMETERS |
+                 IREE_HAL_BUFFER_USAGE_MAPPING;
+  return iree_hal_allocator_allocate_buffer(allocator, params, buffer_size,
+                                            out_buffer);
+}
+
 static bool IsAmdgpuCtsExecutableTarget(
     const iree::hal::cts::ExecutableTarget& target) {
   if (target.family == nullptr || target.target_key == nullptr ||

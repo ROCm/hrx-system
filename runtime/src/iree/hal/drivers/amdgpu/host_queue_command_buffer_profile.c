@@ -168,6 +168,7 @@ iree_hal_amdgpu_host_queue_initialize_command_buffer_dispatch_summary_event(
 void iree_hal_amdgpu_host_queue_record_command_buffer_profile_dispatch_source(
     iree_hal_amdgpu_host_queue_t* queue, uint64_t command_buffer_id,
     const iree_hal_amdgpu_aql_block_processor_profile_dispatch_t* dispatch,
+    const uint32_t* workgroup_count_override,
     iree_hal_amdgpu_profile_dispatch_event_reservation_t profile_events,
     iree_hal_amdgpu_profile_dispatch_harvest_source_t* profile_harvest_sources,
     uint32_t* inout_profile_event_index) {
@@ -179,6 +180,10 @@ void iree_hal_amdgpu_host_queue_record_command_buffer_profile_dispatch_source(
           queue, profile_event_position);
   iree_hal_amdgpu_host_queue_initialize_command_buffer_dispatch_summary_event(
       event, command_buffer_id, dispatch->summary);
+  if (workgroup_count_override) {
+    memcpy(event->workgroup_count, workgroup_count_override,
+           sizeof(event->workgroup_count));
+  }
   profile_harvest_sources[profile_event_index].completion_signal =
       iree_hal_amdgpu_host_queue_profiling_completion_signal_ptr(
           queue, profile_event_position);
