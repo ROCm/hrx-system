@@ -432,7 +432,7 @@ typedef struct hrx_graph_exec_s {
   uint32_t block_count;
 
   uint32_t semaphore_count;
-  iree_hal_semaphore_t** semaphores;
+  iree_hal_semaphore_t** semaphores;  // borrowed; owned by resource_set
   uint64_t* semaphore_base_values;
 
   iree_hal_resource_set_t* resource_set;
