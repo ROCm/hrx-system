@@ -193,7 +193,7 @@ if(HRX_ENABLE_ZSTD)
   endif()
   if(HRX_ZSTD_FOUND)
     find_library(HRX_ZSTD_LIBRARY
-      NAMES zstd
+      NAMES zstd zstd_static
       HINTS ${HRX_ZSTD_LIBRARY_DIRS}
       REQUIRED
     )

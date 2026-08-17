@@ -766,7 +766,7 @@ static void iree_hal_amdgpu_host_queue_error_callback(hsa_status_t status,
 iree_status_t iree_hal_amdgpu_host_queue_initialize(
     const iree_hal_amdgpu_libhsa_t* libhsa, iree_hal_device_t* logical_device,
     void* hostcall_buffer, iree_async_proactor_t* proactor,
-    hsa_agent_t gpu_agent,
+    hsa_agent_t gpu_agent, bool use_libhsa_doorbell,
     const iree_hal_amdgpu_kernarg_ring_memory_t* kernarg_memory,
     hsa_amd_memory_pool_t pm4_ib_pool,
     iree_async_frontier_tracker_t* frontier_tracker, iree_async_axis_t axis,
@@ -898,6 +898,13 @@ iree_status_t iree_hal_amdgpu_host_queue_initialize(
     out_queue->hardware_queue = hardware_queue;
     iree_hal_amdgpu_aql_ring_initialize(
         libhsa, (iree_amd_queue_t*)hardware_queue, &out_queue->aql_ring);
+    if (use_libhsa_doorbell) {
+      // Windows HSA queues expose a software doorbell value through the normal
+      // ROCr signal ABI. A direct store updates that value but does not notify
+      // the KMT queue worker; the HSA signal API also calls the thunk's
+      // hsaKmtQueueRingDoorbell entry point.
+      out_queue->aql_ring.doorbell.ptr = NULL;
+    }
   }
 
   // Initialize the kernarg ring from the selected HSA memory pool.

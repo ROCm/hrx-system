@@ -6,9 +6,10 @@
 
 #include "iree/hal/drivers/amdgpu/host_queue_staging.h"
 
-#include <cerrno>
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
+#include <filesystem>
 #include <fstream>
 #include <string>
 #include <vector>
@@ -21,13 +22,11 @@
 #include "iree/hal/drivers/amdgpu/queue_affinity.h"
 #include "iree/hal/drivers/amdgpu/system.h"
 #include "iree/hal/drivers/amdgpu/util/aql_emitter.h"
+#include "iree/io/file_contents.h"
 #include "iree/io/file_handle.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
-
-#if IREE_FILE_IO_ENABLE
-#include <unistd.h>
-#endif  // IREE_FILE_IO_ENABLE
+#include "iree/testing/temp_file.h"
 
 namespace iree::hal::amdgpu {
 namespace {
@@ -89,36 +88,6 @@ static iree_status_t EnqueueRawBlockingBarrier(
   return iree_ok_status();
 }
 
-static iree_status_t WriteAll(int fd, const uint8_t* data, size_t length) {
-#if IREE_FILE_IO_ENABLE
-  size_t total_written = 0;
-  while (total_written < length) {
-    const ssize_t written =
-        write(fd, data + total_written, length - total_written);
-    if (written < 0 && errno == EINTR) continue;
-    if (written < 0) {
-      return iree_make_status(iree_status_code_from_errno(errno),
-                              "write failed after %" PRIhsz " of %" PRIhsz
-                              " bytes: %s",
-                              total_written, length, strerror(errno));
-    }
-    if (written == 0) {
-      return iree_make_status(IREE_STATUS_UNAVAILABLE,
-                              "write made no progress after %" PRIhsz
-                              " of %" PRIhsz " bytes",
-                              total_written, length);
-    }
-    total_written += (size_t)written;
-  }
-  return iree_ok_status();
-#else
-  (void)fd;
-  (void)data;
-  (void)length;
-  return iree_make_status(IREE_STATUS_UNAVAILABLE, "file I/O is disabled");
-#endif  // IREE_FILE_IO_ENABLE
-}
-
 static void ExpectByteRangeRepeated(const std::vector<uint8_t>& data,
                                     uint8_t pattern) {
   for (size_t i = 0; i < data.size(); ++i) {
@@ -166,7 +135,7 @@ class HostQueueStagingTest : public ::testing::Test {
   void TearDown() override {
 #if IREE_FILE_IO_ENABLE
     for (const auto& path : temp_paths_) {
-      unlink(path.c_str());
+      std::remove(path.c_str());
     }
 #endif  // IREE_FILE_IO_ENABLE
   }
@@ -280,23 +249,17 @@ class HostQueueStagingTest : public ::testing::Test {
   iree_status_t CreateTempFileWithContents(const std::vector<uint8_t>& data,
                                            std::string* out_path) {
 #if IREE_FILE_IO_ENABLE
-    *out_path = std::string();
-    char temp_path[] = "/tmp/iree_hal_amdgpu_staging_XXXXXX";
-    int fd = mkstemp(temp_path);
-    if (fd < 0) {
-      return iree_make_status(iree_status_code_from_errno(errno),
-                              "mkstemp failed: %s", strerror(errno));
-    }
-    temp_paths_.push_back(temp_path);
-    iree_status_t status = WriteAll(fd, data.data(), data.size());
-    if (close(fd) != 0) {
-      status = iree_status_join(
-          status, iree_make_status(iree_status_code_from_errno(errno),
-                                   "close failed: %s", strerror(errno)));
-    }
+    *out_path = iree::testing::MakeTempFilePath("iree_hal_amdgpu_staging");
+    temp_paths_.push_back(*out_path);
+    iree_status_t status = iree_io_file_contents_write(
+        iree_make_string_view(out_path->data(), out_path->size()),
+        iree_make_const_byte_span(data.data(), data.size()),
+        iree_allocator_system());
     if (iree_status_is_ok(status)) {
-      *out_path = temp_path;
+      return status;
     }
+    std::remove(out_path->c_str());
+    out_path->clear();
     return status;
 #else
     (void)data;
@@ -313,9 +276,11 @@ class HostQueueStagingTest : public ::testing::Test {
 
   iree_status_t TruncateTempFile(const std::string& path, size_t length) {
 #if IREE_FILE_IO_ENABLE
-    if (truncate(path.c_str(), length) != 0) {
-      return iree_make_status(iree_status_code_from_errno(errno),
-                              "truncate failed: %s", strerror(errno));
+    std::error_code error;
+    std::filesystem::resize_file(path, length, error);
+    if (error) {
+      return iree_make_status(IREE_STATUS_INTERNAL, "resize_file failed: %s",
+                              error.message().c_str());
     }
     return iree_ok_status();
 #else
@@ -341,7 +306,9 @@ class HostQueueStagingTest : public ::testing::Test {
   iree_status_t ImportFdFile(iree_hal_device_t* device, const std::string& path,
                              iree_hal_memory_access_t access,
                              iree_hal_file_t** out_file) {
-    iree_io_file_mode_t mode = IREE_IO_FILE_MODE_READ | IREE_IO_FILE_MODE_ASYNC;
+    iree_io_file_mode_t mode =
+        IREE_IO_FILE_MODE_READ | IREE_IO_FILE_MODE_ASYNC |
+        IREE_IO_FILE_MODE_SHARE_READ | IREE_IO_FILE_MODE_SHARE_WRITE;
     if (iree_all_bits_set(access, IREE_HAL_MEMORY_ACCESS_WRITE)) {
       mode |= IREE_IO_FILE_MODE_WRITE;
     }

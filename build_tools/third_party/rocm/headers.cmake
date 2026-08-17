@@ -112,11 +112,33 @@ function(_iree_rocm_add_header_target target_name include_dir)
   target_include_directories(${target_name} SYSTEM INTERFACE "${include_dir}")
 endfunction()
 
+function(_iree_rocm_add_aqlprofile_sdk_header_target include_dir)
+  _iree_rocm_add_header_target(
+    iree_rocm_aqlprofile_sdk_headers "${include_dir}")
+  # aql_profile_v2.h uses flat HSA includes on Windows even though ROCm's
+  # installed and source layouts keep those headers under include/hsa.
+  if(WIN32 AND EXISTS "${include_dir}/hsa/hsa.h")
+    target_include_directories(iree_rocm_aqlprofile_sdk_headers SYSTEM
+      INTERFACE "${include_dir}/hsa")
+  endif()
+endfunction()
+
 function(_iree_rocm_try_system_hsa_runtime_headers out_found_var)
   find_package(hsa-runtime64 CONFIG QUIET)
   if(TARGET hsa-runtime64::hsa-runtime64)
-    get_target_property(_hsa_runtime_include_dirs
-      hsa-runtime64::hsa-runtime64 INTERFACE_INCLUDE_DIRECTORIES)
+    foreach(_hsa_runtime_target
+        hsa-runtime64::hsa-runtime64
+        hsa-runtime64::hsa-runtime64_static
+        hsakmt-staticdrm::hsakmt-staticdrm)
+      if(TARGET ${_hsa_runtime_target})
+        set_property(TARGET ${_hsa_runtime_target} PROPERTY IMPORTED_GLOBAL TRUE)
+      endif()
+    endforeach()
+    # A staged static ROCR package may only expose its public include tree,
+    # while a complete TheRock prefix also carries driver-private HSA headers
+    # such as amd_hsa_queue.h. Merge all configured ROCm include roots so the
+    # package provides the library and IREE_ROCM_PATH can supplement headers.
+    _iree_rocm_collect_system_include_dirs(_hsa_runtime_include_dirs)
     if(NOT _hsa_runtime_include_dirs)
       message(FATAL_ERROR
         "hsa-runtime64::hsa-runtime64 does not publish include directories")
@@ -124,8 +146,22 @@ function(_iree_rocm_try_system_hsa_runtime_headers out_found_var)
     add_library(iree_rocm_hsa_runtime_headers INTERFACE)
     target_include_directories(iree_rocm_hsa_runtime_headers SYSTEM INTERFACE
       ${_hsa_runtime_include_dirs})
-    iree_add_alias_interface(
-      iree::third_party::hsa_runtime hsa-runtime64::hsa-runtime64)
+    add_library(iree_rocm_hsa_runtime INTERFACE)
+    target_link_libraries(iree_rocm_hsa_runtime INTERFACE
+      hsa-runtime64::hsa-runtime64)
+    if(WIN32 AND IREE_HAL_AMDGPU_LIBHSA_STATIC)
+      set(IREE_ROCM_HSA_RUNTIME_ELF_LIBRARY "" CACHE FILEPATH
+        "Static oclelf library required by the Windows ROCR archive")
+      if(NOT EXISTS "${IREE_ROCM_HSA_RUNTIME_ELF_LIBRARY}")
+        message(FATAL_ERROR
+          "Static Windows ROCR requires its oclelf archive. Set "
+          "IREE_ROCM_HSA_RUNTIME_ELF_LIBRARY to oclelf.lib from the matching "
+          "ROCR build.")
+      endif()
+      target_link_libraries(iree_rocm_hsa_runtime INTERFACE
+        "${IREE_ROCM_HSA_RUNTIME_ELF_LIBRARY}")
+    endif()
+    add_library(iree::third_party::hsa_runtime ALIAS iree_rocm_hsa_runtime)
     set(${out_found_var} TRUE PARENT_SCOPE)
     return()
   endif()
@@ -187,8 +223,8 @@ function(iree_configure_rocm_aqlprofile_sdk_headers)
       "AQL profile SDK"
       "aqlprofile-sdk/aql_profile_v2.h")
     if(_found)
-      _iree_rocm_add_header_target(
-        iree_rocm_aqlprofile_sdk_headers "${_aqlprofile_sdk_include_dir}")
+      _iree_rocm_add_aqlprofile_sdk_header_target(
+        "${_aqlprofile_sdk_include_dir}")
     else()
       _iree_rocm_dependency_mode(_mode)
       if(_mode STREQUAL "package")
@@ -201,8 +237,7 @@ function(iree_configure_rocm_aqlprofile_sdk_headers)
     _iree_rocm_require_pinned_source_allowed("hsa_runtime_headers")
     iree_populate_locked_fetch_content(
       hsa_runtime_headers _hsa_runtime_headers_source_dir)
-    _iree_rocm_add_header_target(
-      iree_rocm_aqlprofile_sdk_headers
+    _iree_rocm_add_aqlprofile_sdk_header_target(
       "${_hsa_runtime_headers_source_dir}/include")
   endif()
 

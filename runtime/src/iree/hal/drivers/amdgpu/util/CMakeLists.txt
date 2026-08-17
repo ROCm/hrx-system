@@ -1290,12 +1290,21 @@ if(IREE_HAL_AMDGPU_LIBHSA_STATIC)
       "ROCm discovery is enough for dynamic loading but cannot satisfy static "
       "libhsa linking.")
   endif()
-  target_compile_options(iree_hal_drivers_amdgpu_util_libhsa
-    PUBLIC
-      "-DIREE_HAL_AMDGPU_LIBHSA_STATIC=1"
-  )
+  if(WIN32 AND NOT TARGET hsa-runtime64::hsa-runtime64_static)
+    message(FATAL_ERROR
+      "IREE_HAL_AMDGPU_LIBHSA_STATIC=ON requires a static Windows ROCR "
+      "package that provides hsa-runtime64::hsa-runtime64_static.")
+  endif()
+  foreach(_libhsa_target
+      iree_hal_drivers_amdgpu_util_libhsa
+      iree_hal_drivers_amdgpu_util_libhsa.objects)
+    target_compile_definitions(${_libhsa_target}
+      PUBLIC
+        IREE_HAL_AMDGPU_LIBHSA_STATIC=1
+    )
+  endforeach()
   target_link_libraries(iree_hal_drivers_amdgpu_util_libhsa
     PRIVATE
-      iree::third_party::hsa_runtime
+      iree_rocm_hsa_runtime
   )
 endif()

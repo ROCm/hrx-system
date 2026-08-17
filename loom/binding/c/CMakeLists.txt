@@ -332,6 +332,15 @@ if(NOT TARGET loomc::loomc)
   add_library(loomc::loomc ALIAS loomc_shared)
 endif()
 
+add_library(loomc_static INTERFACE)
+target_sources(loomc_static INTERFACE ${_loomc_object_sources})
+target_link_libraries(loomc_static INTERFACE ${_loomc_direct_deps})
+target_include_directories(loomc_static INTERFACE
+  "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>")
+if(NOT TARGET loomc::loomc_static)
+  add_library(loomc::loomc_static ALIAS loomc_static)
+endif()
+
 install(TARGETS loomc_shared EXPORT loomc-targets
   LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}"
     COMPONENT "${HRX_PUBLIC_DIST_COMPONENT}"

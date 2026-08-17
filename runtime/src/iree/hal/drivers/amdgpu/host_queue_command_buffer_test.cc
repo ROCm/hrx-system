@@ -7,8 +7,8 @@
 #include "iree/hal/drivers/amdgpu/host_queue_command_buffer.h"
 
 #include <algorithm>
-#include <cerrno>
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 #include <string>
 #include <vector>
@@ -29,13 +29,11 @@
 #include "iree/hal/drivers/amdgpu/queue_affinity.h"
 #include "iree/hal/drivers/amdgpu/util/aql_emitter.h"
 #include "iree/hal/drivers/amdgpu/util/pm4_emitter.h"
+#include "iree/io/file_contents.h"
 #include "iree/io/file_handle.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
-
-#if IREE_FILE_IO_ENABLE
-#include <unistd.h>
-#endif  // IREE_FILE_IO_ENABLE
+#include "iree/testing/temp_file.h"
 
 namespace iree::hal::amdgpu {
 namespace {
@@ -200,7 +198,7 @@ static iree_status_t ExecuteHostcallBufferCommandBuffer(
 #if IREE_FILE_IO_ENABLE
 struct TempFilePath {
   ~TempFilePath() {
-    if (!path.empty()) unlink(path.c_str());
+    if (!path.empty()) std::remove(path.c_str());
   }
 
   std::string path;
@@ -224,56 +222,17 @@ static const uint32_t* FindPm4DispatchDirectPacket(
   return nullptr;
 }
 
-static iree_status_t WriteAll(int fd, const uint8_t* data, size_t length) {
-#if IREE_FILE_IO_ENABLE
-  size_t total_written = 0;
-  while (total_written < length) {
-    const ssize_t written =
-        write(fd, data + total_written, length - total_written);
-    if (written < 0 && errno == EINTR) continue;
-    if (written < 0) {
-      return iree_make_status(iree_status_code_from_errno(errno),
-                              "write failed after %" PRIhsz " of %" PRIhsz
-                              " bytes: %s",
-                              total_written, length, strerror(errno));
-    }
-    if (written == 0) {
-      return iree_make_status(IREE_STATUS_UNAVAILABLE,
-                              "write made no progress after %" PRIhsz
-                              " of %" PRIhsz " bytes",
-                              total_written, length);
-    }
-    total_written += (size_t)written;
-  }
-  return iree_ok_status();
-#else
-  (void)fd;
-  (void)data;
-  (void)length;
-  return iree_make_status(IREE_STATUS_UNAVAILABLE, "file I/O is disabled");
-#endif  // IREE_FILE_IO_ENABLE
-}
-
 static iree_status_t CreateTempFileWithContents(
     const std::vector<uint8_t>& data, std::string* out_path) {
 #if IREE_FILE_IO_ENABLE
-  *out_path = std::string();
-  char temp_path[] = "/tmp/iree_hal_amdgpu_command_buffer_XXXXXX";
-  int fd = mkstemp(temp_path);
-  if (fd < 0) {
-    return iree_make_status(iree_status_code_from_errno(errno),
-                            "mkstemp failed: %s", strerror(errno));
-  }
-  iree_status_t status = WriteAll(fd, data.data(), data.size());
-  if (close(fd) != 0) {
-    status = iree_status_join(
-        status, iree_make_status(iree_status_code_from_errno(errno),
-                                 "close failed: %s", strerror(errno)));
-  }
-  if (iree_status_is_ok(status)) {
-    *out_path = temp_path;
-  } else {
-    unlink(temp_path);
+  *out_path = iree::testing::MakeTempFilePath("iree_hal_amdgpu_command_buffer");
+  iree_status_t status = iree_io_file_contents_write(
+      iree_make_string_view(out_path->data(), out_path->size()),
+      iree_make_const_byte_span(data.data(), data.size()),
+      iree_allocator_system());
+  if (!iree_status_is_ok(status)) {
+    std::remove(out_path->c_str());
+    out_path->clear();
   }
   return status;
 #else
@@ -370,6 +329,10 @@ TEST_F(HostQueueCommandBufferTest, DispatchSummariesRetainPacketOrdinals) {
 
 TEST_F(HostQueueCommandBufferTest,
        TsanAssignmentPlanForcesBarrierWhenShadowSlotsWouldOverlap) {
+#if defined(IREE_PLATFORM_WINDOWS)
+  GTEST_SKIP() << "AMDGPU TSAN shadow memory is not supported on Windows";
+#endif  // IREE_PLATFORM_WINDOWS
+
   iree_hal_amdgpu_logical_device_options_t options;
   iree_hal_amdgpu_logical_device_options_initialize(&options);
   options.preallocate_pools = 0;

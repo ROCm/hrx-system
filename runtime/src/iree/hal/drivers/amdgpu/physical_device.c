@@ -912,6 +912,16 @@ iree_hal_amdgpu_physical_device_initialize_vendor_packet_strategy(
       iree_hal_amdgpu_select_vendor_packet_capabilities(gfxip_version);
   iree_hal_amdgpu_pm4_timestamp_strategy_t pm4_timestamp_strategy =
       iree_hal_amdgpu_select_pm4_timestamp_strategy(gfxip_version);
+#if defined(IREE_PLATFORM_WINDOWS)
+  // The Windows DXG-backed HSA runtime does not expose the native KFD clock
+  // source or AQL PM4-IB path. Use portable HSA AQL dispatches and barriers
+  // whenever that native platform capability is unavailable.
+  if (system->device_clock_source.type ==
+      IREE_HAL_AMDGPU_DEVICE_CLOCK_SOURCE_TYPE_UNAVAILABLE) {
+    vendor_packet_capabilities = 0;
+    pm4_timestamp_strategy = IREE_HAL_AMDGPU_PM4_TIMESTAMP_STRATEGY_NONE;
+  }
+#endif  // IREE_PLATFORM_WINDOWS
   iree_hal_amdgpu_wait_barrier_strategy_t wait_barrier_strategy =
       IREE_HAL_AMDGPU_WAIT_BARRIER_STRATEGY_DEFER;
   if (!options->force_wait_barrier_defer) {
@@ -1264,10 +1274,15 @@ iree_status_t iree_hal_amdgpu_physical_device_assign_frontier(
     iree_thread_affinity_t completion_thread_affinity;
     iree_thread_affinity_set_group_any(physical_device->host_numa_node,
                                        &completion_thread_affinity);
+    bool use_libhsa_doorbell = false;
+#if defined(IREE_PLATFORM_WINDOWS)
+    use_libhsa_doorbell = system->device_clock_source.type ==
+                          IREE_HAL_AMDGPU_DEVICE_CLOCK_SOURCE_TYPE_UNAVAILABLE;
+#endif  // IREE_PLATFORM_WINDOWS
     status = iree_hal_amdgpu_host_queue_initialize(
         libhsa, logical_device,
         iree_hal_amdgpu_physical_device_hostcall_buffer(physical_device),
-        proactor, physical_device->device_agent,
+        proactor, physical_device->device_agent, use_libhsa_doorbell,
         &kernarg_ring_memory.descriptor, host_memory_pools->fine_pool,
         frontier_tracker, queue_axis, resolved.queue_affinity,
         logical_queue_ordinal, queue_ordinal, completion_thread_affinity,

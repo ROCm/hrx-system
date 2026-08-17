@@ -68,13 +68,7 @@ iree_status_t iree_hal_amdgpu_system_info_query(
                                HSA_AMD_SYSTEM_INFO_SVM_SUPPORTED,
                                &svm_supported),
       "querying HSA_AMD_SYSTEM_INFO_SVM_SUPPORTED");
-  if (!svm_supported) {
-    IREE_RETURN_AND_END_ZONE_IF_ERROR(
-        z0, iree_make_status(IREE_STATUS_INCOMPATIBLE,
-                             "only systems with SVM are supported "
-                             "(HSA_AMD_SYSTEM_INFO_SVM_SUPPORTED == true)"));
-  }
-  out_info->svm.supported = 1;
+  out_info->svm.supported = svm_supported ? 1 : 0;
 
   bool svm_accessible_by_default = false;
   IREE_RETURN_AND_END_ZONE_IF_ERROR(

@@ -11,7 +11,14 @@
 // Some ROCm aqlprofile SDK headers define these C tag types without matching
 // typedefs, then use the untagged names in public prototypes.
 typedef struct aqlprofile_att_buffer_status_t aqlprofile_att_buffer_status_t;
+#if defined(__clang__) && defined(IREE_PLATFORM_WINDOWS)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wmicrosoft-enum-forward-reference"
+#endif
 typedef enum aqlprofile_spm_decode_query_t aqlprofile_spm_decode_query_t;
+#if defined(__clang__) && defined(IREE_PLATFORM_WINDOWS)
+#pragma clang diagnostic pop
+#endif
 
 #include "aqlprofile-sdk/aql_profile_v2.h"
 #include "iree/base/internal/dynamic_library.h"

@@ -66,6 +66,13 @@ def _descriptor_set_info() -> AmdgpuDescriptorSetInfo:
     )
 
 
+def test_generated_header_uses_c_linkage_for_exported_data() -> None:
+    source = amdgpu_target_info._emit_header(amdgpu_target_info.sorted_descriptor_set_infos())
+
+    assert '#ifdef __cplusplus\nextern "C" {' in source
+    assert '}  // extern "C"\n#endif  // __cplusplus' in source
+
+
 def test_memory_cache_policy_fragments_are_data_only() -> None:
     policy_rows = amdgpu_target_info._emit_memory_cache_policy_encoding_rows(
         amdgpu_target_info_data.sorted_descriptor_set_infos(),

@@ -668,7 +668,7 @@ void iree_hal_amdgpu_host_queue_enqueue_post_drain_action(
 iree_status_t iree_hal_amdgpu_host_queue_initialize(
     const iree_hal_amdgpu_libhsa_t* libhsa, iree_hal_device_t* logical_device,
     void* hostcall_buffer, iree_async_proactor_t* proactor,
-    hsa_agent_t gpu_agent,
+    hsa_agent_t gpu_agent, bool use_libhsa_doorbell,
     const iree_hal_amdgpu_kernarg_ring_memory_t* kernarg_memory,
     hsa_amd_memory_pool_t pm4_ib_pool,
     iree_async_frontier_tracker_t* frontier_tracker, iree_async_axis_t axis,

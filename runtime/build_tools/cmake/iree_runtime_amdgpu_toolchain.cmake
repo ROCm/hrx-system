@@ -4,6 +4,14 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+function(_iree_runtime_amdgpu_resolve_tool path_var)
+  set(_path "${${path_var}}")
+  if(WIN32 AND _path AND NOT EXISTS "${_path}" AND
+     EXISTS "${_path}${CMAKE_EXECUTABLE_SUFFIX}")
+    set(${path_var} "${_path}${CMAKE_EXECUTABLE_SUFFIX}" PARENT_SCOPE)
+  endif()
+endfunction()
+
 function(iree_runtime_configure_amdgpu_toolchain)
   if(NOT IREE_HAL_DRIVER_AMDGPU)
     return()
@@ -16,13 +24,25 @@ function(iree_runtime_configure_amdgpu_toolchain)
       "libraries and runtime components, not the host compiler.")
   endif()
 
-  set(IREE_CLANG_BINARY "${CMAKE_C_COMPILER}" CACHE FILEPATH
+  set(_iree_runtime_amdgpu_clang_binary "${CMAKE_C_COMPILER}")
+  if(CMAKE_C_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
+    get_filename_component(
+      _iree_runtime_amdgpu_clang_dir "${CMAKE_C_COMPILER}" DIRECTORY)
+    unset(_iree_runtime_amdgpu_clang_binary)
+    find_program(_iree_runtime_amdgpu_clang_binary
+      NAMES clang
+      HINTS "${_iree_runtime_amdgpu_clang_dir}"
+      NO_DEFAULT_PATH
+      REQUIRED)
+  endif()
+  set(IREE_CLANG_BINARY "${_iree_runtime_amdgpu_clang_binary}" CACHE FILEPATH
     "Clang used by IREE runtime AMDGPU device binary builds." FORCE)
 
   execute_process(
     COMMAND "${IREE_CLANG_BINARY}" -print-prog-name=llvm-ar
     OUTPUT_VARIABLE _llvm_ar_from_clang
     OUTPUT_STRIP_TRAILING_WHITESPACE)
+  _iree_runtime_amdgpu_resolve_tool(_llvm_ar_from_clang)
   if(EXISTS "${_llvm_ar_from_clang}")
     set(IREE_LLVM_AR_BINARY "${_llvm_ar_from_clang}" CACHE FILEPATH
       "llvm-ar used by IREE runtime AMDGPU device binary builds." FORCE)
@@ -54,6 +74,7 @@ function(iree_runtime_configure_amdgpu_toolchain)
     COMMAND "${IREE_CLANG_BINARY}" -print-prog-name=llvm-link
     OUTPUT_VARIABLE _llvm_link_from_clang
     OUTPUT_STRIP_TRAILING_WHITESPACE)
+  _iree_runtime_amdgpu_resolve_tool(_llvm_link_from_clang)
   if(EXISTS "${_llvm_link_from_clang}")
     set(IREE_LLVM_LINK_BINARY "${_llvm_link_from_clang}" CACHE FILEPATH
       "llvm-link used by IREE runtime AMDGPU device binary builds." FORCE)
@@ -67,6 +88,7 @@ function(iree_runtime_configure_amdgpu_toolchain)
     COMMAND "${IREE_CLANG_BINARY}" -print-prog-name=ld.lld
     OUTPUT_VARIABLE _lld_from_clang
     OUTPUT_STRIP_TRAILING_WHITESPACE)
+  _iree_runtime_amdgpu_resolve_tool(_lld_from_clang)
   if(EXISTS "${_lld_from_clang}")
     set(IREE_LLD_BINARY "${_lld_from_clang}" CACHE FILEPATH
       "lld used by IREE runtime AMDGPU device binary builds." FORCE)
@@ -80,6 +102,7 @@ function(iree_runtime_configure_amdgpu_toolchain)
     COMMAND "${IREE_CLANG_BINARY}" -print-prog-name=llvm-objcopy
     OUTPUT_VARIABLE _objcopy_from_clang
     OUTPUT_STRIP_TRAILING_WHITESPACE)
+  _iree_runtime_amdgpu_resolve_tool(_objcopy_from_clang)
   if(EXISTS "${_objcopy_from_clang}")
     set(IREE_LLVM_OBJCOPY_BINARY "${_objcopy_from_clang}" CACHE FILEPATH
       "llvm-objcopy used by IREE runtime AMDGPU device binary builds." FORCE)
@@ -158,14 +181,16 @@ function(iree_runtime_configure_amdgpu_toolchain)
       COMMAND "${IREE_CLANG_BINARY}" -print-prog-name=clang-offload-bundler
       OUTPUT_VARIABLE _offload_bundler_from_clang
       OUTPUT_STRIP_TRAILING_WHITESPACE)
+    _iree_runtime_amdgpu_resolve_tool(_offload_bundler_from_clang)
     if(EXISTS "${_offload_bundler_from_clang}")
       set(IREE_CLANG_OFFLOAD_BUNDLER_BINARY
         "${_offload_bundler_from_clang}" CACHE FILEPATH
         "clang-offload-bundler used by HIP device fixture builds." FORCE)
     else()
-      message(FATAL_ERROR
-        "ROCm device libraries are available, but "
-        "${IREE_CLANG_BINARY} cannot locate clang-offload-bundler")
+      find_program(_offload_bundler_fallback clang-offload-bundler REQUIRED)
+      set(IREE_CLANG_OFFLOAD_BUNDLER_BINARY
+        "${_offload_bundler_fallback}" CACHE FILEPATH
+        "clang-offload-bundler used by HIP device fixture builds." FORCE)
     endif()
     set(IREE_AMDGPU_HIP_DEVICE_LIBRARIES_AVAILABLE ON CACHE INTERNAL
       "Whether the AMDGPU toolchain can link HIP device fixtures." FORCE)
