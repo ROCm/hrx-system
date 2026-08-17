@@ -143,6 +143,24 @@ hrx_cts_test(
 )
 
 hrx_cc_test(
+    name = "hip_event_test",
+    srcs = ["tests/hip/event_test.cpp"],
+    data = ["//libhrx/src/binding/hip:amdhip64"],
+    env = {
+        "HRX_TEST_LIBAMDHIP64": "$(location //libhrx/src/binding/hip:amdhip64)",
+    },
+    sanitizer_suppressions = hsa_suppressions,
+    tags = AMD_GPU_CTS_TAGS,
+    target_compatible_with = _LINUX_COMPATIBILITY,
+    deps = [
+        "//build_tools:dl",
+        "//libhrx/src/binding/hip:launch_params",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+hrx_cc_test(
     name = "hip_module_execution_test",
     srcs = [
         "core/amdgpu_executable_test_data.hpp",

@@ -1148,10 +1148,27 @@ CUDAAPI CUresult cuEventElapsedTime(float* pMilliseconds, CUevent hStart,
   if (!pMilliseconds) {
     return CUDA_ERROR_INVALID_VALUE;
   }
+  iree_hal_streaming_event_timing_t timing =
+      IREE_HAL_STREAMING_EVENT_TIMING_UNTIMED;
   iree_status_t status = iree_hal_streaming_event_elapsed_time(
       pMilliseconds, (iree_hal_streaming_event_t*)hStart,
-      (iree_hal_streaming_event_t*)hEnd);
-  CUresult result = iree_status_to_cu_result(status);
+      (iree_hal_streaming_event_t*)hEnd, &timing);
+  if (!iree_status_is_ok(status)) {
+    // The timeline a record names has failed; the event handles are fine.
+    return iree_status_to_cu_result(status);
+  }
+  CUresult result = CUDA_ERROR_INVALID_VALUE;
+  switch (timing) {
+    case IREE_HAL_STREAMING_EVENT_TIMING_MEASURED:
+      result = CUDA_SUCCESS;
+      break;
+    case IREE_HAL_STREAMING_EVENT_TIMING_INCOMPLETE:
+      result = CUDA_ERROR_NOT_READY;
+      break;
+    case IREE_HAL_STREAMING_EVENT_TIMING_UNTIMED:
+      result = CUDA_ERROR_INVALID_VALUE;
+      break;
+  }
   return result;
 }
 

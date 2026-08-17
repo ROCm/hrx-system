@@ -1705,25 +1705,36 @@ iree_status_t iree_hal_streaming_graph_exec_instantiate_from_template(
         iree_arena_allocate(&exec->arena_allocator,
                             exec->semaphore_count * sizeof(*exec->semaphores),
                             (void**)&exec->semaphores));
+    memset(exec->semaphores, 0,
+           exec->semaphore_count * sizeof(*exec->semaphores));
     IREE_RETURN_AND_END_ZONE_IF_ERROR(
         z0, iree_arena_allocate(
                 &exec->arena_allocator,
                 exec->semaphore_count * sizeof(*exec->semaphore_base_values),
                 (void**)&exec->semaphore_base_values));
+    memset(exec->semaphore_base_values, 0,
+           exec->semaphore_count * sizeof(*exec->semaphore_base_values));
 
-    // Create internal semaphores.
-    for (uint32_t i = 0; i < exec->semaphore_count; i++) {
-      IREE_RETURN_AND_END_ZONE_IF_ERROR(
-          z0, iree_hal_semaphore_create(
-                  exec->context->device, exec->context->queue_affinity, 0ull,
-                  IREE_HAL_SEMAPHORE_FLAG_NONE, &exec->semaphores[i]));
-      exec->semaphore_base_values[i] = 0;
+    // Create the internal semaphores that carry values between partitions. The
+    // resource set is their sole owner; exec->semaphores are borrowed pointers
+    // and anything outliving the executable takes its own reference.
+    iree_status_t status = iree_ok_status();
+    for (uint32_t i = 0; i < exec->semaphore_count && iree_status_is_ok(status);
+         i++) {
+      iree_hal_semaphore_t* semaphore = NULL;
+      status = iree_hal_semaphore_create(
+          exec->context->device, exec->context->queue_affinity, 0ull,
+          IREE_HAL_SEMAPHORE_FLAG_NONE, &semaphore);
+      if (iree_status_is_ok(status)) {
+        status =
+            iree_hal_resource_set_insert(exec->resource_set, 1, &semaphore);
+        iree_hal_semaphore_release(semaphore);
+      }
+      if (iree_status_is_ok(status)) {
+        exec->semaphores[i] = semaphore;
+      }
     }
-
-    // Add semaphores to the resource set for automatic cleanup.
-    IREE_RETURN_AND_END_ZONE_IF_ERROR(
-        z0, iree_hal_resource_set_insert(
-                exec->resource_set, exec->semaphore_count, exec->semaphores));
+    IREE_RETURN_AND_END_ZONE_IF_ERROR(z0, status);
   }
 
   // Create blocks from partitions.
@@ -1898,6 +1909,7 @@ iree_status_t iree_hal_streaming_graph_exec_instantiate_from_template(
 
 static iree_status_t iree_hal_streaming_graph_exec_submit_blocks_locked(
     iree_hal_streaming_graph_exec_t* exec, iree_hal_streaming_stream_t* stream,
+    uint64_t launch_stream_tail_value,
     iree_hal_semaphore_list_t external_wait_semaphores,
     iree_hal_semaphore_list_t external_signal_semaphores);
 
@@ -1918,7 +1930,7 @@ static iree_status_t iree_hal_streaming_graph_host_callback(
 static iree_status_t iree_hal_streaming_graph_submit_block(
     iree_hal_streaming_graph_block_t* block,
     const iree_hal_streaming_graph_block_ptrs_t* ptrs,
-    iree_hal_streaming_stream_t* stream,
+    iree_hal_streaming_stream_t* stream, uint64_t launch_stream_tail_value,
     iree_hal_semaphore_list_t wait_semaphores,
     iree_hal_semaphore_list_t signal_semaphores) {
   switch (block->type) {
@@ -1983,8 +1995,13 @@ static iree_status_t iree_hal_streaming_graph_submit_block(
     case IREE_HAL_STREAMING_GRAPH_BLOCK_TYPE_CHILD_GRAPH: {
       iree_hal_streaming_graph_exec_t* child_exec =
           ptrs->attrs->child_graph.exec;
+      // Only the child's block 0 carries this block's waits, which are
+      // themselves behind the launch tail; a record inside the child sits in a
+      // single-block partition that either is block 0 or chains back to it, so
+      // the tail carries down unchanged.
       return iree_hal_streaming_graph_exec_submit_blocks_locked(
-          child_exec, stream, wait_semaphores, signal_semaphores);
+          child_exec, stream, launch_stream_tail_value, wait_semaphores,
+          signal_semaphores);
     }
     default:
       return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
@@ -1992,8 +2009,16 @@ static iree_status_t iree_hal_streaming_graph_submit_block(
   }
 }
 
+// |launch_stream_tail_value| is the value on |stream|'s timeline that the whole
+// launch waits behind, or 0 when the stream had never submitted. Only block 0
+// carries the launch's external waits, and the extra workstream blocks of the
+// first partition wait on nothing, so a block is behind the tail only when it
+// chains back to block 0. An event record node is never recordable and so gets
+// a partition of its own holding a single block, which either is block 0 or
+// waits on every signal of the partition ahead of it, back to block 0.
 static iree_status_t iree_hal_streaming_graph_exec_submit_blocks_locked(
     iree_hal_streaming_graph_exec_t* exec, iree_hal_streaming_stream_t* stream,
+    uint64_t launch_stream_tail_value,
     iree_hal_semaphore_list_t external_wait_semaphores,
     iree_hal_semaphore_list_t external_signal_semaphores) {
   enum {
@@ -2059,10 +2084,9 @@ static iree_status_t iree_hal_streaming_graph_exec_submit_blocks_locked(
         (block_index == 0 ? external_wait_semaphores.count : 0) +
         (block_waits_event ? 1 : 0);
     const iree_host_size_t total_signal_count =
-        block->signal_semaphore_count +
-        (block_index == exec->block_count - 1 ? external_signal_semaphores.count
-                                              : 0) +
-        (block_records_event ? 1 : 0);
+        block->signal_semaphore_count + (block_index == exec->block_count - 1
+                                             ? external_signal_semaphores.count
+                                             : 0);
     iree_host_size_t total_semaphores = 0;
     if (IREE_UNLIKELY(!iree_host_size_checked_add(
             total_wait_count, total_signal_count, &total_semaphores))) {
@@ -2134,11 +2158,22 @@ static iree_status_t iree_hal_streaming_graph_exec_submit_blocks_locked(
           exec->semaphore_base_values[semaphore_index] + delta;
       ++wait_count;
     }
+    // Retained across the submission so a concurrent record of the same event
+    // cannot drop the last reference to the timeline this block names. Unlike
+    // iree_hal_streaming_stream_wait_event, the point's stream ordering is not
+    // filed in |stream|'s memory reuse ledger; a missing entry only withholds
+    // allocations from reuse, so the omission costs reuse and can never grant
+    // it.
+    iree_hal_streaming_recorded_point_t event_wait_point = {0};
     if (block_waits_event) {
-      iree_hal_streaming_event_t* event = ptrs.attrs->event.event;
-      wait_sems[wait_count] = event->semaphore;
-      wait_vals[wait_count] = event->signal_value;
-      ++wait_count;
+      iree_hal_streaming_event_acquire_recorded_point(ptrs.attrs->event.event,
+                                                      &event_wait_point);
+      // A wait on an event with no submitted record has nothing to wait for.
+      if (event_wait_point.semaphore) {
+        wait_sems[wait_count] = event_wait_point.semaphore;
+        wait_vals[wait_count] = event_wait_point.value;
+        ++wait_count;
+      }
     }
 
     iree_host_size_t signal_count = 0;
@@ -2159,23 +2194,15 @@ static iree_status_t iree_hal_streaming_graph_exec_submit_blocks_locked(
         ++signal_count;
       }
     }
-    if (block_records_event) {
-      iree_hal_streaming_event_t* event = ptrs.attrs->event.event;
-      if (IREE_UNLIKELY(event->signal_value == UINT64_MAX)) {
-        status = iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                                  "event signal value overflow");
-      } else if (event->recording_stream != stream) {
-        iree_hal_streaming_stream_retain(stream);
-        iree_hal_streaming_stream_release(event->recording_stream);
-        event->recording_stream = stream;
-      }
-      if (iree_status_is_ok(status)) {
-        event->record_time_ns = iree_time_now();
-        ++event->signal_value;
-        signal_sems[signal_count] = event->semaphore;
-        signal_vals[signal_count] = event->signal_value;
-        ++signal_count;
-      }
+
+    // A record node marks the point its own block reaches, which is the block's
+    // first signal value: the partitioner gives a record node a partition of
+    // its own, so that value is signaled exactly when the node's dependencies
+    // complete. Every block signals either an internal semaphore or the
+    // launch's external signals, so a record block always has a value to name.
+    if (block_records_event && IREE_UNLIKELY(signal_count == 0)) {
+      status = iree_make_status(IREE_STATUS_INTERNAL,
+                                "event record block signals no timeline value");
     }
 
     iree_hal_semaphore_list_t wait_semaphores = {
@@ -2189,9 +2216,38 @@ static iree_status_t iree_hal_streaming_graph_exec_submit_blocks_locked(
         .payload_values = signal_vals,
     };
     if (iree_status_is_ok(status)) {
+      // Sampled before the submission so the timestamp reflects when the launch
+      // issued the record.
+      const iree_time_t record_time_ns =
+          block_records_event ? iree_time_now() : 0;
       status = iree_hal_streaming_graph_submit_block(
-          block, &ptrs, stream, wait_semaphores, signal_semaphores);
+          block, &ptrs, stream, launch_stream_tail_value, wait_semaphores,
+          signal_semaphores);
+      // A rejected block signals nothing, so the event keeps its old point. The
+      // commit stays inside this iteration because later blocks in the same
+      // launch wait on the committed point. The recording stream is left alone:
+      // it carries capture state and a launch is not a capture.
+      if (block_records_event && iree_status_is_ok(status)) {
+        // The block's first signal is the point the record names. When that
+        // signal is the launching stream's own timeline the point is exactly a
+        // stream point; otherwise it is internal to the launch and all that is
+        // known about the stream is that the launch waited behind its tail.
+        const bool signals_launch_stream_timeline =
+            signal_sems[0] == stream->timeline_semaphore;
+        const iree_hal_streaming_recorded_point_t recorded_point = {
+            .semaphore = signal_sems[0],
+            .value = signal_vals[0],
+            .ordered_after_stream_id = stream->stream_id,
+            .ordered_after_stream_value = signals_launch_stream_timeline
+                                              ? signal_vals[0]
+                                              : launch_stream_tail_value,
+            .record_time_ns = record_time_ns,
+        };
+        iree_hal_streaming_event_commit_recorded_point(ptrs.attrs->event.event,
+                                                       recorded_point);
+      }
     }
+    iree_hal_semaphore_release(event_wait_point.semaphore);
     if (free_value_array) {
       iree_allocator_free(exec->host_allocator, value_array);
     }
@@ -2200,7 +2256,13 @@ static iree_status_t iree_hal_streaming_graph_exec_submit_blocks_locked(
     }
   }
 
-  if (iree_status_is_ok(status) && exec->semaphore_count > 0) {
+  // The base values advance even when a block failed to submit: blocks that did
+  // submit have already signaled their new values, and a value must name
+  // exactly one submission. Nothing rejects a duplicate signal, so rewinding
+  // the bases would make the next launch re-signal those values silently, and
+  // its blocks would find their waits already satisfied and run ahead of the
+  // work they were ordered behind.
+  if (exec->semaphore_count > 0) {
     memcpy(exec->semaphore_base_values, new_base_values,
            exec->semaphore_count * sizeof(uint64_t));
   }
@@ -2291,8 +2353,10 @@ iree_status_t iree_hal_streaming_graph_exec_launch(
   // completion observed by the host; HIP stream ordering requires repeated
   // graph launches on the same stream to execute FIFO even when the caller does
   // not synchronize between launches.
-  uint64_t stream_wait_value = stream->pending_value;
-  uint64_t stream_signal_value = stream_wait_value + 1;
+  uint64_t stream_wait_value = 0;
+  uint64_t stream_signal_value = 0;
+  iree_status_t status = iree_hal_streaming_stream_reserve_next_value_locked(
+      stream, &stream_wait_value, &stream_signal_value);
 
   iree_hal_semaphore_t* wait_semaphore = stream->timeline_semaphore;
   uint64_t wait_payload_value = stream_wait_value;
@@ -2308,12 +2372,13 @@ iree_status_t iree_hal_streaming_graph_exec_launch(
       .semaphores = &signal_semaphore,
       .payload_values = &signal_payload_value,
   };
-  iree_status_t status = iree_hal_streaming_graph_exec_submit_blocks_locked(
-      exec, stream, wait_semaphores, signal_semaphores);
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_streaming_graph_exec_submit_blocks_locked(
+        exec, stream, stream_wait_value, wait_semaphores, signal_semaphores);
+  }
 
   if (iree_status_is_ok(status)) {
     stream->pending_value = stream_signal_value;
-    stream->submitted_value = stream_signal_value;
     if (exec->uses_graph_memory_nodes) {
       iree_hal_streaming_stream_release(
           exec->graph_memory_active_launch_stream);

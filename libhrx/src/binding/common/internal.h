@@ -507,18 +507,11 @@ typedef struct iree_hal_streaming_stream_t {
 
   // Semaphore chain for synchronization.
   iree_hal_semaphore_t* timeline_semaphore;
-  uint64_t pending_value;    // Last stream timeline value reserved.
-  uint64_t submitted_value;  // Last value that was actually submitted (for
-                             // wait_submitted)
+  uint64_t pending_value;    // Last value a submission has been accepted for.
   uint64_t completed_value;  // Last value we've verified as completed
 
   // Queue affinity.
   iree_hal_queue_affinity_t queue_affinity;
-
-  // Recorded events on this stream.
-  iree_hal_streaming_event_t** recorded_events;
-  iree_host_size_t event_count;
-  iree_host_size_t event_capacity;
 
   // Event dependencies that establish safe cross-stream allocation reuse.
   iree_hal_streaming_memory_reuse_dependency_t* memory_reuse_dependencies;
@@ -551,6 +544,34 @@ typedef struct iree_hal_streaming_stream_t {
   // Host allocator.
   iree_allocator_t host_allocator;
 } iree_hal_streaming_stream_t;
+
+// Reserves the next value on |stream|'s timeline for one submission. Callers
+// must hold |stream->mutex| and publish |*out_signal_value| to
+// |stream->pending_value| only once the submission is accepted, so a rejected
+// submission leaves the timeline where it was and hands the value out again.
+//
+// A value must name exactly one submission, and nothing catches a violation:
+// queues publish their completions with a duplicate-tolerant advance, so the
+// second submission's signal is a silent no-op and the timeline reaches the
+// value when the first submission completes. Every reader treats the timeline
+// reaching a value as "the submission that signals it has completed", so all of
+// them report completion while the second submission is still running.
+//
+// |*out_wait_value| is the value the submission must wait on to stay behind the
+// work in front of it, or 0 when the stream has never submitted, in which case
+// callers drop the wait rather than waiting on value zero.
+static inline iree_status_t iree_hal_streaming_stream_reserve_next_value_locked(
+    iree_hal_streaming_stream_t* stream, uint64_t* out_wait_value,
+    uint64_t* out_signal_value) {
+  const uint64_t wait_value = stream->pending_value;
+  if (IREE_UNLIKELY(wait_value == UINT64_MAX)) {
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "stream timeline value overflow");
+  }
+  *out_wait_value = wait_value;
+  *out_signal_value = wait_value + 1;
+  return iree_ok_status();
+}
 
 // Updates capture status while keeping the owning context's capture-stream
 // count in sync. Callers serialize access to the stream capture fields.
@@ -714,6 +735,33 @@ typedef enum iree_hal_streaming_event_flag_bits_e {
   IREE_HAL_STREAMING_EVENT_FLAG_INTERPROCESS = 1ull << 2,
 } iree_hal_streaming_event_flags_t;
 
+// The timeline point a submitted event record names, together with the stream
+// timeline point that reaching it implies and the host time the record was
+// issued at. Published and read as one value so no reader can pair one record's
+// semaphore, value or timestamp with another record's.
+typedef struct iree_hal_streaming_recorded_point_t {
+  // Timeline semaphore the record's submission signals, or NULL when no record
+  // has been submitted. Retained by whoever holds the point.
+  iree_hal_semaphore_t* semaphore;
+  // Value |semaphore| reaches once the recorded work completes, or 0 when
+  // |semaphore| is NULL.
+  uint64_t value;
+  // Stream whose timeline this point is ordered after, or 0 when the point
+  // follows no stream timeline point. Identifies the timeline a cross-stream
+  // wait on this point can claim ordering against.
+  unsigned long long ordered_after_stream_id;
+  // Value on |ordered_after_stream_id|'s timeline this point is ordered after,
+  // or 0 when there is none. A lower bound, not the point itself: a record
+  // inside a graph launch is ordered after the tail the launch waited on,
+  // which is earlier than anything the launch signals.
+  uint64_t ordered_after_stream_value;
+  // Host time in nanoseconds the record was issued at, or 0 when no record has
+  // been submitted. Sampled before the submission, so it marks when the caller
+  // issued the record, not when the point is reached; elapsed time reads 0 here
+  // as "never recorded".
+  iree_time_t record_time_ns;
+} iree_hal_streaming_recorded_point_t;
+
 // Event for synchronization.
 typedef struct iree_hal_streaming_event_t {
   // Reference counting.
@@ -722,16 +770,28 @@ typedef struct iree_hal_streaming_event_t {
   // Event properties.
   iree_hal_streaming_event_flags_t flags;
 
-  // HAL semaphore.
-  iree_hal_semaphore_t* semaphore;
-  uint64_t signal_value;
+  // Guards |recorded_point|, which carries the record's point and timestamp as
+  // one value so no reader can pair one record's point with another record's
+  // timestamp.
+  // Acquired after the recording stream's mutex and after the graph
+  // executable's mutex; no path takes either while holding this one.
+  // Waits happen outside it: readers copy and retain the point under it.
+  iree_slim_mutex_t mutex;
+  // Point the last submitted record names, or a zeroed point when no record
+  // has been submitted. The event owns no timeline: a record names a point on
+  // the timeline of whichever submission carries it, and the retained
+  // reference in |recorded_point.semaphore| is what keeps a submitted record
+  // queryable after the stream or graph executable that carried it is gone.
+  iree_hal_streaming_recorded_point_t recorded_point;
 
-  // Recording stream and context.
+  // Stream that last recorded this event through the stream API, retained, or
+  // NULL before any such record. Consumed only by stream capture, which picks
+  // the capture mode, id and owning thread up from here; a graph launch leaves
+  // it alone. Exchanged under |mutex| but read by the capture paths without it,
+  // which is sound only because a capture sequence is driven by one thread.
   iree_hal_streaming_stream_t* recording_stream;
+  // Context that created the event, retained.
   iree_hal_streaming_context_t* context;
-
-  // Timing information.
-  iree_time_t record_time_ns;
 
   // Platform-specific IPC handle, if the event is IPC enabled.
   void* ipc_handle;
@@ -748,6 +808,20 @@ typedef struct iree_hal_streaming_event_t {
   // Host allocator.
   iree_allocator_t host_allocator;
 } iree_hal_streaming_event_t;
+
+// Outcome of measuring the interval between two event records. Carried out of
+// band from the status because a failed timeline propagates its own status
+// verbatim, and that status can carry any code, including whichever one a
+// measurement outcome would otherwise have used.
+typedef enum iree_hal_streaming_event_timing_e {
+  // Both records were reached and the interval between them was measured.
+  IREE_HAL_STREAMING_EVENT_TIMING_MEASURED = 0,
+  // At least one of the events carries no timestamp, because timing is disabled
+  // on it or because no record of it has been submitted.
+  IREE_HAL_STREAMING_EVENT_TIMING_UNTIMED,
+  // Both events carry a timestamp but at least one record has not been reached.
+  IREE_HAL_STREAMING_EVENT_TIMING_INCOMPLETE,
+} iree_hal_streaming_event_timing_t;
 
 //===----------------------------------------------------------------------===//
 // Memory types
@@ -1708,6 +1782,33 @@ void iree_hal_streaming_event_release(iree_hal_streaming_event_t* event);
 iree_status_t iree_hal_streaming_event_query(iree_hal_streaming_event_t* event,
                                              int* status);
 
+// Takes a reference to the point |event| was last recorded at, or a zeroed
+// point when no record has been submitted. Callers release
+// |out_point->semaphore|.
+// Synchronization: event (event mutex held while copying the point).
+void iree_hal_streaming_event_acquire_recorded_point(
+    iree_hal_streaming_event_t* event,
+    iree_hal_streaming_recorded_point_t* out_point);
+
+// Adopts |point| as the point |event| is recorded at, taking a reference to
+// |point.semaphore| and dropping the reference to the previous point. Called
+// only once the submission that signals the point has been accepted.
+// Synchronization: event (event mutex held while replacing the point).
+void iree_hal_streaming_event_commit_recorded_point(
+    iree_hal_streaming_event_t* event,
+    iree_hal_streaming_recorded_point_t point);
+
+// Makes |stream| the stream whose capture state |event| belongs to, taking a
+// reference to it, and transfers the previously referenced stream to the
+// caller. Returns NULL when |stream| was already the recording stream.
+//
+// Releasing the returned stream can run its teardown, which re-enters the
+// streaming layer to synchronize and unregister the stream, so callers holding
+// a stream mutex must drop the reference after unlocking.
+// Synchronization: event (event mutex held while exchanging).
+iree_hal_streaming_stream_t* iree_hal_streaming_event_exchange_recording_stream(
+    iree_hal_streaming_event_t* event, iree_hal_streaming_stream_t* stream);
+
 // Synchronization: stream flush (flushes stream before recording).
 iree_status_t iree_hal_streaming_event_record(
     iree_hal_streaming_event_t* event, iree_hal_streaming_stream_t* stream);
@@ -1716,10 +1817,20 @@ iree_status_t iree_hal_streaming_event_record(
 iree_status_t iree_hal_streaming_event_synchronize(
     iree_hal_streaming_event_t* event);
 
-// Synchronization: both events (waits for both events to complete).
+// Measures the interval between the records |start| and |stop| name and stores
+// it in milliseconds in |*ms|. Writes |*ms| only when |*out_timing| is
+// MEASURED; every other outcome leaves it untouched.
+//
+// |*out_timing| says why no interval was produced and is meaningful only when
+// this returns ok. A non-ok status comes from querying a timeline and belongs
+// to whatever failed the device, not to the events.
+//
+// Synchronization: both events (each event's mutex held while its record is
+// copied; no waiting).
 iree_status_t iree_hal_streaming_event_elapsed_time(
     float* ms, iree_hal_streaming_event_t* start,
-    iree_hal_streaming_event_t* stop);
+    iree_hal_streaming_event_t* stop,
+    iree_hal_streaming_event_timing_t* out_timing);
 
 //===----------------------------------------------------------------------===//
 // Memory management

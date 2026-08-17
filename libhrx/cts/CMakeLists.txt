@@ -260,6 +260,30 @@ hrx_cc_test(
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
 iree_cc_test(
   NAME
+    hip_event_test
+  SRCS
+    "tests/hip/event_test.cpp"
+  DATA
+    libhrx::src::binding::hip::amdhip64
+  DEPS
+    ${CMAKE_DL_LIBS}
+    iree::testing::gtest
+    iree::testing::gtest_main
+    libhrx::src::binding::hip::launch_params
+    libhrx_defs
+  ENV
+    "HRX_TEST_LIBAMDHIP64=$<TARGET_FILE:libhrx::src::binding::hip::amdhip64>"
+  LABELS
+    "runtime-resource=amd-gpu"
+  SANITIZER_SUPPRESSIONS
+    lsan
+    hsa
+)
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+iree_cc_test(
+  NAME
     hip_module_execution_test
   SRCS
     "core/amdgpu_executable_test_data.hpp"
