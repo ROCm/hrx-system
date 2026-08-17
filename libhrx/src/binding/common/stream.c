@@ -747,92 +747,111 @@ iree_status_t iree_hal_streaming_stream_wait_event(
     return iree_ok_status();
   }
 
+  // Read the point once. The barrier below waits on exactly the point whose
+  // stream ordering is filed as a reuse dependency, so a record landing on this
+  // event concurrently cannot make the filed dependency describe a point other
+  // than the one waited on.
+  iree_hal_streaming_recorded_point_t recorded_point;
+  iree_hal_streaming_event_acquire_recorded_point(event, &recorded_point);
+
+  // Waiting on the point orders every later submission on this stream behind
+  // it, and therefore behind the stream timeline point it follows. That is the
+  // ordering a deferred free on that stream needs before its allocation may be
+  // reused here. A point that follows no stream timeline point files nothing:
+  // there is no ordering to claim. A point on this stream's own timeline files
+  // nothing either, because same-stream ordering already covers it.
   const unsigned long long source_stream_id =
-      event->recording_stream ? event->recording_stream->stream_id : 0;
-  const uint64_t source_timeline_value = event->signal_value;
+      recorded_point.ordered_after_stream_id;
+  const uint64_t source_timeline_value =
+      recorded_point.ordered_after_stream_value;
+  const bool files_memory_reuse_dependency =
+      source_stream_id != 0 && source_stream_id != stream->stream_id &&
+      source_timeline_value != 0;
   bool added_memory_reuse_dependency = false;
-  if (source_stream_id != 0 && source_stream_id != stream->stream_id &&
-      source_timeline_value != 0) {
-    IREE_RETURN_AND_END_ZONE_IF_ERROR(
-        z0, iree_hal_streaming_stream_reserve_memory_reuse_dependency(
-                stream, source_stream_id, &added_memory_reuse_dependency));
+  iree_status_t status = iree_ok_status();
+  if (files_memory_reuse_dependency) {
+    status = iree_hal_streaming_stream_reserve_memory_reuse_dependency(
+        stream, source_stream_id, &added_memory_reuse_dependency);
   }
 
   // Flush the stream to ensure all prior operations are submitted.
-  IREE_RETURN_AND_END_ZONE_IF_ERROR(z0,
-                                    iree_hal_streaming_stream_flush(stream));
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_streaming_stream_flush(stream);
+  }
 
-  iree_slim_mutex_lock(&stream->mutex);
+  if (iree_status_is_ok(status)) {
+    iree_slim_mutex_lock(&stream->mutex);
 
-  // Reserve the next stream timeline value and submit a barrier that completes
-  // only after the event is signaled. The value is submitted, not completed;
-  // query/synchronize advance completed_value after observing the semaphore.
-  uint64_t wait_value = 0;
-  uint64_t signal_value = 0;
-  iree_status_t status = iree_hal_streaming_stream_reserve_next_value_locked(
-      stream, &wait_value, &signal_value);
-  if (!iree_status_is_ok(status)) {
+    // Reserve the next stream timeline value and submit a barrier that
+    // completes only after the event is signaled. The value is submitted, not
+    // completed; query/synchronize advance completed_value after observing the
+    // semaphore.
+    uint64_t wait_value = 0;
+    uint64_t signal_value = 0;
+    status = iree_hal_streaming_stream_reserve_next_value_locked(
+        stream, &wait_value, &signal_value);
+    if (iree_status_is_ok(status)) {
+      // The barrier waits on the point the event was recorded at and on
+      // everything already on this stream, so the value it signals stays behind
+      // the value below it. Either wait is dropped when there is nothing behind
+      // it: a stream that has never submitted, or an event with no submitted
+      // record.
+      iree_hal_semaphore_t* wait_semaphore_storage[2];
+      uint64_t wait_value_storage[2];
+      iree_host_size_t wait_count = 0;
+      if (wait_value > 0) {
+        wait_semaphore_storage[wait_count] = stream->timeline_semaphore;
+        wait_value_storage[wait_count] = wait_value;
+        ++wait_count;
+      }
+      if (recorded_point.semaphore) {
+        wait_semaphore_storage[wait_count] = recorded_point.semaphore;
+        wait_value_storage[wait_count] = recorded_point.value;
+        ++wait_count;
+      }
+      iree_hal_semaphore_list_t wait_semaphores = {
+          .count = wait_count,
+          .semaphores = wait_semaphore_storage,
+          .payload_values = wait_value_storage,
+      };
+      iree_hal_semaphore_list_t signal_semaphores = {
+          .count = 1,
+          .semaphores = &stream->timeline_semaphore,
+          .payload_values = &signal_value,
+      };
+
+      status = iree_hal_device_queue_barrier(
+          stream->context->device, stream->queue_affinity, wait_semaphores,
+          signal_semaphores, IREE_HAL_EXECUTE_FLAG_NONE);
+      if (iree_status_is_ok(status)) {
+        status = iree_hal_device_queue_flush(stream->context->device,
+                                             stream->queue_affinity);
+      }
+      if (iree_status_is_ok(status)) {
+        stream->pending_value = signal_value;
+        stream->submitted_value = signal_value;
+      }
+    }
+
     iree_slim_mutex_unlock(&stream->mutex);
-    IREE_TRACE_ZONE_END(z0);
-    return status;
   }
 
-  // The barrier waits on the point the event was recorded at and on everything
-  // already on this stream, so the value it signals stays behind the value
-  // below it. Either wait is dropped when there is nothing behind it: a stream
-  // that has never submitted, or an event with no submitted record.
-  iree_hal_semaphore_t* event_semaphore = NULL;
-  uint64_t event_signal_value = 0;
-  iree_hal_streaming_event_acquire_recorded_point(event, &event_semaphore,
-                                                  &event_signal_value);
-  iree_hal_semaphore_t* wait_semaphore_storage[2];
-  uint64_t wait_value_storage[2];
-  iree_host_size_t wait_count = 0;
-  if (wait_value > 0) {
-    wait_semaphore_storage[wait_count] = stream->timeline_semaphore;
-    wait_value_storage[wait_count] = wait_value;
-    ++wait_count;
-  }
-  if (event_semaphore) {
-    wait_semaphore_storage[wait_count] = event_semaphore;
-    wait_value_storage[wait_count] = event_signal_value;
-    ++wait_count;
-  }
-  iree_hal_semaphore_list_t wait_semaphores = {
-      .count = wait_count,
-      .semaphores = wait_semaphore_storage,
-      .payload_values = wait_value_storage,
-  };
-  iree_hal_semaphore_list_t signal_semaphores = {
-      .count = 1,
-      .semaphores = &stream->timeline_semaphore,
-      .payload_values = &signal_value,
-  };
+  iree_hal_semaphore_release(recorded_point.semaphore);
 
-  status = iree_hal_device_queue_barrier(
-      stream->context->device, stream->queue_affinity, wait_semaphores,
-      signal_semaphores, IREE_HAL_EXECUTE_FLAG_NONE);
-  if (iree_status_is_ok(status)) {
-    status = iree_hal_device_queue_flush(stream->context->device,
-                                         stream->queue_affinity);
-  }
-  if (iree_status_is_ok(status)) {
-    stream->pending_value = signal_value;
-    stream->submitted_value = signal_value;
-  }
-
-  iree_slim_mutex_unlock(&stream->mutex);
-  iree_hal_semaphore_release(event_semaphore);
-  if (!iree_status_is_ok(status) && added_memory_reuse_dependency) {
-    iree_hal_streaming_stream_remove_uncommitted_memory_reuse_dependency(
-        stream, source_stream_id);
+  // The reservation holds the dependency slot from before the submission so a
+  // concurrent reservation for the same source stream cannot displace it. It
+  // carries no value until the submission that establishes the ordering is
+  // accepted, and is withdrawn when that submission is not.
+  if (files_memory_reuse_dependency) {
+    if (iree_status_is_ok(status)) {
+      iree_hal_streaming_stream_record_memory_reuse_dependency(
+          stream, source_stream_id, source_timeline_value);
+    } else if (added_memory_reuse_dependency) {
+      iree_hal_streaming_stream_remove_uncommitted_memory_reuse_dependency(
+          stream, source_stream_id);
+    }
   }
   IREE_RETURN_AND_END_ZONE_IF_ERROR(z0, status);
-  if (source_stream_id != 0 && source_stream_id != stream->stream_id &&
-      source_timeline_value != 0) {
-    iree_hal_streaming_stream_record_memory_reuse_dependency(
-        stream, source_stream_id, source_timeline_value);
-  }
 
   IREE_TRACE_ZONE_END(z0);
   return iree_ok_status();

@@ -1909,6 +1909,7 @@ iree_status_t iree_hal_streaming_graph_exec_instantiate_from_template(
 
 static iree_status_t iree_hal_streaming_graph_exec_submit_blocks_locked(
     iree_hal_streaming_graph_exec_t* exec, iree_hal_streaming_stream_t* stream,
+    uint64_t launch_stream_tail_value,
     iree_hal_semaphore_list_t external_wait_semaphores,
     iree_hal_semaphore_list_t external_signal_semaphores);
 
@@ -1929,7 +1930,7 @@ static iree_status_t iree_hal_streaming_graph_host_callback(
 static iree_status_t iree_hal_streaming_graph_submit_block(
     iree_hal_streaming_graph_block_t* block,
     const iree_hal_streaming_graph_block_ptrs_t* ptrs,
-    iree_hal_streaming_stream_t* stream,
+    iree_hal_streaming_stream_t* stream, uint64_t launch_stream_tail_value,
     iree_hal_semaphore_list_t wait_semaphores,
     iree_hal_semaphore_list_t signal_semaphores) {
   switch (block->type) {
@@ -1994,8 +1995,13 @@ static iree_status_t iree_hal_streaming_graph_submit_block(
     case IREE_HAL_STREAMING_GRAPH_BLOCK_TYPE_CHILD_GRAPH: {
       iree_hal_streaming_graph_exec_t* child_exec =
           ptrs->attrs->child_graph.exec;
+      // Only the child's block 0 carries this block's waits, which are
+      // themselves behind the launch tail; a record inside the child sits in a
+      // single-block partition that either is block 0 or chains back to it, so
+      // the tail carries down unchanged.
       return iree_hal_streaming_graph_exec_submit_blocks_locked(
-          child_exec, stream, wait_semaphores, signal_semaphores);
+          child_exec, stream, launch_stream_tail_value, wait_semaphores,
+          signal_semaphores);
     }
     default:
       return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
@@ -2003,8 +2009,16 @@ static iree_status_t iree_hal_streaming_graph_submit_block(
   }
 }
 
+// |launch_stream_tail_value| is the value on |stream|'s timeline that the whole
+// launch waits behind, or 0 when the stream had never submitted. Only block 0
+// carries the launch's external waits, and the extra workstream blocks of the
+// first partition wait on nothing, so a block is behind the tail only when it
+// chains back to block 0. An event record node is never recordable and so gets
+// a partition of its own holding a single block, which either is block 0 or
+// waits on every signal of the partition ahead of it, back to block 0.
 static iree_status_t iree_hal_streaming_graph_exec_submit_blocks_locked(
     iree_hal_streaming_graph_exec_t* exec, iree_hal_streaming_stream_t* stream,
+    uint64_t launch_stream_tail_value,
     iree_hal_semaphore_list_t external_wait_semaphores,
     iree_hal_semaphore_list_t external_signal_semaphores) {
   enum {
@@ -2145,16 +2159,19 @@ static iree_status_t iree_hal_streaming_graph_exec_submit_blocks_locked(
       ++wait_count;
     }
     // Retained across the submission so a concurrent record of the same event
-    // cannot drop the last reference to the timeline this block names.
-    iree_hal_semaphore_t* event_wait_semaphore = NULL;
+    // cannot drop the last reference to the timeline this block names. Unlike
+    // iree_hal_streaming_stream_wait_event, the point's stream ordering is not
+    // filed in |stream|'s memory reuse ledger; a missing entry only withholds
+    // allocations from reuse, so the omission costs reuse and can never grant
+    // it.
+    iree_hal_streaming_recorded_point_t event_wait_point = {0};
     if (block_waits_event) {
-      uint64_t event_wait_value = 0;
-      iree_hal_streaming_event_acquire_recorded_point(
-          ptrs.attrs->event.event, &event_wait_semaphore, &event_wait_value);
+      iree_hal_streaming_event_acquire_recorded_point(ptrs.attrs->event.event,
+                                                      &event_wait_point);
       // A wait on an event with no submitted record has nothing to wait for.
-      if (event_wait_semaphore) {
-        wait_sems[wait_count] = event_wait_semaphore;
-        wait_vals[wait_count] = event_wait_value;
+      if (event_wait_point.semaphore) {
+        wait_sems[wait_count] = event_wait_point.semaphore;
+        wait_vals[wait_count] = event_wait_point.value;
         ++wait_count;
       }
     }
@@ -2204,18 +2221,32 @@ static iree_status_t iree_hal_streaming_graph_exec_submit_blocks_locked(
       const iree_time_t record_time_ns =
           block_records_event ? iree_time_now() : 0;
       status = iree_hal_streaming_graph_submit_block(
-          block, &ptrs, stream, wait_semaphores, signal_semaphores);
+          block, &ptrs, stream, launch_stream_tail_value, wait_semaphores,
+          signal_semaphores);
       // A rejected block signals nothing, so the event keeps its old point. The
       // commit stays inside this iteration because later blocks in the same
       // launch wait on the committed point. The recording stream is left alone:
       // it carries capture state and a launch is not a capture.
       if (block_records_event && iree_status_is_ok(status)) {
+        // The block's first signal is the point the record names. When that
+        // signal is the launching stream's own timeline the point is exactly a
+        // stream point; otherwise it is internal to the launch and all that is
+        // known about the stream is that the launch waited behind its tail.
+        const bool signals_launch_stream_timeline =
+            signal_sems[0] == stream->timeline_semaphore;
+        const iree_hal_streaming_recorded_point_t recorded_point = {
+            .semaphore = signal_sems[0],
+            .value = signal_vals[0],
+            .ordered_after_stream_id = stream->stream_id,
+            .ordered_after_stream_value = signals_launch_stream_timeline
+                                              ? signal_vals[0]
+                                              : launch_stream_tail_value,
+        };
         iree_hal_streaming_event_commit_recorded_point(
-            ptrs.attrs->event.event, signal_sems[0], signal_vals[0],
-            record_time_ns);
+            ptrs.attrs->event.event, recorded_point, record_time_ns);
       }
     }
-    iree_hal_semaphore_release(event_wait_semaphore);
+    iree_hal_semaphore_release(event_wait_point.semaphore);
     if (free_value_array) {
       iree_allocator_free(exec->host_allocator, value_array);
     }
@@ -2340,7 +2371,7 @@ iree_status_t iree_hal_streaming_graph_exec_launch(
   };
   if (iree_status_is_ok(status)) {
     status = iree_hal_streaming_graph_exec_submit_blocks_locked(
-        exec, stream, wait_semaphores, signal_semaphores);
+        exec, stream, stream_wait_value, wait_semaphores, signal_semaphores);
   }
 
   if (iree_status_is_ok(status)) {

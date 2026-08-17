@@ -28,8 +28,7 @@ iree_status_t iree_hal_streaming_event_create(
   iree_atomic_ref_count_init(&event->ref_count);
   event->flags = flags;
   iree_slim_mutex_initialize(&event->mutex);
-  event->signal_semaphore = NULL;
-  event->signal_value = 0;
+  event->recorded_point = (iree_hal_streaming_recorded_point_t){0};
   event->recording_stream = NULL;
   event->context = context;
   iree_hal_streaming_context_retain(context);
@@ -51,7 +50,7 @@ static void iree_hal_streaming_event_destroy(
   IREE_TRACE_ZONE_BEGIN(z0);
 
   // Release the recorded point.
-  iree_hal_semaphore_release(event->signal_semaphore);
+  iree_hal_semaphore_release(event->recorded_point.semaphore);
 
   // Release recording stream reference.
   iree_hal_streaming_stream_release(event->recording_stream);
@@ -83,23 +82,21 @@ void iree_hal_streaming_event_release(iree_hal_streaming_event_t* event) {
 }
 
 void iree_hal_streaming_event_acquire_recorded_point(
-    iree_hal_streaming_event_t* event, iree_hal_semaphore_t** out_semaphore,
-    uint64_t* out_value) {
+    iree_hal_streaming_event_t* event,
+    iree_hal_streaming_recorded_point_t* out_point) {
   iree_slim_mutex_lock(&event->mutex);
-  *out_semaphore = event->signal_semaphore;
-  *out_value = event->signal_value;
-  iree_hal_semaphore_retain(*out_semaphore);
+  *out_point = event->recorded_point;
+  iree_hal_semaphore_retain(out_point->semaphore);
   iree_slim_mutex_unlock(&event->mutex);
 }
 
 void iree_hal_streaming_event_commit_recorded_point(
-    iree_hal_streaming_event_t* event, iree_hal_semaphore_t* semaphore,
-    uint64_t value, iree_time_t record_time_ns) {
-  iree_hal_semaphore_retain(semaphore);
+    iree_hal_streaming_event_t* event,
+    iree_hal_streaming_recorded_point_t point, iree_time_t record_time_ns) {
+  iree_hal_semaphore_retain(point.semaphore);
   iree_slim_mutex_lock(&event->mutex);
-  iree_hal_semaphore_t* previous_semaphore = event->signal_semaphore;
-  event->signal_semaphore = semaphore;
-  event->signal_value = value;
+  iree_hal_semaphore_t* previous_semaphore = event->recorded_point.semaphore;
+  event->recorded_point = point;
   event->record_time_ns = record_time_ns;
   iree_slim_mutex_unlock(&event->mutex);
   iree_hal_semaphore_release(previous_semaphore);
@@ -133,11 +130,9 @@ iree_status_t iree_hal_streaming_event_query(iree_hal_streaming_event_t* event,
   IREE_ASSERT_ARGUMENT(status);
   IREE_TRACE_ZONE_BEGIN(z0);
 
-  iree_hal_semaphore_t* semaphore = NULL;
-  uint64_t signal_value = 0;
-  iree_hal_streaming_event_acquire_recorded_point(event, &semaphore,
-                                                  &signal_value);
-  if (!semaphore) {
+  iree_hal_streaming_recorded_point_t recorded_point;
+  iree_hal_streaming_event_acquire_recorded_point(event, &recorded_point);
+  if (!recorded_point.semaphore) {
     // An event with no submitted record reads as complete.
     *status = 0;
     IREE_TRACE_ZONE_END(z0);
@@ -146,12 +141,12 @@ iree_status_t iree_hal_streaming_event_query(iree_hal_streaming_event_t* event,
 
   uint64_t current_value = 0;
   iree_status_t query_status =
-      iree_hal_semaphore_query(semaphore, &current_value);
-  iree_hal_semaphore_release(semaphore);
+      iree_hal_semaphore_query(recorded_point.semaphore, &current_value);
+  iree_hal_semaphore_release(recorded_point.semaphore);
   IREE_RETURN_AND_END_ZONE_IF_ERROR(z0, query_status);
 
-  *status =
-      (current_value >= signal_value) ? 0 : 1;  // 0=complete, 1=not complete
+  // 0=complete, 1=not complete.
+  *status = (current_value >= recorded_point.value) ? 0 : 1;
 
   IREE_TRACE_ZONE_END(z0);
   return iree_ok_status();
@@ -239,9 +234,17 @@ iree_status_t iree_hal_streaming_event_record(
   if (iree_status_is_ok(status)) {
     stream->pending_value = stream_signal_value;
     stream->submitted_value = stream_signal_value;
+    // The barrier signals the stream's own timeline, so reaching the point is
+    // exactly the stream reaching that value.
+    const iree_hal_streaming_recorded_point_t recorded_point = {
+        .semaphore = stream->timeline_semaphore,
+        .value = stream_signal_value,
+        .ordered_after_stream_id = stream->stream_id,
+        .ordered_after_stream_value = stream_signal_value,
+    };
     // A rejected submission signals nothing, so the event keeps its old point.
-    iree_hal_streaming_event_commit_recorded_point(
-        event, stream->timeline_semaphore, stream_signal_value, record_time_ns);
+    iree_hal_streaming_event_commit_recorded_point(event, recorded_point,
+                                                   record_time_ns);
     previous_stream =
         iree_hal_streaming_event_exchange_recording_stream(event, stream);
   }
@@ -260,20 +263,18 @@ iree_status_t iree_hal_streaming_event_synchronize(
   IREE_ASSERT_ARGUMENT(event);
   IREE_TRACE_ZONE_BEGIN(z0);
 
-  iree_hal_semaphore_t* semaphore = NULL;
-  uint64_t signal_value = 0;
-  iree_hal_streaming_event_acquire_recorded_point(event, &semaphore,
-                                                  &signal_value);
-  if (!semaphore) {
+  iree_hal_streaming_recorded_point_t recorded_point;
+  iree_hal_streaming_event_acquire_recorded_point(event, &recorded_point);
+  if (!recorded_point.semaphore) {
     // An event with no submitted record has nothing to wait for.
     IREE_TRACE_ZONE_END(z0);
     return iree_ok_status();
   }
 
-  iree_status_t status =
-      iree_hal_semaphore_wait(semaphore, signal_value, iree_infinite_timeout(),
-                              IREE_ASYNC_WAIT_FLAG_NONE);
-  iree_hal_semaphore_release(semaphore);
+  iree_status_t status = iree_hal_semaphore_wait(
+      recorded_point.semaphore, recorded_point.value, iree_infinite_timeout(),
+      IREE_ASYNC_WAIT_FLAG_NONE);
+  iree_hal_semaphore_release(recorded_point.semaphore);
   IREE_RETURN_AND_END_ZONE_IF_ERROR(z0, status);
 
   IREE_TRACE_ZONE_END(z0);
