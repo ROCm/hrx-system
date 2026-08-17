@@ -32,7 +32,6 @@ iree_status_t iree_hal_streaming_event_create(
   event->recording_stream = NULL;
   event->context = context;
   iree_hal_streaming_context_retain(context);
-  event->record_time_ns = 0;
   event->ipc_handle = NULL;
   event->capture_graph = NULL;
   event->capture_dependencies = NULL;
@@ -92,12 +91,11 @@ void iree_hal_streaming_event_acquire_recorded_point(
 
 void iree_hal_streaming_event_commit_recorded_point(
     iree_hal_streaming_event_t* event,
-    iree_hal_streaming_recorded_point_t point, iree_time_t record_time_ns) {
+    iree_hal_streaming_recorded_point_t point) {
   iree_hal_semaphore_retain(point.semaphore);
   iree_slim_mutex_lock(&event->mutex);
   iree_hal_semaphore_t* previous_semaphore = event->recorded_point.semaphore;
   event->recorded_point = point;
-  event->record_time_ns = record_time_ns;
   iree_slim_mutex_unlock(&event->mutex);
   iree_hal_semaphore_release(previous_semaphore);
 }
@@ -116,12 +114,18 @@ iree_hal_streaming_stream_t* iree_hal_streaming_event_exchange_recording_stream(
   return previous_stream;
 }
 
-iree_time_t iree_hal_streaming_event_record_time_ns(
-    iree_hal_streaming_event_t* event) {
-  iree_slim_mutex_lock(&event->mutex);
-  const iree_time_t record_time_ns = event->record_time_ns;
-  iree_slim_mutex_unlock(&event->mutex);
-  return record_time_ns;
+// Returns whether |point| has been reached. A point naming no timeline has no
+// submitted record and reads as reached. Borrows |point|: the reference taken
+// when the point was acquired stays with the acquirer, which releases it.
+static iree_status_t iree_hal_streaming_recorded_point_query(
+    const iree_hal_streaming_recorded_point_t* point, bool* out_reached) {
+  *out_reached = true;
+  if (!point->semaphore) return iree_ok_status();
+  uint64_t current_value = 0;
+  IREE_RETURN_IF_ERROR(
+      iree_hal_semaphore_query(point->semaphore, &current_value));
+  *out_reached = current_value >= point->value;
+  return iree_ok_status();
 }
 
 iree_status_t iree_hal_streaming_event_query(iree_hal_streaming_event_t* event,
@@ -132,21 +136,14 @@ iree_status_t iree_hal_streaming_event_query(iree_hal_streaming_event_t* event,
 
   iree_hal_streaming_recorded_point_t recorded_point;
   iree_hal_streaming_event_acquire_recorded_point(event, &recorded_point);
-  if (!recorded_point.semaphore) {
-    // An event with no submitted record reads as complete.
-    *status = 0;
-    IREE_TRACE_ZONE_END(z0);
-    return iree_ok_status();
-  }
-
-  uint64_t current_value = 0;
+  bool reached = false;
   iree_status_t query_status =
-      iree_hal_semaphore_query(recorded_point.semaphore, &current_value);
+      iree_hal_streaming_recorded_point_query(&recorded_point, &reached);
   iree_hal_semaphore_release(recorded_point.semaphore);
   IREE_RETURN_AND_END_ZONE_IF_ERROR(z0, query_status);
 
   // 0=complete, 1=not complete.
-  *status = (current_value >= recorded_point.value) ? 0 : 1;
+  *status = reached ? 0 : 1;
 
   IREE_TRACE_ZONE_END(z0);
   return iree_ok_status();
@@ -180,8 +177,8 @@ iree_status_t iree_hal_streaming_event_record(
       iree_hal_streaming_graph_retain(event->capture_graph);
     }
     // A captured record produces no submission, so it leaves the recorded point
-    // and the record time alone; only the stream is adopted, for the later wait
-    // that picks the capture up from the stream that captured it.
+    // alone; only the stream is adopted, for the later wait that picks the
+    // capture up from the stream that captured it.
     iree_hal_streaming_stream_release(
         iree_hal_streaming_event_exchange_recording_stream(event, stream));
     IREE_TRACE_ZONE_END(z0);
@@ -238,10 +235,10 @@ iree_status_t iree_hal_streaming_event_record(
         .value = stream_signal_value,
         .ordered_after_stream_id = stream->stream_id,
         .ordered_after_stream_value = stream_signal_value,
+        .record_time_ns = record_time_ns,
     };
     // A rejected submission signals nothing, so the event keeps its old point.
-    iree_hal_streaming_event_commit_recorded_point(event, recorded_point,
-                                                   record_time_ns);
+    iree_hal_streaming_event_commit_recorded_point(event, recorded_point);
     previous_stream =
         iree_hal_streaming_event_exchange_recording_stream(event, stream);
     status = iree_hal_device_queue_flush(stream->context->device,
@@ -282,47 +279,52 @@ iree_status_t iree_hal_streaming_event_synchronize(
 
 iree_status_t iree_hal_streaming_event_elapsed_time(
     float* ms, iree_hal_streaming_event_t* start,
-    iree_hal_streaming_event_t* stop) {
+    iree_hal_streaming_event_t* stop,
+    iree_hal_streaming_event_timing_t* out_timing) {
   IREE_ASSERT_ARGUMENT(ms);
   IREE_ASSERT_ARGUMENT(start);
   IREE_ASSERT_ARGUMENT(stop);
+  IREE_ASSERT_ARGUMENT(out_timing);
+  *out_timing = IREE_HAL_STREAMING_EVENT_TIMING_UNTIMED;
 
-  // Check if either event has timing disabled.
+  // An event with timing disabled never carries a timestamp to measure from.
   if ((start->flags & IREE_HAL_STREAMING_EVENT_FLAG_DISABLE_TIMING) ||
       (stop->flags & IREE_HAL_STREAMING_EVENT_FLAG_DISABLE_TIMING)) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "cannot measure elapsed time with timing disabled");
+    return iree_ok_status();
   }
 
-  // Ensure both events have been recorded.
-  const iree_time_t start_time_ns =
-      iree_hal_streaming_event_record_time_ns(start);
-  const iree_time_t stop_time_ns =
-      iree_hal_streaming_event_record_time_ns(stop);
-  if (start_time_ns == 0 || stop_time_ns == 0) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "events must be recorded before measuring elapsed time");
+  // Each record is taken once and the interval is measured between exactly the
+  // two records queried below, so a record landing on either event concurrently
+  // cannot pair one record's timestamp with another record's point.
+  iree_hal_streaming_recorded_point_t start_point;
+  iree_hal_streaming_recorded_point_t stop_point;
+  iree_hal_streaming_event_acquire_recorded_point(start, &start_point);
+  iree_hal_streaming_event_acquire_recorded_point(stop, &stop_point);
+
+  // Both records must carry a timestamp and both must have been reached before
+  // the interval between them exists. The stop record is only queried once the
+  // start record is known to have been reached, so an outstanding start reports
+  // the interval as incomplete without touching the stop timeline.
+  iree_status_t status = iree_ok_status();
+  if (start_point.record_time_ns != 0 && stop_point.record_time_ns != 0) {
+    bool reached = false;
+    status = iree_hal_streaming_recorded_point_query(&start_point, &reached);
+    if (iree_status_is_ok(status) && reached) {
+      status = iree_hal_streaming_recorded_point_query(&stop_point, &reached);
+    }
+    if (iree_status_is_ok(status)) {
+      if (reached) {
+        const int64_t elapsed_ns =
+            stop_point.record_time_ns - start_point.record_time_ns;
+        *ms = (float)elapsed_ns / 1000000.0f;
+        *out_timing = IREE_HAL_STREAMING_EVENT_TIMING_MEASURED;
+      } else {
+        *out_timing = IREE_HAL_STREAMING_EVENT_TIMING_INCOMPLETE;
+      }
+    }
   }
 
-  // Ensure both events have completed.
-  int start_status = 0;
-  IREE_RETURN_IF_ERROR(iree_hal_streaming_event_query(start, &start_status));
-  if (start_status != 0) {
-    return iree_make_status(IREE_STATUS_UNAVAILABLE,
-                            "start event has not completed");
-  }
-
-  int stop_status = 0;
-  IREE_RETURN_IF_ERROR(iree_hal_streaming_event_query(stop, &stop_status));
-  if (stop_status != 0) {
-    return iree_make_status(IREE_STATUS_UNAVAILABLE,
-                            "stop event has not completed");
-  }
-
-  // Calculate elapsed time in milliseconds.
-  int64_t elapsed_ns = stop_time_ns - start_time_ns;
-  *ms = (float)elapsed_ns / 1000000.0f;  // Convert nanoseconds to milliseconds.
-
-  return iree_ok_status();
+  iree_hal_semaphore_release(start_point.semaphore);
+  iree_hal_semaphore_release(stop_point.semaphore);
+  return status;
 }

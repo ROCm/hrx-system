@@ -2241,9 +2241,10 @@ static iree_status_t iree_hal_streaming_graph_exec_submit_blocks_locked(
             .ordered_after_stream_value = signals_launch_stream_timeline
                                               ? signal_vals[0]
                                               : launch_stream_tail_value,
+            .record_time_ns = record_time_ns,
         };
-        iree_hal_streaming_event_commit_recorded_point(
-            ptrs.attrs->event.event, recorded_point, record_time_ns);
+        iree_hal_streaming_event_commit_recorded_point(ptrs.attrs->event.event,
+                                                       recorded_point);
       }
     }
     iree_hal_semaphore_release(event_wait_point.semaphore);

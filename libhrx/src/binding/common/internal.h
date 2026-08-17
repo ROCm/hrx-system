@@ -736,8 +736,9 @@ typedef enum iree_hal_streaming_event_flag_bits_e {
 } iree_hal_streaming_event_flags_t;
 
 // The timeline point a submitted event record names, together with the stream
-// timeline point that reaching it implies. Published and read as one value so
-// no reader can pair one record's semaphore with another record's value.
+// timeline point that reaching it implies and the host time the record was
+// issued at. Published and read as one value so no reader can pair one record's
+// semaphore, value or timestamp with another record's.
 typedef struct iree_hal_streaming_recorded_point_t {
   // Timeline semaphore the record's submission signals, or NULL when no record
   // has been submitted. Retained by whoever holds the point.
@@ -754,6 +755,11 @@ typedef struct iree_hal_streaming_recorded_point_t {
   // inside a graph launch is ordered after the tail the launch waited on,
   // which is earlier than anything the launch signals.
   uint64_t ordered_after_stream_value;
+  // Host time in nanoseconds the record was issued at, or 0 when no record has
+  // been submitted. Sampled before the submission, so it marks when the caller
+  // issued the record, not when the point is reached; elapsed time reads 0 here
+  // as "never recorded".
+  iree_time_t record_time_ns;
 } iree_hal_streaming_recorded_point_t;
 
 // Event for synchronization.
@@ -764,8 +770,9 @@ typedef struct iree_hal_streaming_event_t {
   // Event properties.
   iree_hal_streaming_event_flags_t flags;
 
-  // Guards |recorded_point| and |record_time_ns|, which must be read together
-  // or a reader pairs one record's point with another record's timestamp.
+  // Guards |recorded_point|, which carries the record's point and timestamp as
+  // one value so no reader can pair one record's point with another record's
+  // timestamp.
   // Acquired after the recording stream's mutex and after the graph
   // executable's mutex; no path takes either while holding this one.
   // Waits happen outside it: readers copy and retain the point under it.
@@ -786,11 +793,6 @@ typedef struct iree_hal_streaming_event_t {
   // Context that created the event, retained.
   iree_hal_streaming_context_t* context;
 
-  // Host time in nanoseconds the last submitted record was issued at, or 0 when
-  // no record has been submitted. Guarded by |mutex| and adopted with the
-  // recorded point; elapsed time reads 0 here as "never recorded".
-  iree_time_t record_time_ns;
-
   // Platform-specific IPC handle, if the event is IPC enabled.
   void* ipc_handle;
 
@@ -806,6 +808,20 @@ typedef struct iree_hal_streaming_event_t {
   // Host allocator.
   iree_allocator_t host_allocator;
 } iree_hal_streaming_event_t;
+
+// Outcome of measuring the interval between two event records. Carried out of
+// band from the status because a failed timeline propagates its own status
+// verbatim, and that status can carry any code, including whichever one a
+// measurement outcome would otherwise have used.
+typedef enum iree_hal_streaming_event_timing_e {
+  // Both records were reached and the interval between them was measured.
+  IREE_HAL_STREAMING_EVENT_TIMING_MEASURED = 0,
+  // At least one of the events carries no timestamp, because timing is disabled
+  // on it or because no record of it has been submitted.
+  IREE_HAL_STREAMING_EVENT_TIMING_UNTIMED,
+  // Both events carry a timestamp but at least one record has not been reached.
+  IREE_HAL_STREAMING_EVENT_TIMING_INCOMPLETE,
+} iree_hal_streaming_event_timing_t;
 
 //===----------------------------------------------------------------------===//
 // Memory types
@@ -1780,7 +1796,7 @@ void iree_hal_streaming_event_acquire_recorded_point(
 // Synchronization: event (event mutex held while replacing the point).
 void iree_hal_streaming_event_commit_recorded_point(
     iree_hal_streaming_event_t* event,
-    iree_hal_streaming_recorded_point_t point, iree_time_t record_time_ns);
+    iree_hal_streaming_recorded_point_t point);
 
 // Makes |stream| the stream whose capture state |event| belongs to, taking a
 // reference to it, and transfers the previously referenced stream to the
@@ -1793,12 +1809,6 @@ void iree_hal_streaming_event_commit_recorded_point(
 iree_hal_streaming_stream_t* iree_hal_streaming_event_exchange_recording_stream(
     iree_hal_streaming_event_t* event, iree_hal_streaming_stream_t* stream);
 
-// Returns the host time the last submitted record of |event| was issued at, or
-// 0 when no record has been submitted.
-// Synchronization: event (event mutex held while reading).
-iree_time_t iree_hal_streaming_event_record_time_ns(
-    iree_hal_streaming_event_t* event);
-
 // Synchronization: stream flush (flushes stream before recording).
 iree_status_t iree_hal_streaming_event_record(
     iree_hal_streaming_event_t* event, iree_hal_streaming_stream_t* stream);
@@ -1807,10 +1817,20 @@ iree_status_t iree_hal_streaming_event_record(
 iree_status_t iree_hal_streaming_event_synchronize(
     iree_hal_streaming_event_t* event);
 
-// Synchronization: both events (waits for both events to complete).
+// Measures the interval between the records |start| and |stop| name and stores
+// it in milliseconds in |*ms|. Writes |*ms| only when |*out_timing| is
+// MEASURED; every other outcome leaves it untouched.
+//
+// |*out_timing| says why no interval was produced and is meaningful only when
+// this returns ok. A non-ok status comes from querying a timeline and belongs
+// to whatever failed the device, not to the events.
+//
+// Synchronization: both events (each event's mutex held while its record is
+// copied; no waiting).
 iree_status_t iree_hal_streaming_event_elapsed_time(
     float* ms, iree_hal_streaming_event_t* start,
-    iree_hal_streaming_event_t* stop);
+    iree_hal_streaming_event_t* stop,
+    iree_hal_streaming_event_timing_t* out_timing);
 
 //===----------------------------------------------------------------------===//
 // Memory management

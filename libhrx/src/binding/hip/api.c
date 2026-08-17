@@ -11249,21 +11249,29 @@ HIPAPI hipError_t hipEventElapsedTime(float* ms, hipEvent_t start,
     HIP_RETURN_ERROR(hipErrorInvalidHandle);
   }
 
-  // Check if either event has timing disabled.
-  if ((start_event->flags & IREE_HAL_STREAMING_EVENT_FLAG_DISABLE_TIMING) ||
-      (stop_event->flags & IREE_HAL_STREAMING_EVENT_FLAG_DISABLE_TIMING)) {
-    HIP_RETURN_ERROR(hipErrorInvalidHandle);
+  iree_hal_streaming_event_timing_t timing =
+      IREE_HAL_STREAMING_EVENT_TIMING_UNTIMED;
+  iree_status_t status = iree_hal_streaming_event_elapsed_time(
+      ms, start_event, stop_event, &timing);
+  if (!iree_status_is_ok(status)) {
+    // The timeline a record names has failed; the event handles are fine.
+    return iree_status_to_hip_result(status);
   }
-
-  if (iree_hal_streaming_event_record_time_ns(start_event) == 0 ||
-      iree_hal_streaming_event_record_time_ns(stop_event) == 0) {
-    HIP_RETURN_ERROR(hipErrorInvalidHandle);
+  hipError_t result = hipErrorInvalidHandle;
+  switch (timing) {
+    case IREE_HAL_STREAMING_EVENT_TIMING_MEASURED:
+      result = hipSuccess;
+      break;
+    case IREE_HAL_STREAMING_EVENT_TIMING_INCOMPLETE:
+      result = hipErrorNotReady;
+      break;
+    case IREE_HAL_STREAMING_EVENT_TIMING_UNTIMED:
+      // An event with timing disabled or without a submitted record is a bad
+      // handle here, not a bad value.
+      result = hipErrorInvalidHandle;
+      break;
   }
-
-  iree_status_t status =
-      iree_hal_streaming_event_elapsed_time(ms, start_event, stop_event);
-  hipError_t result = iree_status_to_hip_result(status);
-  return result;
+  HIP_RETURN_ERROR(result);
 }
 
 //===----------------------------------------------------------------------===//
