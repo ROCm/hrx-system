@@ -10,6 +10,7 @@
 
 #include "common/internal.h"
 #include "common/memory.h"
+#include "common/stream.h"
 
 //===----------------------------------------------------------------------===//
 // Global state
@@ -102,6 +103,7 @@ iree_status_t iree_hal_streaming_context_create(
   context->stream_capacity =
       8;  // Pre-allocate for default stream + user streams.
   context->streams = NULL;
+  memset(context->stream_queue_counts, 0, sizeof(context->stream_queue_counts));
 
   // Initialize default limits.
   // These are typical defaults matching CUDA/HIP behavior.
@@ -655,6 +657,45 @@ iree_status_t iree_hal_streaming_context_register_stream(
   }
 
   if (iree_status_is_ok(status)) {
+    const iree_hal_device_queue_spec_t* queue_spec =
+        iree_hal_device_spec_queues(iree_hal_device_spec(context->device));
+    iree_host_size_t queue_count = 0;
+    iree_hal_queue_affinity_t eligible_queue_affinity = 0;
+    const iree_hal_queue_family_role_flags_t required_roles =
+        IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_DISPATCH |
+        IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_TRANSFER;
+    for (iree_host_size_t i = 0;
+         i < queue_spec->family_count && iree_status_is_ok(status); ++i) {
+      const iree_host_size_t family_base_ordinal = queue_count;
+      if (!iree_host_size_checked_add(
+              queue_count, queue_spec->families[i].queue_count, &queue_count) ||
+          queue_count > IREE_HAL_MAX_QUEUES) {
+        status = iree_make_status(
+            IREE_STATUS_FAILED_PRECONDITION,
+            "device exposes more queues than a queue affinity can represent");
+      } else if (iree_all_bits_set(queue_spec->families[i].role_flags,
+                                   required_roles)) {
+        for (iree_host_size_t j = family_base_ordinal; j < queue_count; ++j) {
+          eligible_queue_affinity |= 1ull << j;
+        }
+      }
+    }
+    if (iree_status_is_ok(status) && eligible_queue_affinity != 0) {
+      iree_host_size_t selected_queue_ordinal =
+          (iree_host_size_t)iree_hal_queue_affinity_find_first_set(
+              eligible_queue_affinity);
+      IREE_HAL_FOR_QUEUE_AFFINITY(eligible_queue_affinity) {
+        if (context->stream_queue_counts[queue_ordinal] <
+            context->stream_queue_counts[selected_queue_ordinal]) {
+          selected_queue_ordinal = queue_ordinal;
+        }
+      }
+      ++context->stream_queue_counts[selected_queue_ordinal];
+      stream->queue_affinity = 1ull << selected_queue_ordinal;
+    }
+  }
+
+  if (iree_status_is_ok(status)) {
     // Retain the stream - the context's stream list owns a reference.
     iree_hal_streaming_stream_retain(stream);
     context->streams[context->stream_count++] = stream;
@@ -683,10 +724,10 @@ iree_status_t iree_hal_streaming_context_allocate_capture_id(
   return iree_ok_status();
 }
 
-void iree_hal_streaming_context_unregister_stream(
+bool iree_hal_streaming_context_unregister_stream(
     iree_hal_streaming_context_t* context,
     iree_hal_streaming_stream_t* stream) {
-  if (!context || !stream) return;
+  if (!context || !stream) return false;
   IREE_TRACE_ZONE_BEGIN(z0);
 
   bool found = false;
@@ -697,6 +738,14 @@ void iree_hal_streaming_context_unregister_stream(
       // Swap with last and remove.
       context->streams[i] = context->streams[context->stream_count - 1];
       --context->stream_count;
+      if (!iree_hal_queue_affinity_is_any(stream->queue_affinity)) {
+        const int queue_ordinal =
+            iree_hal_queue_affinity_find_first_set(stream->queue_affinity);
+        IREE_ASSERT(queue_ordinal >= 0 && queue_ordinal < IREE_HAL_MAX_QUEUES &&
+                        context->stream_queue_counts[queue_ordinal] > 0,
+                    "registered stream queue assignment must be live");
+        --context->stream_queue_counts[queue_ordinal];
+      }
       found = true;
       break;
     }
@@ -712,6 +761,7 @@ void iree_hal_streaming_context_unregister_stream(
   }
 
   IREE_TRACE_ZONE_END(z0);
+  return found;
 }
 
 bool iree_hal_streaming_context_has_peer_contexts(
@@ -1145,10 +1195,11 @@ iree_status_t iree_hal_streaming_context_synchronize_all(void) {
   return status;
 }
 
-iree_status_t iree_hal_streaming_context_synchronize_blocking_streams(
+iree_status_t iree_hal_streaming_context_wait_blocking_streams(
     iree_hal_streaming_context_t* context,
-    iree_hal_streaming_stream_t* except_stream) {
+    iree_hal_streaming_stream_t* stream) {
   IREE_ASSERT_ARGUMENT(context);
+  IREE_ASSERT_ARGUMENT(stream);
   IREE_TRACE_ZONE_BEGIN(z0);
 
   iree_hal_streaming_stream_t** streams_copy = NULL;
@@ -1161,16 +1212,16 @@ iree_status_t iree_hal_streaming_context_synchronize_blocking_streams(
   }
 
   for (iree_host_size_t i = 0; i < count && iree_status_is_ok(status); ++i) {
-    iree_hal_streaming_stream_t* stream = streams_copy[i];
-    if (!stream || stream == except_stream ||
-        stream == context->default_stream ||
-        iree_any_bit_set(stream->flags,
+    iree_hal_streaming_stream_t* source_stream = streams_copy[i];
+    if (!source_stream || source_stream == stream ||
+        source_stream == context->default_stream ||
+        iree_any_bit_set(source_stream->flags,
                          IREE_HAL_STREAMING_STREAM_FLAG_NON_BLOCKING) ||
-        stream->capture_status != IREE_HAL_STREAMING_CAPTURE_STATUS_NONE) {
+        source_stream->capture_status !=
+            IREE_HAL_STREAMING_CAPTURE_STATUS_NONE) {
       continue;
     }
-    status = iree_hal_streaming_stream_synchronize_in_context(
-        stream, context, /*flush_context=*/true);
+    status = iree_hal_streaming_stream_wait_stream(stream, source_stream);
   }
 
   iree_hal_streaming_context_release_stream_snapshot(context, streams_copy,
@@ -1191,6 +1242,11 @@ iree_status_t iree_hal_streaming_context_query(
       context, &streams_copy, &count);
   for (iree_host_size_t i = 0; i < count && iree_status_is_ok(query_status);
        ++i) {
+    // The legacy default stream does not order with non-blocking streams.
+    if (iree_any_bit_set(streams_copy[i]->flags,
+                         IREE_HAL_STREAMING_STREAM_FLAG_NON_BLOCKING)) {
+      continue;
+    }
     int stream_status = 0;
     query_status = iree_hal_streaming_stream_query_in_context(
         streams_copy[i], context, &stream_status);

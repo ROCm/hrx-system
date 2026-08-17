@@ -576,6 +576,104 @@ iree_status_t iree_hal_streaming_stream_query_in_context(
   return iree_ok_status();
 }
 
+iree_status_t iree_hal_streaming_stream_wait_stream(
+    iree_hal_streaming_stream_t* stream,
+    iree_hal_streaming_stream_t* source_stream) {
+  IREE_ASSERT_ARGUMENT(stream);
+  IREE_ASSERT_ARGUMENT(source_stream);
+  if (stream == source_stream) return iree_ok_status();
+  if (stream->context != source_stream->context) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "stream dependency crosses contexts");
+  }
+
+  IREE_TRACE_ZONE_BEGIN(z0);
+
+  // Make the source timeline point concrete before reading it. A source with
+  // no submitted work cannot contribute a dependency.
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_hal_streaming_stream_flush(source_stream));
+  iree_slim_mutex_lock(&source_stream->mutex);
+  const uint64_t source_timeline_value = source_stream->submitted_value;
+  iree_slim_mutex_unlock(&source_stream->mutex);
+  if (source_timeline_value == 0) {
+    IREE_TRACE_ZONE_END(z0);
+    return iree_ok_status();
+  }
+  if (iree_hal_streaming_stream_has_memory_reuse_dependency(
+          stream, source_stream->stream_id, source_timeline_value)) {
+    IREE_TRACE_ZONE_END(z0);
+    return iree_ok_status();
+  }
+
+  bool added_memory_reuse_dependency = false;
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0,
+      iree_hal_streaming_stream_reserve_memory_reuse_dependency(
+          stream, source_stream->stream_id, &added_memory_reuse_dependency));
+
+  // Submit prior destination work before appending a queue dependency. The
+  // barrier advances the destination timeline only after both streams reach
+  // their captured points, so later command buffers naturally wait on it.
+  iree_status_t status = iree_hal_streaming_stream_flush(stream);
+  if (iree_status_is_ok(status)) {
+    iree_slim_mutex_lock(&stream->mutex);
+    const uint64_t destination_timeline_value = stream->pending_value;
+    if (IREE_UNLIKELY(destination_timeline_value == UINT64_MAX)) {
+      status = iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                                "stream timeline value overflow");
+    } else {
+      iree_hal_semaphore_t* wait_semaphores_storage[] = {
+          stream->timeline_semaphore,
+          source_stream->timeline_semaphore,
+      };
+      uint64_t wait_values_storage[] = {
+          destination_timeline_value,
+          source_timeline_value,
+      };
+      const iree_hal_semaphore_list_t wait_semaphores = {
+          .count = destination_timeline_value > 0 ? 2 : 1,
+          .semaphores = destination_timeline_value > 0
+                            ? wait_semaphores_storage
+                            : &wait_semaphores_storage[1],
+          .payload_values = destination_timeline_value > 0
+                                ? wait_values_storage
+                                : &wait_values_storage[1],
+      };
+      uint64_t signal_value = destination_timeline_value + 1;
+      const iree_hal_semaphore_list_t signal_semaphores = {
+          .count = 1,
+          .semaphores = &stream->timeline_semaphore,
+          .payload_values = &signal_value,
+      };
+      status = iree_hal_device_queue_barrier(
+          stream->context->device, stream->queue_affinity, wait_semaphores,
+          signal_semaphores, IREE_HAL_EXECUTE_FLAG_NONE);
+      if (iree_status_is_ok(status)) {
+        status = iree_hal_device_queue_flush(stream->context->device,
+                                             stream->queue_affinity);
+      }
+      if (iree_status_is_ok(status)) {
+        stream->pending_value = signal_value;
+        stream->submitted_value = signal_value;
+      }
+    }
+    iree_slim_mutex_unlock(&stream->mutex);
+  }
+
+  if (!iree_status_is_ok(status) && added_memory_reuse_dependency) {
+    iree_hal_streaming_stream_remove_uncommitted_memory_reuse_dependency(
+        stream, source_stream->stream_id);
+  }
+  if (iree_status_is_ok(status)) {
+    iree_hal_streaming_stream_record_memory_reuse_dependency(
+        stream, source_stream->stream_id, source_timeline_value);
+  }
+
+  IREE_TRACE_ZONE_END(z0);
+  return status;
+}
+
 iree_status_t iree_hal_streaming_stream_query(
     iree_hal_streaming_stream_t* stream, int* status) {
   IREE_ASSERT_ARGUMENT(stream);
@@ -672,8 +770,14 @@ static iree_status_t iree_hal_streaming_stream_synchronize_impl(
 
 iree_status_t iree_hal_streaming_stream_synchronize(
     iree_hal_streaming_stream_t* stream) {
+  // HIP launches are submitted when enqueued even though the streaming layer
+  // batches command-buffer recording. Publish work from every context before
+  // blocking so device-side dependencies cannot wait on a launch that remains
+  // recorded in another stream or physical-device context. The wait below is
+  // still scoped to |stream|.
+  IREE_RETURN_IF_ERROR(iree_hal_streaming_context_flush_all());
   return iree_hal_streaming_stream_synchronize_impl(stream, stream->context,
-                                                    /*flush_context=*/true);
+                                                    /*flush_context=*/false);
 }
 
 iree_status_t iree_hal_streaming_stream_synchronize_flushed(
@@ -1844,6 +1948,62 @@ iree_status_t iree_hal_streaming_queue_host_call(
   iree_status_t status = iree_hal_device_queue_host_call(
       stream->context->device, stream->queue_affinity, wait_semaphores,
       signal_semaphores, call, args, flags);
+  if (iree_status_is_ok(status)) {
+    stream->pending_value = signal_value;
+    stream->submitted_value = signal_value;
+  }
+  iree_slim_mutex_unlock(&stream->mutex);
+
+  IREE_TRACE_ZONE_END(z0);
+  return status;
+}
+
+iree_status_t iree_hal_streaming_queue_wait_value(
+    iree_hal_streaming_stream_t* stream, iree_hal_buffer_t* target_buffer,
+    iree_device_size_t target_offset, uint64_t value, uint64_t mask,
+    iree_host_size_t value_length, uint32_t condition, uint64_t flags,
+    iree_hal_streaming_queue_wait_value_fn_t queue_wait_value) {
+  IREE_ASSERT_ARGUMENT(stream);
+  IREE_ASSERT_ARGUMENT(target_buffer);
+  IREE_ASSERT_ARGUMENT(queue_wait_value);
+  IREE_TRACE_ZONE_BEGIN(z0);
+
+  // Captured waits require a graph node that preserves the target allocation
+  // and materializes the wait during each graph launch.
+  if (stream->capture_status == IREE_HAL_STREAMING_CAPTURE_STATUS_ACTIVE) {
+    IREE_TRACE_ZONE_END(z0);
+    return iree_make_status(
+        IREE_STATUS_UNIMPLEMENTED,
+        "queue-ordered value waits are not supported during stream capture");
+  }
+
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(z0,
+                                    iree_hal_streaming_stream_flush(stream));
+
+  iree_slim_mutex_lock(&stream->mutex);
+  uint64_t wait_value = stream->pending_value;
+  if (IREE_UNLIKELY(wait_value == UINT64_MAX)) {
+    iree_slim_mutex_unlock(&stream->mutex);
+    IREE_TRACE_ZONE_END(z0);
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "stream timeline value overflow");
+  }
+  uint64_t signal_value = wait_value + 1;
+  iree_hal_semaphore_list_t wait_semaphores = {
+      .count = wait_value > 0 ? 1 : 0,
+      .semaphores = &stream->timeline_semaphore,
+      .payload_values = &wait_value,
+  };
+  iree_hal_semaphore_list_t signal_semaphores = {
+      .count = 1,
+      .semaphores = &stream->timeline_semaphore,
+      .payload_values = &signal_value,
+  };
+
+  iree_status_t status = queue_wait_value(
+      stream->context->device, stream->queue_affinity, wait_semaphores,
+      signal_semaphores, target_buffer, target_offset, value, mask,
+      value_length, condition, flags);
   if (iree_status_is_ok(status)) {
     stream->pending_value = signal_value;
     stream->submitted_value = signal_value;

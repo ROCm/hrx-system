@@ -229,14 +229,11 @@ typedef struct hipMemcpy3DBatchOp {
 } hipMemcpy3DBatchOp;
 typedef struct hipResourceDesc hipResourceDesc;
 typedef struct hipResourceViewDesc hipResourceViewDesc;
-typedef struct hipStreamBatchMemOpParams hipStreamBatchMemOpParams;
 typedef struct hipTextureDesc hipTextureDesc;
 typedef struct hipDevResource_st hipDevResource;
 typedef struct hipDevSmResourceGroupParams_st hipDevSmResourceGroupParams;
 typedef int hipDevResourceType;
 typedef int hipMemRangeHandleType;
-typedef int hipStreamAttrID;
-typedef int hipStreamAttrValue;
 typedef void (*hipStreamCallback_t)(hipStream_t stream, hipError_t status,
                                     void* user_data);
 enum hipTextureAddressMode {
@@ -497,16 +494,12 @@ static hipError_t hrx_hip_validate_mipmapped_array_descriptor(
   return hrx_hip_mipmapped_array_level_size(descriptor, 0, &ignored_size);
 }
 
-static IREE_THREAD_LOCAL hipStream_t hrx_hip_spt_stream = NULL;
-
 static hipError_t hrx_hip_spt_default_stream(hipStream_t* stream) {
   if (!stream) return hipErrorInvalidValue;
-  if (!hrx_hip_spt_stream) {
-    hipError_t result =
-        hipStreamCreateWithFlags(&hrx_hip_spt_stream, hipStreamNonBlocking);
-    if (result != hipSuccess) return result;
-  }
-  *stream = hrx_hip_spt_stream;
+  // The public sentinel is resolved by the regular entry points through the
+  // shared per-thread stream state. Keeping that state in one place gives
+  // reset and context changes the same lifetime behavior for every API form.
+  *stream = hipStreamPerThread;
   return hipSuccess;
 }
 
@@ -534,13 +527,6 @@ static void hrx_hip_stream_callback_host_fn(void* user_data) {
   void* callback_user_data = thunk->user_data;
   free(thunk);
   callback(stream, hipSuccess, callback_user_data);
-}
-
-HIPAPI const char* hipApiName(uint32_t id) {
-  (void)id;
-  // API callback identifiers are an external sparse namespace. Keep unknown
-  // identifiers string-valued until authoritative metadata is available.
-  return "unknown";
 }
 
 HIPAPI hipError_t hipBindTexture(size_t* offset, const textureReference* tex,
@@ -1734,46 +1720,12 @@ HIPAPI hipError_t hipStreamAttachMemAsync(hipStream_t stream, void* dev_ptr,
   return hipSuccess;
 }
 
-HIPAPI hipError_t hipStreamBatchMemOp(hipStream_t stream, unsigned int count,
-                                      hipStreamBatchMemOpParams* paramArray,
-                                      unsigned int flags) {
-  (void)stream;
-  (void)count;
-  (void)paramArray;
-  (void)flags;
-  return hipErrorNotSupported;
-}
-
-HIPAPI hipError_t hipStreamCopyAttributes(hipStream_t dst, hipStream_t src) {
-  (void)dst;
-  (void)src;
-  return hipErrorNotSupported;
-}
-
-HIPAPI hipError_t hipStreamGetAttribute(hipStream_t stream,
-                                        hipStreamAttrID attr,
-                                        hipStreamAttrValue* value_out) {
-  (void)stream;
-  (void)attr;
-  (void)value_out;
-  return hipErrorNotSupported;
-}
-
 HIPAPI hipError_t hipStreamGetDevResource(hipStream_t stream,
                                           hipDevResource* resource,
                                           hipDevResourceType type) {
   (void)stream;
   (void)resource;
   (void)type;
-  return hipErrorNotSupported;
-}
-
-HIPAPI hipError_t hipStreamSetAttribute(hipStream_t stream,
-                                        hipStreamAttrID attr,
-                                        const hipStreamAttrValue* value) {
-  (void)stream;
-  (void)attr;
-  (void)value;
   return hipErrorNotSupported;
 }
 
@@ -2083,6 +2035,19 @@ HIPAPI hipError_t hipMemcpy2DAsync_spt(void* dst, size_t dpitch,
                           resolved_stream);
 }
 
+HIPAPI hipError_t hipMemcpy2DFromArrayAsync_spt(void* dst, size_t dpitch,
+                                                hipArray_const_t src,
+                                                size_t wOffset, size_t hOffset,
+                                                size_t width, size_t height,
+                                                hipMemcpyKind kind,
+                                                hipStream_t stream) {
+  hipStream_t resolved_stream = NULL;
+  hipError_t result = hrx_hip_spt_stream_or_explicit(stream, &resolved_stream);
+  if (result != hipSuccess) return result;
+  return hipMemcpy2DFromArrayAsync(dst, dpitch, src, wOffset, hOffset, width,
+                                   height, kind, resolved_stream);
+}
+
 HIPAPI hipError_t hipMemcpy2DFromArray_spt(void* dst, size_t dpitch,
                                            hipArray_const_t src, size_t wOffset,
                                            size_t hOffset, size_t width,
@@ -2091,12 +2056,30 @@ HIPAPI hipError_t hipMemcpy2DFromArray_spt(void* dst, size_t dpitch,
                               kind);
 }
 
+HIPAPI hipError_t hipMemcpy2DToArrayAsync_spt(hipArray_t dst, size_t wOffset,
+                                              size_t hOffset, const void* src,
+                                              size_t spitch, size_t width,
+                                              size_t height, hipMemcpyKind kind,
+                                              hipStream_t stream) {
+  hipStream_t resolved_stream = NULL;
+  hipError_t result = hrx_hip_spt_stream_or_explicit(stream, &resolved_stream);
+  if (result != hipSuccess) return result;
+  return hipMemcpy2DToArrayAsync(dst, wOffset, hOffset, src, spitch, width,
+                                 height, kind, resolved_stream);
+}
+
 HIPAPI hipError_t hipMemcpy2DToArray_spt(hipArray_t dst, size_t wOffset,
                                          size_t hOffset, const void* src,
                                          size_t spitch, size_t width,
                                          size_t height, hipMemcpyKind kind) {
   return hipMemcpy2DToArray(dst, wOffset, hOffset, src, spitch, width, height,
                             kind);
+}
+
+HIPAPI hipError_t hipMemcpyFromArray_spt(void* dst, hipArray_const_t src,
+                                         size_t wOffset, size_t hOffset,
+                                         size_t count, hipMemcpyKind kind) {
+  return hipMemcpyFromArray(dst, src, wOffset, hOffset, count, kind);
 }
 
 HIPAPI hipError_t hipMemcpy2D_spt(void* dst, size_t dpitch, const void* src,
@@ -2140,6 +2123,17 @@ HIPAPI hipError_t hipMemcpyFromSymbol_spt(void* dst, const void* symbol,
   result =
       hipMemcpyFromSymbolAsync(dst, symbol, size_bytes, offset, kind, stream);
   return result == hipSuccess ? hipStreamSynchronize(stream) : result;
+}
+
+HIPAPI hipError_t hipMemcpyFromSymbolAsync_spt(void* dst, const void* symbol,
+                                               size_t size_bytes, size_t offset,
+                                               hipMemcpyKind kind,
+                                               hipStream_t stream) {
+  hipStream_t resolved_stream = NULL;
+  hipError_t result = hrx_hip_spt_stream_or_explicit(stream, &resolved_stream);
+  if (result != hipSuccess) return result;
+  return hipMemcpyFromSymbolAsync(dst, symbol, size_bytes, offset, kind,
+                                  resolved_stream);
 }
 
 HIPAPI hipError_t hipMemcpyToSymbol_spt(const void* symbol, const void* src,
