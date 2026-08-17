@@ -644,6 +644,11 @@ class QueueDispatchIndirectParametersTest : public CtsTestBase<> {
         parameter_data, /*source_offset=*/0, parameter_buffer,
         /*target_offset=*/0, sizeof(parameter_data),
         IREE_HAL_UPDATE_FLAG_NONE));
+    if (iree_any_bit_set(flags,
+                         IREE_HAL_DISPATCH_FLAG_STATIC_INDIRECT_PARAMETERS)) {
+      IREE_ASSERT_OK(iree_hal_semaphore_list_wait(
+          update_signal, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
+    }
 
     iree_hal_buffer_ref_t binding_refs[1] = {
         iree_hal_make_buffer_ref(output_buffer, /*offset=*/0,
