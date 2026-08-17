@@ -41,6 +41,8 @@ using HipStreamBeginCaptureFn = hipError_t (*)(hipStream_t stream,
 using HipStreamEndCaptureFn = hipError_t (*)(hipStream_t stream,
                                              hipGraph_t* graph);
 using HipEventCreateFn = hipError_t (*)(hipEvent_t* event);
+using HipEventCreateWithFlagsFn = hipError_t (*)(hipEvent_t* event,
+                                                 unsigned int flags);
 using HipEventDestroyFn = hipError_t (*)(hipEvent_t event);
 using HipEventRecordFn = hipError_t (*)(hipEvent_t event, hipStream_t stream);
 using HipEventQueryFn = hipError_t (*)(hipEvent_t event);
@@ -187,6 +189,8 @@ class HipEventTest : public ::testing::Test {
         library_, "hipStreamEndCapture");
     hip_.event_create =
         ResolveHipSymbol<HipEventCreateFn>(library_, "hipEventCreate");
+    hip_.event_create_with_flags = ResolveHipSymbol<HipEventCreateWithFlagsFn>(
+        library_, "hipEventCreateWithFlags");
     hip_.event_destroy =
         ResolveHipSymbol<HipEventDestroyFn>(library_, "hipEventDestroy");
     hip_.event_record =
@@ -230,6 +234,7 @@ class HipEventTest : public ::testing::Test {
     ASSERT_NE(nullptr, hip_.stream_begin_capture);
     ASSERT_NE(nullptr, hip_.stream_end_capture);
     ASSERT_NE(nullptr, hip_.event_create);
+    ASSERT_NE(nullptr, hip_.event_create_with_flags);
     ASSERT_NE(nullptr, hip_.event_destroy);
     ASSERT_NE(nullptr, hip_.event_record);
     ASSERT_NE(nullptr, hip_.event_query);
@@ -291,6 +296,14 @@ class HipEventTest : public ::testing::Test {
   hipEvent_t CreateEvent() {
     hipEvent_t event = nullptr;
     EXPECT_EQ(hipSuccess, hip_.event_create(&event));
+    if (event) events_.push_back(event);
+    return event;
+  }
+
+  // Creates an event carrying |flags|, owned by the fixture.
+  hipEvent_t CreateEventWithFlags(unsigned int flags) {
+    hipEvent_t event = nullptr;
+    EXPECT_EQ(hipSuccess, hip_.event_create_with_flags(&event, flags));
     if (event) events_.push_back(event);
     return event;
   }
@@ -414,6 +427,7 @@ class HipEventTest : public ::testing::Test {
     HipStreamBeginCaptureFn stream_begin_capture;
     HipStreamEndCaptureFn stream_end_capture;
     HipEventCreateFn event_create;
+    HipEventCreateWithFlagsFn event_create_with_flags;
     HipEventDestroyFn event_destroy;
     HipEventRecordFn event_record;
     HipEventQueryFn event_query;
@@ -840,6 +854,45 @@ TEST_F(HipEventTest, ElapsedTimeRejectsEventsRecordedOnlyDuringCapture) {
   float ms = -1.0f;
   EXPECT_EQ(hipErrorInvalidHandle, hip_.event_elapsed_time(&ms, start, stop))
       << "an interval was reported for records that were never submitted";
+}
+
+TEST_F(HipEventTest, ElapsedTimeNeedsTimingEnabledOnBothEvents) {
+  hipStream_t stream = CreateStream();
+  ASSERT_NE(nullptr, stream);
+  hipEvent_t timed_start = CreateEvent();
+  ASSERT_NE(nullptr, timed_start);
+  hipEvent_t timed_stop = CreateEvent();
+  ASSERT_NE(nullptr, timed_stop);
+  hipEvent_t untimed_start = CreateEventWithFlags(hipEventDisableTiming);
+  ASSERT_NE(nullptr, untimed_start);
+  hipEvent_t untimed_stop = CreateEventWithFlags(hipEventDisableTiming);
+  ASSERT_NE(nullptr, untimed_stop);
+
+  // Every event is left with a submitted record that has been reached, and the
+  // pairs below are drawn from that one ordered run, so the timing flag is the
+  // only thing separating a measured interval from a rejected one.
+  ASSERT_NO_FATAL_FAILURE(AdvanceEventOnStream(timed_start, stream,
+                                               /*count=*/1));
+  ASSERT_NO_FATAL_FAILURE(AdvanceEventOnStream(untimed_start, stream,
+                                               /*count=*/1));
+  ASSERT_NO_FATAL_FAILURE(AdvanceEventOnStream(untimed_stop, stream,
+                                               /*count=*/1));
+  ASSERT_NO_FATAL_FAILURE(AdvanceEventOnStream(timed_stop, stream,
+                                               /*count=*/1));
+
+  float ms = -1.0f;
+  EXPECT_EQ(hipSuccess, hip_.event_elapsed_time(&ms, timed_start, timed_stop));
+  EXPECT_GE(ms, 0.0f);
+
+  EXPECT_EQ(hipErrorInvalidHandle,
+            hip_.event_elapsed_time(&ms, untimed_start, untimed_stop))
+      << "an interval was reported for two events with timing disabled";
+  EXPECT_EQ(hipErrorInvalidHandle,
+            hip_.event_elapsed_time(&ms, untimed_start, timed_stop))
+      << "an interval was reported for a start with timing disabled";
+  EXPECT_EQ(hipErrorInvalidHandle,
+            hip_.event_elapsed_time(&ms, timed_start, untimed_stop))
+      << "an interval was reported for a stop with timing disabled";
 }
 
 // Bytes taken from the default pool by the reuse tests below. A pending free is
