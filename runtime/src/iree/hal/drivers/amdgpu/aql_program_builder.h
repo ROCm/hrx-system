@@ -105,10 +105,8 @@ typedef struct iree_hal_amdgpu_aql_program_builder_t {
     uint16_t binding_source_count;
     // Number of dispatch command records emitted into the block.
     uint16_t dispatch_count;
-    // Number of indirect dispatch command records emitted into the block.
-    uint16_t indirect_dispatch_count;
-    // Number of profile marker command records emitted into the block.
-    uint16_t profile_marker_count;
+    // Number of static indirect dispatch command records in the block.
+    uint16_t static_indirect_dispatch_count;
     // Worst-case AQL packet count emitted by the block.
     uint32_t aql_packet_count;
     // Worst-case kernarg byte count emitted by the block.

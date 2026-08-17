@@ -179,8 +179,7 @@ static iree_status_t iree_hal_amdgpu_aql_program_builder_begin_block(
   builder->current_block.command_count = 0;
   builder->current_block.binding_source_count = 0;
   builder->current_block.dispatch_count = 0;
-  builder->current_block.indirect_dispatch_count = 0;
-  builder->current_block.profile_marker_count = 0;
+  builder->current_block.static_indirect_dispatch_count = 0;
   builder->current_block.aql_packet_count = 0;
   builder->current_block.kernarg_length = 0;
   builder->current_block.initial_barrier_packet_count = 0;
@@ -206,9 +205,8 @@ static void iree_hal_amdgpu_aql_program_builder_finalize_block(
   block->aql_packet_count = builder->current_block.aql_packet_count;
   block->kernarg_length = builder->current_block.kernarg_length;
   block->dispatch_count = builder->current_block.dispatch_count;
-  block->indirect_dispatch_count =
-      builder->current_block.indirect_dispatch_count;
-  block->profile_marker_count = builder->current_block.profile_marker_count;
+  block->static_indirect_dispatch_count =
+      builder->current_block.static_indirect_dispatch_count;
   block->initial_barrier_packet_count =
       iree_any_bit_set(
           builder->current_block.flags,
@@ -608,8 +606,6 @@ iree_status_t iree_hal_amdgpu_aql_program_builder_append_command(
   ++builder->current_block.command_count;
   if (opcode == IREE_HAL_AMDGPU_COMMAND_BUFFER_OPCODE_DISPATCH) {
     ++builder->current_block.dispatch_count;
-  } else if (opcode == IREE_HAL_AMDGPU_COMMAND_BUFFER_OPCODE_PROFILE_MARKER) {
-    ++builder->current_block.profile_marker_count;
   }
   builder->current_block.binding_source_count += binding_source_count;
   builder->current_block.aql_packet_count += aql_packet_count;

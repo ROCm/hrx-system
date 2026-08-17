@@ -193,6 +193,13 @@ iree_hal_amdgpu_aql_block_processor_execution_barrier_packet_flags(void) {
       IREE_HSA_FENCE_SCOPE_NONE, IREE_HSA_FENCE_SCOPE_NONE);
 }
 
+static iree_hal_amdgpu_aql_block_processor_packet_flags_t
+iree_hal_amdgpu_aql_block_processor_agent_barrier_packet_flags(void) {
+  return iree_hal_amdgpu_aql_block_processor_packet_flags_set_fence_scopes(
+      IREE_HAL_AMDGPU_AQL_BLOCK_PROCESSOR_PACKET_FLAG_EXECUTION_BARRIER,
+      IREE_HSA_FENCE_SCOPE_AGENT, IREE_HSA_FENCE_SCOPE_AGENT);
+}
+
 static iree_hal_amdgpu_aql_block_processor_packet_flag_pair_t
 iree_hal_amdgpu_aql_block_processor_split_command_packet_flags(
     const iree_hal_amdgpu_command_buffer_command_header_t* command) {
@@ -227,6 +234,14 @@ static bool iree_hal_amdgpu_aql_block_processor_dispatch_uses_indirect(
   return iree_any_bit_set(
       dispatch_command->dispatch_flags,
       IREE_HAL_AMDGPU_COMMAND_BUFFER_DISPATCH_FLAG_INDIRECT_PARAMETERS);
+}
+
+static bool iree_hal_amdgpu_aql_block_processor_dispatch_uses_static_indirect(
+    const iree_hal_amdgpu_command_buffer_dispatch_command_t* dispatch_command) {
+  return iree_all_bits_set(
+      dispatch_command->dispatch_flags,
+      IREE_HAL_AMDGPU_COMMAND_BUFFER_DISPATCH_FLAG_INDIRECT_PARAMETERS |
+          IREE_HAL_AMDGPU_COMMAND_BUFFER_DISPATCH_FLAG_STATIC_INDIRECT_PARAMETERS);
 }
 
 static iree_status_t
@@ -888,10 +903,14 @@ static iree_status_t iree_hal_amdgpu_aql_block_processor_emit_indirect_dispatch(
           &processor->packets.setups[patch_packet_index],
           &processor->packets.setups[dispatch_packet_index]);
   if (iree_status_is_ok(status)) {
+    const iree_hal_amdgpu_aql_block_processor_packet_flags_t required_patch_flags =
+        iree_hal_amdgpu_aql_block_processor_dispatch_uses_static_indirect(
+            dispatch_command)
+            ? iree_hal_amdgpu_aql_block_processor_agent_barrier_packet_flags()
+            : iree_hal_amdgpu_aql_block_processor_execution_barrier_packet_flags();
     const iree_hal_amdgpu_aql_block_processor_packet_flags_t patch_flags =
         iree_hal_amdgpu_aql_block_processor_packet_flags_merge(
-            iree_hal_amdgpu_aql_block_processor_execution_barrier_packet_flags(),
-            command_flags.first);
+            required_patch_flags, command_flags.first);
     const iree_hsa_fence_scope_t patch_acquire_scope =
         iree_hal_amdgpu_aql_block_processor_payload_acquire_scope(
             processor, state, payload_acquire_packet_count, patch_packet_index,
