@@ -1120,9 +1120,10 @@ CUDAAPI CUresult cuEventQuery(CUevent hEvent) {
   int is_complete = 0;
   iree_status_t status = iree_hal_streaming_event_query(
       (iree_hal_streaming_event_t*)hEvent, &is_complete);
+  // is_complete == 0 means complete, is_complete == 1 means not complete.
   CUresult result =
       iree_status_is_ok(status)
-          ? (is_complete == 1 ? CUDA_SUCCESS : CUDA_ERROR_NOT_READY)
+          ? (is_complete == 0 ? CUDA_SUCCESS : CUDA_ERROR_NOT_READY)
           : iree_status_to_cu_result(status);
   return result;
 }
@@ -2792,9 +2793,10 @@ CUDAAPI CUresult cuStreamQuery(CUstream hStream) {
   int is_complete = 0;
   iree_status_t status = iree_hal_streaming_stream_query(
       (iree_hal_streaming_stream_t*)hStream, &is_complete);
+  // is_complete == 0 means complete, is_complete == 1 means not complete.
   CUresult result =
       iree_status_is_ok(status)
-          ? (is_complete == 1 ? CUDA_SUCCESS : CUDA_ERROR_NOT_READY)
+          ? (is_complete == 0 ? CUDA_SUCCESS : CUDA_ERROR_NOT_READY)
           : iree_status_to_cu_result(status);
   return result;
 }
