@@ -336,4 +336,92 @@ TEST_F(CpuContextTimestampDomainTest, LeavesTheDomainZeroedOnTheCpuDevice) {
   EXPECT_EQ(0u, context_->timestamp_domain.valid_bits);
 }
 
+// A record on a context whose domain is zeroed captures no tick, so the pool it
+// would have drawn a slot from stays empty and the interval between two such
+// records names no clock to be measured on. This is the only reachable path to
+// that outcome anywhere in this tree: every device libhrx builds a context on
+// advertises a domain.
+TEST_F(CpuContextTimestampDomainTest, DirectRecordsOnAnUntimedDeviceGoUntimed) {
+  iree_hal_streaming_stream_t* stream = nullptr;
+  IREE_ASSERT_OK(iree_hal_streaming_stream_create(
+      context_, IREE_HAL_STREAMING_STREAM_FLAG_NONE, /*priority=*/0,
+      iree_allocator_system(), &stream));
+  iree_hal_streaming_event_t* start = nullptr;
+  IREE_ASSERT_OK(iree_hal_streaming_event_create(
+      context_, IREE_HAL_STREAMING_EVENT_FLAG_NONE, iree_allocator_system(),
+      &start));
+  iree_hal_streaming_event_t* stop = nullptr;
+  IREE_ASSERT_OK(iree_hal_streaming_event_create(
+      context_, IREE_HAL_STREAMING_EVENT_FLAG_NONE, iree_allocator_system(),
+      &stop));
+
+  IREE_ASSERT_OK(iree_hal_streaming_event_record(start, stream));
+  IREE_ASSERT_OK(iree_hal_streaming_event_record(stop, stream));
+  IREE_ASSERT_OK(iree_hal_streaming_event_synchronize(stop));
+
+  EXPECT_EQ(nullptr, context_->timestamp_pool.slabs)
+      << "a record on a device advertising no domain acquired a tick slot";
+
+  float ms = -1.0f;
+  iree_hal_streaming_event_timing_t timing =
+      IREE_HAL_STREAMING_EVENT_TIMING_MEASURED;
+  IREE_ASSERT_OK(
+      iree_hal_streaming_event_elapsed_time(&ms, start, stop, &timing));
+  EXPECT_EQ(IREE_HAL_STREAMING_EVENT_TIMING_UNSUPPORTED, timing);
+  EXPECT_FLOAT_EQ(-1.0f, ms) << "an unmeasurable pair reported a duration";
+
+  iree_hal_streaming_event_release(stop);
+  iree_hal_streaming_event_release(start);
+  iree_hal_streaming_stream_release(stream);
+}
+
+// The records a graph launch enqueues run through the same helper as a direct
+// record, so a launch recording eleven events on this device acquires no slot
+// either.
+TEST_F(CpuContextTimestampDomainTest,
+       AGraphLaunchOnAnUntimedDeviceGoesUntimed) {
+  static constexpr iree_host_size_t kEventCount = 11;
+
+  iree_hal_streaming_stream_t* stream = nullptr;
+  IREE_ASSERT_OK(iree_hal_streaming_stream_create(
+      context_, IREE_HAL_STREAMING_STREAM_FLAG_NONE, /*priority=*/0,
+      iree_allocator_system(), &stream));
+  iree_hal_streaming_graph_t* graph = nullptr;
+  IREE_ASSERT_OK(iree_hal_streaming_graph_create(
+      context_, IREE_HAL_STREAMING_GRAPH_FLAG_NONE, iree_allocator_system(),
+      &graph));
+
+  std::array<iree_hal_streaming_event_t*, kEventCount> events = {};
+  for (iree_host_size_t i = 0; i < kEventCount; ++i) {
+    IREE_ASSERT_OK(iree_hal_streaming_event_create(
+        context_, IREE_HAL_STREAMING_EVENT_FLAG_NONE, iree_allocator_system(),
+        &events[i]));
+    iree_hal_streaming_graph_node_t* node = nullptr;
+    IREE_ASSERT_OK(iree_hal_streaming_graph_add_event_node(
+        graph, /*dependencies=*/nullptr, /*dependency_count=*/0,
+        IREE_HAL_STREAMING_GRAPH_NODE_TYPE_EVENT_RECORD, events[i], &node));
+  }
+
+  iree_hal_streaming_graph_exec_t* exec = nullptr;
+  IREE_ASSERT_OK(iree_hal_streaming_graph_instantiate(
+      graph, IREE_HAL_STREAMING_GRAPH_INSTANTIATE_FLAG_NONE, &exec));
+  IREE_ASSERT_OK(iree_hal_streaming_graph_exec_launch(exec, stream));
+  IREE_ASSERT_OK(iree_hal_streaming_stream_synchronize(stream));
+
+  EXPECT_EQ(nullptr, context_->timestamp_pool.slabs)
+      << "a launch on a device advertising no domain acquired tick slots";
+  for (iree_host_size_t i = 0; i < kEventCount; ++i) {
+    int event_status = -1;
+    IREE_ASSERT_OK(iree_hal_streaming_event_query(events[i], &event_status));
+    EXPECT_EQ(0, event_status) << "event " << i;
+  }
+
+  for (iree_host_size_t i = kEventCount; i > 0; --i) {
+    iree_hal_streaming_event_release(events[i - 1]);
+  }
+  iree_hal_streaming_graph_exec_release(exec);
+  iree_hal_streaming_graph_release(graph);
+  iree_hal_streaming_stream_release(stream);
+}
+
 }  // namespace

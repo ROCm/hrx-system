@@ -334,7 +334,7 @@ static iree_status_t iree_hal_streaming_graph_list_append(
   return iree_ok_status();
 }
 
-static iree_status_t iree_hal_streaming_graph_validate_child_graph(
+iree_status_t iree_hal_streaming_graph_validate_child_graph(
     iree_hal_streaming_graph_t* parent_graph,
     iree_hal_streaming_graph_t* child_graph) {
   if (parent_graph == child_graph) {

@@ -167,6 +167,11 @@ typedef struct iree_hal_streaming_graph_exec_t {
   // Immutable block list created during instantiate.
   iree_hal_streaming_graph_block_t** blocks;
   uint32_t block_count;
+  // True when |blocks|, or the blocks of a child-graph executable they launch,
+  // hold an event record. Every such record names an event of |context|, so a
+  // launch on a stream of any other context would have every one of its
+  // records refused.
+  bool records_events;
   // Number of graph nodes present when this executable was instantiated.
   iree_host_size_t instantiated_node_count;
   // Number of HIP-visible graph nodes present at instantiation/update time.
@@ -640,6 +645,7 @@ iree_status_t iree_hal_streaming_graph_exec_create(
                         &exec->arena_allocator);
   exec->blocks = NULL;
   exec->block_count = 0;
+  exec->records_events = false;
   exec->instantiated_node_count = 0;
   exec->instantiated_visible_node_count = 0;
   exec->node_disabled_states = NULL;
@@ -746,6 +752,7 @@ static void iree_hal_streaming_graph_exec_initialize_compiled_state(
                         &exec->arena_allocator);
   exec->blocks = NULL;
   exec->block_count = 0;
+  exec->records_events = false;
   exec->instantiated_node_count = 0;
   exec->instantiated_visible_node_count = 0;
   exec->semaphores = NULL;
@@ -770,6 +777,7 @@ static void iree_hal_streaming_graph_exec_deinitialize_compiled_state(
   iree_arena_deinitialize(&exec->arena_allocator);
   exec->blocks = NULL;
   exec->block_count = 0;
+  exec->records_events = false;
   exec->instantiated_node_count = 0;
   exec->instantiated_visible_node_count = 0;
   exec->semaphores = NULL;
@@ -786,6 +794,7 @@ static void iree_hal_streaming_graph_exec_move_compiled_state(
   target->arena_allocator = source->arena_allocator;
   target->blocks = source->blocks;
   target->block_count = source->block_count;
+  target->records_events = source->records_events;
   target->instantiated_node_count = source->instantiated_node_count;
   target->instantiated_visible_node_count =
       source->instantiated_visible_node_count;
@@ -800,6 +809,7 @@ static void iree_hal_streaming_graph_exec_move_compiled_state(
 
   source->blocks = NULL;
   source->block_count = 0;
+  source->records_events = false;
   source->instantiated_node_count = 0;
   source->instantiated_visible_node_count = 0;
   source->semaphores = NULL;
@@ -981,6 +991,18 @@ iree_status_t iree_hal_streaming_graph_exec_set_event_node_event(
        type != IREE_HAL_STREAMING_GRAPH_NODE_TYPE_EVENT_WAIT)) {
     IREE_TRACE_ZONE_END(z0);
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT);
+  }
+  // The same rule iree_hal_streaming_graph_add_event_node holds the template
+  // to, applied to the executable an event node is retargeted in. On a record
+  // node it is what lets a launch answer for every record block by comparing
+  // one pair of contexts, and an event of another context would be refused at
+  // the record itself anyway. A wait node is held to it because that function
+  // holds both node types to it: retargeting is another way of naming a node's
+  // event, and it must not seat one the template would have refused.
+  if (event->context != exec->context) {
+    IREE_TRACE_ZONE_END(z0);
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "event must belong to the graph context");
   }
 
   const iree_hal_streaming_graph_block_type_t block_type =
@@ -1253,6 +1275,11 @@ static iree_status_t iree_hal_streaming_graph_create_event_block(
   out_ptrs->attrs->event.source_node = source_node;
   out_ptrs->attrs->event.event = event;
   iree_hal_streaming_event_retain(event);
+  // The one place a record block is built, and so where |exec| learns it holds
+  // one. A launch reads this to answer for every record at once.
+  if (type == IREE_HAL_STREAMING_GRAPH_BLOCK_TYPE_EVENT_RECORD) {
+    exec->records_events = true;
+  }
 
   *out_block = block;
   IREE_TRACE_ZONE_END(z0);
@@ -1404,6 +1431,10 @@ static iree_status_t iree_hal_streaming_graph_create_child_graph_block(
       signal_semaphore_count, &block, out_ptrs);
   if (iree_status_is_ok(status)) {
     out_ptrs->attrs->child_graph.exec = child_exec;
+    // A launch of |exec| walks the child's blocks too, so the records they hold
+    // are records of this launch. The child instantiated above already carries
+    // its own children's, which makes the property transitive.
+    exec->records_events |= child_exec->records_events;
     *out_block = block;
   } else {
     iree_hal_streaming_graph_exec_release(child_exec);
@@ -2240,9 +2271,6 @@ static iree_status_t iree_hal_streaming_graph_exec_submit_blocks_locked(
             .ordered_after_stream_value = signals_launch_stream_timeline
                                               ? signal_vals[0]
                                               : launch_stream_tail_value,
-            // Sampled before the submission so the timestamp reflects when the
-            // launch issued the record.
-            .record_time_ns = iree_time_now(),
         };
       }
       status = iree_hal_streaming_graph_submit_block(
@@ -2307,6 +2335,20 @@ iree_status_t iree_hal_streaming_graph_exec_launch(
     iree_slim_mutex_unlock(&exec->mutex);
     IREE_TRACE_ZONE_END(z0);
     return iree_ok_status();
+  }
+  // Every record this executable holds names an event of |exec->context|, so on
+  // a stream of any other context iree_hal_streaming_event_enqueue_record would
+  // refuse each of them in turn. Deciding the same question here refuses the
+  // launch before it submits any of the graph, where the walk below breaks on
+  // the first refusal and leaves the blocks ahead of the record in flight with
+  // nothing signaling the launching stream's timeline.
+  if (exec->records_events && stream->context != exec->context) {
+    iree_slim_mutex_unlock(&exec->mutex);
+    IREE_TRACE_ZONE_END(z0);
+    return iree_make_status(
+        IREE_STATUS_INCOMPATIBLE,
+        "an event can only be recorded on a stream of the context that "
+        "created it");
   }
   if (exec->has_unfreed_graph_alloc_nodes && exec->launch_count > 0 &&
       !iree_all_bits_set(

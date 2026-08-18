@@ -189,6 +189,23 @@ static CUresult iree_status_to_cu_result(iree_status_t status) {
   }
 }
 
+// Maps the status of an event record. A record refused because its stream
+// belongs to a context other than the event's names two handles that do not go
+// together, which is a handle error and not a bad value. The mapping is local
+// because IREE_STATUS_INCOMPATIBLE says nothing on its own about which handle
+// is at fault - code object loading raises it for an unsupported container
+// version, which cuModuleLoadDataEx reports through iree_status_to_cu_result -
+// so the code can only be read by a caller that knows what it asked for.
+static CUresult iree_event_record_status_to_cu_result(iree_status_t status) {
+  if (iree_status_is_ok(status)) return CUDA_SUCCESS;
+  const iree_status_code_t code = iree_status_code(status);
+  if (code == IREE_STATUS_INCOMPATIBLE) {
+    iree_status_free(status);
+    return CUDA_ERROR_INVALID_HANDLE;
+  }
+  return iree_status_to_cu_result(status);
+}
+
 //===----------------------------------------------------------------------===//
 // Initialization
 //===----------------------------------------------------------------------===//
@@ -1111,7 +1128,7 @@ CUDAAPI CUresult cuEventRecord(CUevent hEvent, CUstream hStream) {
   iree_status_t status =
       iree_hal_streaming_event_record((iree_hal_streaming_event_t*)hEvent,
                                       (iree_hal_streaming_stream_t*)hStream);
-  CUresult result = iree_status_to_cu_result(status);
+  CUresult result = iree_event_record_status_to_cu_result(status);
   IREE_TRACE_ZONE_END(z0);
   return result;
 }
@@ -1148,11 +1165,24 @@ CUDAAPI CUresult cuEventElapsedTime(float* pMilliseconds, CUevent hStart,
   if (!pMilliseconds) {
     return CUDA_ERROR_INVALID_VALUE;
   }
+  if (!hStart || !hEnd) {
+    return CUDA_ERROR_INVALID_HANDLE;
+  }
+
+  iree_hal_streaming_event_t* start_event = (iree_hal_streaming_event_t*)hStart;
+  iree_hal_streaming_event_t* end_event = (iree_hal_streaming_event_t*)hEnd;
+
+  // Each device counts ticks on its own clock, so a pair spanning two contexts
+  // names no interval; cuEventElapsedTime compares contexts for the same
+  // reason hipEventElapsedTime does.
+  if (start_event->context != end_event->context) {
+    return CUDA_ERROR_INVALID_HANDLE;
+  }
+
   iree_hal_streaming_event_timing_t timing =
       IREE_HAL_STREAMING_EVENT_TIMING_UNTIMED;
   iree_status_t status = iree_hal_streaming_event_elapsed_time(
-      pMilliseconds, (iree_hal_streaming_event_t*)hStart,
-      (iree_hal_streaming_event_t*)hEnd, &timing);
+      pMilliseconds, start_event, end_event, &timing);
   if (!iree_status_is_ok(status)) {
     // The timeline a record names has failed; the event handles are fine.
     return iree_status_to_cu_result(status);
@@ -1167,6 +1197,9 @@ CUDAAPI CUresult cuEventElapsedTime(float* pMilliseconds, CUevent hStart,
       break;
     case IREE_HAL_STREAMING_EVENT_TIMING_UNTIMED:
       result = CUDA_ERROR_INVALID_VALUE;
+      break;
+    case IREE_HAL_STREAMING_EVENT_TIMING_UNSUPPORTED:
+      result = CUDA_ERROR_NOT_SUPPORTED;
       break;
   }
   return result;

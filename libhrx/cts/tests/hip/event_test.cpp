@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <cstddef>
 #include <cstdlib>
 #include <thread>
@@ -71,6 +72,11 @@ using HipGraphAddHostNodeFn = hipError_t (*)(hipGraphNode_t* node,
                                              const hipGraphNode_t* dependencies,
                                              size_t dependency_count,
                                              const void* node_params);
+using HipGraphAddChildGraphNodeFn = hipError_t (*)(
+    hipGraphNode_t* node, hipGraph_t graph, const hipGraphNode_t* dependencies,
+    size_t dependency_count, hipGraph_t child_graph);
+using HipGraphExecChildGraphNodeSetParamsFn = hipError_t (*)(
+    hipGraphExec_t graph_exec, hipGraphNode_t node, hipGraph_t child_graph);
 using HipGraphInstantiateFn = hipError_t (*)(hipGraphExec_t* graph_exec,
                                              hipGraph_t graph,
                                              hipGraphNode_t* error_node,
@@ -83,6 +89,11 @@ using HipGraphExecEventRecordNodeSetEventFn = hipError_t (*)(
     hipGraphExec_t graph_exec, hipGraphNode_t node, hipEvent_t event);
 using HipGraphExecEventWaitNodeSetEventFn = hipError_t (*)(
     hipGraphExec_t graph_exec, hipGraphNode_t node, hipEvent_t event);
+using HipCtxCreateFn = hipError_t (*)(hipCtx_t* ctx, unsigned int flags,
+                                      hipDevice_t device);
+using HipCtxDestroyFn = hipError_t (*)(hipCtx_t ctx);
+using HipCtxGetCurrentFn = hipError_t (*)(hipCtx_t* ctx);
+using HipCtxSetCurrentFn = hipError_t (*)(hipCtx_t ctx);
 
 // Host callback that parks a stream timeline until the test thread releases it.
 struct StreamGate {
@@ -175,6 +186,98 @@ class ScopedHostCallbacks {
   std::vector<const std::atomic<bool>*> pending_;
 };
 
+// Host callback that parks every launch reaching it until the test thread
+// releases that launch, so one graph can be replayed with a different hold each
+// time.
+struct ReplayGate {
+  // Launches whose callback has started, and so the generation of the launch
+  // parked right now.
+  std::atomic<int> entered{0};
+  // Highest generation the test thread has let return.
+  std::atomic<int> released{0};
+  // Launches whose callback has returned. The callback writes through a
+  // pointer into the frame that instantiated the graph, so that frame must
+  // outlive every launch of it.
+  std::atomic<int> finished{0};
+};
+
+void ReplayGateHostFunction(void* user_data) {
+  auto* gate = static_cast<ReplayGate*>(user_data);
+  const int generation =
+      gate->entered.fetch_add(1, std::memory_order_acq_rel) + 1;
+  while (gate->released.load(std::memory_order_acquire) < generation) {
+    sched_yield();
+  }
+  gate->finished.fetch_add(1, std::memory_order_acq_rel);
+}
+
+// Keeps the enclosing frame alive until every launch registered with it has run
+// its gate callback to completion, releasing any still parked first. Launches
+// are registered only once their enqueue has succeeded.
+class ScopedReplayGate {
+ public:
+  explicit ScopedReplayGate(ReplayGate* gate) : gate_(gate) {}
+  ScopedReplayGate(const ScopedReplayGate&) = delete;
+  ScopedReplayGate& operator=(const ScopedReplayGate&) = delete;
+  ~ScopedReplayGate() {
+    gate_->released.store(launch_count_, std::memory_order_release);
+    while (gate_->finished.load(std::memory_order_acquire) < launch_count_) {
+      sched_yield();
+    }
+  }
+
+  // Registers a launch whose enqueue has succeeded and returns its generation.
+  int AddLaunch() { return ++launch_count_; }
+
+  // Returns once |generation|'s callback is parked.
+  void WaitUntilParked(int generation) const {
+    while (gate_->entered.load(std::memory_order_acquire) < generation) {
+      sched_yield();
+    }
+  }
+
+  // Lets |generation|'s parked callback return. Generations are released in
+  // order, so this never lowers what an earlier call published.
+  void Release(int generation) {
+    gate_->released.store(generation, std::memory_order_release);
+  }
+
+ private:
+  // Gate the registered launches park on, borrowed from the enclosing frame.
+  ReplayGate* gate_;
+  // Launches registered so far, which is the generation of the last one.
+  int launch_count_ = 0;
+};
+
+double MillisecondsSince(std::chrono::steady_clock::time_point from) {
+  return std::chrono::duration<double, std::milli>(
+             std::chrono::steady_clock::now() - from)
+      .count();
+}
+
+// Milliseconds the test thread parks the queue for between two records. Long
+// enough that the interval it opens is orders of magnitude above the time two
+// hipEventRecord calls take, short enough to keep the suite quick.
+constexpr double kGateHoldMs = 100.0;
+
+// The short hold of the replay test, a tenth of the long one.
+constexpr double kShortGateHoldMs = kGateHoldMs / 10.0;
+
+// Fraction of the observed hold a device-timed interval must exceed. Correct
+// behavior reports the hold plus microseconds; timing the host's enqueue
+// reports the fraction of a millisecond two records take, which is more than
+// two orders of magnitude below this.
+constexpr double kMinimumHoldFraction = 1.0 / 4.0;
+
+// Multiple of the observed hold a device-timed interval must stay under, which
+// is what catches ticks converted on a rate nothing advertised.
+constexpr double kMaximumHoldFactor = 4.0;
+
+// Smallest factor by which a long replay's reported interval must exceed a
+// short replay's. Below the ratio of the holds for noise, well above 1 to catch
+// a replay reporting the ticks of an earlier one.
+constexpr float kMinimumReplayRatio = 3.0f;
+
 class HipEventTest : public ::testing::Test {
  protected:
   void SetUp() override {
@@ -233,6 +336,12 @@ class HipEventTest : public ::testing::Test {
             library_, "hipGraphEventWaitNodeSetEvent");
     hip_.graph_add_host_node = ResolveHipSymbol<HipGraphAddHostNodeFn>(
         library_, "hipGraphAddHostNode");
+    hip_.graph_add_child_graph_node =
+        ResolveHipSymbol<HipGraphAddChildGraphNodeFn>(
+            library_, "hipGraphAddChildGraphNode");
+    hip_.graph_exec_child_graph_node_set_params =
+        ResolveHipSymbol<HipGraphExecChildGraphNodeSetParamsFn>(
+            library_, "hipGraphExecChildGraphNodeSetParams");
     hip_.graph_instantiate = ResolveHipSymbol<HipGraphInstantiateFn>(
         library_, "hipGraphInstantiate");
     hip_.graph_launch =
@@ -245,6 +354,14 @@ class HipEventTest : public ::testing::Test {
     hip_.graph_exec_event_wait_node_set_event =
         ResolveHipSymbol<HipGraphExecEventWaitNodeSetEventFn>(
             library_, "hipGraphExecEventWaitNodeSetEvent");
+    hip_.ctx_create =
+        ResolveHipSymbol<HipCtxCreateFn>(library_, "hipCtxCreate");
+    hip_.ctx_destroy =
+        ResolveHipSymbol<HipCtxDestroyFn>(library_, "hipCtxDestroy");
+    hip_.ctx_get_current =
+        ResolveHipSymbol<HipCtxGetCurrentFn>(library_, "hipCtxGetCurrent");
+    hip_.ctx_set_current =
+        ResolveHipSymbol<HipCtxSetCurrentFn>(library_, "hipCtxSetCurrent");
 
     ASSERT_NE(nullptr, hip_.init);
     ASSERT_NE(nullptr, hip_.stream_create);
@@ -270,11 +387,17 @@ class HipEventTest : public ::testing::Test {
     ASSERT_NE(nullptr, hip_.graph_event_record_node_set_event);
     ASSERT_NE(nullptr, hip_.graph_event_wait_node_set_event);
     ASSERT_NE(nullptr, hip_.graph_add_host_node);
+    ASSERT_NE(nullptr, hip_.graph_add_child_graph_node);
+    ASSERT_NE(nullptr, hip_.graph_exec_child_graph_node_set_params);
     ASSERT_NE(nullptr, hip_.graph_instantiate);
     ASSERT_NE(nullptr, hip_.graph_launch);
     ASSERT_NE(nullptr, hip_.graph_exec_destroy);
     ASSERT_NE(nullptr, hip_.graph_exec_event_record_node_set_event);
     ASSERT_NE(nullptr, hip_.graph_exec_event_wait_node_set_event);
+    ASSERT_NE(nullptr, hip_.ctx_create);
+    ASSERT_NE(nullptr, hip_.ctx_destroy);
+    ASSERT_NE(nullptr, hip_.ctx_get_current);
+    ASSERT_NE(nullptr, hip_.ctx_set_current);
 
     const hipError_t init_result = hip_.init(/*flags=*/0);
     if (init_result == hipErrorNoDevice) {
@@ -424,6 +547,83 @@ class HipEventTest : public ::testing::Test {
     return InstantiateGraph(graph);
   }
 
+  // Instantiates a graph that records |start|, runs |fn| over |user_data|, and
+  // then records |stop|, so a replay opens a device interval the host node
+  // controls. |user_data| must outlive every launch of the returned executable.
+  hipGraphExec_t InstantiateGraphRecordingAroundAHostNode(hipEvent_t start,
+                                                          hipEvent_t stop,
+                                                          hipHostFn_t fn,
+                                                          void* user_data) {
+    hipGraph_t graph = CreateGraph();
+    EXPECT_NE(nullptr, graph);
+    if (!graph) return nullptr;
+    hipGraphNode_t start_node = nullptr;
+    EXPECT_EQ(hipSuccess, hip_.graph_add_event_record_node(
+                              &start_node, graph, /*dependencies=*/nullptr,
+                              /*dependency_count=*/0, start));
+    hipHostNodeParams host_params = {};
+    host_params.fn = fn;
+    host_params.userData = user_data;
+    hipGraphNode_t host_node = nullptr;
+    EXPECT_EQ(hipSuccess,
+              hip_.graph_add_host_node(&host_node, graph, &start_node,
+                                       /*dependency_count=*/1, &host_params));
+    hipGraphNode_t stop_node = nullptr;
+    EXPECT_EQ(hipSuccess,
+              hip_.graph_add_event_record_node(&stop_node, graph, &host_node,
+                                               /*dependency_count=*/1, stop));
+    return InstantiateGraph(graph);
+  }
+
+  // Parks the test thread for kGateHoldMs, releases the gate, and returns how
+  // long the gate was held. The device sees at least this interval between the
+  // records either side of it.
+  double HoldGateAndRelease(ScopedHostCallbacks* callbacks) {
+    const auto held_from = std::chrono::steady_clock::now();
+    std::this_thread::sleep_for(
+        std::chrono::duration<double, std::milli>(kGateHoldMs));
+    const double held_ms = MillisecondsSince(held_from);
+    callbacks->ReleaseGate();
+    return held_ms;
+  }
+
+  // Replays |graph_exec| on |stream|, holds its gate for |hold_ms|, and reports
+  // what the event pair measured across the hold together with how long the
+  // gate was actually held.
+  void ReplayHoldingTheGateAndMeasure(hipGraphExec_t graph_exec,
+                                      hipStream_t stream,
+                                      ScopedReplayGate* gate, double hold_ms,
+                                      hipEvent_t start, hipEvent_t stop,
+                                      float* out_reported_ms,
+                                      double* out_held_ms) {
+    ASSERT_EQ(hipSuccess, hip_.graph_launch(graph_exec, stream));
+    const int generation = gate->AddLaunch();
+    gate->WaitUntilParked(generation);
+    const auto held_from = std::chrono::steady_clock::now();
+    std::this_thread::sleep_for(
+        std::chrono::duration<double, std::milli>(hold_ms));
+    *out_held_ms = MillisecondsSince(held_from);
+    gate->Release(generation);
+    ASSERT_EQ(hipSuccess, hip_.event_synchronize(stop));
+    ASSERT_EQ(hipSuccess,
+              hip_.event_elapsed_time(out_reported_ms, start, stop));
+  }
+
+  // Asserts |reported_ms| is the device interval a gate held open for
+  // |held_ms| rather than the time the host spent issuing the records.
+  void ExpectMeasuredTheHold(float reported_ms, double held_ms,
+                             const char* what) {
+    EXPECT_GT(reported_ms, held_ms * kMinimumHoldFraction)
+        << what << ": reported " << reported_ms
+        << " ms for a device interval the host held open for " << held_ms
+        << " ms, which is what timing the enqueue instead of the device "
+           "reports";
+    EXPECT_LT(reported_ms, held_ms * kMaximumHoldFactor)
+        << what << ": reported " << reported_ms
+        << " ms for a device interval the host held open for " << held_ms
+        << " ms, so the ticks were converted on a rate nothing advertised";
+  }
+
   // Allocates |size| bytes from the device's default pool on |stream|.
   void* AllocateAsync(hipStream_t stream, size_t size) {
     void* device_ptr = nullptr;
@@ -442,6 +642,12 @@ class HipEventTest : public ::testing::Test {
       sched_yield();
     }
   }
+
+  // Flag a graph host node built inline by a test body stores through
+  // RanHostFunction. It must outlive every launch of an executable holding
+  // that node, and the fixture owns executables until TearDown, so it is held
+  // here for the whole test.
+  std::atomic<bool> graph_host_node_ran_{false};
 
   // HIP shim under test. Intentionally never dlclose()d: the shim owns
   // process-global device state shared by every test in this file.
@@ -474,12 +680,19 @@ class HipEventTest : public ::testing::Test {
     HipGraphEventRecordNodeSetEventFn graph_event_record_node_set_event;
     HipGraphEventWaitNodeSetEventFn graph_event_wait_node_set_event;
     HipGraphAddHostNodeFn graph_add_host_node;
+    HipGraphAddChildGraphNodeFn graph_add_child_graph_node;
+    HipGraphExecChildGraphNodeSetParamsFn
+        graph_exec_child_graph_node_set_params;
     HipGraphInstantiateFn graph_instantiate;
     HipGraphLaunchFn graph_launch;
     HipGraphExecDestroyFn graph_exec_destroy;
     HipGraphExecEventRecordNodeSetEventFn
         graph_exec_event_record_node_set_event;
     HipGraphExecEventWaitNodeSetEventFn graph_exec_event_wait_node_set_event;
+    HipCtxCreateFn ctx_create;
+    HipCtxDestroyFn ctx_destroy;
+    HipCtxGetCurrentFn ctx_get_current;
+    HipCtxSetCurrentFn ctx_set_current;
   } hip_ = {};
 
  private:
@@ -522,12 +735,22 @@ TEST_F(HipEventTest, CrossStreamRerecordDoesNotReportStaleCompletion) {
 }
 
 // A chained stream hangs in hipStreamSynchronize rather than failing here.
+//
+// Timing is disabled on the event because a timed record enqueues a device
+// timestamp where an untimed one is semaphore bookkeeping the queue never
+// sees, and one hardware queue serves every stream: B's record would sit
+// behind the gate parked on A and B could not drain until the gate is
+// released, which is the one thing this test needs to happen while it is
+// held. The two records differ only in which queue operation they enqueue -
+// the timeline value they reserve, the point they commit and the recording
+// stream they adopt are identical - so the chaining this test names is
+// exercised either way.
 TEST_F(HipEventTest, CrossStreamRerecordDoesNotChainTheNewStreamToTheOldOne) {
   hipStream_t stream_a = CreateStream();
   ASSERT_NE(nullptr, stream_a);
   hipStream_t stream_b = CreateStream();
   ASSERT_NE(nullptr, stream_b);
-  hipEvent_t event = CreateEvent();
+  hipEvent_t event = CreateEventWithFlags(hipEventDisableTiming);
   ASSERT_NE(nullptr, event);
 
   StreamGate gate;
@@ -973,6 +1196,442 @@ TEST_F(HipEventTest, ElapsedTimeNeedsTimingEnabledOnBothEvents) {
   EXPECT_EQ(hipErrorInvalidHandle,
             hip_.event_elapsed_time(&ms, timed_start, untimed_stop))
       << "an interval was reported for a stop with timing disabled";
+}
+
+// The interval between two records is the device work between them, not the
+// time the host spent issuing them. The gate sits between the two records on
+// one stream, so the start record runs before the queue parks and the stop
+// record after it is released, and nothing has to make progress on a second
+// stream while the queue is held.
+TEST_F(HipEventTest, ElapsedTimeMeasuresTheDeviceIntervalBetweenDirectRecords) {
+  hipStream_t stream = CreateStream();
+  ASSERT_NE(nullptr, stream);
+  hipEvent_t start = CreateEvent();
+  ASSERT_NE(nullptr, start);
+  hipEvent_t stop = CreateEvent();
+  ASSERT_NE(nullptr, stop);
+
+  StreamGate gate;
+  ScopedHostCallbacks callbacks;
+  // Only the two record calls are timed, so the number below is the quantity
+  // this test separates the reported interval from.
+  const auto first_record_from = std::chrono::steady_clock::now();
+  ASSERT_EQ(hipSuccess, hip_.event_record(start, stream));
+  double issue_ms = MillisecondsSince(first_record_from);
+  ASSERT_NO_FATAL_FAILURE(
+      EnqueueGateAndWaitUntilEntered(stream, &gate, &callbacks));
+  const auto second_record_from = std::chrono::steady_clock::now();
+  ASSERT_EQ(hipSuccess, hip_.event_record(stop, stream));
+  issue_ms += MillisecondsSince(second_record_from);
+
+  const double held_ms = HoldGateAndRelease(&callbacks);
+  ASSERT_EQ(hipSuccess, hip_.event_synchronize(stop));
+
+  float reported_ms = -1.0f;
+  ASSERT_EQ(hipSuccess, hip_.event_elapsed_time(&reported_ms, start, stop));
+  ASSERT_NO_FATAL_FAILURE(
+      ExpectMeasuredTheHold(reported_ms, held_ms, "direct records"));
+  EXPECT_LT(issue_ms, reported_ms * kMinimumHoldFraction)
+      << "issuing the two records took " << issue_ms << " ms against the "
+      << reported_ms
+      << " ms reported, so this test cannot separate the two quantities";
+}
+
+// The same property through hipGraphLaunch, which reaches the queue by a
+// different path than a direct record; the gate is the graph's own host node.
+TEST_F(HipEventTest, ElapsedTimeMeasuresTheDeviceIntervalBetweenGraphRecords) {
+  hipStream_t stream = CreateStream();
+  ASSERT_NE(nullptr, stream);
+  hipEvent_t start = CreateEvent();
+  ASSERT_NE(nullptr, start);
+  hipEvent_t stop = CreateEvent();
+  ASSERT_NE(nullptr, stop);
+
+  StreamGate gate;
+  ScopedHostCallbacks callbacks;
+  hipGraphExec_t graph_exec = InstantiateGraphRecordingAroundAHostNode(
+      start, stop, &GateHostFunction, &gate);
+  ASSERT_NE(nullptr, graph_exec);
+
+  const auto launch_from = std::chrono::steady_clock::now();
+  ASSERT_EQ(hipSuccess, hip_.graph_launch(graph_exec, stream));
+  const double launch_ms = MillisecondsSince(launch_from);
+  ASSERT_NO_FATAL_FAILURE(callbacks.AddGate(&gate));
+  while (!gate.entered.load(std::memory_order_acquire)) {
+    sched_yield();
+  }
+
+  const double held_ms = HoldGateAndRelease(&callbacks);
+  ASSERT_EQ(hipSuccess, hip_.event_synchronize(stop));
+
+  float reported_ms = -1.0f;
+  ASSERT_EQ(hipSuccess, hip_.event_elapsed_time(&reported_ms, start, stop));
+  ASSERT_NO_FATAL_FAILURE(
+      ExpectMeasuredTheHold(reported_ms, held_ms, "graph-replayed records"));
+  EXPECT_LT(launch_ms, reported_ms * kMinimumHoldFraction)
+      << "the launch took " << launch_ms << " ms against the " << reported_ms
+      << " ms reported, so this test cannot separate the two quantities";
+}
+
+// Every replay of one executable has to capture new ticks. Three replays of one
+// graph over one event pair, holding long, short and long, report three
+// intervals on the same clock, so comparing them to each other cancels the tick
+// rate. A long replay either side of the short one is what separates re-timing
+// from a second replay happening to read something plausible: a tick written
+// once, or a slot recycled between a record and the read of it, collapses the
+// ratio.
+TEST_F(HipEventTest, GraphReplayRetimesTheEventsOnEveryLaunch) {
+  hipStream_t stream = CreateStream();
+  ASSERT_NE(nullptr, stream);
+  hipEvent_t start = CreateEvent();
+  ASSERT_NE(nullptr, start);
+  hipEvent_t stop = CreateEvent();
+  ASSERT_NE(nullptr, stop);
+
+  ReplayGate gate;
+  ScopedReplayGate replays(&gate);
+  hipGraphExec_t graph_exec = InstantiateGraphRecordingAroundAHostNode(
+      start, stop, &ReplayGateHostFunction, &gate);
+  ASSERT_NE(nullptr, graph_exec);
+
+  float first_long_ms = -1.0f;
+  double first_long_held_ms = 0.0;
+  ASSERT_NO_FATAL_FAILURE(ReplayHoldingTheGateAndMeasure(
+      graph_exec, stream, &replays, kGateHoldMs, start, stop, &first_long_ms,
+      &first_long_held_ms));
+  float short_ms = -1.0f;
+  double short_held_ms = 0.0;
+  ASSERT_NO_FATAL_FAILURE(ReplayHoldingTheGateAndMeasure(
+      graph_exec, stream, &replays, kShortGateHoldMs, start, stop, &short_ms,
+      &short_held_ms));
+  float second_long_ms = -1.0f;
+  double second_long_held_ms = 0.0;
+  ASSERT_NO_FATAL_FAILURE(ReplayHoldingTheGateAndMeasure(
+      graph_exec, stream, &replays, kGateHoldMs, start, stop, &second_long_ms,
+      &second_long_held_ms));
+
+  ASSERT_NO_FATAL_FAILURE(ExpectMeasuredTheHold(
+      first_long_ms, first_long_held_ms, "first long replay"));
+  ASSERT_NO_FATAL_FAILURE(ExpectMeasuredTheHold(
+      second_long_ms, second_long_held_ms, "second long replay"));
+  EXPECT_GT(first_long_ms, short_ms * kMinimumReplayRatio)
+      << "the first long replay reported " << first_long_ms
+      << " ms against the short replay's " << short_ms
+      << " ms for a tenth of the hold, so the replay did not re-time the "
+         "events";
+  EXPECT_GT(second_long_ms, short_ms * kMinimumReplayRatio)
+      << "the second long replay reported " << second_long_ms
+      << " ms, close to the preceding short replay's " << short_ms
+      << " ms, so the replay reported the ticks of an earlier one";
+}
+
+// A submitted record draws its tick slot from the recording stream's context
+// pool and hands it to a point the event outlives. Nothing the point names
+// keeps that pool alive - a slot reference is a count on the slot alone - so
+// only the reference the event holds on its own context does. A record on a
+// stream of any other context is refused before a slot is acquired, on the
+// direct path and inside a graph launch alike, so an event can never name
+// storage a context it does not hold has freed.
+//
+// A launch settles that refusal before it submits any of the graph, so the
+// node ahead of the record never runs either: a launch that had submitted part
+// of the graph would report failure and still leave work in flight on a stream
+// whose timeline it never advanced.
+//
+// A second context on the same device is what makes this reachable on a
+// machine with one GPU, where a skip would report green for coverage that
+// never ran.
+TEST_F(HipEventTest, RecordOnAnotherContextsStreamIsRefused) {
+  hipEvent_t event = CreateEvent();
+  ASSERT_NE(nullptr, event);
+  hipStream_t own_stream = CreateStream();
+  ASSERT_NE(nullptr, own_stream);
+
+  // The host node depends on nothing and the record depends on it, so the host
+  // call is the block a launch submits first and the record the block that
+  // refuses it. Whether the host node ran is how the test sees what a refused
+  // launch had already submitted.
+  hipGraph_t graph = CreateGraph();
+  ASSERT_NE(nullptr, graph);
+  hipHostNodeParams host_params = {};
+  host_params.fn = &RanHostFunction;
+  host_params.userData = &graph_host_node_ran_;
+  hipGraphNode_t host_node = nullptr;
+  ASSERT_EQ(hipSuccess,
+            hip_.graph_add_host_node(&host_node, graph,
+                                     /*dependencies=*/nullptr,
+                                     /*dependency_count=*/0, &host_params));
+  hipGraphNode_t record_node = nullptr;
+  ASSERT_EQ(hipSuccess,
+            hip_.graph_add_event_record_node(&record_node, graph, &host_node,
+                                             /*dependency_count=*/1, event));
+  hipGraphExec_t graph_exec = InstantiateGraph(graph);
+  ASSERT_NE(nullptr, graph_exec);
+
+  hipCtx_t original_context = nullptr;
+  ASSERT_EQ(hipSuccess, hip_.ctx_get_current(&original_context));
+  ASSERT_NE(nullptr, original_context)
+      << "the fixture's handles were created without a current context";
+
+  // Creating a context makes it current, so the stream below is created in it
+  // and everything after the restore runs in the original one again.
+  hipCtx_t other_context = nullptr;
+  ASSERT_EQ(hipSuccess,
+            hip_.ctx_create(&other_context, /*flags=*/0, /*device=*/0));
+  ASSERT_NE(nullptr, other_context);
+  hipStream_t other_stream = nullptr;
+  const hipError_t other_stream_result = hip_.stream_create(&other_stream);
+  ASSERT_EQ(hipSuccess, hip_.ctx_set_current(original_context));
+  ASSERT_EQ(hipSuccess, other_stream_result);
+  ASSERT_NE(nullptr, other_stream);
+
+  EXPECT_EQ(hipErrorInvalidHandle, hip_.event_record(event, other_stream))
+      << "a record on a stream of another context was accepted, leaving the "
+         "event holding a tick slot from a pool that context owns";
+  // hipGraphLaunch maps every failed launch to one code, so this pins that the
+  // launch failed and nothing about why; the refusal's own message reaches
+  // stderr on the way through that mapping.
+  EXPECT_EQ(hipErrorInvalidValue, hip_.graph_launch(graph_exec, other_stream))
+      << "a replayed record on a stream of another context was accepted";
+
+  // Nothing has been submitted on that stream, so a block the launch enqueued
+  // would have waited on nothing and been runnable the moment the queue took
+  // it. Draining the stream behind a callback enqueued after the refused launch
+  // is what gives such a block its chance to run before the read below. It is
+  // not an ordering proof: HAL queues are not FIFO, user-visible order comes
+  // from semaphore edges, and these two submissions share none - a refused
+  // launch leaves the stream tail where it was, so the callback drops its wait
+  // the same way the block would have.
+  std::atomic<bool> marker_ran{false};
+  ScopedHostCallbacks callbacks;
+  ASSERT_EQ(hipSuccess,
+            hip_.launch_host_func(other_stream, &RanHostFunction, &marker_ran));
+  callbacks.Add(marker_ran);
+  ASSERT_EQ(hipSuccess, hip_.stream_synchronize(other_stream));
+  ASSERT_TRUE(marker_ran.load(std::memory_order_acquire))
+      << "the stream was synchronized without running the callback behind it, "
+         "so nothing here says when the launch's own blocks would have run";
+  EXPECT_FALSE(graph_host_node_ran_.load(std::memory_order_acquire))
+      << "the node ahead of the refused record ran, so the launch submitted "
+         "part of the graph and then failed";
+
+  // A refused record commits no point, so the event still carries none and
+  // there is no interval between it and a record that was accepted.
+  hipEvent_t accepted = CreateEvent();
+  ASSERT_NE(nullptr, accepted);
+  ASSERT_NO_FATAL_FAILURE(AdvanceEventOnStream(accepted, own_stream,
+                                               /*count=*/1));
+  float ms = -1.0f;
+  EXPECT_EQ(hipErrorInvalidHandle,
+            hip_.event_elapsed_time(&ms, accepted, event))
+      << "an interval was reported for an event whose only records were "
+         "refused";
+
+  // A record on a stream of the event's own context is still accepted, so the
+  // refusals above are not a blanket one.
+  ASSERT_NO_FATAL_FAILURE(AdvanceEventOnStream(event, own_stream, /*count=*/1));
+  ms = -1.0f;
+  EXPECT_EQ(hipSuccess, hip_.event_elapsed_time(&ms, accepted, event));
+  EXPECT_GE(ms, 0.0f);
+
+  EXPECT_EQ(hipSuccess, hip_.stream_synchronize(other_stream));
+  EXPECT_EQ(hipSuccess, hip_.stream_destroy(other_stream));
+  EXPECT_EQ(hipSuccess, hip_.ctx_destroy(other_context));
+}
+
+// Splicing a child graph into an instantiated executable instantiates that
+// graph in the context it belongs to and folds the result into the executable,
+// so it takes a child graph only from the executable's own context - the rule
+// the template's child graph node builder already enforces. A child of another
+// context would seat that context's event records in an executable a launch
+// answers for by comparing one pair of contexts, and the launch would then
+// break on the first of those records with the blocks ahead of it submitted.
+TEST_F(HipEventTest, ExecChildGraphNodeTakesOnlyItsOwnContextsGraph) {
+  hipEvent_t event = CreateEvent();
+  ASSERT_NE(nullptr, event);
+
+  // A splice keeps the node count, so every child graph here holds one record
+  // node, which is also what makes the executable one that records events.
+  hipGraph_t child_graph = CreateGraph();
+  ASSERT_NE(nullptr, child_graph);
+  hipGraphNode_t child_record_node = nullptr;
+  ASSERT_EQ(hipSuccess,
+            hip_.graph_add_event_record_node(&child_record_node, child_graph,
+                                             /*dependencies=*/nullptr,
+                                             /*dependency_count=*/0, event));
+  hipGraph_t parent_graph = CreateGraph();
+  ASSERT_NE(nullptr, parent_graph);
+  hipGraphNode_t child_node = nullptr;
+  ASSERT_EQ(hipSuccess, hip_.graph_add_child_graph_node(
+                            &child_node, parent_graph,
+                            /*dependencies=*/nullptr,
+                            /*dependency_count=*/0, child_graph));
+  hipGraphExec_t graph_exec = InstantiateGraph(parent_graph);
+  ASSERT_NE(nullptr, graph_exec);
+
+  hipCtx_t original_context = nullptr;
+  ASSERT_EQ(hipSuccess, hip_.ctx_get_current(&original_context));
+  ASSERT_NE(nullptr, original_context)
+      << "the fixture's handles were created without a current context";
+
+  // Creating a context makes it current, so the event and graph below are
+  // created in it and everything after the restore runs in the original one
+  // again. Both belong to the same context, which is what lets the record node
+  // be added at all.
+  hipCtx_t other_context = nullptr;
+  ASSERT_EQ(hipSuccess,
+            hip_.ctx_create(&other_context, /*flags=*/0, /*device=*/0));
+  ASSERT_NE(nullptr, other_context);
+  hipEvent_t other_event = nullptr;
+  hipGraph_t other_child_graph = nullptr;
+  hipGraphNode_t other_record_node = nullptr;
+  hipError_t other_result = hip_.event_create(&other_event);
+  if (other_result == hipSuccess) {
+    other_result = hip_.graph_create(&other_child_graph, /*flags=*/0);
+  }
+  if (other_result == hipSuccess) {
+    other_result = hip_.graph_add_event_record_node(
+        &other_record_node, other_child_graph, /*dependencies=*/nullptr,
+        /*dependency_count=*/0, other_event);
+  }
+  ASSERT_EQ(hipSuccess, hip_.ctx_set_current(original_context));
+  ASSERT_EQ(hipSuccess, other_result);
+
+  EXPECT_EQ(hipErrorInvalidValue,
+            hip_.graph_exec_child_graph_node_set_params(graph_exec, child_node,
+                                                        other_child_graph))
+      << "an executable took a child graph from another context, whose record "
+         "nodes a launch on a stream of this context would refuse one block "
+         "into the walk";
+
+  // A child graph of the executable's own context is still taken, so the
+  // refusal is the context rule and not a blanket one.
+  hipGraph_t replacement_child_graph = CreateGraph();
+  ASSERT_NE(nullptr, replacement_child_graph);
+  hipGraphNode_t replacement_record_node = nullptr;
+  ASSERT_EQ(hipSuccess, hip_.graph_add_event_record_node(
+                            &replacement_record_node, replacement_child_graph,
+                            /*dependencies=*/nullptr,
+                            /*dependency_count=*/0, event));
+  EXPECT_EQ(hipSuccess, hip_.graph_exec_child_graph_node_set_params(
+                            graph_exec, child_node, replacement_child_graph));
+
+  EXPECT_EQ(hipSuccess, hip_.graph_destroy(other_child_graph));
+  EXPECT_EQ(hipSuccess, hip_.event_destroy(other_event));
+  EXPECT_EQ(hipSuccess, hip_.ctx_destroy(other_context));
+}
+
+// Instantiating a child graph instantiates the child graph nodes it holds in
+// turn, so a splice takes only a graph that does not reach the executable's
+// template: one that did would make the rebuild follow the containment back
+// into itself until the stack ran out. This is the rest of the rule the
+// template's child graph node builder already enforces, and the builder takes
+// the container built here because containment closes into a cycle only once
+// the template's own node is retargeted at it.
+TEST_F(HipEventTest, ExecChildGraphNodeRefusesAGraphContainingItsTemplate) {
+  hipEvent_t event = CreateEvent();
+  ASSERT_NE(nullptr, event);
+
+  // Every graph here holds exactly one node, so the node counts a splice
+  // compares are equal and cannot be what refuses anything below.
+  hipGraph_t child_graph = CreateGraph();
+  ASSERT_NE(nullptr, child_graph);
+  hipGraphNode_t child_record_node = nullptr;
+  ASSERT_EQ(hipSuccess,
+            hip_.graph_add_event_record_node(&child_record_node, child_graph,
+                                             /*dependencies=*/nullptr,
+                                             /*dependency_count=*/0, event));
+  hipGraph_t template_graph = CreateGraph();
+  ASSERT_NE(nullptr, template_graph);
+  hipGraphNode_t child_node = nullptr;
+  ASSERT_EQ(hipSuccess, hip_.graph_add_child_graph_node(
+                            &child_node, template_graph,
+                            /*dependencies=*/nullptr,
+                            /*dependency_count=*/0, child_graph));
+  hipGraphExec_t graph_exec = InstantiateGraph(template_graph);
+  ASSERT_NE(nullptr, graph_exec);
+
+  hipGraph_t container_graph = CreateGraph();
+  ASSERT_NE(nullptr, container_graph);
+  hipGraphNode_t container_child_node = nullptr;
+  ASSERT_EQ(hipSuccess, hip_.graph_add_child_graph_node(
+                            &container_child_node, container_graph,
+                            /*dependencies=*/nullptr,
+                            /*dependency_count=*/0, template_graph));
+
+  EXPECT_EQ(hipErrorInvalidValue, hip_.graph_exec_child_graph_node_set_params(
+                                      graph_exec, child_node, container_graph))
+      << "an executable took a child graph that holds its own template, whose "
+         "rebuild instantiates the template again through that child";
+  // Both the identity check and the containment walk refuse this: the walk
+  // seeds with the offered graph and matches the parent on its first step. The
+  // assertion pins the entry point's answer, not the identity check on its
+  // own. That check carries the template's child graph node builder, where a
+  // graph with no child graph node added to itself would otherwise take the
+  // containment early return and succeed.
+  EXPECT_EQ(hipErrorInvalidValue, hip_.graph_exec_child_graph_node_set_params(
+                                      graph_exec, child_node, template_graph))
+      << "an executable took its own template as the child graph of a node of "
+         "that template";
+
+  // A child graph that reaches nothing is still taken, so the refusals above
+  // are the containment rule and not a blanket one.
+  hipGraph_t replacement_child_graph = CreateGraph();
+  ASSERT_NE(nullptr, replacement_child_graph);
+  hipGraphNode_t replacement_record_node = nullptr;
+  ASSERT_EQ(hipSuccess, hip_.graph_add_event_record_node(
+                            &replacement_record_node, replacement_child_graph,
+                            /*dependencies=*/nullptr,
+                            /*dependency_count=*/0, event));
+  EXPECT_EQ(hipSuccess, hip_.graph_exec_child_graph_node_set_params(
+                            graph_exec, child_node, replacement_child_graph));
+}
+
+// Destroying a graph unregisters its handle and drops the reference the handle
+// carried, so a handle offered here afterwards names storage the last release
+// freed. On the path this test builds the splice reads a node count, a context
+// and a child graph node count out of that storage; the walk of the node
+// blocks runs only for a graph that holds child graph nodes, and the one
+// offered here holds a single record node. It takes only a live handle, the
+// gate its template counterpart holds.
+TEST_F(HipEventTest, ExecChildGraphNodeRefusesADestroyedGraph) {
+  hipEvent_t event = CreateEvent();
+  ASSERT_NE(nullptr, event);
+
+  hipGraph_t child_graph = CreateGraph();
+  ASSERT_NE(nullptr, child_graph);
+  hipGraphNode_t child_record_node = nullptr;
+  ASSERT_EQ(hipSuccess,
+            hip_.graph_add_event_record_node(&child_record_node, child_graph,
+                                             /*dependencies=*/nullptr,
+                                             /*dependency_count=*/0, event));
+  hipGraph_t template_graph = CreateGraph();
+  ASSERT_NE(nullptr, template_graph);
+  hipGraphNode_t child_node = nullptr;
+  ASSERT_EQ(hipSuccess, hip_.graph_add_child_graph_node(
+                            &child_node, template_graph,
+                            /*dependencies=*/nullptr,
+                            /*dependency_count=*/0, child_graph));
+  hipGraphExec_t graph_exec = InstantiateGraph(template_graph);
+  ASSERT_NE(nullptr, graph_exec);
+
+  // Holds one node like the graph it would displace, so the node counts a
+  // splice compares are equal and cannot be what refuses it. Nothing else
+  // holds a reference to it, so destroying it is what frees it.
+  hipGraph_t stale_graph = CreateGraph();
+  ASSERT_NE(nullptr, stale_graph);
+  hipGraphNode_t stale_record_node = nullptr;
+  ASSERT_EQ(hipSuccess,
+            hip_.graph_add_event_record_node(&stale_record_node, stale_graph,
+                                             /*dependencies=*/nullptr,
+                                             /*dependency_count=*/0, event));
+  DestroyGraph(stale_graph);
+
+  EXPECT_EQ(hipErrorInvalidValue, hip_.graph_exec_child_graph_node_set_params(
+                                      graph_exec, child_node, stale_graph))
+      << "an executable took a destroyed graph as a child graph, reading its "
+         "node count, its context and its child graph node count out of freed "
+         "storage";
 }
 
 // Bytes taken from the default pool by the reuse tests below. A pending free is

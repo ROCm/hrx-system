@@ -143,6 +143,18 @@ hrx_cc_test(
 )
 
 hrx_cc_test(
+    name = "graph_exec_test",
+    srcs = ["graph_exec_test.cc"],
+    deps = [
+        ":common",
+        "//libhrx/src/libhrx:hrx_static",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+hrx_cc_test(
     name = "graph_test",
     srcs = ["graph_test.cc"],
     deps = [

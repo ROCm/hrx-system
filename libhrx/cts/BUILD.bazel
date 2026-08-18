@@ -161,6 +161,31 @@ hrx_cc_test(
 )
 
 hrx_cc_test(
+    name = "hip_event_timing_test",
+    srcs = [
+        "core/amdgpu_executable_test_data.hpp",
+        "core/amdgpu_test_data.hpp",
+        "tests/hip/event_timing_test.cpp",
+    ],
+    copts = ["-Wno-attributes"],
+    data = ["//libhrx/src/binding/hip:amdhip64"],
+    env = {
+        "HRX_TEST_LIBAMDHIP64": "$(location //libhrx/src/binding/hip:amdhip64)",
+    },
+    sanitizer_suppressions = hsa_suppressions,
+    tags = AMD_GPU_CTS_TAGS,
+    target_compatible_with = _LINUX_COMPATIBILITY,
+    deps = [
+        ":amdgpu_executable_test_kernels",
+        "//build_tools:dl",
+        "//build_tools/amdgpu:target_map_h",
+        "//libhrx/src/binding/hip:launch_params",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+hrx_cc_test(
     name = "hip_module_execution_test",
     srcs = [
         "core/amdgpu_executable_test_data.hpp",

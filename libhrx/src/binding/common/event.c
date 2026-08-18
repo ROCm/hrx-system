@@ -86,11 +86,17 @@ void iree_hal_streaming_event_acquire_recorded_point(
   iree_slim_mutex_lock(&event->mutex);
   *out_point = event->recorded_point;
   iree_hal_semaphore_retain(out_point->semaphore);
+  iree_hal_streaming_event_timestamp_slot_retain(out_point->timestamp_slot);
   iree_slim_mutex_unlock(&event->mutex);
 }
 
 void iree_hal_streaming_event_release_recorded_point(
     iree_hal_streaming_recorded_point_t* point) {
+  // Released before the semaphore: the slot's retirement condition is the
+  // point's own semaphore payload, so the pool reads it while this reference
+  // still holds the semaphore up.
+  iree_hal_streaming_event_timestamp_slot_release(
+      point->timestamp_slot, point->semaphore, point->value);
   iree_hal_semaphore_release(point->semaphore);
   *point = (iree_hal_streaming_recorded_point_t){0};
 }
@@ -102,6 +108,9 @@ void iree_hal_streaming_event_commit_recorded_point(
   iree_hal_streaming_recorded_point_t previous = event->recorded_point;
   event->recorded_point = point;
   iree_slim_mutex_unlock(&event->mutex);
+  // Dropped outside the lock: returning a tick slot to its pool takes the pool
+  // mutex, and that mutex and this one are both leaves that no path holds at
+  // the same time.
   iree_hal_streaming_event_release_recorded_point(&previous);
 }
 
@@ -159,12 +168,53 @@ iree_status_t iree_hal_streaming_event_enqueue_record(
     iree_hal_semaphore_list_t wait_semaphores,
     iree_hal_semaphore_list_t signal_semaphores,
     iree_hal_streaming_recorded_point_t* point) {
-  IREE_RETURN_IF_ERROR(iree_hal_device_queue_barrier(
-      stream->context->device, stream->queue_affinity, wait_semaphores,
-      signal_semaphores, IREE_HAL_EXECUTE_FLAG_NONE));
+  iree_hal_streaming_context_t* context = stream->context;
+  // The slot a timed record captures into is suballocated from |context|'s
+  // pool and outlives the record on the point the event holds. Nothing the
+  // point names keeps that pool alive - a slot reference is a count on the
+  // slot alone - so only the reference the event holds on its own context
+  // does, and a slot drawn from any other context's pool can be left naming
+  // storage that context freed. Ticks are counted on the recording device's
+  // clock besides, and iree_hal_streaming_event_elapsed_time converts them
+  // with the event's own context domain.
+  if (event->context != context) {
+    return iree_make_status(
+        IREE_STATUS_INCOMPATIBLE,
+        "an event can only be recorded on a stream of the context that "
+        "created it");
+  }
+
+  const bool captures_tick =
+      context->timestamp_domain.frequency_hz != 0 &&
+      !(event->flags & IREE_HAL_STREAMING_EVENT_FLAG_DISABLE_TIMING);
+
+  iree_hal_streaming_event_timestamp_slot_t* slot = NULL;
+  if (captures_tick) {
+    IREE_RETURN_IF_ERROR(iree_hal_streaming_event_timestamp_pool_acquire(
+        &context->timestamp_pool, &slot));
+  }
+
+  const iree_status_t status =
+      slot ? iree_hal_device_queue_timestamp(
+                 context->device, stream->queue_affinity, wait_semaphores,
+                 signal_semaphores,
+                 iree_hal_streaming_event_timestamp_slot_buffer(slot),
+                 iree_hal_streaming_event_timestamp_slot_offset(slot),
+                 IREE_HAL_TIMESTAMP_FLAG_NONE)
+           : iree_hal_device_queue_barrier(
+                 context->device, stream->queue_affinity, wait_semaphores,
+                 signal_semaphores, IREE_HAL_EXECUTE_FLAG_NONE);
+  if (!iree_status_is_ok(status)) {
+    // A rejected enqueue leaves no write outstanding against the slot, which
+    // only this path can say; every other release names the point's own
+    // retirement condition.
+    iree_hal_streaming_event_timestamp_slot_release(slot, NULL, 0);
+    return status;
+  }
 
   // The point owns what it names from here.
   iree_hal_semaphore_retain(point->semaphore);
+  point->timestamp_slot = slot;
   return iree_ok_status();
 }
 
@@ -204,10 +254,6 @@ iree_status_t iree_hal_streaming_event_record(
     return iree_ok_status();
   }
 
-  // Sampled before the submission so the timestamp reflects when the caller
-  // issued the record.
-  const iree_time_t record_time_ns = iree_time_now();
-
   // Flush the stream to ensure all prior operations are submitted.
   IREE_RETURN_AND_END_ZONE_IF_ERROR(z0,
                                     iree_hal_streaming_stream_flush(stream));
@@ -246,7 +292,6 @@ iree_status_t iree_hal_streaming_event_record(
       .value = stream_signal_value,
       .ordered_after_stream_id = stream->stream_id,
       .ordered_after_stream_value = stream_signal_value,
-      .record_time_ns = record_time_ns,
   };
   iree_hal_streaming_stream_t* previous_stream = NULL;
   status = iree_hal_streaming_event_enqueue_record(
@@ -279,15 +324,14 @@ iree_status_t iree_hal_streaming_event_synchronize(
 
   iree_hal_streaming_recorded_point_t recorded_point;
   iree_hal_streaming_event_acquire_recorded_point(event, &recorded_point);
-  if (!recorded_point.semaphore) {
-    // An event with no submitted record has nothing to wait for.
-    IREE_TRACE_ZONE_END(z0);
-    return iree_ok_status();
+  // A point naming no timeline has no submitted record behind it and nothing to
+  // wait for.
+  iree_status_t status = iree_ok_status();
+  if (recorded_point.semaphore) {
+    status = iree_hal_semaphore_wait(
+        recorded_point.semaphore, recorded_point.value, iree_infinite_timeout(),
+        IREE_ASYNC_WAIT_FLAG_NONE);
   }
-
-  iree_status_t status = iree_hal_semaphore_wait(
-      recorded_point.semaphore, recorded_point.value, iree_infinite_timeout(),
-      IREE_ASYNC_WAIT_FLAG_NONE);
   iree_hal_streaming_event_release_recorded_point(&recorded_point);
   IREE_RETURN_AND_END_ZONE_IF_ERROR(z0, status);
 
@@ -315,6 +359,33 @@ float iree_hal_streaming_timestamp_domain_elapsed_ms(
   return (float)(signed_delta * 1000.0 / (double)domain.frequency_hz);
 }
 
+// Reads the ticks the reached records |start_point| and |stop_point| captured
+// and converts the interval between them with |domain|, writing |*out_ms| only
+// when both reads succeed. Both points must name a tick slot, which the caller
+// establishes before querying either record.
+static iree_status_t iree_hal_streaming_recorded_point_pair_elapsed_ms(
+    iree_hal_streaming_timestamp_domain_t domain,
+    const iree_hal_streaming_recorded_point_t* start_point,
+    const iree_hal_streaming_recorded_point_t* stop_point, float* out_ms) {
+  uint64_t start_tick = 0;
+  IREE_RETURN_IF_ERROR(
+      iree_hal_buffer_map_read(iree_hal_streaming_event_timestamp_slot_buffer(
+                                   start_point->timestamp_slot),
+                               iree_hal_streaming_event_timestamp_slot_offset(
+                                   start_point->timestamp_slot),
+                               &start_tick, sizeof(start_tick)));
+  uint64_t stop_tick = 0;
+  IREE_RETURN_IF_ERROR(
+      iree_hal_buffer_map_read(iree_hal_streaming_event_timestamp_slot_buffer(
+                                   stop_point->timestamp_slot),
+                               iree_hal_streaming_event_timestamp_slot_offset(
+                                   stop_point->timestamp_slot),
+                               &stop_tick, sizeof(stop_tick)));
+  *out_ms = iree_hal_streaming_timestamp_domain_elapsed_ms(domain, start_tick,
+                                                           stop_tick);
+  return iree_ok_status();
+}
+
 iree_status_t iree_hal_streaming_event_elapsed_time(
     float* ms, iree_hal_streaming_event_t* start,
     iree_hal_streaming_event_t* stop,
@@ -325,7 +396,8 @@ iree_status_t iree_hal_streaming_event_elapsed_time(
   IREE_ASSERT_ARGUMENT(out_timing);
   *out_timing = IREE_HAL_STREAMING_EVENT_TIMING_UNTIMED;
 
-  // An event with timing disabled never carries a timestamp to measure from.
+  // An event with timing disabled captures no tick, so there is no interval
+  // between two such records to measure.
   if ((start->flags & IREE_HAL_STREAMING_EVENT_FLAG_DISABLE_TIMING) ||
       (stop->flags & IREE_HAL_STREAMING_EVENT_FLAG_DISABLE_TIMING)) {
     return iree_ok_status();
@@ -333,18 +405,28 @@ iree_status_t iree_hal_streaming_event_elapsed_time(
 
   // Each record is taken once and the interval is measured between exactly the
   // two records queried below, so a record landing on either event concurrently
-  // cannot pair one record's timestamp with another record's point.
+  // cannot pair one record's tick with another record's point.
   iree_hal_streaming_recorded_point_t start_point;
   iree_hal_streaming_recorded_point_t stop_point;
   iree_hal_streaming_event_acquire_recorded_point(start, &start_point);
   iree_hal_streaming_event_acquire_recorded_point(stop, &stop_point);
 
-  // Both records must carry a timestamp and both must have been reached before
-  // the interval between them exists. The stop record is only queried once the
-  // start record is known to have been reached, so an outstanding start reports
-  // the interval as incomplete without touching the stop timeline.
   iree_status_t status = iree_ok_status();
-  if (start_point.record_time_ns != 0 && stop_point.record_time_ns != 0) {
+  if (!start_point.semaphore || !stop_point.semaphore) {
+    // An event with no submitted record names no point to measure from, which
+    // is what the outcome already reads as.
+  } else if (!start_point.timestamp_slot || !stop_point.timestamp_slot) {
+    // Both records were submitted with timing enabled, and a record is made
+    // only on a stream of its own event's context, so the one thing that can
+    // leave a record without a tick is that context advertising no domain to
+    // capture in. Answered before the timelines are queried: reaching a record
+    // that captured nothing produces no measurement either.
+    *out_timing = IREE_HAL_STREAMING_EVENT_TIMING_UNSUPPORTED;
+  } else {
+    // Both ticks are defined once both records have been reached. The stop
+    // record is only queried once the start record is known to have been
+    // reached, so an outstanding start reports the interval as incomplete
+    // without touching the stop timeline.
     bool reached = false;
     status = iree_hal_streaming_recorded_point_query(&start_point, &reached);
     if (iree_status_is_ok(status) && reached) {
@@ -352,10 +434,16 @@ iree_status_t iree_hal_streaming_event_elapsed_time(
     }
     if (iree_status_is_ok(status)) {
       if (reached) {
-        const int64_t elapsed_ns =
-            stop_point.record_time_ns - start_point.record_time_ns;
-        *ms = (float)elapsed_ns / 1000000.0f;
-        *out_timing = IREE_HAL_STREAMING_EVENT_TIMING_MEASURED;
+        // Ticks are comparable only inside one device's domain, and this
+        // converts with the start event's context domain. A record is made
+        // only on a stream of its own event's context, and both bindings
+        // refuse a pair whose events come from different contexts before it
+        // reaches here, so both ticks were captured in that domain.
+        status = iree_hal_streaming_recorded_point_pair_elapsed_ms(
+            start->context->timestamp_domain, &start_point, &stop_point, ms);
+        if (iree_status_is_ok(status)) {
+          *out_timing = IREE_HAL_STREAMING_EVENT_TIMING_MEASURED;
+        }
       } else {
         *out_timing = IREE_HAL_STREAMING_EVENT_TIMING_INCOMPLETE;
       }
