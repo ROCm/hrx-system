@@ -42,6 +42,20 @@ struct loom_symbolic_expr_memo_entry_t {
 
   // Cached expression when state is LOOM_SYMBOLIC_EXPR_MEMO_READY.
   loom_symbolic_expr_t expression;
+
+  // Which entries of `refined` hold a result, indexed by remaining depth.
+  // Queries always enter at the depth limit, so depths are 0..LIMIT and a
+  // uint32_t covers them.
+  uint32_t refined_valid;
+
+  // Condition-refined facts per remaining depth. The walk recurses into every
+  // operand, so on a DAG a value reachable by several paths is otherwise
+  // recomputed once per path -- exponential in the depth limit, and each visit
+  // bump-allocates operand and result arrays that the arena only reclaims on
+  // reset. Keyed on depth and not just value because a shallower budget yields
+  // deliberately weaker facts.
+  loom_value_facts_t
+      refined[LOOM_SYMBOLIC_EXPR_CONDITION_FACT_INFER_DEPTH_LIMIT + 1];
 };
 
 static loom_value_facts_t loom_symbolic_expr_intersect_integer_facts(
@@ -52,6 +66,9 @@ static iree_status_t
 loom_symbolic_expr_apply_identity_chain_predicates_to_value_facts(
     loom_symbolic_expr_context_t* context, loom_value_id_t start_value,
     loom_value_facts_t* inout_facts);
+static iree_status_t loom_symbolic_expr_lookup_condition_refined_facts(
+    loom_symbolic_expr_context_t* context, loom_value_id_t value_id,
+    uint8_t remaining_depth, loom_value_facts_t* out_facts);
 static iree_status_t loom_symbolic_expr_values_match(
     loom_symbolic_expr_context_t* context, loom_value_id_t left_value,
     loom_value_id_t right_value, bool* out_match);
@@ -161,7 +178,7 @@ static loom_value_facts_t loom_symbolic_expr_lookup_facts(
   return facts;
 }
 
-static iree_status_t loom_symbolic_expr_lookup_condition_refined_facts(
+static iree_status_t loom_symbolic_expr_lookup_condition_refined_facts_uncached(
     loom_symbolic_expr_context_t* context, loom_value_id_t value_id,
     uint8_t remaining_depth, loom_value_facts_t* out_facts) {
   loom_value_facts_t facts = loom_symbolic_expr_lookup_facts(context, value_id);
@@ -229,6 +246,38 @@ static iree_status_t loom_symbolic_expr_lookup_condition_refined_facts(
           context, value_id, &inferred_facts));
   *out_facts =
       loom_symbolic_expr_intersect_integer_facts(facts, inferred_facts);
+  return iree_ok_status();
+}
+
+// Memo in front of the walk above. Sound for the same reason the expression
+// memo is: every caller that changes `condition_facts` resets the context, so
+// no entry outlives the assumptions it was derived under.
+static iree_status_t loom_symbolic_expr_lookup_condition_refined_facts(
+    loom_symbolic_expr_context_t* context, loom_value_id_t value_id,
+    uint8_t remaining_depth, loom_value_facts_t* out_facts) {
+  const bool cacheable =
+      context->module != NULL && value_id < context->module->values.count &&
+      remaining_depth <= LOOM_SYMBOLIC_EXPR_CONDITION_FACT_INFER_DEPTH_LIMIT;
+  if (cacheable) {
+    IREE_RETURN_IF_ERROR(
+        loom_symbolic_expr_ensure_memo_capacity(context, value_id + 1));
+    const loom_symbolic_expr_memo_entry_t* entry =
+        &context->memo_entries[value_id];
+    if (entry->refined_valid & (1u << remaining_depth)) {
+      *out_facts = entry->refined[remaining_depth];
+      return iree_ok_status();
+    }
+  }
+  IREE_RETURN_IF_ERROR(
+      loom_symbolic_expr_lookup_condition_refined_facts_uncached(
+          context, value_id, remaining_depth, out_facts));
+  if (cacheable) {
+    // Re-index rather than reusing the probe's pointer: the walk recurses, and
+    // a deeper query may have grown the entry array out from under it.
+    loom_symbolic_expr_memo_entry_t* entry = &context->memo_entries[value_id];
+    entry->refined[remaining_depth] = *out_facts;
+    entry->refined_valid |= 1u << remaining_depth;
+  }
   return iree_ok_status();
 }
 
