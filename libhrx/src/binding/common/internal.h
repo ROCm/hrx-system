@@ -7,6 +7,7 @@
 #ifndef IREE_EXPERIMENTAL_STREAMING_INTERNAL_H_
 #define IREE_EXPERIMENTAL_STREAMING_INTERNAL_H_
 
+#include "common/event_timestamp_pool.h"
 #include "common/fat_binary.h"
 #include "common/function_attributes.h"
 #include "common/hrx_bridge.h"
@@ -219,6 +220,9 @@ struct iree_hal_streaming_context_t {
   // zeroed domain when the device advertises none. Constant for the context's
   // life: the device spec is immutable.
   iree_hal_streaming_timestamp_domain_t timestamp_domain;
+  // Suballocator for the tick slots this context's event records write into.
+  // Unused, and never grown, when |timestamp_domain| is zeroed.
+  iree_hal_streaming_event_timestamp_pool_t timestamp_pool;
 
   // Context flags.
   iree_hal_streaming_context_flags_t flags;

@@ -163,6 +163,10 @@ iree_status_t iree_hal_streaming_context_create(
   // Initialize buffer mapping table.
   hrx_buffer_table_initialize(&context->buffer_table);
 
+  // Initialize the device timestamp slot pool.
+  iree_hal_streaming_event_timestamp_pool_initialize(
+      context->device_allocator, host_allocator, &context->timestamp_pool);
+
   // Initialize symbol map with global registry as the backing store.
   iree_status_t status = iree_hal_streaming_context_symbol_map_initialize(
       context, /*initial_capacity=*/16, registry, host_allocator,
@@ -291,6 +295,12 @@ static void iree_hal_streaming_context_destroy(
     iree_allocator_free(context->host_allocator, context->streams);
   }
   iree_slim_mutex_deinitialize(&context->stream_list_mutex);
+
+  // A record draws its slot from the pool of the recording event's own context
+  // and every event retains that context, so reaching here means every event
+  // that could hold a slot from this pool is gone and every slot is back.
+  iree_hal_streaming_event_timestamp_pool_deinitialize(
+      &context->timestamp_pool);
 
   iree_status_ignore(context->loop_status);
   iree_hal_allocator_release(context->device_allocator);

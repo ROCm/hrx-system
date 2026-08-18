@@ -35,6 +35,7 @@ iree_cc_library(
     common
   HDRS
     "direct_transfer.h"
+    "event_timestamp_pool.h"
     "fat_binary.h"
     "graph.h"
     "hrx_bridge.h"
@@ -51,6 +52,7 @@ iree_cc_library(
     "device.c"
     "direct_transfer.c"
     "event.c"
+    "event_timestamp_pool.c"
     "fat_binary.c"
     "graph.c"
     "graph_analysis.c"
@@ -128,6 +130,23 @@ iree_cc_test(
     iree::testing::gtest
     iree::testing::gtest_main
     libhrx::src::libhrx::hrx_static
+    libhrx_defs
+)
+
+iree_cc_test(
+  NAME
+    event_timestamp_pool_test
+  SRCS
+    "event_timestamp_pool_test.cc"
+  DEPS
+    ::common
+    iree::async
+    iree::async::platform
+    iree::base
+    iree::hal
+    iree::hal::drivers::local_sync::sync_driver
+    iree::testing::gtest
+    iree::testing::gtest_main
     libhrx_defs
 )
 
