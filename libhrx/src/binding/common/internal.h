@@ -188,6 +188,18 @@ typedef struct iree_hal_streaming_graph_memory_size_entry_t {
   uint32_t reference_count;
 } iree_hal_streaming_graph_memory_size_entry_t;
 
+// Facts converting a pair of device ticks captured on one device into a
+// duration. Populated or zeroed as a unit: a zero |frequency_hz| means the
+// device advertises no domain whose ticks this layer can convert, and is the
+// one state in which a timing-enabled record captures no tick.
+typedef struct iree_hal_streaming_timestamp_domain_t {
+  // Ticks per second of the domain, or 0 when the device advertises none.
+  uint64_t frequency_hz;
+  // Number of low bits defined in a tick, in [1, 64]; the counter wraps at
+  // this width. Zero exactly when |frequency_hz| is zero.
+  uint32_t valid_bits;
+} iree_hal_streaming_timestamp_domain_t;
+
 // Stream context mapped to HAL device.
 struct iree_hal_streaming_context_t {
   // Reference counting.
@@ -202,6 +214,11 @@ struct iree_hal_streaming_context_t {
   // HAL resources.
   iree_hal_allocator_t* device_allocator;
   iree_status_t loop_status;
+
+  // Facts converting the ticks this context's event records capture, or a
+  // zeroed domain when the device advertises none. Constant for the context's
+  // life: the device spec is immutable.
+  iree_hal_streaming_timestamp_domain_t timestamp_domain;
 
   // Context flags.
   iree_hal_streaming_context_flags_t flags;
@@ -1468,6 +1485,22 @@ iree_status_t iree_hal_streaming_calculate_max_cooperative_blocks(
 // Context management
 //===----------------------------------------------------------------------===//
 
+// Reads the facts converting the ticks of the device |spec| describes, or a
+// zeroed domain when it advertises none whose ticks records made on that device
+// can be differenced. A NULL |spec| is a device publishing no facts at all.
+//
+// The facts belong to the queue family a capture resolves to, so this accepts
+// only a device reporting a single family covering a single physical device:
+// there is then one domain, and two records made anywhere on the device are
+// comparable however the implementation resolves their queue affinity. The
+// device-scope summary carries the DEVICE_TIMESTAMPS flag, which no family spec
+// repeats, and may aggregate families that differ, so the flag is read there
+// and the numbers from the family itself; a summary that disagrees with the one
+// family it stands for describes no domain either can be converted with.
+// Synchronization: none (reads immutable device facts).
+iree_hal_streaming_timestamp_domain_t iree_hal_streaming_query_timestamp_domain(
+    const iree_hal_device_spec_t* spec);
+
 // Synchronization: none (creates new context).
 iree_status_t iree_hal_streaming_context_create(
     iree_hal_streaming_device_t* device_entry,
@@ -1815,6 +1848,25 @@ iree_status_t iree_hal_streaming_event_record(
 // Synchronization: event (blocks until event signaled).
 iree_status_t iree_hal_streaming_event_synchronize(
     iree_hal_streaming_event_t* event);
+
+// Converts the interval between two ticks captured in |domain| to milliseconds.
+// Only the low |domain.valid_bits| of a tick are defined and the counter wraps
+// there, so the difference is reduced modulo that width; a width of 64 makes
+// the reduction the identity.
+//
+// Reading that reduced difference as a signed offset from the counter's top bit
+// is this layer's choice and not something the device facts state. It is what
+// makes a pair captured in order a positive duration and a reversed pair a
+// negative one, and what it costs is that an interval longer than half the
+// counter range reports negative: out of reach at 64 bits and 100 MHz, but 21
+// seconds on a 32-bit counter at the same rate.
+//
+// |domain| must be populated; the only caller reaches this through a record
+// that captured a tick, which a zeroed domain makes impossible.
+// Synchronization: none (pure arithmetic).
+float iree_hal_streaming_timestamp_domain_elapsed_ms(
+    iree_hal_streaming_timestamp_domain_t domain, uint64_t start_tick,
+    uint64_t stop_tick);
 
 // Measures the interval between the records |start| and |stop| name and stores
 // it in milliseconds in |*ms|. Writes |*ms| only when |*out_timing| is

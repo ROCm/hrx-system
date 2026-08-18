@@ -118,6 +118,21 @@ iree_cc_test(
 
 iree_cc_test(
   NAME
+    event_test
+  SRCS
+    "event_test.cc"
+  DEPS
+    ::common
+    iree::base
+    iree::hal
+    iree::testing::gtest
+    iree::testing::gtest_main
+    libhrx::src::libhrx::hrx_static
+    libhrx_defs
+)
+
+iree_cc_test(
+  NAME
     graph_test
   SRCS
     "graph_test.cc"

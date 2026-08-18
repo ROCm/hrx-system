@@ -277,6 +277,26 @@ iree_status_t iree_hal_streaming_event_synchronize(
   return iree_ok_status();
 }
 
+float iree_hal_streaming_timestamp_domain_elapsed_ms(
+    iree_hal_streaming_timestamp_domain_t domain, uint64_t start_tick,
+    uint64_t stop_tick) {
+  const uint64_t mask = domain.valid_bits == 64
+                            ? UINT64_MAX
+                            : ((1ull << domain.valid_bits) - 1ull);
+  const uint64_t delta = (stop_tick - start_tick) & mask;
+  // The counter's top bit, derived from the mask so it is defined at every
+  // width the domain can carry, including none: there the mask takes the pair
+  // to zero, which sits below this.
+  const uint64_t sign_bit = (mask >> 1) + 1ull;
+  // Formed as a double because the scaling below is floating point and the
+  // result is a float. The offset itself fits int64_t at every width the
+  // domain can carry: for delta >= sign_bit, mask - delta is at most
+  // INT64_MAX, so -(mask - delta) - 1 bottoms out at exactly INT64_MIN.
+  const double signed_delta =
+      delta >= sign_bit ? -(double)(mask - delta) - 1.0 : (double)delta;
+  return (float)(signed_delta * 1000.0 / (double)domain.frequency_hz);
+}
+
 iree_status_t iree_hal_streaming_event_elapsed_time(
     float* ms, iree_hal_streaming_event_t* start,
     iree_hal_streaming_event_t* stop,
