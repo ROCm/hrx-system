@@ -149,6 +149,7 @@ hrx_cc_test(
         ":common",
         "//libhrx/src/libhrx:hrx_static",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],

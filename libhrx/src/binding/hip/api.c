@@ -11875,6 +11875,27 @@ HIPAPI hipError_t hipEventQuery(hipEvent_t event) {
   return result;
 }
 
+// Invalidates the stream capture |event|'s last record went into. An event
+// that names no capture invalidates nothing: one whose last record was
+// submitted, and one that has never been recorded.
+//
+// The graph identifies the capture and the context only narrows which streams
+// are searched for it, so this searches the event's own context: the one
+// hipEventElapsedTime has already established both of its events share. The
+// streams searched are then a property of the pair being measured, and an
+// entry point that resolves no current context needs none. hipEventQuery and
+// hipEventSynchronize search the current context instead, which
+// iree_hip_ensure_context hands them when they initialize the runtime. A
+// capture recorded on a stream belonging to neither context is found by none
+// of the three.
+static void iree_hip_invalidate_event_capture(
+    iree_hal_streaming_event_t* event) {
+  iree_hal_streaming_graph_t* capture_graph =
+      iree_hal_streaming_event_acquire_capture_graph(event);
+  iree_hip_context_invalidate_capture_graph(event->context, capture_graph);
+  iree_hal_streaming_graph_release(capture_graph);
+}
+
 // Computes elapsed time between two events.
 //
 // Parameters:
@@ -11884,15 +11905,21 @@ HIPAPI hipError_t hipEventQuery(hipEvent_t event) {
 //
 // Returns:
 //  - hipSuccess: Time computed successfully.
-//  - hipErrorInvalidValue: ms is NULL or events are NULL.
-//  - hipErrorInvalidResourceHandle: Invalid event handles.
-//  - hipErrorNotReady: One or both events have not completed.
-//  - hipErrorInvalidHandle: Events created with hipEventDisableTiming.
+//  - hipErrorInvalidValue: ms is NULL.
+//  - hipErrorInvalidHandle: An event handle is not a live handle, the two
+//    events belong to different contexts, an event was created with
+//    hipEventDisableTiming, or an event carries no submitted record.
+//  - hipErrorNotReady: One or both records have not been reached.
+//  - hipErrorCapturedEvent: An event's last record went into a stream capture,
+//    which names a dependency frontier and no queue point.
 //  - hipErrorNotSupported: The device advertises no timestamp domain, so no
 //    clock the two records share can measure the interval between them.
 //
-// Synchronization: Never blocks; an event whose record is still outstanding is
-// reported as hipErrorNotReady.
+// Synchronization: Never waits for a record to complete; an event whose record
+// is still outstanding is reported as hipErrorNotReady. Refusing a captured
+// pair invalidates that capture, and dropping the last reference to the graph
+// it was building frees the host allocations the graph owns, which
+// synchronizes every context.
 //
 // Timing behavior:
 // - Stop event must be recorded after start event.
@@ -11904,6 +11931,8 @@ HIPAPI hipError_t hipEventQuery(hipEvent_t event) {
 //   differenced.
 // - Resolution is the device's timestamp period.
 // - Time measurement includes all operations between events.
+// - A failure of the timeline a record names, or of reading a tick back, is
+//   reported with the code that failure maps to and not as a bad handle.
 //
 // Multi-GPU: Both events must be from the same device.
 //
@@ -11945,13 +11974,15 @@ HIPAPI hipError_t hipEventElapsedTime(float* ms, hipEvent_t start,
       IREE_HAL_STREAMING_EVENT_TIMING_UNTIMED;
   iree_status_t status = iree_hal_streaming_event_elapsed_time(
       ms, start_event, stop_event, &timing);
-  iree_hal_streaming_event_release(stop_event);
-  iree_hal_streaming_event_release(start_event);
   if (!iree_status_is_ok(status)) {
     // The timeline a record names has failed; the event handles are fine.
     result = iree_status_to_hip_result(status);
+    iree_hal_streaming_event_release(stop_event);
+    iree_hal_streaming_event_release(start_event);
     HIP_RETURN_ERROR(result);
   }
+  // Both events stay held across the outcomes below: refusing a captured pair
+  // reaches back into each event for the capture it names.
   result = hipErrorInvalidHandle;
   switch (timing) {
     case IREE_HAL_STREAMING_EVENT_TIMING_MEASURED:
@@ -11965,10 +11996,23 @@ HIPAPI hipError_t hipEventElapsedTime(float* ms, hipEvent_t start,
       // handle here, not a bad value.
       result = hipErrorInvalidHandle;
       break;
+    case IREE_HAL_STREAMING_EVENT_TIMING_CAPTURED:
+      // Measuring a captured event is not something a capture can express, so
+      // the capture it belongs to is invalidated and the pair refused, which
+      // is how hipEventQuery and hipEventSynchronize answer a captured event
+      // too. Either event may be the captured one and an event whose last
+      // record was submitted names no capture, so both are offered and one
+      // naming no capture invalidates nothing.
+      iree_hip_invalidate_event_capture(start_event);
+      iree_hip_invalidate_event_capture(stop_event);
+      result = hipErrorCapturedEvent;
+      break;
     case IREE_HAL_STREAMING_EVENT_TIMING_UNSUPPORTED:
       result = hipErrorNotSupported;
       break;
   }
+  iree_hal_streaming_event_release(stop_event);
+  iree_hal_streaming_event_release(start_event);
   HIP_RETURN_ERROR(result);
 }
 

@@ -158,6 +158,7 @@ iree_cc_test(
   DEPS
     ::common
     iree::base
+    iree::base::internal
     iree::testing::gtest
     iree::testing::gtest_main
     libhrx::src::libhrx::hrx_static

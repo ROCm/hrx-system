@@ -101,17 +101,20 @@ void iree_hal_streaming_event_release_recorded_point(
   *point = (iree_hal_streaming_recorded_point_t){0};
 }
 
-void iree_hal_streaming_event_commit_recorded_point(
+iree_hal_streaming_graph_t* iree_hal_streaming_event_commit_recorded_point(
     iree_hal_streaming_event_t* event,
     iree_hal_streaming_recorded_point_t point) {
   iree_slim_mutex_lock(&event->mutex);
   iree_hal_streaming_recorded_point_t previous = event->recorded_point;
   event->recorded_point = point;
+  iree_hal_streaming_graph_t* dropped_capture_graph = event->capture_graph;
+  event->capture_graph = NULL;
   iree_slim_mutex_unlock(&event->mutex);
   // Dropped outside the lock: returning a tick slot to its pool takes the pool
   // mutex, and that mutex and this one are both leaves that no path holds at
   // the same time.
   iree_hal_streaming_event_release_recorded_point(&previous);
+  return dropped_capture_graph;
 }
 
 iree_hal_streaming_stream_t* iree_hal_streaming_event_exchange_recording_stream(
@@ -126,6 +129,14 @@ iree_hal_streaming_stream_t* iree_hal_streaming_event_exchange_recording_stream(
   }
   iree_slim_mutex_unlock(&event->mutex);
   return previous_stream;
+}
+
+bool iree_hal_streaming_event_has_capture_graph(
+    iree_hal_streaming_event_t* event) {
+  iree_slim_mutex_lock(&event->mutex);
+  const bool has_capture_graph = event->capture_graph != NULL;
+  iree_slim_mutex_unlock(&event->mutex);
+  return has_capture_graph;
 }
 
 iree_hal_streaming_graph_t* iree_hal_streaming_event_acquire_capture_graph(
@@ -316,23 +327,29 @@ iree_status_t iree_hal_streaming_event_record(
       .ordered_after_stream_value = stream_signal_value,
   };
   iree_hal_streaming_stream_t* previous_stream = NULL;
+  iree_hal_streaming_graph_t* dropped_capture_graph = NULL;
   status = iree_hal_streaming_event_enqueue_record(
       event, stream, wait_semaphores, signal_semaphores, &recorded_point);
   if (iree_status_is_ok(status)) {
     // The accepted enqueue owns the value it signals, so the timeline advances
     // here and stays advanced even when the flush below fails.
     stream->pending_value = stream_signal_value;
-    // A rejected submission signals nothing, so the event keeps its old point.
-    iree_hal_streaming_event_commit_recorded_point(event, recorded_point);
+    // A rejected submission signals nothing, so the event keeps its old point
+    // and stays associated with whatever capture it belonged to.
+    dropped_capture_graph =
+        iree_hal_streaming_event_commit_recorded_point(event, recorded_point);
     previous_stream =
         iree_hal_streaming_event_exchange_recording_stream(event, stream);
     status = iree_hal_device_queue_flush(stream->context->device,
                                          stream->queue_affinity);
   }
   iree_slim_mutex_unlock(&stream->mutex);
-  // Stream teardown re-enters the streaming layer, so the displaced reference
-  // is dropped outside this stream's mutex.
+  // Stream teardown re-enters the streaming layer, and the last reference to a
+  // captured graph frees the allocations it owns, which synchronizes every
+  // context and relocks this stream. Both displaced references are therefore
+  // dropped outside this stream's mutex.
   iree_hal_streaming_stream_release(previous_stream);
+  iree_hal_streaming_graph_release(dropped_capture_graph);
   IREE_RETURN_AND_END_ZONE_IF_ERROR(z0, status);
 
   IREE_TRACE_ZONE_END(z0);
@@ -422,6 +439,21 @@ iree_status_t iree_hal_streaming_event_elapsed_time(
   // between two such records to measure.
   if ((start->flags & IREE_HAL_STREAMING_EVENT_FLAG_DISABLE_TIMING) ||
       (stop->flags & IREE_HAL_STREAMING_EVENT_FLAG_DISABLE_TIMING)) {
+    return iree_ok_status();
+  }
+
+  // A record made into a capture names a dependency frontier and no queue
+  // point, so an event whose last record went into one names no time. The
+  // associations are read ahead of the points because a submitted record
+  // installs its point and clears its association together: a reader taking
+  // the association first never finds it clear while the point it goes on to
+  // read is still the one that capture left behind. Only the presence of an
+  // association decides the outcome, so it is read without naming either
+  // graph: this path holds no reference whose release could free a graph's
+  // allocations and synchronize every context.
+  if (iree_hal_streaming_event_has_capture_graph(start) ||
+      iree_hal_streaming_event_has_capture_graph(stop)) {
+    *out_timing = IREE_HAL_STREAMING_EVENT_TIMING_CAPTURED;
     return iree_ok_status();
   }
 

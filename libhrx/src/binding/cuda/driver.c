@@ -1198,6 +1198,9 @@ CUDAAPI CUresult cuEventElapsedTime(float* pMilliseconds, CUevent hStart,
     case IREE_HAL_STREAMING_EVENT_TIMING_UNTIMED:
       result = CUDA_ERROR_INVALID_VALUE;
       break;
+    case IREE_HAL_STREAMING_EVENT_TIMING_CAPTURED:
+      result = CUDA_ERROR_CAPTURED_EVENT;
+      break;
     case IREE_HAL_STREAMING_EVENT_TIMING_UNSUPPORTED:
       result = CUDA_ERROR_NOT_SUPPORTED;
       break;

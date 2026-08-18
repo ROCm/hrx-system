@@ -8,6 +8,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstddef>
+#include <cstdint>
 #include <cstdlib>
 #include <thread>
 #include <vector>
@@ -41,6 +42,8 @@ using HipStreamBeginCaptureFn = hipError_t (*)(hipStream_t stream,
                                                hipStreamCaptureMode mode);
 using HipStreamEndCaptureFn = hipError_t (*)(hipStream_t stream,
                                              hipGraph_t* graph);
+using HipStreamIsCapturingFn =
+    hipError_t (*)(hipStream_t stream, hipStreamCaptureStatus* capture_status);
 using HipEventCreateFn = hipError_t (*)(hipEvent_t* event);
 using HipEventCreateWithFlagsFn = hipError_t (*)(hipEvent_t* event,
                                                  unsigned int flags);
@@ -53,6 +56,9 @@ using HipEventElapsedTimeFn = hipError_t (*)(float* ms, hipEvent_t start,
 using HipLaunchHostFuncFn = hipError_t (*)(hipStream_t stream, hipHostFn_t fn,
                                            void* user_data);
 using HipMallocAsyncFn = hipError_t (*)(void** device_ptr, size_t size,
+                                        hipStream_t stream);
+using HipMemcpyAsyncFn = hipError_t (*)(void* destination, const void* source,
+                                        size_t size_bytes, hipMemcpyKind kind,
                                         hipStream_t stream);
 using HipFreeAsyncFn = hipError_t (*)(void* device_ptr, hipStream_t stream);
 using HipGraphCreateFn = hipError_t (*)(hipGraph_t* graph, unsigned int flags);
@@ -298,6 +304,8 @@ class HipEventTest : public ::testing::Test {
         library_, "hipStreamBeginCapture");
     hip_.stream_end_capture = ResolveHipSymbol<HipStreamEndCaptureFn>(
         library_, "hipStreamEndCapture");
+    hip_.stream_is_capturing = ResolveHipSymbol<HipStreamIsCapturingFn>(
+        library_, "hipStreamIsCapturing");
     hip_.event_create =
         ResolveHipSymbol<HipEventCreateFn>(library_, "hipEventCreate");
     hip_.event_create_with_flags = ResolveHipSymbol<HipEventCreateWithFlagsFn>(
@@ -318,6 +326,8 @@ class HipEventTest : public ::testing::Test {
         ResolveHipSymbol<HipMallocAsyncFn>(library_, "hipMallocAsync");
     hip_.free_async =
         ResolveHipSymbol<HipFreeAsyncFn>(library_, "hipFreeAsync");
+    hip_.memcpy_async =
+        ResolveHipSymbol<HipMemcpyAsyncFn>(library_, "hipMemcpyAsync");
     hip_.graph_create =
         ResolveHipSymbol<HipGraphCreateFn>(library_, "hipGraphCreate");
     hip_.graph_destroy =
@@ -370,6 +380,7 @@ class HipEventTest : public ::testing::Test {
     ASSERT_NE(nullptr, hip_.stream_wait_event);
     ASSERT_NE(nullptr, hip_.stream_begin_capture);
     ASSERT_NE(nullptr, hip_.stream_end_capture);
+    ASSERT_NE(nullptr, hip_.stream_is_capturing);
     ASSERT_NE(nullptr, hip_.event_create);
     ASSERT_NE(nullptr, hip_.event_create_with_flags);
     ASSERT_NE(nullptr, hip_.event_destroy);
@@ -380,6 +391,7 @@ class HipEventTest : public ::testing::Test {
     ASSERT_NE(nullptr, hip_.launch_host_func);
     ASSERT_NE(nullptr, hip_.malloc_async);
     ASSERT_NE(nullptr, hip_.free_async);
+    ASSERT_NE(nullptr, hip_.memcpy_async);
     ASSERT_NE(nullptr, hip_.graph_create);
     ASSERT_NE(nullptr, hip_.graph_destroy);
     ASSERT_NE(nullptr, hip_.graph_add_event_record_node);
@@ -663,6 +675,7 @@ class HipEventTest : public ::testing::Test {
     HipStreamWaitEventFn stream_wait_event;
     HipStreamBeginCaptureFn stream_begin_capture;
     HipStreamEndCaptureFn stream_end_capture;
+    HipStreamIsCapturingFn stream_is_capturing;
     HipEventCreateFn event_create;
     HipEventCreateWithFlagsFn event_create_with_flags;
     HipEventDestroyFn event_destroy;
@@ -673,6 +686,7 @@ class HipEventTest : public ::testing::Test {
     HipLaunchHostFuncFn launch_host_func;
     HipMallocAsyncFn malloc_async;
     HipFreeAsyncFn free_async;
+    HipMemcpyAsyncFn memcpy_async;
     HipGraphCreateFn graph_create;
     HipGraphDestroyFn graph_destroy;
     HipGraphAddEventRecordNodeFn graph_add_event_record_node;
@@ -1155,8 +1169,232 @@ TEST_F(HipEventTest, ElapsedTimeRejectsEventsRecordedOnlyDuringCapture) {
   ASSERT_NE(nullptr, graph);
 
   float ms = -1.0f;
-  EXPECT_EQ(hipErrorInvalidHandle, hip_.event_elapsed_time(&ms, start, stop))
+  EXPECT_EQ(hipErrorCapturedEvent, hip_.event_elapsed_time(&ms, start, stop))
       << "an interval was reported for records that were never submitted";
+}
+
+// An event recorded directly and then captured carries a submitted point that
+// measures, but that point belongs to the earlier record and not to what the
+// caller asked about when it captured the event. The pair is refused for the
+// same reason a query of the event is.
+TEST_F(HipEventTest, ElapsedTimeRejectsAnEventLastRecordedIntoACapture) {
+  hipStream_t stream = CreateStream();
+  ASSERT_NE(nullptr, stream);
+  hipStream_t capture_stream = CreateStream();
+  ASSERT_NE(nullptr, capture_stream);
+  hipEvent_t start = CreateEvent();
+  ASSERT_NE(nullptr, start);
+  hipEvent_t stop = CreateEvent();
+  ASSERT_NE(nullptr, stop);
+
+  // Both events are left carrying a submitted record that has been reached, so
+  // the pair measures until one of them is captured.
+  ASSERT_NO_FATAL_FAILURE(AdvanceEventOnStream(start, stream, /*count=*/1));
+  ASSERT_NO_FATAL_FAILURE(AdvanceEventOnStream(stop, stream, /*count=*/1));
+  float ms = -1.0f;
+  ASSERT_EQ(hipSuccess, hip_.event_elapsed_time(&ms, start, stop));
+  ASSERT_GE(ms, 0.0f);
+
+  ASSERT_EQ(hipSuccess, hip_.stream_begin_capture(capture_stream,
+                                                  hipStreamCaptureModeGlobal));
+  ASSERT_EQ(hipSuccess, hip_.event_record(stop, capture_stream));
+  hipGraph_t graph = nullptr;
+  ASSERT_EQ(hipSuccess, hip_.stream_end_capture(capture_stream, &graph));
+  TrackGraph(graph);
+  ASSERT_NE(nullptr, graph);
+
+  ms = -1.0f;
+  EXPECT_EQ(hipErrorCapturedEvent, hip_.event_elapsed_time(&ms, start, stop))
+      << "the interval of a record the caller did not ask about was reported";
+  EXPECT_FLOAT_EQ(-1.0f, ms) << "a refused pair reported a duration";
+}
+
+// Refusing a pair also invalidates the capture the refused record went into,
+// which is what the two neighbouring event entry points do for the same state.
+// Only an active capture can be marked: ending one clears the association from
+// its stream, so a measurement taken afterwards finds no stream to mark. The
+// capture is therefore left running here, and hipStreamEndCapture refusing to
+// hand back a graph is the evidence that measuring invalidated it.
+TEST_F(HipEventTest, ElapsedTimeInvalidatesTheCaptureItRefuses) {
+  hipStream_t capture_stream = CreateStream();
+  ASSERT_NE(nullptr, capture_stream);
+  hipEvent_t start = CreateEvent();
+  ASSERT_NE(nullptr, start);
+  hipEvent_t stop = CreateEvent();
+  ASSERT_NE(nullptr, stop);
+
+  ASSERT_EQ(hipSuccess, hip_.stream_begin_capture(capture_stream,
+                                                  hipStreamCaptureModeGlobal));
+  ASSERT_EQ(hipSuccess, hip_.event_record(start, capture_stream));
+  ASSERT_EQ(hipSuccess, hip_.event_record(stop, capture_stream));
+
+  float ms = -1.0f;
+  EXPECT_EQ(hipErrorCapturedEvent, hip_.event_elapsed_time(&ms, start, stop))
+      << "an interval was reported for records that went into a capture";
+
+  hipGraph_t graph = nullptr;
+  const hipError_t end_result = hip_.stream_end_capture(capture_stream, &graph);
+  TrackGraph(graph);
+  EXPECT_EQ(hipErrorStreamCaptureInvalidated, end_result)
+      << "the capture the measurement refused was left able to complete";
+}
+
+// A record submitted after a capture ends the event's association with the
+// captured graph in the same transition that installs its point, so every
+// entry point that refuses a captured event stops refusing without the caller
+// doing anything else.
+TEST_F(HipEventTest, ASubmittedRecordEndsTheCaptureAssociation) {
+  hipStream_t stream = CreateStream();
+  ASSERT_NE(nullptr, stream);
+  hipStream_t capture_stream = CreateStream();
+  ASSERT_NE(nullptr, capture_stream);
+  hipEvent_t start = CreateEvent();
+  ASSERT_NE(nullptr, start);
+  hipEvent_t stop = CreateEvent();
+  ASSERT_NE(nullptr, stop);
+
+  ASSERT_EQ(hipSuccess, hip_.stream_begin_capture(capture_stream,
+                                                  hipStreamCaptureModeGlobal));
+  ASSERT_EQ(hipSuccess, hip_.event_record(start, capture_stream));
+  hipGraph_t graph = nullptr;
+  ASSERT_EQ(hipSuccess, hip_.stream_end_capture(capture_stream, &graph));
+  TrackGraph(graph);
+  ASSERT_NE(nullptr, graph);
+
+  // The capture has ended and the event still belongs to the graph it went
+  // into, which is the state the record below has to clear.
+  ASSERT_EQ(hipErrorCapturedEvent, hip_.event_query(start));
+
+  ASSERT_EQ(hipSuccess, hip_.event_record(start, stream));
+  ASSERT_EQ(hipSuccess, hip_.event_record(stop, stream));
+  ASSERT_EQ(hipSuccess, hip_.stream_synchronize(stream));
+
+  EXPECT_EQ(hipSuccess, hip_.event_query(start));
+  EXPECT_EQ(hipSuccess, hip_.event_synchronize(start));
+  float ms = -1.0f;
+  EXPECT_EQ(hipSuccess, hip_.event_elapsed_time(&ms, start, stop));
+  EXPECT_GE(ms, 0.0f);
+}
+
+// The last reference to a captured graph is dropped after a replaying launch
+// has released its locks. Freeing a graph's host allocations synchronizes every
+// context, which relocks the stream the launch submits on, so a launch still
+// holding that lock when it dropped the reference would hang. The capture here
+// owns a host allocation, its graph handle is destroyed before the replay, and
+// the replay's records hold the only references left, so the launch is what
+// destroys it and the evidence is that the replay completes.
+//
+// The launch parks the references it drops in chunked storage that starts in
+// its own frame and grows onto the heap, and seventeen events exceed the
+// sixteen one chunk holds, so the walk grows it. What this pins about the
+// growth is that the launch still completes and every event comes back
+// unassociated; a reference stranded in a grown chunk is a leak, which none of
+// these observables can see, and the drain across the growth is pinned on the
+// host by graph_exec_test.cc instead. The capacity is private to the launch
+// and nothing here can read it, so a change to it has to be matched by a
+// change here.
+TEST_F(HipEventTest, GraphReplayDropsTheLastCaptureReferenceAfterUnlocking) {
+  static constexpr int kEventCount = 17;
+  static constexpr size_t kCapturedCopySize = 256;
+  hipStream_t stream = CreateStream();
+  ASSERT_NE(nullptr, stream);
+  hipStream_t capture_stream = CreateStream();
+  ASSERT_NE(nullptr, capture_stream);
+  std::vector<hipEvent_t> events;
+  for (int i = 0; i < kEventCount; ++i) {
+    hipEvent_t event = CreateEvent();
+    ASSERT_NE(nullptr, event);
+    events.push_back(event);
+  }
+
+  void* device_ptr = AllocateAsync(stream, kCapturedCopySize);
+  ASSERT_NE(nullptr, device_ptr);
+  ASSERT_EQ(hipSuccess, hip_.stream_synchronize(stream));
+
+  // The captured copy is what gives the graph a host allocation of its own,
+  // and every event is associated with that graph.
+  std::vector<uint8_t> host_source(kCapturedCopySize, 0x5a);
+  ASSERT_EQ(hipSuccess, hip_.stream_begin_capture(capture_stream,
+                                                  hipStreamCaptureModeGlobal));
+  ASSERT_EQ(hipSuccess,
+            hip_.memcpy_async(device_ptr, host_source.data(), kCapturedCopySize,
+                              hipMemcpyHostToDevice, capture_stream));
+  for (hipEvent_t event : events) {
+    ASSERT_EQ(hipSuccess, hip_.event_record(event, capture_stream));
+  }
+  hipGraph_t captured_graph = nullptr;
+  ASSERT_EQ(hipSuccess,
+            hip_.stream_end_capture(capture_stream, &captured_graph));
+  ASSERT_NE(nullptr, captured_graph);
+
+  // Leaves the events holding the only references to the captured graph.
+  ASSERT_EQ(hipSuccess, hip_.graph_destroy(captured_graph));
+
+  hipGraph_t replay_graph = CreateGraph();
+  ASSERT_NE(nullptr, replay_graph);
+  hipGraphNode_t tail = nullptr;
+  for (hipEvent_t event : events) {
+    hipGraphNode_t node = nullptr;
+    ASSERT_EQ(hipSuccess, hip_.graph_add_event_record_node(
+                              &node, replay_graph, tail ? &tail : nullptr,
+                              tail ? 1 : 0, event));
+    tail = node;
+  }
+  hipGraphExec_t replay_exec = InstantiateGraph(replay_graph);
+  ASSERT_NE(nullptr, replay_exec);
+
+  ASSERT_EQ(hipSuccess, hip_.graph_launch(replay_exec, stream));
+  ASSERT_EQ(hipSuccess, hip_.stream_synchronize(stream));
+
+  for (hipEvent_t event : events) {
+    EXPECT_EQ(hipSuccess, hip_.event_query(event))
+        << "a replayed record left its event associated with a capture";
+  }
+
+  ASSERT_EQ(hipSuccess, hip_.free_async(device_ptr, stream));
+  ASSERT_EQ(hipSuccess, hip_.stream_synchronize(stream));
+}
+
+// A wait on an event whose last record was submitted waits on that record's
+// point. It does not join the capture an earlier record of the same event went
+// into, so the waiting stream is not left capturing into a graph the caller
+// never asked it to build. No gate parks the queue here: a parked queue cannot
+// tell a stream that waited on a point from a stream blocked behind the gate,
+// so the observable is the waiting stream's capture status.
+TEST_F(HipEventTest, StreamWaitAfterARecordDoesNotJoinTheOldCapture) {
+  hipStream_t capture_stream = CreateStream();
+  ASSERT_NE(nullptr, capture_stream);
+  hipStream_t recording_stream = CreateStream();
+  ASSERT_NE(nullptr, recording_stream);
+  hipStream_t waiting_stream = CreateStream();
+  ASSERT_NE(nullptr, waiting_stream);
+  hipEvent_t event = CreateEvent();
+  ASSERT_NE(nullptr, event);
+
+  ASSERT_EQ(hipSuccess, hip_.stream_begin_capture(capture_stream,
+                                                  hipStreamCaptureModeGlobal));
+  ASSERT_EQ(hipSuccess, hip_.event_record(event, capture_stream));
+  hipGraph_t graph = nullptr;
+  ASSERT_EQ(hipSuccess, hip_.stream_end_capture(capture_stream, &graph));
+  TrackGraph(graph);
+  ASSERT_NE(nullptr, graph);
+
+  // The submitted record replaces the capture association, and synchronizing
+  // leaves nothing outstanding so the wait below has only the association to
+  // decide on.
+  ASSERT_EQ(hipSuccess, hip_.event_record(event, recording_stream));
+  ASSERT_EQ(hipSuccess, hip_.stream_synchronize(recording_stream));
+
+  EXPECT_EQ(hipSuccess,
+            hip_.stream_wait_event(waiting_stream, event, /*flags=*/0));
+  hipStreamCaptureStatus capture_status = hipStreamCaptureStatusActive;
+  EXPECT_EQ(hipSuccess,
+            hip_.stream_is_capturing(waiting_stream, &capture_status));
+  EXPECT_EQ(hipStreamCaptureStatusNone, capture_status)
+      << "the waiting stream adopted a capture the event no longer belongs to";
+  EXPECT_EQ(hipSuccess, hip_.stream_synchronize(waiting_stream))
+      << "the waiting stream was left capturing, which makes synchronizing it "
+         "unsupported";
 }
 
 TEST_F(HipEventTest, ElapsedTimeNeedsTimingEnabledOnBothEvents) {

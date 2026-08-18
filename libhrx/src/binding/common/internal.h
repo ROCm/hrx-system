@@ -785,11 +785,13 @@ typedef struct iree_hal_streaming_event_t {
   // Event properties.
   iree_hal_streaming_event_flags_t flags;
 
-  // Guards |recorded_point| and |capture_graph|. The point carries the record's
-  // point and timestamp as one value so no reader can pair one record's point
-  // with another record's timestamp, and the capture association is what the
-  // paths that refuse a captured event read. It does not reach the capture
-  // dependency frontier below, whose fields each say what orders them.
+  // Guards |recorded_point| and |capture_graph|, which move together: a
+  // submitted record installs a point and ends any capture association in one
+  // transition, so no reader can see the new point while the event still reads
+  // as captured. The point carries the record's timeline point and the slot its
+  // tick lands in as one value, so no reader can pair one record's point with
+  // another record's slot. It does not reach the capture dependency frontier
+  // below, whose fields each say what orders them.
   // Acquired after the recording stream's mutex and after the graph
   // executable's mutex; no path takes either while holding this one.
   // Waits and reference releases happen outside it: readers copy and retain
@@ -814,8 +816,8 @@ typedef struct iree_hal_streaming_event_t {
   // Platform-specific IPC handle, if the event is IPC enabled.
   void* ipc_handle;
 
-  // Graph a capture-time record last associated this event with, retained.
-  // Guarded by |mutex|.
+  // Graph a capture-time record last associated this event with, retained, or
+  // NULL when the event's last record was submitted. Guarded by |mutex|.
   iree_hal_streaming_graph_t* capture_graph;
   // Captured dependency frontier stored by the last captured record. Not
   // guarded by |mutex|, unlike the association above it: the capture-time
@@ -847,6 +849,9 @@ typedef enum iree_hal_streaming_event_timing_e {
   IREE_HAL_STREAMING_EVENT_TIMING_UNTIMED,
   // Both events carry a record but at least one has not been reached.
   IREE_HAL_STREAMING_EVENT_TIMING_INCOMPLETE,
+  // At least one event's last record went into a stream capture, which records
+  // a dependency frontier and no queue point, so it names no time.
+  IREE_HAL_STREAMING_EVENT_TIMING_CAPTURED,
   // The device the records were made on advertises no timestamp domain, so no
   // clock the two records share can measure the interval between them.
   IREE_HAL_STREAMING_EVENT_TIMING_UNSUPPORTED,
@@ -1862,8 +1867,16 @@ void iree_hal_streaming_event_release_recorded_point(
 // it holds and dropping the references the previous point held. Called only
 // once the submission that signals |point| has been accepted, with a point
 // iree_hal_streaming_event_enqueue_record completed.
+//
+// A submitted record ends the event's association with any graph a capture-time
+// record left on it, in the same transition, so no reader can see the new point
+// while the event still reads as captured. Returns that graph reference;
+// releasing it can free the allocations the graph owns, which synchronizes
+// every context and relocks the stream, so callers holding a stream or graph
+// executable mutex must release it after unlocking.
 // Synchronization: event (event mutex held while replacing the point).
-void iree_hal_streaming_event_commit_recorded_point(
+IREE_MUST_USE_RESULT iree_hal_streaming_graph_t*
+iree_hal_streaming_event_commit_recorded_point(
     iree_hal_streaming_event_t* event,
     iree_hal_streaming_recorded_point_t point);
 
@@ -1879,8 +1892,21 @@ IREE_MUST_USE_RESULT iree_hal_streaming_stream_t*
 iree_hal_streaming_event_exchange_recording_stream(
     iree_hal_streaming_event_t* event, iree_hal_streaming_stream_t* stream);
 
+// Returns whether a capture-time record last associated |event| with a graph.
+// An event names none once its last record has been submitted, and none before
+// any record has been made.
+//
+// Answers from the association alone, taking no reference to the graph: a
+// caller deciding only whether the event names a capture never holds a
+// reference whose release could free the graph's allocations, which
+// synchronizes every context.
+// Synchronization: event (event mutex held while reading).
+bool iree_hal_streaming_event_has_capture_graph(
+    iree_hal_streaming_event_t* event);
+
 // Returns a retained reference to the graph a capture-time record last
-// associated |event| with, or NULL when no capture-time record has been made.
+// associated |event| with, or NULL when the event names no capture: once its
+// last record has been submitted, and before any record has been made.
 // Releasing the returned graph can free the allocations it owns, which
 // synchronizes every context and relocks streams, so callers holding a stream
 // mutex must release it after unlocking.
