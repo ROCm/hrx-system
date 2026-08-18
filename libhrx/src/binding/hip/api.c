@@ -11739,6 +11739,8 @@ HIPAPI hipError_t hipEventRecord(hipEvent_t event, hipStream_t stream) {
 //  - hipErrorLaunchFailure: A kernel launch associated with event failed.
 //  - hipErrorIllegalAddress: Invalid memory access in associated operations.
 //  - hipErrorNotInitialized: HIP runtime not initialized.
+//  - hipErrorCapturedEvent: The event's last record went into a stream
+//    capture, which names a dependency frontier and no queue point.
 //
 // Synchronization: This operation blocks the host thread until the event
 // completes.
@@ -11752,7 +11754,9 @@ HIPAPI hipError_t hipEventRecord(hipEvent_t event, hipStream_t stream) {
 //
 // Performance note: For polling without blocking, use hipEventQuery.
 //
-// Graph capture: Not supported. Returns hipErrorStreamCaptureUnsupported.
+// Graph capture: An event whose last record went into a stream capture is
+// refused with hipErrorCapturedEvent, and a stream of the current context
+// capturing into that graph is invalidated.
 //
 // See also: hipEventQuery, hipEventRecord, hipStreamSynchronize.
 HIPAPI hipError_t hipEventSynchronize(hipEvent_t event) {
@@ -11779,9 +11783,11 @@ HIPAPI hipError_t hipEventSynchronize(hipEvent_t event) {
     HIP_RETURN_ERROR(init_result);
   }
 
-  if (streaming_event->capture_graph) {
-    iree_hip_context_invalidate_capture_graph(context,
-                                              streaming_event->capture_graph);
+  iree_hal_streaming_graph_t* capture_graph =
+      iree_hal_streaming_event_acquire_capture_graph(streaming_event);
+  if (capture_graph) {
+    iree_hip_context_invalidate_capture_graph(context, capture_graph);
+    iree_hal_streaming_graph_release(capture_graph);
     iree_hal_streaming_event_release(streaming_event);
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(hipErrorCapturedEvent);
@@ -11805,9 +11811,14 @@ HIPAPI hipError_t hipEventSynchronize(hipEvent_t event) {
 //  - hipErrorInvalidResourceHandle: Invalid event handle.
 //  - hipErrorLaunchFailure: A kernel launch associated with event failed.
 //  - hipErrorNotInitialized: HIP runtime not initialized.
+//  - hipErrorCapturedEvent: The event's last record went into a stream
+//    capture, which names a dependency frontier and no queue point.
 //
-// Synchronization: This operation is non-blocking. Returns immediately with
-// the current status.
+// Synchronization: Never waits for a record to complete; an event whose record
+// is still outstanding is reported as hipErrorNotReady. Refusing a captured
+// event takes a reference to the graph that capture is building and drops it
+// again, and dropping the last reference frees the host allocations the graph
+// owns, which synchronizes every context.
 //
 // Event behavior:
 // - Checks if all operations before the event recording have completed.
@@ -11823,7 +11834,9 @@ HIPAPI hipError_t hipEventSynchronize(hipEvent_t event) {
 // }
 // ```
 //
-// Graph capture: Not supported. Returns hipErrorStreamCaptureUnsupported.
+// Graph capture: An event whose last record went into a stream capture is
+// refused with hipErrorCapturedEvent, and a stream of the current context
+// capturing into that graph is invalidated.
 //
 // See also: hipEventSynchronize, hipEventRecord, hipStreamQuery.
 HIPAPI hipError_t hipEventQuery(hipEvent_t event) {
@@ -11842,9 +11855,11 @@ HIPAPI hipError_t hipEventQuery(hipEvent_t event) {
     HIP_RETURN_ERROR(init_result);
   }
 
-  if (streaming_event->capture_graph) {
-    iree_hip_context_invalidate_capture_graph(context,
-                                              streaming_event->capture_graph);
+  iree_hal_streaming_graph_t* capture_graph =
+      iree_hal_streaming_event_acquire_capture_graph(streaming_event);
+  if (capture_graph) {
+    iree_hip_context_invalidate_capture_graph(context, capture_graph);
+    iree_hal_streaming_graph_release(capture_graph);
     iree_hal_streaming_event_release(streaming_event);
     HIP_RETURN_ERROR(hipErrorCapturedEvent);
   }

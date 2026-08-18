@@ -128,6 +128,29 @@ iree_hal_streaming_stream_t* iree_hal_streaming_event_exchange_recording_stream(
   return previous_stream;
 }
 
+iree_hal_streaming_graph_t* iree_hal_streaming_event_acquire_capture_graph(
+    iree_hal_streaming_event_t* event) {
+  iree_slim_mutex_lock(&event->mutex);
+  iree_hal_streaming_graph_t* capture_graph = event->capture_graph;
+  iree_hal_streaming_graph_retain(capture_graph);
+  iree_slim_mutex_unlock(&event->mutex);
+  return capture_graph;
+}
+
+iree_hal_streaming_graph_t* iree_hal_streaming_event_exchange_capture_graph(
+    iree_hal_streaming_event_t* event, iree_hal_streaming_graph_t* graph) {
+  iree_slim_mutex_lock(&event->mutex);
+  iree_hal_streaming_graph_t* previous_graph = event->capture_graph;
+  if (previous_graph != graph) {
+    iree_hal_streaming_graph_retain(graph);
+    event->capture_graph = graph;
+  } else {
+    previous_graph = NULL;
+  }
+  iree_slim_mutex_unlock(&event->mutex);
+  return previous_graph;
+}
+
 // Returns whether |point| has been reached. A point naming no timeline has no
 // submitted record and reads as reached. Borrows |point|: the reference taken
 // when the point was acquired stays with the acquirer, which releases it.
@@ -240,11 +263,10 @@ iree_status_t iree_hal_streaming_event_record(
                  sizeof(*event->capture_dependencies));
     }
     event->capture_dependency_count = stream->capture_dependency_count;
-    if (event->capture_graph != stream->capture_graph) {
-      iree_hal_streaming_graph_release(event->capture_graph);
-      event->capture_graph = stream->capture_graph;
-      iree_hal_streaming_graph_retain(event->capture_graph);
-    }
+    // No lock is held here, so the displaced graph can be released inline.
+    iree_hal_streaming_graph_release(
+        iree_hal_streaming_event_exchange_capture_graph(event,
+                                                        stream->capture_graph));
     // A captured record produces no submission, so it leaves the recorded point
     // alone; only the stream is adopted, for the later wait that picks the
     // capture up from the stream that captured it.

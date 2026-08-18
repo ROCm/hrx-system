@@ -785,12 +785,15 @@ typedef struct iree_hal_streaming_event_t {
   // Event properties.
   iree_hal_streaming_event_flags_t flags;
 
-  // Guards |recorded_point|, which carries the record's point and timestamp as
-  // one value so no reader can pair one record's point with another record's
-  // timestamp.
+  // Guards |recorded_point| and |capture_graph|. The point carries the record's
+  // point and timestamp as one value so no reader can pair one record's point
+  // with another record's timestamp, and the capture association is what the
+  // paths that refuse a captured event read. It does not reach the capture
+  // dependency frontier below, whose fields each say what orders them.
   // Acquired after the recording stream's mutex and after the graph
   // executable's mutex; no path takes either while holding this one.
-  // Waits happen outside it: readers copy and retain the point under it.
+  // Waits and reference releases happen outside it: readers copy and retain
+  // what they need under it and drop it once unlocked.
   iree_slim_mutex_t mutex;
   // Point the last submitted record names, or a zeroed point when no record
   // has been submitted. The event owns no timeline: a record names a point on
@@ -811,13 +814,21 @@ typedef struct iree_hal_streaming_event_t {
   // Platform-specific IPC handle, if the event is IPC enabled.
   void* ipc_handle;
 
-  // Captured graph associated with this event's last captured record.
+  // Graph a capture-time record last associated this event with, retained.
+  // Guarded by |mutex|.
   iree_hal_streaming_graph_t* capture_graph;
-  // Captured dependency frontier stored by the last captured record.
+  // Captured dependency frontier stored by the last captured record. Not
+  // guarded by |mutex|, unlike the association above it: the capture-time
+  // record writes this array with no lock held and the capture-time wait that
+  // joins the frontier reads it the same way, so what orders them is the
+  // capture protocol's requirement that one thread drive a capture sequence,
+  // not this mutex.
   iree_hal_streaming_graph_node_t** capture_dependencies;
-  // Number of entries in |capture_dependencies| currently valid.
+  // Number of entries in |capture_dependencies| currently valid. Written and
+  // read with the array it counts, outside |mutex| and ordered the same way.
   iree_host_size_t capture_dependency_count;
-  // Allocated capacity of |capture_dependencies|.
+  // Allocated capacity of |capture_dependencies|. Written by the capture-time
+  // record that grows the array, outside |mutex| like the array itself.
   iree_host_size_t capture_dependency_capacity;
 
   // Host allocator.
@@ -1864,8 +1875,31 @@ void iree_hal_streaming_event_commit_recorded_point(
 // streaming layer to synchronize and unregister the stream, so callers holding
 // a stream mutex must drop the reference after unlocking.
 // Synchronization: event (event mutex held while exchanging).
-iree_hal_streaming_stream_t* iree_hal_streaming_event_exchange_recording_stream(
+IREE_MUST_USE_RESULT iree_hal_streaming_stream_t*
+iree_hal_streaming_event_exchange_recording_stream(
     iree_hal_streaming_event_t* event, iree_hal_streaming_stream_t* stream);
+
+// Returns a retained reference to the graph a capture-time record last
+// associated |event| with, or NULL when no capture-time record has been made.
+// Releasing the returned graph can free the allocations it owns, which
+// synchronizes every context and relocks streams, so callers holding a stream
+// mutex must release it after unlocking.
+// Synchronization: event (event mutex held while retaining).
+IREE_MUST_USE_RESULT iree_hal_streaming_graph_t*
+iree_hal_streaming_event_acquire_capture_graph(
+    iree_hal_streaming_event_t* event);
+
+// Makes |graph| the graph |event|'s capture-time record belongs to, taking a
+// reference to it, and transfers the reference the event held to the caller.
+// Returns NULL when |graph| was already the capture graph.
+//
+// Releasing the returned graph can free the allocations it owns, which
+// synchronizes every context and relocks streams, so callers holding a stream
+// mutex must release it after unlocking.
+// Synchronization: event (event mutex held while exchanging).
+IREE_MUST_USE_RESULT iree_hal_streaming_graph_t*
+iree_hal_streaming_event_exchange_capture_graph(
+    iree_hal_streaming_event_t* event, iree_hal_streaming_graph_t* graph);
 
 // Enqueues |event|'s record on |stream|'s queue at the point reached once
 // |wait_semaphores| is satisfied, signaling |signal_semaphores| there.
