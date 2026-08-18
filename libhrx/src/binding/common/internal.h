@@ -1819,16 +1819,22 @@ iree_status_t iree_hal_streaming_event_query(iree_hal_streaming_event_t* event,
                                              int* status);
 
 // Takes a reference to the point |event| was last recorded at, or a zeroed
-// point when no record has been submitted. Callers release
-// |out_point->semaphore|.
+// point when no record has been submitted. Callers release the point with
+// iree_hal_streaming_event_release_recorded_point.
 // Synchronization: event (event mutex held while copying the point).
 void iree_hal_streaming_event_acquire_recorded_point(
     iree_hal_streaming_event_t* event,
     iree_hal_streaming_recorded_point_t* out_point);
 
-// Adopts |point| as the point |event| is recorded at, taking a reference to
-// |point.semaphore| and dropping the reference to the previous point. Called
-// only once the submission that signals the point has been accepted.
+// Releases the references |point| holds and zeroes it.
+// Synchronization: none.
+void iree_hal_streaming_event_release_recorded_point(
+    iree_hal_streaming_recorded_point_t* point);
+
+// Adopts |point| as the point |event| is recorded at, consuming the references
+// it holds and dropping the references the previous point held. Called only
+// once the submission that signals |point| has been accepted, with a point
+// iree_hal_streaming_event_enqueue_record completed.
 // Synchronization: event (event mutex held while replacing the point).
 void iree_hal_streaming_event_commit_recorded_point(
     iree_hal_streaming_event_t* event,
@@ -1844,6 +1850,26 @@ void iree_hal_streaming_event_commit_recorded_point(
 // Synchronization: event (event mutex held while exchanging).
 iree_hal_streaming_stream_t* iree_hal_streaming_event_exchange_recording_stream(
     iree_hal_streaming_event_t* event, iree_hal_streaming_stream_t* stream);
+
+// Enqueues |event|'s record on |stream|'s queue at the point reached once
+// |wait_semaphores| is satisfied, signaling |signal_semaphores| there.
+//
+// |point| arrives describing the timeline point that record signals and owning
+// nothing. On success it holds one reference to everything it names, which the
+// caller hands to iree_hal_streaming_event_commit_recorded_point; that call
+// consumes them. On failure |point| is left exactly as it arrived, owing
+// nothing.
+//
+// Both record paths enqueue through here, so neither can produce a point
+// owning only part of what it names.
+//
+// Synchronization: none of its own; runs under whichever lock the calling
+// record path holds.
+IREE_MUST_USE_RESULT iree_status_t iree_hal_streaming_event_enqueue_record(
+    iree_hal_streaming_event_t* event, iree_hal_streaming_stream_t* stream,
+    iree_hal_semaphore_list_t wait_semaphores,
+    iree_hal_semaphore_list_t signal_semaphores,
+    iree_hal_streaming_recorded_point_t* point);
 
 // Synchronization: stream flush (flushes stream before recording).
 iree_status_t iree_hal_streaming_event_record(

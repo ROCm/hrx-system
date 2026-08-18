@@ -1066,7 +1066,7 @@ iree_status_t iree_hal_streaming_stream_wait_event(
     iree_slim_mutex_unlock(&stream->mutex);
   }
 
-  iree_hal_semaphore_release(recorded_point.semaphore);
+  iree_hal_streaming_event_release_recorded_point(&recorded_point);
 
   // The reservation holds the dependency slot from before the submission so a
   // concurrent reservation for the same source stream cannot displace it. It

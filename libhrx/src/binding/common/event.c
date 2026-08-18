@@ -49,7 +49,7 @@ static void iree_hal_streaming_event_destroy(
   IREE_TRACE_ZONE_BEGIN(z0);
 
   // Release the recorded point.
-  iree_hal_semaphore_release(event->recorded_point.semaphore);
+  iree_hal_streaming_event_release_recorded_point(&event->recorded_point);
 
   // Release recording stream reference.
   iree_hal_streaming_stream_release(event->recording_stream);
@@ -89,15 +89,20 @@ void iree_hal_streaming_event_acquire_recorded_point(
   iree_slim_mutex_unlock(&event->mutex);
 }
 
+void iree_hal_streaming_event_release_recorded_point(
+    iree_hal_streaming_recorded_point_t* point) {
+  iree_hal_semaphore_release(point->semaphore);
+  *point = (iree_hal_streaming_recorded_point_t){0};
+}
+
 void iree_hal_streaming_event_commit_recorded_point(
     iree_hal_streaming_event_t* event,
     iree_hal_streaming_recorded_point_t point) {
-  iree_hal_semaphore_retain(point.semaphore);
   iree_slim_mutex_lock(&event->mutex);
-  iree_hal_semaphore_t* previous_semaphore = event->recorded_point.semaphore;
+  iree_hal_streaming_recorded_point_t previous = event->recorded_point;
   event->recorded_point = point;
   iree_slim_mutex_unlock(&event->mutex);
-  iree_hal_semaphore_release(previous_semaphore);
+  iree_hal_streaming_event_release_recorded_point(&previous);
 }
 
 iree_hal_streaming_stream_t* iree_hal_streaming_event_exchange_recording_stream(
@@ -139,13 +144,27 @@ iree_status_t iree_hal_streaming_event_query(iree_hal_streaming_event_t* event,
   bool reached = false;
   iree_status_t query_status =
       iree_hal_streaming_recorded_point_query(&recorded_point, &reached);
-  iree_hal_semaphore_release(recorded_point.semaphore);
+  iree_hal_streaming_event_release_recorded_point(&recorded_point);
   IREE_RETURN_AND_END_ZONE_IF_ERROR(z0, query_status);
 
   // 0=complete, 1=not complete.
   *status = reached ? 0 : 1;
 
   IREE_TRACE_ZONE_END(z0);
+  return iree_ok_status();
+}
+
+iree_status_t iree_hal_streaming_event_enqueue_record(
+    iree_hal_streaming_event_t* event, iree_hal_streaming_stream_t* stream,
+    iree_hal_semaphore_list_t wait_semaphores,
+    iree_hal_semaphore_list_t signal_semaphores,
+    iree_hal_streaming_recorded_point_t* point) {
+  IREE_RETURN_IF_ERROR(iree_hal_device_queue_barrier(
+      stream->context->device, stream->queue_affinity, wait_semaphores,
+      signal_semaphores, IREE_HAL_EXECUTE_FLAG_NONE));
+
+  // The point owns what it names from here.
+  iree_hal_semaphore_retain(point->semaphore);
   return iree_ok_status();
 }
 
@@ -220,23 +239,22 @@ iree_status_t iree_hal_streaming_event_record(
       .payload_values = &stream_signal_value,
   };
 
+  // The record signals the stream's own timeline, so reaching the point is
+  // exactly the stream reaching that value.
+  iree_hal_streaming_recorded_point_t recorded_point = {
+      .semaphore = stream->timeline_semaphore,
+      .value = stream_signal_value,
+      .ordered_after_stream_id = stream->stream_id,
+      .ordered_after_stream_value = stream_signal_value,
+      .record_time_ns = record_time_ns,
+  };
   iree_hal_streaming_stream_t* previous_stream = NULL;
-  status = iree_hal_device_queue_barrier(
-      stream->context->device, stream->queue_affinity, wait_semaphores,
-      signal_semaphores, IREE_HAL_EXECUTE_FLAG_NONE);
+  status = iree_hal_streaming_event_enqueue_record(
+      event, stream, wait_semaphores, signal_semaphores, &recorded_point);
   if (iree_status_is_ok(status)) {
-    // The accepted barrier owns the value it signals, so the timeline advances
+    // The accepted enqueue owns the value it signals, so the timeline advances
     // here and stays advanced even when the flush below fails.
     stream->pending_value = stream_signal_value;
-    // The barrier signals the stream's own timeline, so reaching the point is
-    // exactly the stream reaching that value.
-    const iree_hal_streaming_recorded_point_t recorded_point = {
-        .semaphore = stream->timeline_semaphore,
-        .value = stream_signal_value,
-        .ordered_after_stream_id = stream->stream_id,
-        .ordered_after_stream_value = stream_signal_value,
-        .record_time_ns = record_time_ns,
-    };
     // A rejected submission signals nothing, so the event keeps its old point.
     iree_hal_streaming_event_commit_recorded_point(event, recorded_point);
     previous_stream =
@@ -270,7 +288,7 @@ iree_status_t iree_hal_streaming_event_synchronize(
   iree_status_t status = iree_hal_semaphore_wait(
       recorded_point.semaphore, recorded_point.value, iree_infinite_timeout(),
       IREE_ASYNC_WAIT_FLAG_NONE);
-  iree_hal_semaphore_release(recorded_point.semaphore);
+  iree_hal_streaming_event_release_recorded_point(&recorded_point);
   IREE_RETURN_AND_END_ZONE_IF_ERROR(z0, status);
 
   IREE_TRACE_ZONE_END(z0);
@@ -344,7 +362,7 @@ iree_status_t iree_hal_streaming_event_elapsed_time(
     }
   }
 
-  iree_hal_semaphore_release(start_point.semaphore);
-  iree_hal_semaphore_release(stop_point.semaphore);
+  iree_hal_streaming_event_release_recorded_point(&start_point);
+  iree_hal_streaming_event_release_recorded_point(&stop_point);
   return status;
 }

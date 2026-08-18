@@ -1927,14 +1927,23 @@ static iree_status_t iree_hal_streaming_graph_host_callback(
   return iree_ok_status();
 }
 
+// Submits |block| on |stream| behind |wait_semaphores|, signaling
+// |signal_semaphores| when it completes. |launch_stream_tail_value| is
+// meaningful only to a child graph block and |record_point| only to an event
+// record block, which receives it describing the point the record signals and
+// leaves it owning what it names.
 static iree_status_t iree_hal_streaming_graph_submit_block(
     iree_hal_streaming_graph_block_t* block,
     const iree_hal_streaming_graph_block_ptrs_t* ptrs,
     iree_hal_streaming_stream_t* stream, uint64_t launch_stream_tail_value,
     iree_hal_semaphore_list_t wait_semaphores,
-    iree_hal_semaphore_list_t signal_semaphores) {
+    iree_hal_semaphore_list_t signal_semaphores,
+    iree_hal_streaming_recorded_point_t* record_point) {
   switch (block->type) {
     case IREE_HAL_STREAMING_GRAPH_BLOCK_TYPE_EVENT_RECORD:
+      return iree_hal_streaming_event_enqueue_record(
+          ptrs->attrs->event.event, stream, wait_semaphores, signal_semaphores,
+          record_point);
     case IREE_HAL_STREAMING_GRAPH_BLOCK_TYPE_EVENT_WAIT:
     case IREE_HAL_STREAMING_GRAPH_BLOCK_TYPE_QUEUE_BARRIER: {
       const iree_hal_execute_flags_t flags =
@@ -2216,38 +2225,39 @@ static iree_status_t iree_hal_streaming_graph_exec_submit_blocks_locked(
         .payload_values = signal_vals,
     };
     if (iree_status_is_ok(status)) {
-      // Sampled before the submission so the timestamp reflects when the launch
-      // issued the record.
-      const iree_time_t record_time_ns =
-          block_records_event ? iree_time_now() : 0;
-      status = iree_hal_streaming_graph_submit_block(
-          block, &ptrs, stream, launch_stream_tail_value, wait_semaphores,
-          signal_semaphores);
-      // A rejected block signals nothing, so the event keeps its old point. The
-      // commit stays inside this iteration because later blocks in the same
-      // launch wait on the committed point. The recording stream is left alone:
-      // it carries capture state and a launch is not a capture.
-      if (block_records_event && iree_status_is_ok(status)) {
+      iree_hal_streaming_recorded_point_t record_point = {0};
+      if (block_records_event) {
         // The block's first signal is the point the record names. When that
         // signal is the launching stream's own timeline the point is exactly a
         // stream point; otherwise it is internal to the launch and all that is
         // known about the stream is that the launch waited behind its tail.
         const bool signals_launch_stream_timeline =
             signal_sems[0] == stream->timeline_semaphore;
-        const iree_hal_streaming_recorded_point_t recorded_point = {
+        record_point = (iree_hal_streaming_recorded_point_t){
             .semaphore = signal_sems[0],
             .value = signal_vals[0],
             .ordered_after_stream_id = stream->stream_id,
             .ordered_after_stream_value = signals_launch_stream_timeline
                                               ? signal_vals[0]
                                               : launch_stream_tail_value,
-            .record_time_ns = record_time_ns,
+            // Sampled before the submission so the timestamp reflects when the
+            // launch issued the record.
+            .record_time_ns = iree_time_now(),
         };
+      }
+      status = iree_hal_streaming_graph_submit_block(
+          block, &ptrs, stream, launch_stream_tail_value, wait_semaphores,
+          signal_semaphores, &record_point);
+      // A rejected block signals nothing, so the event keeps its old point. The
+      // commit stays inside this iteration because later blocks in the same
+      // launch wait on the committed point. The recording stream is left alone:
+      // it carries capture state and a launch is not a capture.
+      if (block_records_event && iree_status_is_ok(status)) {
         iree_hal_streaming_event_commit_recorded_point(ptrs.attrs->event.event,
-                                                       recorded_point);
+                                                       record_point);
       }
     }
-    iree_hal_semaphore_release(event_wait_point.semaphore);
+    iree_hal_streaming_event_release_recorded_point(&event_wait_point);
     if (free_value_array) {
       iree_allocator_free(exec->host_allocator, value_array);
     }
