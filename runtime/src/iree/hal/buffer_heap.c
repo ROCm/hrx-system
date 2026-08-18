@@ -104,8 +104,6 @@ static iree_status_t iree_hal_heap_buffer_allocate_slab(
       (void**)&buffer));
   *out_buffer = buffer;
 
-  // Set bit indicating that we need to free the metadata with
-  // iree_allocator_free_aligned.
   uint8_t* data_ptr = (uint8_t*)buffer + header_size;
   IREE_ASSERT_TRUE(iree_host_size_has_alignment(
       (iree_host_size_t)data_ptr, IREE_HAL_HEAP_BUFFER_ALIGNMENT));
@@ -233,7 +231,7 @@ static void iree_hal_heap_buffer_destroy(iree_hal_buffer_t* base_buffer) {
       break;
     }
     case IREE_HAL_HEAP_BUFFER_STORAGE_MODE_SPLIT: {
-      iree_allocator_free(buffer->data_allocator, buffer->data.data);
+      iree_allocator_free_aligned(buffer->data_allocator, buffer->data.data);
       iree_allocator_free(host_allocator, buffer);
       break;
     }
