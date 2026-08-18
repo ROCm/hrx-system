@@ -871,7 +871,9 @@ iree_status_t activate_pathb_context_for_submit_locked(
 }
 
 iree_status_t ensure_pathb_single_code_range_active(
-    iree_hal_amdxdna_native_queue_t* queue, uint64_t offset, uint64_t size) {
+    iree_hal_amdxdna_native_queue_t* queue, uint64_t offset, uint64_t size,
+    bool* out_activated) {
+  if (out_activated) *out_activated = false;
   if (!queue || !queue->context) return iree_ok_status();
   auto& ranges = queue->context->pathb_active_single_code_ranges;
   const bool active =
@@ -889,6 +891,7 @@ iree_status_t ensure_pathb_single_code_range_active(
         "amdxdna Windows MCDM pathb single-session code acquire failed", error);
   }
   ranges.push_back({offset, size});
+  if (out_activated) *out_activated = true;
   return iree_ok_status();
 }
 
@@ -1029,10 +1032,19 @@ iree_status_t stage_windows_dpu_code_buffer(
                     static_cast<size_t>(command->control_buffer_size)) == 0));
   if (same_staged_code) {
     if (is_partial_elf) {
+      bool range_activated = false;
       IREE_RETURN_IF_ERROR(ensure_pathb_single_code_range_active(
-          queue, code_offset, command->control_buffer_size));
+          queue, code_offset, command->control_buffer_size,
+          &range_activated));
+      // Chains and context transitions close active single-code sessions. The
+      // staged bytes remain valid, but a new opcode-9 publication boundary is
+      // required before state 3 can consume them again.
+      if (range_activated) {
+        IREE_RETURN_IF_ERROR(publish_pathb_code_write(
+            queue, code_offset, command->control_buffer_size));
+      }
       IREE_RETURN_IF_ERROR(set_partial_elf_instruction_fields());
-      // Re-publish cached PARTIAL_ELF code for each START_NPU invocation.
+      return iree_ok_status();
     }
     IREE_RETURN_IF_ERROR(publish_pathb_code_write(
         queue, code_offset, command->control_buffer_size));
@@ -1044,7 +1056,8 @@ iree_status_t stage_windows_dpu_code_buffer(
     command->pathb_code_staged_size = 0;
     IREE_RETURN_IF_ERROR(set_partial_elf_instruction_fields());
     IREE_RETURN_IF_ERROR(ensure_pathb_single_code_range_active(
-        queue, code_offset, command->control_buffer_size));
+        queue, code_offset, command->control_buffer_size,
+        /*out_activated=*/nullptr));
   } else {
     IREE_RETURN_IF_ERROR(acquire_pathb_code_range(
         queue, code_offset, command->control_buffer_size));
@@ -4113,10 +4126,6 @@ static iree_status_t iree_hal_amdxdna_native_submit_wait(
           "amdxdna Windows MCDM pathb post-dispatch sync failed", error);
     }
   }
-  // Keep completed partial-ELF code ranges active. Each cached command owns a
-  // non-overlapping aperture slot, so alternating singles need no opcode-9
-  // boundary. Runlist submission, context switching, and teardown release the
-  // complete active set.
   {
     queue->exec_command_count++;
     if (packet->state == ERT_CMD_STATE_COMPLETED) {
@@ -4135,8 +4144,15 @@ static iree_status_t iree_hal_amdxdna_native_submit_wait(
           chain_data->error_index, chain_data->submit_index);
     }
     return iree_make_status(
-        IREE_STATUS_INTERNAL, "amdxdna %.*s did not complete: ert state %u",
-        static_cast<int>(s->label_size), s->label, packet->state);
+        IREE_STATUS_INTERNAL,
+        "amdxdna %.*s did not complete: ert state %u (fence=%" PRIu64
+        ", completion_slot=0x%x, code_offset=0x%" PRIx64
+        ", code_capacity=0x%" PRIx64 ", active_code_ranges=%zu)",
+        static_cast<int>(s->label_size), s->label, packet->state,
+        s->pending.fence_id, s->pending.slot_offset,
+        command->pathb_single_code_aperture_offset,
+        command->pathb_single_code_aperture_capacity,
+        queue->context->pathb_active_single_code_ranges.size());
   }
 }
 

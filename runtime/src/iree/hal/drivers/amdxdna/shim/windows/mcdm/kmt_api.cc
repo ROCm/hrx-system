@@ -2752,6 +2752,20 @@ bool WaitForPathBSubmits(const KmtApi& api, const Device& device,
       return false;
     }
   }
+  // Retire each parent through the queue fence interface before consuming its
+  // completion slot. The final fence establishes in-order device completion;
+  // the per-parent waits mirror the command-specific retirement performed by
+  // XRT's runlist wait path and keep miniport completion ownership explicit.
+  // These waits observe already-reached fence values and do not serialize
+  // parent submission.
+  for (size_t i = 0; i < pending_count; ++i) {
+    if (!WaitForHwQueueFenceCpu(
+            api, device, *context, pending[i].fence_id,
+            "D3DKMTWaitForSynchronizationObjectFromCpu(pathb parent retire)",
+            out_error)) {
+      return false;
+    }
+  }
   // Every pending parent in a context reports through the same completion
   // ring. The final HWQ fence makes all preceding slots complete; invalidate
   // that ring once, then publish each authoritative slot state into its
