@@ -125,12 +125,20 @@ typedef struct iree_hal_amdgpu_aql_program_builder_t {
   uint32_t max_block_aql_packet_count;
   // Worst-case kernarg byte count across finalized blocks.
   uint32_t max_block_kernarg_length;
+  // Maximum kernarg byte count permitted in one replay block.
+  uint32_t block_kernarg_length_limit;
 } iree_hal_amdgpu_aql_program_builder_t;
 
 // Initializes |out_builder|. No blocks are acquired until begin().
 void iree_hal_amdgpu_aql_program_builder_initialize(
     iree_arena_block_pool_t* block_pool,
     iree_hal_amdgpu_aql_program_builder_t* out_builder);
+
+// Limits the kernarg bytes accumulated into one replay block. Must be called
+// before begin(). Commands are split so each block fits the host queue ring.
+void iree_hal_amdgpu_aql_program_builder_set_kernarg_length_limit(
+    iree_hal_amdgpu_aql_program_builder_t* builder,
+    uint32_t kernarg_length_limit);
 
 // Deinitializes |builder| and releases any blocks not transferred by end().
 void iree_hal_amdgpu_aql_program_builder_deinitialize(

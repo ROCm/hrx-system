@@ -2685,6 +2685,15 @@ static iree_status_t iree_hal_amdgpu_logical_device_create_aql_command_buffer(
     iree_hal_queue_affinity_t effective_queue_affinity,
     iree_host_size_t binding_capacity, iree_host_size_t device_ordinal,
     iree_hal_command_buffer_t** out_command_buffer) {
+  const uint32_t block_kernarg_length_limit =
+      iree_hal_amdgpu_aql_command_buffer_block_kernarg_length_limit(
+          physical_device->host_queue_aql_capacity,
+          physical_device->host_queue_kernarg_capacity);
+  if (IREE_UNLIKELY(block_kernarg_length_limit == 0)) {
+    return iree_make_status(
+        IREE_STATUS_OUT_OF_RANGE,
+        "host queue kernarg capacity cannot fit one profiled replay block");
+  }
   return iree_hal_amdgpu_aql_command_buffer_create(
       logical_device->device_allocator, mode, command_categories,
       effective_queue_affinity, binding_capacity, device_ordinal,
@@ -2693,7 +2702,7 @@ static iree_status_t iree_hal_amdgpu_logical_device_create_aql_command_buffer(
           ? logical_device->tsan.device_states[device_ordinal]
                 .config.shadow_slot_count
           : 0,
-      physical_device->prepublished_kernarg_storage,
+      block_kernarg_length_limit, physical_device->prepublished_kernarg_storage,
       iree_hal_amdgpu_physical_device_hostcall_buffer(physical_device),
       &logical_device->profile_metadata,
       &logical_device->host_block_pools.command_buffer,

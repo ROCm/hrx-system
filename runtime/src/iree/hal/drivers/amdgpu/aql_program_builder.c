@@ -112,6 +112,14 @@ void iree_hal_amdgpu_aql_program_builder_initialize(
     iree_hal_amdgpu_aql_program_builder_t* out_builder) {
   memset(out_builder, 0, sizeof(*out_builder));
   out_builder->block_pool = block_pool;
+  out_builder->block_kernarg_length_limit = UINT32_MAX;
+}
+
+void iree_hal_amdgpu_aql_program_builder_set_kernarg_length_limit(
+    iree_hal_amdgpu_aql_program_builder_t* builder,
+    uint32_t kernarg_length_limit) {
+  IREE_ASSERT(!builder->current_block.header && !builder->first_block);
+  builder->block_kernarg_length_limit = kernarg_length_limit;
 }
 
 void iree_hal_amdgpu_aql_program_builder_deinitialize(
@@ -405,6 +413,12 @@ static bool iree_hal_amdgpu_aql_program_command_fits_current_block(
   if (kernarg_length > UINT32_MAX - builder->current_block.kernarg_length) {
     return false;
   }
+  if (builder->current_block.kernarg_length >
+          builder->block_kernarg_length_limit ||
+      kernarg_length > builder->block_kernarg_length_limit -
+                           builder->current_block.kernarg_length) {
+    return false;
+  }
   return true;
 }
 
@@ -496,6 +510,12 @@ iree_status_t iree_hal_amdgpu_aql_program_builder_append_command(
   if (IREE_UNLIKELY(builder->command_count == UINT32_MAX)) {
     return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
                             "command-buffer command count overflow");
+  }
+  if (IREE_UNLIKELY(kernarg_length > builder->block_kernarg_length_limit)) {
+    return iree_make_status(
+        IREE_STATUS_OUT_OF_RANGE,
+        "command kernarg length %u exceeds replay block limit %u",
+        kernarg_length, builder->block_kernarg_length_limit);
   }
 
   iree_host_size_t required_length = 0;

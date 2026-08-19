@@ -19,6 +19,12 @@
 extern "C" {
 #endif  // __cplusplus
 
+// Calculates the recorded kernarg byte limit for one replay block. The limit
+// leaves room for dispatch-profiling harvest kernargs and guarantees that the
+// complete replay allocation fits contiguously at any host queue ring cursor.
+uint32_t iree_hal_amdgpu_aql_command_buffer_block_kernarg_length_limit(
+    uint32_t host_queue_aql_capacity, uint32_t host_queue_kernarg_capacity);
+
 // Creates a host-recorded AQL command buffer.
 //
 // The command buffer borrows |program_block_pool| for durable AQL program
@@ -35,7 +41,7 @@ iree_status_t iree_hal_amdgpu_aql_command_buffer_create(
     iree_hal_queue_affinity_t queue_affinity, iree_host_size_t binding_capacity,
     iree_host_size_t device_ordinal,
     iree_host_size_t queue_count_per_physical_device,
-    uint32_t tsan_shadow_slot_count,
+    uint32_t tsan_shadow_slot_count, uint32_t block_kernarg_length_limit,
     iree_hal_amdgpu_aql_prepublished_kernarg_storage_t
         prepublished_kernarg_storage,
     void* hostcall_buffer,

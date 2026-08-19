@@ -17,12 +17,31 @@
 #include "iree/hal/drivers/amdgpu/buffer.h"
 #include "iree/hal/drivers/amdgpu/device/blit.h"
 #include "iree/hal/drivers/amdgpu/device/dispatch.h"
+#include "iree/hal/drivers/amdgpu/device/timestamp.h"
 #include "iree/hal/drivers/amdgpu/executable.h"
 #include "iree/hal/drivers/amdgpu/queue_affinity.h"
 #include "iree/hal/drivers/amdgpu/transient_buffer.h"
 #include "iree/hal/drivers/amdgpu/util/aql_emitter.h"
 #include "iree/hal/drivers/amdgpu/util/kernarg_ring.h"
 #include "iree/hal/utils/resource_set.h"
+
+uint32_t iree_hal_amdgpu_aql_command_buffer_block_kernarg_length_limit(
+    uint32_t host_queue_aql_capacity, uint32_t host_queue_kernarg_capacity) {
+  const uint64_t contiguous_block_capacity =
+      (uint64_t)host_queue_kernarg_capacity / 2u;
+  const uint64_t profile_harvest_block_count = iree_host_size_ceil_div(
+      iree_hal_amdgpu_device_timestamp_dispatch_harvest_kernarg_length(
+          host_queue_aql_capacity),
+      sizeof(iree_hal_amdgpu_kernarg_block_t));
+  if (IREE_UNLIKELY(profile_harvest_block_count >= contiguous_block_capacity)) {
+    return 0;
+  }
+  const uint64_t recorded_byte_capacity =
+      (contiguous_block_capacity - profile_harvest_block_count) *
+      sizeof(iree_hal_amdgpu_kernarg_block_t);
+  return recorded_byte_capacity > UINT32_MAX ? UINT32_MAX
+                                             : (uint32_t)recorded_byte_capacity;
+}
 
 //===----------------------------------------------------------------------===//
 // iree_hal_amdgpu_aql_command_buffer_t
@@ -157,6 +176,8 @@ typedef struct iree_hal_amdgpu_aql_command_buffer_t {
   uint32_t device_ordinal;
   // Number of physical queues on |device_ordinal|.
   uint32_t queue_count_per_physical_device;
+  // Maximum kernarg bytes replayed in one command-buffer block.
+  uint32_t block_kernarg_length_limit;
   // Stable opaque hostcall device address written into implicit templates.
   void* hostcall_buffer;
   // One-shot lifecycle state enforced even when generic HAL validation is off.
@@ -326,6 +347,8 @@ static void iree_hal_amdgpu_aql_command_buffer_discard_recording(
   iree_hal_amdgpu_aql_program_builder_deinitialize(&command_buffer->builder);
   iree_hal_amdgpu_aql_program_builder_initialize(
       command_buffer->block_pools.program, &command_buffer->builder);
+  iree_hal_amdgpu_aql_program_builder_set_kernarg_length_limit(
+      &command_buffer->builder, command_buffer->block_kernarg_length_limit);
   iree_hal_amdgpu_aql_command_buffer_reset_resources(command_buffer);
 }
 
@@ -801,7 +824,7 @@ iree_status_t iree_hal_amdgpu_aql_command_buffer_create(
     iree_hal_queue_affinity_t queue_affinity, iree_host_size_t binding_capacity,
     iree_host_size_t device_ordinal,
     iree_host_size_t queue_count_per_physical_device,
-    uint32_t tsan_shadow_slot_count,
+    uint32_t tsan_shadow_slot_count, uint32_t block_kernarg_length_limit,
     iree_hal_amdgpu_aql_prepublished_kernarg_storage_t
         prepublished_kernarg_storage,
     void* hostcall_buffer,
@@ -888,6 +911,7 @@ iree_status_t iree_hal_amdgpu_aql_command_buffer_create(
   command_buffer->device_ordinal = (uint32_t)device_ordinal;
   command_buffer->queue_count_per_physical_device =
       (uint32_t)queue_count_per_physical_device;
+  command_buffer->block_kernarg_length_limit = block_kernarg_length_limit;
   command_buffer->hostcall_buffer = hostcall_buffer;
   command_buffer->tsan_shadow_spans.shadow_slot_count = tsan_shadow_slot_count;
   command_buffer->prepublished_kernargs.storage = prepublished_kernarg_storage;
@@ -895,6 +919,8 @@ iree_status_t iree_hal_amdgpu_aql_command_buffer_create(
   iree_arena_initialize(program_block_pool, &command_buffer->recording_arena);
   iree_hal_amdgpu_aql_program_builder_initialize(program_block_pool,
                                                  &command_buffer->builder);
+  iree_hal_amdgpu_aql_program_builder_set_kernarg_length_limit(
+      &command_buffer->builder, block_kernarg_length_limit);
 
   iree_status_t status = iree_ok_status();
   if (retain_profile_metadata) {

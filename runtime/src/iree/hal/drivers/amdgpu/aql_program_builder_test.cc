@@ -418,6 +418,85 @@ TEST_F(AqlProgramBuilderTest, SplitsBlocksWithBranchTerminator) {
   iree_hal_amdgpu_aql_program_deinitialize(&program);
 }
 
+TEST_F(AqlProgramBuilderTest, SplitsBlocksAtKernargLengthLimit) {
+  iree_hal_amdgpu_aql_program_builder_t builder;
+  iree_hal_amdgpu_aql_program_builder_initialize(block_pool(), &builder);
+  iree_hal_amdgpu_aql_program_builder_set_kernarg_length_limit(
+      &builder, /*kernarg_length_limit=*/96);
+  IREE_ASSERT_OK(iree_hal_amdgpu_aql_program_builder_begin(&builder));
+
+  for (int i = 0; i < 2; ++i) {
+    iree_hal_amdgpu_command_buffer_command_header_t* command = nullptr;
+    IREE_ASSERT_OK(iree_hal_amdgpu_aql_program_builder_append_command(
+        &builder, IREE_HAL_AMDGPU_COMMAND_BUFFER_OPCODE_DISPATCH,
+        IREE_HAL_AMDGPU_COMMAND_BUFFER_COMMAND_FLAG_NONE,
+        sizeof(iree_hal_amdgpu_command_buffer_dispatch_command_t),
+        /*binding_source_count=*/0, /*aql_packet_count=*/1,
+        /*kernarg_length=*/64, &command, /*out_binding_sources=*/nullptr));
+  }
+
+  iree_hal_amdgpu_aql_program_t program = {};
+  IREE_ASSERT_OK(iree_hal_amdgpu_aql_program_builder_end(&builder, &program));
+  iree_hal_amdgpu_aql_program_builder_deinitialize(&builder);
+
+  EXPECT_EQ(program.block_count, 2u);
+  EXPECT_EQ(program.max_block_kernarg_length, 64u);
+  EXPECT_EQ(program.first_block->kernarg_length, 64u);
+  const iree_hal_amdgpu_command_buffer_block_header_t* second_block =
+      iree_hal_amdgpu_aql_program_block_next(block_pool(), program.first_block);
+  ASSERT_NE(second_block, nullptr);
+  EXPECT_EQ(second_block->kernarg_length, 64u);
+
+  iree_hal_amdgpu_aql_program_deinitialize(&program);
+}
+
+TEST_F(AqlProgramBuilderTest, RejectsCommandAboveKernargLengthLimit) {
+  iree_hal_amdgpu_aql_program_builder_t builder;
+  iree_hal_amdgpu_aql_program_builder_initialize(block_pool(), &builder);
+  iree_hal_amdgpu_aql_program_builder_set_kernarg_length_limit(
+      &builder, /*kernarg_length_limit=*/63);
+  IREE_ASSERT_OK(iree_hal_amdgpu_aql_program_builder_begin(&builder));
+
+  iree_hal_amdgpu_command_buffer_command_header_t* command = nullptr;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_OUT_OF_RANGE,
+      iree_hal_amdgpu_aql_program_builder_append_command(
+          &builder, IREE_HAL_AMDGPU_COMMAND_BUFFER_OPCODE_DISPATCH,
+          IREE_HAL_AMDGPU_COMMAND_BUFFER_COMMAND_FLAG_NONE,
+          sizeof(iree_hal_amdgpu_command_buffer_dispatch_command_t),
+          /*binding_source_count=*/0, /*aql_packet_count=*/1,
+          /*kernarg_length=*/64, &command, /*out_binding_sources=*/nullptr));
+
+  iree_hal_amdgpu_aql_program_builder_deinitialize(&builder);
+}
+
+TEST_F(AqlProgramBuilderTest, PreservesKernargLengthLimitAcrossRecordings) {
+  iree_hal_amdgpu_aql_program_builder_t builder;
+  iree_hal_amdgpu_aql_program_builder_initialize(block_pool(), &builder);
+  iree_hal_amdgpu_aql_program_builder_set_kernarg_length_limit(
+      &builder, /*kernarg_length_limit=*/96);
+
+  for (int recording = 0; recording < 2; ++recording) {
+    IREE_ASSERT_OK(iree_hal_amdgpu_aql_program_builder_begin(&builder));
+    for (int command_index = 0; command_index < 2; ++command_index) {
+      iree_hal_amdgpu_command_buffer_command_header_t* command = nullptr;
+      IREE_ASSERT_OK(iree_hal_amdgpu_aql_program_builder_append_command(
+          &builder, IREE_HAL_AMDGPU_COMMAND_BUFFER_OPCODE_DISPATCH,
+          IREE_HAL_AMDGPU_COMMAND_BUFFER_COMMAND_FLAG_NONE,
+          sizeof(iree_hal_amdgpu_command_buffer_dispatch_command_t),
+          /*binding_source_count=*/0, /*aql_packet_count=*/1,
+          /*kernarg_length=*/64, &command, /*out_binding_sources=*/nullptr));
+    }
+
+    iree_hal_amdgpu_aql_program_t program = {};
+    IREE_ASSERT_OK(iree_hal_amdgpu_aql_program_builder_end(&builder, &program));
+    EXPECT_EQ(program.block_count, 2u);
+    iree_hal_amdgpu_aql_program_deinitialize(&program);
+  }
+
+  iree_hal_amdgpu_aql_program_builder_deinitialize(&builder);
+}
+
 TEST_F(AqlProgramBuilderTest, ValidatesSplitMetadataOnlyProgram) {
   iree_hal_amdgpu_aql_program_builder_t builder;
   iree_hal_amdgpu_aql_program_builder_initialize(block_pool(), &builder);

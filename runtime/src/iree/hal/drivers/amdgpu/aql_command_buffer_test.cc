@@ -11,11 +11,39 @@
 #include <memory>
 
 #include "iree/hal/drivers/amdgpu/abi/queue.h"
+#include "iree/hal/drivers/amdgpu/device/timestamp.h"
+#include "iree/hal/drivers/amdgpu/util/kernarg_ring.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 
 namespace iree::hal::amdgpu {
 namespace {
+
+TEST(AqlCommandBufferCapacityTest, ReservesProfileHarvestKernargs) {
+  constexpr uint32_t kAqlCapacity = 65536;
+  constexpr uint32_t kKernargCapacity = 262144;
+  const uint32_t recorded_byte_limit =
+      iree_hal_amdgpu_aql_command_buffer_block_kernarg_length_limit(
+          kAqlCapacity, kKernargCapacity);
+  const uint32_t recorded_block_limit = (uint32_t)iree_host_size_ceil_div(
+      recorded_byte_limit, sizeof(iree_hal_amdgpu_kernarg_block_t));
+  const uint32_t profile_harvest_block_count =
+      (uint32_t)iree_host_size_ceil_div(
+          iree_hal_amdgpu_device_timestamp_dispatch_harvest_kernarg_length(
+              kAqlCapacity),
+          sizeof(iree_hal_amdgpu_kernarg_block_t));
+
+  EXPECT_EQ(recorded_byte_limit, 7339968u);
+  EXPECT_EQ(recorded_block_limit + profile_harvest_block_count,
+            kKernargCapacity / 2u);
+}
+
+TEST(AqlCommandBufferCapacityTest, RejectsInsufficientKernargCapacity) {
+  EXPECT_EQ(iree_hal_amdgpu_aql_command_buffer_block_kernarg_length_limit(
+                /*host_queue_aql_capacity=*/1,
+                /*host_queue_kernarg_capacity=*/2),
+            0u);
+}
 
 struct CommandBufferDeleter {
   void operator()(iree_hal_command_buffer_t* command_buffer) const {
@@ -61,6 +89,7 @@ class AqlCommandBufferTest : public ::testing::Test {
         IREE_HAL_QUEUE_AFFINITY_ANY, binding_capacity, /*device_ordinal=*/0,
         /*queue_count_per_physical_device=*/1,
         /*tsan_shadow_slot_count=*/16,
+        /*block_kernarg_length_limit=*/UINT32_MAX,
         iree_hal_amdgpu_aql_prepublished_kernarg_storage_disabled(),
         /*hostcall_buffer=*/nullptr, profile_metadata, &block_pool_,
         &block_pool_, iree_allocator_system(), &command_buffer));

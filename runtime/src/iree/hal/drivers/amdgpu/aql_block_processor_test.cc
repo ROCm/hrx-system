@@ -543,6 +543,7 @@ class AqlBlockProcessorRecordedTest : public ::testing::Test {
         binding_capacity, /*device_ordinal=*/0,
         /*queue_count_per_physical_device=*/1,
         /*tsan_shadow_slot_count=*/16,
+        /*block_kernarg_length_limit=*/UINT32_MAX,
         iree_hal_amdgpu_aql_prepublished_kernarg_storage_disabled(),
         /*hostcall_buffer=*/nullptr, &profile_metadata_, &block_pool_,
         &block_pool_, iree_allocator_system(), &command_buffer));
