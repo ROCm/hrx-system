@@ -249,11 +249,15 @@ struct iree_hal_streaming_context_t {
   // Host allocator.
   iree_allocator_t host_allocator;
 
-  // Stream tracking (non-owning references - streams are not retained).
-  // NOTE: Streams are NOT retained by this list to avoid reference cycles.
-  // Streams must unregister themselves before destruction.
-  iree_hal_streaming_stream_t** streams;  // Non-owning pointers.
+  // Streams registered with this context. The list holds a reference to each
+  // entry: iree_hal_streaming_context_register_stream retains on insert and
+  // iree_hal_streaming_context_unregister_stream releases once the entry is
+  // unlinked, so a registered stream stays alive for as long as the list names
+  // it.
+  iree_hal_streaming_stream_t** streams;
+  // Number of entries in |streams| currently valid.
   iree_host_size_t stream_count;
+  // Allocated capacity of |streams|.
   iree_host_size_t stream_capacity;
 
   // Dedicated mutex for stream list access.
