@@ -234,6 +234,7 @@ static iree_string_view_t qwen38_chunk_root_name(bool mtp) {
 
 static iree_status_t qwen38_prepare_text_model(
     qwen_tooling_runtime_context_t* runtime_context, bool mtp,
+    uint32_t prefill_schedule_mask,
     iree_string_view_t context_capacity, iree_allocator_t host_allocator,
     qwen_tooling_command_program_set_t** out_program_set) {
   if (qwen38_text_model_source_size() != 1) {
@@ -245,6 +246,7 @@ static iree_status_t qwen38_prepare_text_model(
   iree_string_view_t root_names[8];
   iree_host_size_t root_count = 0;
   for (iree_host_size_t i = 0; i < QWEN38_PREFILL_SCHEDULE_COUNT; ++i) {
+    if ((prefill_schedule_mask & (1u << i)) == 0) continue;
     root_names[root_count++] = qwen38_prefill_root_name_for_schedule(
         mtp, (qwen38_prefill_schedule_t)i);
   }
@@ -607,6 +609,7 @@ static iree_status_t qwen38_text_run(void) {
   int32_t eos_token = -1;
   iree_host_size_t intermediate_chunk_count = 0;
   iree_host_size_t final_chunk_token_count = 0;
+  uint32_t prefill_schedule_mask = 0;
   iree_host_size_t chunk_config_data_offset = 0;
   iree_host_size_t prefill_config_data_offset = 0;
   iree_host_size_t prefill_config_data_length = 0;
@@ -758,6 +761,40 @@ static iree_status_t qwen38_text_run(void) {
                                       &final_chunk_token_byte_length)) {
       status = iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                                 "final prompt token span overflow");
+    } else {
+      const qwen38_prefill_schedule_t initial_prefill_schedule =
+          qwen38_prefill_schedule_for_token_count(final_chunk_token_count);
+      prefill_schedule_mask = 1u << initial_prefill_schedule;
+    }
+  }
+  if (iree_status_is_ok(status) && FLAG_second_prompt[0] != '\0') {
+    status = qwen38_build_followup_span(
+        iree_make_cstring_view(FLAG_second_prompt), &formatted_prompt);
+  }
+  iree_host_size_t prepared_second_prompt_token_count = 0;
+  if (iree_status_is_ok(status) && FLAG_second_prompt[0] != '\0') {
+    status = iree_tokenizer_encode(
+        tokenizer, iree_string_builder_view(&formatted_prompt),
+        IREE_TOKENIZER_ENCODE_FLAG_NONE,
+        iree_tokenizer_make_token_output(
+            token_ids + prompt_token_count, /*token_offsets=*/NULL,
+            /*type_ids=*/NULL,
+            (iree_host_size_t)FLAG_context_capacity - prompt_token_count),
+        host_allocator, &prepared_second_prompt_token_count);
+  }
+  if (iree_status_is_ok(status) && FLAG_second_prompt[0] != '\0') {
+    if (prepared_second_prompt_token_count == 0) {
+      status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "the second prompt tokenized to no tokens");
+    } else {
+      const iree_host_size_t prepared_final_chunk_token_count =
+          (prepared_second_prompt_token_count - 1) %
+              QWEN38_PREFILL_CHUNK_CAPACITY +
+          1;
+      const qwen38_prefill_schedule_t second_prefill_schedule =
+          qwen38_prefill_schedule_for_token_count(
+              prepared_final_chunk_token_count);
+      prefill_schedule_mask |= 1u << second_prefill_schedule;
     }
   }
 
@@ -776,22 +813,23 @@ static iree_status_t qwen38_text_run(void) {
             " prompt tokens; preparing prefill, decode, and MTP together...\n",
             prompt_token_count);
     status = qwen38_prepare_text_model(
-        &runtime_context, FLAG_mtp,
+        &runtime_context, FLAG_mtp, prefill_schedule_mask,
         iree_make_cstring_view(context_capacity_value), host_allocator,
         &program_set);
   }
   if (iree_status_is_ok(status)) {
     chunk_program = qwen_tooling_command_program_set_lookup(
         program_set, qwen38_chunk_root_name(FLAG_mtp));
+    const qwen38_prefill_schedule_t initial_prefill_schedule =
+        qwen38_prefill_schedule_for_token_count(final_chunk_token_count);
     for (iree_host_size_t i = 0; i < QWEN38_PREFILL_SCHEDULE_COUNT; ++i) {
+      if ((prefill_schedule_mask & (1u << i)) == 0) continue;
       prefill_programs[i] = qwen_tooling_command_program_set_lookup(
           program_set, qwen38_prefill_root_name_for_schedule(
                            FLAG_mtp, (qwen38_prefill_schedule_t)i));
       prefill_infos[i] =
           qwen_tooling_command_program_info(prefill_programs[i]);
     }
-    const qwen38_prefill_schedule_t initial_prefill_schedule =
-        qwen38_prefill_schedule_for_token_count(final_chunk_token_count);
     prefill_program = prefill_programs[initial_prefill_schedule];
     prefill_info = prefill_infos[initial_prefill_schedule];
     if (FLAG_verbose) {
@@ -847,6 +885,7 @@ static iree_status_t qwen38_text_run(void) {
   }
   for (iree_host_size_t i = 0;
        i < QWEN38_PREFILL_SCHEDULE_COUNT && iree_status_is_ok(status); ++i) {
+    if ((prefill_schedule_mask & (1u << i)) == 0) continue;
     const loomc_cmd_program_info_t* info = prefill_infos[i];
     const iree_host_size_t expected_prefill_binding_count = FLAG_mtp ? 10 : 9;
     const iree_host_size_t expected_prefill_transient_binding = FLAG_mtp ? 8 : 7;
@@ -950,6 +989,7 @@ static iree_status_t qwen38_text_run(void) {
     iree_device_size_t transient_byte_length =
         chunk_info->transient.required_byte_length;
     for (iree_host_size_t i = 0; i < QWEN38_PREFILL_SCHEDULE_COUNT; ++i) {
+      if ((prefill_schedule_mask & (1u << i)) == 0) continue;
       transient_byte_length =
           iree_max(transient_byte_length,
                    prefill_infos[i]->transient.required_byte_length);
@@ -968,6 +1008,7 @@ static iree_status_t qwen38_text_run(void) {
     iree_device_size_t transient_alignment =
         chunk_info->transient.minimum_alignment;
     for (iree_host_size_t i = 0; i < QWEN38_PREFILL_SCHEDULE_COUNT; ++i) {
+      if ((prefill_schedule_mask & (1u << i)) == 0) continue;
       transient_alignment =
           iree_max(transient_alignment,
                    prefill_infos[i]->transient.minimum_alignment);
@@ -1301,6 +1342,7 @@ static iree_status_t qwen38_text_run(void) {
     ready_time = iree_time_now();
     fprintf(stderr, "qwen38: materialized command programs:\n");
     for (iree_host_size_t i = 0; i < QWEN38_PREFILL_SCHEDULE_COUNT; ++i) {
+      if ((prefill_schedule_mask & (1u << i)) == 0) continue;
       const iree_string_view_t root_name =
           qwen38_prefill_root_name_for_schedule(
               FLAG_mtp, (qwen38_prefill_schedule_t)i);
