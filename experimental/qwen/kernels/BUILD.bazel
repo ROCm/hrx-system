@@ -204,11 +204,21 @@ loom_link_module(
 
 loom_link_module(
     name = "qwen38_linear_q6k_f16_wmma_linked",
-    srcs = ["qwen38/linear_q6k_f16_wmma.loom"],
+    srcs = [
+        "qwen38/linear_q6k_f16_wmma_metadata.loom",
+        "qwen38/linear_q6k_f16_wmma.loom",
+    ],
     libraries = [
+        "ggml/linear_q8_0_q8_1_x4.loom",
         "ggml/linear_q6k_q8_1_x4.loom",
         "ggml/quantize_q8_1_x4.loom",
     ],
+)
+
+loom_link_module(
+    name = "qwen38_linear_q6k_f16_wmma_benchmark_linked",
+    srcs = [":qwen38_linear_q6k_f16_wmma_linked"],
+    libraries = ["qwen38/layer_prefill.loom"],
 )
 
 loom_link_module(
