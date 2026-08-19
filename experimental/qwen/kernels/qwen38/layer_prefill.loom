@@ -42,8 +42,51 @@ kernel.def export("qwen38_rmsnorm_f32_prefill") @qwen38_rmsnorm_f32_prefill(%tok
   kernel.return
 }
 
-kernel.def export("qwen38_residual_add_f32_prefill") @qwen38_residual_add_f32_prefill(%token_count: index) {
+// Produces the same F16 values consumed by WMMA projections without
+// materializing and repeatedly reloading an F32 normalized tensor.
+kernel.def export("qwen38_rmsnorm_f16_prefill") @qwen38_rmsnorm_f16_prefill(%token_count: index) {
   %bounded_token_count = index.assume %token_count [range(%token_count, 1, 512)] : index
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 256 : index
+  kernel.launch.config workgroups(%unit, %bounded_token_count, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%token_count: index, %epsilon: f32, %input: buffer, %weight: buffer, %output: buffer) {
+  %bounded_token_count = index.assume %token_count [range(%token_count, 1, 512)] : index
+  %token0 = kernel.workgroup.id<y> : index
+  %token = index.assume %token0 [lt(%token0, %bounded_token_count)] : index
+  %lane0 = kernel.workitem.id<x> : index
+  %lane = index.assume %lane0 [range(%lane0, 0, 255)] : index
+  %workgroup_size = index.constant 256 : index
+  %hidden_size = index.constant 5120 : index
+  %c0_offset = index.constant 0 : offset
+  %c0_f32 = scalar.constant 0.0 : f32
+  %input_noalias, %weight_noalias, %output_noalias = buffer.assume.noalias %input, %weight, %output : buffer, buffer, buffer
+  %input_view = buffer.view %input_noalias[%c0_offset] : buffer -> view<[%bounded_token_count]x5120xf32>
+  %weight_view = buffer.view %weight_noalias[%c0_offset] : buffer -> view<5120xf32>
+  %output_view = buffer.view %output_noalias[%c0_offset] : buffer -> view<[%bounded_token_count]x5120xf16>
+  %thread_sum = scf.for %element = [%lane to %hidden_size step %workgroup_size](%partial_sum = %c0_f32 : f32) -> (f32) {
+    %input_value = view.load %input_view[%token, %element] : view<[%bounded_token_count]x5120xf32> -> f32
+    %square = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %input_value, %input_value : f32
+    %next_sum = scalar.addf<reassoc|nnan|ninf|nsz> %partial_sum, %square : f32
+    scf.yield %next_sum : f32
+  }
+  %sum = kernel.workgroup.reduce<addf> %thread_sum : f32
+  %element_count_f32 = scalar.constant 5120.0 : f32
+  %mean = scalar.divf<nnan|ninf|nsz|arcp> %sum, %element_count_f32 : f32
+  %biased_mean = scalar.addf<nnan|ninf|nsz> %mean, %epsilon : f32
+  %inverse_rms = scalar.rsqrtf<nnan|ninf|nsz|afn> %biased_mean : f32
+  scf.for %element = [%lane to %hidden_size step %workgroup_size] {
+    %input_value = view.load %input_view[%token, %element] : view<[%bounded_token_count]x5120xf32> -> f32
+    %weight = view.load %weight_view[%element] : view<5120xf32> -> f32
+    %normalized = scalar.mulf<nnan|ninf|nsz> %input_value, %inverse_rms : f32
+    %result = scalar.mulf<nnan|ninf|nsz> %normalized, %weight : f32
+    %result_f16 = scalar.fptrunc %result : f32 to f16
+    view.store %result_f16, %output_view[%token, %element] : f16, view<[%bounded_token_count]x5120xf16>
+  }
+  kernel.return
+}
+
+kernel.def export("qwen38_residual_add_f32_prefill") @qwen38_residual_add_f32_prefill(%token_count: index) {
+  %bounded_token_count = index.assume %token_count [range(%token_count, 0, 512)] : index
   %unit = index.constant 1 : index
   %workgroup_count = index.constant 5 : index
   %workgroup_size = index.constant 256 : index
@@ -72,7 +115,7 @@ kernel.def export("qwen38_residual_add_f32_prefill") @qwen38_residual_add_f32_pr
 }
 
 kernel.def export("qwen38_swiglu_f32_prefill") @qwen38_swiglu_f32_prefill(%token_count: index) {
-  %bounded_token_count = index.assume %token_count [range(%token_count, 1, 512)] : index
+  %bounded_token_count = index.assume %token_count [range(%token_count, 0, 512)] : index
   %unit = index.constant 1 : index
   %workgroup_count = index.constant 68 : index
   %workgroup_size = index.constant 256 : index
@@ -108,6 +151,10 @@ check.case public @qwen38_layer_prefill_known_case {
   %expected_normalized = check.generate.fill value(0.49999994) : tensor<3x5120xf32>
   kernel.launch @qwen38_rmsnorm_f32_prefill[%token_count](%token_count, %epsilon, %norm_input, %norm_weight, %normalized) : [index](index, f32, tensor<3x5120xf32>, tensor<5120xf32>, tensor<3x5120xf32>)
   check.expect.close actual(%normalized) expected(%expected_normalized) atol(0.000001) rtol(0.000001) nan(same) : tensor<3x5120xf32>
+  %normalized_f16 = check.generate.fill value(0.0) : tensor<3x5120xf16>
+  %expected_normalized_f16 = check.generate.fill value(0.5) : tensor<3x5120xf16>
+  kernel.launch @qwen38_rmsnorm_f16_prefill[%token_count](%token_count, %epsilon, %norm_input, %norm_weight, %normalized_f16) : [index](index, f32, tensor<3x5120xf32>, tensor<5120xf32>, tensor<3x5120xf16>)
+  check.expect.close actual(%normalized_f16) expected(%expected_normalized_f16) atol(0.0) rtol(0.0) nan(same) : tensor<3x5120xf16>
 
   %lhs = check.generate.fill value(0.125) : tensor<3x5120xf32>
   %rhs = check.generate.fill value(-0.0625) : tensor<3x5120xf32>
