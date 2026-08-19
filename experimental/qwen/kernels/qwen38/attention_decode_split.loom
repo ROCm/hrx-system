@@ -1,0 +1,687 @@
+// Qwen3.8-27B split-context grouped-query decode attention.
+//
+// Six query heads share each key/value head. The partial kernel keeps those
+// queries together so every cache row is loaded once, and divides the visible
+// context among independent workgroups. The reduction kernel combines the
+// resulting online-softmax states without a host round trip.
+
+amdgpu.target<gfx11-generic> @qwen38_attention_decode_split_gfx11_wave64 {subgroup_size = 64}
+
+config.decl @qwen38.attention.cache_capacity : %value: index where [range(%value, 1, 262144)]
+config.decl @qwen38.attention.decode_split_count : %value: index where [range(%value, 1, 64)]
+
+kernel.decl @qwen38_attention_decode() launch(%control: buffer, %query: buffer, %gate: buffer, %key_cache: buffer, %value_cache: buffer, %output: buffer)
+kernel.decl @qwen38_attention_prefill_reference(%token_count: index) launch(%control: buffer, %query: buffer, %gate: buffer, %key_cache: buffer, %value_cache: buffer, %output: buffer)
+
+// Computes one partial online-softmax state for six query heads sharing one
+// key/value head. Partial storage is [workgroup][query-in-group][accumulator,
+// max, sum], with 256 accumulator elements followed by the two scalar state
+// values.
+kernel.def export("qwen38_attention_decode_split_partial") @qwen38_attention_decode_split_partial() {
+  %unit = index.constant 1 : index
+  %key_head_count = index.constant 4 : index
+  %split_count = config.get @qwen38.attention.decode_split_count : index
+  %workgroup_count = index.mul %key_head_count, %split_count : index
+  %workgroup_size = index.constant 256 : index
+  kernel.launch.config workgroups(%workgroup_count, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%control: buffer, %query: buffer, %key_cache: buffer, %value_cache: buffer, %partials: buffer) {
+  %cache_capacity = config.get @qwen38.attention.cache_capacity : index
+  %split_count = config.get @qwen38.attention.decode_split_count : index
+  %workgroup0 = kernel.workgroup.id<x> : index
+  %workgroup = index.assume %workgroup0 [range(%workgroup0, 0, 255)] : index
+  %lane0 = kernel.workitem.id<x> : index
+  %lane = index.assume %lane0 [range(%lane0, 0, 255)] : index
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %c3 = index.constant 3 : index
+  %c4 = index.constant 4 : index
+  %c5 = index.constant 5 : index
+  %c6 = index.constant 6 : index
+  %c256 = index.constant 256 : index
+  %c257 = index.constant 257 : index
+  %c258 = index.constant 258 : index
+  %c1024 = index.constant 1024 : index
+  %c1548 = index.constant 1548 : index
+  %c0_offset = index.constant 0 : offset
+  %zero6 = vector.constant 0.0 : vector<6xf32>
+  %negative_large6 = vector.constant -3.4028234663852886e+38 : vector<6xf32>
+  %attention_scale6 = vector.constant 0.0625 : vector<6xf32>
+
+  %control_noalias, %query_noalias, %key_cache_noalias, %value_cache_noalias, %partials_noalias = buffer.assume.noalias %control, %query, %key_cache, %value_cache, %partials : buffer, buffer, buffer, buffer, buffer
+  %control_view = buffer.view %control_noalias[%c0_offset] : buffer -> view<1xi32>
+  %query_view = buffer.view %query_noalias[%c0_offset] : buffer -> view<6144xf32>
+  %cache_element_count = index.mul %cache_capacity, %c1024 : index
+  %key_cache_view = buffer.view %key_cache_noalias[%c0_offset] : buffer -> view<[%cache_element_count]xf16>
+  %value_cache_view = buffer.view %value_cache_noalias[%c0_offset] : buffer -> view<[%cache_element_count]xf16>
+  %partial_element_count = index.mul %split_count, %c1548 : index
+  %all_partial_element_count = index.mul %partial_element_count, %c4 : index
+  %partial_view = buffer.view %partials_noalias[%c0_offset] : buffer -> view<[%all_partial_element_count]xf32>
+
+  %key_head0 = index.div %workgroup, %split_count : index
+  %key_head = index.assume %key_head0 [range(%key_head0, 0, 3)] : index
+  %split = index.rem %workgroup, %split_count : index
+  %position_i32 = view.load %control_view[0] : view<1xi32> -> i32
+  %position0 = index.cast %position_i32 : i32 to index
+  %position = index.assume %position0 [range(%position0, 0, 262143), lt(%position0, %cache_capacity)] : index
+  %context_count0 = index.add %position, %c1 : index
+  %context_count = index.assume %context_count0 [range(%context_count0, 1, 262144), le(%context_count0, %cache_capacity)] : index
+  %split_count_minus_one = index.sub %split_count, %c1 : index
+  %rounded_context_count = index.add %context_count, %split_count_minus_one : index
+  %tokens_per_split = index.div %rounded_context_count, %split_count : index
+  %split_begin0 = index.mul %split, %tokens_per_split : index
+  %split_begin = index.min %split_begin0, %context_count : index
+  %split_end0 = index.add %split_begin, %tokens_per_split : index
+  %split_end = index.min %split_end0, %context_count : index
+
+  %query_head0 = index.mul %key_head, %c6 : index
+  %query_head1 = index.add %query_head0, %c1 : index
+  %query_head2 = index.add %query_head0, %c2 : index
+  %query_head3 = index.add %query_head0, %c3 : index
+  %query_head4 = index.add %query_head0, %c4 : index
+  %query_head5 = index.add %query_head0, %c5 : index
+  %query_base0 = index.mul %query_head0, %c256 : index
+  %query_base1 = index.mul %query_head1, %c256 : index
+  %query_base2 = index.mul %query_head2, %c256 : index
+  %query_base3 = index.mul %query_head3, %c256 : index
+  %query_base4 = index.mul %query_head4, %c256 : index
+  %query_base5 = index.mul %query_head5, %c256 : index
+  %query_index0 = index.add %query_base0, %lane : index
+  %query_index1 = index.add %query_base1, %lane : index
+  %query_index2 = index.add %query_base2, %lane : index
+  %query_index3 = index.add %query_base3, %lane : index
+  %query_index4 = index.add %query_base4, %lane : index
+  %query_index5 = index.add %query_base5, %lane : index
+  %query0 = view.load %query_view[%query_index0] : view<6144xf32> -> f32
+  %query1 = view.load %query_view[%query_index1] : view<6144xf32> -> f32
+  %query2 = view.load %query_view[%query_index2] : view<6144xf32> -> f32
+  %query3 = view.load %query_view[%query_index3] : view<6144xf32> -> f32
+  %query4 = view.load %query_view[%query_index4] : view<6144xf32> -> f32
+  %query5 = view.load %query_view[%query_index5] : view<6144xf32> -> f32
+  %query_values = vector.from_elements %query0, %query1, %query2, %query3, %query4, %query5 : vector<6xf32>
+  %key_head_base = index.mul %key_head, %c256 : index
+
+  %final_max, %final_sum, %final_acc = scf.for %token = [%split_begin to %split_end step %c1](%old_max = %negative_large6, %old_sum = %zero6, %old_acc = %zero6 : vector<6xf32>, vector<6xf32>, vector<6xf32>) -> (vector<6xf32>, vector<6xf32>, vector<6xf32>) {
+    %token_cache_base = index.mul %token, %c1024 : index
+    %cache_head_base = index.add %token_cache_base, %key_head_base : index
+    %cache_index = index.add %cache_head_base, %lane : index
+    %key_f16 = view.load %key_cache_view[%cache_index] : view<[%cache_element_count]xf16> -> f16
+    %value_f16 = view.load %value_cache_view[%cache_index] : view<[%cache_element_count]xf16> -> f16
+    %key = scalar.extf %key_f16 : f16 to f32
+    %value = scalar.extf %value_f16 : f16 to f32
+    %key6 = vector.splat %key : vector<6xf32>
+    %value6 = vector.splat %value : vector<6xf32>
+    %dot_part0 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %query_values, %key6 : vector<6xf32>
+    %dot_part = vector.mulf<reassoc|nnan|ninf|nsz> %dot_part0, %attention_scale6 : vector<6xf32>
+    %score = kernel.workgroup.reduce<addf> %dot_part : vector<6xf32>
+    %new_max = vector.maxnumf %old_max, %score : vector<6xf32>
+    %old_delta = vector.subf %old_max, %new_max : vector<6xf32>
+    %score_delta = vector.subf %score, %new_max : vector<6xf32>
+    %old_scale = vector.expf<afn> %old_delta : vector<6xf32>
+    %new_scale = vector.expf<afn> %score_delta : vector<6xf32>
+    %rescaled_sum = vector.mulf<reassoc|nnan|ninf|nsz> %old_sum, %old_scale : vector<6xf32>
+    %new_sum = vector.addf<reassoc|nnan|ninf|nsz> %rescaled_sum, %new_scale : vector<6xf32>
+    %rescaled_acc = vector.mulf<reassoc|nnan|ninf|nsz> %old_acc, %old_scale : vector<6xf32>
+    %weighted_value = vector.mulf<reassoc|nnan|ninf|nsz> %value6, %new_scale : vector<6xf32>
+    %new_acc = vector.addf<reassoc|nnan|ninf|nsz> %rescaled_acc, %weighted_value : vector<6xf32>
+    scf.yield %new_max, %new_sum, %new_acc : vector<6xf32>, vector<6xf32>, vector<6xf32>
+  }
+
+  %workgroup_partial_base = index.mul %workgroup, %c1548 : index
+  %partial_head_base0 = index.add %workgroup_partial_base, %c0 : index
+  %partial_head_base1 = index.add %workgroup_partial_base, %c258 : index
+  %c516 = index.constant 516 : index
+  %c774 = index.constant 774 : index
+  %c1032 = index.constant 1032 : index
+  %c1290 = index.constant 1290 : index
+  %partial_head_base2 = index.add %workgroup_partial_base, %c516 : index
+  %partial_head_base3 = index.add %workgroup_partial_base, %c774 : index
+  %partial_head_base4 = index.add %workgroup_partial_base, %c1032 : index
+  %partial_head_base5 = index.add %workgroup_partial_base, %c1290 : index
+  %partial_acc_index0 = index.add %partial_head_base0, %lane : index
+  %partial_acc_index1 = index.add %partial_head_base1, %lane : index
+  %partial_acc_index2 = index.add %partial_head_base2, %lane : index
+  %partial_acc_index3 = index.add %partial_head_base3, %lane : index
+  %partial_acc_index4 = index.add %partial_head_base4, %lane : index
+  %partial_acc_index5 = index.add %partial_head_base5, %lane : index
+  %partial_acc0 = vector.extract %final_acc[0] : vector<6xf32> -> f32
+  %partial_acc1 = vector.extract %final_acc[1] : vector<6xf32> -> f32
+  %partial_acc2 = vector.extract %final_acc[2] : vector<6xf32> -> f32
+  %partial_acc3 = vector.extract %final_acc[3] : vector<6xf32> -> f32
+  %partial_acc4 = vector.extract %final_acc[4] : vector<6xf32> -> f32
+  %partial_acc5 = vector.extract %final_acc[5] : vector<6xf32> -> f32
+  view.store %partial_acc0, %partial_view[%partial_acc_index0] : f32, view<[%all_partial_element_count]xf32>
+  view.store %partial_acc1, %partial_view[%partial_acc_index1] : f32, view<[%all_partial_element_count]xf32>
+  view.store %partial_acc2, %partial_view[%partial_acc_index2] : f32, view<[%all_partial_element_count]xf32>
+  view.store %partial_acc3, %partial_view[%partial_acc_index3] : f32, view<[%all_partial_element_count]xf32>
+  view.store %partial_acc4, %partial_view[%partial_acc_index4] : f32, view<[%all_partial_element_count]xf32>
+  view.store %partial_acc5, %partial_view[%partial_acc_index5] : f32, view<[%all_partial_element_count]xf32>
+
+  %is_leader = index.cmp eq, %lane, %c0 : index
+  scf.if %is_leader {
+    %partial_max_index0 = index.add %partial_head_base0, %c256 : index
+    %partial_max_index1 = index.add %partial_head_base1, %c256 : index
+    %partial_max_index2 = index.add %partial_head_base2, %c256 : index
+    %partial_max_index3 = index.add %partial_head_base3, %c256 : index
+    %partial_max_index4 = index.add %partial_head_base4, %c256 : index
+    %partial_max_index5 = index.add %partial_head_base5, %c256 : index
+    %partial_sum_index0 = index.add %partial_head_base0, %c257 : index
+    %partial_sum_index1 = index.add %partial_head_base1, %c257 : index
+    %partial_sum_index2 = index.add %partial_head_base2, %c257 : index
+    %partial_sum_index3 = index.add %partial_head_base3, %c257 : index
+    %partial_sum_index4 = index.add %partial_head_base4, %c257 : index
+    %partial_sum_index5 = index.add %partial_head_base5, %c257 : index
+    %partial_max0 = vector.extract %final_max[0] : vector<6xf32> -> f32
+    %partial_max1 = vector.extract %final_max[1] : vector<6xf32> -> f32
+    %partial_max2 = vector.extract %final_max[2] : vector<6xf32> -> f32
+    %partial_max3 = vector.extract %final_max[3] : vector<6xf32> -> f32
+    %partial_max4 = vector.extract %final_max[4] : vector<6xf32> -> f32
+    %partial_max5 = vector.extract %final_max[5] : vector<6xf32> -> f32
+    %partial_sum0 = vector.extract %final_sum[0] : vector<6xf32> -> f32
+    %partial_sum1 = vector.extract %final_sum[1] : vector<6xf32> -> f32
+    %partial_sum2 = vector.extract %final_sum[2] : vector<6xf32> -> f32
+    %partial_sum3 = vector.extract %final_sum[3] : vector<6xf32> -> f32
+    %partial_sum4 = vector.extract %final_sum[4] : vector<6xf32> -> f32
+    %partial_sum5 = vector.extract %final_sum[5] : vector<6xf32> -> f32
+    view.store %partial_max0, %partial_view[%partial_max_index0] : f32, view<[%all_partial_element_count]xf32>
+    view.store %partial_max1, %partial_view[%partial_max_index1] : f32, view<[%all_partial_element_count]xf32>
+    view.store %partial_max2, %partial_view[%partial_max_index2] : f32, view<[%all_partial_element_count]xf32>
+    view.store %partial_max3, %partial_view[%partial_max_index3] : f32, view<[%all_partial_element_count]xf32>
+    view.store %partial_max4, %partial_view[%partial_max_index4] : f32, view<[%all_partial_element_count]xf32>
+    view.store %partial_max5, %partial_view[%partial_max_index5] : f32, view<[%all_partial_element_count]xf32>
+    view.store %partial_sum0, %partial_view[%partial_sum_index0] : f32, view<[%all_partial_element_count]xf32>
+    view.store %partial_sum1, %partial_view[%partial_sum_index1] : f32, view<[%all_partial_element_count]xf32>
+    view.store %partial_sum2, %partial_view[%partial_sum_index2] : f32, view<[%all_partial_element_count]xf32>
+    view.store %partial_sum3, %partial_view[%partial_sum_index3] : f32, view<[%all_partial_element_count]xf32>
+    view.store %partial_sum4, %partial_view[%partial_sum_index4] : f32, view<[%all_partial_element_count]xf32>
+    view.store %partial_sum5, %partial_view[%partial_sum_index5] : f32, view<[%all_partial_element_count]xf32>
+  }
+  kernel.return
+}
+
+// Processes the same GQA/split decomposition as the scalar partial kernel,
+// but tiles 64 cache rows at a time. Six useful query rows occupy one 16-row
+// WMMA tile; the remaining rows are masked. K and V are staged with coalesced
+// 128-bit transfers so the final partial tile follows the same path without
+// an out-of-bounds global fragment load.
+kernel.def target(@qwen38_attention_decode_split_gfx11_wave64) export("qwen38_attention_decode_split_wmma_partial") @qwen38_attention_decode_split_wmma_partial() {
+  %unit = index.constant 1 : index
+  %key_head_count = index.constant 4 : index
+  %split_count = config.get @qwen38.attention.decode_split_count : index
+  %workgroup_count = index.mul %key_head_count, %split_count : index
+  %workgroup_size = index.constant 256 : index
+  kernel.launch.config workgroups(%workgroup_count, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%token_count_data: index, %token_ordinal_data: index, %control_position_index_data: index, %control: buffer, %query: buffer, %key_cache: buffer, %value_cache: buffer, %partials: buffer) {
+  %cache_capacity = config.get @qwen38.attention.cache_capacity : index
+  %split_count = config.get @qwen38.attention.decode_split_count : index
+  %workgroup0 = kernel.workgroup.id<x> : index
+  %workgroup = index.assume %workgroup0 [range(%workgroup0, 0, 255)] : index
+  %workitem = kernel.workitem.id<x> : index
+  %subgroup0 = kernel.subgroup.id : index
+  %subgroup = index.assume %subgroup0 [range(%subgroup0, 0, 3)] : index
+  %lane = kernel.subgroup.lane.id : index
+  %token_count = index.assume %token_count_data [range(%token_count_data, 1, 4)] : index
+  %token_ordinal = index.assume %token_ordinal_data [range(%token_ordinal_data, 0, 3), lt(%token_ordinal_data, %token_count)] : index
+  %control_position_index = index.assume %control_position_index_data [range(%control_position_index_data, 0, 1)] : index
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %c3 = index.constant 3 : index
+  %c4 = index.constant 4 : index
+  %c6 = index.constant 6 : index
+  %c8 = index.constant 8 : index
+  %c16 = index.constant 16 : index
+  %c63 = index.constant 63 : index
+  %c64 = index.constant 64 : index
+  %c256 = index.constant 256 : index
+  %c257 = index.constant 257 : index
+  %c1024 = index.constant 1024 : index
+  %c2048 = index.constant 2048 : index
+  %c0_offset = index.constant 0 : offset
+  %query_stage_bytes = index.constant 8448 : offset
+  %score_stage_bytes = index.constant 6144 : offset
+  %probability_stage_bytes = index.constant 3072 : offset
+  %product_stage_bytes = index.constant 2048 : offset
+  %key_value_stage_bytes = index.constant 32768 : offset
+  %output_zero0 = vector.constant 0.0 : vector<4xf16>
+  %output_zero1 = vector.constant 0.0 : vector<4xf16>
+  %output_zero2 = vector.constant 0.0 : vector<4xf16>
+  %output_zero3 = vector.constant 0.0 : vector<4xf16>
+  %c0_f16x8 = vector.constant 0.0 : vector<8xf16>
+  %c0_f32x4 = vector.constant 0.0 : vector<4xf32>
+  %negative_f32x4 = vector.constant -1e+30 : vector<4xf32>
+  %attention_scale8 = vector.constant 0.0625 : vector<8xf32>
+  %m = index.constant 16 : index
+  %n = index.constant 16 : index
+  %k = index.constant 16 : index
+
+  %control_noalias, %query_noalias, %key_noalias, %value_noalias, %partials_noalias = buffer.assume.noalias %control, %query, %key_cache, %value_cache, %partials : buffer, buffer, buffer, buffer, buffer
+  %control_view = buffer.view %control_noalias[%c0_offset] : buffer -> view<2xi32>
+  %query_view = buffer.view %query_noalias[%c0_offset] : buffer -> view<[%token_count]x24x256xf32>
+  %key_view = buffer.view %key_noalias[%c0_offset] : buffer -> view<[%cache_capacity]x1024xf16>
+  %value_view = buffer.view %value_noalias[%c0_offset] : buffer -> view<[%cache_capacity]x1024xf16>
+  %partial_view = buffer.view %partials_noalias[%c0_offset] : buffer -> view<[%token_count]x4x[%split_count]x6x258xf32>
+
+  %key_head0 = index.div %workgroup, %split_count : index
+  %key_head = index.assume %key_head0 [range(%key_head0, 0, 3)] : index
+  %split = index.rem %workgroup, %split_count : index
+  %position_base_i32 = view.load %control_view[%control_position_index] : view<2xi32> -> i32
+  %position_base = index.cast %position_base_i32 : i32 to index
+  %position0 = index.add %position_base, %token_ordinal : index
+  %position = index.assume %position0 [range(%position0, 0, 262143), lt(%position0, %cache_capacity)] : index
+  %context_count0 = index.add %position, %c1 : index
+  %context_count = index.assume %context_count0 [range(%context_count0, 1, 262144), le(%context_count0, %cache_capacity)] : index
+  %rounded_tile_count = index.add %context_count, %c63 : index
+  %tile_count = index.div %rounded_tile_count, %c64 : index
+  %split_count_minus_one = index.sub %split_count, %c1 : index
+  %rounded_tiles_per_split = index.add %tile_count, %split_count_minus_one : index
+  %tiles_per_split = index.div %rounded_tiles_per_split, %split_count : index
+  %split_tile_begin0 = index.mul %split, %tiles_per_split : index
+  %split_tile_begin = index.min %split_tile_begin0, %tile_count : index
+  %split_tile_end0 = index.add %split_tile_begin, %tiles_per_split : index
+  %split_tile_end = index.min %split_tile_end0, %tile_count : index
+  %split_begin0 = index.mul %split_tile_begin, %c64 : index
+  %split_begin1 = index.min %split_begin0, %context_count : index
+  %split_begin = index.assume %split_begin1 [range(%split_begin1, 0, 262144), le(%split_begin1, %context_count)] : index
+  %split_end0 = index.mul %split_tile_end, %c64 : index
+  %split_end1 = index.min %split_end0, %context_count : index
+  %split_end = index.assume %split_end1 [range(%split_end1, 0, 262144), le(%split_end1, %context_count)] : index
+
+  %subgroup_score_row = index.mul %subgroup, %c16 : index
+  %subgroup_query_row = index.mul %subgroup, %c4 : index
+  %query_row0 = index.add %subgroup_query_row, %c0 : index
+  %query_row1 = index.add %subgroup_query_row, %c1 : index
+  %query_row2 = index.add %subgroup_query_row, %c2 : index
+  %query_row3 = index.add %subgroup_query_row, %c3 : index
+  %query_valid0 = index.cmp ult, %query_row0, %c6 : index
+  %query_valid1 = index.cmp ult, %query_row1, %c6 : index
+  %query_valid2 = index.cmp ult, %query_row2, %c6 : index
+  %query_valid3 = index.cmp ult, %query_row3, %c6 : index
+  %subgroup_product_channel = index.mul %subgroup, %c16 : index
+  %lane_output_tile = index.div %lane, %c16 : index
+  %lane_product_channel0 = index.rem %lane, %c16 : index
+  %lane_product_channel = index.mul %lane_product_channel0, %c4 : index
+  %lane_output_channel = index.mul %lane, %c4 : index
+  %workitem_vector = index.mul %workitem, %c8 : index
+
+  %query_transposed_layout = encoding.layout.strided [1, 264] : encoding<layout>
+  %probability_transposed_layout = encoding.layout.strided [1, 24] : encoding<layout>
+  %query_stage = buffer.alloca<workgroup> align(16) %query_stage_bytes : buffer
+  %score_stage = buffer.alloca<workgroup> align(16) %score_stage_bytes : buffer
+  %probability_stage = buffer.alloca<workgroup> align(16) %probability_stage_bytes : buffer
+  %product_stage = buffer.alloca<workgroup> align(16) %product_stage_bytes : buffer
+  %key_value_stage = buffer.alloca<workgroup> align(16) %key_value_stage_bytes : buffer
+  %query_stage_view = buffer.view %query_stage[%c0_offset] : buffer -> view<16x264xf16>
+  %query_transposed_view = buffer.view %query_stage[%c0_offset] : buffer -> view<256x16xf16, %query_transposed_layout>
+  %score_stage_view = buffer.view %score_stage[%c0_offset] : buffer -> view<64x24xf32>
+  %probability_stage_view = buffer.view %probability_stage[%c0_offset] : buffer -> view<16x64xf16, %probability_transposed_layout>
+  %product_stage_view = buffer.view %product_stage[%c0_offset] : buffer -> view<16x64xf16>
+  %key_value_stage_view = buffer.view %key_value_stage[%c0_offset] : buffer -> view<64x256xf16>
+
+  // Scale and truncate the six query rows once before the cache traversal.
+  scf.for %load_iteration = [%c0 to %c2 step %c1] unroll {
+    %linear = index.madd %load_iteration, %c2048, %workitem_vector : index
+    %local_query_row = index.div %linear, %c256 : index
+    %query_channel0 = index.rem %linear, %c256 : index
+    %query_channel = index.assume %query_channel0 [range(%query_channel0, 0, 248), mul(%query_channel0, 8)] : index
+    %query_valid = index.cmp ult, %local_query_row, %c6 : index
+    %query_value = scf.if %query_valid -> (vector<8xf16>) {
+      %query_head_base0 = index.mul %key_head, %c6 : index
+      %query_head0 = index.add %query_head_base0, %local_query_row : index
+      %query_head = index.assume %query_head0 [range(%query_head0, 0, 23)] : index
+      %loaded = vector.load %query_view[%token_ordinal, %query_head, %query_channel] : view<[%token_count]x24x256xf32> -> vector<8xf32>
+      %scaled = vector.mulf<reassoc|nnan|ninf|nsz|contract> %loaded, %attention_scale8 : vector<8xf32>
+      %truncated = vector.fptrunc %scaled : vector<8xf32> to vector<8xf16>
+      scf.yield %truncated : vector<8xf16>
+    } else {
+      scf.yield %c0_f16x8 : vector<8xf16>
+    }
+    vector.store %query_value, %query_stage_view[%local_query_row, %query_channel] : vector<8xf16>, view<16x264xf16>
+  }
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+
+  %final_max, %final_sum, %final_output0, %final_output1, %final_output2, %final_output3 = scf.for %key_origin = [%split_begin to %split_end step %c64](%current_max = %negative_f32x4 : vector<4xf32>, %current_sum = %c0_f32x4 : vector<4xf32>, %current_output0 = %output_zero0 : vector<4xf16>, %current_output1 = %output_zero1 : vector<4xf16>, %current_output2 = %output_zero2 : vector<4xf16>, %current_output3 = %output_zero3 : vector<4xf16>) -> (vector<4xf32>, vector<4xf32>, vector<4xf16>, vector<4xf16>, vector<4xf16>, vector<4xf16>) {
+    %remaining = index.sub %split_end, %key_origin : index
+    %tile_token_count = index.min %remaining, %c64 : index
+    scf.for %load_iteration = [%c0 to %c8 step %c1] unroll {
+      %linear = index.madd %load_iteration, %c2048, %workitem_vector : index
+      %tile_row = index.div %linear, %c256 : index
+      %channel0 = index.rem %linear, %c256 : index
+      %channel = index.assume %channel0 [range(%channel0, 0, 248), mul(%channel0, 8)] : index
+      %row_valid = index.cmp ult, %tile_row, %tile_token_count : index
+      %key_value = scf.if %row_valid -> (vector<8xf16>) {
+        %token0 = index.add %key_origin, %tile_row : index
+        %token = index.assume %token0 [lt(%token0, %context_count)] : index
+        %key_head_channel = index.madd %key_head, %c256, %channel : index
+        %loaded = vector.load %key_view[%token, %key_head_channel] : view<[%cache_capacity]x1024xf16> -> vector<8xf16>
+        scf.yield %loaded : vector<8xf16>
+      } else {
+        scf.yield %c0_f16x8 : vector<8xf16>
+      }
+      vector.store %key_value, %key_value_stage_view[%tile_row, %channel] : vector<8xf16>, view<64x256xf16>
+    }
+    kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+
+    %score_init_values = vector.constant 0.0 : vector<4xf32>
+    %score_init = vector.fragment<init> %score_init_values shape [%m, %n] : vector<4xf32>
+    %score_fragment = scf.for %head_tile = [%c0 to %c256 step %c16](%score_accumulator = %score_init : vector<4xf32>) -> (vector<4xf32>) unroll schedule(recurrence) {
+      %key_fragment = vector.fragment.load<lhs> %key_value_stage_view[%subgroup_score_row, %head_tile] shape [%m, %k] : view<64x256xf16> -> vector<16xf16>
+      %query_fragment = vector.fragment.load<rhs> %query_transposed_view[%head_tile, %c0] shape [%k, %n] : view<256x16xf16, %query_transposed_layout> -> vector<16xf16>
+      %next_score_accumulator = vector.mma %key_fragment, %query_fragment, %score_accumulator : vector<16xf16>, vector<16xf16>, vector<4xf32>
+      scf.yield %next_score_accumulator : vector<4xf32>
+    }
+    vector.fragment.store<result> %score_fragment, %score_stage_view[%subgroup_score_row, %c0] shape [%m, %n] : vector<4xf32>, view<64x24xf32>
+    kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+
+    %lane_valid = index.cmp ult, %lane, %tile_token_count : index
+    %valid0 = scalar.andi %query_valid0, %lane_valid : i1
+    %valid1 = scalar.andi %query_valid1, %lane_valid : i1
+    %valid2 = scalar.andi %query_valid2, %lane_valid : i1
+    %valid3 = scalar.andi %query_valid3, %lane_valid : i1
+    %valid = vector.from_elements %valid0, %valid1, %valid2, %valid3 : vector<4xi1>
+    %raw_score0 = view.load %score_stage_view[%lane, %query_row0] : view<64x24xf32> -> f32
+    %raw_score1 = view.load %score_stage_view[%lane, %query_row1] : view<64x24xf32> -> f32
+    %raw_score2 = view.load %score_stage_view[%lane, %query_row2] : view<64x24xf32> -> f32
+    %raw_score3 = view.load %score_stage_view[%lane, %query_row3] : view<64x24xf32> -> f32
+    %raw_scores = vector.from_elements %raw_score0, %raw_score1, %raw_score2, %raw_score3 : vector<4xf32>
+    %masked_scores = vector.select %valid, %raw_scores, %negative_f32x4 : vector<4xf32>
+    %block_max = kernel.subgroup.reduce<maxnumf> %masked_scores : vector<4xf32>
+    %next_max = vector.maxnumf %current_max, %block_max : vector<4xf32>
+    %score_delta = vector.subf<reassoc|nnan|nsz> %masked_scores, %next_max : vector<4xf32>
+    %raw_probability = vector.expf<afn> %score_delta : vector<4xf32>
+    %probability = vector.select %valid, %raw_probability, %c0_f32x4 : vector<4xf32>
+    %block_sum = kernel.subgroup.reduce<addf> %probability : vector<4xf32>
+    %old_delta = vector.subf<reassoc|nnan|ninf|nsz> %current_max, %next_max : vector<4xf32>
+    %old_scale = vector.expf<afn> %old_delta : vector<4xf32>
+    %scaled_current_sum = vector.mulf<reassoc|nnan|ninf|nsz|contract> %current_sum, %old_scale : vector<4xf32>
+    %next_sum = vector.addf<reassoc|nnan|ninf|nsz> %scaled_current_sum, %block_sum : vector<4xf32>
+    %probability_f16 = vector.fptrunc %probability : vector<4xf32> to vector<4xf16>
+    %probability0 = vector.extract %probability_f16[0] : vector<4xf16> -> f16
+    %probability1 = vector.extract %probability_f16[1] : vector<4xf16> -> f16
+    %probability2 = vector.extract %probability_f16[2] : vector<4xf16> -> f16
+    %probability3 = vector.extract %probability_f16[3] : vector<4xf16> -> f16
+    view.store %probability0, %probability_stage_view[%query_row0, %lane] : f16, view<16x64xf16, %probability_transposed_layout>
+    view.store %probability1, %probability_stage_view[%query_row1, %lane] : f16, view<16x64xf16, %probability_transposed_layout>
+    view.store %probability2, %probability_stage_view[%query_row2, %lane] : f16, view<16x64xf16, %probability_transposed_layout>
+    view.store %probability3, %probability_stage_view[%query_row3, %lane] : f16, view<16x64xf16, %probability_transposed_layout>
+    kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+
+    // Reuse the same LDS allocation for V after every score consumer has
+    // completed. This keeps the total workgroup allocation below 64 KiB.
+    scf.for %load_iteration = [%c0 to %c8 step %c1] unroll {
+      %linear = index.madd %load_iteration, %c2048, %workitem_vector : index
+      %tile_row = index.div %linear, %c256 : index
+      %channel0 = index.rem %linear, %c256 : index
+      %channel = index.assume %channel0 [range(%channel0, 0, 248), mul(%channel0, 8)] : index
+      %row_valid = index.cmp ult, %tile_row, %tile_token_count : index
+      %value = scf.if %row_valid -> (vector<8xf16>) {
+        %token0 = index.add %key_origin, %tile_row : index
+        %token = index.assume %token0 [lt(%token0, %context_count)] : index
+        %key_head_channel = index.madd %key_head, %c256, %channel : index
+        %loaded = vector.load %value_view[%token, %key_head_channel] : view<[%cache_capacity]x1024xf16> -> vector<8xf16>
+        scf.yield %loaded : vector<8xf16>
+      } else {
+        scf.yield %c0_f16x8 : vector<8xf16>
+      }
+      vector.store %value, %key_value_stage_view[%tile_row, %channel] : vector<8xf16>, view<64x256xf16>
+    }
+    kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+
+    %old_scale_f16 = vector.fptrunc %old_scale : vector<4xf32> to vector<4xf16>
+    %old_scale0_scalar = vector.extract %old_scale_f16[0] : vector<4xf16> -> f16
+    %old_scale1_scalar = vector.extract %old_scale_f16[1] : vector<4xf16> -> f16
+    %old_scale2_scalar = vector.extract %old_scale_f16[2] : vector<4xf16> -> f16
+    %old_scale3_scalar = vector.extract %old_scale_f16[3] : vector<4xf16> -> f16
+    %old_scale0 = vector.splat %old_scale0_scalar : vector<4xf16>
+    %old_scale1 = vector.splat %old_scale1_scalar : vector<4xf16>
+    %old_scale2 = vector.splat %old_scale2_scalar : vector<4xf16>
+    %old_scale3 = vector.splat %old_scale3_scalar : vector<4xf16>
+    %scaled_current_output0 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %current_output0, %old_scale0 : vector<4xf16>
+    %scaled_current_output1 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %current_output1, %old_scale1 : vector<4xf16>
+    %scaled_current_output2 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %current_output2, %old_scale2 : vector<4xf16>
+    %scaled_current_output3 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %current_output3, %old_scale3 : vector<4xf16>
+    %next_output0, %next_output1, %next_output2, %next_output3 = scf.for %output_tile = [%c0 to %c4 step %c1](%tile_output0 = %scaled_current_output0 : vector<4xf16>, %tile_output1 = %scaled_current_output1 : vector<4xf16>, %tile_output2 = %scaled_current_output2 : vector<4xf16>, %tile_output3 = %scaled_current_output3 : vector<4xf16>) -> (vector<4xf16>, vector<4xf16>, vector<4xf16>, vector<4xf16>) unroll {
+      %output_tile_channel = index.mul %output_tile, %c64 : index
+      %value_channel = index.add %output_tile_channel, %subgroup_product_channel : index
+      %product_init = vector.fragment<init> %c0_f16x8 shape [%m, %n] : vector<8xf16>
+      %product_fragment = scf.for %key_tile = [%c0 to %c64 step %c16](%product_accumulator = %product_init : vector<8xf16>) -> (vector<8xf16>) unroll schedule(recurrence) {
+        %probability_fragment = vector.fragment.load<lhs> %probability_stage_view[%c0, %key_tile] shape [%m, %k] : view<16x64xf16, %probability_transposed_layout> -> vector<16xf16>
+        %value_fragment = vector.fragment.load<rhs> %key_value_stage_view[%key_tile, %value_channel] shape [%k, %n] : view<64x256xf16> -> vector<16xf16>
+        %next_product_accumulator = vector.mma %probability_fragment, %value_fragment, %product_accumulator : vector<16xf16>, vector<16xf16>, vector<8xf16>
+        scf.yield %next_product_accumulator : vector<8xf16>
+      }
+      vector.fragment.store<result> %product_fragment, %product_stage_view[%c0, %subgroup_product_channel] shape [%m, %n] : vector<8xf16>, view<16x64xf16>
+      kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+      %owns_output_tile = index.cmp eq, %lane_output_tile, %output_tile : index
+      %updated_output0, %updated_output1, %updated_output2, %updated_output3 = scf.if %owns_output_tile -> (vector<4xf16>, vector<4xf16>, vector<4xf16>, vector<4xf16>) {
+        %block_output0 = vector.load %product_stage_view[%query_row0, %lane_product_channel] : view<16x64xf16> -> vector<4xf16>
+        %block_output1 = vector.load %product_stage_view[%query_row1, %lane_product_channel] : view<16x64xf16> -> vector<4xf16>
+        %block_output2 = vector.load %product_stage_view[%query_row2, %lane_product_channel] : view<16x64xf16> -> vector<4xf16>
+        %block_output3 = vector.load %product_stage_view[%query_row3, %lane_product_channel] : view<16x64xf16> -> vector<4xf16>
+        %updated_tile_output0 = vector.addf<reassoc|nnan|ninf|nsz> %tile_output0, %block_output0 : vector<4xf16>
+        %updated_tile_output1 = vector.addf<reassoc|nnan|ninf|nsz> %tile_output1, %block_output1 : vector<4xf16>
+        %updated_tile_output2 = vector.addf<reassoc|nnan|ninf|nsz> %tile_output2, %block_output2 : vector<4xf16>
+        %updated_tile_output3 = vector.addf<reassoc|nnan|ninf|nsz> %tile_output3, %block_output3 : vector<4xf16>
+        scf.yield %updated_tile_output0, %updated_tile_output1, %updated_tile_output2, %updated_tile_output3 : vector<4xf16>, vector<4xf16>, vector<4xf16>, vector<4xf16>
+      } else {
+        scf.yield %tile_output0, %tile_output1, %tile_output2, %tile_output3 : vector<4xf16>, vector<4xf16>, vector<4xf16>, vector<4xf16>
+      }
+      kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+      scf.yield %updated_output0, %updated_output1, %updated_output2, %updated_output3 : vector<4xf16>, vector<4xf16>, vector<4xf16>, vector<4xf16>
+    }
+    scf.yield %next_max, %next_sum, %next_output0, %next_output1, %next_output2, %next_output3 : vector<4xf32>, vector<4xf32>, vector<4xf16>, vector<4xf16>, vector<4xf16>, vector<4xf16>
+  }
+
+  %output0_f32 = vector.extf %final_output0 : vector<4xf16> to vector<4xf32>
+  %output1_f32 = vector.extf %final_output1 : vector<4xf16> to vector<4xf32>
+  %output2_f32 = vector.extf %final_output2 : vector<4xf16> to vector<4xf32>
+  %output3_f32 = vector.extf %final_output3 : vector<4xf16> to vector<4xf32>
+  scf.if %query_valid0 {
+    vector.store %output0_f32, %partial_view[%token_ordinal, %key_head, %split, %query_row0, %lane_output_channel] : vector<4xf32>, view<[%token_count]x4x[%split_count]x6x258xf32>
+  }
+  scf.if %query_valid1 {
+    vector.store %output1_f32, %partial_view[%token_ordinal, %key_head, %split, %query_row1, %lane_output_channel] : vector<4xf32>, view<[%token_count]x4x[%split_count]x6x258xf32>
+  }
+  scf.if %query_valid2 {
+    vector.store %output2_f32, %partial_view[%token_ordinal, %key_head, %split, %query_row2, %lane_output_channel] : vector<4xf32>, view<[%token_count]x4x[%split_count]x6x258xf32>
+  }
+  scf.if %query_valid3 {
+    vector.store %output3_f32, %partial_view[%token_ordinal, %key_head, %split, %query_row3, %lane_output_channel] : vector<4xf32>, view<[%token_count]x4x[%split_count]x6x258xf32>
+  }
+
+  %is_leader = index.cmp eq, %lane, %c0 : index
+  scf.if %is_leader {
+    %max0 = vector.extract %final_max[0] : vector<4xf32> -> f32
+    %max1 = vector.extract %final_max[1] : vector<4xf32> -> f32
+    %max2 = vector.extract %final_max[2] : vector<4xf32> -> f32
+    %max3 = vector.extract %final_max[3] : vector<4xf32> -> f32
+    %sum0 = vector.extract %final_sum[0] : vector<4xf32> -> f32
+    %sum1 = vector.extract %final_sum[1] : vector<4xf32> -> f32
+    %sum2 = vector.extract %final_sum[2] : vector<4xf32> -> f32
+    %sum3 = vector.extract %final_sum[3] : vector<4xf32> -> f32
+    scf.if %query_valid0 {
+      view.store %max0, %partial_view[%token_ordinal, %key_head, %split, %query_row0, %c256] : f32, view<[%token_count]x4x[%split_count]x6x258xf32>
+      view.store %sum0, %partial_view[%token_ordinal, %key_head, %split, %query_row0, %c257] : f32, view<[%token_count]x4x[%split_count]x6x258xf32>
+    }
+    scf.if %query_valid1 {
+      view.store %max1, %partial_view[%token_ordinal, %key_head, %split, %query_row1, %c256] : f32, view<[%token_count]x4x[%split_count]x6x258xf32>
+      view.store %sum1, %partial_view[%token_ordinal, %key_head, %split, %query_row1, %c257] : f32, view<[%token_count]x4x[%split_count]x6x258xf32>
+    }
+    scf.if %query_valid2 {
+      view.store %max2, %partial_view[%token_ordinal, %key_head, %split, %query_row2, %c256] : f32, view<[%token_count]x4x[%split_count]x6x258xf32>
+      view.store %sum2, %partial_view[%token_ordinal, %key_head, %split, %query_row2, %c257] : f32, view<[%token_count]x4x[%split_count]x6x258xf32>
+    }
+    scf.if %query_valid3 {
+      view.store %max3, %partial_view[%token_ordinal, %key_head, %split, %query_row3, %c256] : f32, view<[%token_count]x4x[%split_count]x6x258xf32>
+      view.store %sum3, %partial_view[%token_ordinal, %key_head, %split, %query_row3, %c257] : f32, view<[%token_count]x4x[%split_count]x6x258xf32>
+    }
+  }
+  kernel.return
+}
+
+// Combines split online-softmax states and applies the per-query sigmoid gate.
+kernel.def export("qwen38_attention_decode_split_reduce") @qwen38_attention_decode_split_reduce() {
+  %unit = index.constant 1 : index
+  %head_count = index.constant 24 : index
+  %workgroup_size = index.constant 256 : index
+  kernel.launch.config workgroups(%head_count, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%token_count_data: index, %token_ordinal_data: index, %gate: buffer, %partials: buffer, %output: buffer) {
+  %split_count = config.get @qwen38.attention.decode_split_count : index
+  %head0 = kernel.workgroup.id<x> : index
+  %head = index.assume %head0 [range(%head0, 0, 23)] : index
+  %lane0 = kernel.workitem.id<x> : index
+  %lane = index.assume %lane0 [range(%lane0, 0, 255)] : index
+  %token_count = index.assume %token_count_data [range(%token_count_data, 1, 4)] : index
+  %token_ordinal = index.assume %token_ordinal_data [range(%token_ordinal_data, 0, 3), lt(%token_ordinal_data, %token_count)] : index
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c6 = index.constant 6 : index
+  %c256 = index.constant 256 : index
+  %c257 = index.constant 257 : index
+  %c0_offset = index.constant 0 : offset
+  %zero = scalar.constant 0.0 : f32
+  %negative_large = scalar.constant -3.4028234663852886e+38 : f32
+
+  %gate_noalias, %partials_noalias, %output_noalias = buffer.assume.noalias %gate, %partials, %output : buffer, buffer, buffer
+  %gate_view = buffer.view %gate_noalias[%c0_offset] : buffer -> view<[%token_count]x6144xf32>
+  %output_view = buffer.view %output_noalias[%c0_offset] : buffer -> view<[%token_count]x6144xf32>
+  %partial_view = buffer.view %partials_noalias[%c0_offset] : buffer -> view<[%token_count]x4x[%split_count]x6x258xf32>
+  %key_head = index.div %head, %c6 : index
+  %query_in_group = index.rem %head, %c6 : index
+
+  %global_max = scf.for %split = [%c0 to %split_count step %c1](%old_max = %negative_large : f32) -> (f32) {
+    %partial_max = view.load %partial_view[%token_ordinal, %key_head, %split, %query_in_group, %c256] : view<[%token_count]x4x[%split_count]x6x258xf32> -> f32
+    %new_max = scalar.maxnumf %old_max, %partial_max : f32
+    scf.yield %new_max : f32
+  }
+
+  %final_sum, %final_acc = scf.for %split = [%c0 to %split_count step %c1](%old_sum = %zero, %old_acc = %zero : f32, f32) -> (f32, f32) {
+    %partial_acc = view.load %partial_view[%token_ordinal, %key_head, %split, %query_in_group, %lane] : view<[%token_count]x4x[%split_count]x6x258xf32> -> f32
+    %partial_max = view.load %partial_view[%token_ordinal, %key_head, %split, %query_in_group, %c256] : view<[%token_count]x4x[%split_count]x6x258xf32> -> f32
+    %partial_sum = view.load %partial_view[%token_ordinal, %key_head, %split, %query_in_group, %c257] : view<[%token_count]x4x[%split_count]x6x258xf32> -> f32
+    %max_delta = scalar.subf %partial_max, %global_max : f32
+    %scale = scalar.expf<afn> %max_delta : f32
+    %scaled_sum = scalar.mulf<reassoc|nnan|ninf|nsz> %partial_sum, %scale : f32
+    %new_sum = scalar.addf<reassoc|nnan|ninf|nsz> %old_sum, %scaled_sum : f32
+    %scaled_acc = scalar.mulf<reassoc|nnan|ninf|nsz> %partial_acc, %scale : f32
+    %new_acc = scalar.addf<reassoc|nnan|ninf|nsz> %old_acc, %scaled_acc : f32
+    scf.yield %new_sum, %new_acc : f32, f32
+  }
+
+  %element0 = index.mul %head, %c256 : index
+  %element = index.add %element0, %lane : index
+  %attention_value = scalar.divf<nnan|ninf|nsz|arcp> %final_acc, %final_sum : f32
+  %gate_value = view.load %gate_view[%token_ordinal, %element] : view<[%token_count]x6144xf32> -> f32
+  %gated = scalar.mulf<nnan|ninf|nsz> %attention_value, %gate_value : f32
+  view.store %gated, %output_view[%token_ordinal, %element] : f32, view<[%token_count]x6144xf32>
+  kernel.return
+}
+
+// Differentially exercises all six queries in each GQA group across ten
+// single-token context splits.
+check.case public @qwen38_attention_decode_split_differential_case {
+  %token_count = check.literal value(1) : index
+  %token_ordinal = check.literal value(0) : index
+  %control_position_index = check.literal value(0) : index
+  %control = check.generate.fill value(9) : tensor<2xi32>
+  %query = check.generate.iota offset(-0.5) step(0.000244140625) period(4096) : tensor<6144xf32>
+  %gate = check.generate.iota offset(0.125) step(0.0001220703125) period(2048) : tensor<6144xf32>
+  %key_cache = check.generate.iota offset(-0.5) step(0.0001220703125) period(8192) : tensor<10240xf16>
+  %value_cache = check.generate.iota offset(0.25) step(-0.00006103515625) period(8192) : tensor<10240xf16>
+  %partials = check.generate.fill value(0.0) : tensor<61920xf32>
+  %wmma_partials = check.generate.fill value(0.0) : tensor<61920xf32>
+  %expected = check.generate.fill value(0.0) : tensor<6144xf32>
+  %actual = check.generate.fill value(0.0) : tensor<6144xf32>
+  %wmma_actual = check.generate.fill value(0.0) : tensor<6144xf32>
+  kernel.launch @qwen38_attention_decode(%control, %query, %gate, %key_cache, %value_cache, %expected) : (tensor<2xi32>, tensor<6144xf32>, tensor<6144xf32>, tensor<10240xf16>, tensor<10240xf16>, tensor<6144xf32>)
+  kernel.launch @qwen38_attention_decode_split_partial(%control, %query, %key_cache, %value_cache, %partials) : (tensor<2xi32>, tensor<6144xf32>, tensor<10240xf16>, tensor<10240xf16>, tensor<61920xf32>)
+  kernel.launch @qwen38_attention_decode_split_reduce(%token_count, %token_ordinal, %gate, %partials, %actual) : (index, index, tensor<6144xf32>, tensor<61920xf32>, tensor<6144xf32>)
+  kernel.launch @qwen38_attention_decode_split_wmma_partial(%token_count, %token_ordinal, %control_position_index, %control, %query, %key_cache, %value_cache, %wmma_partials) : (index, index, index, tensor<2xi32>, tensor<6144xf32>, tensor<10240xf16>, tensor<10240xf16>, tensor<61920xf32>)
+  kernel.launch @qwen38_attention_decode_split_reduce(%token_count, %token_ordinal, %gate, %wmma_partials, %wmma_actual) : (index, index, tensor<6144xf32>, tensor<61920xf32>, tensor<6144xf32>)
+  check.expect.close actual(%actual) expected(%expected) atol(0.00001) rtol(0.0001) nan(same) : tensor<6144xf32>
+  check.expect.close actual(%wmma_actual) expected(%expected) atol(0.002) rtol(0.002) nan(same) : tensor<6144xf32>
+  check.return
+}
+
+// Exercises the exact four-row verifier ABI. Each row reuses the one-row
+// arithmetic schedule while concurrent launches write disjoint partial and
+// output slices.
+check.case public @qwen38_attention_decode_split_m4_differential_case {
+  %token_count = check.literal value(4) : index
+  %token_ordinal0 = check.literal value(0) : index
+  %token_ordinal1 = check.literal value(1) : index
+  %token_ordinal2 = check.literal value(2) : index
+  %token_ordinal3 = check.literal value(3) : index
+  %control_position_index = check.literal value(1) : index
+  %control = check.generate.iota offset(4) step(5) : tensor<2xi32>
+  %query = check.generate.iota offset(-0.5) step(0.000244140625) period(4096) : tensor<4x6144xf32>
+  %gate = check.generate.iota offset(0.125) step(0.0001220703125) period(2048) : tensor<4x6144xf32>
+  %key_cache = check.generate.iota offset(-0.5) step(0.0001220703125) period(8192) : tensor<13312xf16>
+  %value_cache = check.generate.iota offset(0.25) step(-0.00006103515625) period(8192) : tensor<13312xf16>
+  %partials = check.generate.fill value(0.0) : tensor<247680xf32>
+  %expected = check.generate.fill value(0.0) : tensor<4x6144xf32>
+  %actual = check.generate.fill value(0.0) : tensor<4x6144xf32>
+  kernel.launch @qwen38_attention_prefill_reference[%token_count](%control, %query, %gate, %key_cache, %value_cache, %expected) : [index](tensor<2xi32>, tensor<4x6144xf32>, tensor<4x6144xf32>, tensor<13312xf16>, tensor<13312xf16>, tensor<4x6144xf32>)
+  kernel.launch.concurrent {
+    kernel.launch @qwen38_attention_decode_split_wmma_partial(%token_count, %token_ordinal0, %control_position_index, %control, %query, %key_cache, %value_cache, %partials) : (index, index, index, tensor<2xi32>, tensor<4x6144xf32>, tensor<13312xf16>, tensor<13312xf16>, tensor<247680xf32>)
+    kernel.launch @qwen38_attention_decode_split_wmma_partial(%token_count, %token_ordinal1, %control_position_index, %control, %query, %key_cache, %value_cache, %partials) : (index, index, index, tensor<2xi32>, tensor<4x6144xf32>, tensor<13312xf16>, tensor<13312xf16>, tensor<247680xf32>)
+    kernel.launch @qwen38_attention_decode_split_wmma_partial(%token_count, %token_ordinal2, %control_position_index, %control, %query, %key_cache, %value_cache, %partials) : (index, index, index, tensor<2xi32>, tensor<4x6144xf32>, tensor<13312xf16>, tensor<13312xf16>, tensor<247680xf32>)
+    kernel.launch @qwen38_attention_decode_split_wmma_partial(%token_count, %token_ordinal3, %control_position_index, %control, %query, %key_cache, %value_cache, %partials) : (index, index, index, tensor<2xi32>, tensor<4x6144xf32>, tensor<13312xf16>, tensor<13312xf16>, tensor<247680xf32>)
+  }
+  kernel.launch.concurrent {
+    kernel.launch @qwen38_attention_decode_split_reduce(%token_count, %token_ordinal0, %gate, %partials, %actual) : (index, index, tensor<4x6144xf32>, tensor<247680xf32>, tensor<4x6144xf32>)
+    kernel.launch @qwen38_attention_decode_split_reduce(%token_count, %token_ordinal1, %gate, %partials, %actual) : (index, index, tensor<4x6144xf32>, tensor<247680xf32>, tensor<4x6144xf32>)
+    kernel.launch @qwen38_attention_decode_split_reduce(%token_count, %token_ordinal2, %gate, %partials, %actual) : (index, index, tensor<4x6144xf32>, tensor<247680xf32>, tensor<4x6144xf32>)
+    kernel.launch @qwen38_attention_decode_split_reduce(%token_count, %token_ordinal3, %gate, %partials, %actual) : (index, index, tensor<4x6144xf32>, tensor<247680xf32>, tensor<4x6144xf32>)
+  }
+  check.expect.close actual(%actual) expected(%expected) atol(0.002) rtol(0.002) nan(same) : tensor<4x6144xf32>
+  check.return
+}
+
+// Production-shaped 10K-context cases keep the original and split schedules
+// independently benchmarkable under the same input geometry.
+check.case public @qwen38_attention_decode_10k_baseline_case {
+  %control = check.generate.fill value(10239) : tensor<1xi32>
+  %query = check.generate.fill value(0.125) : tensor<6144xf32>
+  %gate = check.generate.fill value(0.5) : tensor<6144xf32>
+  %key_cache = check.generate.fill value(0.25) : tensor<10485760xf16>
+  %value_cache = check.generate.fill value(-0.125) : tensor<10485760xf16>
+  %output = check.generate.fill value(0.0) : tensor<6144xf32>
+  kernel.launch @qwen38_attention_decode(%control, %query, %gate, %key_cache, %value_cache, %output) : (tensor<1xi32>, tensor<6144xf32>, tensor<6144xf32>, tensor<10485760xf16>, tensor<10485760xf16>, tensor<6144xf32>)
+  check.return
+}
+
+check.case public @qwen38_attention_decode_10k_split_case {
+  %token_count = check.literal value(1) : index
+  %token_ordinal = check.literal value(0) : index
+  %control = check.generate.fill value(10239) : tensor<2xi32>
+  %query = check.generate.fill value(0.125) : tensor<6144xf32>
+  %gate = check.generate.fill value(0.5) : tensor<6144xf32>
+  %key_cache = check.generate.fill value(0.25) : tensor<10485760xf16>
+  %value_cache = check.generate.fill value(-0.125) : tensor<10485760xf16>
+  %partials = check.generate.fill value(0.0) : tensor<61920xf32>
+  %output = check.generate.fill value(0.0) : tensor<6144xf32>
+  kernel.launch @qwen38_attention_decode_split_partial(%control, %query, %key_cache, %value_cache, %partials) : (tensor<2xi32>, tensor<6144xf32>, tensor<10485760xf16>, tensor<10485760xf16>, tensor<61920xf32>)
+  kernel.launch @qwen38_attention_decode_split_reduce(%token_count, %token_ordinal, %gate, %partials, %output) : (index, index, tensor<6144xf32>, tensor<61920xf32>, tensor<6144xf32>)
+  check.return
+}
+
+check.case public @qwen38_attention_decode_10k_split_wmma_case {
+  %token_count = check.literal value(1) : index
+  %token_ordinal = check.literal value(0) : index
+  %control_position_index = check.literal value(0) : index
+  %control = check.generate.fill value(10239) : tensor<2xi32>
+  %query = check.generate.fill value(0.125) : tensor<6144xf32>
+  %gate = check.generate.fill value(0.5) : tensor<6144xf32>
+  %key_cache = check.generate.fill value(0.25) : tensor<10485760xf16>
+  %value_cache = check.generate.fill value(-0.125) : tensor<10485760xf16>
+  %partials = check.generate.fill value(0.0) : tensor<61920xf32>
+  %output = check.generate.fill value(0.0) : tensor<6144xf32>
+  kernel.launch @qwen38_attention_decode_split_wmma_partial(%token_count, %token_ordinal, %control_position_index, %control, %query, %key_cache, %value_cache, %partials) : (index, index, index, tensor<2xi32>, tensor<6144xf32>, tensor<10485760xf16>, tensor<10485760xf16>, tensor<61920xf32>)
+  kernel.launch @qwen38_attention_decode_split_reduce(%token_count, %token_ordinal, %gate, %partials, %output) : (index, index, tensor<6144xf32>, tensor<61920xf32>, tensor<6144xf32>)
+  check.return
+}
+
+check.benchmark<@qwen38_attention_decode_10k_baseline_case> @qwen38_attention_decode_10k_baseline
+check.benchmark<@qwen38_attention_decode_10k_split_case> @qwen38_attention_decode_10k_split
+check.benchmark<@qwen38_attention_decode_10k_split_wmma_case> @qwen38_attention_decode_10k_split_wmma
