@@ -88,6 +88,22 @@ hrx_cc_library(
     ],
 )
 
+hrx_cc_library(
+    name = "streaming_query_test_util",
+    testonly = True,
+    hdrs = ["streaming_query_test_util.h"],
+    includes = [".."],
+    deps = [
+        ":common",
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
+        "//runtime/src/iree/base/threading",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/testing:gtest",
+    ],
+)
+
 hrx_cc_test(
     name = "function_attributes_test",
     srcs = ["function_attributes_test.cc"],
@@ -155,6 +171,42 @@ hrx_cc_test(
     target_compatible_with = ["@platforms//os:linux"],
     deps = [
         ":common",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+hrx_cc_test(
+    name = "context_test",
+    srcs = ["context_test.cc"],
+    deps = [
+        ":common",
+        ":streaming_query_test_util",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+hrx_cc_test(
+    name = "event_test",
+    srcs = ["event_test.cc"],
+    deps = [
+        ":common",
+        ":streaming_query_test_util",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+hrx_cc_test(
+    name = "stream_test",
+    srcs = ["stream_test.cc"],
+    deps = [
+        ":common",
+        ":streaming_query_test_util",
         "//runtime/src/iree/base",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",

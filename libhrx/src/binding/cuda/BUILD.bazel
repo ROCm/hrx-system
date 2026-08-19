@@ -7,6 +7,7 @@
 load(
     "//libhrx/build_tools/bazel:cc.bzl",
     "hrx_cc_library",
+    "hrx_cc_test",
 )
 
 package(
@@ -32,4 +33,23 @@ hrx_cc_library(
     copts = ["-DIREE_HAL_STREAMING_CUDA_EXPORTS"],
     includes = ["../.."],
     deps = ["//libhrx/src/binding/common"],
+)
+
+hrx_cc_test(
+    name = "driver_query_test",
+    srcs = ["driver_query_test.cc"],
+    # CUDAAPI has no spelling for a statically linked entry point: it resolves
+    # to __declspec(dllexport) in the sources that define these functions and
+    # to __declspec(dllimport) here, which includes the same headers without
+    # the define, so on Windows this test would look for __imp_ symbols in a
+    # static archive. A Windows port needs a third spelling of the export macro
+    # before relaxing this constraint.
+    target_compatible_with = ["@platforms//os:linux"],
+    deps = [
+        ":cuda",
+        "//libhrx/src/binding/common:streaming_query_test_util",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
 )
