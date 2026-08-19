@@ -1071,9 +1071,6 @@ CUDAAPI CUresult cuEventCreateWithFlags(CUevent* event, unsigned flags) {
   }
 
   CUresult result = iree_status_to_cu_result(status);
-  if (!iree_status_is_ok(status)) {
-    iree_status_ignore(status);
-  }
   IREE_TRACE_ZONE_END(z0);
   return result;
 }
@@ -1749,9 +1746,6 @@ CUDAAPI CUresult cuMemset(void* dst, int value, size_t sizeBytes) {
       sizeof(pattern), context->default_stream);
 
   CUresult result = iree_status_to_cu_result(status);
-  if (!iree_status_is_ok(status)) {
-    iree_status_ignore(status);
-  }
   IREE_TRACE_ZONE_END(z0);
   return result;
 }
@@ -1778,9 +1772,6 @@ CUDAAPI CUresult cuMemsetAsync(void* dst, int value, size_t sizeBytes,
               : context->default_stream);
 
   CUresult result = iree_status_to_cu_result(status);
-  if (!iree_status_is_ok(status)) {
-    iree_status_ignore(status);
-  }
   IREE_TRACE_ZONE_END(z0);
   return result;
 }
@@ -1825,9 +1816,6 @@ CUDAAPI CUresult cuMemcpyWithStream(void* dst, const void* src,
   }
 
   CUresult result = iree_status_to_cu_result(status);
-  if (!iree_status_is_ok(status)) {
-    iree_status_ignore(status);
-  }
   IREE_TRACE_ZONE_END(z0);
   return result;
 }
@@ -2651,9 +2639,6 @@ CUDAAPI CUresult cuStreamCreateWithFlags(CUstream* phStream,
   }
 
   CUresult result = iree_status_to_cu_result(status);
-  if (!iree_status_is_ok(status)) {
-    iree_status_ignore(status);
-  }
   IREE_TRACE_ZONE_END(z0);
   return result;
 }
