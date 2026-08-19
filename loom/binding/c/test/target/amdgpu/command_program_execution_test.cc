@@ -539,6 +539,26 @@ TEST(CommandProgramExecutionTest,
                                IREE_HAL_WHOLE_BUFFER),
   };
   iree_hal_executable_t* executables[] = {executable.get()};
+  loomc_cmd_hal_program_options_t one_shot_materialization_options = {
+      /*.type=*/LOOMC_STRUCTURE_TYPE_CMD_HAL_PROGRAM_OPTIONS,
+      /*.structure_size=*/sizeof(one_shot_materialization_options),
+      /*.next=*/nullptr,
+      /*.command_buffer_mode=*/IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT,
+      /*.queue_affinity=*/IREE_HAL_QUEUE_AFFINITY_ANY,
+      /*.fixed_buffers=*/fixed_buffers,
+      /*.fixed_buffer_count=*/IREE_ARRAYSIZE(fixed_buffers),
+      /*.executables=*/executables,
+      /*.executable_count=*/IREE_ARRAYSIZE(executables),
+  };
+  loomc_cmd_hal_program_t* one_shot_program = nullptr;
+  LOOMC_EXPECT_STATUS_IS(
+      LOOMC_STATUS_INVALID_ARGUMENT,
+      loomc_cmd_hal_program_create(
+          package.get(), prefill_export, device.get(),
+          &one_shot_materialization_options, loomc_allocator_system(),
+          &one_shot_program));
+  EXPECT_EQ(one_shot_program, nullptr);
+
   const loomc_cmd_hal_program_options_t materialization_options = {
       /*.type=*/LOOMC_STRUCTURE_TYPE_CMD_HAL_PROGRAM_OPTIONS,
       /*.structure_size=*/sizeof(materialization_options),
@@ -648,6 +668,23 @@ TEST(CommandProgramExecutionTest,
       iree_infinite_timeout()));
   EXPECT_EQ(actual_values[0], 1007u);
 
+  const std::array<uint32_t, 1> replay_source_values = {2000u};
+  IREE_ASSERT_OK(iree_hal_device_transfer_h2d(
+      device.get(), replay_source_values.data(), source_buffer.get(), 0,
+      kDataByteLength, IREE_HAL_TRANSFER_BUFFER_FLAG_DEFAULT,
+      iree_infinite_timeout()));
+  IREE_ASSERT_OK(iree_hal_device_transfer_h2d(
+      device.get(), zero_values.data(), target_buffer.get(), 0, kDataByteLength,
+      IREE_HAL_TRANSFER_BUFFER_FLAG_DEFAULT, iree_infinite_timeout()));
+  IREE_ASSERT_OK(SubmitAndWait(
+      device.get(), loomc_cmd_hal_program_command_buffer(prefill_program.get()),
+      {/*.count=*/bindings.size(), /*.bindings=*/bindings.data()}));
+  IREE_ASSERT_OK(iree_hal_device_transfer_d2h(
+      device.get(), target_buffer.get(), 0, actual_values.data(),
+      kDataByteLength, IREE_HAL_TRANSFER_BUFFER_FLAG_DEFAULT,
+      iree_infinite_timeout()));
+  EXPECT_EQ(actual_values[0], 2007u);
+
   IREE_ASSERT_OK(iree_hal_device_transfer_h2d(
       device.get(), zero_values.data(), target_buffer.get(), 0, kDataByteLength,
       IREE_HAL_TRANSFER_BUFFER_FLAG_DEFAULT, iree_infinite_timeout()));
@@ -658,7 +695,7 @@ TEST(CommandProgramExecutionTest,
       device.get(), target_buffer.get(), 0, actual_values.data(),
       kDataByteLength, IREE_HAL_TRANSFER_BUFFER_FLAG_DEFAULT,
       iree_infinite_timeout()));
-  EXPECT_EQ(actual_values[0], 1007u);
+  EXPECT_EQ(actual_values[0], 2007u);
 }
 
 }  // namespace

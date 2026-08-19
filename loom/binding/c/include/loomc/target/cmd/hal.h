@@ -50,6 +50,9 @@ typedef struct loomc_cmd_hal_program_options_t {
 
   /// Mode flags used to create the reusable HAL command buffer.
   ///
+  /// `IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT` and modes requiring it are not
+  /// allowed. A command program is recorded once and may be issued repeatedly.
+  ///
   /// `IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT` retains fixed buffers and
   /// executables for the command-buffer lifetime. When
   /// `IREE_HAL_COMMAND_BUFFER_MODE_UNRETAINED` is set, the caller must preserve

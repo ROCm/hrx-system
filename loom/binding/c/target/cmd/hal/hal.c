@@ -50,6 +50,13 @@ static loomc_status_t loomc_cmd_hal_validate_options(
         LOOMC_STATUS_UNIMPLEMENTED,
         "command HAL program option extensions are not supported");
   }
+  if (iree_any_bit_set(options->command_buffer_mode,
+                       IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT |
+                           IREE_HAL_COMMAND_BUFFER_MODE_ALLOW_INLINE_EXECUTION)) {
+    return loomc_make_status(
+        LOOMC_STATUS_INVALID_ARGUMENT,
+        "command HAL programs require reusable command-buffer recording");
+  }
   if (options->fixed_buffer_count != program->requirements.fixed_buffer_count) {
     return loomc_make_status(
         LOOMC_STATUS_INVALID_ARGUMENT,
