@@ -569,6 +569,8 @@ iree_runtime_cc_test(
         "//runtime/src/iree/base/internal:arena",
         "//runtime/src/iree/hal",
         "//runtime/src/iree/hal/drivers/amdgpu/abi",
+        "//runtime/src/iree/hal/drivers/amdgpu/device:headers",
+        "//runtime/src/iree/hal/drivers/amdgpu/util:queue_primitives",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],
