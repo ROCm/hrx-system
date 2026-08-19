@@ -548,6 +548,60 @@ TEST_F(TokenizerJsonTest, BackToBackSpecialTokens) {
   iree_tokenizer_free(tokenizer);
 }
 
+// Added tokens participate in pre-model matching even when they are not
+// special. Their special attribute controls decoding, not whether the model is
+// allowed to split their spelling into ordinary vocabulary tokens.
+TEST_F(TokenizerJsonTest, NonSpecialAddedTokenMatchesAtomically) {
+  iree_string_view_t json = IREE_SV(R"({
+    "model": {
+      "type": "BPE",
+      "vocab": {
+        "<": 0, "t": 1, "h": 2, "i": 3, "n": 4, "k": 5, ">": 6,
+        "<think>": 100
+      },
+      "merges": []
+    },
+    "added_tokens": [{
+      "id": 100,
+      "content": "<think>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": false
+    }],
+    "pre_tokenizer": null,
+    "decoder": {"type": "ByteFallback"}
+  })");
+
+  iree_tokenizer_t* tokenizer = nullptr;
+  IREE_ASSERT_OK(
+      iree_tokenizer_from_huggingface_json(json, allocator_, &tokenizer));
+  ASSERT_NE(tokenizer, nullptr);
+
+  int32_t token_ids[8] = {0};
+  iree_host_size_t token_count = 0;
+  IREE_ASSERT_OK(iree_tokenizer_encode(
+      tokenizer, IREE_SV("<think>"), IREE_TOKENIZER_ENCODE_FLAG_NONE,
+      iree_tokenizer_make_token_output(token_ids, NULL, NULL,
+                                       IREE_ARRAYSIZE(token_ids)),
+      allocator_, &token_count));
+  ASSERT_EQ(token_count, 1u);
+  EXPECT_EQ(token_ids[0], 100);
+
+  char decoded[16] = {0};
+  iree_host_size_t decoded_length = 0;
+  IREE_ASSERT_OK(iree_tokenizer_decode(
+      tokenizer, iree_tokenizer_make_token_id_list(token_ids, token_count),
+      IREE_TOKENIZER_DECODE_FLAG_SKIP_SPECIAL_TOKENS,
+      iree_make_mutable_string_view(decoded, sizeof(decoded)), allocator_,
+      &decoded_length));
+  EXPECT_TRUE(iree_string_view_equal(
+      iree_make_string_view(decoded, decoded_length), IREE_SV("<think>")));
+
+  iree_tokenizer_free(tokenizer);
+}
+
 TEST_F(TokenizerJsonTest, MaxSpecialTokenCountNoPostProcessor) {
   iree_string_view_t json = IREE_SV(R"({
     "model": {"type": "BPE", "vocab": {"a": 0}, "merges": []}
