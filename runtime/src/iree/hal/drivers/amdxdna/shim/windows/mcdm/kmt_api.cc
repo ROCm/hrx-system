@@ -1245,6 +1245,11 @@ void DestroyDevice(const KmtApi& api, Device* device) {
 bool WaitForPagingFenceCpu(const KmtApi& api, const Device& device,
                            UINT64 fence_value) {
   if (fence_value == 0) return true;
+  if (device.paging_fence_cpu) {
+    const auto* const completed =
+        static_cast<const volatile UINT64*>(device.paging_fence_cpu);
+    if (*completed >= fence_value) return true;
+  }
   D3DKMT_HANDLE objects[1] = {device.paging_sync_object};
   UINT64 values[1] = {fence_value};
   D3DKMT_WAITFORSYNCHRONIZATIONOBJECTFROMCPU wait = {};
@@ -1277,15 +1282,6 @@ bool WaitForPendingPagingBeforeSubmit(const KmtApi& api,
       &device.pending_paging_fence_value, 0, 0));
   if (fence_value == 0) return true;
 
-  // Match XRT's submit wrapper: read the paging queue's shared completion
-  // value first and enter KMT only while the device-wide watermark is pending.
-  if (device.paging_fence_cpu) {
-    const auto* const completed =
-        static_cast<const volatile UINT64*>(device.paging_fence_cpu);
-    if (*completed >= fence_value) {
-      return true;
-    }
-  }
   if (WaitForPagingFenceCpu(api, device, fence_value)) return true;
   SetErrorFormat(
       out_error,
@@ -1580,6 +1576,13 @@ bool WaitForBufferResidency(const KmtApi& api, const Device& device,
 
 void DestroyBuffer(const KmtApi& api, const Device& device, Buffer* buffer) {
   if (!buffer || !buffer->allocation) return;
+  if (buffer->paging_fence_value &&
+      !WaitForPagingFenceCpu(api, device, buffer->paging_fence_value)) {
+    // The paging queue may still own this allocation. Retain the KMT handle;
+    // process teardown will reclaim it after the device is closed. Leaking on
+    // this exceptional path is safer than freeing storage the KMD may use.
+    return;
+  }
   const BufferKindInfo kind_info = GetBufferKindInfo(buffer->kind);
   if (buffer->cpu_ptr) {
     D3DKMT_UNLOCK2 unlock = {};

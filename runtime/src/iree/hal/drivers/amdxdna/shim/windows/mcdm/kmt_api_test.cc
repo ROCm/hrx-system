@@ -58,6 +58,7 @@ struct DestroyCall {
   D3DKMT_HANDLE allocation = 0;
   uint32_t allocation_count = 0;
   uint32_t flags = 0;
+  size_t wait_count = 0;
 };
 DestroyCall g_destroy_calls[4] = {};
 size_t g_destroy_call_count = 0;
@@ -330,6 +331,7 @@ NTSTATUS APIENTRY FakeDestroyAllocation2(
   call.resource = args->hResource;
   call.allocation_count = args->AllocationCount;
   call.flags = args->Flags.Value;
+  call.wait_count = g_wait_count;
   if (args->AllocationCount && args->phAllocationList) {
     call.allocation = args->phAllocationList[0];
   }
@@ -470,6 +472,76 @@ TEST(KmtApiTest, SharedResourceDestroyFlagsMatchNegotiatedAbi) {
     EXPECT_EQ(g_free_gpu_va_count,
               mcdm_abi == McdmAbi::legacy ? 3u : 0u);
   }
+}
+
+TEST(KmtApiTest, BufferDestroyWaitsForPendingPaging) {
+  ResetFakes();
+  KmtApi api = {};
+  api.wait_from_cpu = FakeWaitFromCpu;
+  api.unlock2 = FakeUnlock2;
+  api.destroy_allocation2 = FakeDestroyAllocation2;
+  Device device = {};
+  device.device = 0x10;
+  device.paging_sync_object = 0x11;
+  uint64_t completed_fence = 6;
+  device.paging_fence_cpu = &completed_fence;
+  Buffer buffer = {};
+  buffer.allocation = 0x20;
+  buffer.cpu_ptr = reinterpret_cast<void*>(0x1000);
+  buffer.paging_fence_value = 7;
+
+  DestroyBuffer(api, device, &buffer);
+
+  ASSERT_EQ(g_wait_count, 1u);
+  EXPECT_EQ(g_wait_fences[0], 7u);
+  ASSERT_EQ(g_destroy_call_count, 1u);
+  EXPECT_EQ(g_destroy_calls[0].wait_count, 1u);
+  EXPECT_EQ(g_destroy_calls[0].flags, 0x1u);
+  EXPECT_EQ(buffer.allocation, 0u);
+}
+
+TEST(KmtApiTest, BufferDestroySkipsCompletedPagingWait) {
+  ResetFakes();
+  KmtApi api = {};
+  api.wait_from_cpu = FakeWaitFromCpu;
+  api.destroy_allocation2 = FakeDestroyAllocation2;
+  Device device = {};
+  device.device = 0x10;
+  uint64_t completed_fence = 7;
+  device.paging_fence_cpu = &completed_fence;
+  Buffer buffer = {};
+  buffer.allocation = 0x20;
+  buffer.paging_fence_value = 7;
+
+  DestroyBuffer(api, device, &buffer);
+
+  EXPECT_EQ(g_wait_count, 0u);
+  ASSERT_EQ(g_destroy_call_count, 1u);
+  EXPECT_EQ(g_destroy_calls[0].wait_count, 0u);
+  EXPECT_EQ(g_destroy_calls[0].flags, 0x1u);
+  EXPECT_EQ(buffer.allocation, 0u);
+}
+
+TEST(KmtApiTest, BufferDestroyRetainsAllocationWhenPagingWaitFails) {
+  ResetFakes();
+  KmtApi api = {};
+  api.wait_from_cpu = FakeWaitFromCpu;
+  api.destroy_allocation2 = FakeDestroyAllocation2;
+  Device device = {};
+  device.device = 0x10;
+  device.paging_sync_object = 0x11;
+  uint64_t completed_fence = 6;
+  device.paging_fence_cpu = &completed_fence;
+  Buffer buffer = {};
+  buffer.allocation = 0x20;
+  buffer.paging_fence_value = 7;
+  g_wait_status = static_cast<NTSTATUS>(0xC0000001u);
+
+  DestroyBuffer(api, device, &buffer);
+
+  EXPECT_EQ(g_wait_count, 1u);
+  EXPECT_EQ(g_destroy_call_count, 0u);
+  EXPECT_EQ(buffer.allocation, 0x20u);
 }
 
 TEST(KmtApiTest, CompactContextTeardownMatchesXrtOwnershipOrder) {
