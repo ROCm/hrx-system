@@ -172,10 +172,12 @@ static iree_status_t loom_symbol_equivalence_map_block(
       return iree_ok_status();
     }
   }
-  IREE_RETURN_IF_ERROR(iree_arena_grow_array(
-      state->arena, state->blocks.count, state->blocks.count + 1,
-      sizeof(*state->blocks.pairs), &state->blocks.capacity,
-      (void**)&state->blocks.pairs));
+  if (state->blocks.count >= state->blocks.capacity) {
+    IREE_RETURN_IF_ERROR(iree_arena_grow_array(
+        state->arena, state->blocks.count, state->blocks.count + 1,
+        sizeof(*state->blocks.pairs), &state->blocks.capacity,
+        (void**)&state->blocks.pairs));
+  }
   state->blocks.pairs[state->blocks.count++] =
       (loom_symbol_equivalence_block_pair_t){
           .lhs = lhs_block,
@@ -524,10 +526,12 @@ static iree_status_t loom_symbol_equivalence_compare_symbol_refs(
     }
   }
 
-  IREE_RETURN_IF_ERROR(iree_arena_grow_array(
-      state->arena, state->symbols.count, state->symbols.count + 1,
-      sizeof(*state->symbols.pairs), &state->symbols.capacity,
-      (void**)&state->symbols.pairs));
+  if (state->symbols.count >= state->symbols.capacity) {
+    IREE_RETURN_IF_ERROR(iree_arena_grow_array(
+        state->arena, state->symbols.count, state->symbols.count + 1,
+        sizeof(*state->symbols.pairs), &state->symbols.capacity,
+        (void**)&state->symbols.pairs));
+  }
   const iree_host_size_t pair_index = state->symbols.count++;
   state->symbols.pairs[pair_index] = (loom_symbol_equivalence_symbol_pair_t){
       .lhs = lhs,
