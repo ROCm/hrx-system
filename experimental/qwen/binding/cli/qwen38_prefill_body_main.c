@@ -48,6 +48,29 @@ static const char* const qwen38_prefill_body_usage =
     "  --position_base=<absolute first-token position>\n"
     "  --output=<raw F32 residual output path>\n";
 
+static double qwen38_elapsed_ms(iree_time_t start, iree_time_t end) {
+  return (double)(end - start) / 1000000.0;
+}
+
+static double qwen38_rate(iree_host_size_t item_count, iree_time_t start,
+                          iree_time_t end) {
+  return end != start
+             ? (double)item_count * 1000000000.0 / (double)(end - start)
+             : 0.0;
+}
+
+static iree_string_view_t qwen38_prefill_body_root_name(
+    int32_t token_count) {
+  if (token_count == 32) {
+    return IREE_SV("qwen38_text_prefill_body_schedule_c64t32");
+  } else if (token_count <= 64) {
+    return IREE_SV("qwen38_text_prefill_body_schedule_x64");
+  } else if (token_count <= 480) {
+    return IREE_SV("qwen38_text_prefill_body_schedule_x128");
+  }
+  return IREE_SV("qwen38_text_prefill_body_schedule_c128");
+}
+
 static iree_status_t qwen38_allocate_buffer(
     iree_hal_device_t* device, iree_hal_memory_type_t memory_type,
     iree_hal_buffer_usage_t usage, iree_device_size_t minimum_alignment,
@@ -74,7 +97,7 @@ static iree_status_t qwen38_prepare_prefill_body(
   }
   const iree_file_toc_t* files = qwen38_text_prefill_body_source_create();
   const iree_string_view_t root_names[] = {
-      IREE_SV("qwen38_text_prefill_body"),
+      qwen38_prefill_body_root_name(FLAG_token_count),
   };
   const qwen_tooling_command_program_set_options_t options = {
       .source_identifier = iree_make_cstring_view(files[0].name),
@@ -145,11 +168,13 @@ static iree_status_t qwen38_upload_control(
     iree_host_size_t config_data_length, uint8_t* config_data,
     iree_hal_device_t* device, iree_hal_buffer_t* config_buffer) {
   const uint64_t argument_bits[] = {(uint64_t)token_count};
-  IREE_RETURN_IF_ERROR(qwen_tooling_command_program_populate_config(
-      program, argument_bits, IREE_ARRAYSIZE(argument_bits),
-      iree_make_byte_span(
-          config_data,
-          (iree_host_size_t)program_info->config.required_byte_length)));
+  if (program_info->config.required_byte_length != 0) {
+    IREE_RETURN_IF_ERROR(qwen_tooling_command_program_populate_config(
+        program, argument_bits, IREE_ARRAYSIZE(argument_bits),
+        iree_make_byte_span(
+            config_data,
+            (iree_host_size_t)program_info->config.required_byte_length)));
+  }
   iree_unaligned_store_le_u32(config_data + control_data_offset,
                               (uint32_t)token_count);
   iree_unaligned_store_le_u32(
@@ -196,6 +221,7 @@ static iree_status_t qwen38_prefill_body_run(void) {
   qwen_tooling_command_program_set_t* program_set = NULL;
   qwen_tooling_command_program_t* program = NULL;
   const loomc_cmd_program_info_t* program_info = NULL;
+  iree_hal_device_t* device = NULL;
   iree_hal_buffer_t* residual_buffer = NULL;
   iree_hal_buffer_t* gdn_state_buffer = NULL;
   iree_hal_buffer_t* attention_cache_buffer = NULL;
@@ -208,6 +234,9 @@ static iree_status_t qwen38_prefill_body_run(void) {
   iree_device_size_t hidden_byte_length = 0;
   iree_host_size_t control_data_offset = 0;
   iree_host_size_t config_data_length = 0;
+  bool has_dynamic_config = false;
+  iree_time_t execute_start = 0;
+  iree_time_t execute_end = 0;
 
   iree_status_t status = iree_ok_status();
   if (FLAG_token_count < 1 || FLAG_token_count > QWEN38_PREFILL_CAPACITY) {
@@ -230,6 +259,11 @@ static iree_status_t qwen38_prefill_body_run(void) {
         host_allocator, &runtime_context);
   }
   if (iree_status_is_ok(status)) {
+    device = qwen_tooling_runtime_context_device(&runtime_context);
+    status =
+        iree_hal_begin_profiling_from_flags(device, host_allocator, &profiling);
+  }
+  if (iree_status_is_ok(status)) {
     fprintf(stderr,
             "qwen38: indexed GGUF; compiling and gathering the 64-layer "
             "prefill program...\n");
@@ -238,15 +272,17 @@ static iree_status_t qwen38_prefill_body_run(void) {
   }
   if (iree_status_is_ok(status)) {
     program = qwen_tooling_command_program_set_lookup(
-        program_set, IREE_SV("qwen38_text_prefill_body"));
+        program_set, qwen38_prefill_body_root_name(FLAG_token_count));
   }
   if (iree_status_is_ok(status)) {
     program_info = qwen_tooling_command_program_info(program);
-    if (program_info->rebindable_binding_count != 6 ||
+    has_dynamic_config = program_info->config.required_byte_length != 0;
+    const iree_host_size_t expected_binding_count =
+        has_dynamic_config ? 6 : 5;
+    if (program_info->rebindable_binding_count != expected_binding_count ||
         program_info->transient.binding_index != 4 ||
         program_info->transient.required_byte_length == 0 ||
-        program_info->config.binding_index != 5 ||
-        program_info->config.required_byte_length == 0) {
+        (has_dynamic_config && program_info->config.binding_index != 5)) {
       status = iree_make_status(
           IREE_STATUS_FAILED_PRECONDITION,
           "the prefill body command program published an incompatible ABI");
@@ -259,8 +295,6 @@ static iree_status_t qwen38_prefill_body_run(void) {
     config_data_length = control_data_offset + 2 * sizeof(uint32_t);
   }
 
-  iree_hal_device_t* device =
-      qwen_tooling_runtime_context_device(&runtime_context);
   if (iree_status_is_ok(status)) {
     status = qwen38_allocate_buffer(
         device, IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL,
@@ -375,16 +409,15 @@ static iree_status_t qwen38_prefill_body_run(void) {
                 .length = program_info->config.required_byte_length,
             },
     };
-    status =
-        iree_hal_begin_profiling_from_flags(device, host_allocator, &profiling);
-    if (iree_status_is_ok(status)) {
-      status = qwen38_submit_and_wait(
-          device, qwen_tooling_command_program_command_buffer(program),
-          (iree_hal_buffer_binding_table_t){
-              .count = IREE_ARRAYSIZE(bindings),
-              .bindings = bindings,
-          });
-    }
+    execute_start = iree_time_now();
+    status = qwen38_submit_and_wait(
+        device, qwen_tooling_command_program_command_buffer(program),
+        (iree_hal_buffer_binding_table_t){
+            .count = has_dynamic_config ? IREE_ARRAYSIZE(bindings)
+                                        : IREE_ARRAYSIZE(bindings) - 1,
+            .bindings = bindings,
+        });
+    execute_end = iree_time_now();
     status =
         iree_status_join(status, iree_hal_end_profiling_from_flags(profiling));
     profiling = NULL;
@@ -427,13 +460,16 @@ static iree_status_t qwen38_prefill_body_run(void) {
             "Qwen3.8 prefill processed %d token(s): %" PRIhsz
             " commands, %" PRIhsz " parameters, %" PRIu64
             " parameter bytes, %" PRIu64
-            " transient bytes, residual[min=%g max=%g sum=%.9g "
+            " transient bytes, %.3f ms (%.2f tok/s), "
+            "residual[min=%g max=%g sum=%.9g "
             "sum_squares=%.9g]\n",
             FLAG_token_count, program_info->command_count,
             program_info->parameter_count,
             (uint64_t)qwen_tooling_command_program_set_parameter_byte_length(
                 program_set),
-            (uint64_t)program_info->transient.required_byte_length, minimum,
+            (uint64_t)program_info->transient.required_byte_length,
+            qwen38_elapsed_ms(execute_start, execute_end),
+            qwen38_rate(FLAG_token_count, execute_start, execute_end), minimum,
             maximum, sum, sum_squares);
   }
 
