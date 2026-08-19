@@ -25,8 +25,7 @@ static iree_status_t qwen_tooling_command_buffer_mode_from_flags(
       iree_hal_profiling_from_flags_requires_retained_command_buffer_metadata(
           &retain_profile_metadata));
   *out_mode = retain_profile_metadata
-                  ? IREE_HAL_COMMAND_BUFFER_MODE_RETAIN_PROFILE_METADATA |
-                        IREE_HAL_COMMAND_BUFFER_MODE_RETAIN_DISPATCH_METADATA
+                  ? IREE_HAL_COMMAND_BUFFER_MODE_RETAIN_PROFILE_METADATA
                   : IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT;
   return iree_ok_status();
 }

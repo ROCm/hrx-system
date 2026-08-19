@@ -455,9 +455,15 @@ static iree_status_t qwen_tooling_parameter_pack_build(
                   existing->span.buffer_offset, existing->span.length)) {
             status = iree_make_status(
                 IREE_STATUS_FAILED_PRECONDITION,
-                "parameters '%.*s' and '%.*s' require overlapping storage",
-                (int)key.size, key.data, (int)existing->key.size,
-                existing->key.data);
+                "parameter '%.*s' in command root '%.*s' requires slab range "
+                "{offset=%" PRIu64 ", length=%" PRIu64 "}, overlapping "
+                "parameter '%.*s' range {offset=%" PRIu64 ", length=%" PRIu64
+                "}",
+                (int)key.size, key.data, (int)program_info->name.size,
+                program_info->name.data, parameter_offset,
+                parameter_info.byte_length,
+                (int)existing->key.size, existing->key.data,
+                existing->span.buffer_offset, existing->span.length);
             break;
           }
         }
@@ -725,6 +731,7 @@ iree_status_t qwen_tooling_command_program_set_create(
         .structure_size = sizeof(compile_options),
         .next = &specialization_options,
         .module_name = root_names[0],
+        .config = options->config,
     };
     status = qwen_tooling_status_from_loomc(
         loomc_compile_module(compiler, workspace, empty_pass_program, module,

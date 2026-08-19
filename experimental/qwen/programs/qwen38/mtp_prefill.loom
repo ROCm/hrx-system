@@ -5,7 +5,7 @@
 // normalized hidden rows shifted by one position so this program can overwrite
 // the same MTP cache cells before the next proposal.
 
-command.program.decl @qwen38_attention_layer_prefill(%token_count: index, %layer: index, %attention_ordinal: index, %verification_depth: index) launch(%parameters: buffer, %residual: buffer, %attention_cache: buffer, %control: buffer, %attention_output: buffer) where [range(%token_count, 1, 512), range(%layer, 0, 64), range(%attention_ordinal, 0, 15), range(%verification_depth, 0, 4)]
+command.program.decl @qwen38_attention_layer_prefill(%token_count: index, %schedule_token_count: index, %layer: index, %attention_ordinal: index, %verification_depth: index) launch(%parameters: buffer, %residual: buffer, %attention_cache: buffer, %control: buffer, %attention_output: buffer) where [range(%token_count, 1, 512), range(%schedule_token_count, 1, 512), range(%layer, 0, 64), range(%attention_ordinal, 0, 15), range(%verification_depth, 0, 4)]
 
 kernel.decl @ggml_quantize_q8_1_x4_f32(%token_count: index, %input_size: index) launch(%token_capacity: index, %input_size_data: index, %input: buffer, %output: buffer)
 kernel.decl @ggml_linear_q8_0_q8_1_x4(%token_count: index, %input_size: index, %output_size: index) launch(%token_capacity: index, %input_size_data: index, %output_size_data: index, %input: buffer, %weight: buffer, %output: buffer)
@@ -16,7 +16,7 @@ kernel.decl @qwen38_token_embedding_q5k_f32_prefill(%token_count: index) launch(
 // Advances the stored MTP block over one committed target span. The caller
 // supplies target hidden rows already shifted into the MTP pairing contract:
 // [previous carry, target_h[0], ..., target_h[token_count - 2]].
-command.program.def @qwen38_mtp_catchup(%token_count: index, %verification_depth: index) launch(%embedding_parameters: buffer, %mtp_input_parameters: buffer, %mtp_layer_parameters: buffer, %residual: buffer, %control: buffer, %attention_cache: buffer, %shifted_hidden: buffer, %token_ids: buffer) where [range(%token_count, 1, 512), range(%verification_depth, 0, 4)] {
+command.program.def @qwen38_mtp_catchup(%token_count: index, %schedule_token_count: index, %verification_depth: index) launch(%embedding_parameters: buffer, %mtp_input_parameters: buffer, %mtp_layer_parameters: buffer, %residual: buffer, %control: buffer, %attention_cache: buffer, %shifted_hidden: buffer, %token_ids: buffer) where [range(%token_count, 1, 512), range(%schedule_token_count, 1, 512), range(%verification_depth, 0, 4)] {
   %token_capacity = index.constant 512 : index
   %hidden_size = index.constant 5120 : index
   %concat_size = index.constant 10240 : index
@@ -48,6 +48,6 @@ command.program.def @qwen38_mtp_catchup(%token_count: index, %verification_depth
   kernel.launch @ggml_linear_q8_0_q8_1_x4[%token_count, %concat_size, %hidden_size](%token_capacity, %concat_size, %hidden_size, %normalized_concat_q8, %embedding_hidden_weight, %residual) : [index, index, index](index, index, index, buffer, view<55705600xi8>, buffer)
 
   %attention_output = buffer.alloca<global> align(256) %attention_capacity_bytes : buffer
-  command.program.launch @qwen38_attention_layer_prefill[%token_count, %mtp_layer, %mtp_attention_ordinal, %verification_depth](%mtp_layer_parameters, %residual, %attention_cache, %control, %attention_output) : [index, index, index, index](buffer, buffer, buffer, buffer, buffer)
+  command.program.launch @qwen38_attention_layer_prefill[%token_count, %schedule_token_count, %mtp_layer, %mtp_attention_ordinal, %verification_depth](%mtp_layer_parameters, %residual, %attention_cache, %control, %attention_output) : [index, index, index, index, index](buffer, buffer, buffer, buffer, buffer)
   command.return
 }

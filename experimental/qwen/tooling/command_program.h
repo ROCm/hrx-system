@@ -10,6 +10,7 @@
 #include "experimental/qwen/tooling/runtime.h"
 #include "iree/base/api.h"
 #include "iree/hal/api.h"
+#include "loomc/config.h"
 #include "loomc/target/cmd/program.h"
 
 #ifdef __cplusplus
@@ -33,6 +34,8 @@ typedef struct qwen_tooling_command_program_set_options_t {
   const iree_string_view_t* root_names;
   // Number of entries in |root_names|.
   iree_host_size_t root_count;
+  // Compile-time config values shared by every selected root.
+  loomc_config_options_t config;
 } qwen_tooling_command_program_set_options_t;
 
 // Compiles and materializes sealed command-program roots for the runtime

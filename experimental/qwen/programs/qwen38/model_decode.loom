@@ -9,7 +9,7 @@ command.program.decl @qwen38_gdn_layer_decode(%layer: index, %gdn_ordinal: index
 command.program.decl @qwen38_attention_layer_decode(%layer: index, %attention_ordinal: index) launch(%parameters: buffer, %residual: buffer, %control: buffer, %attention_cache: buffer, %attention_output: buffer) where [range(%layer, 0, 64), range(%attention_ordinal, 0, 15)]
 command.program.decl @qwen38_output_head_greedy_with_hidden(%residual_offset: offset) launch(%parameters: buffer, %residual: buffer, %normalized: buffer, %token_id: buffer)
 kernel.decl @qwen38_token_embedding_q5k_f32_decode() launch(%token_id: buffer, %weight: buffer, %output: buffer)
-kernel.decl @qwen38_decode_commit_token() launch(%control: buffer, %token_ids: buffer)
+kernel.decl @qwen38_decode_commit_token() launch(%control: buffer, %token_ids: buffer, %progress: buffer)
 
 // Advances the complete base-model body for one token. Position is read from
 // the issue-time control buffer by every attention layer, allowing one
@@ -49,29 +49,29 @@ command.program.def public @qwen38_text_decode_body() launch(%parameters: buffer
 
 // Consumes one device-local token, advances the base model, and publishes the
 // next greedy token plus the normalized hidden row required by NextN/MTP.
-command.program.def @qwen38_text_decode_transition() launch(%parameters: buffer, %residual: buffer, %control: buffer, %gdn_state: buffer, %attention_cache: buffer, %normalized_hidden: buffer, %token_id: buffer) {
+command.program.def @qwen38_text_decode_transition() launch(%parameters: buffer, %residual: buffer, %control: buffer, %gdn_state: buffer, %attention_cache: buffer, %normalized_hidden: buffer, %token_id: buffer, %progress: buffer) {
   %c0_offset = index.constant 0 : offset
   %embedding_weight = command.parameter %parameters, "token_embd.weight" : view<874086400xi8>
   kernel.launch @qwen38_token_embedding_q5k_f32_decode(%token_id, %embedding_weight, %residual) : (buffer, view<874086400xi8>, buffer)
   command.program.launch @qwen38_text_decode_body[](%parameters, %residual, %control, %gdn_state, %attention_cache) : [](buffer, buffer, buffer, buffer, buffer)
   command.program.launch @qwen38_output_head_greedy_with_hidden[%c0_offset](%parameters, %residual, %normalized_hidden, %token_id) : [offset](buffer, buffer, buffer, buffer)
-  kernel.launch @qwen38_decode_commit_token(%control, %token_id) : (buffer, buffer)
+  kernel.launch @qwen38_decode_commit_token(%control, %token_id, %progress) : (buffer, buffer, buffer)
   command.return
 }
 
 // Advances one token without exposing hidden rows or vocabulary logits to the
 // host. The position update makes the materialized command buffer a complete
 // reusable generation transition.
-command.program.def public @qwen38_text_decode_greedy() launch(%parameters: buffer, %residual: buffer, %control: buffer, %gdn_state: buffer, %attention_cache: buffer, %token_id: buffer) {
+command.program.def public @qwen38_text_decode_greedy() launch(%parameters: buffer, %residual: buffer, %control: buffer, %gdn_state: buffer, %attention_cache: buffer, %token_id: buffer, %progress: buffer) {
   %hidden_bytes = index.constant 20480 : offset
   %normalized_hidden = buffer.alloca<global> align(256) %hidden_bytes : buffer
-  command.program.launch @qwen38_text_decode_transition[](%parameters, %residual, %control, %gdn_state, %attention_cache, %normalized_hidden, %token_id) : [](buffer, buffer, buffer, buffer, buffer, buffer, buffer)
+  command.program.launch @qwen38_text_decode_transition[](%parameters, %residual, %control, %gdn_state, %attention_cache, %normalized_hidden, %token_id, %progress) : [](buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
   command.return
 }
 
 // Advances one token while exposing the target model's final normalized hidden
 // row to a following NextN/MTP proposal command program.
-command.program.def public @qwen38_text_decode_greedy_with_hidden() launch(%parameters: buffer, %residual: buffer, %control: buffer, %gdn_state: buffer, %attention_cache: buffer, %normalized_hidden: buffer, %token_id: buffer) {
-  command.program.launch @qwen38_text_decode_transition[](%parameters, %residual, %control, %gdn_state, %attention_cache, %normalized_hidden, %token_id) : [](buffer, buffer, buffer, buffer, buffer, buffer, buffer)
+command.program.def public @qwen38_text_decode_greedy_with_hidden() launch(%parameters: buffer, %residual: buffer, %control: buffer, %gdn_state: buffer, %attention_cache: buffer, %normalized_hidden: buffer, %token_id: buffer, %progress: buffer) {
+  command.program.launch @qwen38_text_decode_transition[](%parameters, %residual, %control, %gdn_state, %attention_cache, %normalized_hidden, %token_id, %progress) : [](buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
   command.return
 }

@@ -7,9 +7,9 @@
 // transition inputs advance only the accepted 1-4 row prefix in committed GDN
 // state, avoiding a second execution of the dense target model.
 
-command.program.decl @qwen38_text_prefill_body_impl(%token_count: index, %verification_depth: index) launch(%parameters: buffer, %residual: buffer, %control: buffer, %gdn_state: buffer, %attention_cache: buffer, %transition_capture: buffer) where [range(%token_count, 1, 512), range(%verification_depth, 0, 4)]
+command.program.decl @qwen38_text_prefill_body_impl(%token_count: index, %schedule_token_count: index, %verification_depth: index) launch(%parameters: buffer, %residual: buffer, %control: buffer, %gdn_state: buffer, %attention_cache: buffer, %transition_capture: buffer) where [range(%token_count, 1, 512), range(%schedule_token_count, 1, 512), range(%verification_depth, 0, 4)]
 command.program.decl @qwen38_output_head_rows_greedy_depth4() launch(%parameters: buffer, %residual: buffer, %normalized: buffer, %token_ids: buffer)
-command.program.decl @qwen38_mtp_catchup(%token_count: index, %verification_depth: index) launch(%embedding_parameters: buffer, %mtp_input_parameters: buffer, %mtp_layer_parameters: buffer, %residual: buffer, %control: buffer, %attention_cache: buffer, %shifted_hidden: buffer, %token_ids: buffer) where [range(%token_count, 1, 512), range(%verification_depth, 0, 4)]
+command.program.decl @qwen38_mtp_catchup(%token_count: index, %schedule_token_count: index, %verification_depth: index) launch(%embedding_parameters: buffer, %mtp_input_parameters: buffer, %mtp_layer_parameters: buffer, %residual: buffer, %control: buffer, %attention_cache: buffer, %shifted_hidden: buffer, %token_ids: buffer) where [range(%token_count, 1, 512), range(%schedule_token_count, 1, 512), range(%verification_depth, 0, 4)]
 
 kernel.decl @qwen38_token_embedding_q5k_f32_prefill(%token_count: index) launch(%token_ids: buffer, %weight: buffer, %output: buffer)
 kernel.decl @qwen38_mtp_begin_verify_depth4() launch(%target_control: buffer, %verify_control: buffer)
@@ -100,7 +100,7 @@ command.program.def public @qwen38_mtp_target_verify_depth4() launch(%target_par
 
   kernel.launch @qwen38_mtp_begin_verify_depth4(%target_control, %verify_control) : (buffer, buffer)
   kernel.launch @qwen38_token_embedding_q5k_f32_prefill[%token_count](%verify_tokens, %embedding_weight, %residual) : [index](buffer, view<874086400xi8>, buffer)
-  command.program.launch @qwen38_text_prefill_body_impl[%token_count, %token_count](%target_parameters, %residual, %verify_control, %gdn_state, %attention_cache, %transition_capture) : [index, index](buffer, buffer, buffer, buffer, buffer, buffer)
+  command.program.launch @qwen38_text_prefill_body_impl[%token_count, %token_count, %token_count](%target_parameters, %residual, %verify_control, %gdn_state, %attention_cache, %transition_capture) : [index, index, index](buffer, buffer, buffer, buffer, buffer, buffer)
   command.program.launch @qwen38_output_head_rows_greedy_depth4[](%target_parameters, %residual, %normalized_rows, %target_predictions) : [](buffer, buffer, buffer, buffer)
   %shifted_hidden = buffer.alloca<global> align(256) %shifted_hidden_bytes : buffer
   kernel.launch @qwen38_mtp_shift_hidden_rows[%token_count](%token_count, %normalized_rows, %normalized_hidden, %shifted_hidden) : [index](index, buffer, buffer, buffer)
@@ -110,7 +110,7 @@ command.program.def public @qwen38_mtp_target_verify_depth4() launch(%target_par
       command.program.launch @qwen38_mtp_commit_gdn_states_depth4[](%target_parameters, %replay_control, %gdn_state, %transition_capture) : [](buffer, buffer, buffer, buffer)
     }
     command.serial {
-      command.program.launch @qwen38_mtp_catchup[%token_count, %token_count](%embedding_parameters, %mtp_input_parameters, %mtp_layer_parameters, %residual, %replay_control, %mtp_attention_cache, %shifted_hidden, %verify_tokens) : [index, index](buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
+      command.program.launch @qwen38_mtp_catchup[%token_count, %token_count, %token_count](%embedding_parameters, %mtp_input_parameters, %mtp_layer_parameters, %residual, %replay_control, %mtp_attention_cache, %shifted_hidden, %verify_tokens) : [index, index, index](buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
     }
   }
   kernel.launch @qwen38_mtp_select_hidden_depth4(%normalized_rows, %acceptance, %normalized_hidden) : (buffer, buffer, buffer)

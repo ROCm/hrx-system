@@ -428,74 +428,62 @@ kernel.def export("qwen38_gdn_conv_prepare_prefill_parallel_read_only") @qwen38_
   kernel.return
 }
 
-// Retains the bounded transition inputs needed to commit an accepted MTP
-// prefix without replaying the dense target model. The command program owns
-// the packed layer layout and passes its QKV, alpha, and beta subranges as
-// independent destinations.
-kernel.def export("qwen38_gdn_capture_transition") @qwen38_gdn_capture_transition(%token_count0: index) {
-  %token_count = index.assume %token_count0 [range(%token_count0, 1, 8)] : index
-  %qkv_workgroups_per_token = index.constant 10 : index
-  %qkv_workgroup_count = index.mul %token_count, %qkv_workgroups_per_token : index
-  %unit = index.constant 1 : index
-  %workgroup_count = index.add %qkv_workgroup_count, %unit : index
+// Retains the four-row transition inputs needed to commit an accepted MTP
+// prefix without replaying the dense target model. One layer record contains
+// QKV followed by alpha and beta, all in their native row-major F32 layouts.
+kernel.def export("qwen38_gdn_capture_transition_depth4") @qwen38_gdn_capture_transition_depth4() {
+  %workgroup_count = index.constant 41 : index
   %workgroup_size = index.constant 256 : index
+  %unit = index.constant 1 : index
   kernel.launch.config workgroups(%workgroup_count, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
-} launch(%token_count0: index, %qkv: buffer, %alpha: buffer, %beta: buffer, %captured_qkv: buffer, %captured_alpha: buffer, %captured_beta: buffer) {
-  %token_count = index.assume %token_count0 [range(%token_count0, 1, 8)] : index
+} launch(%qkv: buffer, %alpha: buffer, %beta: buffer, %transition: buffer) {
   %workgroup0 = kernel.workgroup.id<x> : index
-  %workgroup = index.assume %workgroup0 [range(%workgroup0, 0, 80)] : index
+  %workgroup = index.assume %workgroup0 [range(%workgroup0, 0, 40)] : index
   %workitem0 = kernel.workitem.id<x> : index
   %workitem = index.assume %workitem0 [range(%workitem0, 0, 255)] : index
-  %c1 = index.constant 1 : index
   %c4 = index.constant 4 : index
-  %c12 = index.constant 12 : index
-  %c24 = index.constant 24 : index
+  %c40 = index.constant 40 : index
+  %c48 = index.constant 48 : index
+  %c96 = index.constant 96 : index
   %c256 = index.constant 256 : index
-  %qkv_elements_per_token = index.constant 10240 : index
-  %gate_elements_per_token = index.constant 48 : index
-  %qkv_workgroups_per_token = index.constant 10 : index
-  %zero = vector.constant 0.0 : vector<4xf32>
-  %qkv_element_count = index.mul %token_count, %qkv_elements_per_token : index
-  %gate_element_count = index.mul %token_count, %gate_elements_per_token : index
-  %qkv_workgroup_count = index.mul %token_count, %qkv_workgroups_per_token : index
-  %alpha_packet_count = index.mul %token_count, %c12 : index
-  %gate_packet_count = index.mul %token_count, %c24 : index
+  %alpha_element_base = index.constant 40960 : index
+  %beta_element_base = index.constant 41152 : index
   %c0_offset = index.constant 0 : offset
-  %qkv_view = buffer.view %qkv[%c0_offset] : buffer -> view<[%qkv_element_count]xf32>
-  %alpha_view = buffer.view %alpha[%c0_offset] : buffer -> view<[%gate_element_count]xf32>
-  %beta_view = buffer.view %beta[%c0_offset] : buffer -> view<[%gate_element_count]xf32>
-  %captured_qkv_view = buffer.view %captured_qkv[%c0_offset] : buffer -> view<[%qkv_element_count]xf32>
-  %captured_alpha_view = buffer.view %captured_alpha[%c0_offset] : buffer -> view<[%gate_element_count]xf32>
-  %captured_beta_view = buffer.view %captured_beta[%c0_offset] : buffer -> view<[%gate_element_count]xf32>
+  %qkv_view = buffer.view %qkv[%c0_offset] : buffer -> view<40960xf32>
+  %alpha_view = buffer.view %alpha[%c0_offset] : buffer -> view<192xf32>
+  %beta_view = buffer.view %beta[%c0_offset] : buffer -> view<192xf32>
+  %transition_view = buffer.view %transition[%c0_offset] : buffer -> view<41344xf32>
 
-  %is_qkv_workgroup = index.cmp ult, %workgroup, %qkv_workgroup_count : index
+  %is_qkv_workgroup = index.cmp ult, %workgroup, %c40 : index
   scf.if %is_qkv_workgroup {
     %packet_base = index.mul %workgroup, %c256 : index
     %packet = index.add %packet_base, %workitem : index
     %element0 = index.mul %packet, %c4 : index
-    %element = index.assume %element0 [range(%element0, 0, 81916), mul(%element0, 4), lt(%element0, %qkv_element_count)] : index
-    %mask = vector.mask.range [%element to %qkv_element_count step %c1] : index -> vector<4xi1>
-    %values = vector.load.mask %qkv_view[%element], %mask, %zero : view<[%qkv_element_count]xf32>, vector<4xi1>, vector<4xf32>
-    vector.store.mask %values, %captured_qkv_view[%element], %mask : vector<4xf32>, view<[%qkv_element_count]xf32>, vector<4xi1>
+    %element = index.assume %element0 [range(%element0, 0, 40956), mul(%element0, 4)] : index
+    %values = vector.load %qkv_view[%element] : view<40960xf32> -> vector<4xf32>
+    vector.store %values, %transition_view[%element] : vector<4xf32>, view<41344xf32>
   } else {
-    %is_gate_packet = index.cmp ult, %workitem, %gate_packet_count : index
+    %is_gate_packet = index.cmp ult, %workitem, %c96 : index
     scf.if %is_gate_packet {
-      %is_alpha = index.cmp ult, %workitem, %alpha_packet_count : index
+      %is_alpha = index.cmp ult, %workitem, %c48 : index
       %gate_packet = scf.if %is_alpha -> (index) {
         scf.yield %workitem : index
       } else {
-        %beta_packet = index.sub %workitem, %alpha_packet_count : index
+        %beta_packet = index.sub %workitem, %c48 : index
         scf.yield %beta_packet : index
       }
       %gate_element = index.mul %gate_packet, %c4 : index
-      %gate_mask = vector.mask.range [%gate_element to %gate_element_count step %c1] : index -> vector<4xi1>
-      scf.if %is_alpha {
-        %alpha_values = vector.load.mask %alpha_view[%gate_element], %gate_mask, %zero : view<[%gate_element_count]xf32>, vector<4xi1>, vector<4xf32>
-        vector.store.mask %alpha_values, %captured_alpha_view[%gate_element], %gate_mask : vector<4xf32>, view<[%gate_element_count]xf32>, vector<4xi1>
+      %values = scf.if %is_alpha -> (vector<4xf32>) {
+        %alpha_values = vector.load %alpha_view[%gate_element] : view<192xf32> -> vector<4xf32>
+        scf.yield %alpha_values : vector<4xf32>
       } else {
-        %beta_values = vector.load.mask %beta_view[%gate_element], %gate_mask, %zero : view<[%gate_element_count]xf32>, vector<4xi1>, vector<4xf32>
-        vector.store.mask %beta_values, %captured_beta_view[%gate_element], %gate_mask : vector<4xf32>, view<[%gate_element_count]xf32>, vector<4xi1>
+        %beta_values = vector.load %beta_view[%gate_element] : view<192xf32> -> vector<4xf32>
+        scf.yield %beta_values : vector<4xf32>
       }
+      %gate_base = scf.select %is_alpha, %alpha_element_base, %beta_element_base : index
+      %target_element0 = index.add %gate_base, %gate_element : index
+      %target_element = index.assume %target_element0 [range(%target_element0, 40960, 41340), mul(%target_element0, 4)] : index
+      vector.store %values, %transition_view[%target_element] : vector<4xf32>, view<41344xf32>
     }
   }
   kernel.return
@@ -786,95 +774,55 @@ check.case public @qwen38_gdn_norm_gate_f16_known_case {
   check.return
 }
 
-check.case public @qwen38_gdn_capture_transition_depth8_case {
-  %token_count = check.literal value(8) : index
-  %qkv = check.generate.iota offset(-40960.0) step(1.0) : tensor<81920xf32>
-  %alpha = check.generate.iota offset(-192.0) step(1.0) : tensor<384xf32>
-  %beta = check.generate.iota offset(192.0) step(-1.0) : tensor<384xf32>
-  %captured_qkv = check.generate.fill value(0.0) : tensor<81920xf32>
-  %captured_alpha = check.generate.fill value(0.0) : tensor<384xf32>
-  %captured_beta = check.generate.fill value(0.0) : tensor<384xf32>
-  kernel.launch @qwen38_gdn_capture_transition[%token_count](%token_count, %qkv, %alpha, %beta, %captured_qkv, %captured_alpha, %captured_beta) : [index](index, tensor<81920xf32>, tensor<384xf32>, tensor<384xf32>, tensor<81920xf32>, tensor<384xf32>, tensor<384xf32>)
-  check.expect.equal actual(%captured_qkv) expected(%qkv) : tensor<81920xf32>
-  check.expect.equal actual(%captured_alpha) expected(%alpha) : tensor<384xf32>
-  check.expect.equal actual(%captured_beta) expected(%beta) : tensor<384xf32>
+check.case public @qwen38_gdn_capture_transition_depth4_case {
+  %qkv = check.generate.iota offset(-20480.0) step(1.0) : tensor<40960xf32>
+  %alpha = check.generate.iota offset(-96.0) step(1.0) : tensor<192xf32>
+  %beta = check.generate.iota offset(96.0) step(-1.0) : tensor<192xf32>
+  %transition = check.generate.fill value(0.0) : tensor<41344xf32>
+  kernel.launch @qwen38_gdn_capture_transition_depth4(%qkv, %alpha, %beta, %transition) : (tensor<40960xf32>, tensor<192xf32>, tensor<192xf32>, tensor<41344xf32>)
+  %actual_qkv = check.tensor.view %transition offset(0) : tensor<41344xf32> -> tensor<40960xf32>
+  %actual_alpha = check.tensor.view %transition offset(163840) : tensor<41344xf32> -> tensor<192xf32>
+  %actual_beta = check.tensor.view %transition offset(164608) : tensor<41344xf32> -> tensor<192xf32>
+  check.expect.equal actual(%actual_qkv) expected(%qkv) : tensor<40960xf32>
+  check.expect.equal actual(%actual_alpha) expected(%alpha) : tensor<192xf32>
+  check.expect.equal actual(%actual_beta) expected(%beta) : tensor<192xf32>
   check.return
 }
 
 // Proves that speculative verification produces the same causal outputs as
 // committed execution while preserving both persistent GDN state components.
 check.case public @qwen38_gdn_read_only_state_case {
-  %token_count = check.literal value(8) : index
-  %token_count_data = check.generate.fill value(8) : tensor<1xi32>
+  %token_count = check.literal value(4) : index
+  %token_count_data = check.generate.fill value(4) : tensor<1xi32>
   %l2_epsilon = check.literal value(0.000001) : f32
-  %qkv_input = check.generate.iota offset(-0.5) step(0.0000244140625) period(4096) : tensor<8x10240xf32>
+  %qkv_input = check.generate.iota offset(-0.5) step(0.0000244140625) period(4096) : tensor<4x10240xf32>
   %conv_weight = check.generate.iota offset(-0.25) step(0.0000244140625) period(2048) : tensor<40960xf32>
   %initial_history = check.generate.fill value(-0.0625) : tensor<30720xf32>
   %committed_history = check.generate.fill value(-0.0625) : tensor<30720xf32>
   %read_only_history = check.generate.fill value(-0.0625) : tensor<30720xf32>
-  %committed_qkv = check.generate.fill value(0.0) : tensor<8x10240xf32>
-  %read_only_qkv = check.generate.fill value(0.0) : tensor<8x10240xf32>
-  %committed_inverse_norm = check.generate.fill value(0.0) : tensor<8x32xf32>
-  %read_only_inverse_norm = check.generate.fill value(0.0) : tensor<8x32xf32>
-  kernel.launch @qwen38_gdn_conv_prepare_prefill[%token_count](%token_count_data, %l2_epsilon, %qkv_input, %conv_weight, %committed_history, %committed_qkv, %committed_inverse_norm) : [index](tensor<1xi32>, f32, tensor<8x10240xf32>, tensor<40960xf32>, tensor<30720xf32>, tensor<8x10240xf32>, tensor<8x32xf32>)
-  kernel.launch @qwen38_gdn_conv_prepare_prefill_parallel_read_only[%token_count](%token_count_data, %l2_epsilon, %qkv_input, %conv_weight, %read_only_history, %read_only_qkv, %read_only_inverse_norm) : [index](tensor<1xi32>, f32, tensor<8x10240xf32>, tensor<40960xf32>, tensor<30720xf32>, tensor<8x10240xf32>, tensor<8x32xf32>)
-  check.expect.equal actual(%read_only_qkv) expected(%committed_qkv) : tensor<8x10240xf32>
-  check.expect.equal actual(%read_only_inverse_norm) expected(%committed_inverse_norm) : tensor<8x32xf32>
+  %committed_qkv = check.generate.fill value(0.0) : tensor<4x10240xf32>
+  %read_only_qkv = check.generate.fill value(0.0) : tensor<4x10240xf32>
+  %committed_inverse_norm = check.generate.fill value(0.0) : tensor<4x32xf32>
+  %read_only_inverse_norm = check.generate.fill value(0.0) : tensor<4x32xf32>
+  kernel.launch @qwen38_gdn_conv_prepare_prefill[%token_count](%token_count_data, %l2_epsilon, %qkv_input, %conv_weight, %committed_history, %committed_qkv, %committed_inverse_norm) : [index](tensor<1xi32>, f32, tensor<4x10240xf32>, tensor<40960xf32>, tensor<30720xf32>, tensor<4x10240xf32>, tensor<4x32xf32>)
+  kernel.launch @qwen38_gdn_conv_prepare_prefill_read_only[%token_count](%token_count_data, %l2_epsilon, %qkv_input, %conv_weight, %read_only_history, %read_only_qkv, %read_only_inverse_norm) : [index](tensor<1xi32>, f32, tensor<4x10240xf32>, tensor<40960xf32>, tensor<30720xf32>, tensor<4x10240xf32>, tensor<4x32xf32>)
+  check.expect.equal actual(%read_only_qkv) expected(%committed_qkv) : tensor<4x10240xf32>
+  check.expect.equal actual(%read_only_inverse_norm) expected(%committed_inverse_norm) : tensor<4x32xf32>
   check.expect.equal actual(%read_only_history) expected(%initial_history) : tensor<30720xf32>
 
-  %alpha = check.generate.iota offset(-0.25) step(0.0026041666666666665) : tensor<8x48xf32>
-  %beta = check.generate.iota offset(0.25) step(-0.0013020833333333333) : tensor<8x48xf32>
+  %alpha = check.generate.iota offset(-0.25) step(0.0026041666666666665) : tensor<4x48xf32>
+  %beta = check.generate.iota offset(0.25) step(-0.0013020833333333333) : tensor<4x48xf32>
   %ssm_a = check.generate.fill value(-0.5) : tensor<48xf32>
   %dt_bias = check.generate.fill value(0.0625) : tensor<48xf32>
   %initial_state = check.generate.fill value(0.03125) : tensor<786432xf32>
   %committed_state = check.generate.fill value(0.03125) : tensor<786432xf32>
   %read_only_state = check.generate.fill value(0.03125) : tensor<786432xf32>
-  %committed_output = check.generate.fill value(0.0) : tensor<8x6144xf32>
-  %read_only_output = check.generate.fill value(0.0) : tensor<8x6144xf32>
-  kernel.launch @qwen38_gdn_recurrent_prefill_x4[%token_count](%token_count_data, %committed_qkv, %committed_inverse_norm, %alpha, %beta, %ssm_a, %dt_bias, %committed_state, %committed_output) : [index](tensor<1xi32>, tensor<8x10240xf32>, tensor<8x32xf32>, tensor<8x48xf32>, tensor<8x48xf32>, tensor<48xf32>, tensor<48xf32>, tensor<786432xf32>, tensor<8x6144xf32>)
-  kernel.launch @qwen38_gdn_recurrent_prefill_x4_read_only[%token_count](%token_count_data, %read_only_qkv, %read_only_inverse_norm, %alpha, %beta, %ssm_a, %dt_bias, %read_only_state, %read_only_output) : [index](tensor<1xi32>, tensor<8x10240xf32>, tensor<8x32xf32>, tensor<8x48xf32>, tensor<8x48xf32>, tensor<48xf32>, tensor<48xf32>, tensor<786432xf32>, tensor<8x6144xf32>)
-  check.expect.equal actual(%read_only_output) expected(%committed_output) : tensor<8x6144xf32>
-  check.expect.equal actual(%read_only_state) expected(%initial_state) : tensor<786432xf32>
-  check.return
-}
-
-// Proves that a reusable depth-eight commit kernel publishes the same state as
-// an exact-depth kernel when replay_control commits only the first four rows.
-// MTP verification specializes allocation and launch capacity independently
-// from the accepted prefix carried in replay_control.
-check.case public @qwen38_gdn_partial_commit_capacity_differential_case {
-  %capacity_token_count = check.literal value(8) : index
-  %committed_token_count = check.literal value(4) : index
-  %token_count_data = check.generate.fill value(4) : tensor<1xi32>
-  %l2_epsilon = check.literal value(0.000001) : f32
-  %qkv_input = check.generate.iota offset(-0.5) step(0.0000244140625) period(4096) : tensor<8x10240xf32>
-  %qkv_input_prefix = check.tensor.view %qkv_input offset(0) : tensor<8x10240xf32> -> tensor<4x10240xf32>
-  %conv_weight = check.generate.iota offset(-0.25) step(0.0000244140625) period(2048) : tensor<40960xf32>
-  %capacity_history = check.generate.iota offset(-0.0625) step(0.0000030517578125) period(1024) : tensor<30720xf32>
-  %committed_history = check.generate.iota offset(-0.0625) step(0.0000030517578125) period(1024) : tensor<30720xf32>
-  %capacity_qkv = check.generate.fill value(0.0) : tensor<8x10240xf32>
-  %committed_qkv = check.generate.fill value(0.0) : tensor<4x10240xf32>
-  %capacity_inverse_norm = check.generate.fill value(0.0) : tensor<8x32xf32>
-  %committed_inverse_norm = check.generate.fill value(0.0) : tensor<4x32xf32>
-  kernel.launch @qwen38_gdn_conv_prepare_prefill[%capacity_token_count](%token_count_data, %l2_epsilon, %qkv_input, %conv_weight, %capacity_history, %capacity_qkv, %capacity_inverse_norm) : [index](tensor<1xi32>, f32, tensor<8x10240xf32>, tensor<40960xf32>, tensor<30720xf32>, tensor<8x10240xf32>, tensor<8x32xf32>)
-  kernel.launch @qwen38_gdn_conv_prepare_prefill[%committed_token_count](%token_count_data, %l2_epsilon, %qkv_input_prefix, %conv_weight, %committed_history, %committed_qkv, %committed_inverse_norm) : [index](tensor<1xi32>, f32, tensor<4x10240xf32>, tensor<40960xf32>, tensor<30720xf32>, tensor<4x10240xf32>, tensor<4x32xf32>)
-  check.expect.equal actual(%capacity_history) expected(%committed_history) : tensor<30720xf32>
-
-  %alpha = check.generate.iota offset(-0.25) step(0.0026041666666666665) : tensor<8x48xf32>
-  %beta = check.generate.iota offset(0.25) step(-0.0013020833333333333) : tensor<8x48xf32>
-  %alpha_prefix = check.tensor.view %alpha offset(0) : tensor<8x48xf32> -> tensor<4x48xf32>
-  %beta_prefix = check.tensor.view %beta offset(0) : tensor<8x48xf32> -> tensor<4x48xf32>
-  %ssm_a = check.generate.fill value(-0.5) : tensor<48xf32>
-  %dt_bias = check.generate.fill value(0.0625) : tensor<48xf32>
-  %capacity_state = check.generate.iota offset(-0.03125) step(0.0000019073486328125) period(2048) : tensor<786432xf32>
-  %committed_state = check.generate.iota offset(-0.03125) step(0.0000019073486328125) period(2048) : tensor<786432xf32>
-  %capacity_output = check.generate.fill value(0.0) : tensor<8x6144xf32>
   %committed_output = check.generate.fill value(0.0) : tensor<4x6144xf32>
-  kernel.launch @qwen38_gdn_recurrent_prefill_x4[%capacity_token_count](%token_count_data, %capacity_qkv, %capacity_inverse_norm, %alpha, %beta, %ssm_a, %dt_bias, %capacity_state, %capacity_output) : [index](tensor<1xi32>, tensor<8x10240xf32>, tensor<8x32xf32>, tensor<8x48xf32>, tensor<8x48xf32>, tensor<48xf32>, tensor<48xf32>, tensor<786432xf32>, tensor<8x6144xf32>)
-  kernel.launch @qwen38_gdn_recurrent_prefill_x4[%committed_token_count](%token_count_data, %committed_qkv, %committed_inverse_norm, %alpha_prefix, %beta_prefix, %ssm_a, %dt_bias, %committed_state, %committed_output) : [index](tensor<1xi32>, tensor<4x10240xf32>, tensor<4x32xf32>, tensor<4x48xf32>, tensor<4x48xf32>, tensor<48xf32>, tensor<48xf32>, tensor<786432xf32>, tensor<4x6144xf32>)
-  check.expect.equal actual(%capacity_state) expected(%committed_state) : tensor<786432xf32>
-  %capacity_output_prefix = check.tensor.view %capacity_output offset(0) : tensor<8x6144xf32> -> tensor<4x6144xf32>
-  check.expect.equal actual(%capacity_output_prefix) expected(%committed_output) : tensor<4x6144xf32>
+  %read_only_output = check.generate.fill value(0.0) : tensor<4x6144xf32>
+  kernel.launch @qwen38_gdn_recurrent_prefill_x4[%token_count](%token_count_data, %committed_qkv, %committed_inverse_norm, %alpha, %beta, %ssm_a, %dt_bias, %committed_state, %committed_output) : [index](tensor<1xi32>, tensor<4x10240xf32>, tensor<4x32xf32>, tensor<4x48xf32>, tensor<4x48xf32>, tensor<48xf32>, tensor<48xf32>, tensor<786432xf32>, tensor<4x6144xf32>)
+  kernel.launch @qwen38_gdn_recurrent_prefill_x4_read_only[%token_count](%token_count_data, %read_only_qkv, %read_only_inverse_norm, %alpha, %beta, %ssm_a, %dt_bias, %read_only_state, %read_only_output) : [index](tensor<1xi32>, tensor<4x10240xf32>, tensor<4x32xf32>, tensor<4x48xf32>, tensor<4x48xf32>, tensor<48xf32>, tensor<48xf32>, tensor<786432xf32>, tensor<4x6144xf32>)
+  check.expect.equal actual(%read_only_output) expected(%committed_output) : tensor<4x6144xf32>
+  check.expect.equal actual(%read_only_state) expected(%initial_state) : tensor<786432xf32>
   check.return
 }
 

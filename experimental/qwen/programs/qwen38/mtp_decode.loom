@@ -15,7 +15,7 @@ kernel.decl @qwen38_rmsnorm_f32_decode() launch(%epsilon: f32, %input: buffer, %
 kernel.decl @qwen38_token_embedding_q5k_f32_decode() launch(%token_id: buffer, %weight: buffer, %output: buffer)
 kernel.decl @qwen38_greedy_argmax_partial_rows_f32(%token_count: index, %output_size: index) launch(%token_count: index, %output_size: index, %logits: buffer, %partial_logits: buffer, %partial_token_ids: buffer)
 kernel.decl @qwen38_greedy_argmax_reduce_rows_f32(%token_count: index, %output_size: index) launch(%token_count: index, %output_size: index, %partial_logits: buffer, %partial_token_ids: buffer, %token_ids: buffer)
-kernel.decl @qwen38_decode_commit_token() launch(%control: buffer, %token_ids: buffer)
+kernel.decl @qwen38_decode_commit_token() launch(%control: buffer, %token_ids: buffer, %progress: buffer)
 kernel.decl @qwen38_mtp_begin_depth4() launch(%target_control: buffer, %target_tokens: buffer, %target_hidden: buffer, %mtp_control: buffer, %current_token: buffer, %draft_hidden: buffer, %verify_tokens: buffer)
 kernel.decl @qwen38_mtp_commit_draft_depth4() launch(%mtp_control: buffer, %current_token: buffer, %draft_tokens: buffer, %verify_tokens: buffer)
 
@@ -80,9 +80,9 @@ command.program.def @qwen38_mtp_decode_body() launch(%embedding_parameters: buff
 
 // Preserves the standalone one-token NextN transition used by the isolated
 // correctness and timing harness.
-command.program.def public @qwen38_mtp_decode_greedy() launch(%embedding_parameters: buffer, %output_parameters: buffer, %mtp_input_parameters: buffer, %mtp_layer_parameters: buffer, %mtp_head_parameters: buffer, %residual: buffer, %control: buffer, %attention_cache: buffer, %normalized_hidden: buffer, %token_id: buffer) {
+command.program.def public @qwen38_mtp_decode_greedy() launch(%embedding_parameters: buffer, %output_parameters: buffer, %mtp_input_parameters: buffer, %mtp_layer_parameters: buffer, %mtp_head_parameters: buffer, %residual: buffer, %control: buffer, %attention_cache: buffer, %normalized_hidden: buffer, %token_id: buffer, %progress: buffer) {
   command.program.launch @qwen38_mtp_decode_body[](%embedding_parameters, %output_parameters, %mtp_input_parameters, %mtp_layer_parameters, %mtp_head_parameters, %residual, %control, %attention_cache, %normalized_hidden, %token_id) : [](buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
-  kernel.launch @qwen38_decode_commit_token(%control, %token_id) : (buffer, buffer)
+  kernel.launch @qwen38_decode_commit_token(%control, %token_id, %progress) : (buffer, buffer, buffer)
   command.return
 }
 
