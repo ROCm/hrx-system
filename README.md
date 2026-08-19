@@ -133,8 +133,9 @@ python dev.py cmake precommit
 `precommit` checks staged, unstaged, and untracked files. Use
 `python dev.py <lane> precommit --base <git-ref>` to check the branch diff from
 the merge base through `HEAD` plus local changes, or `--staged` for staged
-files only. Add `--profile default`, `--profile paranoid`, or `--profile ci`
-to select the check profile for a manual run. Re-run
+files only. `--amend` checks the exact amended candidate, the index relative to
+`HEAD^`, without writing files. Add `--profile default`, `--profile paranoid`,
+or `--profile ci` to select the check profile for a manual run. Re-run
 `python dev.py <lane> hook --profile <profile>` to change the default profile
 used by Git commits. Use `python dev.py <lane> presubmit` for the full-tree
 CI-shaped check.
@@ -146,10 +147,11 @@ python dev.py bazel fix
 python dev.py cmake fix
 ```
 
-Test-bearing Git commit-hook profiles apply mechanical fixups before running
-the same profile in non-mutating check mode. The hook validates commit scope,
-not the full branch: files staged for commit plus files changed by `HEAD`, so
-amended commits include the commit being replaced. See
+Test-bearing Git commit-hook profiles apply mechanical fixups only to staged
+files and declared generated outputs. When a fixer changes the index, the hook
+names those paths and stops before tests; reviewing the staged diff and retrying
+the commit runs the non-mutating validation. A candidate path with unstaged
+hunks stops before fixers run, preserving partial-staging intent. See
 `CONTRIBUTING.md` for contributor setup and `build_tools/lefthook/README.md`
 for the hook architecture.
 

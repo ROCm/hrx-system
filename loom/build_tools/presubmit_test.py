@@ -102,6 +102,37 @@ class LoomPresubmitTest(unittest.TestCase):
             changed_paths,
         )
 
+    def test_generated_artifact_fix_passes_only_selected_paths_as_writable(self):
+        selected_paths = ["loom/py/loom/dialect/__init__.py"]
+        result = types.SimpleNamespace(ok=True, changed_paths=())
+        with (
+            mock.patch.object(
+                self.presubmit, "selected_files", return_value=selected_paths
+            ),
+            mock.patch.object(
+                self.presubmit.checked_in_artifacts,
+                "maintain_checked_in_artifacts",
+                return_value=result,
+            ) as maintain_checked_in_artifacts,
+            mock.patch.object(
+                self.presubmit.project_presubmit, "stage_changed_paths"
+            ) as stage_changed_paths,
+        ):
+            self.assertTrue(
+                self.presubmit.run_generated_artifact_maintenance(
+                    fix=True, files_from="paths.txt"
+                )
+            )
+
+        maintain_checked_in_artifacts.assert_called_once_with(
+            "update", writable_paths=selected_paths
+        )
+        stage_changed_paths.assert_called_once_with(
+            self.presubmit.PROJECT_NAME,
+            self.presubmit.REPO_ROOT,
+            (),
+        )
+
     def test_generated_artifact_failure_does_not_stage_partial_updates(self):
         result = types.SimpleNamespace(
             ok=False,
@@ -555,7 +586,7 @@ class LoomPresubmitTest(unittest.TestCase):
         ):
             self.assertEqual(self.presubmit.run_presubmit(args), 1)
 
-        generated_artifact_maintenance.assert_called_once_with(False)
+        generated_artifact_maintenance.assert_called_once_with(False, None)
         source_format_maintenance.assert_called_once_with(
             lane="bazel", files_from=None, fix=False
         )
@@ -589,7 +620,7 @@ class LoomPresubmitTest(unittest.TestCase):
         ):
             self.assertEqual(self.presubmit.run_presubmit(args), 1)
 
-        generated_artifact_maintenance.assert_called_once_with(False)
+        generated_artifact_maintenance.assert_called_once_with(False, None)
         source_format_maintenance.assert_called_once_with(
             lane="bazel", files_from=None, fix=False
         )

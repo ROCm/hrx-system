@@ -91,11 +91,17 @@ def checked_in_artifact_families() -> tuple[GeneratedFileFamily, ...]:
 
 def maintain_checked_in_artifacts(
     mode: GeneratedFileMaintenanceMode,
+    *,
+    writable_paths: Sequence[str] | None = None,
 ) -> GeneratedFileMaintenanceResult:
-    """Checks or updates every registered checked-in artifact family."""
+    """Checks all families or updates only families owning writable paths."""
+    families = checked_in_artifact_families()
+    if mode == "update" and writable_paths is not None:
+        writable_path_set = set(writable_paths)
+        families = tuple(family for family in families if writable_path_set.intersection((*family.file_set.output_paths, *family.file_set.obsolete_paths)))
     return maintain_generated_file_families(
         _bootstrap.REPO_ROOT,
-        checked_in_artifact_families(),
+        families,
         mode=mode,
     )
 

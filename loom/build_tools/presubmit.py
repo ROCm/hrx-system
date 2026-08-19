@@ -98,11 +98,18 @@ def should_run_presubmit(files_from: str | None) -> bool:
     )
 
 
-def run_generated_artifact_maintenance(fix: bool) -> bool:
+def run_generated_artifact_maintenance(
+    fix: bool, files_from: str | None = None
+) -> bool:
     print("loom presubmit: Checked-in generated artifacts")
-    result = checked_in_artifacts.maintain_checked_in_artifacts(
-        "update" if fix else "check"
-    )
+    if fix and files_from is not None:
+        result = checked_in_artifacts.maintain_checked_in_artifacts(
+            "update", writable_paths=selected_files(files_from)
+        )
+    else:
+        result = checked_in_artifacts.maintain_checked_in_artifacts(
+            "update" if fix else "check"
+        )
     if not result.ok:
         return False
     if not fix:
@@ -329,7 +336,7 @@ def run_presubmit(args: argparse.Namespace) -> int:
         return 0
     ok = True
     if args.hygiene:
-        ok = run_generated_artifact_maintenance(args.fix) and ok
+        ok = run_generated_artifact_maintenance(args.fix, args.files_from) and ok
         ok = (
             run_source_format_maintenance(
                 lane=args.lane,

@@ -95,10 +95,11 @@ python dev.py cmake precommit
 With no input option, `precommit` checks staged, unstaged, and untracked files.
 Use `--base <git-ref>` to check the branch diff from the merge base through
 `HEAD` plus local changes. Use `--staged` when you explicitly want staged files
-only. Use `--profile default`, `--profile paranoid`, or `--profile ci` to select
-the check profile for one manual run. The Bazel lane defaults to `paranoid` for
-precommit. The CMake lane defaults to `default`; select `paranoid` or `ci` to
-add affected project CMake/CTest checks.
+only. `--amend` checks the exact amended candidate by comparing the index with
+`HEAD^`; that mode is always non-mutating. Use `--profile default`, `--profile
+paranoid`, or `--profile ci` to select the check profile for one manual run. The
+Bazel lane defaults to `paranoid` for precommit. The CMake lane defaults to
+`default`; select `paranoid` or `ci` to add affected project CMake/CTest checks.
 
 Use the fix command when you want mechanical repairs:
 
@@ -130,11 +131,24 @@ or:
 python dev.py cmake hook --profile default
 ```
 
-The hook validates commit scope: files staged for commit plus files changed by
-`HEAD`, so amended commits include the commit being replaced without checking
-the full branch. Test-bearing hook profiles apply mechanical fixups before
-running the same profile in non-mutating check mode. Lane-specific hook policy
-is stored in ignored `lefthook-local.yml`. Re-run
+The hook treats the Git index as the ordinary commit boundary. Test-bearing
+profiles first apply fixups to staged existing files and generated outputs
+derived from selected inputs. If the index changes, the attempt stops before
+tests and prints every changed staged path. Review `git diff --cached` and retry
+the same commit; the repaired candidate then receives read-only hygiene, tests,
+and static analysis. Lefthook's `fail_on_changes` check remains an independent
+guard against committing hook mutations without review.
+
+A candidate file that also has unstaged changes is an incoherent formatter
+input: the index contains one version while whole-file tools see another. The
+hook stops with the exact paths. Running `python dev.py <lane> fix` before
+selecting hunks, then staging the intended hunks again, keeps the commit narrow
+without letting a formatter stage the rest of the file.
+
+Git's pre-commit event does not identify an amend operation. Explicit
+`python dev.py <lane> precommit --amend` validates the index against `HEAD^`
+without granting mutation authority to files inherited from `HEAD`.
+Lane-specific hook policy is stored in ignored `lefthook-local.yml`. Re-run
 `python dev.py <lane> hook --profile <profile>` to change the profile used by
 Git commits.
 

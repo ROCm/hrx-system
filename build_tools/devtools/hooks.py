@@ -53,7 +53,7 @@ def hook_content(lane: str, profile: str, python_executable: str) -> str:
             "precommit",
             "--profile",
             profile,
-            "--commit",
+            "--staged",
             "--verbose",
         ]
     )
@@ -69,7 +69,7 @@ def hook_content(lane: str, profile: str, python_executable: str) -> str:
 
 # Local {lane_name}-lane hook policy.
 # Installed by `python dev.py {lane} hook --profile {profile}`.
-# Test-bearing commit-scope precommit profiles apply fixups before validation.
+# Test-bearing staged precommit profiles apply fixups before validation.
 # Tool output streams live so long-running builds remain observable.
 
 pre-commit:
