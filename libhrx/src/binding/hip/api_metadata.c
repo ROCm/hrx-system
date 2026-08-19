@@ -11,6 +11,8 @@
 // HIP profiler callback IDs are an ABI-defined sparse namespace. Defined
 // entries identify APIs independently of whether this runtime implements
 // them; reserved and unrecognized IDs have the stable name "unknown".
+// Mirrors the stable profiling IDs through HIP_API_ID_LAST=483 declared by
+// hip/amd_detail/hip_prof_str.h. Reserved IDs intentionally remain NULL.
 static const char* const iree_hip_api_name_table[] = {
     [1] = "__hipPopCallConfiguration",
     [2] = "__hipPushCallConfiguration",
@@ -478,6 +480,10 @@ static const char* const iree_hip_api_name_table[] = {
     [477] = "hipExecutionCtxWaitEvent",
     [478] = "hipLibraryGetGlobal",
     [479] = "hipLibraryGetManaged",
+    [480] = "hipMemDiscardBatchAsync",
+    [481] = "hipDrvMemDiscardBatchAsync",
+    [482] = "hipMemDiscardAndPrefetchBatchAsync",
+    [483] = "hipDrvMemDiscardAndPrefetchBatchAsync",
 };
 
 HIPAPI const char* hipApiName(uint32_t id) {

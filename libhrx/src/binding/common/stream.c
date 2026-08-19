@@ -302,8 +302,6 @@ iree_status_t iree_hal_streaming_stream_create(
   iree_atomic_ref_count_init(&stream->ref_count);
   stream->context = context;
   stream->flags = flags;
-  stream->synchronization_policy =
-      IREE_HAL_STREAMING_SYNCHRONIZATION_POLICY_AUTO;
   stream->priority = priority;
   stream->stream_id = 0;
   stream->command_buffer = NULL;
@@ -354,14 +352,18 @@ static void iree_hal_streaming_stream_destroy(
     iree_hal_streaming_stream_t* stream) {
   IREE_TRACE_ZONE_BEGIN(z0);
 
+  iree_slim_mutex_lock(&stream->mutex);
   iree_hal_streaming_context_t* context = stream->context;
+  iree_slim_mutex_unlock(&stream->mutex);
   if (context) {
     iree_status_ignore(iree_hal_streaming_stream_synchronize(stream));
     if (stream->capture_status != IREE_HAL_STREAMING_CAPTURE_STATUS_NONE) {
       iree_hal_streaming_stream_set_capture_status(
           stream, IREE_HAL_STREAMING_CAPTURE_STATUS_NONE);
     }
-    stream->context = NULL;
+    iree_slim_mutex_lock(&stream->mutex);
+    if (stream->context == context) stream->context = NULL;
+    iree_slim_mutex_unlock(&stream->mutex);
     iree_hal_streaming_context_unregister_stream(context, stream);
   }
 
@@ -399,6 +401,21 @@ void iree_hal_streaming_stream_release(iree_hal_streaming_stream_t* stream) {
   if (stream && iree_atomic_ref_count_dec(&stream->ref_count) == 1) {
     iree_hal_streaming_stream_destroy(stream);
   }
+}
+
+bool iree_hal_streaming_stream_retain_context(
+    iree_hal_streaming_stream_t* stream,
+    iree_hal_streaming_context_t** out_context) {
+  IREE_ASSERT_ARGUMENT(stream);
+  IREE_ASSERT_ARGUMENT(out_context);
+  *out_context = NULL;
+  iree_slim_mutex_lock(&stream->mutex);
+  iree_hal_streaming_context_t* context = stream->context;
+  if (iree_hal_streaming_context_try_retain(context)) {
+    *out_context = context;
+  }
+  iree_slim_mutex_unlock(&stream->mutex);
+  return *out_context != NULL;
 }
 
 iree_status_t iree_hal_streaming_stream_begin_locked(
@@ -553,70 +570,158 @@ iree_status_t iree_hal_streaming_stream_query(
   return iree_ok_status();
 }
 
-iree_status_t iree_hal_streaming_stream_wait_stream(
+typedef struct iree_hal_streaming_wait_dependency_t {
+  iree_hal_streaming_stream_t* source_stream;
+  uint64_t source_timeline_value;
+  bool added_memory_reuse_dependency;
+} iree_hal_streaming_wait_dependency_t;
+
+enum { IREE_HAL_STREAMING_INLINE_WAIT_DEPENDENCY_COUNT = 8 };
+
+iree_status_t iree_hal_streaming_stream_wait_streams(
     iree_hal_streaming_stream_t* stream,
-    iree_hal_streaming_stream_t* source_stream) {
+    iree_hal_streaming_stream_t* const* source_streams,
+    iree_host_size_t source_stream_count) {
   IREE_ASSERT_ARGUMENT(stream);
-  IREE_ASSERT_ARGUMENT(source_stream);
-  if (stream == source_stream) return iree_ok_status();
-  if (stream->context != source_stream->context) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "stream dependency crosses contexts");
-  }
+  if (source_stream_count == 0) return iree_ok_status();
+  IREE_ASSERT_ARGUMENT(source_streams);
 
   IREE_TRACE_ZONE_BEGIN(z0);
 
-  // Make the source timeline point concrete before reading it. A source with
-  // no submitted work cannot contribute a dependency.
-  IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_hal_streaming_stream_flush(source_stream));
-  iree_slim_mutex_lock(&source_stream->mutex);
-  const uint64_t source_timeline_value = source_stream->pending_value;
-  iree_slim_mutex_unlock(&source_stream->mutex);
-  if (source_timeline_value == 0) {
+  iree_slim_mutex_lock(&stream->mutex);
+  const bool destination_is_capturing =
+      stream->capture_status != IREE_HAL_STREAMING_CAPTURE_STATUS_NONE;
+  iree_slim_mutex_unlock(&stream->mutex);
+  if (destination_is_capturing) {
     IREE_TRACE_ZONE_END(z0);
-    return iree_ok_status();
-  }
-  if (iree_hal_streaming_stream_has_memory_reuse_dependency(
-          stream, source_stream->stream_id, source_timeline_value)) {
-    IREE_TRACE_ZONE_END(z0);
-    return iree_ok_status();
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "destination stream is capturing");
   }
 
-  bool added_memory_reuse_dependency = false;
-  IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0,
-      iree_hal_streaming_stream_reserve_memory_reuse_dependency(
-          stream, source_stream->stream_id, &added_memory_reuse_dependency));
+  iree_status_t status = iree_ok_status();
+  iree_hal_streaming_wait_dependency_t
+      inline_dependencies[IREE_HAL_STREAMING_INLINE_WAIT_DEPENDENCY_COUNT];
+  iree_hal_semaphore_t*
+      inline_wait_semaphores[IREE_HAL_STREAMING_INLINE_WAIT_DEPENDENCY_COUNT +
+                             1];
+  uint64_t
+      inline_wait_values[IREE_HAL_STREAMING_INLINE_WAIT_DEPENDENCY_COUNT + 1];
+  iree_hal_streaming_wait_dependency_t* dependencies = inline_dependencies;
+  iree_hal_semaphore_t** wait_semaphores_storage = inline_wait_semaphores;
+  uint64_t* wait_values_storage = inline_wait_values;
+  bool uses_heap_storage =
+      source_stream_count > IREE_HAL_STREAMING_INLINE_WAIT_DEPENDENCY_COUNT;
+  if (uses_heap_storage) {
+    iree_host_size_t wait_capacity = 0;
+    iree_host_size_t dependencies_size = 0;
+    iree_host_size_t semaphores_size = 0;
+    iree_host_size_t values_size = 0;
+    if (IREE_UNLIKELY(!iree_host_size_checked_add(source_stream_count, 1,
+                                                  &wait_capacity) ||
+                      !iree_host_size_checked_mul(
+                          source_stream_count,
+                          sizeof(iree_hal_streaming_wait_dependency_t),
+                          &dependencies_size) ||
+                      !iree_host_size_checked_mul(wait_capacity,
+                                                  sizeof(iree_hal_semaphore_t*),
+                                                  &semaphores_size) ||
+                      !iree_host_size_checked_mul(
+                          wait_capacity, sizeof(uint64_t), &values_size))) {
+      status = iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                                "stream dependency count overflow");
+    }
+    dependencies = NULL;
+    wait_semaphores_storage = NULL;
+    wait_values_storage = NULL;
+    if (iree_status_is_ok(status)) {
+      status = iree_allocator_malloc(stream->host_allocator, dependencies_size,
+                                     (void**)&dependencies);
+    }
+    if (iree_status_is_ok(status)) {
+      status = iree_allocator_malloc(stream->host_allocator, semaphores_size,
+                                     (void**)&wait_semaphores_storage);
+    }
+    if (iree_status_is_ok(status)) {
+      status = iree_allocator_malloc(stream->host_allocator, values_size,
+                                     (void**)&wait_values_storage);
+    }
+  }
+
+  iree_host_size_t dependency_count = 0;
+  for (iree_host_size_t i = 0;
+       i < source_stream_count && iree_status_is_ok(status); ++i) {
+    iree_hal_streaming_stream_t* source_stream = source_streams[i];
+    if (!source_stream || source_stream == stream) continue;
+    if (source_stream->context != stream->context) {
+      status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "stream dependency crosses contexts");
+      break;
+    }
+    iree_slim_mutex_lock(&source_stream->mutex);
+    const bool source_is_capturing =
+        source_stream->capture_status != IREE_HAL_STREAMING_CAPTURE_STATUS_NONE;
+    iree_slim_mutex_unlock(&source_stream->mutex);
+    if (source_is_capturing) {
+      status = iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                                "source stream is capturing");
+      break;
+    }
+
+    // Flush first so the captured value names all source work preceding this
+    // operation. A source that has never submitted contributes no wait.
+    status = iree_hal_streaming_stream_flush(source_stream);
+    if (!iree_status_is_ok(status)) break;
+    iree_slim_mutex_lock(&source_stream->mutex);
+    const uint64_t source_timeline_value = source_stream->pending_value;
+    iree_slim_mutex_unlock(&source_stream->mutex);
+
+    status = iree_status_join(
+        status,
+        iree_hal_streaming_memory_release_completed_async_frees(source_stream));
+    if (!iree_status_is_ok(status) || source_timeline_value == 0) continue;
+
+    iree_hal_streaming_wait_dependency_t* dependency =
+        &dependencies[dependency_count];
+    dependency->source_stream = source_stream;
+    dependency->source_timeline_value = source_timeline_value;
+    dependency->added_memory_reuse_dependency = false;
+    status = iree_hal_streaming_stream_reserve_memory_reuse_dependency(
+        stream, source_stream->stream_id,
+        &dependency->added_memory_reuse_dependency);
+    if (iree_status_is_ok(status)) {
+      ++dependency_count;
+    }
+  }
 
   // Submit prior destination work before appending a queue dependency. The
-  // barrier advances the destination timeline only after both streams reach
-  // their captured points, so later command buffers naturally wait on it.
+  // barrier advances its timeline only after every captured source point.
   bool submitted = false;
-  iree_status_t status = iree_hal_streaming_stream_flush(stream);
-  if (iree_status_is_ok(status)) {
+  if (iree_status_is_ok(status) && dependency_count > 0) {
+    status = iree_hal_streaming_stream_flush(stream);
+  }
+  if (iree_status_is_ok(status) && dependency_count > 0) {
     iree_slim_mutex_lock(&stream->mutex);
     uint64_t destination_timeline_value = 0;
     uint64_t signal_value = 0;
     status = iree_hal_streaming_stream_reserve_next_value_locked(
         stream, &destination_timeline_value, &signal_value);
     if (iree_status_is_ok(status)) {
-      iree_hal_semaphore_t* wait_semaphores_storage[] = {
-          stream->timeline_semaphore,
-          source_stream->timeline_semaphore,
-      };
-      uint64_t wait_values_storage[] = {
-          destination_timeline_value,
-          source_timeline_value,
-      };
+      iree_host_size_t wait_count = 0;
+      if (destination_timeline_value > 0) {
+        wait_semaphores_storage[wait_count] = stream->timeline_semaphore;
+        wait_values_storage[wait_count] = destination_timeline_value;
+        ++wait_count;
+      }
+      for (iree_host_size_t i = 0; i < dependency_count; ++i) {
+        wait_semaphores_storage[wait_count] =
+            dependencies[i].source_stream->timeline_semaphore;
+        wait_values_storage[wait_count] = dependencies[i].source_timeline_value;
+        ++wait_count;
+      }
       const iree_hal_semaphore_list_t wait_semaphores = {
-          .count = destination_timeline_value > 0 ? 2 : 1,
-          .semaphores = destination_timeline_value > 0
-                            ? wait_semaphores_storage
-                            : &wait_semaphores_storage[1],
-          .payload_values = destination_timeline_value > 0
-                                ? wait_values_storage
-                                : &wait_values_storage[1],
+          .count = wait_count,
+          .semaphores = wait_semaphores_storage,
+          .payload_values = wait_values_storage,
       };
       const iree_hal_semaphore_list_t signal_semaphores = {
           .count = 1,
@@ -638,16 +743,33 @@ iree_status_t iree_hal_streaming_stream_wait_stream(
     iree_slim_mutex_unlock(&stream->mutex);
   }
 
-  if (submitted) {
-    iree_hal_streaming_stream_record_memory_reuse_dependency(
-        stream, source_stream->stream_id, source_timeline_value);
-  } else if (added_memory_reuse_dependency) {
-    iree_hal_streaming_stream_remove_uncommitted_memory_reuse_dependency(
-        stream, source_stream->stream_id);
+  for (iree_host_size_t i = 0; i < dependency_count; ++i) {
+    iree_hal_streaming_wait_dependency_t* dependency = &dependencies[i];
+    if (submitted) {
+      iree_hal_streaming_stream_record_memory_reuse_dependency(
+          stream, dependency->source_stream->stream_id,
+          dependency->source_timeline_value);
+    } else if (dependency->added_memory_reuse_dependency) {
+      iree_hal_streaming_stream_remove_uncommitted_memory_reuse_dependency(
+          stream, dependency->source_stream->stream_id);
+    }
+  }
+
+  if (uses_heap_storage) {
+    iree_allocator_free(stream->host_allocator, wait_values_storage);
+    iree_allocator_free(stream->host_allocator, wait_semaphores_storage);
+    iree_allocator_free(stream->host_allocator, dependencies);
   }
 
   IREE_TRACE_ZONE_END(z0);
   return status;
+}
+
+iree_status_t iree_hal_streaming_stream_wait_stream(
+    iree_hal_streaming_stream_t* stream,
+    iree_hal_streaming_stream_t* source_stream) {
+  IREE_ASSERT_ARGUMENT(source_stream);
+  return iree_hal_streaming_stream_wait_streams(stream, &source_stream, 1);
 }
 
 static iree_status_t iree_hal_streaming_stream_synchronize_impl(
@@ -767,12 +889,29 @@ iree_status_t iree_hal_streaming_stream_wait_submitted(
 }
 
 iree_status_t iree_hal_streaming_stream_wait_event(
-    iree_hal_streaming_stream_t* stream, iree_hal_streaming_event_t* event) {
+    iree_hal_streaming_stream_t* stream, iree_hal_streaming_event_t* event,
+    bool capture_external_wait) {
   IREE_ASSERT_ARGUMENT(stream);
   IREE_ASSERT_ARGUMENT(event);
   IREE_TRACE_ZONE_BEGIN(z0);
 
-  // Check if we're capturing to a graph.
+  // An external wait remains an explicit node so each graph launch resolves
+  // the event point supplied by the application at execution time.
+  if (capture_external_wait &&
+      stream->capture_status == IREE_HAL_STREAMING_CAPTURE_STATUS_ACTIVE) {
+    iree_hal_streaming_graph_node_t* node = NULL;
+    IREE_RETURN_AND_END_ZONE_IF_ERROR(
+        z0, iree_hal_streaming_graph_add_event_node(
+                stream->capture_graph, stream->capture_dependencies,
+                stream->capture_dependency_count,
+                IREE_HAL_STREAMING_GRAPH_NODE_TYPE_EVENT_WAIT, event, &node));
+    IREE_RETURN_AND_END_ZONE_IF_ERROR(
+        z0, iree_hal_streaming_capture_set_last_node(stream, node));
+    IREE_TRACE_ZONE_END(z0);
+    return iree_ok_status();
+  }
+
+  // A wait on an event recorded during capture joins the recording graph.
   if (event->capture_graph) {
     bool adopt_capture_graph = false;
     iree_slim_mutex_lock(&stream->mutex);

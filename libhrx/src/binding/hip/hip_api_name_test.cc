@@ -21,18 +21,19 @@ const char* CandidateLibPath() {
 #ifdef HRX_TEST_LIBAMDHIP64_PATH
   return HRX_TEST_LIBAMDHIP64_PATH;
 #else
-  return "libamdhip64.so";
+  return nullptr;
 #endif
 }
 
 class HipApiNameTest : public testing::Test {
  protected:
   void SetUp() override {
-    library_ = dlopen(CandidateLibPath(), RTLD_LAZY | RTLD_LOCAL);
-    if (library_ == nullptr) {
-      GTEST_SKIP() << "cannot dlopen " << CandidateLibPath() << ": "
-                   << dlerror();
-    }
+    const char* library_path = CandidateLibPath();
+    ASSERT_NE(library_path, nullptr)
+        << "the build must provide the libamdhip64 artifact under test";
+    library_ = dlopen(library_path, RTLD_LAZY | RTLD_LOCAL);
+    ASSERT_NE(library_, nullptr)
+        << "cannot dlopen " << library_path << ": " << dlerror();
     api_name_ = reinterpret_cast<hipApiNameFn>(dlsym(library_, "hipApiName"));
     ASSERT_NE(api_name_, nullptr) << "hipApiName is not exported";
   }
@@ -49,7 +50,7 @@ class HipApiNameTest : public testing::Test {
 
 TEST_F(HipApiNameTest, ReturnsStableNamesForDefinedIds) {
   EXPECT_STREQ("__hipPopCallConfiguration", api_name_(1));
-  EXPECT_STREQ("hipLibraryGetManaged", api_name_(479));
+  EXPECT_STREQ("hipDrvMemDiscardAndPrefetchBatchAsync", api_name_(483));
 }
 
 TEST_F(HipApiNameTest, ReturnsUnknownForReservedAndOutOfRangeIds) {

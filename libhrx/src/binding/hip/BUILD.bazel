@@ -159,6 +159,7 @@ hrx_cc_test(
     srcs = ["handle_registry_test.cc"],
     deps = [
         ":handle_registry",
+        "//build_tools:pthreads",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],
@@ -231,6 +232,7 @@ hrx_cc_test(
     deps = [
         ":launch_params",
         "//build_tools:dl",
+        "//build_tools:pthreads",
         "//libhrx/src/binding/common",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",

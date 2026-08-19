@@ -6,6 +6,10 @@
 
 #include "binding/hip/handle_registry.h"
 
+#include <atomic>
+#include <thread>
+#include <vector>
+
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 
@@ -25,6 +29,14 @@ class HandleRegistryTest : public ::testing::Test {
 uintptr_t retained_handle = 0;
 
 void RetainHandle(uintptr_t handle) { retained_handle = handle; }
+
+std::atomic<uint64_t> concurrent_retain_count{0};
+
+void CountRetain(uintptr_t handle) {
+  if (handle != 0) {
+    concurrent_retain_count.fetch_add(1, std::memory_order_relaxed);
+  }
+}
 
 TEST_F(HandleRegistryTest, LookupRetainsOnlyLiveHandles) {
   constexpr uintptr_t handle = 0x1234;
@@ -77,6 +89,43 @@ TEST_F(HandleRegistryTest, RetainsEntriesAcrossGrowthAndTombstoneReuse) {
       EXPECT_TRUE(iree_hip_handle_registry_remove(&registry_, handle));
     }
   }
+}
+
+TEST_F(HandleRegistryTest, ConcurrentLookupsAndRemovalRejectStaleHandles) {
+  constexpr uintptr_t handle_count = 256;
+  constexpr int thread_count = 8;
+  for (uintptr_t handle = 1; handle <= handle_count; ++handle) {
+    IREE_ASSERT_OK(iree_hip_handle_registry_insert(&registry_, handle));
+  }
+
+  concurrent_retain_count.store(0, std::memory_order_relaxed);
+  std::atomic<bool> start{false};
+  std::vector<std::thread> threads;
+  threads.reserve(thread_count);
+  for (int thread = 0; thread < thread_count; ++thread) {
+    threads.emplace_back([&, thread] {
+      while (!start.load(std::memory_order_acquire)) {
+        std::this_thread::yield();
+      }
+      for (uintptr_t handle = thread + 1; handle <= handle_count;
+           handle += thread_count) {
+        iree_hip_handle_registry_lookup_retain(&registry_, handle, CountRetain);
+      }
+    });
+  }
+
+  start.store(true, std::memory_order_release);
+  for (uintptr_t handle = 1; handle <= handle_count; ++handle) {
+    EXPECT_TRUE(iree_hip_handle_registry_remove(&registry_, handle));
+  }
+  for (std::thread& thread : threads) thread.join();
+
+  for (uintptr_t handle = 1; handle <= handle_count; ++handle) {
+    EXPECT_FALSE(iree_hip_handle_registry_lookup_retain(&registry_, handle,
+                                                        CountRetain));
+  }
+  EXPECT_LE(concurrent_retain_count.load(std::memory_order_relaxed),
+            handle_count);
 }
 
 }  // namespace

@@ -402,6 +402,7 @@ typedef enum hipEventFlags {
   hipEventReleaseToSystem = 0x80000000
 } hipEventFlags_t;
 
+#define hipEventWaitExternal 0x01
 #define hipEventDisableSystemFence 0x20000000u
 
 typedef enum hipDeviceP2PAttr {

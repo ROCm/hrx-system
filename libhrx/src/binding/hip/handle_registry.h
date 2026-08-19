@@ -16,9 +16,12 @@
 extern "C" {
 #endif  // __cplusplus
 
-// Tracks live opaque API handles without dereferencing caller-provided values.
-typedef struct iree_hip_handle_registry_t {
-  // Serializes all registry operations.
+// Number of independently locked handle-table shards. A power of two keeps
+// shard selection to one mask on lookup paths.
+#define IREE_HIP_HANDLE_REGISTRY_SHARD_COUNT 16
+
+typedef struct iree_hip_handle_registry_shard_t {
+  // Serializes operations in this shard.
   iree_slim_mutex_t mutex;
   // Open-addressed table of live handle values.
   uintptr_t* handles;
@@ -30,6 +33,12 @@ typedef struct iree_hip_handle_registry_t {
   iree_host_size_t count;
   // Number of removed slots awaiting reuse or rehashing.
   iree_host_size_t tombstone_count;
+} iree_hip_handle_registry_shard_t;
+
+// Tracks live opaque API handles without dereferencing caller-provided values.
+typedef struct iree_hip_handle_registry_t {
+  // Independently locked tables selected by the handle hash.
+  iree_hip_handle_registry_shard_t shards[IREE_HIP_HANDLE_REGISTRY_SHARD_COUNT];
 } iree_hip_handle_registry_t;
 
 // Retains a handle while its registry entry is locked and known to be live.

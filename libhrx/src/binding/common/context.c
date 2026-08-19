@@ -18,6 +18,12 @@ static IREE_THREAD_LOCAL iree_hal_streaming_context_t*
     iree_hal_streaming_current_context = NULL;
 static IREE_THREAD_LOCAL int iree_hal_streaming_thread_token_storage;
 
+// Stream IDs identify timeline dependencies that can outlive the context that
+// created them. Keeping the namespace process-wide prevents a dependency from
+// being mistaken for one recorded by a different context.
+static iree_atomic_uint64_t iree_hal_streaming_next_stream_id =
+    IREE_ATOMIC_VAR_INIT(1);
+
 typedef struct iree_hal_streaming_context_stack_t {
   iree_hal_streaming_context_t** contexts;
   iree_host_size_t depth;
@@ -72,7 +78,6 @@ iree_status_t iree_hal_streaming_context_create(
       iree_hal_device_allocator(device_entry->hal_device);
   context->flags = flags;
   context->default_stream = NULL;
-  context->next_stream_id = 1;
   context->next_capture_id = 1;
   context->peer_contexts = NULL;
   context->peer_count = 0;
@@ -200,17 +205,22 @@ static void iree_hal_streaming_context_destroy(
   iree_hal_streaming_stream_t* default_stream = context->default_stream;
   context->default_stream = NULL;
 
-  // Unregister all remaining streams.
-  // This releases the list's references, which may trigger stream destruction.
-  while (context->stream_count > 0) {
-    iree_hal_streaming_stream_t* stream = context->streams[0];
-    // Detach surviving user-owned streams from the context being destroyed.
-    stream->context = NULL;
-    // Remove from list (swap with last).
-    context->streams[0] = context->streams[context->stream_count - 1];
-    --context->stream_count;
-    // Release the list's reference.
-    iree_hal_streaming_stream_release(stream);
+  // Detach every stream while holding the same locks used to acquire an
+  // operation-scoped context reference. Once detached, new operations fail
+  // before touching context-owned state. Release list references outside the
+  // list lock because the last release may destroy a stream.
+  iree_slim_mutex_lock(&context->stream_list_mutex);
+  const iree_host_size_t detached_stream_count = context->stream_count;
+  context->stream_count = 0;
+  for (iree_host_size_t i = 0; i < detached_stream_count; ++i) {
+    iree_hal_streaming_stream_t* stream = context->streams[i];
+    iree_slim_mutex_lock(&stream->mutex);
+    if (stream->context == context) stream->context = NULL;
+    iree_slim_mutex_unlock(&stream->mutex);
+  }
+  iree_slim_mutex_unlock(&context->stream_list_mutex);
+  for (iree_host_size_t i = 0; i < detached_stream_count; ++i) {
+    iree_hal_streaming_stream_release(context->streams[i]);
   }
 
   // Now release the context's reference to default stream.
@@ -241,6 +251,20 @@ void iree_hal_streaming_context_retain(iree_hal_streaming_context_t* context) {
   if (context) {
     iree_atomic_ref_count_inc(&context->ref_count);
   }
+}
+
+bool iree_hal_streaming_context_try_retain(
+    iree_hal_streaming_context_t* context) {
+  if (!context) return false;
+  int32_t reference_count = iree_atomic_ref_count_load(&context->ref_count);
+  while (reference_count > 0) {
+    if (iree_atomic_compare_exchange_weak(
+            &context->ref_count, &reference_count, reference_count + 1,
+            iree_memory_order_acq_rel, iree_memory_order_acquire)) {
+      return true;
+    }
+  }
+  return false;
 }
 
 void iree_hal_streaming_context_release(iree_hal_streaming_context_t* context) {
@@ -625,13 +649,18 @@ iree_status_t iree_hal_streaming_context_register_stream(
   }
 
   if (iree_status_is_ok(status)) {
-    if (context->next_stream_id == 0 || context->next_stream_id > UINT32_MAX) {
+    uint64_t stream_id = iree_atomic_load(&iree_hal_streaming_next_stream_id,
+                                          iree_memory_order_relaxed);
+    while (stream_id != 0 && stream_id != UINT64_MAX &&
+           !iree_atomic_compare_exchange_weak(
+               &iree_hal_streaming_next_stream_id, &stream_id, stream_id + 1,
+               iree_memory_order_relaxed, iree_memory_order_relaxed)) {
+    }
+    if (stream_id == 0 || stream_id == UINT64_MAX) {
       status = iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
                                 "stream identifier space exhausted");
     } else {
-      const unsigned long long device_id =
-          ((unsigned long long)context->device_ordinal + 1ull) << 32;
-      stream->stream_id = device_id | context->next_stream_id++;
+      stream->stream_id = stream_id;
     }
   }
 
@@ -664,10 +693,10 @@ iree_status_t iree_hal_streaming_context_allocate_capture_id(
   return iree_ok_status();
 }
 
-bool iree_hal_streaming_context_unregister_stream(
+void iree_hal_streaming_context_unregister_stream(
     iree_hal_streaming_context_t* context,
     iree_hal_streaming_stream_t* stream) {
-  if (!context || !stream) return false;
+  if (!context || !stream) return;
   IREE_TRACE_ZONE_BEGIN(z0);
 
   bool found = false;
@@ -693,7 +722,6 @@ bool iree_hal_streaming_context_unregister_stream(
   }
 
   IREE_TRACE_ZONE_END(z0);
-  return found;
 }
 
 bool iree_hal_streaming_context_has_peer_contexts(
@@ -1021,7 +1049,8 @@ iree_status_t iree_hal_streaming_context_wait_blocking_streams(
     return status;
   }
 
-  for (iree_host_size_t i = 0; i < count && iree_status_is_ok(status); ++i) {
+  iree_host_size_t source_count = 0;
+  for (iree_host_size_t i = 0; i < count; ++i) {
     iree_hal_streaming_stream_t* source_stream = streams_copy[i];
     if (!source_stream || source_stream == stream ||
         source_stream == context->default_stream ||
@@ -1031,7 +1060,15 @@ iree_status_t iree_hal_streaming_context_wait_blocking_streams(
             IREE_HAL_STREAMING_CAPTURE_STATUS_NONE) {
       continue;
     }
-    status = iree_hal_streaming_stream_wait_stream(stream, source_stream);
+    // Partition selected sources into the front while preserving every
+    // retained entry for snapshot release below.
+    iree_hal_streaming_stream_t* displaced_stream = streams_copy[source_count];
+    streams_copy[source_count++] = source_stream;
+    streams_copy[i] = displaced_stream;
+  }
+  if (source_count > 0) {
+    status = iree_hal_streaming_stream_wait_streams(stream, streams_copy,
+                                                    source_count);
   }
 
   iree_hal_streaming_context_release_stream_snapshot(context, streams_copy,
