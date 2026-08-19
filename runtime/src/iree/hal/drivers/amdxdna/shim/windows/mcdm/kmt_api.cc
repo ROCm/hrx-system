@@ -1450,10 +1450,11 @@ bool PopulatePathBBoTable(
     const Device& device, void* command_bo, size_t command_bo_size,
     const D3DGPU_VIRTUAL_ADDRESS* real_bo_gpu_vas,
     size_t real_bo_entry_count, Error* out_error) {
-  constexpr size_t kBoTableWordOffset = 11;
-  constexpr size_t kBoTableWords = 2 * kMaxPathBBoTableEntries;
+  constexpr size_t kBoTableWordOffset =
+      kPathBBoTableOffset / sizeof(uint32_t);
+  constexpr size_t kBoTableWords = kPathBBoTableSize / sizeof(uint32_t);
   constexpr size_t kBoTableEndBytes =
-      (kBoTableWordOffset + kBoTableWords) * sizeof(uint32_t);
+      kPathBBoTableOffset + kPathBBoTableSize;
   if (!command_bo || command_bo_size < kBoTableEndBytes ||
       (real_bo_entry_count && !real_bo_gpu_vas)) {
     SetError(out_error, "PopulatePathBBoTable called with invalid storage");
@@ -2428,8 +2429,8 @@ bool PublishPathBCodeWrite(const KmtApi& api, const Device& device,
                            uint64_t length, Error* out_error) {
   // Both MCDM profiles publish device-visible code with opcode-9 end markers.
   // Compact writes use CPU cache-line flushes while legacy writes use KMT
-  // invalidation; in either case the marker is submitted after publication so
-  // the later state-3 command observes the completed image in queue order.
+  // invalidation. The marker is the queue-order publication of those slots; a
+  // later state-3/chain command may consume them only after this submit.
   return SubmitPathBCodeRangeEndMarkers(api, device, context, aperture, offset,
                                         length, out_error);
 }

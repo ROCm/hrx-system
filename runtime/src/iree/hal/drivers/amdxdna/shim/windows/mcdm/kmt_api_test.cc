@@ -36,10 +36,10 @@ enum class TeardownCall {
 TeardownCall g_teardown_calls[8] = {};
 size_t g_teardown_call_count = 0;
 bool g_record_teardown = false;
-uint32_t g_submit_opcodes[8] = {};
-uint64_t g_submit_fences[8] = {};
-uint64_t g_submit_offsets[8] = {};
-uint64_t g_wait_fences[8] = {};
+uint32_t g_submit_opcodes[16] = {};
+uint64_t g_submit_fences[16] = {};
+uint64_t g_submit_offsets[16] = {};
+uint64_t g_wait_fences[16] = {};
 D3DKMT_HANDLE g_gpu_wait_context = 0;
 D3DKMT_HANDLE g_gpu_wait_object = 0;
 uint64_t g_gpu_wait_fence = 0;
@@ -268,7 +268,13 @@ NTSTATUS APIENTRY FakeCloseAdapter(CONST D3DKMT_CLOSEADAPTER* args) {
 NTSTATUS APIENTRY FakeSubmitCommandToHwQueue(
     CONST D3DKMT_SUBMITCOMMANDTOHWQUEUE* args) {
   const size_t call_index = g_submit_count;
-  g_setup_calls[g_setup_call_count++] = SetupCall::submit;
+  if (g_setup_call_count < std::size(g_setup_calls)) {
+    g_setup_calls[g_setup_call_count] = SetupCall::submit;
+  }
+  ++g_setup_call_count;
+  if (g_submit_count >= std::size(g_submit_opcodes)) {
+    return static_cast<NTSTATUS>(0xC0000001u);
+  }
   std::memcpy(&g_submit_opcodes[g_submit_count], args->pPrivateDriverData,
               sizeof(uint32_t));
   std::memcpy(&g_submit_offsets[g_submit_count],
@@ -1641,6 +1647,67 @@ TEST(KmtApiTest, CodeRangeLifecycleMatchesNegotiatedAbi) {
   EXPECT_EQ(g_submit_offsets[4], 0x30000u);
   ASSERT_EQ(g_wait_count, 1u);
   EXPECT_EQ(g_wait_fences[0], 9u);
+}
+
+TEST(KmtApiTest, PublishPathBCodeWriteRepeatsOpcode9WithoutRewrite) {
+  // Opcode-9 is a queue-ordered happens-before, not a sticky mapping of
+  // previously committed bytes. Cached reuse must emit the same end-marker
+  // sequence before every consumer, without another CommitPathBCodeWrite.
+  auto run = [](McdmAbi mcdm_abi) {
+    constexpr uint64_t kCodeBytes = 0x10000;
+    constexpr size_t kPublishCount = 3;
+    ResetFakes();
+    KmtApi api = {};
+    api.submit_command_to_hw_queue = FakeSubmitCommandToHwQueue;
+    api.invalidate_cache = FakeInvalidateCache;
+    Device device = {};
+    device.device = 0x10;
+    device.mcdm_abi = mcdm_abi;
+    Context context = {};
+    context.hw_queue = 0x20;
+    context.progress_fence = 0x21;
+    context.next_fence_id = 7;
+    CommandAperture aperture = {};
+    aperture.gpu_allocation = 0x30;
+    alignas(64) static std::array<uint8_t, 0x100000> aperture_storage = {};
+    aperture.gpu_cpu_ptr = aperture_storage.data();
+    aperture.gpu_va_size = aperture_storage.size();
+    Error error = {};
+    ASSERT_TRUE(ConfigurePathBCodeRangeForSetupPayload(
+        mcdm_abi, 9952, &aperture, &error));
+    ASSERT_TRUE(AcquirePathBCodeRange(api, device, &context, aperture,
+                                      aperture.code_offset, kCodeBytes,
+                                      &error));
+    ASSERT_TRUE(CommitPathBCodeWrite(api, device, aperture,
+                                     aperture.code_offset, kCodeBytes,
+                                     &error));
+    const size_t submits_after_commit = g_submit_count;
+    const size_t invalidates_after_commit = g_invalidate_count;
+    EXPECT_EQ(submits_after_commit, 0u);
+    for (size_t i = 0; i < kPublishCount; ++i) {
+      ASSERT_TRUE(PublishPathBCodeWrite(
+          api, device, &context, aperture, aperture.code_offset, kCodeBytes,
+          &error))
+          << ErrorMessage(&error);
+    }
+    EXPECT_EQ(g_invalidate_count, invalidates_after_commit);
+    ASSERT_GT(g_submit_count, submits_after_commit);
+    ASSERT_EQ(g_submit_count % kPublishCount, 0u);
+    const size_t markers_per_publish = g_submit_count / kPublishCount;
+    ASSERT_GT(markers_per_publish, 0u);
+    for (size_t i = 0; i < g_submit_count; ++i) {
+      EXPECT_EQ(g_submit_opcodes[i], 9u);
+    }
+    for (size_t publish = 1; publish < kPublishCount; ++publish) {
+      for (size_t marker = 0; marker < markers_per_publish; ++marker) {
+        EXPECT_EQ(g_submit_offsets[publish * markers_per_publish + marker],
+                  g_submit_offsets[marker]);
+      }
+    }
+  };
+
+  run(McdmAbi::compact);
+  run(McdmAbi::legacy);
 }
 
 TEST(KmtApiTest, CodeWriteRemapMatchesNegotiatedAbi) {
