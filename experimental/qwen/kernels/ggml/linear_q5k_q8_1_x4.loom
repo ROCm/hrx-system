@@ -18,10 +18,8 @@ config.decl @ggml.linear_q5k_q8_1_x4.output_capacity : %value: index where [rang
 
 kernel.decl @ggml_quantize_q8_1_x4_f32(%token_count$2: index, %input_size$3: index) launch(%token_count$4: index, %input_size$5: index, %input: buffer, %output: buffer)
 
-// Decodes one Q5_K scale/minimum pair from the naturally aligned 16-byte
-// header. Keeping the header in one vector load avoids lane-divergent byte-load
-// paths inside the production contraction loop.
-func.template<ggml.q5k.scale_min> device @ggml_q5k_scale_min(%weight: buffer, %block_byte_base: offset, %group: index) -> (f32, f32) {
+// Decodes one Q5_K scale/minimum pair from a loaded 16-byte block header.
+func.template<ggml.q5k.scale_min.header> device @ggml_q5k_scale_min_header(%header_words: vector<4xi32>, %group: index) -> (f32, f32) {
   %c4 = index.constant 4 : index
   %c8 = index.constant 8 : index
   %c4_i32 = scalar.constant 4 : i32
@@ -30,8 +28,6 @@ func.template<ggml.q5k.scale_min> device @ggml_q5k_scale_min(%weight: buffer, %b
   %c63_i32 = scalar.constant 63 : i32
   %c255_i32 = scalar.constant 255 : i32
   %bounded_group = index.assume %group [range(%group, 0, 7)] : index
-  %header_view = buffer.view %weight[%block_byte_base] : buffer -> view<4xi32>
-  %header_words = vector.load %header_view[0] : view<4xi32> -> vector<4xi32>
   %header_halves = vector.bitcast %header_words : vector<4xi32> to vector<8xf16>
   %d_f16 = vector.extract %header_halves[0] : vector<8xf16> -> f16
   %dmin_f16 = vector.extract %header_halves[1] : vector<8xf16> -> f16
@@ -66,6 +62,16 @@ func.template<ggml.q5k.scale_min> device @ggml_q5k_scale_min(%weight: buffer, %b
   %minimum_f32 = scalar.uitofp %minimum : i32 to f32
   %d_scale = scalar.mulf %d, %scale_f32 : f32
   %dmin_scale = scalar.mulf %dmin, %minimum_f32 : f32
+  func.return %d_scale, %dmin_scale : f32, f32
+}
+
+// Decodes one Q5_K scale/minimum pair from the naturally aligned 16-byte
+// header. Keeping the header in one vector load avoids lane-divergent byte-load
+// paths inside the production contraction loop.
+func.template<ggml.q5k.scale_min> device @ggml_q5k_scale_min(%weight: buffer, %block_byte_base: offset, %group: index) -> (f32, f32) {
+  %header_view = buffer.view %weight[%block_byte_base] : buffer -> view<4xi32>
+  %header_words = vector.load %header_view[0] : view<4xi32> -> vector<4xi32>
+  %d_scale, %dmin_scale = func.apply<ggml.q5k.scale_min.header>(%header_words, %group) : (vector<4xi32>, index) -> (f32, f32)
   func.return %d_scale, %dmin_scale : f32, f32
 }
 
