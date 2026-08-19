@@ -5,6 +5,7 @@
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 load("//runtime/build_tools/bazel:cc.bzl", "iree_runtime_cc_library")
+load("//runtime/build_tools/bazel:cc_test.bzl", "iree_runtime_cc_test")
 
 package(
     default_visibility = ["//experimental/qwen:__subpackages__"],
@@ -13,10 +14,36 @@ package(
 )
 
 iree_runtime_cc_library(
+    name = "compile_pool",
+    srcs = ["compile_pool.c"],
+    hdrs = ["compile_pool.h"],
+    deps = [
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
+        "//runtime/src/iree/base/threading",
+        "//runtime/src/iree/task",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "compile_pool_test",
+    srcs = ["compile_pool_test.cc"],
+    deps = [
+        ":compile_pool",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
+        "//runtime/src/iree/base/threading",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_library(
     name = "command_program",
     srcs = ["command_program.c"],
     hdrs = ["command_program.h"],
     deps = [
+        ":compile_pool",
         ":runtime",
         "//loom/binding/c:loomc",
         "//loom/binding/c/target/amdgpu",
@@ -35,6 +62,7 @@ iree_runtime_cc_library(
     srcs = ["runtime.c"],
     hdrs = ["runtime.h"],
     deps = [
+        ":compile_pool",
         "//runtime/src/iree/async",
         "//runtime/src/iree/async/platform/posix",
         "//runtime/src/iree/async/util:proactor_pool",

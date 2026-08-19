@@ -8,6 +8,7 @@
 
 #include <string.h>
 
+#include "experimental/qwen/tooling/compile_pool.h"
 #include "iree/async/frontier_tracker.h"
 #include "iree/async/platform/posix/api.h"
 #include "iree/async/util/proactor_pool.h"
@@ -131,12 +132,16 @@ iree_status_t qwen_tooling_runtime_context_initialize_from_flags(
   memset(out_context, 0, sizeof(*out_context));
   out_context->host_allocator = host_allocator;
 
+  iree_status_t status = qwen_tooling_compile_pool_create(
+      /*worker_count=*/4, host_allocator, &out_context->compile_pool);
   iree_async_proactor_pool_options_t proactor_pool_options =
       iree_async_proactor_pool_options_default();
   proactor_pool_options.proactor_create = iree_async_proactor_create_posix;
-  iree_status_t status = iree_async_proactor_pool_create(
-      /*node_count=*/1, /*node_ids=*/NULL, proactor_pool_options,
-      host_allocator, &out_context->proactor_pool);
+  if (iree_status_is_ok(status)) {
+    status = iree_async_proactor_pool_create(
+        /*node_count=*/1, /*node_ids=*/NULL, proactor_pool_options,
+        host_allocator, &out_context->proactor_pool);
+  }
   if (iree_status_is_ok(status)) {
     status = iree_async_frontier_tracker_create(
         iree_async_frontier_tracker_options_default(), host_allocator,
@@ -170,6 +175,7 @@ void qwen_tooling_runtime_context_deinitialize(
   iree_hal_device_group_release(context->device_group);
   iree_async_frontier_tracker_release(context->frontier_tracker);
   iree_async_proactor_pool_release(context->proactor_pool);
+  qwen_tooling_compile_pool_release(context->compile_pool);
   memset(context, 0, sizeof(*context));
 }
 

@@ -18,6 +18,7 @@ typedef struct iree_async_frontier_tracker_t iree_async_frontier_tracker_t;
 typedef struct iree_async_proactor_pool_t iree_async_proactor_pool_t;
 typedef struct iree_io_parameter_index_t iree_io_parameter_index_t;
 typedef struct iree_io_parameter_provider_t iree_io_parameter_provider_t;
+typedef struct qwen_tooling_compile_pool_t qwen_tooling_compile_pool_t;
 
 // Process-local services created from the standard IREE tooling flags.
 //
@@ -27,6 +28,8 @@ typedef struct iree_io_parameter_provider_t iree_io_parameter_provider_t;
 typedef struct qwen_tooling_runtime_context_t {
   // Allocator used for context-owned host allocations.
   iree_allocator_t host_allocator;
+  // Shared task workers used for independent Loom compilation units.
+  qwen_tooling_compile_pool_t* compile_pool;
   // Proactor pool passed to the selected HAL device.
   iree_async_proactor_pool_t* proactor_pool;
   // Frontier tracker retained by the single-device group.
