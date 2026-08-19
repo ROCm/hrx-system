@@ -346,15 +346,13 @@ CUDAAPI CUresult cuCtxDestroy(CUcontext ctx) {
 
   // Check if this is the current context.
   // If so, clear it from TLS to avoid a dangling reference.
-  if (ctx && ctx == (CUcontext)iree_hal_streaming_context_current()) {
+  if (ctx == (CUcontext)iree_hal_streaming_context_current()) {
     // This will release the TLS reference.
     iree_hal_streaming_context_set_current(NULL);
   }
 
   // Release the context.
-  if (ctx) {
-    iree_hal_streaming_context_release((iree_hal_streaming_context_t*)ctx);
-  }
+  iree_hal_streaming_context_release((iree_hal_streaming_context_t*)ctx);
 
   IREE_TRACE_ZONE_END(z0);
   return CUDA_SUCCESS;

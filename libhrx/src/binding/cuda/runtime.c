@@ -237,7 +237,7 @@ cudaError_t CUDAAPI cudaGetLastError(void) {
 
 cudaError_t CUDAAPI cudaPeekAtLastError(void) { return iree_cuda_thread_error; }
 
-const char* CUDAAPI cudaGetErrorString(cudaError_t error) {
+CUDAAPI const char* cudaGetErrorString(cudaError_t error) {
   // TODO: Implement full error string mapping.
   switch (error) {
     case cudaSuccess:
@@ -255,7 +255,7 @@ const char* CUDAAPI cudaGetErrorString(cudaError_t error) {
   }
 }
 
-const char* CUDAAPI cudaGetErrorName(cudaError_t error) {
+CUDAAPI const char* cudaGetErrorName(cudaError_t error) {
   // TODO: Implement full error name mapping.
   switch (error) {
     case cudaSuccess:

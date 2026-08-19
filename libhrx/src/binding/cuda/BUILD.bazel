@@ -1,0 +1,35 @@
+# Copyright 2026 The HRX Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load(
+    "//libhrx/build_tools/bazel:cc.bzl",
+    "hrx_cc_library",
+)
+
+package(
+    default_visibility = ["//visibility:public"],
+    features = ["layering_check"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+hrx_cc_library(
+    name = "cuda",
+    srcs = [
+        "driver.c",
+        "runtime.c",
+    ],
+    hdrs = [
+        "api.h",
+        "driver.h",
+        "runtime.h",
+    ],
+    # These sources are the definitions of the CUDA entry points, so CUDAAPI
+    # must select the exporting spelling. Read only on Windows; the CMake
+    # target that compiles the same sources defines it too.
+    copts = ["-DIREE_HAL_STREAMING_CUDA_EXPORTS"],
+    includes = ["../.."],
+    deps = ["//libhrx/src/binding/common"],
+)
