@@ -12,6 +12,7 @@ import argparse
 import importlib.util
 import sys
 from collections.abc import Sequence
+from pathlib import Path
 from types import ModuleType
 
 from loom.gen import bootstrap as _bootstrap
@@ -28,27 +29,28 @@ from loom.gen.target.arch.x86 import x86_packed_dot_contract
 from loom.gen.test import numeric_conversion_matrix
 
 _AMDGPU_TARGET_CONFIG_MODULE_NAME = "loom_build_tools_amdgpu_target_config"
+# Source checkouts and declared build trees preserve paths below top-level loom.
+_AMDGPU_TARGET_CONFIG_PATH = Path(__file__).resolve().parents[3] / "build_tools/amdgpu/target_config.py"
 
 
 def _load_amdgpu_target_config() -> ModuleType:
     existing_module = sys.modules.get(_AMDGPU_TARGET_CONFIG_MODULE_NAME)
     if existing_module is not None:
         return existing_module
-    module_path = _bootstrap.REPO_ROOT / "loom/build_tools/amdgpu/target_config.py"
     spec = importlib.util.spec_from_file_location(
         _AMDGPU_TARGET_CONFIG_MODULE_NAME,
-        module_path,
+        _AMDGPU_TARGET_CONFIG_PATH,
     )
     if spec is None or spec.loader is None:
-        raise RuntimeError(f"could not load {module_path}")
+        raise RuntimeError(f"could not load {_AMDGPU_TARGET_CONFIG_PATH}")
     module = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     return module
 
 
-def checked_in_artifact_families() -> tuple[GeneratedFileFamily, ...]:
-    """Returns every checked-in Loom generated artifact family."""
+def checked_in_artifact_families(*, repository_root: Path | None = None) -> tuple[GeneratedFileFamily, ...]:
+    """Returns each family, discovering obsolete files when a root is given."""
     amdgpu_target_config = _load_amdgpu_target_config()
     return (
         GeneratedFileFamily(
@@ -59,7 +61,7 @@ def checked_in_artifact_families() -> tuple[GeneratedFileFamily, ...]:
         GeneratedFileFamily(
             description=builders_pyi.DESCRIPTION,
             regenerate_command=builders_pyi.REGENERATE_COMMAND,
-            file_set=builders_pyi.checked_in_file_set(),
+            file_set=builders_pyi.checked_in_file_set(repository_root),
         ),
         GeneratedFileFamily(
             description=c_tables.DESCRIPTION,
@@ -74,7 +76,7 @@ def checked_in_artifact_families() -> tuple[GeneratedFileFamily, ...]:
         GeneratedFileFamily(
             description=textmate.DESCRIPTION,
             regenerate_command=textmate.REGENERATE_COMMAND,
-            file_set=textmate.checked_in_file_set(),
+            file_set=textmate.checked_in_file_set(repository_root),
         ),
         GeneratedFileFamily(
             description=x86_packed_dot_contract.DESCRIPTION,
@@ -95,12 +97,13 @@ def maintain_checked_in_artifacts(
     writable_paths: Sequence[str] | None = None,
 ) -> GeneratedFileMaintenanceResult:
     """Checks all families or updates only families owning writable paths."""
-    families = checked_in_artifact_families()
+    repository_root = _bootstrap.find_repo_root()
+    families = checked_in_artifact_families(repository_root=repository_root)
     if mode == "update" and writable_paths is not None:
         writable_path_set = set(writable_paths)
         families = tuple(family for family in families if writable_path_set.intersection((*family.file_set.output_paths, *family.file_set.obsolete_paths)))
     return maintain_generated_file_families(
-        _bootstrap.REPO_ROOT,
+        repository_root,
         families,
         mode=mode,
     )

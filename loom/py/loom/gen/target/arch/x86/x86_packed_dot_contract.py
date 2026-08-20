@@ -14,17 +14,16 @@ from collections.abc import Sequence
 from pathlib import Path
 
 
-def _ensure_runtime_py_on_path() -> Path:
-    repo_root = Path(__file__).resolve().parents[7]
-    runtime_py = repo_root / "loom/py"
+def _ensure_runtime_py_on_path() -> None:
+    runtime_py = Path(__file__).resolve().parents[5]
     runtime_py_string = str(runtime_py)
     if runtime_py_string not in sys.path:
         sys.path.insert(0, runtime_py_string)
-    return repo_root
 
 
-REPO_ROOT = _ensure_runtime_py_on_path()
+_ensure_runtime_py_on_path()
 
+from loom.gen import bootstrap as _bootstrap  # noqa: E402
 from loom.gen.support.c import c_string_literal as _c_string_literal  # noqa: E402
 from loom.gen.support.files import write_text_file  # noqa: E402
 from loom.gen.support.generated_file import (  # noqa: E402
@@ -150,7 +149,7 @@ def maintain_checked_in_files(
 ) -> GeneratedFileMaintenanceResult:
     """Checks or updates the checked-in packed-dot contract header."""
     return maintain_generated_file_set(
-        REPO_ROOT,
+        _bootstrap.find_repo_root(),
         checked_in_file_set(),
         mode=mode,
         description=DESCRIPTION,

@@ -66,6 +66,7 @@ iree_py_library(
     "__init__.py"
     "x86_packed_dot_contract.py"
   DEPS
+    loom::py::loom::gen::bootstrap
     loom::py::loom::gen::support::support
     loom::py::loom::target::low_descriptors
     loom::py::loom::target::arch::x86::target_info

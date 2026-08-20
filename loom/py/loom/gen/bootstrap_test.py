@@ -14,6 +14,25 @@ from pathlib import Path
 from loom.gen import bootstrap
 
 
+def test_import_does_not_require_repository_layout(tmp_path: Path) -> None:
+    module_path = tmp_path / "runfiles" / "_main" / "loom" / "py" / "loom" / "gen" / "bootstrap.py"
+    module_path.parent.mkdir(parents=True)
+    module_path.write_bytes(Path(bootstrap.__file__).read_bytes())
+
+    spec = importlib.util.spec_from_file_location("materialized_loom_bootstrap", module_path)
+    assert spec is not None
+    assert spec.loader is not None
+    materialized_bootstrap = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(materialized_bootstrap)
+
+    try:
+        materialized_bootstrap.find_repo_root(module_path)
+    except RuntimeError:
+        pass
+    else:
+        raise AssertionError("materialized runfiles unexpectedly contained a Loom repository")
+
+
 def test_repository_packages_precede_ambient_imports(tmp_path: Path) -> None:
     repo_root = tmp_path / "repo"
     script_path = repo_root / "loom" / "py" / "loom" / "gen" / "run.py"

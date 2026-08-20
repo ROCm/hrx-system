@@ -102,6 +102,11 @@ def test_update_selects_only_families_owning_writable_paths() -> None:
             checked_in_artifacts,
             "checked_in_artifact_families",
             return_value=(first_family, second_family),
+        ) as checked_in_artifact_families,
+        mock.patch.object(
+            checked_in_artifacts._bootstrap,
+            "find_repo_root",
+            return_value=mock.sentinel.repository_root,
         ),
         mock.patch.object(
             checked_in_artifacts,
@@ -112,8 +117,9 @@ def test_update_selects_only_families_owning_writable_paths() -> None:
         result = checked_in_artifacts.maintain_checked_in_artifacts("update", writable_paths=["generated/second.txt"])
 
     assert result.ok
+    checked_in_artifact_families.assert_called_once_with(repository_root=mock.sentinel.repository_root)
     maintain_generated_file_families.assert_called_once_with(
-        checked_in_artifacts._bootstrap.REPO_ROOT,
+        mock.sentinel.repository_root,
         (second_family,),
         mode="update",
     )
