@@ -862,6 +862,23 @@ class PresubmitTest(unittest.TestCase):
         self.assertIn("[skip]", output.getvalue())
         self.assertIn("[fail]", output.getvalue())
 
+    def test_missing_semgrep_does_not_attempt_scan(self):
+        output = io.StringIO()
+        inputs = input_scope(["runtime/src/iree/base/status.c"])
+        with (
+            contextlib.redirect_stdout(output),
+            mock.patch.object(presubmit.shutil, "which", return_value=None),
+            mock.patch.object(presubmit, "run_command") as run_command,
+        ):
+            self.assertTrue(
+                presubmit.run_semgrep(inputs, profile="paranoid", verbose=False)
+            )
+            self.assertFalse(presubmit.run_semgrep(inputs, profile="ci", verbose=False))
+
+        run_command.assert_not_called()
+        self.assertIn("[skip]", output.getvalue())
+        self.assertIn("[fail]", output.getvalue())
+
     def test_semgrep_is_explicitly_delegated_to_linux_on_windows(self):
         output = io.StringIO()
         inputs = input_scope(["runtime/src/iree/base/status.c"])
