@@ -1,0 +1,170 @@
+// Copyright 2026 The IREE Authors
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+// Single-machine NativeLink cache, scheduler, and local execution worker.
+// NATIVELINK_STATE_ROOT must name a persistent directory outside the checkout.
+// The client and worker APIs listen only on loopback.
+{
+  stores: [
+    {
+      name: "CAS_MAIN_STORE",
+      filesystem: {
+        content_path: "${NATIVELINK_STATE_ROOT}/cas/content",
+        temp_path: "${NATIVELINK_STATE_ROOT}/cas/temp",
+        eviction_policy: {
+          max_bytes: "${NATIVELINK_CAS_MAX_BYTES:-48000000000}",
+        },
+      },
+    },
+    {
+      name: "AC_MAIN_STORE",
+      filesystem: {
+        content_path: "${NATIVELINK_STATE_ROOT}/ac/content",
+        temp_path: "${NATIVELINK_STATE_ROOT}/ac/temp",
+        eviction_policy: {
+          max_bytes: "${NATIVELINK_AC_MAX_BYTES:-2000000000}",
+        },
+      },
+    },
+    {
+      name: "WORKER_FAST_SLOW_STORE",
+      fast_slow: {
+        fast: {
+          filesystem: {
+            content_path: "${NATIVELINK_STATE_ROOT}/worker/cas/content",
+            temp_path: "${NATIVELINK_STATE_ROOT}/worker/cas/temp",
+            eviction_policy: {
+              max_bytes: "${NATIVELINK_WORKER_CACHE_MAX_BYTES:-12000000000}",
+            },
+          },
+        },
+        fast_direction: "get",
+        slow: {
+          ref_store: {
+            name: "CAS_MAIN_STORE",
+          },
+        },
+      },
+    },
+  ],
+  schedulers: [
+    {
+      name: "MAIN_SCHEDULER",
+      simple: {
+        supported_platform_properties: {
+          cpu_count: "minimum",
+          OSFamily: "priority",
+          "container-image": "priority",
+        },
+        retain_completed_for_s: "${NATIVELINK_RETAIN_COMPLETED_SECONDS:-3600}sec",
+        client_action_timeout_s: "${NATIVELINK_CLIENT_ACTION_TIMEOUT_SECONDS:-3600}sec",
+        worker_timeout_s: 10,
+        fallback_match_interval_s: 1,
+      },
+    },
+  ],
+  workers: [
+    {
+      local: {
+        name: "local-iree-",
+        worker_api_endpoint: {
+          uri: "${NATIVELINK_WORKER_API_ENDPOINT:-grpc://127.0.0.1:50061}",
+        },
+        max_action_timeout_s: "${NATIVELINK_MAX_ACTION_TIMEOUT_SECONDS:-21600}sec",
+        max_upload_timeout_s: 3600,
+        max_inflight_tasks: "${NATIVELINK_MAX_INFLIGHT_TASKS:-16}",
+        cas_fast_slow_store: "WORKER_FAST_SLOW_STORE",
+        upload_action_result: {
+          ac_store: "AC_MAIN_STORE",
+        },
+        work_directory: "${NATIVELINK_STATE_ROOT}/worker/actions",
+        platform_properties: {
+          cpu_count: {
+            query_cmd: "nproc",
+          },
+          OSFamily: {
+            values: [
+              "linux",
+              "",
+            ],
+          },
+          "container-image": {
+            values: [
+              "",
+            ],
+          },
+        },
+
+        // This developer configuration executes trusted repository actions
+        // directly on the host so configured toolchains remain visible.
+        use_namespaces: false,
+      },
+    },
+  ],
+  servers: [
+    {
+      name: "client",
+      listener: {
+        http: {
+          socket_address: "${NATIVELINK_CLIENT_LISTEN_ADDRESS:-127.0.0.1:50051}",
+          advanced_http: {
+            http2_keep_alive_interval: 10,
+            experimental_http2_keep_alive_timeout_s: 20,
+          },
+        },
+      },
+      services: {
+        cas: [
+          {
+            cas_store: "CAS_MAIN_STORE",
+          },
+        ],
+        ac: [
+          {
+            ac_store: "AC_MAIN_STORE",
+          },
+        ],
+        bytestream: [
+          {
+            cas_store: "CAS_MAIN_STORE",
+          },
+        ],
+        execution: [
+          {
+            cas_store: "CAS_MAIN_STORE",
+            scheduler: "MAIN_SCHEDULER",
+          },
+        ],
+        capabilities: [
+          {
+            remote_execution: {
+              scheduler: "MAIN_SCHEDULER",
+            },
+          },
+        ],
+      },
+    },
+    {
+      name: "worker-api",
+      listener: {
+        http: {
+          socket_address: "${NATIVELINK_WORKER_API_LISTEN_ADDRESS:-127.0.0.1:50061}",
+          advanced_http: {
+            http2_keep_alive_interval: 10,
+            experimental_http2_keep_alive_timeout_s: 20,
+          },
+        },
+      },
+      services: {
+        worker_api: {
+          scheduler: "MAIN_SCHEDULER",
+        },
+        health: {},
+      },
+    },
+  ],
+  global: {
+    max_open_files: 24576,
+    default_digest_hash_function: "sha256",
+  },
+}
