@@ -45,6 +45,7 @@ build_tools/embed_data/testdata/crlf.bin binary -eol
 *.ico binary -eol
 *.jpg binary -eol
 *.jpeg binary -eol
+*.loombc binary -eol
 *.npy binary -eol
 *.pdf binary -eol
 *.png binary -eol
