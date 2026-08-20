@@ -94,25 +94,36 @@ cmake --install build/hrx-system --prefix build/hrx-tests \
 
 ### Windows
 
-Run the build from an x64 Developer PowerShell for Visual Studio 2022. Set
-`THEROCK_ROOT` to a TheRock checkout whose `build/dist/rocm` tree includes the
-ROCm LLVM toolchain, headers, and `hsa-runtime64.dll`. For example, configure
-TheRock with `THEROCK_ENABLE_HSA_WINDOWS_SHARED_RUNTIME=ON` before building it.
+Run the build from an x64 Developer PowerShell for Visual Studio 2022. Activate
+a Python virtual environment containing matching TheRock core, libraries,
+development, and device wheels. See
+[TheRock's `RELEASES.md`](https://github.com/ROCm/TheRock/blob/main/RELEASES.md)
+for the index URLs and version-specific installation command. A `gfx1201`
+installation includes:
+
+```powershell
+python -m pip install "rocm[libraries,devel,device-gfx1201]"
+rocm-sdk init
+```
+
+For compressed CCOB and kpack support, install libzstd development files and
+ensure `pkg-config --exists libzstd` succeeds. HRX can build without libzstd,
+but those compressed inputs will not load.
 
 The equivalent `dev.py` flow for a `gfx1201` build is:
 
 ```powershell
-$env:THEROCK_ROOT = "D:\src\TheRock"
-$rocmRoot = Join-Path $env:THEROCK_ROOT "build\dist\rocm"
-$aqlProfileRoot = Join-Path $env:THEROCK_ROOT "build\profiler\aqlprofile\dist"
-$cmakePrefixPath = "$aqlProfileRoot;$rocmRoot;$rocmRoot\lib\rocm_sysdeps"
+$rocmRoot = (rocm-sdk path --root).Trim()
+$rocmCmake = (rocm-sdk path --cmake).Trim()
+$rocmBin = (rocm-sdk path --bin).Trim()
 $llvmBin = Join-Path $rocmRoot "lib\llvm\bin"
+$env:PATH = "$rocmBin;$llvmBin;$env:PATH"
 
-python dev.py cmake setup
+python dev.py cmake setup --system
 python dev.py cmake configure --fresh `
-  "-DCMAKE_PREFIX_PATH=$cmakePrefixPath" `
+  "-DCMAKE_PREFIX_PATH=$rocmCmake" `
   "-DIREE_ROCM_PATH=$rocmRoot" `
-  -DIREE_ROCM_DEPENDENCY_MODE=package `
+  -DIREE_ROCM_DEPENDENCY_MODE=pinned `
   -DCMAKE_INSTALL_LIBDIR=lib `
   "-DCMAKE_C_COMPILER=$llvmBin\clang-cl.exe" `
   "-DCMAKE_CXX_COMPILER=$llvmBin\clang-cl.exe" `
@@ -130,23 +141,23 @@ cmake --install build/cmake --prefix build/hrx-tests `
   --component HrxTestsDist
 ```
 
+Pinned ROCm dependency mode supplies the repository-locked HSA and AQL Profile
+SDK headers; the compiler, device files, CMake packages, and runtime DLLs still
+come from the installed TheRock wheels.
+
 Add the ROCm and HRX DLL directories to `PATH` before running the installed
 tools or tests:
 
 ```powershell
-$env:PATH = "$rocmRoot\bin;$PWD\build\hrx-install\bin;$env:PATH"
+$env:PATH = "$PWD\build\hrx-install\bin;$rocmBin;$env:PATH"
 & .\build\hrx-install\bin\hrx-info.exe
 ctest --test-dir build/hrx-tests/share/hrx-system/tests --output-on-failure
 ```
 
-This default build loads `hsa-runtime64.dll` dynamically. A Windows ROCr
-package that exports `hsa-runtime64::hsa-runtime64_static` can instead be linked
-statically by changing the runtime selection and CRT mode during configure:
-
-```powershell
--DIREE_HAL_AMDGPU_LIBHSA_STATIC=ON `
--DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded
-```
+This build loads the wheel-provided `hsa-runtime64.dll` dynamically. Static HSA
+linking requires a separate Windows ROCr package that exports
+`hsa-runtime64::hsa-runtime64_static`; it is not available from the current
+TheRock Windows wheels.
 
 Useful options:
 
