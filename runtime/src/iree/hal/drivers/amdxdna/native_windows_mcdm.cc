@@ -456,10 +456,11 @@ struct iree_hal_amdxdna_native_command_t {
   uint64_t pathb_chain_descriptor_aperture_offset = 0;
   uint64_t pathb_chain_aperture_generation = 0;
   bool pathb_chain_prepared_valid = false;
-  // CPU-restage flags only. They must not gate opcode-9: firmware consumes
-  // aperture slots on every state-3/chain submit, including cached reuse.
-  // code_dirty means memcpy + CommitPathBCodeWrite is required; publication
-  // of the consumed slot range is required regardless.
+  // CPU-restage flags only. They must not gate device-image installation or
+  // opcode-9. Compact Path-B firmware does not retain aperture GPU contents
+  // across consumes, so copy+Commit is required before every state-3/chain
+  // submit even when the CPU source image is unchanged. Opcode-9 then
+  // publishes those slots.
   bool pathb_chain_code_dirty = false;
   bool pathb_chain_descriptor_dirty = false;
   bool pathb_chain_bound_residency_checked = false;
@@ -1039,30 +1040,26 @@ iree_status_t stage_windows_dpu_code_buffer(
       IREE_RETURN_IF_ERROR(ensure_pathb_single_code_range_active(
           queue, code_offset, command->control_buffer_size,
           /*out_activated=*/nullptr));
-      // Opcode-9 publishes aperture slots in HW-queue order. Unchanged CPU
-      // bytes still need a publication boundary before the next consumer.
-      IREE_RETURN_IF_ERROR(publish_pathb_code_write(
-          queue, code_offset, command->control_buffer_size));
       IREE_RETURN_IF_ERROR(set_partial_elf_instruction_fields());
-      return iree_ok_status();
     }
-    IREE_RETURN_IF_ERROR(publish_pathb_code_write(
-        queue, code_offset, command->control_buffer_size));
-    return iree_ok_status();
-  }
-  IREE_RETURN_IF_ERROR(close_pathb_single_code_range(queue, code_offset));
-  if (is_partial_elf) {
-    command->pathb_code_staged = false;
-    command->pathb_code_staged_size = 0;
-    IREE_RETURN_IF_ERROR(set_partial_elf_instruction_fields());
-    IREE_RETURN_IF_ERROR(ensure_pathb_single_code_range_active(
-        queue, code_offset, command->control_buffer_size,
-        /*out_activated=*/nullptr));
   } else {
-    IREE_RETURN_IF_ERROR(acquire_pathb_code_range(
-        queue, code_offset, command->control_buffer_size));
+    IREE_RETURN_IF_ERROR(close_pathb_single_code_range(queue, code_offset));
+    if (is_partial_elf) {
+      command->pathb_code_staged = false;
+      command->pathb_code_staged_size = 0;
+      IREE_RETURN_IF_ERROR(set_partial_elf_instruction_fields());
+      IREE_RETURN_IF_ERROR(ensure_pathb_single_code_range_active(
+          queue, code_offset, command->control_buffer_size,
+          /*out_activated=*/nullptr));
+    } else {
+      IREE_RETURN_IF_ERROR(acquire_pathb_code_range(
+          queue, code_offset, command->control_buffer_size));
+    }
   }
   {
+    // Restage from the CPU source of truth on every consume. same_staged_code
+    // means the host image is unchanged, not that the previous device image
+    // is still resident. Opcode-9 publishes slots; it does not copy bytes.
     if (command->pathb_code_staged &&
         command->pathb_code_staged_size > command->control_buffer_size) {
       const size_t stale_tail_offset =
@@ -1082,6 +1079,16 @@ iree_status_t stage_windows_dpu_code_buffer(
             &error)) {
       return status_from_mcdm_error(
           "amdxdna Windows MCDM path-B single aperture code commit failed",
+          error);
+    }
+    // Compact Commit is CPU clflush. That flush does not snoop the NPU cache,
+    // so invalidate the KMT allocation before opcode-9.
+    if (!mcdm::SyncCommandApertureCode(
+            command->device->api, command->device->device, aperture,
+            code_offset, static_cast<uint64_t>(command->control_buffer_size),
+            &error)) {
+      return status_from_mcdm_error(
+          "amdxdna Windows MCDM path-B single aperture KMT invalidate failed",
           error);
     }
   }
@@ -1854,6 +1861,10 @@ iree_status_t get_pathb_chain_region_sizes(
   return iree_ok_status();
 }
 
+iree_status_t commit_prepared_pathb_chain_code(
+    iree_hal_amdxdna_native_queue_t* queue,
+    iree_hal_amdxdna_native_command_t* command);
+
 iree_status_t prepare_pathb_chain_code(
     iree_hal_amdxdna_native_queue_t* queue,
     iree_hal_amdxdna_native_command_t* chain_command, bool sync_aperture) {
@@ -1885,101 +1896,10 @@ iree_status_t prepare_pathb_chain_code(
         "aperture GPU view");
   }
 
-  if (!sync_aperture && chain_command->pathb_chain_prepared_valid) {
-    if (chain_command->pathb_chain_code_dirty) {
-      if (IREE_UNLIKELY(chain_command->pathb_chain_child_code_offset_count !=
-                        chain_command->chain_child_count)) {
-        return iree_make_status(
-            IREE_STATUS_FAILED_PRECONDITION,
-            "amdxdna Windows MCDM path-B prepared chain is missing child code "
-            "offsets");
-      }
-      const uint64_t code_base_offset =
-          chain_command->pathb_chain_code_aperture_offset;
-      if (IREE_UNLIKELY(code_base_offset >= aperture.code_size)) {
-        return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                                "amdxdna Windows MCDM prepared path-B chain "
-                                "code base offset %" PRIu64
-                                " exceeds aperture code BO (%" PRIu64 " bytes)",
-                                code_base_offset, aperture.code_size);
-      }
-      uint8_t* code = static_cast<uint8_t*>(aperture.code_cpu_ptr) +
-                      static_cast<size_t>(code_base_offset);
-      const size_t code_capacity =
-          static_cast<size_t>(aperture.code_size - code_base_offset);
-      for (size_t child_index = 0;
-           child_index < chain_command->chain_child_count; ++child_index) {
-        iree_hal_amdxdna_native_command_t* child =
-            chain_command->chain_children[child_index];
-        reset_command_packet_for_start(child);
-        const size_t code_offset =
-            chain_command->pathb_chain_child_code_offsets[child_index];
-        const size_t child_code_size =
-            static_cast<size_t>(child->control_buffer_size);
-        if (IREE_UNLIKELY(code_offset > code_capacity ||
-                          child_code_size > code_capacity - code_offset)) {
-          return iree_make_status(
-              IREE_STATUS_RESOURCE_EXHAUSTED,
-              "amdxdna Windows MCDM prepared path-B chain control code "
-              "exceeds aperture code BO (%zu-byte child at offset %zu, "
-              "capacity %zu)",
-              child_code_size, code_offset, code_capacity);
-        }
-        if (IREE_UNLIKELY(!child->control_buffer ||
-                          !child->control_buffer->buffer.cpu_ptr ||
-                          child_code_size == 0)) {
-          return iree_make_status(
-              IREE_STATUS_FAILED_PRECONDITION,
-              "amdxdna Windows MCDM prepared path-B chain child has no "
-              "control-code buffer");
-        }
-        std::memcpy(code + code_offset, child->control_buffer->buffer.cpu_ptr,
-                    child_code_size);
-        if (uses_partial_elf_npu_packet(child)) {
-          ert_npu_data* npu_data =
-              get_ert_npu_data(command_start_packet(child));
-          if (IREE_UNLIKELY(!npu_data)) {
-            return iree_make_status(
-                IREE_STATUS_INTERNAL,
-                "amdxdna Windows MCDM PARTIAL_ELF prepared chain child has "
-                "no NPU data");
-          }
-          npu_data->instruction_buffer =
-              aperture.code_gpu_va + code_base_offset + code_offset;
-          npu_data->instruction_buffer_size =
-              static_cast<uint32_t>(child->control_buffer_size);
-          npu_data->instruction_prop_count = 0;
-          IREE_RETURN_IF_ERROR(maybe_write_partial_elf_bo_table(child));
-        }
-        IREE_RETURN_IF_ERROR(iree_hal_amdxdna_native_buffer_sync_all(
-            child->exec_buffer,
-            IREE_HAL_AMDXDNA_NATIVE_BUFFER_SYNC_HOST_TO_DEVICE));
-      }
-      chain_command->pathb_chain_descriptor_dirty = false;
-      return iree_ok_status();
-    }
-    for (size_t child_index = 0; child_index < chain_command->chain_child_count;
-         ++child_index) {
-      iree_hal_amdxdna_native_command_t* child =
-          chain_command->chain_children[child_index];
-      reset_command_packet_for_start(child);
-      if (uses_partial_elf_npu_packet(child)) {
-        IREE_RETURN_IF_ERROR(maybe_write_partial_elf_bo_table(child));
-      }
-      // reset_command_packet_for_start and the PARTIAL_ELF BO-table rewrite
-      // both modify dynamic child state. Publish the complete child allocation
-      // so a cached chain never exposes a fresh BO table with a stale ERT
-      // header to the miniport.
-      IREE_RETURN_IF_ERROR(iree_hal_amdxdna_native_buffer_sync_all(
-          child->exec_buffer,
-          IREE_HAL_AMDXDNA_NATIVE_BUFFER_SYNC_HOST_TO_DEVICE));
-    }
-    // Command-BO domain only: restore and HOST_TO_DEVICE child packets. The
-    // aperture CPU image is unchanged, so Commit is skipped here. Opcode-9
-    // still publishes the consumed slot range at batch submit.
-    chain_command->pathb_chain_descriptor_dirty = false;
-    return iree_ok_status();
-  }
+  // Always restage into the existing placement. prepared_valid caches slot
+  // offsets, not a sticky device image: compact Path-B firmware drops
+  // aperture GPU contents after consume, so copy+Commit must run before the
+  // next chain submit.
 
   const uint64_t code_base_offset =
       chain_command->pathb_chain_code_aperture_offset;
@@ -2143,31 +2063,44 @@ iree_status_t prepare_pathb_chain_code(
           child, descriptor_base, descriptor_capacity, &descriptor_used));
     }
   }
+  for (size_t child_index = 0; child_index < chain_command->chain_child_count;
+       ++child_index) {
+    // reset_command_packet_for_start and the PARTIAL_ELF BO-table rewrite both
+    // modify child command BOs. Publish the complete child allocation so a
+    // reused chain never exposes a fresh BO table with a stale ERT header.
+    IREE_RETURN_IF_ERROR(iree_hal_amdxdna_native_buffer_sync_all(
+        chain_command->chain_children[child_index]->exec_buffer,
+        IREE_HAL_AMDXDNA_NATIVE_BUFFER_SYNC_HOST_TO_DEVICE));
+  }
   // Child ERT packets are persistent mapped command metadata. Publish all
   // packet and BO-table stores as one ordered batch before aperture code is
   // committed and the parent chain is submitted.
   std::atomic_thread_fence(std::memory_order_release);
 
   if (sync_aperture) {
-    mcdm::Error error;
-    if (!mcdm::CommitPathBCodeWrite(chain_command->device->api,
-                                    chain_command->device->device, aperture,
-                                    aperture.code_offset + code_base_offset,
-                                    static_cast<uint64_t>(code_used), &error)) {
-      return status_from_mcdm_error(
-          "amdxdna Windows MCDM path-B chain aperture code commit failed",
-          error);
-    }
+    // CopyAndCommit from each child's control_buffer. A spanning Commit of
+    // the code range without that copy would publish leftover aperture bytes.
+    IREE_RETURN_IF_ERROR(
+        commit_prepared_pathb_chain_code(queue, chain_command));
     IREE_RETURN_IF_ERROR(publish_pathb_code_write(
         queue, aperture.code_offset + code_base_offset,
         align_up_size(code_used, kWindowsDpuChainCodeAlignment)));
     if (descriptor_used) {
+      mcdm::Error error;
       if (!mcdm::CommitPathBCodeWrite(
               chain_command->device->api, chain_command->device->device,
               aperture, static_cast<uint64_t>(descriptor_offset),
               static_cast<uint64_t>(descriptor_used), &error)) {
         return status_from_mcdm_error(
             "amdxdna Windows MCDM path-B chain descriptor commit failed",
+            error);
+      }
+      if (!mcdm::SyncCommandApertureCode(
+              chain_command->device->api, chain_command->device->device,
+              aperture, static_cast<uint64_t>(descriptor_offset),
+              static_cast<uint64_t>(descriptor_used), &error)) {
+        return status_from_mcdm_error(
+            "amdxdna Windows MCDM path-B chain descriptor KMT invalidate failed",
             error);
       }
     }
@@ -2213,6 +2146,14 @@ iree_status_t sync_prepared_pathb_chain_batch(
       return status_from_mcdm_error(
           "amdxdna Windows MCDM path-B batch descriptor commit failed", error);
     }
+    if (!mcdm::SyncCommandApertureCode(
+            queue->context->device->api, queue->context->device->device,
+            aperture, static_cast<uint64_t>(descriptor_offset),
+            static_cast<uint64_t>(descriptor_bytes), &error)) {
+      return status_from_mcdm_error(
+          "amdxdna Windows MCDM path-B batch descriptor KMT invalidate failed",
+          error);
+    }
   }
   if ((code_bytes || descriptor_bytes) &&
       !mcdm::RefreshPathBCodeMappingAfterWrite(
@@ -2250,6 +2191,22 @@ iree_status_t commit_prepared_pathb_chain_code(
                                           command->chain_child_count, &error)) {
     return status_from_mcdm_error(
         "amdxdna Windows MCDM path-B child code staging failed", error);
+  }
+  uint64_t span_begin = std::numeric_limits<uint64_t>::max();
+  uint64_t span_end = 0;
+  for (size_t child_index = 0; child_index < command->chain_child_count;
+       ++child_index) {
+    if (ranges[child_index].length == 0) continue;
+    span_begin = std::min(span_begin, ranges[child_index].offset);
+    span_end = std::max(span_end, ranges[child_index].offset +
+                                      ranges[child_index].length);
+  }
+  if (span_begin < span_end &&
+      !mcdm::SyncCommandApertureCode(
+          command->device->api, command->device->device, aperture, span_begin,
+          span_end - span_begin, &error)) {
+    return status_from_mcdm_error(
+        "amdxdna Windows MCDM path-B child code KMT invalidate failed", error);
   }
   return iree_ok_status();
 }
@@ -3914,16 +3871,13 @@ static iree_status_t iree_hal_amdxdna_native_submit_all_issue(
   size_t dirty_code_begin = std::numeric_limits<size_t>::max();
   size_t dirty_code_end = 0;
   for (iree_host_size_t i = 0; i < command_count; ++i) {
-    if (!commands[i]->pathb_chain_prepared_valid ||
-        commands[i]->pathb_chain_code_dirty) {
-      dirty_code_begin = std::min(
-          dirty_code_begin,
-          static_cast<size_t>(commands[i]->pathb_chain_code_aperture_offset));
-      dirty_code_end = std::max(
-          dirty_code_end,
-          static_cast<size_t>(commands[i]->pathb_chain_code_aperture_offset) +
-              code_sizes[i]);
-    }
+    dirty_code_begin = std::min(
+        dirty_code_begin,
+        static_cast<size_t>(commands[i]->pathb_chain_code_aperture_offset));
+    dirty_code_end = std::max(
+        dirty_code_end,
+        static_cast<size_t>(commands[i]->pathb_chain_code_aperture_offset) +
+            code_sizes[i]);
   }
   if (dirty_code_begin != std::numeric_limits<size_t>::max()) {
     mcdm::Error acquire_error;
@@ -3969,11 +3923,10 @@ static iree_status_t iree_hal_amdxdna_native_submit_all_issue(
     {
       IREE_RETURN_IF_ERROR(prepare_pathb_chain_code(queue, command, false));
     }
-    if (command->pathb_chain_code_dirty) {
-      // Restage device-visible aperture bytes only. Opcode-9 below is
-      // independent of this flag.
-      IREE_RETURN_IF_ERROR(commit_prepared_pathb_chain_code(queue, command));
-    }
+    // CopyAndCommit from each child's control_buffer before opcode-9. Dirty
+    // flags may skip a host memcpy optimization later; they must not skip
+    // reinstalling the device image dropped after the last consume.
+    IREE_RETURN_IF_ERROR(commit_prepared_pathb_chain_code(queue, command));
     {
       IREE_RETURN_IF_ERROR(materialize_deferred_buffer(command->exec_buffer));
       command->start_packet = reinterpret_cast<ert_start_kernel_cmd*>(
@@ -4006,7 +3959,6 @@ static iree_status_t iree_hal_amdxdna_native_submit_all_issue(
   for (iree_host_size_t command_index = 0; command_index < command_count;
        ++command_index) {
     iree_hal_amdxdna_native_command_t* command = commands[command_index];
-    if (!command->pathb_chain_descriptor_dirty) continue;
     const size_t begin =
         static_cast<size_t>(command->pathb_chain_descriptor_aperture_offset);
     const size_t end =
@@ -4023,16 +3975,14 @@ static iree_status_t iree_hal_amdxdna_native_submit_all_issue(
           ? 0
           : dirty_descriptor_end - dirty_descriptor_begin;
 
-  // code_bytes=0 is intentional: a dirty-gated batch publish would skip
-  // cached chains (prepared=1, code_dirty=0). Opcode-9 is the following
-  // per-command loop, which always publishes the exact consumed range.
+  // code_bytes=0: child instruction bytes were CopyAndCommit'd above.
+  // Opcode-9 is the following per-command loop, which publishes the exact
+  // consumed range after the device image is reinstalled.
   IREE_RETURN_IF_ERROR(sync_prepared_pathb_chain_batch(
       queue, command_count, /*code_offset=*/0, /*code_bytes=*/0,
       descriptor_sync_offset, descriptor_sync_bytes));
-  // Opcode-9 is a queue-ordered publication of aperture slots, not a sticky
-  // mapping of previously committed bytes. Cached chains with unchanged CPU
-  // images still consume those slots on the next state-3/chain command, so
-  // every submit must publish the exact range it will execute.
+  // Opcode-9 publishes aperture slots in HW-queue order. It does not copy
+  // bytes; CopyAndCommit above reinstalled the device image first.
   for (iree_host_size_t command_index = 0; command_index < command_count;
        ++command_index) {
     iree_hal_amdxdna_native_command_t* command = commands[command_index];

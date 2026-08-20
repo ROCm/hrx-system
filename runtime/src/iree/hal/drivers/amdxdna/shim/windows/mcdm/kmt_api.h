@@ -469,15 +469,20 @@ bool SubmitPathBApertureSync(const KmtApi& api, const Device& device,
 
 // Path-B aperture publication is two independent happens-before edges:
 //
-//   1. CommitPathBCodeWrite makes CPU stores device-visible (compact: cache
-//      flush of each 0x8000 slot; legacy: D3DKMTInvalidateCache). Skip this
-//      only when the CPU did not write the mapping.
+//   1. CommitPathBCodeWrite / CopyAndCommitPathBCodeWrites makes CPU stores
+//      device-visible (compact: cache flush of each 0x8000 slot; legacy:
+//      D3DKMTInvalidateCache). Skip this only when the CPU did not write
+//      AND the previous device image is known still resident. Compact Path-B
+//      firmware does not retain aperture GPU contents across consumes, so
+//      native submit restages from the CPU source of truth and
+//      KMT-invalidates the allocation before every consume. Compact Commit
+//      is CPU clflush only and does not snoop the NPU cache.
 //   2. PublishPathBCodeWrite / opcode-9 end markers publish those slots in
 //      HW-queue order so a later state-3/chain command may consume them.
-//      Opcode-9 is not a sticky mapping. Firmware that retains published
-//      slots can appear to tolerate a skip; that is not a portable MCDM
-//      contract. Every consumer must publish the exact range it will execute,
-//      including cached reuse of unchanged bytes.
+//      Opcode-9 is not a copy and not a sticky mapping. Firmware that
+//      retains published slots can appear to tolerate a skip-Commit; that
+//      is not a portable MCDM contract. Every consumer must restage then
+//      publish the exact range it will execute.
 //
 // Acquisition validates the mapped range. After execution, start-boundary
 // markers release the slots and the final release retires before teardown.
@@ -507,8 +512,9 @@ bool RefreshPathBCodeMappingAfterWrite(
     const KmtApi& api, const Device& device, CommandAperture* aperture,
     Error* out_error);
 
-// Queue-ordered opcode-9 publication of `offset`/`length`. Call this before
-// every state-3/chain consumer of that range, even when Commit was skipped.
+// Queue-ordered opcode-9 publication of `offset`/`length`. Does not copy
+// bytes. Native submit restages (copy+Commit) first, then calls this before
+// every state-3/chain consumer of that range.
 bool PublishPathBCodeWrite(const KmtApi& api, const Device& device,
                            Context* context,
                            const CommandAperture& aperture, uint64_t offset,

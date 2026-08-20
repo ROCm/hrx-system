@@ -1722,9 +1722,10 @@ TEST(KmtApiTest, CodeRangeLifecycleMatchesNegotiatedAbi) {
 }
 
 TEST(KmtApiTest, PublishPathBCodeWriteRepeatsOpcode9WithoutRewrite) {
-  // Opcode-9 is a queue-ordered happens-before, not a sticky mapping of
-  // previously committed bytes. Cached reuse must emit the same end-marker
-  // sequence before every consumer, without another CommitPathBCodeWrite.
+  // Opcode-9 is a queue-ordered happens-before, not a copy. Repeating
+  // PublishPathBCodeWrite must emit the same end-marker sequence without
+  // another CommitPathBCodeWrite at this KMT API layer. Native submit
+  // restages separately before each Publish.
   auto run = [](McdmAbi mcdm_abi) {
     constexpr uint64_t kCodeBytes = 0x10000;
     constexpr size_t kPublishCount = 3;
