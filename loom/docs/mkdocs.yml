@@ -27,6 +27,7 @@ watch:
   - ../py/loom/gen/ops/model.py
   - ../py/loom/target
   - ../src/loom/editor/textmate
+  - ../../runtime/src/iree/vm/bytecode/spec/model
 
 theme:
   name: material
@@ -98,6 +99,11 @@ nav:
       - Types: reference/types/index.md
       - Attributes: reference/attributes/index.md
       - Encodings: reference/encodings/index.md
+      - VM bytecode:
+          - Specification: reference/vm/index.md
+          - Module container: reference/vm/module-format.md
+          - Core ISA: reference/vm/isa/core/index.md
+          - HAL ISA: reference/vm/isa/hal/index.md
       - C API: reference/c-api/index.md
 
 plugins:

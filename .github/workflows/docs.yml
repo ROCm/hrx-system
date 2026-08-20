@@ -19,6 +19,7 @@ on:
       - "loom/docs/**"
       - "loom/py/loom/**"
       - "loom/src/loom/editor/textmate/**"
+      - "runtime/src/iree/vm/bytecode/spec/**"
   push:
     branches:
       - main
@@ -33,6 +34,7 @@ on:
       - "loom/docs/**"
       - "loom/py/loom/**"
       - "loom/src/loom/editor/textmate/**"
+      - "runtime/src/iree/vm/bytecode/spec/**"
 
 permissions:
   contents: read
@@ -70,6 +72,10 @@ jobs:
             --site-dir build/loom-pages/loom
           test -f build/loom-pages/loom/index.html
           test -f build/loom-pages/loom/reference/dialects/index.html
+          test -f build/loom-pages/loom/reference/vm/index.html
+          test -f build/loom-pages/loom/reference/vm/module-format/index.html
+          test -f build/loom-pages/loom/reference/vm/isa/core/index.html
+          test -f build/loom-pages/loom/reference/vm/isa/hal/index.html
           test -f build/loom-pages/loom/reference/c-api/generated/index.html
 
       - name: Upload Pages artifact

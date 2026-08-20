@@ -30,9 +30,10 @@ python dev.py docs serve
 
 Hand-authored pages live under `src/`. Executable guide programs live under
 `examples/` so the compiler and execution-test infrastructure can validate the
-same source readers see. Generated dialect reference pages and C API output are
-assembled only in the build tree; generated Markdown and HTML are not checked
-in. Set `LOOM_DOCS_WORK_DIR` to relocate that isolated build tree when needed.
+same source readers see. Generated language and VM bytecode reference pages and
+C API output are assembled only in the build tree; generated Markdown and HTML
+are not checked in. Set `LOOM_DOCS_WORK_DIR` to relocate that isolated build
+tree when needed.
 
 ## Content architecture
 
@@ -48,7 +49,7 @@ manual, tool reference, target cookbook, and fixture inventory at once.
 | Workflows | How do I format, test, benchmark, compile, inspect, or debug a program? | Task-oriented public tool invocations with their input, output, and failure contracts. |
 | Integration | How do I package libraries or embed AOT/JIT compilation? | Real caller flows for bytecode libraries, the `loomc` API, launch evaluation, artifacts, and caches. |
 | Targets | What changes for this architecture or runtime? | Target-owned setup, profiles, capabilities, execution paths, and evidence interpretation. |
-| Reference | What is the exact syntax or API contract? | Generated dialect/type/attribute pages and declaration-owned C API documentation. |
+| Reference | What is the exact syntax, bytecode, or API contract? | Generated dialect/type/attribute pages, the normative VM bytecode specification, and declaration-owned C API documentation. |
 | Contributing | How do I build Loom or change its documentation? | Repository tooling and compiler-development workflows kept out of the installed-user path. |
 
 The public navigation grows with complete content rather than publishing empty
