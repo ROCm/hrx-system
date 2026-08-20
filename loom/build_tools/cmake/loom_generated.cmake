@@ -14,7 +14,10 @@
 # Generated commands record input freshness in a private stamp and expose their
 # artifacts as byproducts. Generators that preserve an artifact's timestamp
 # when its contents are unchanged can then avoid invalidating C/C++ consumers
-# without leaving Make to repeat the generator on every build.
+# without leaving Make to repeat the generator on every build. Producer targets
+# depend only on the stamp: CMake's Makefile generators do not emit standalone
+# rules for BYPRODUCTS, while the explicit producer-to-consumer target edges
+# ensure the artifacts exist before compilation begins.
 
 function(_loom_python_command_prefix OUTPUT_PREFIX GENERATOR)
   iree_py_library_collect_package_dirs(_GENERATOR_PACKAGE_DIRS "${GENERATOR}")
@@ -27,6 +30,13 @@ function(_loom_python_command_prefix OUTPUT_PREFIX GENERATOR)
   set(${OUTPUT_PREFIX}
     "${CMAKE_COMMAND}" -E env "PYTHONPATH=${_GENERATOR_PYTHONPATH}"
     PARENT_SCOPE
+  )
+endfunction()
+
+function(_loom_add_generated_target TARGET_NAME STAMP_PATH)
+  add_custom_target("${TARGET_NAME}"
+    DEPENDS
+      "${STAMP_PATH}"
   )
 endfunction()
 
@@ -103,11 +113,7 @@ function(_loom_generated_files)
     PROPERTIES GENERATED TRUE
   )
 
-  add_custom_target("${_GEN_TARGET}"
-    DEPENDS
-      "${_GEN_STAMP}"
-      ${_OUTPUTS}
-  )
+  _loom_add_generated_target("${_GEN_TARGET}" "${_GEN_STAMP}")
   iree_register_generated_compile_input("${_GEN_TARGET}"
     OUTPUTS ${_OUTPUTS}
   )
@@ -292,11 +298,7 @@ function(loom_generated_cc_library)
     PROPERTIES GENERATED TRUE
   )
 
-  add_custom_target("${_GEN_TARGET}"
-    DEPENDS
-      "${_GEN_STAMP}"
-      ${_OUTPUTS}
-  )
+  _loom_add_generated_target("${_GEN_TARGET}" "${_GEN_STAMP}")
   iree_register_generated_compile_input("${_GEN_TARGET}"
     OUTPUTS ${_OUTPUTS}
   )

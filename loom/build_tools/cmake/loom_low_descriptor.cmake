@@ -176,11 +176,7 @@ function(loom_target_table_cc_library)
     VERBATIM
   )
 
-  add_custom_target("${_GEN_TARGET}"
-    DEPENDS
-      "${_GEN_STAMP}"
-      ${_OUTPUTS}
-  )
+  _loom_add_generated_target("${_GEN_TARGET}" "${_GEN_STAMP}")
   iree_register_generated_compile_input("${_GEN_TARGET}"
     OUTPUTS
       ${_OUTPUTS}
@@ -318,11 +314,7 @@ function(loom_target_contract_table_cc_libraries)
     VERBATIM
   )
 
-  add_custom_target("${_GEN_TARGET}"
-    DEPENDS
-      "${_GEN_STAMP}"
-      ${_OUTPUTS}
-  )
+  _loom_add_generated_target("${_GEN_TARGET}" "${_GEN_STAMP}")
   iree_register_generated_compile_input("${_GEN_TARGET}"
     OUTPUTS
       ${_OUTPUTS}
