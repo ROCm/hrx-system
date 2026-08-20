@@ -1,0 +1,28 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//build_tools/bazel:python.bzl", "iree_py_library")
+
+package(
+    default_visibility = ["//visibility:public"],
+    licenses = ["notice"],
+)
+
+iree_py_library(
+    name = "render",
+    srcs = [
+        "__init__.py",
+        "c_header.py",
+        "json_projection.py",
+        "manifest.py",
+        "markdown.py",
+    ],
+    deps = [
+        "//runtime/src/iree/vm/bytecode/spec/model",
+        "//runtime/src/iree/vm/bytecode/spec/model/isa",
+        "//runtime/src/iree/vm/bytecode/spec/model/module",
+    ],
+)

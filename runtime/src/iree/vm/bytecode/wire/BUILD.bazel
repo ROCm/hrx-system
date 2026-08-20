@@ -1,0 +1,131 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//build_tools/bazel:cmake.bzl", "iree_cmake_extra_content")
+load("//build_tools/bazel:generate.bzl", "iree_generated_files")
+load("//runtime/build_tools/bazel:cc.bzl", "iree_runtime_cc_library")
+
+package(
+    default_visibility = ["//visibility:public"],
+    features = ["layering_check"],
+    licenses = ["notice"],
+)
+
+_WIRE_OUTPUT_ARGUMENTS = {
+    "assertions.c": "--output-file=wire/assertions.c={path}",
+    "core/abi.h": "--output-file=wire/core/abi.h={path}",
+    "core/assertions.c": "--output-file=wire/core/assertions.c={path}",
+    "core/buffer.h": "--output-file=wire/core/buffer.h={path}",
+    "core/constant.h": "--output-file=wire/core/constant.h={path}",
+    "core/control.h": "--output-file=wire/core/control.h={path}",
+    "core/conversion.h": "--output-file=wire/core/conversion.h={path}",
+    "core/float.h": "--output-file=wire/core/float.h={path}",
+    "core/function.h": "--output-file=wire/core/function.h={path}",
+    "core/global.h": "--output-file=wire/core/global.h={path}",
+    "core/integer.h": "--output-file=wire/core/integer.h={path}",
+    "core/opcodes.h": "--output-file=wire/core/opcodes.h={path}",
+    "core/ref.h": "--output-file=wire/core/ref.h={path}",
+    "core/selectors.h": "--output-file=wire/core/selectors.h={path}",
+    "core/stack.h": "--output-file=wire/core/stack.h={path}",
+    "core/value.h": "--output-file=wire/core/value.h={path}",
+    "hal/assertions.c": "--output-file=wire/hal/assertions.c={path}",
+    "hal/buffer.h": "--output-file=wire/hal/buffer.h={path}",
+    "hal/command_buffer.h": "--output-file=wire/hal/command_buffer.h={path}",
+    "hal/device.h": "--output-file=wire/hal/device.h={path}",
+    "hal/opcodes.h": "--output-file=wire/hal/opcodes.h={path}",
+    "hal/queue.h": "--output-file=wire/hal/queue.h={path}",
+    "hal/semaphore.h": "--output-file=wire/hal/semaphore.h={path}",
+    "module_format.h": "--output-file=wire/module_format.h={path}",
+}
+
+_WIRE_HEADERS = [
+    output
+    for output in sorted(_WIRE_OUTPUT_ARGUMENTS.keys())
+    if output.endswith(".h")
+]
+
+_WIRE_SOURCES = [
+    output
+    for output in sorted(_WIRE_OUTPUT_ARGUMENTS.keys())
+    if output.endswith(".c")
+]
+
+iree_generated_files(
+    name = "wire_gen",
+    outs = sorted(_WIRE_OUTPUT_ARGUMENTS.keys()),
+    args = ["--output-kind=wire"],
+    output_args = _WIRE_OUTPUT_ARGUMENTS,
+    tags = ["skip-bazel_to_cmake"],
+    tool = "//runtime/src/iree/vm/bytecode/spec:generate",
+)
+
+iree_cmake_extra_content(
+    content = """
+iree_py_generated_files(
+  NAME wire_gen
+  GENERATOR iree::vm::bytecode::spec::generate
+  OUTPUTS
+    assertions.c
+    core/abi.h
+    core/assertions.c
+    core/buffer.h
+    core/constant.h
+    core/control.h
+    core/conversion.h
+    core/float.h
+    core/function.h
+    core/global.h
+    core/integer.h
+    core/opcodes.h
+    core/ref.h
+    core/selectors.h
+    core/stack.h
+    core/value.h
+    hal/assertions.c
+    hal/buffer.h
+    hal/command_buffer.h
+    hal/device.h
+    hal/opcodes.h
+    hal/queue.h
+    hal/semaphore.h
+    module_format.h
+  OUTPUT_FLAGS
+    --output-file=wire/assertions.c
+    --output-file=wire/core/abi.h
+    --output-file=wire/core/assertions.c
+    --output-file=wire/core/buffer.h
+    --output-file=wire/core/constant.h
+    --output-file=wire/core/control.h
+    --output-file=wire/core/conversion.h
+    --output-file=wire/core/float.h
+    --output-file=wire/core/function.h
+    --output-file=wire/core/global.h
+    --output-file=wire/core/integer.h
+    --output-file=wire/core/opcodes.h
+    --output-file=wire/core/ref.h
+    --output-file=wire/core/selectors.h
+    --output-file=wire/core/stack.h
+    --output-file=wire/core/value.h
+    --output-file=wire/hal/assertions.c
+    --output-file=wire/hal/buffer.h
+    --output-file=wire/hal/command_buffer.h
+    --output-file=wire/hal/device.h
+    --output-file=wire/hal/opcodes.h
+    --output-file=wire/hal/queue.h
+    --output-file=wire/hal/semaphore.h
+    --output-file=wire/module_format.h
+  ARGS --output-kind=wire
+)
+""",
+    inline = True,
+)
+
+iree_runtime_cc_library(
+    name = "wire",
+    srcs = _WIRE_SOURCES,
+    hdrs = _WIRE_HEADERS,
+    deps = ["//runtime/src/iree/base:core_headers"],
+)
