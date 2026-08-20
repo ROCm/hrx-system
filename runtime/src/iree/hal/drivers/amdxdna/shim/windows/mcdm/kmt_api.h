@@ -29,6 +29,13 @@ namespace iree::hal::amdxdna::mcdm {
 constexpr size_t kMaxComputeAdapterHandles = 256;
 constexpr size_t kMaxMcdmPrivateDataSize = 0x280;
 constexpr size_t kMaxPathBBoTableEntries = 6;
+// PARTIAL_ELF command BOs carry this out-of-packet table. The miniport reads
+// it independently of the ERT packet, so every submit that consumes the BO
+// must SyncBuffer this exact range (or the whole child exec BO). That is a
+// command-BO publication domain, not opcode-9.
+constexpr size_t kPathBBoTableOffset = 11 * sizeof(uint32_t);
+constexpr size_t kPathBBoTableSize =
+    2 * kMaxPathBBoTableEntries * sizeof(uint32_t);
 constexpr size_t kCompactPathBChainHandleSize = 0x120;
 
 // Miniport-facing runlist child record for the compact MCDM contract. The
@@ -460,14 +467,22 @@ bool SubmitPathBApertureSync(const KmtApi& api, const Device& device,
                              uint64_t offset, bool wait_for_cpu,
                              Error* out_error);
 
-// Code ranges have an ABI-owned lifetime independent of CPU write
-// publication. Acquisition validates the mapped range. Compact MCDM publishes
-// writes by flushing every cache line in each complete 0x8000-byte slot;
-// legacy MCDM uses KMT invalidation. Both profiles then submit opcode-9 end
-// markers so the later state-3 command observes the published image in queue
-// order. After execution, start-boundary markers release the slots and the
-// final release retires before teardown. Keeping those details here lets the
-// native layer use one acquire/write/publish/release sequence for both ABIs.
+// Path-B aperture publication is two independent happens-before edges:
+//
+//   1. CommitPathBCodeWrite makes CPU stores device-visible (compact: cache
+//      flush of each 0x8000 slot; legacy: D3DKMTInvalidateCache). Skip this
+//      only when the CPU did not write the mapping.
+//   2. PublishPathBCodeWrite / opcode-9 end markers publish those slots in
+//      HW-queue order so a later state-3/chain command may consume them.
+//      Opcode-9 is not a sticky mapping. Firmware that retains published
+//      slots can appear to tolerate a skip; that is not a portable MCDM
+//      contract. Every consumer must publish the exact range it will execute,
+//      including cached reuse of unchanged bytes.
+//
+// Acquisition validates the mapped range. After execution, start-boundary
+// markers release the slots and the final release retires before teardown.
+// Keeping those details here lets the native layer use one
+// acquire/write/publish/release sequence for both ABIs.
 bool AcquirePathBCodeRange(const KmtApi& api, const Device& device,
                            Context* context,
                            const CommandAperture& aperture, uint64_t offset,
@@ -492,6 +507,8 @@ bool RefreshPathBCodeMappingAfterWrite(
     const KmtApi& api, const Device& device, CommandAperture* aperture,
     Error* out_error);
 
+// Queue-ordered opcode-9 publication of `offset`/`length`. Call this before
+// every state-3/chain consumer of that range, even when Commit was skipped.
 bool PublishPathBCodeWrite(const KmtApi& api, const Device& device,
                            Context* context,
                            const CommandAperture& aperture, uint64_t offset,

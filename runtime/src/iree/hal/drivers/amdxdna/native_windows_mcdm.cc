@@ -456,6 +456,10 @@ struct iree_hal_amdxdna_native_command_t {
   uint64_t pathb_chain_descriptor_aperture_offset = 0;
   uint64_t pathb_chain_aperture_generation = 0;
   bool pathb_chain_prepared_valid = false;
+  // CPU-restage flags only. They must not gate opcode-9: firmware consumes
+  // aperture slots on every state-3/chain submit, including cached reuse.
+  // code_dirty means memcpy + CommitPathBCodeWrite is required; publication
+  // of the consumed slot range is required regardless.
   bool pathb_chain_code_dirty = false;
   bool pathb_chain_descriptor_dirty = false;
   bool pathb_chain_bound_residency_checked = false;
@@ -871,7 +875,9 @@ iree_status_t activate_pathb_context_for_submit_locked(
 }
 
 iree_status_t ensure_pathb_single_code_range_active(
-    iree_hal_amdxdna_native_queue_t* queue, uint64_t offset, uint64_t size) {
+    iree_hal_amdxdna_native_queue_t* queue, uint64_t offset, uint64_t size,
+    bool* out_activated) {
+  if (out_activated) *out_activated = false;
   if (!queue || !queue->context) return iree_ok_status();
   auto& ranges = queue->context->pathb_active_single_code_ranges;
   const bool active =
@@ -889,6 +895,7 @@ iree_status_t ensure_pathb_single_code_range_active(
         "amdxdna Windows MCDM pathb single-session code acquire failed", error);
   }
   ranges.push_back({offset, size});
+  if (out_activated) *out_activated = true;
   return iree_ok_status();
 }
 
@@ -1030,9 +1037,14 @@ iree_status_t stage_windows_dpu_code_buffer(
   if (same_staged_code) {
     if (is_partial_elf) {
       IREE_RETURN_IF_ERROR(ensure_pathb_single_code_range_active(
+          queue, code_offset, command->control_buffer_size,
+          /*out_activated=*/nullptr));
+      // Opcode-9 publishes aperture slots in HW-queue order. Unchanged CPU
+      // bytes still need a publication boundary before the next consumer.
+      IREE_RETURN_IF_ERROR(publish_pathb_code_write(
           queue, code_offset, command->control_buffer_size));
       IREE_RETURN_IF_ERROR(set_partial_elf_instruction_fields());
-      // Re-publish cached PARTIAL_ELF code for each START_NPU invocation.
+      return iree_ok_status();
     }
     IREE_RETURN_IF_ERROR(publish_pathb_code_write(
         queue, code_offset, command->control_buffer_size));
@@ -1044,7 +1056,8 @@ iree_status_t stage_windows_dpu_code_buffer(
     command->pathb_code_staged_size = 0;
     IREE_RETURN_IF_ERROR(set_partial_elf_instruction_fields());
     IREE_RETURN_IF_ERROR(ensure_pathb_single_code_range_active(
-        queue, code_offset, command->control_buffer_size));
+        queue, code_offset, command->control_buffer_size,
+        /*out_activated=*/nullptr));
   } else {
     IREE_RETURN_IF_ERROR(acquire_pathb_code_range(
         queue, code_offset, command->control_buffer_size));
@@ -1517,7 +1530,9 @@ iree_status_t maybe_write_partial_elf_bo_table(
   // GPU VAs after the 32-byte ERT_START_NPU packet. The inline private packet
   // still advertises only the ERT packet bytes, but the miniport inspects this
   // table for dependency metadata. The negotiated DDI ABI defines its capacity;
-  // entries without a bound kernel argument remain zero, matching XRT.
+  // entries without a bound kernel argument remain zero, matching XRT. This
+  // function only stores CPU bytes; the caller must SyncBuffer the table (or
+  // the whole child exec BO) before the device reads it.
   std::array<D3DGPU_VIRTUAL_ADDRESS, mcdm::kMaxPathBBoTableEntries>
       real_bo_gpu_vas = {};
   const size_t real_bo_entry_count = partial_elf_real_bo_entry_count(command);
@@ -1948,11 +1963,20 @@ iree_status_t prepare_pathb_chain_code(
       iree_hal_amdxdna_native_command_t* child =
           chain_command->chain_children[child_index];
       reset_command_packet_for_start(child);
+      if (uses_partial_elf_npu_packet(child)) {
+        IREE_RETURN_IF_ERROR(maybe_write_partial_elf_bo_table(child));
+      }
+      // reset_command_packet_for_start and the PARTIAL_ELF BO-table rewrite
+      // both modify dynamic child state. Publish the complete child allocation
+      // so a cached chain never exposes a fresh BO table with a stale ERT
+      // header to the miniport.
+      IREE_RETURN_IF_ERROR(iree_hal_amdxdna_native_buffer_sync_all(
+          child->exec_buffer,
+          IREE_HAL_AMDXDNA_NATIVE_BUFFER_SYNC_HOST_TO_DEVICE));
     }
-    // Clean prepared chains only restore child ERT packet headers/state before
-    // resubmission. This mirrors XRT runlist execute(), which calls
-    // run_impl::prep_start() for each child run before submitting the parent.
-    // Dirty packet/BO-table rewrites still take the explicit sync path above.
+    // Command-BO domain only: restore and HOST_TO_DEVICE child packets. The
+    // aperture CPU image is unchanged, so Commit is skipped here. Opcode-9
+    // still publishes the consumed slot range at batch submit.
     chain_command->pathb_chain_descriptor_dirty = false;
     return iree_ok_status();
   }
@@ -3697,9 +3721,18 @@ static iree_status_t iree_hal_amdxdna_native_submit_issue(
   {
     IREE_RETURN_IF_ERROR(maybe_write_partial_elf_bo_table(command));
   }
+  if (is_pathb_partial_elf &&
+      !mcdm::SyncBuffer(command->device->api, command->device->device,
+                        command->exec_buffer->buffer,
+                        mcdm::kPathBBoTableOffset, mcdm::kPathBBoTableSize,
+                        &error)) {
+    return status_from_mcdm_error(
+        "amdxdna Windows MCDM PARTIAL_ELF BO table publication failed", error);
+  }
   // The state-3 packet lives in a normal command BO. Keep its CPU writes
-  // visible before the KMT submit; the staged instruction bytes are made
-  // visible above through the command-aperture refresh.
+  // ordered before the KMT submit. PARTIAL_ELF packets are copied inline, but
+  // their out-of-packet BO table is read from this allocation by the miniport
+  // and was published explicitly above.
   {
     if (!handler.skips_exec_buffer_sync()) {
       IREE_RETURN_IF_ERROR(iree_hal_amdxdna_native_buffer_sync_all(
@@ -3905,8 +3938,6 @@ static iree_status_t iree_hal_amdxdna_native_submit_all_issue(
     }
   }
   mcdm::Error error;
-  size_t batch_code_sync_begin = std::numeric_limits<size_t>::max();
-  size_t batch_code_sync_end = 0;
   for (iree_host_size_t command_index = 0; command_index < command_count;
        ++command_index) {
     iree_hal_amdxdna_native_command_t* command = commands[command_index];
@@ -3939,17 +3970,9 @@ static iree_status_t iree_hal_amdxdna_native_submit_all_issue(
       IREE_RETURN_IF_ERROR(prepare_pathb_chain_code(queue, command, false));
     }
     if (command->pathb_chain_code_dirty) {
+      // Restage device-visible aperture bytes only. Opcode-9 below is
+      // independent of this flag.
       IREE_RETURN_IF_ERROR(commit_prepared_pathb_chain_code(queue, command));
-    }
-    if (command->pathb_chain_code_dirty ||
-        command->pathb_chain_descriptor_dirty) {
-      batch_code_sync_begin = std::min(
-          batch_code_sync_begin,
-          static_cast<size_t>(command->pathb_chain_code_aperture_offset));
-      batch_code_sync_end = std::max<size_t>(
-          batch_code_sync_end,
-          static_cast<size_t>(command->pathb_chain_code_aperture_offset +
-                              command->pathb_chain_code_used_size));
     }
     {
       IREE_RETURN_IF_ERROR(materialize_deferred_buffer(command->exec_buffer));
@@ -4000,19 +4023,25 @@ static iree_status_t iree_hal_amdxdna_native_submit_all_issue(
           ? 0
           : dirty_descriptor_end - dirty_descriptor_begin;
 
+  // code_bytes=0 is intentional: a dirty-gated batch publish would skip
+  // cached chains (prepared=1, code_dirty=0). Opcode-9 is the following
+  // per-command loop, which always publishes the exact consumed range.
   IREE_RETURN_IF_ERROR(sync_prepared_pathb_chain_batch(
-      queue, command_count,
-      batch_code_sync_begin == std::numeric_limits<size_t>::max()
-          ? 0
-          : aperture.code_offset + batch_code_sync_begin,
-      batch_code_sync_begin == std::numeric_limits<size_t>::max()
-          ? 0
-          : batch_code_sync_end - batch_code_sync_begin,
+      queue, command_count, /*code_offset=*/0, /*code_bytes=*/0,
       descriptor_sync_offset, descriptor_sync_bytes));
+  // Opcode-9 is a queue-ordered publication of aperture slots, not a sticky
+  // mapping of previously committed bytes. Cached chains with unchanged CPU
+  // images still consume those slots on the next state-3/chain command, so
+  // every submit must publish the exact range it will execute.
   for (iree_host_size_t command_index = 0; command_index < command_count;
        ++command_index) {
-    commands[command_index]->pathb_chain_code_dirty = false;
-    commands[command_index]->pathb_chain_descriptor_dirty = false;
+    iree_hal_amdxdna_native_command_t* command = commands[command_index];
+    IREE_RETURN_IF_ERROR(publish_pathb_code_write(
+        queue,
+        aperture.code_offset + command->pathb_chain_code_aperture_offset,
+        command->pathb_chain_code_used_size));
+    command->pathb_chain_code_dirty = false;
+    command->pathb_chain_descriptor_dirty = false;
   }
   for (iree_host_size_t command_index = 0; command_index < command_count;
        ++command_index) {
@@ -4068,12 +4097,23 @@ static iree_status_t iree_hal_amdxdna_native_submit_all_wait(
     if (packet->state == ERT_CMD_STATE_COMPLETED) continue;
     ert_cmd_chain_data* chain_data =
         reinterpret_cast<ert_cmd_chain_data*>(packet->data);
+    const mcdm::PathBPendingSubmit& pending =
+        s->pending_batch[command_index];
     return iree_make_status(
         IREE_STATUS_INTERNAL,
         "amdxdna %.*s batch command %" PRIhsz
-        " did not complete: ert state %u (error_index %u, submit_index %u)",
+        " did not complete: ert state %u (error_index %u, submit_index %u, "
+        "fence=%" PRIu64 ", completion_slot=0x%x, code_offset=0x%" PRIx64
+        ", code_size=0x%" PRIx64 ", prepared=%u, code_dirty=%u, "
+        "descriptor_dirty=%u, generation=%" PRIu64 ")",
         static_cast<int>(s->label_size), s->label, command_index, packet->state,
-        chain_data->error_index, chain_data->submit_index);
+        chain_data->error_index, chain_data->submit_index, pending.fence_id,
+        pending.slot_offset, command->pathb_chain_code_aperture_offset,
+        command->pathb_chain_code_used_size,
+        command->pathb_chain_prepared_valid ? 1u : 0u,
+        command->pathb_chain_code_dirty ? 1u : 0u,
+        command->pathb_chain_descriptor_dirty ? 1u : 0u,
+        command->pathb_chain_aperture_generation);
   }
   for (iree_host_size_t command_index = 0; command_index < s->issued_count;
        ++command_index) {
@@ -4113,10 +4153,6 @@ static iree_status_t iree_hal_amdxdna_native_submit_wait(
           "amdxdna Windows MCDM pathb post-dispatch sync failed", error);
     }
   }
-  // Keep completed partial-ELF code ranges active. Each cached command owns a
-  // non-overlapping aperture slot, so alternating singles need no opcode-9
-  // boundary. Runlist submission, context switching, and teardown release the
-  // complete active set.
   {
     queue->exec_command_count++;
     if (packet->state == ERT_CMD_STATE_COMPLETED) {
@@ -4135,8 +4171,15 @@ static iree_status_t iree_hal_amdxdna_native_submit_wait(
           chain_data->error_index, chain_data->submit_index);
     }
     return iree_make_status(
-        IREE_STATUS_INTERNAL, "amdxdna %.*s did not complete: ert state %u",
-        static_cast<int>(s->label_size), s->label, packet->state);
+        IREE_STATUS_INTERNAL,
+        "amdxdna %.*s did not complete: ert state %u (fence=%" PRIu64
+        ", completion_slot=0x%x, code_offset=0x%" PRIx64
+        ", code_capacity=0x%" PRIx64 ", active_code_ranges=%zu)",
+        static_cast<int>(s->label_size), s->label, packet->state,
+        s->pending.fence_id, s->pending.slot_offset,
+        command->pathb_single_code_aperture_offset,
+        command->pathb_single_code_aperture_capacity,
+        queue->context->pathb_active_single_code_ranges.size());
   }
 }
 

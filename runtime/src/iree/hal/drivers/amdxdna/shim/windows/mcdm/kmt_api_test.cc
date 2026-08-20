@@ -36,10 +36,10 @@ enum class TeardownCall {
 TeardownCall g_teardown_calls[8] = {};
 size_t g_teardown_call_count = 0;
 bool g_record_teardown = false;
-uint32_t g_submit_opcodes[8] = {};
-uint64_t g_submit_fences[8] = {};
-uint64_t g_submit_offsets[8] = {};
-uint64_t g_wait_fences[2] = {};
+uint32_t g_submit_opcodes[16] = {};
+uint64_t g_submit_fences[16] = {};
+uint64_t g_submit_offsets[16] = {};
+uint64_t g_wait_fences[16] = {};
 D3DKMT_HANDLE g_gpu_wait_context = 0;
 D3DKMT_HANDLE g_gpu_wait_object = 0;
 uint64_t g_gpu_wait_fence = 0;
@@ -268,7 +268,13 @@ NTSTATUS APIENTRY FakeCloseAdapter(CONST D3DKMT_CLOSEADAPTER* args) {
 NTSTATUS APIENTRY FakeSubmitCommandToHwQueue(
     CONST D3DKMT_SUBMITCOMMANDTOHWQUEUE* args) {
   const size_t call_index = g_submit_count;
-  g_setup_calls[g_setup_call_count++] = SetupCall::submit;
+  if (g_setup_call_count < std::size(g_setup_calls)) {
+    g_setup_calls[g_setup_call_count] = SetupCall::submit;
+  }
+  ++g_setup_call_count;
+  if (g_submit_count >= std::size(g_submit_opcodes)) {
+    return static_cast<NTSTATUS>(0xC0000001u);
+  }
   std::memcpy(&g_submit_opcodes[g_submit_count], args->pPrivateDriverData,
               sizeof(uint32_t));
   std::memcpy(&g_submit_offsets[g_submit_count],
@@ -1188,7 +1194,7 @@ TEST(KmtApiTest, ExecBufferAllocationPreservesLogicalCommandSize) {
   }
 }
 
-TEST(KmtApiTest, CompletedPathBSubmitSkipsRedundantCpuFenceWait) {
+TEST(KmtApiTest, CompletedPathBSubmitStillRetiresParentFence) {
   auto run = [](uint64_t completed_fence) {
     ResetFakes();
     KmtApi api = {};
@@ -1218,8 +1224,46 @@ TEST(KmtApiTest, CompletedPathBSubmitSkipsRedundantCpuFenceWait) {
     return g_wait_count;
   };
 
-  EXPECT_EQ(run(/*completed_fence=*/7), 0u);
-  EXPECT_EQ(run(/*completed_fence=*/6), 1u);
+  EXPECT_EQ(run(/*completed_fence=*/7), 1u);
+  EXPECT_EQ(run(/*completed_fence=*/6), 2u);
+}
+
+TEST(KmtApiTest, PathBBatchRetirementMatchesXrtRunlistWaitOrder) {
+  ResetFakes();
+  KmtApi api = {};
+  api.wait_from_cpu = FakeWaitFromCpu;
+  api.invalidate_cache = FakeInvalidateCache;
+  Device device = {};
+  device.device = 0x10;
+  uint64_t progress_fence = 10;
+  Context context = {};
+  context.hw_queue = 0x20;
+  context.progress_fence = 0x21;
+  context.progress_fence_cpu = &progress_fence;
+  std::array<uint32_t, 6> ring_storage = {0, 0, 4, 0, 4, 0};
+  std::array<uint32_t, 2> packet_headers = {};
+  std::array<PathBPendingSubmit, 2> pending = {};
+  for (size_t i = 0; i < pending.size(); ++i) {
+    pending[i].fence_id = 11 + i;
+    pending[i].slot_cpu =
+        reinterpret_cast<uint8_t*>(&ring_storage[(i + 1) * 2]);
+    pending[i].slot_offset = static_cast<uint32_t>((i + 1) * 8);
+    pending[i].packet_header = &packet_headers[i];
+    pending[i].ring.allocation = 0x30;
+    pending[i].ring.cpu_ptr = ring_storage.data();
+    pending[i].ring.size = sizeof(ring_storage);
+  }
+  Error error = {};
+
+  ASSERT_TRUE(WaitForPathBSubmits(api, device, &context, pending.data(),
+                                  pending.size(), &error))
+      << ErrorMessage(&error);
+  ASSERT_EQ(g_wait_count, 3u);
+  EXPECT_EQ(g_wait_fences[0], 12u);
+  EXPECT_EQ(g_wait_fences[1], 11u);
+  EXPECT_EQ(g_wait_fences[2], 12u);
+  EXPECT_EQ(packet_headers[0] & 0xFu, 4u);
+  EXPECT_EQ(packet_headers[1] & 0xFu, 4u);
 }
 
 TEST(KmtApiTest, PathBWaitFailureDoesNotPublishCompletion) {
@@ -1542,12 +1586,19 @@ TEST(KmtApiTest, CodeRangeLifecycleMatchesNegotiatedAbi) {
     ASSERT_TRUE(ReleasePathBCodeRange(
         api, device, &context, aperture, aperture.code_offset, 0x10000,
         &error));
+    ASSERT_TRUE(AcquirePathBCodeRange(
+        api, device, &context, aperture, aperture.code_offset, 0x10000,
+        &error));
+    ASSERT_TRUE(PublishPathBCodeWrite(
+        api, device, &context, aperture, aperture.code_offset, 0x10000,
+        &error));
   };
 
   run(McdmAbi::compact, 9952);
   const SetupCall compact_calls[] = {
       SetupCall::submit, SetupCall::submit, SetupCall::submit,
-      SetupCall::submit, SetupCall::wait};
+      SetupCall::submit, SetupCall::wait, SetupCall::submit,
+      SetupCall::submit};
   ASSERT_EQ(g_setup_call_count, std::size(compact_calls));
   size_t compact_submit_index = 0;
   for (size_t i = 0; i < std::size(compact_calls); ++i) {
@@ -1556,38 +1607,107 @@ TEST(KmtApiTest, CodeRangeLifecycleMatchesNegotiatedAbi) {
       EXPECT_EQ(g_submit_opcodes[compact_submit_index++], 9u);
     }
   }
-  ASSERT_EQ(g_submit_count, 4u);
+  ASSERT_EQ(g_submit_count, 6u);
   EXPECT_EQ(g_submit_offsets[0], 0x10000u);
   EXPECT_EQ(g_submit_offsets[1], 0x18000u);
   EXPECT_EQ(g_submit_offsets[2], 0x10000u);
   EXPECT_EQ(g_submit_offsets[3], 0x8000u);
+  EXPECT_EQ(g_submit_offsets[4], 0x10000u);
+  EXPECT_EQ(g_submit_offsets[5], 0x18000u);
   EXPECT_EQ(g_wait_count, 1u);
   EXPECT_EQ(g_wait_fences[0], 10u);
 
   run(McdmAbi::compact, 107600);
   ASSERT_EQ(g_setup_call_count, std::size(compact_calls));
-  ASSERT_EQ(g_submit_count, 4u);
+  ASSERT_EQ(g_submit_count, 6u);
   EXPECT_EQ(g_submit_offsets[0], 0x28000u);
   EXPECT_EQ(g_submit_offsets[1], 0x30000u);
   EXPECT_EQ(g_submit_offsets[2], 0x28000u);
   EXPECT_EQ(g_submit_offsets[3], 0x20000u);
+  EXPECT_EQ(g_submit_offsets[4], 0x28000u);
+  EXPECT_EQ(g_submit_offsets[5], 0x30000u);
   EXPECT_EQ(g_wait_count, 1u);
   EXPECT_EQ(g_wait_fences[0], 10u);
 
   run(McdmAbi::legacy, 107600);
-  ASSERT_EQ(g_setup_call_count, 5u);
+  ASSERT_EQ(g_setup_call_count, 7u);
   EXPECT_EQ(g_setup_calls[0], SetupCall::invalidate);
   EXPECT_EQ(g_setup_calls[1], SetupCall::submit);
   EXPECT_EQ(g_setup_calls[2], SetupCall::submit);
   EXPECT_EQ(g_setup_calls[3], SetupCall::submit);
   EXPECT_EQ(g_setup_calls[4], SetupCall::wait);
-  ASSERT_EQ(g_submit_count, 3u);
+  EXPECT_EQ(g_setup_calls[5], SetupCall::submit);
+  EXPECT_EQ(g_setup_calls[6], SetupCall::submit);
+  ASSERT_EQ(g_submit_count, 5u);
   EXPECT_EQ(g_submit_opcodes[0], 9u);
   EXPECT_EQ(g_submit_offsets[0], 0x28000u);
   EXPECT_EQ(g_submit_offsets[1], 0x30000u);
   EXPECT_EQ(g_submit_offsets[2], 0x20000u);
+  EXPECT_EQ(g_submit_offsets[3], 0x28000u);
+  EXPECT_EQ(g_submit_offsets[4], 0x30000u);
   ASSERT_EQ(g_wait_count, 1u);
   EXPECT_EQ(g_wait_fences[0], 9u);
+}
+
+TEST(KmtApiTest, PublishPathBCodeWriteRepeatsOpcode9WithoutRewrite) {
+  // Opcode-9 is a queue-ordered happens-before, not a sticky mapping of
+  // previously committed bytes. Cached reuse must emit the same end-marker
+  // sequence before every consumer, without another CommitPathBCodeWrite.
+  auto run = [](McdmAbi mcdm_abi) {
+    constexpr uint64_t kCodeBytes = 0x10000;
+    constexpr size_t kPublishCount = 3;
+    ResetFakes();
+    KmtApi api = {};
+    api.submit_command_to_hw_queue = FakeSubmitCommandToHwQueue;
+    api.invalidate_cache = FakeInvalidateCache;
+    Device device = {};
+    device.device = 0x10;
+    device.mcdm_abi = mcdm_abi;
+    Context context = {};
+    context.hw_queue = 0x20;
+    context.progress_fence = 0x21;
+    context.next_fence_id = 7;
+    CommandAperture aperture = {};
+    aperture.gpu_allocation = 0x30;
+    alignas(64) static std::array<uint8_t, 0x100000> aperture_storage = {};
+    aperture.gpu_cpu_ptr = aperture_storage.data();
+    aperture.gpu_va_size = aperture_storage.size();
+    Error error = {};
+    ASSERT_TRUE(ConfigurePathBCodeRangeForSetupPayload(
+        mcdm_abi, 9952, &aperture, &error));
+    ASSERT_TRUE(AcquirePathBCodeRange(api, device, &context, aperture,
+                                      aperture.code_offset, kCodeBytes,
+                                      &error));
+    ASSERT_TRUE(CommitPathBCodeWrite(api, device, aperture,
+                                     aperture.code_offset, kCodeBytes,
+                                     &error));
+    const size_t submits_after_commit = g_submit_count;
+    const size_t invalidates_after_commit = g_invalidate_count;
+    EXPECT_EQ(submits_after_commit, 0u);
+    for (size_t i = 0; i < kPublishCount; ++i) {
+      ASSERT_TRUE(PublishPathBCodeWrite(
+          api, device, &context, aperture, aperture.code_offset, kCodeBytes,
+          &error))
+          << ErrorMessage(&error);
+    }
+    EXPECT_EQ(g_invalidate_count, invalidates_after_commit);
+    ASSERT_GT(g_submit_count, submits_after_commit);
+    ASSERT_EQ(g_submit_count % kPublishCount, 0u);
+    const size_t markers_per_publish = g_submit_count / kPublishCount;
+    ASSERT_GT(markers_per_publish, 0u);
+    for (size_t i = 0; i < g_submit_count; ++i) {
+      EXPECT_EQ(g_submit_opcodes[i], 9u);
+    }
+    for (size_t publish = 1; publish < kPublishCount; ++publish) {
+      for (size_t marker = 0; marker < markers_per_publish; ++marker) {
+        EXPECT_EQ(g_submit_offsets[publish * markers_per_publish + marker],
+                  g_submit_offsets[marker]);
+      }
+    }
+  };
+
+  run(McdmAbi::compact);
+  run(McdmAbi::legacy);
 }
 
 TEST(KmtApiTest, CodeWriteRemapMatchesNegotiatedAbi) {
