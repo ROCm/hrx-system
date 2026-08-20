@@ -35,6 +35,8 @@ Use a ROCm installation or unpacked ROCm build environment that provides HSA,
 AQL profile headers, and a ROCm LLVM toolchain. The CI path uses ROCm clang and
 forces libraries into `lib`.
 
+### Linux
+
 The blessed local command path uses `dev.py` to keep setup, hook configuration,
 and build-lane selection consistent:
 
@@ -90,6 +92,62 @@ cmake --install build/hrx-system --prefix build/hrx-tests \
   --component HrxTestsDist
 ```
 
+### Windows
+
+Run the build from an x64 Developer PowerShell for Visual Studio 2022. Set
+`THEROCK_ROOT` to a TheRock checkout whose `build/dist/rocm` tree includes the
+ROCm LLVM toolchain, headers, and `hsa-runtime64.dll`. For example, configure
+TheRock with `THEROCK_ENABLE_HSA_WINDOWS_SHARED_RUNTIME=ON` before building it.
+
+The equivalent `dev.py` flow for a `gfx1201` build is:
+
+```powershell
+$env:THEROCK_ROOT = "D:\src\TheRock"
+$rocmRoot = Join-Path $env:THEROCK_ROOT "build\dist\rocm"
+$aqlProfileRoot = Join-Path $env:THEROCK_ROOT "build\profiler\aqlprofile\dist"
+$cmakePrefixPath = "$aqlProfileRoot;$rocmRoot;$rocmRoot\lib\rocm_sysdeps"
+$llvmBin = Join-Path $rocmRoot "lib\llvm\bin"
+
+python dev.py cmake setup
+python dev.py cmake configure --fresh `
+  "-DCMAKE_PREFIX_PATH=$cmakePrefixPath" `
+  "-DIREE_ROCM_PATH=$rocmRoot" `
+  -DIREE_ROCM_DEPENDENCY_MODE=package `
+  -DCMAKE_INSTALL_LIBDIR=lib `
+  "-DCMAKE_C_COMPILER=$llvmBin\clang-cl.exe" `
+  "-DCMAKE_CXX_COMPILER=$llvmBin\clang-cl.exe" `
+  "-DCMAKE_AR=$llvmBin\llvm-lib.exe" `
+  -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreadedDLL `
+  -DCMAKE_BUILD_TYPE=RelWithDebInfo `
+  -DIREE_HAL_DRIVER_AMDGPU=ON `
+  -DIREE_HAL_AMDGPU_TARGETS=gfx1201
+
+python dev.py cmake build --parallel
+python dev.py cmake test --output-on-failure
+cmake --install build/cmake --prefix build/hrx-install `
+  --component HrxPublicDist
+cmake --install build/cmake --prefix build/hrx-tests `
+  --component HrxTestsDist
+```
+
+Add the ROCm and HRX DLL directories to `PATH` before running the installed
+tools or tests:
+
+```powershell
+$env:PATH = "$rocmRoot\bin;$PWD\build\hrx-install\bin;$env:PATH"
+& .\build\hrx-install\bin\hrx-info.exe
+ctest --test-dir build/hrx-tests/share/hrx-system/tests --output-on-failure
+```
+
+This default build loads `hsa-runtime64.dll` dynamically. A Windows ROCr
+package that exports `hsa-runtime64::hsa-runtime64_static` can instead be linked
+statically by changing the runtime selection and CRT mode during configure:
+
+```powershell
+-DIREE_HAL_AMDGPU_LIBHSA_STATIC=ON `
+-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded
+```
+
 Useful options:
 
 | Option | Default | Purpose |
@@ -102,6 +160,7 @@ Useful options:
 | `IREE_BUILD_TESTS` | ON | Build IREE runtime tests and CTS targets. |
 | `HRX_INSTALL_TESTS` | `${IREE_BUILD_TESTS}` | Install a relocatable CTest tree. |
 | `IREE_HAL_DRIVER_AMDGPU` | ON | Build the AMDGPU runtime HAL driver. |
+| `IREE_HAL_AMDGPU_LIBHSA_STATIC` | OFF | Link an installed static HSA runtime instead of loading it dynamically. |
 | `IREE_ROCM_DEPENDENCY_MODE` | empty | Overrides ROCm header dependency resolution: `pinned`, `package`, or `auto`; empty selects package mode when `IREE_ROCM_PATH` is set. |
 | `IREE_ROCM_PATH` | empty | ROCm or TheRock SDK root used for package-mode ROCm headers and device tooling. |
 | `IREE_HAL_AMDGPU_TARGETS` | checked-in AMDGPU generic set | AMDGPU target selectors supported by the runtime build. |
