@@ -139,6 +139,10 @@ build:fuzzer --copt=-DFUZZING_BUILD_MODE_UNSAFE_FOR_PRODUCTION
 # Local/generated configuration.
 # -----------------------------------------------------------------------------
 
+# Repository-owned opt-in integrations define named configs here. They do not
+# change ordinary builds unless selected explicitly.
+import %workspace%/build_tools/nativelink/nativelink.bazelrc
+
 # Generated configuration and local machine overrides stay out of version
 # control. Local overrides are imported last so they can adjust generated
 # settings for a specific checkout.

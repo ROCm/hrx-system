@@ -11,6 +11,7 @@ from unittest import mock
 
 from loom.gen import checked_in_artifacts
 from loom.gen.support.generated_file import (
+    GeneratedFileFamily,
     GeneratedFileMaintenanceResult,
     GeneratedFileSet,
 )
@@ -83,6 +84,45 @@ def test_registered_artifact_ownership_is_disjoint() -> None:
             owners[path] = family.description
 
     assert owners
+
+
+def test_update_selects_only_families_owning_writable_paths() -> None:
+    first_family = GeneratedFileFamily(
+        description="first",
+        regenerate_command="generate first",
+        file_set=GeneratedFileSet.from_mapping({"generated/first.txt": "first\n"}),
+    )
+    second_family = GeneratedFileFamily(
+        description="second",
+        regenerate_command="generate second",
+        file_set=GeneratedFileSet.from_mapping({"generated/second.txt": "second\n"}),
+    )
+    with (
+        mock.patch.object(
+            checked_in_artifacts,
+            "checked_in_artifact_families",
+            return_value=(first_family, second_family),
+        ) as checked_in_artifact_families,
+        mock.patch.object(
+            checked_in_artifacts._bootstrap,
+            "find_repo_root",
+            return_value=mock.sentinel.repository_root,
+        ),
+        mock.patch.object(
+            checked_in_artifacts,
+            "maintain_generated_file_families",
+            return_value=GeneratedFileMaintenanceResult(True),
+        ) as maintain_generated_file_families,
+    ):
+        result = checked_in_artifacts.maintain_checked_in_artifacts("update", writable_paths=["generated/second.txt"])
+
+    assert result.ok
+    checked_in_artifact_families.assert_called_once_with(repository_root=mock.sentinel.repository_root)
+    maintain_generated_file_families.assert_called_once_with(
+        mock.sentinel.repository_root,
+        (second_family,),
+        mode="update",
+    )
 
 
 def test_main_selects_check_and_update_modes() -> None:

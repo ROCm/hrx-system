@@ -1170,12 +1170,26 @@ class CliTest(unittest.TestCase):
 
         self.assertEqual(len(plan.steps), 2)
         self.assertIn("--fix", plan.steps[0].argv)
+        self.assertIn("--fail-on-fix", plan.steps[0].argv)
         self.assertIn("--hygiene", plan.steps[0].argv)
         self.assertIn("--check", plan.steps[1].argv)
-        self.assertNotIn("--hygiene", plan.steps[1].argv)
+        self.assertNotIn("--fail-on-fix", plan.steps[1].argv)
+        self.assertIn("--hygiene", plan.steps[1].argv)
         self.assertIn("--tests", plan.steps[1].argv)
         self.assertIn("--static-analysis", plan.steps[1].argv)
         self.assertIn("--commit", description)
+        self.assertNotIn("--changed", description)
+
+    def test_bazel_precommit_amend_scope_is_check_only(self):
+        args = cli.parse_arguments(["bazel", "precommit", "--amend"])
+
+        plan = args.handler(args)
+        description = plan.describe()
+
+        self.assertEqual(len(plan.steps), 1)
+        self.assertIn("--check", plan.steps[0].argv)
+        self.assertNotIn("--fix", plan.steps[0].argv)
+        self.assertIn("--amend", description)
         self.assertNotIn("--changed", description)
 
     def test_bazel_precommit_can_use_staged_files(self):
@@ -1186,9 +1200,10 @@ class CliTest(unittest.TestCase):
 
         self.assertEqual(len(plan.steps), 2)
         self.assertIn("--fix", plan.steps[0].argv)
+        self.assertIn("--fail-on-fix", plan.steps[0].argv)
         self.assertIn("--hygiene", plan.steps[0].argv)
         self.assertIn("--check", plan.steps[1].argv)
-        self.assertNotIn("--hygiene", plan.steps[1].argv)
+        self.assertIn("--hygiene", plan.steps[1].argv)
         self.assertIn("--tests", plan.steps[1].argv)
         self.assertIn("--static-analysis", plan.steps[1].argv)
         self.assertIn("--staged", description)
@@ -1204,7 +1219,7 @@ class CliTest(unittest.TestCase):
         self.assertIn("--fix", plan.steps[0].argv)
         self.assertIn("--hygiene", plan.steps[0].argv)
         self.assertIn("--check", plan.steps[1].argv)
-        self.assertNotIn("--hygiene", plan.steps[1].argv)
+        self.assertIn("--hygiene", plan.steps[1].argv)
         self.assertIn("--tests", plan.steps[1].argv)
         self.assertIn("--static-analysis", plan.steps[1].argv)
         self.assertIn("README.md dev.py", description)
@@ -1293,7 +1308,7 @@ class CliTest(unittest.TestCase):
         )
         self.assertNotIn("run: python dev.py", step.content)
         self.assertIn(
-            "bazel precommit --profile ci --commit --verbose",
+            "bazel precommit --profile ci --staged --verbose",
             step.content,
         )
 
@@ -1318,7 +1333,7 @@ class CliTest(unittest.TestCase):
         self.assertIn(str(cli.REPO_ROOT / "dev.py"), step.content)
         self.assertNotIn("run: python dev.py", step.content)
         self.assertIn(
-            "cmake precommit --profile default --commit",
+            "cmake precommit --profile default --staged",
             step.content,
         )
 
@@ -1366,13 +1381,14 @@ class CliTest(unittest.TestCase):
         output = self.parse_help(["bazel", "precommit", "--help"])
 
         self.assertIn("staged, unstaged, and untracked files", output)
+        self.assertIn("--amend", output)
         self.assertIn("--commit", output)
         self.assertIn("--base", output)
         self.assertIn("--staged", output)
         self.assertIn("Explicit paths", output)
         self.assertNotIn("generated Git hook", output)
         self.assertIn("mechanical fixups", output)
-        self.assertIn("non-mutating check mode", output)
+        self.assertIn("retry runs non-mutating hygiene", output)
 
     def test_presubmit_help_calls_out_full_tree_default(self):
         output = self.parse_help(["bazel", "presubmit", "--help"])

@@ -422,6 +422,15 @@ target set plus explicit debug emitters and execution substrates.
 
 Other Bazel-native overrides belong in `.bazelrc.local`.
 
+## Optional Local NativeLink Execution
+
+NativeLink can provide one shared Bazel action cache and execution limit across
+multiple local worktrees. The repository provides an inert named Bazel config
+and a loopback-only local server configuration; ordinary builds remain
+unchanged until `--config=nativelink` is selected. See the
+[local NativeLink guide](build_tools/nativelink/README.md) for installation,
+startup, verification, capacity, and trust-boundary details.
+
 ## Loom Importers
 
 Importer frontends are optional dependency lanes. Start with the importer-local

@@ -270,8 +270,16 @@ def parse_arguments() -> argparse.Namespace:
         "--commit",
         action="store_true",
         help=(
-            "Use files staged for commit plus files changed by HEAD. This is "
-            "the Git hook scope and covers amended commit contents."
+            "Use files staged for commit. This legacy Git-hook spelling is "
+            "equivalent to --staged."
+        ),
+    )
+    inputs.add_argument(
+        "--amend",
+        action="store_true",
+        help=(
+            "Use the exact amended commit candidate: the index compared with "
+            "HEAD's first parent. This scope is check-only."
         ),
     )
     inputs.add_argument("--all", action="store_true", help="Use all tracked files.")
@@ -328,6 +336,14 @@ def parse_arguments() -> argparse.Namespace:
         help="Print the selected plan before running it.",
     )
     parser.add_argument(
+        "--fail-on-fix",
+        action="store_true",
+        help=(
+            "Return a failure after staging any fix so a Git hook stops before "
+            "test-bearing validation and retries against the repaired index."
+        ),
+    )
+    parser.add_argument(
         "--verbose",
         action="store_true",
         help="Stream command output and print exact commands.",
@@ -344,12 +360,17 @@ def parse_arguments() -> argparse.Namespace:
         args.changed
         or args.staged
         or args.commit
+        or args.amend
         or args.all
         or args.base
         or args.since
         or args.files_from
     ):
         parser.error("explicit paths cannot be combined with another input mode")
+    if args.fix and args.amend:
+        parser.error("--amend is a non-mutating validation scope; use --check")
+    if args.fail_on_fix and not args.fix:
+        parser.error("--fail-on-fix requires --fix")
     apply_profile_defaults(args)
     return args
 
@@ -368,6 +389,7 @@ def apply_profile_defaults(args: argparse.Namespace) -> None:
         and not args.changed
         and not args.staged
         and not args.commit
+        and not args.amend
         and not args.all
         and not args.base
         and not args.since
@@ -641,37 +663,69 @@ def unique_paths(paths: list[str]) -> list[str]:
     return unique
 
 
+def git_diff_files(*revisions: str, cached: bool = False) -> list[str]:
+    command = ["diff"]
+    if cached:
+        command.append("--cached")
+    command += ["--name-only", "-z", "--no-renames", *revisions, "--"]
+    return git_list(command)
+
+
+def git_unstaged_files(paths: list[str]) -> list[str]:
+    if not paths:
+        return []
+    return git_list(
+        [
+            "--literal-pathspecs",
+            "diff",
+            "--name-only",
+            "-z",
+            "--no-renames",
+            "--",
+            *paths,
+        ]
+    )
+
+
 def changed_files() -> list[str]:
     return unique_paths(
         [
-            *git_list(["diff", "--cached", "--name-only", "-z", "--diff-filter=ACMR"]),
-            *git_list(["diff", "--name-only", "-z", "--diff-filter=ACMR"]),
+            *git_diff_files(cached=True),
+            *git_diff_files(),
             *git_list(["ls-files", "--others", "--exclude-standard", "-z"]),
         ]
     )
 
 
-def head_commit_files() -> list[str]:
+def empty_tree() -> str:
+    result = subprocess.run(
+        ["git", "hash-object", "-t", "tree", "--stdin"],
+        cwd=REPO_ROOT,
+        check=True,
+        input=b"",
+        stdout=subprocess.PIPE,
+    )
+    return result.stdout.decode("ascii").strip()
+
+
+def amend_base() -> str:
     result = subprocess.run(
         ["git", "rev-parse", "--verify", "HEAD^"],
         cwd=REPO_ROOT,
-        stdout=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
         stderr=subprocess.DEVNULL,
     )
-    if result.returncode != 0:
-        return []
-    return git_list(
-        ["diff", "--name-only", "-z", "--diff-filter=ACMR", "HEAD^", "HEAD", "--"]
-    )
+    if result.returncode == 0:
+        return result.stdout.decode("ascii").strip()
+    return empty_tree()
 
 
 def commit_files() -> list[str]:
-    return unique_paths(
-        [
-            *git_list(["diff", "--cached", "--name-only", "-z", "--diff-filter=ACMR"]),
-            *head_commit_files(),
-        ]
-    )
+    return git_diff_files(cached=True)
+
+
+def amend_files() -> list[str]:
+    return git_diff_files(amend_base(), cached=True)
 
 
 def tracked_files() -> list[str]:
@@ -693,9 +747,7 @@ def presubmit_inputs(args: argparse.Namespace) -> PresubmitInputs:
             changed_paths=paths,
         )
     if args.staged:
-        paths = git_list(
-            ["diff", "--cached", "--name-only", "-z", "--diff-filter=ACMR"]
-        )
+        paths = git_diff_files(cached=True)
         return PresubmitInputs(
             mode="staged",
             selected_paths=paths,
@@ -705,6 +757,13 @@ def presubmit_inputs(args: argparse.Namespace) -> PresubmitInputs:
         paths = commit_files()
         return PresubmitInputs(
             mode="commit",
+            selected_paths=paths,
+            changed_paths=paths,
+        )
+    if args.amend:
+        paths = amend_files()
+        return PresubmitInputs(
+            mode="amend",
             selected_paths=paths,
             changed_paths=paths,
         )
@@ -719,16 +778,7 @@ def presubmit_inputs(args: argparse.Namespace) -> PresubmitInputs:
     if args.base:
         paths = unique_paths(
             [
-                *git_list(
-                    [
-                        "diff",
-                        "--name-only",
-                        "-z",
-                        "--diff-filter=ACMR",
-                        f"{args.base}...HEAD",
-                        "--",
-                    ]
-                ),
+                *git_diff_files(f"{args.base}...HEAD"),
                 *changed_files(),
             ]
         )
@@ -747,9 +797,7 @@ def presubmit_inputs(args: argparse.Namespace) -> PresubmitInputs:
             selected_paths=paths,
             changed_paths=paths,
         )
-    paths = git_list(
-        ["diff", "--name-only", "-z", "--diff-filter=ACMR", args.since, "--"]
-    )
+    paths = git_diff_files(args.since)
     return PresubmitInputs(
         mode="since",
         selected_paths=paths,
@@ -759,6 +807,42 @@ def presubmit_inputs(args: argparse.Namespace) -> PresubmitInputs:
 
 def selected_files(args: argparse.Namespace) -> list[str]:
     return presubmit_inputs(args).selected_paths
+
+
+def index_worktree_conflicts(inputs: PresubmitInputs) -> list[str]:
+    selected_path_set = set(inputs.selected_paths)
+    unstaged_path_set = set(git_unstaged_files(inputs.selected_paths))
+    if inputs.mode in ("staged", "commit", "amend"):
+        return sorted(selected_path_set.intersection(unstaged_path_set))
+    if inputs.mode == "explicit":
+        staged_path_set = set(commit_files())
+        return sorted(
+            selected_path_set.intersection(unstaged_path_set, staged_path_set)
+        )
+    return []
+
+
+def validate_index_worktree_coherence(
+    args: argparse.Namespace, inputs: PresubmitInputs
+) -> bool:
+    conflict_paths = index_worktree_conflicts(inputs)
+    if not conflict_paths:
+        return True
+    print_section("Index Boundary")
+    print(
+        "[fail] Candidate paths also contain unstaged changes. Presubmit tools "
+        "consume whole working-tree files, so continuing would validate or "
+        "stage content outside the candidate:"
+    )
+    for path in conflict_paths:
+        print(f"  {path}")
+    print(
+        "[next] Keep the commit narrow by running "
+        f"`python dev.py {args.lane} fix` before partial staging, then stage "
+        "only the intended hunks again. A whole-file commit boundary also "
+        "resolves this state."
+    )
+    return False
 
 
 def existing_files(paths: list[str]) -> list[str]:
@@ -787,6 +871,53 @@ def stage_files(paths: list[str], verbose: bool) -> bool:
     if not has_unstaged_changes(paths):
         return True
     return run_command(["git", "add", "--", *paths], "Stage local fixups", verbose)
+
+
+def index_tree() -> str:
+    result = subprocess.run(
+        ["git", "write-tree"],
+        cwd=REPO_ROOT,
+        check=True,
+        stdout=subprocess.PIPE,
+    )
+    return result.stdout.decode("ascii").strip()
+
+
+def changed_index_paths(before_tree: str) -> list[str]:
+    after_tree = index_tree()
+    if after_tree == before_tree:
+        return []
+    return git_list(
+        [
+            "diff-tree",
+            "--no-commit-id",
+            "--name-only",
+            "-z",
+            "-r",
+            "--no-renames",
+            before_tree,
+            after_tree,
+        ]
+    )
+
+
+def print_fix_summary(paths: list[str], *, stops_for_retry: bool) -> None:
+    if not paths:
+        return
+    print_section("Index Fixups")
+    print(f"[fix] Mechanical fixups changed {len(paths)} staged path(s):")
+    for path in paths:
+        print(f"  {path}")
+    if stops_for_retry:
+        print(
+            "[next] This commit attempt stops before tests. Review `git diff "
+            "--cached`, then retry the same commit; the repaired index will "
+            "receive non-mutating hygiene, tests, and static analysis."
+        )
+        print(
+            "[note] Lefthook's fail_on_changes policy independently prevents "
+            "a hook-modified index from being committed without review."
+        )
 
 
 def is_buildifier_file(path: str) -> bool:
@@ -1178,16 +1309,47 @@ def run_watchwords(paths: list[str]) -> bool:
 
 def run_build_filename_check(paths: list[str]) -> bool:
     ok = True
-    for path in paths:
+    for path in existing_files(paths):
         if Path(path).name == "BUILD":
             print(f"{path}: use BUILD.bazel instead of BUILD")
             ok = False
     return ok
 
 
-def run_bazel_to_cmake(fix: bool, verbose: bool) -> bool:
+def is_bazel_to_cmake_global_trigger(path: str) -> bool:
+    return (
+        Path(path).name == ".bazel_to_cmake.cfg.py"
+        or path == "loom/build_tools/amdgpu/target_config.bzl"
+        or path.startswith(
+            (
+                "build_tools/bazel_to_cmake/",
+                "loom/requirements/",
+                "runtime/requirements/",
+            )
+        )
+    )
+
+
+def bazel_to_cmake_input_paths(paths: list[str]) -> list[str]:
+    return existing_files(
+        [
+            path
+            for path in paths
+            if Path(path).name in {"BUILD", "BUILD.bazel", "CMakeLists.txt"}
+        ]
+    )
+
+
+def run_bazel_to_cmake(paths: list[str], fix: bool, verbose: bool) -> bool:
     command = [sys.executable, "build_tools/bazel_to_cmake/bazel_to_cmake.py"]
-    command.append("--stage-updates" if fix else "--check")
+    if any(is_bazel_to_cmake_global_trigger(path) for path in paths):
+        command.append("--check")
+        return run_command(command, "Bazel-to-CMake", verbose)
+
+    input_paths = bazel_to_cmake_input_paths(paths)
+    if not input_paths:
+        return skip_step("Bazel-to-CMake", "no selected Bazel/CMake files")
+    command += ["--stage-updates" if fix else "--check", *input_paths]
     return run_command(command, "Bazel-to-CMake", verbose)
 
 
@@ -1240,7 +1402,7 @@ def run_hygiene(paths: list[str], fix: bool, verbose: bool) -> bool:
     ok = run_buildifier(paths, fix=fix, verbose=verbose) and ok
     ok = run_ruff(paths, fix=fix, verbose=verbose) and ok
     ok = run_clang_format(paths, fix=fix, verbose=verbose) and ok
-    ok = run_bazel_to_cmake(fix=fix, verbose=verbose) and ok
+    ok = run_bazel_to_cmake(paths, fix=fix, verbose=verbose) and ok
     ok = run_amdgpu_target_map(paths, fix=fix, verbose=verbose) and ok
     return ok
 
@@ -2200,6 +2362,8 @@ def print_plan(
         input_mode = "changed"
     elif args.commit:
         input_mode = "commit"
+    elif args.amend:
+        input_mode = "amend"
     elif args.all:
         input_mode = "all"
     elif args.base:
@@ -2223,7 +2387,13 @@ def print_plan(
     print(f"  lane: {args.lane}")
     print(f"  profile: {args.profile}")
     print(f"  mode: {mutation}")
-    print(f"  input: {input_mode} ({len(paths)} file(s))")
+    print(f"  validation input: {input_mode} ({len(paths)} path(s))")
+    if args.fix:
+        print(
+            "  mutation input: selected existing files and declared generated outputs"
+        )
+    else:
+        print("  mutation input: none (read-only)")
     print("  scopes: " + ", ".join(scopes))
     if projects:
         print("  projects: " + ", ".join(project.name for project in projects))
@@ -2256,6 +2426,8 @@ def dev_py_rerun_command(args: argparse.Namespace, verbose: bool) -> list[str]:
         ]
         if args.base:
             command += ["--base", args.base]
+        elif args.amend:
+            command.append("--amend")
         elif args.commit:
             command.append("--commit")
         elif args.staged or args.paths:
@@ -2366,18 +2538,27 @@ def run_presubmit(
 def run_presubmit_with_source_guard(
     args: argparse.Namespace, inputs: PresubmitInputs, projects: list[Project]
 ) -> int:
+    before_tree = index_tree() if args.fix else None
     snapshot = NonEmptyTrackedFileSnapshot.capture_tracked_package_initializers(
         REPO_ROOT
     )
     result = run_presubmit(args, inputs, projects)
     if not snapshot.verify(REPO_ROOT):
         result = 1
+    if before_tree is not None:
+        fixed_paths = changed_index_paths(before_tree)
+        stops_for_retry = bool(fixed_paths and args.fail_on_fix)
+        print_fix_summary(fixed_paths, stops_for_retry=stops_for_retry)
+        if stops_for_retry:
+            result = 1
     return result
 
 
 def main() -> int:
     args = parse_arguments()
     inputs = presubmit_inputs(args)
+    if not validate_index_worktree_coherence(args, inputs):
+        return 1
     projects = projects_for_paths(inputs.selected_paths)
     if args.fix:
         with source_mutation_lock(REPO_ROOT, "root-presubmit-fix"):

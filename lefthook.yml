@@ -14,7 +14,7 @@ pre-commit:
   fail_on_changes: always
   commands:
     precommit:
-      run: python dev.py bazel precommit --profile paranoid --commit
+      run: python dev.py bazel precommit --profile paranoid --staged
 
 commit-msg:
   commands:

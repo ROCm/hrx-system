@@ -466,17 +466,17 @@ def _output_files() -> dict[str, str]:
     return {(_OUTPUT_ROOT / filename).as_posix(): contents for filename, contents in generate_all_grammars(ops, type_defs).items()}
 
 
-def _obsolete_output_paths(expected_paths: set[str]) -> tuple[str, ...]:
-    existing_paths = (path.relative_to(_bootstrap.REPO_ROOT).as_posix() for path in (_bootstrap.REPO_ROOT / _OUTPUT_ROOT).glob("*.tmLanguage.json") if path.is_file() or path.is_symlink())
+def _obsolete_output_paths(repository_root: Path, expected_paths: set[str]) -> tuple[str, ...]:
+    existing_paths = (path.relative_to(repository_root).as_posix() for path in (repository_root / _OUTPUT_ROOT).glob("*.tmLanguage.json") if path.is_file() or path.is_symlink())
     return tuple(sorted(path for path in existing_paths if path not in expected_paths))
 
 
-def checked_in_file_set() -> GeneratedFileSet:
-    """Returns the complete checked-in TextMate grammar ownership set."""
+def checked_in_file_set(repository_root: Path | None = None) -> GeneratedFileSet:
+    """Returns expected grammars and any obsolete files under a given root."""
     files = _output_files()
     return GeneratedFileSet.from_mapping(
         files,
-        obsolete_paths=_obsolete_output_paths(set(files)),
+        obsolete_paths=(_obsolete_output_paths(repository_root, set(files)) if repository_root is not None else ()),
     )
 
 
@@ -484,9 +484,10 @@ def maintain_checked_in_files(
     mode: GeneratedFileMaintenanceMode,
 ) -> GeneratedFileMaintenanceResult:
     """Checks or updates all checked-in TextMate grammars."""
+    repository_root = _bootstrap.find_repo_root()
     return maintain_generated_file_set(
-        _bootstrap.REPO_ROOT,
-        checked_in_file_set(),
+        repository_root,
+        checked_in_file_set(repository_root),
         mode=mode,
         description=DESCRIPTION,
         regenerate_command=REGENERATE_COMMAND,

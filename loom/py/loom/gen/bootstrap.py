@@ -29,6 +29,3 @@ def ensure_repository_packages_on_path(start: str | Path | None = None) -> Path:
     package_roots = [str(repo_root / "loom" / "py"), str(repo_root)]
     sys.path[:] = package_roots + [path for path in sys.path if path not in package_roots]
     return repo_root
-
-
-REPO_ROOT = find_repo_root(__file__)

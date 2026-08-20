@@ -118,15 +118,12 @@ def test_checked_in_file_set_owns_only_generated_stubs(
     (tmp_path / obsolete_path).write_text("obsolete\n", encoding="utf-8")
     neighbor_path = expected_file.parent / "helpers.py"
     neighbor_path.write_text("authored\n", encoding="utf-8")
-    with (
-        mock.patch.object(builders_pyi._bootstrap, "REPO_ROOT", tmp_path),
-        mock.patch.object(
-            builders_pyi,
-            "_output_files",
-            return_value={expected_path: "expected\n"},
-        ),
+    with mock.patch.object(
+        builders_pyi,
+        "_output_files",
+        return_value={expected_path: "expected\n"},
     ):
-        generated_file_set = builders_pyi.checked_in_file_set()
+        generated_file_set = builders_pyi.checked_in_file_set(tmp_path)
 
     assert generated_file_set.output_paths == (expected_path,)
     assert generated_file_set.obsolete_paths == (obsolete_path,)

@@ -13,6 +13,7 @@ import re
 import sys
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from loom.builder_model import (
@@ -378,18 +379,18 @@ def _output_files() -> dict[str, str]:
     )
 
 
-def _obsolete_output_paths(expected_paths: set[str]) -> tuple[str, ...]:
-    dialect_root = _bootstrap.REPO_ROOT / "loom" / "py" / "loom" / "dialect"
-    existing_paths = (path.relative_to(_bootstrap.REPO_ROOT).as_posix() for path in dialect_root.glob("*/builders/**/*.pyi") if path.is_file())
+def _obsolete_output_paths(repository_root: Path, expected_paths: set[str]) -> tuple[str, ...]:
+    dialect_root = repository_root / "loom" / "py" / "loom" / "dialect"
+    existing_paths = (path.relative_to(repository_root).as_posix() for path in dialect_root.glob("*/builders/**/*.pyi") if path.is_file())
     return tuple(sorted(path for path in existing_paths if path not in expected_paths))
 
 
-def checked_in_file_set() -> GeneratedFileSet:
-    """Returns the complete checked-in builder-stub ownership set."""
+def checked_in_file_set(repository_root: Path | None = None) -> GeneratedFileSet:
+    """Returns expected stubs and any obsolete files under a given root."""
     files = _output_files()
     return GeneratedFileSet.from_mapping(
         files,
-        obsolete_paths=_obsolete_output_paths(set(files)),
+        obsolete_paths=(_obsolete_output_paths(repository_root, set(files)) if repository_root is not None else ()),
     )
 
 
@@ -397,9 +398,10 @@ def maintain_checked_in_files(
     mode: GeneratedFileMaintenanceMode,
 ) -> GeneratedFileMaintenanceResult:
     """Checks or updates all checked-in builder stubs."""
+    repository_root = _bootstrap.find_repo_root()
     return maintain_generated_file_set(
-        _bootstrap.REPO_ROOT,
-        checked_in_file_set(),
+        repository_root,
+        checked_in_file_set(repository_root),
         mode=mode,
         description=DESCRIPTION,
         regenerate_command=REGENERATE_COMMAND,

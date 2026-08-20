@@ -58,8 +58,18 @@ def parse_arguments(description: str) -> argparse.Namespace:
 
 
 def git_paths(*args: str) -> list[str]:
+    git_dir = subprocess.check_output(
+        ["git", "rev-parse", "--absolute-git-dir"],
+        cwd=REPO_ROOT,
+        text=True,
+    ).strip()
     result = subprocess.run(
-        ["git", *args],
+        [
+            "git",
+            f"--git-dir={git_dir}",
+            f"--work-tree={REPO_ROOT}",
+            *args,
+        ],
         cwd=REPO_ROOT,
         check=True,
         stdout=subprocess.PIPE,

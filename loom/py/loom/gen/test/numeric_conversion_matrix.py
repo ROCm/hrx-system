@@ -727,7 +727,7 @@ def maintain_checked_in_files(
 ) -> GeneratedFileMaintenanceResult:
     """Checks or updates all checked-in FP8 conversion witnesses."""
     return maintain_generated_file_set(
-        _bootstrap.REPO_ROOT,
+        _bootstrap.find_repo_root(),
         checked_in_file_set(),
         mode=mode,
         description=DESCRIPTION,

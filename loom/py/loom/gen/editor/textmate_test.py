@@ -158,15 +158,12 @@ def test_checked_in_file_set_owns_only_generated_grammars(tmp_path: Path) -> Non
     (tmp_path / obsolete_path).write_text("obsolete\n", encoding="utf-8")
     neighbor_path = expected_file.parent / "README.md"
     neighbor_path.write_text("authored\n", encoding="utf-8")
-    with (
-        mock.patch.object(textmate._bootstrap, "REPO_ROOT", tmp_path),
-        mock.patch.object(
-            textmate,
-            "_output_files",
-            return_value={expected_path: "expected\n"},
-        ),
+    with mock.patch.object(
+        textmate,
+        "_output_files",
+        return_value={expected_path: "expected\n"},
     ):
-        generated_file_set = textmate.checked_in_file_set()
+        generated_file_set = textmate.checked_in_file_set(tmp_path)
 
     assert generated_file_set.output_paths == (expected_path,)
     assert generated_file_set.obsolete_paths == (obsolete_path,)

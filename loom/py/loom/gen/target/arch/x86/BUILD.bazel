@@ -73,6 +73,7 @@ iree_py_binary(
     main = "x86_packed_dot_contract.py",
     visibility = GENERATOR_VISIBILITY,
     deps = [
+        "//loom/py/loom/gen:bootstrap",
         "//loom/py/loom/gen/support",
         "//loom/py/loom/target:low_descriptors",
         "//loom/py/loom/target/arch/x86:target_info",

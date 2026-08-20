@@ -451,7 +451,8 @@ def parse_arguments(argv: list[str]) -> argparse.Namespace:
     if sum(selected_tool_modes) > 1:
         parser.error("--venv, --system, and --tool-root are mutually exclusive")
     if getattr(args, "paths", None) and (
-        getattr(args, "base", None) is not None
+        getattr(args, "amend", False)
+        or getattr(args, "base", None) is not None
         or getattr(args, "staged", False)
         or getattr(args, "commit", False)
     ):
@@ -798,7 +799,7 @@ def add_lane_commands(subparsers: argparse._SubParsersAction, lane: str) -> None
             input_group,
             "--commit",
             action="store_true",
-            help="Check the Git hook commit scope.",
+            help="Legacy alias for --staged.",
         )
         add_argument(
             input_group,
@@ -884,7 +885,7 @@ def add_lane_commands(subparsers: argparse._SubParsersAction, lane: str) -> None
             input_group,
             "--commit",
             action="store_true",
-            help="Check the Git hook commit scope.",
+            help="Legacy alias for --staged.",
         )
         add_argument(
             input_group,
@@ -920,6 +921,12 @@ def add_lane_commands(subparsers: argparse._SubParsersAction, lane: str) -> None
     precommit_input_group = precommit_parser.add_mutually_exclusive_group()
     add_argument(
         precommit_input_group,
+        "--amend",
+        action="store_true",
+        help="Check the exact amended commit candidate without applying fixups.",
+    )
+    add_argument(
+        precommit_input_group,
         "--base",
         metavar="GIT_REF",
         help="Check branch changes since GIT_REF plus local changes.",
@@ -928,7 +935,7 @@ def add_lane_commands(subparsers: argparse._SubParsersAction, lane: str) -> None
         precommit_input_group,
         "--commit",
         action="store_true",
-        help="Check the Git hook commit scope.",
+        help="Legacy alias for --staged.",
     )
     add_argument(
         precommit_input_group,
@@ -1426,6 +1433,7 @@ def handle_precommit(args: argparse.Namespace) -> CommandPlan:
         args.lane,
         existing_or_system_environment(args),
         args.profile,
+        amend=args.amend,
         base=args.base,
         commit=args.commit,
         cmake_build_dir=configured_cmake_build_dir(args)

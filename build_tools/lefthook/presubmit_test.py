@@ -10,6 +10,7 @@ import contextlib
 import importlib.util
 import io
 import os
+import subprocess
 import sys
 import tempfile
 import types
@@ -42,6 +43,86 @@ def input_scope(
 
 
 class PresubmitTest(unittest.TestCase):
+    def test_commit_scope_excludes_head_only_paths(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            repo_root = Path(temporary_directory)
+
+            def git(*args: str) -> subprocess.CompletedProcess[str]:
+                return subprocess.run(
+                    ["git", *args],
+                    cwd=repo_root,
+                    check=True,
+                    text=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                )
+
+            git("init", "--quiet")
+            git("config", "user.name", "Presubmit Test")
+            git("config", "user.email", "presubmit@example.com")
+            (repo_root / "runtime/deleted").mkdir(parents=True)
+            (repo_root / "loom").mkdir()
+            (repo_root / "head_only.c").write_text("int value = 0;\n")
+            (repo_root / "staged.txt").write_text("base\n")
+            (repo_root / "runtime/deleted/BUILD.bazel").write_text("# build\n")
+            (repo_root / "runtime/old.c").write_text("int old_value;\n")
+            git("add", ".")
+            git("commit", "--quiet", "-m", "base")
+
+            (repo_root / "head_only.c").write_text("int value = 1;\n")
+            git("add", "head_only.c")
+            git("commit", "--quiet", "-m", "head")
+            with mock.patch.object(presubmit, "REPO_ROOT", repo_root):
+                candidate_base_tree = presubmit.index_tree()
+            (repo_root / "staged.txt").write_text("candidate\n")
+            git("add", "staged.txt")
+            (repo_root / "runtime/deleted/BUILD.bazel").unlink()
+            git("add", "runtime/deleted/BUILD.bazel")
+            git("mv", "runtime/old.c", "loom/new.c")
+
+            with mock.patch.object(presubmit, "REPO_ROOT", repo_root):
+                commit_paths = presubmit.commit_files()
+                self.assertEqual(
+                    set(commit_paths),
+                    {
+                        "loom/new.c",
+                        "runtime/deleted/BUILD.bazel",
+                        "runtime/old.c",
+                        "staged.txt",
+                    },
+                )
+                self.assertEqual(
+                    set(presubmit.amend_files()),
+                    {"head_only.c", *commit_paths},
+                )
+                self.assertEqual(
+                    set(presubmit.changed_index_paths(candidate_base_tree)),
+                    set(commit_paths),
+                )
+
+            self.assertEqual(git("status", "--short", "head_only.c").stdout, "")
+
+            with (repo_root / "staged.txt").open("a") as staged_file:
+                staged_file.write("unstaged\n")
+            with mock.patch.object(presubmit, "REPO_ROOT", repo_root):
+                self.assertEqual(
+                    presubmit.index_worktree_conflicts(
+                        input_scope(commit_paths, mode="staged")
+                    ),
+                    ["staged.txt"],
+                )
+
+    def test_deleted_paths_route_affected_projects_without_entering_fixers(self):
+        projects = presubmit.projects_for_paths(
+            ["runtime/deleted/BUILD.bazel", "loom/deleted.loom"]
+        )
+
+        self.assertEqual({project.name for project in projects}, {"runtime", "loom"})
+        with mock.patch.object(presubmit, "existing_files", return_value=[]):
+            self.assertTrue(
+                presubmit.run_build_filename_check(["runtime/deleted/BUILD"])
+            )
+
     def test_semgrep_candidates_require_configured_prefix_and_extension(self):
         with (
             mock.patch.object(presubmit, "SEMGREP_PATH_PREFIXES", ("project/src/",)),
@@ -154,6 +235,168 @@ class PresubmitTest(unittest.TestCase):
             self.assertTrue(presubmit.stage_files(["build_tools/file.py"], False))
 
         self.assertEqual(run_command.call_args.args[0][0:3], ["git", "add", "--"])
+
+    def test_fixing_the_index_stops_before_validation_and_names_paths(self):
+        args = types.SimpleNamespace(fail_on_fix=True, fix=True)
+        snapshot = mock.Mock()
+        snapshot.verify.return_value = True
+        output = io.StringIO()
+        with (
+            mock.patch.object(presubmit, "index_tree", return_value="before"),
+            mock.patch.object(
+                presubmit.NonEmptyTrackedFileSnapshot,
+                "capture_tracked_package_initializers",
+                return_value=snapshot,
+            ),
+            mock.patch.object(presubmit, "run_presubmit", return_value=0),
+            mock.patch.object(
+                presubmit,
+                "changed_index_paths",
+                return_value=["generated/output.cmake", "staged.c"],
+            ),
+            contextlib.redirect_stdout(output),
+        ):
+            self.assertEqual(
+                presubmit.run_presubmit_with_source_guard(
+                    args, input_scope(["staged.c"], mode="staged"), []
+                ),
+                1,
+            )
+
+        summary = output.getvalue()
+        self.assertIn("generated/output.cmake", summary)
+        self.assertIn("staged.c", summary)
+        self.assertIn("stops before tests", summary)
+        self.assertIn("git diff --cached", summary)
+        snapshot.verify.assert_called_once_with(presubmit.REPO_ROOT)
+
+    def test_fix_retry_contract_uses_the_real_index(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            repo_root = Path(temporary_directory)
+
+            def git(*args: str) -> None:
+                subprocess.run(
+                    ["git", *args],
+                    cwd=repo_root,
+                    check=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                )
+
+            git("init", "--quiet")
+            git("config", "user.name", "Presubmit Test")
+            git("config", "user.email", "presubmit@example.com")
+            source_path = repo_root / "source.py"
+            source_path.write_text("value = 'base'\n")
+            git("add", "source.py")
+            git("commit", "--quiet", "-m", "base")
+            source_path.write_text("value =  'candidate'\n")
+            git("add", "source.py")
+
+            run_count = 0
+
+            def run_presubmit(*_args) -> int:
+                nonlocal run_count
+                run_count += 1
+                if run_count == 1:
+                    source_path.write_text("value = 'candidate'\n")
+                    git("add", "source.py")
+                return 0
+
+            args = types.SimpleNamespace(fail_on_fix=True, fix=True)
+            snapshot = mock.Mock()
+            snapshot.verify.return_value = True
+            output = io.StringIO()
+            with (
+                mock.patch.object(presubmit, "REPO_ROOT", repo_root),
+                mock.patch.object(
+                    presubmit.NonEmptyTrackedFileSnapshot,
+                    "capture_tracked_package_initializers",
+                    return_value=snapshot,
+                ),
+                mock.patch.object(
+                    presubmit, "run_presubmit", side_effect=run_presubmit
+                ),
+                contextlib.redirect_stdout(output),
+            ):
+                inputs = input_scope(["source.py"], mode="staged")
+                self.assertEqual(
+                    presubmit.run_presubmit_with_source_guard(args, inputs, []), 1
+                )
+                self.assertEqual(
+                    presubmit.run_presubmit_with_source_guard(args, inputs, []), 0
+                )
+
+            self.assertEqual(run_count, 2)
+            self.assertIn("source.py", output.getvalue())
+            self.assertIn("stops before tests", output.getvalue())
+
+    def test_bazel_to_cmake_fix_receives_only_selected_build_files(self):
+        selected_paths = ["runtime/src/iree/base/BUILD.bazel"]
+        with (
+            mock.patch.object(presubmit, "existing_files", return_value=selected_paths),
+            mock.patch.object(
+                presubmit, "run_command", return_value=True
+            ) as run_command,
+        ):
+            self.assertTrue(
+                presubmit.run_bazel_to_cmake(
+                    [*selected_paths, "runtime/src/iree/base/status.c"],
+                    fix=True,
+                    verbose=False,
+                )
+            )
+
+        command = run_command.call_args.args[0]
+        self.assertIn("--stage-updates", command)
+        self.assertEqual(command[-1], selected_paths[0])
+        self.assertNotIn("runtime/src/iree/base/status.c", command)
+
+    def test_bazel_to_cmake_global_fix_is_read_only(self):
+        with mock.patch.object(
+            presubmit, "run_command", return_value=True
+        ) as run_command:
+            self.assertTrue(
+                presubmit.run_bazel_to_cmake(
+                    ["build_tools/bazel_to_cmake/bazel_to_cmake.py"],
+                    fix=True,
+                    verbose=False,
+                )
+            )
+
+        command = run_command.call_args.args[0]
+        self.assertIn("--check", command)
+        self.assertNotIn("--stage-updates", command)
+
+        self.assertTrue(
+            presubmit.is_bazel_to_cmake_global_trigger(
+                "runtime/requirements/package_policy.bzl"
+            )
+        )
+        self.assertTrue(
+            presubmit.is_bazel_to_cmake_global_trigger(
+                "loom/build_tools/amdgpu/target_config.bzl"
+            )
+        )
+
+    def test_bazel_to_cmake_skips_unrelated_paths(self):
+        with (
+            mock.patch.object(presubmit, "existing_files", return_value=[]),
+            mock.patch.object(presubmit, "skip_step", return_value=True) as skip_step,
+            mock.patch.object(presubmit, "run_command") as run_command,
+        ):
+            self.assertTrue(
+                presubmit.run_bazel_to_cmake(
+                    ["build_tools/lefthook/presubmit.py"],
+                    fix=True,
+                    verbose=False,
+                )
+            )
+
+        skip_step.assert_called_once_with(
+            "Bazel-to-CMake", "no selected Bazel/CMake files"
+        )
+        run_command.assert_not_called()
 
     def test_clang_tidy_candidates_require_configured_prefix_and_extension(self):
         with (
