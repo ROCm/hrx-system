@@ -184,7 +184,7 @@ iree_status_t iree_hal_streaming_kpack_archive_open(
 // outside the archive, or a truncated/oversized zstd frame or kernel count),
 // IREE_STATUS_DATA_LOSS when zstd decompression fails or the decompressed size
 // does not match the recorded original_size, and IREE_STATUS_UNIMPLEMENTED for
-// zstd archives when built without HRX_ENABLE_ZSTD.
+// zstd archives in builds without the HIP binding.
 iree_status_t iree_hal_streaming_kpack_archive_get_kernel(
     const iree_hal_streaming_kpack_archive_t* archive,
     iree_string_view_t binary_key, iree_string_view_t arch,

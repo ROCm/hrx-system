@@ -23,6 +23,7 @@ iree_cc_library(
   COPTS
     ${_hrx_static_platform_copts}
   HDRS
+    "${LIBHRX_SOURCE_DIR}/src/iree_hal_compat.h"
     "buffer_table.h"
     "hrx_internal.h"
     "mem_pool.h"
@@ -100,6 +101,7 @@ iree_cc_library(
   COPTS
     "-DHRX_BUILDING_SHARED"
   HDRS
+    "${LIBHRX_SOURCE_DIR}/src/iree_hal_compat.h"
     "buffer_table.h"
     "hrx_internal.h"
     "mem_pool.h"

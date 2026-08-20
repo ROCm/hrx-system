@@ -58,6 +58,7 @@ class TargetConverter:
                 ],
                 "//third_party:hip_api_headers": ["iree::third_party::hip_api_headers"],
                 "//third_party:libbacktrace": ["${IREE_LIBBACKTRACE_TARGET}"],
+                "//third_party:zstd": ["iree::third_party::zstd"],
                 "//third_party:rccl_headers": ["iree::third_party::rccl_headers"],
                 "//third_party:spirv_as": ["iree::third_party::spirv_as"],
                 "//third_party:spirv_dis": ["iree::third_party::spirv_dis"],

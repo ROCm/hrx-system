@@ -9,7 +9,7 @@
 #include "common/kpack.h"
 #include "iree/base/api.h"
 
-#if defined(HRX_ENABLE_ZSTD)
+#if defined(IREE_HAVE_ZSTD)
 #include <zstd.h>
 #endif
 
@@ -951,10 +951,10 @@ static iree_status_t hrx_fat_extract_from_ccob(
                             version, uncompressed_size);
   }
 
-#if !defined(HRX_ENABLE_ZSTD)
+#if !defined(IREE_HAVE_ZSTD)
   return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
-                          "CCOB v%u zstd compression requires building with "
-                          "HRX_ENABLE_ZSTD (uncompressed size %" PRIu64 ")",
+                          "CCOB v%u zstd compression requires the HRX HIP "
+                          "binding (uncompressed size %" PRIu64 ")",
                           version, uncompressed_size);
 #else
   if (payload_offset > ccob.data_length) {
@@ -999,7 +999,7 @@ static iree_status_t hrx_fat_extract_from_ccob(
   return iree_make_status(
       IREE_STATUS_INVALID_ARGUMENT,
       "CCOB decompressed payload is not an ELF or Clang offload bundle");
-#endif  // HRX_ENABLE_ZSTD
+#endif  // IREE_HAVE_ZSTD
 }
 
 // Resolves an out-of-band "HIPK" wrapper. Unlike HIPF/BA55FACE, its |binary|

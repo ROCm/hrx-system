@@ -25,7 +25,7 @@
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 
-#if defined(HRX_ENABLE_ZSTD)
+#if defined(IREE_HAVE_ZSTD)
 #include <zstd.h>
 #endif
 
@@ -113,7 +113,7 @@ void PutU64LE(std::vector<uint8_t>& v, uint64_t x) {
   for (int i = 0; i < 8; ++i) v.push_back(static_cast<uint8_t>(x >> (i * 8)));
 }
 
-// Builds a .kpack archive (NoOp, or zstd-per-kernel under HRX_ENABLE_ZSTD) in
+// Builds a .kpack archive (NoOp, or zstd-per-kernel under IREE_HAVE_ZSTD) in
 // the documented binary layout: 16-byte header, padding to 64, blob, msgpack
 // TOC. Kernels are assigned ordinals in insertion order.
 class KpackBuilder {
@@ -228,7 +228,7 @@ class KpackBuilder {
     std::vector<uint8_t> data;
   };
 
-#if defined(HRX_ENABLE_ZSTD)
+#if defined(IREE_HAVE_ZSTD)
   static std::vector<uint8_t> Compress(const std::vector<uint8_t>& data) {
     size_t bound = ZSTD_compressBound(data.size());
     std::vector<uint8_t> frame(bound);
@@ -1296,10 +1296,7 @@ TEST(KpackArchive, TocNotAMap) {
       StatusIs(iree::StatusCode::kInvalidArgument));
 }
 
-#if !defined(HRX_ENABLE_ZSTD)
-// In the default build (no libzstd) a zstd-per-kernel archive must fail closed
-// with UNIMPLEMENTED once a real (nonzero original_size) kernel is requested.
-// This case runs in the standard CI build and pins the stub contract.
+#if !defined(IREE_HAVE_ZSTD)
 TEST(KpackArchive, ZstdWithoutSupportUnimplemented) {
   auto bytes =
       KpackBuilder(/*zstd=*/true).Add("a#0", "gfx900", {1, 2, 3}).Build();
@@ -1313,9 +1310,9 @@ TEST(KpackArchive, ZstdWithoutSupportUnimplemented) {
                   iree_allocator_system(), &out, &out_size)),
               StatusIs(iree::StatusCode::kUnimplemented));
 }
-#endif  // !HRX_ENABLE_ZSTD
+#endif  // !IREE_HAVE_ZSTD
 
-#if defined(HRX_ENABLE_ZSTD)
+#if defined(IREE_HAVE_ZSTD)
 TEST(KpackArchive, ZstdGetKernelRoundTrips) {
   std::vector<uint8_t> k1;
   for (int i = 0; i < 1000; ++i) k1.push_back(static_cast<uint8_t>(i & 0x3f));
@@ -1446,7 +1443,7 @@ TEST(KpackArchive, ZstdOriginalSizeCapEnforced) {
                   iree_allocator_system(), &out, &out_size)),
               StatusIs(iree::StatusCode::kInvalidArgument));
 }
-#endif  // HRX_ENABLE_ZSTD
+#endif  // IREE_HAVE_ZSTD
 
 //===----------------------------------------------------------------------===//
 // resolve_code_object (end-to-end through the filesystem)

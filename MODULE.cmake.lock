@@ -14,6 +14,7 @@ set(IREE_DEPENDENCY_IDS
   "google_benchmark"
   "googletest"
   "libbacktrace"
+  "zstd"
   "catch2"
   "spirv_headers"
   "spirv_tools"
@@ -64,6 +65,20 @@ set(IREE_DEP_LIBBACKTRACE_URLS
 set(IREE_DEP_LIBBACKTRACE_SHA256 "858b1225351052234f7e71f0f36622fc9ad33aac947db7816d0b443ae0dd33ce")
 set(IREE_DEP_LIBBACKTRACE_STRIP_PREFIX "libbacktrace-793921876c981ce49759114d7bb89bb89b2d3a2d")
 set(IREE_DEP_LIBBACKTRACE_BUILD_FILE "")
+
+set(IREE_DEP_ZSTD_KIND "bazel_dep")
+set(IREE_DEP_ZSTD_OWNER "shared")
+set(IREE_DEP_ZSTD_MODULE_NAME "zstd")
+set(IREE_DEP_ZSTD_REPO_NAME "zstd")
+set(IREE_DEP_ZSTD_VERSION "1.5.7.bcr.1")
+set(IREE_DEP_ZSTD_DEV_DEPENDENCY "FALSE")
+set(IREE_DEP_ZSTD_SOURCE_URL "https://bcr.bazel.build/modules/zstd/1.5.7.bcr.1/source.json")
+set(IREE_DEP_ZSTD_URLS
+  "https://github.com/facebook/zstd/releases/download/v1.5.7/zstd-1.5.7.tar.gz"
+)
+set(IREE_DEP_ZSTD_SHA256 "eb33e51f49a15e023950cd7825ca74a4a2b43db8354825ac24fc1b7ee09e6fa3")
+set(IREE_DEP_ZSTD_STRIP_PREFIX "zstd-1.5.7")
+set(IREE_DEP_ZSTD_BUILD_FILE "")
 
 set(IREE_DEP_CATCH2_KIND "bazel_dep")
 set(IREE_DEP_CATCH2_OWNER "shared")
