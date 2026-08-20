@@ -1,0 +1,40 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//runtime/build_tools/bazel:cc.bzl", "iree_runtime_cc_library")
+
+package(
+    default_visibility = ["//visibility:public"],
+    features = ["layering_check"],
+    licenses = ["notice"],
+)
+
+filegroup(
+    name = "generated_files",
+    srcs = [
+        "assertions.c",
+        "core/assertions.c",
+        "hal/assertions.c",
+        "module_format.h",
+    ] + glob([
+        "core/*.h",
+        "hal/*.h",
+    ]),
+)
+
+iree_runtime_cc_library(
+    name = "wire",
+    srcs = [
+        "assertions.c",
+        "core/assertions.c",
+        "hal/assertions.c",
+    ],
+    hdrs = ["module_format.h"] + glob([
+        "core/*.h",
+        "hal/*.h",
+    ]),
+    deps = ["//runtime/src/iree/base:core_headers"],
+)

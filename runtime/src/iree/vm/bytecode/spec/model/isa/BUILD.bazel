@@ -1,0 +1,43 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//build_tools/bazel:python.bzl", "iree_py_library")
+
+package(
+    default_visibility = ["//visibility:public"],
+    licenses = ["notice"],
+)
+
+iree_py_library(
+    name = "isa",
+    srcs = ["__init__.py"],
+    deps = ["//runtime/src/iree/vm/bytecode/spec/model"],
+)
+
+iree_py_library(
+    name = "definitions",
+    srcs = [
+        "contracts.py",
+        "declarations.py",
+        "selectors.py",
+        "validation.py",
+    ],
+    deps = [
+        ":isa",
+        "//runtime/src/iree/vm/bytecode/spec/model",
+    ],
+)
+
+iree_py_library(
+    name = "specification",
+    srcs = ["specification.py"],
+    deps = [
+        ":definitions",
+        "//runtime/src/iree/vm/bytecode/spec/model",
+        "//runtime/src/iree/vm/bytecode/spec/model/isa/core",
+        "//runtime/src/iree/vm/bytecode/spec/model/isa/hal",
+    ],
+)
