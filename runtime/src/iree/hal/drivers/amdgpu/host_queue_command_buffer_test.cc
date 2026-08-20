@@ -7,10 +7,8 @@
 #include "iree/hal/drivers/amdgpu/host_queue_command_buffer.h"
 
 #include <algorithm>
-#include <cerrno>
 #include <cstdint>
 #include <cstring>
-#include <string>
 #include <vector>
 
 #include "iree/hal/api.h"
@@ -29,13 +27,11 @@
 #include "iree/hal/drivers/amdgpu/queue_affinity.h"
 #include "iree/hal/drivers/amdgpu/util/aql_emitter.h"
 #include "iree/hal/drivers/amdgpu/util/pm4_emitter.h"
+#include "iree/io/file_contents.h"
 #include "iree/io/file_handle.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
-
-#if IREE_FILE_IO_ENABLE
-#include <unistd.h>
-#endif  // IREE_FILE_IO_ENABLE
+#include "iree/testing/temp_file.h"
 
 namespace iree::hal::amdgpu {
 namespace {
@@ -197,16 +193,6 @@ static iree_status_t ExecuteHostcallBufferCommandBuffer(
                                   sizeof(*out_device_address));
 }
 
-#if IREE_FILE_IO_ENABLE
-struct TempFilePath {
-  ~TempFilePath() {
-    if (!path.empty()) unlink(path.c_str());
-  }
-
-  std::string path;
-};
-#endif  // IREE_FILE_IO_ENABLE
-
 static const uint32_t* FindPm4DispatchDirectPacket(
     const iree_hal_amdgpu_pm4_program_t* pm4_program,
     uint32_t dispatch_direct_ordinal) {
@@ -224,83 +210,35 @@ static const uint32_t* FindPm4DispatchDirectPacket(
   return nullptr;
 }
 
-static iree_status_t WriteAll(int fd, const uint8_t* data, size_t length) {
 #if IREE_FILE_IO_ENABLE
-  size_t total_written = 0;
-  while (total_written < length) {
-    const ssize_t written =
-        write(fd, data + total_written, length - total_written);
-    if (written < 0 && errno == EINTR) continue;
-    if (written < 0) {
-      return iree_make_status(iree_status_code_from_errno(errno),
-                              "write failed after %" PRIhsz " of %" PRIhsz
-                              " bytes: %s",
-                              total_written, length, strerror(errno));
-    }
-    if (written == 0) {
-      return iree_make_status(IREE_STATUS_UNAVAILABLE,
-                              "write made no progress after %" PRIhsz
-                              " of %" PRIhsz " bytes",
-                              total_written, length);
-    }
-    total_written += (size_t)written;
-  }
-  return iree_ok_status();
-#else
-  (void)fd;
-  (void)data;
-  (void)length;
-  return iree_make_status(IREE_STATUS_UNAVAILABLE, "file I/O is disabled");
-#endif  // IREE_FILE_IO_ENABLE
-}
-
 static iree_status_t CreateTempFileWithContents(
-    const std::vector<uint8_t>& data, std::string* out_path) {
-#if IREE_FILE_IO_ENABLE
-  *out_path = std::string();
-  char temp_path[] = "/tmp/iree_hal_amdgpu_command_buffer_XXXXXX";
-  int fd = mkstemp(temp_path);
-  if (fd < 0) {
-    return iree_make_status(iree_status_code_from_errno(errno),
-                            "mkstemp failed: %s", strerror(errno));
-  }
-  iree_status_t status = WriteAll(fd, data.data(), data.size());
-  if (close(fd) != 0) {
-    status = iree_status_join(
-        status, iree_make_status(iree_status_code_from_errno(errno),
-                                 "close failed: %s", strerror(errno)));
-  }
-  if (iree_status_is_ok(status)) {
-    *out_path = temp_path;
-  } else {
-    unlink(temp_path);
-  }
-  return status;
-#else
-  (void)data;
-  *out_path = std::string();
-  return iree_make_status(IREE_STATUS_UNAVAILABLE, "file I/O is disabled");
-#endif  // IREE_FILE_IO_ENABLE
+    const std::vector<uint8_t>& data, iree::testing::TempFilePath* out_path) {
+  *out_path =
+      iree::testing::TempFilePath("iree_hal_amdgpu_host_queue_command_buffer");
+  return iree_io_file_contents_write(
+      out_path->path_view(),
+      iree_make_const_byte_span(data.data(), data.size()),
+      iree_allocator_system());
 }
 
-static iree_status_t ImportFdFile(iree_hal_device_t* device,
-                                  const std::string& path,
-                                  iree_hal_memory_access_t access,
-                                  iree_hal_file_t** out_file) {
+static iree_status_t ImportNativeFile(iree_hal_device_t* device,
+                                      const iree::testing::TempFilePath& path,
+                                      iree_hal_memory_access_t access,
+                                      iree_hal_file_t** out_file) {
   iree_io_file_mode_t mode = IREE_IO_FILE_MODE_READ | IREE_IO_FILE_MODE_ASYNC;
   if (iree_all_bits_set(access, IREE_HAL_MEMORY_ACCESS_WRITE)) {
     mode |= IREE_IO_FILE_MODE_WRITE;
   }
   iree_io_file_handle_t* handle = NULL;
-  IREE_RETURN_IF_ERROR(
-      iree_io_file_handle_open(mode, iree_make_cstring_view(path.c_str()),
-                               iree_allocator_system(), &handle));
+  IREE_RETURN_IF_ERROR(iree_io_file_handle_open(
+      mode, path.path_view(), iree_allocator_system(), &handle));
   iree_status_t status =
       iree_hal_file_import(device, IREE_HAL_QUEUE_AFFINITY_ANY, access, handle,
                            IREE_HAL_EXTERNAL_FILE_FLAG_NONE, out_file);
   iree_io_file_handle_release(handle);
   return status;
 }
+#endif  // IREE_FILE_IO_ENABLE
 
 static iree_status_t QueueHostVisibleDispatchTransientBuffer(
     iree_hal_device_t* device, const iree_hal_semaphore_list_t signal_list,
@@ -2486,12 +2424,13 @@ TEST_F(HostQueueCommandBufferTest,
   const uint8_t* input_bytes = reinterpret_cast<const uint8_t*>(input_values);
   std::vector<uint8_t> file_data(input_bytes,
                                  input_bytes + sizeof(input_values));
-  TempFilePath input_file;
-  IREE_ASSERT_OK(CreateTempFileWithContents(file_data, &input_file.path));
+  iree::testing::TempFilePath input_file;
+  IREE_ASSERT_OK(CreateTempFileWithContents(file_data, &input_file));
 
   Ref<iree_hal_file_t> source_file;
-  IREE_ASSERT_OK(ImportFdFile(test_device.base_device(), input_file.path,
-                              IREE_HAL_MEMORY_ACCESS_READ, source_file.out()));
+  IREE_ASSERT_OK(ImportNativeFile(test_device.base_device(), input_file,
+                                  IREE_HAL_MEMORY_ACCESS_READ,
+                                  source_file.out()));
 
   iree_hal_executable_t* executable = NULL;
   IREE_ASSERT_OK(LoadCtsExecutable(
