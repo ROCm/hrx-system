@@ -112,6 +112,23 @@ function(_iree_rocm_add_header_target target_name include_dir)
   target_include_directories(${target_name} SYSTEM INTERFACE "${include_dir}")
 endfunction()
 
+function(_iree_rocm_add_hsa_runtime_header_target)
+  if(TARGET iree_rocm_hsa_runtime_headers)
+    return()
+  endif()
+  add_library(iree_rocm_hsa_runtime_headers INTERFACE)
+  foreach(_include_dir IN LISTS ARGN)
+    target_include_directories(iree_rocm_hsa_runtime_headers SYSTEM INTERFACE
+      "${_include_dir}")
+    # The Windows AQL Profile SDK includes HSA headers without the hsa/ prefix.
+    # Admit both include spellings when the package uses the nested layout.
+    if(EXISTS "${_include_dir}/hsa/hsa.h")
+      target_include_directories(iree_rocm_hsa_runtime_headers SYSTEM INTERFACE
+        "${_include_dir}/hsa")
+    endif()
+  endforeach()
+endfunction()
+
 function(_iree_rocm_try_system_hsa_runtime_headers out_found_var)
   find_package(hsa-runtime64 CONFIG QUIET)
   if(TARGET hsa-runtime64::hsa-runtime64)
@@ -121,9 +138,7 @@ function(_iree_rocm_try_system_hsa_runtime_headers out_found_var)
       message(FATAL_ERROR
         "hsa-runtime64::hsa-runtime64 does not publish include directories")
     endif()
-    add_library(iree_rocm_hsa_runtime_headers INTERFACE)
-    target_include_directories(iree_rocm_hsa_runtime_headers SYSTEM INTERFACE
-      ${_hsa_runtime_include_dirs})
+    _iree_rocm_add_hsa_runtime_header_target(${_hsa_runtime_include_dirs})
     iree_add_alias_interface(
       iree::third_party::hsa_runtime hsa-runtime64::hsa-runtime64)
     set(${out_found_var} TRUE PARENT_SCOPE)
@@ -133,8 +148,7 @@ function(_iree_rocm_try_system_hsa_runtime_headers out_found_var)
   _iree_rocm_find_system_header_include_dir(
     _hsa_runtime_include_dir _found "HSA runtime" "hsa/hsa.h")
   if(_found)
-    _iree_rocm_add_header_target(
-      iree_rocm_hsa_runtime_headers "${_hsa_runtime_include_dir}")
+    _iree_rocm_add_hsa_runtime_header_target("${_hsa_runtime_include_dir}")
     set(${out_found_var} TRUE PARENT_SCOPE)
     return()
   endif()
@@ -145,8 +159,7 @@ function(_iree_rocm_configure_pinned_hsa_runtime_headers)
   _iree_rocm_require_pinned_source_allowed("hsa_runtime_headers")
   iree_populate_locked_fetch_content(
     hsa_runtime_headers _hsa_runtime_headers_source_dir)
-  _iree_rocm_add_header_target(
-    iree_rocm_hsa_runtime_headers
+  _iree_rocm_add_hsa_runtime_header_target(
     "${_hsa_runtime_headers_source_dir}/include")
 endfunction()
 
@@ -205,6 +218,10 @@ function(iree_configure_rocm_aqlprofile_sdk_headers)
       iree_rocm_aqlprofile_sdk_headers
       "${_hsa_runtime_headers_source_dir}/include")
   endif()
+
+  iree_configure_rocm_hsa_runtime_headers()
+  target_link_libraries(iree_rocm_aqlprofile_sdk_headers INTERFACE
+    iree::third_party::hsa_runtime_headers)
 
   iree_add_alias_interface(
     iree::third_party::aqlprofile_sdk_headers
