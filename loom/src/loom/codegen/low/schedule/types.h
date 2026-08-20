@@ -42,7 +42,7 @@ typedef struct loom_low_allocation_budget_t loom_low_allocation_budget_t;
 #define LOOM_LOW_SCHEDULE_NODE_NONE UINT32_MAX
 
 typedef enum loom_low_schedule_node_kind_e {
-  // Ordinary structural low op such as low.copy, low.spill, or low.reload.
+  // Ordinary structural low op such as low.copy, low.move, or low.reload.
   LOOM_LOW_SCHEDULE_NODE_STRUCTURAL = 0,
   // Descriptor-backed packet such as low.op or low.const.
   LOOM_LOW_SCHEDULE_NODE_DESCRIPTOR = 1,

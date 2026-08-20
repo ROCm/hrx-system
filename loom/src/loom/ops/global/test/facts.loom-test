@@ -1,0 +1,52 @@
+// RUN: pass canonicalize
+
+// Read-only data definitions materialize non-null buffer roots in constant
+// memory with their authored base alignment. Derived views retain the same
+// read-only memory-space provenance.
+global.rodata.def @message = align(16) bytes("6c6f6f6d")
+
+func.def @rodata_definition_facts() -> (i1, i64, i64, i64) {
+  %c0 = index.constant 0 : offset
+  %message = global.load @message : buffer
+  %view = buffer.view %message[%c0] : buffer -> view<4xi8>
+  %is_reference = test.fact_is_buffer_reference %message : buffer -> i1
+  %buffer_space = test.fact_buffer_memory_space %message : buffer -> i64
+  %buffer_alignment = test.fact_buffer_min_alignment %message : buffer -> i64
+  %view_space = test.fact_view_memory_space %view : view<4xi8> -> i64
+  func.return %is_reference, %buffer_space, %buffer_alignment, %view_space : i1, i64, i64, i64
+}
+// ----
+global.rodata.def @message = align(16) bytes("6c6f6f6d")
+
+func.def @rodata_definition_facts() -> (i1, i64, i64, i64) {
+  %message = global.load @message : buffer
+  %is_reference = scalar.constant true : i1
+  %buffer_space = scalar.constant 4 : i64
+  %buffer_alignment = scalar.constant 16 : i64
+  %view_space = scalar.constant 4 : i64
+  func.return %is_reference, %buffer_space, %buffer_alignment, %view_space : i1, i64, i64, i64
+}
+
+// ====
+
+// External read-only data keeps constant-memory provenance while its definition
+// supplies the stronger extent and alignment facts after linking.
+global.rodata.decl @external_message
+
+func.def @rodata_declaration_facts() -> (i1, i64, i64) {
+  %message = global.load @external_message : buffer
+  %is_reference = test.fact_is_buffer_reference %message : buffer -> i1
+  %space = test.fact_buffer_memory_space %message : buffer -> i64
+  %alignment = test.fact_buffer_min_alignment %message : buffer -> i64
+  func.return %is_reference, %space, %alignment : i1, i64, i64
+}
+// ----
+global.rodata.decl @external_message
+
+func.def @rodata_declaration_facts() -> (i1, i64, i64) {
+  %message = global.load @external_message : buffer
+  %is_reference = scalar.constant true : i1
+  %space = scalar.constant 4 : i64
+  %alignment = scalar.constant 1 : i64
+  func.return %is_reference, %space, %alignment : i1, i64, i64
+}

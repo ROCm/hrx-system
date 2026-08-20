@@ -18,6 +18,88 @@ namespace loom {
 namespace {
 
 //===----------------------------------------------------------------------===//
+// Flags
+//===----------------------------------------------------------------------===//
+
+TEST(FactsFlags, EnumeratorsAreUniqueSingleBits) {
+  constexpr loom_value_fact_flags_t kFlags[] = {
+      LOOM_VALUE_FACT_NON_NEGATIVE,
+      LOOM_VALUE_FACT_NON_ZERO,
+      LOOM_VALUE_FACT_POSITIVE,
+      LOOM_VALUE_FACT_POWER_OF_TWO,
+      LOOM_VALUE_FACT_EXACT,
+      LOOM_VALUE_FACT_BOOLEAN,
+      LOOM_VALUE_FACT_FLOAT,
+      LOOM_VALUE_FACT_SUBGROUP_UNIFORM,
+      LOOM_VALUE_FACT_LANE_VARYING,
+      LOOM_VALUE_FACT_LANE_PREDICATE,
+      LOOM_VALUE_FACT_SUBGROUP_LANE_MASK,
+      LOOM_VALUE_FACT_NOT_NAN,
+      LOOM_VALUE_FACT_NOT_INF,
+      LOOM_VALUE_FACT_FINITE,
+      LOOM_VALUE_FACT_TOPOLOGY_WORKITEM_X,
+      LOOM_VALUE_FACT_TOPOLOGY_WORKITEM_Y,
+      LOOM_VALUE_FACT_TOPOLOGY_WORKITEM_Z,
+      LOOM_VALUE_FACT_TOPOLOGY_SUBGROUP_LANE,
+      LOOM_VALUE_FACT_TOPOLOGY_WORKGROUP_X,
+      LOOM_VALUE_FACT_TOPOLOGY_WORKGROUP_Y,
+      LOOM_VALUE_FACT_TOPOLOGY_WORKGROUP_Z,
+      LOOM_VALUE_FACT_NAN,
+      LOOM_VALUE_FACT_INF,
+      LOOM_VALUE_FACT_NOT_SUBNORMAL,
+      LOOM_VALUE_FACT_WORKGROUP_UNIFORM,
+      LOOM_VALUE_FACT_TOPOLOGY_CLUSTER_X,
+      LOOM_VALUE_FACT_TOPOLOGY_CLUSTER_Y,
+      LOOM_VALUE_FACT_TOPOLOGY_CLUSTER_Z,
+      LOOM_VALUE_FACT_TOPOLOGY_CLUSTER_WORKGROUP_X,
+      LOOM_VALUE_FACT_TOPOLOGY_CLUSTER_WORKGROUP_Y,
+      LOOM_VALUE_FACT_TOPOLOGY_CLUSTER_WORKGROUP_Z,
+      LOOM_VALUE_FACT_CLUSTER_UNIFORM,
+  };
+
+  loom_value_fact_flags_t accumulated_flags = 0;
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(kFlags); ++i) {
+    SCOPED_TRACE(i);
+    const loom_value_fact_flags_t flag = kFlags[i];
+    EXPECT_NE(flag, 0u);
+    EXPECT_EQ(flag & (flag - 1), 0u);
+    EXPECT_EQ(accumulated_flags & flag, 0u);
+    accumulated_flags |= flag;
+  }
+}
+
+TEST(FactsFlags, FloatClassesAndUniformityScopesAreIndependent) {
+  struct TestCase {
+    loom_value_fact_flags_t flag;
+    bool is_nan;
+    bool is_inf;
+    bool is_not_subnormal;
+    bool is_workgroup_uniform;
+    bool is_cluster_uniform;
+  };
+  const TestCase test_cases[] = {
+      {LOOM_VALUE_FACT_NAN, true, false, false, false, false},
+      {LOOM_VALUE_FACT_INF, false, true, false, false, false},
+      {LOOM_VALUE_FACT_NOT_SUBNORMAL, false, false, true, false, false},
+      {LOOM_VALUE_FACT_WORKGROUP_UNIFORM, false, false, false, true, false},
+      {LOOM_VALUE_FACT_CLUSTER_UNIFORM, false, false, false, true, true},
+  };
+
+  for (const TestCase& test_case : test_cases) {
+    loom_value_facts_t facts = loom_value_facts_unknown();
+    facts.flags = test_case.flag;
+    EXPECT_EQ(loom_value_facts_is_nan(facts), test_case.is_nan);
+    EXPECT_EQ(loom_value_facts_is_inf(facts), test_case.is_inf);
+    EXPECT_EQ(loom_value_facts_is_not_subnormal(facts),
+              test_case.is_not_subnormal);
+    EXPECT_EQ(loom_value_facts_is_workgroup_uniform(facts),
+              test_case.is_workgroup_uniform);
+    EXPECT_EQ(loom_value_facts_is_cluster_uniform(facts),
+              test_case.is_cluster_uniform);
+  }
+}
+
+//===----------------------------------------------------------------------===//
 // Constructors
 //===----------------------------------------------------------------------===//
 

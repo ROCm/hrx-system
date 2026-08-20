@@ -150,6 +150,17 @@ constexpr char kPreparedVmRefSource[] =
     "  low.return %value : reg<ireevm.ref>\n"
     "}\n";
 
+constexpr char kPreparedVmRefMoveSource[] =
+    "ireevm.target<core> @vm_target\n"
+    "\n"
+    "low.func.def target<ireevm.core>(@vm_target) abi(vm_module_function) "
+    "export(\"move_ref\") "
+    "@move_ref(%value: reg<ireevm.ref>) -> (reg<ireevm.ref>) {\n"
+    "  %moved = low.move %value {detached = true} : "
+    "reg<ireevm.ref> -> reg<ireevm.ref>\n"
+    "  low.return %moved : reg<ireevm.ref>\n"
+    "}\n";
+
 constexpr char kPreparedVmRefBranchSource[] =
     "ireevm.target<core> @vm_target\n"
     "\n"
@@ -1018,6 +1029,34 @@ TEST_F(IreeVmCandidateTest, EmitVmArchiveCandidateWithRefs) {
   EXPECT_TRUE(FlatbufferStringEquals(
       iree_vm_FunctionSignatureDef_calling_convention(signature_def),
       IREE_SV("0r_r")));
+
+  loom_ireevm_run_candidate_deinitialize(&candidate);
+  loom_run_module_deinitialize(&run_module);
+}
+
+TEST_F(IreeVmCandidateTest, EmitVmArchiveCandidateWithDetachedRefMove) {
+  loom_run_module_t run_module = {};
+  IREE_ASSERT_OK(Parse(IREE_SV(kPreparedVmRefMoveSource), &run_module));
+
+  loom_run_candidate_compile_options_t options = {};
+  InitializeCandidateOptions(&run_module, &options);
+
+  loom_ireevm_run_candidate_t candidate = {};
+  IREE_ASSERT_OK(loom_ireevm_run_candidate_emit(
+      &run_module, &options, iree_allocator_system(), &candidate));
+  EXPECT_GT(candidate.archive.data_length, 0u);
+
+  iree_vm_BytecodeModuleDef_table_t module_def = nullptr;
+  ParseArchive(&candidate.archive, &module_def);
+  iree_vm_FunctionDescriptor_vec_t function_descriptors =
+      iree_vm_BytecodeModuleDef_function_descriptors(module_def);
+  ASSERT_EQ(iree_vm_FunctionDescriptor_vec_len(function_descriptors), 1u);
+  iree_vm_FunctionDescriptor_struct_t function_descriptor =
+      iree_vm_FunctionDescriptor_vec_at(function_descriptors, 0);
+  EXPECT_EQ(function_descriptor->i32_register_count, 0);
+  EXPECT_EQ(function_descriptor->ref_register_count, 2);
+  ExpectFunctionBytecodeContainsOpcodes(module_def, function_descriptor,
+                                        {0x86, 0x5A});
 
   loom_ireevm_run_candidate_deinitialize(&candidate);
   loom_run_module_deinitialize(&run_module);

@@ -31,6 +31,7 @@ loom_cc_library(
     iree::base::internal::arena
     iree::base::internal::unicode
     loom::analysis::consumption
+    loom::analysis::ownership
     loom::error::diagnostic
     loom::error::emitter
     loom::error::error_defs

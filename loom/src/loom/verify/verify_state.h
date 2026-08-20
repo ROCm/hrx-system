@@ -111,7 +111,7 @@ typedef struct loom_verify_state_t {
   // Bitset indexed by value_id; a set bit means the value was consumed.
   uint64_t* consumed_bits;
 
-  // First op that consumed each value_id through a tied result.
+  // First op that consumed each value_id through an ownership transfer.
   const loom_op_t** consuming_ops;
 
   // Reusable per-op scratch for tied-result uniqueness checks.

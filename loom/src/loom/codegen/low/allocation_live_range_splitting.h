@@ -8,10 +8,10 @@
 //
 // Fixed values model ABI or target locations that must occupy a particular
 // physical slot while live. When such a value stays live long enough to force a
-// spill, this utility can insert one low.copy immediately after the fixed
-// source is materialized and rewrite later users to the copy result. The fixed
-// physical location then dies at the copy while the ordinary virtual copy
-// remains allocatable by normal rules.
+// spill, this utility can insert one low.copy or ownership-preserving low.move
+// immediately after the fixed source is materialized and rewrite later users
+// to the transfer result. The fixed physical location then dies at the transfer
+// while the ordinary virtual value remains allocatable by normal rules.
 
 #ifndef LOOM_CODEGEN_LOW_ALLOCATION_LIVE_RANGE_SPLITTING_H_
 #define LOOM_CODEGEN_LOW_ALLOCATION_LIVE_RANGE_SPLITTING_H_
@@ -36,13 +36,13 @@ typedef enum loom_low_allocation_live_range_split_trigger_e {
 typedef struct loom_low_allocation_live_range_split_result_t {
   // Fixed SSA value whose physical live range was detached.
   loom_value_id_t source_value_id;
-  // low.copy result carrying the ordinary virtual live range.
+  // Transfer result carrying the ordinary virtual live range.
   loom_value_id_t split_value_id;
   // Original allocation assignment associated with |source_value_id|, or
   // UINT32_MAX when the fixed value had no completed assignment.
   uint32_t source_assignment_index;
-  // Number of low.copy packets inserted.
-  uint32_t copy_packet_count;
+  // Number of low.copy or low.move transfer packets inserted.
+  uint32_t transfer_packet_count;
   // Number of operand uses rewritten to |split_value_id|.
   uint32_t rewritten_operand_count;
 } loom_low_allocation_live_range_split_result_t;

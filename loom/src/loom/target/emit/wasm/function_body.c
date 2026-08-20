@@ -935,11 +935,11 @@ static iree_status_t loom_wasm_record_descriptor_flags(
   return iree_ok_status();
 }
 
-static iree_status_t loom_wasm_emit_low_copy(loom_wasm_emit_state_t* state,
-                                             const loom_op_t* op) {
+static iree_status_t loom_wasm_emit_low_transfer(loom_wasm_emit_state_t* state,
+                                                 const loom_op_t* op) {
   IREE_RETURN_IF_ERROR(
-      loom_wasm_emit_local_get(state, loom_low_copy_source(op)));
-  return loom_wasm_emit_local_set(state, loom_low_copy_result(op));
+      loom_wasm_emit_local_get(state, loom_op_const_operands(op)[0]));
+  return loom_wasm_emit_local_set(state, loom_op_const_results(op)[0]);
 }
 
 static iree_status_t loom_wasm_emit_low_func_call(loom_wasm_emit_state_t* state,
@@ -1214,8 +1214,8 @@ static iree_status_t loom_wasm_emit_low_scf_for(loom_wasm_emit_state_t* state,
 
 static iree_status_t loom_wasm_emit_structural_op(loom_wasm_emit_state_t* state,
                                                   const loom_op_t* op) {
-  if (loom_low_copy_isa(op)) {
-    return loom_wasm_emit_low_copy(state, op);
+  if (loom_low_copy_isa(op) || loom_low_move_isa(op)) {
+    return loom_wasm_emit_low_transfer(state, op);
   }
   if (loom_low_func_call_isa(op)) {
     return loom_wasm_emit_low_func_call(state, op);

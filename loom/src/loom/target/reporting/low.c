@@ -242,6 +242,8 @@ static void loom_target_compile_report_record_packet_moves(
     const loom_low_allocation_table_t* allocation) {
   uint64_t copy_packet_count = 0;
   uint64_t copy_unit_count = 0;
+  uint64_t move_packet_count = 0;
+  uint64_t move_unit_count = 0;
   uint64_t slice_packet_count = 0;
   uint64_t slice_unit_count = 0;
   uint64_t concat_packet_count = 0;
@@ -253,6 +255,10 @@ static void loom_target_compile_report_record_packet_moves(
       case LOOM_LOW_PLACEMENT_CAUSE_LOW_COPY:
         ++copy_packet_count;
         copy_unit_count += group->move_group.moves.count;
+        break;
+      case LOOM_LOW_PLACEMENT_CAUSE_LOW_MOVE:
+        ++move_packet_count;
+        move_unit_count += group->move_group.moves.count;
         break;
       case LOOM_LOW_PLACEMENT_CAUSE_LOW_SLICE:
         ++slice_packet_count;
@@ -271,6 +277,9 @@ static void loom_target_compile_report_record_packet_moves(
   loom_target_compile_report_record_move_cause_if_nonzero(
       report, LOOM_TARGET_COMPILE_REPORT_MOVE_CAUSE_LOW_COPY, copy_packet_count,
       copy_unit_count);
+  loom_target_compile_report_record_move_cause_if_nonzero(
+      report, LOOM_TARGET_COMPILE_REPORT_MOVE_CAUSE_LOW_MOVE, move_packet_count,
+      move_unit_count);
   loom_target_compile_report_record_move_cause_if_nonzero(
       report, LOOM_TARGET_COMPILE_REPORT_MOVE_CAUSE_LOW_SLICE,
       slice_packet_count, slice_unit_count);

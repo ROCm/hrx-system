@@ -581,6 +581,34 @@ low.func.def target<test.low.core>(@test_target) @detached_copy_materializes_aft
 
 // ====
 
+// RUN: emit low-allocation-json @move_coalesces_after_source_dies
+
+test.target<low_core> @test_target
+
+low.func.def target<test.low.core>(@test_target) @move_coalesces_after_source_dies(%state: reg<test.i32>) -> (reg<test.i32>) asm {
+  %moved = move %state : reg<test.i32> -> reg<test.i32>
+  return %moved
+}
+
+// ----
+{"format":"loom.low.allocation.v0","function":"move_coalesces_after_source_dies","target":"test_target","descriptor_set":"test.low.core","allocation_mode":"virtual","assignment_count":2,"remark_count":0,"copy_decision_count":0,"spill_count":0,"spill_plan_count":0,"coalesced_copy_count":0,"materialized_copy_count":0,"assignments":[{"index":0,"value":{"id":0,"name":"state","type":"reg<test.i32>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":"index","register_class":"test.i32"},"start_point":0,"end_point":1,"unit_count":1,"location":{"kind":"target_id","base":0,"count":1}},{"index":1,"value":{"id":2,"name":"moved","type":"reg<test.i32>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":"index","register_class":"test.i32"},"start_point":1,"end_point":2,"unit_count":1,"location":{"kind":"target_id","base":0,"count":1}}],"spill_plans":[],"copy_decisions":[],"remarks":[]}
+
+// ====
+
+// RUN: emit low-allocation-json @detached_move_materializes_after_source_dies
+
+test.target<low_core> @test_target
+
+low.func.def target<test.low.core>(@test_target) @detached_move_materializes_after_source_dies(%state: reg<test.i32>) -> (reg<test.i32>) asm {
+  %moved = move %state {detached = true} : reg<test.i32> -> reg<test.i32>
+  return %moved
+}
+
+// ----
+{"format":"loom.low.allocation.v0","function":"detached_move_materializes_after_source_dies","target":"test_target","descriptor_set":"test.low.core","allocation_mode":"virtual","assignment_count":2,"remark_count":0,"copy_decision_count":0,"spill_count":0,"spill_plan_count":0,"coalesced_copy_count":0,"materialized_copy_count":0,"assignments":[{"index":0,"value":{"id":0,"name":"state","type":"reg<test.i32>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":"index","register_class":"test.i32"},"start_point":0,"end_point":1,"unit_count":1,"location":{"kind":"target_id","base":0,"count":1}},{"index":1,"value":{"id":2,"name":"moved","type":"reg<test.i32>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":"index","register_class":"test.i32"},"start_point":1,"end_point":2,"unit_count":1,"location":{"kind":"target_id","base":1,"count":1}}],"spill_plans":[],"copy_decisions":[],"remarks":[]}
+
+// ====
+
 // RUN: emit low-allocation-json @structured_for_storage_affinity diagnostics=placement-decisions output=none
 
 test.target<low_core> @test_target

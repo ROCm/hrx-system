@@ -3401,12 +3401,13 @@ static iree_status_t loom_llvmir_emit_packet(
   return loom_llvmir_emit_unsupported_descriptor_diagnostic(state, packet);
 }
 
-static iree_status_t loom_llvmir_emit_copy(
+static iree_status_t loom_llvmir_emit_transfer(
     loom_llvmir_emit_function_state_t* state, const loom_op_t* op) {
   loom_llvmir_value_id_t source = LOOM_LLVMIR_VALUE_ID_INVALID;
-  IREE_RETURN_IF_ERROR(
-      loom_llvmir_emit_lookup_value(state, loom_low_copy_source(op), &source));
-  return loom_llvmir_emit_define_value(state, loom_low_copy_result(op), source);
+  IREE_RETURN_IF_ERROR(loom_llvmir_emit_lookup_value(
+      state, loom_op_const_operands(op)[0], &source));
+  return loom_llvmir_emit_define_value(state, loom_op_const_results(op)[0],
+                                       source);
 }
 
 static iree_status_t loom_llvmir_emit_return(
@@ -3455,8 +3456,8 @@ static iree_status_t loom_llvmir_emit_low_op(
   if (loom_low_resource_isa(op)) {
     return iree_ok_status();
   }
-  if (loom_low_copy_isa(op)) {
-    return loom_llvmir_emit_copy(state, op);
+  if (loom_low_copy_isa(op) || loom_low_move_isa(op)) {
+    return loom_llvmir_emit_transfer(state, op);
   }
 
   loom_low_descriptor_packet_t packet = {0};

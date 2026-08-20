@@ -104,7 +104,8 @@ test.target<low_core> @test_target
 
 low.func.def target<test.low.core>(@test_target) @branch_only_concat(%cond: reg<test.i32>, %lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32 x2>) asm {
   %copy = copy %lhs : reg<test.i32> -> reg<test.i32>
-  %pair = concat(%copy, %rhs) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32 x2>
+  %moved = move %copy : reg<test.i32> -> reg<test.i32>
+  %pair = concat(%moved, %rhs) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32 x2>
   low.cond_br %cond, ^then, ^else : reg<test.i32>
 ^then:
   low.br ^join(%pair: reg<test.i32 x2>)
@@ -132,19 +133,24 @@ TEST_F(LowAllocationMoveTopologyTest, ClassifiesPacketMoveOps) {
   loom_region_t* body = loom_low_func_def_body(function_op);
 
   const loom_op_t* copy_op = FindFirstOp(body, loom_low_copy_isa);
+  const loom_op_t* move_op = FindFirstOp(body, loom_low_move_isa);
   const loom_op_t* concat_op = FindFirstOp(body, loom_low_concat_isa);
   const loom_op_t* return_op = FindFirstOp(body, loom_low_return_isa);
 
   ASSERT_NE(copy_op, nullptr);
+  ASSERT_NE(move_op, nullptr);
   ASSERT_NE(concat_op, nullptr);
   ASSERT_NE(return_op, nullptr);
   EXPECT_EQ(loom_low_allocation_move_topology_packet_move_op_kind(copy_op),
             LOOM_LOW_ALLOCATION_PACKET_MOVE_OP_COPY);
+  EXPECT_EQ(loom_low_allocation_move_topology_packet_move_op_kind(move_op),
+            LOOM_LOW_ALLOCATION_PACKET_MOVE_OP_MOVE);
   EXPECT_EQ(loom_low_allocation_move_topology_packet_move_op_kind(concat_op),
             LOOM_LOW_ALLOCATION_PACKET_MOVE_OP_CONCAT);
   EXPECT_EQ(loom_low_allocation_move_topology_packet_move_op_kind(return_op),
             LOOM_LOW_ALLOCATION_PACKET_MOVE_OP_NONE);
   EXPECT_TRUE(loom_low_allocation_move_topology_op_has_packet_moves(copy_op));
+  EXPECT_TRUE(loom_low_allocation_move_topology_op_has_packet_moves(move_op));
   EXPECT_TRUE(loom_low_allocation_move_topology_op_has_packet_moves(concat_op));
   EXPECT_FALSE(
       loom_low_allocation_move_topology_op_has_packet_moves(return_op));

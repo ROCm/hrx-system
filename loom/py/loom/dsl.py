@@ -186,6 +186,7 @@ __all__ = [
     "BorrowedResult",
     "RetainedResult",
     "AliasResult",
+    "MovedResult",
     # Constraints.
     "Constraint",
     "SameType",
@@ -1301,6 +1302,7 @@ class TypeSemantic(Enum):
     ORDINARY = "LOOM_TYPE_SEMANTIC_ORDINARY"
     CONTROL_TOKEN = "LOOM_TYPE_SEMANTIC_CONTROL_TOKEN"
     TARGET_CONTRACT_VALUE = "LOOM_TYPE_SEMANTIC_TARGET_CONTRACT_VALUE"
+    MANAGED_REFERENCE = "LOOM_TYPE_SEMANTIC_MANAGED_REFERENCE"
 
     @property
     def c_name(self) -> str:
@@ -1385,6 +1387,7 @@ class ResultOwnershipEffectKind(Enum):
     BORROWED = "borrowed"
     RETAINED = "retained"
     ALIAS = "alias"
+    MOVED = "moved"
 
 
 @dataclass(frozen=True, slots=True)
@@ -1407,7 +1410,7 @@ class ResultOwnershipEffect:
 
     result: Name of the result field.
     kind: Ownership action applied to each value in the field.
-    source: Operand field used by aliasing result effects.
+    source: Operand field used by aliasing and moved result effects.
     """
 
     result: str
@@ -1475,6 +1478,11 @@ def RetainedResult(result: str) -> ResultOwnershipEffect:
 def AliasResult(result: str, source: str) -> ResultOwnershipEffect:
     """Result aliases an operand resource without consuming it."""
     return ResultOwnershipEffect(result, ResultOwnershipEffectKind.ALIAS, source)
+
+
+def MovedResult(result: str, source: str) -> ResultOwnershipEffect:
+    """Result receives the exact ownership state of a consumed operand."""
+    return ResultOwnershipEffect(result, ResultOwnershipEffectKind.MOVED, source)
 
 
 # Type constraints that represent mutable resources (as opposed to
@@ -4565,6 +4573,7 @@ def _validate_ownership_effects(
     result_map = {r.name: r for r in results}
     operand_effects: set[str] = set()
     result_effects: set[str] = set()
+    moved_sources: set[str] = set()
 
     for effect in ownership_effects:
         if isinstance(effect, OperandOwnershipEffect):
@@ -4594,15 +4603,18 @@ def _validate_ownership_effects(
                 f"'{effect.result}' which is not declared. "
                 f"Declared results: {sorted(result_map.keys())}"
             )
-        if effect.kind == ResultOwnershipEffectKind.ALIAS:
+        if effect.kind in (
+            ResultOwnershipEffectKind.ALIAS,
+            ResultOwnershipEffectKind.MOVED,
+        ):
             if effect.source is None:
                 raise ValueError(
-                    f"Op '{op_name}': alias result ownership effect for "
+                    f"Op '{op_name}': {effect.kind.value} result ownership effect for "
                     f"'{effect.result}' must name a source operand."
                 )
             if effect.source not in operand_map:
                 raise ValueError(
-                    f"Op '{op_name}': alias result ownership effect for "
+                    f"Op '{op_name}': {effect.kind.value} result ownership effect for "
                     f"'{effect.result}' references operand '{effect.source}' "
                     f"which is not declared. Declared operands: "
                     f"{sorted(operand_map.keys())}"
@@ -4611,15 +4623,30 @@ def _validate_ownership_effects(
             result = result_map[effect.result]
             if source_operand.variadic or result.variadic:
                 raise ValueError(
-                    f"Op '{op_name}': alias result ownership effect for "
+                    f"Op '{op_name}': {effect.kind.value} result ownership effect for "
                     f"'{effect.result}' must use fixed operand/result fields."
                 )
+            if effect.kind == ResultOwnershipEffectKind.MOVED:
+                if effect.source in moved_sources:
+                    raise ValueError(
+                        f"Op '{op_name}': operand '{effect.source}' may source "
+                        f"only one moved result ownership effect."
+                    )
+                moved_sources.add(effect.source)
         elif effect.source is not None:
             raise ValueError(
                 f"Op '{op_name}': ownership effect for result "
                 f"'{effect.result}' may not name a source operand unless it "
-                f"is an alias effect."
+                f"is an alias or moved effect."
             )
+
+    conflicting_sources = moved_sources & operand_effects
+    if conflicting_sources:
+        source = sorted(conflicting_sources)[0]
+        raise ValueError(
+            f"Op '{op_name}': moved result source operand '{source}' may not "
+            f"also declare an operand ownership effect."
+        )
 
 
 def _validate_no_effect_conflicts(

@@ -841,13 +841,11 @@ static iree_status_t loom_low_emit_register_value_relation_error(
                        IREE_ARRAYSIZE(params));
 }
 
-static iree_status_t loom_low_verify_copy_register_value_relation(
-    const loom_module_t* module, const loom_op_t* op,
-    iree_diagnostic_emitter_t emitter) {
-  const loom_type_t source_type =
-      loom_module_value_type(module, loom_low_copy_source(op));
-  const loom_type_t result_type =
-      loom_module_value_type(module, loom_low_copy_result(op));
+static iree_status_t loom_low_verify_transfer_register_value_relation(
+    const loom_module_t* module, const loom_op_t* op, loom_value_id_t source_id,
+    loom_value_id_t result_id, iree_diagnostic_emitter_t emitter) {
+  const loom_type_t source_type = loom_module_value_type(module, source_id);
+  const loom_type_t result_type = loom_module_value_type(module, result_id);
   if (!loom_low_register_type_same_class(source_type, result_type) ||
       !loom_low_register_type_same_unit_count(source_type, result_type) ||
       (!loom_type_register_has_value_type(source_type) &&
@@ -1565,7 +1563,17 @@ iree_status_t loom_low_copy_verify(const loom_module_t* module,
                                    iree_diagnostic_emitter_t emitter) {
   IREE_RETURN_IF_ERROR(loom_low_verify_same_register_unit_count(
       module, op, loom_low_copy_source(op), loom_low_copy_result(op), emitter));
-  return loom_low_verify_copy_register_value_relation(module, op, emitter);
+  return loom_low_verify_transfer_register_value_relation(
+      module, op, loom_low_copy_source(op), loom_low_copy_result(op), emitter);
+}
+
+iree_status_t loom_low_move_verify(const loom_module_t* module,
+                                   const loom_op_t* op,
+                                   iree_diagnostic_emitter_t emitter) {
+  IREE_RETURN_IF_ERROR(loom_low_verify_same_register_unit_count(
+      module, op, loom_low_move_source(op), loom_low_move_result(op), emitter));
+  return loom_low_verify_transfer_register_value_relation(
+      module, op, loom_low_move_source(op), loom_low_move_result(op), emitter);
 }
 
 iree_status_t loom_low_slice_verify(const loom_module_t* module,

@@ -454,6 +454,31 @@ low.func.def target<test.low.core>(@test_target) @low_dominator_block_ops_cse_in
 
 // ====
 
+// Results consumed by a moved-result operation retain distinct SSA ownership
+// identities. Folding the second borrowed result into the first would make the
+// later borrow of %lhs a use after move.
+// RUN: pass cse
+func.def @moved_result_consumption_blocks_cse(%resource: pool<16>) {
+  %lhs = test.resource.borrowed %resource : pool<16> -> pool<16>
+  %rhs = test.resource.borrowed %resource : pool<16> -> pool<16>
+  %moved = test.resource.move %rhs : pool<16> -> pool<16>
+  test.resource.borrow %lhs : pool<16>
+  test.resource.borrow %moved : pool<16>
+  func.return
+}
+
+// ----
+func.def @moved_result_consumption_blocks_cse(%resource: pool<16>) {
+  %lhs = test.resource.borrowed %resource : pool<16> -> pool<16>
+  %rhs = test.resource.borrowed %resource : pool<16> -> pool<16>
+  %moved = test.resource.move %rhs : pool<16> -> pool<16>
+  test.resource.borrow %lhs : pool<16>
+  test.resource.borrow %moved : pool<16>
+  func.return
+}
+
+// ====
+
 // low.copy and low.concat are virtual-register identity constructors. They may
 // look structurally identical, but each instance names distinct storage and
 // must not be folded by value CSE.

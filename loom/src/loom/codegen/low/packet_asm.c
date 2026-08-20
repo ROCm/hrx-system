@@ -327,6 +327,15 @@ static iree_status_t loom_low_packet_asm_append_copy(
   return loom_low_packet_asm_append_value(state, loom_low_copy_source(op));
 }
 
+static iree_status_t loom_low_packet_asm_append_move(
+    loom_low_packet_asm_state_t* state, const loom_op_t* op) {
+  IREE_RETURN_IF_ERROR(
+      loom_low_packet_asm_append_value(state, loom_low_move_result(op)));
+  IREE_RETURN_IF_ERROR(
+      iree_string_builder_append_cstring(state->builder, " = move "));
+  return loom_low_packet_asm_append_value(state, loom_low_move_source(op));
+}
+
 static iree_status_t loom_low_packet_asm_append_concat(
     loom_low_packet_asm_state_t* state, const loom_op_t* op) {
   IREE_RETURN_IF_ERROR(
@@ -403,6 +412,7 @@ static const loom_low_packet_asm_structural_dispatch_t
     kLoomLowPacketAsmStructuralDispatch[] = {
         {LOOM_OP_LOW_RETURN, loom_low_packet_asm_append_return},
         {LOOM_OP_LOW_COPY, loom_low_packet_asm_append_copy},
+        {LOOM_OP_LOW_MOVE, loom_low_packet_asm_append_move},
         {LOOM_OP_LOW_SLICE, loom_low_packet_asm_append_slice},
         {LOOM_OP_LOW_CONCAT, loom_low_packet_asm_append_concat},
         {LOOM_OP_LOW_BR, loom_low_packet_asm_append_br},

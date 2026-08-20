@@ -88,6 +88,7 @@ from loom.dsl import (
     LiteralMatchesElementType,
     LoopLikeInterface,
     MemoryAccessInterface,
+    MovedResult,
     Op,
     OpCategory,
     Operand,
@@ -288,6 +289,13 @@ def test_generate_type_registry_emits_type_semantics() -> None:
     assert '#include "loom/ir/type_descriptor.h"' in type_registry_h
     assert ".semantic = LOOM_TYPE_SEMANTIC_CONTROL_TOKEN," in type_registry_tables_c
     assert ".contract_families = LOOM_CONTRACT_KERNEL_ASYNC," in type_registry_tables_c
+
+    reference_type = TypeDef(
+        name="test.ref",
+        semantic=TypeSemantic.MANAGED_REFERENCE,
+    )
+    _, _, reference_tables_c = generate_type_registry([reference_type])
+    assert ".semantic = LOOM_TYPE_SEMANTIC_MANAGED_REFERENCE," in reference_tables_c
 
 
 def test_generate_dialect_type_registry_emits_owned_shard() -> None:
@@ -2259,12 +2267,20 @@ def test_generate_tables_emits_ownership_descriptors_only_when_needed() -> None:
             AliasResult("result", "resource"),
         ],
     )
+    move = Op(
+        "test.resource.move",
+        group=Dialect("test"),
+        operands=[Operand("resource", POOL)],
+        results=[Result("result", POOL)],
+        ownership_effects=[MovedResult("result", "resource")],
+    )
 
-    tables_c = generate_tables_c("test", 0, [op, alias])
+    tables_c = generate_tables_c("test", 0, [op, alias, move])
 
     assert ('{_BSTRING(8, "resource"), LOOM_TYPE_CONSTRAINT_POOL, 0, LOOM_OPERAND_OWNERSHIP_RETAIN, LOOM_OWNERSHIP_CARRIER_BY_VALUE, LOOM_OPERAND_ROLE_NONE}') in tables_c
     assert ('{_BSTRING(6, "result"), LOOM_TYPE_CONSTRAINT_POOL, 0, LOOM_RESULT_OWNERSHIP_RETAINED, LOOM_RESULT_OWNERSHIP_SOURCE_FIELD_NONE}') in tables_c
     assert ('{_BSTRING(6, "result"), LOOM_TYPE_CONSTRAINT_POOL, 0, LOOM_RESULT_OWNERSHIP_ALIAS, 0}') in tables_c
+    assert ('{_BSTRING(6, "result"), LOOM_TYPE_CONSTRAINT_POOL, 0, LOOM_RESULT_OWNERSHIP_MOVED, 0}') in tables_c
 
 
 def test_generate_tables_keeps_repeated_descriptor_names_local() -> None:

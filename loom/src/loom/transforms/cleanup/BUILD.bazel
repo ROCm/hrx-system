@@ -75,6 +75,7 @@ loom_cc_library(
     srcs = ["cse.c"],
     hdrs = ["cse.h"],
     deps = [
+        "//loom/src/loom/analysis:ownership",
         "//loom/src/loom/codegen/low:function",
         "//loom/src/loom/codegen/low:target_binding",
         "//loom/src/loom/codegen/low/pipeline:pass_environment",

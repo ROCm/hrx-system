@@ -117,6 +117,8 @@ static iree_string_view_t loom_low_allocation_placement_cause_name(
       return IREE_SV("tied-result");
     case LOOM_LOW_PLACEMENT_CAUSE_LOW_COPY:
       return IREE_SV("low.copy");
+    case LOOM_LOW_PLACEMENT_CAUSE_LOW_MOVE:
+      return IREE_SV("low.move");
     case LOOM_LOW_PLACEMENT_CAUSE_LOW_SLICE:
       return IREE_SV("low.slice");
     case LOOM_LOW_PLACEMENT_CAUSE_LOW_CONCAT:

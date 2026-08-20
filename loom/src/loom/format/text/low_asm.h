@@ -149,6 +149,8 @@ typedef enum loom_text_low_asm_structural_kind_e {
   LOOM_TEXT_LOW_ASM_STRUCTURAL_COPY = 7,
   // Function-local storage subspan projection.
   LOOM_TEXT_LOW_ASM_STRUCTURAL_STORAGE_VIEW = 8,
+  // Explicit virtual-register ownership transfer/coalescing boundary.
+  LOOM_TEXT_LOW_ASM_STRUCTURAL_MOVE = 9,
 } loom_text_low_asm_structural_kind_t;
 
 enum loom_text_low_asm_structural_build_flag_bits_e {

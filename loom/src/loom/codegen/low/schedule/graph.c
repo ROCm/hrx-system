@@ -42,8 +42,9 @@ static bool loom_low_schedule_op_is_descriptor_packet(const loom_op_t* op) {
 // require.
 static bool loom_low_schedule_op_is_structural_materialization(
     const loom_op_t* op) {
-  return loom_low_copy_isa(op) || loom_low_slice_isa(op) ||
-         loom_low_concat_isa(op) || loom_low_storage_address_isa(op);
+  return loom_low_copy_isa(op) || loom_low_move_isa(op) ||
+         loom_low_slice_isa(op) || loom_low_concat_isa(op) ||
+         loom_low_storage_address_isa(op);
 }
 
 static bool loom_low_schedule_op_is_terminator(const loom_module_t* module,
@@ -584,6 +585,7 @@ static bool loom_low_schedule_relation_is_edge_handoff(
 static bool loom_low_schedule_relation_is_structural_alias(
     const loom_low_schedule_storage_relation_t* relation) {
   return relation->cause == LOOM_LOW_STORAGE_RELATION_CAUSE_LOW_COPY ||
+         relation->cause == LOOM_LOW_STORAGE_RELATION_CAUSE_LOW_MOVE ||
          relation->cause == LOOM_LOW_STORAGE_RELATION_CAUSE_LOW_SLICE ||
          relation->cause == LOOM_LOW_STORAGE_RELATION_CAUSE_LOW_CONCAT;
 }
@@ -1256,14 +1258,18 @@ iree_status_t loom_low_schedule_fill_nodes(
       if (loom_low_live_in_isa(op) || loom_low_resource_isa(op)) {
         node->flags |= LOOM_LOW_SCHEDULE_NODE_FLAG_SOURCE_ORDER_BOUNDARY;
       }
+      if (loom_low_move_isa(op)) {
+        node->flags |= LOOM_LOW_SCHEDULE_NODE_FLAG_SOURCE_ORDER_BOUNDARY;
+      }
       if (iree_any_bit_set(node->traits, LOOM_TRAIT_HINT)) {
         node->flags |= LOOM_LOW_SCHEDULE_NODE_FLAG_SOURCE_ORDER_BOUNDARY;
       }
       if (loom_low_return_isa(op)) {
         node->flags |= LOOM_LOW_SCHEDULE_NODE_FLAG_PROGRAM_EXIT_MEMORY;
       }
-      if (op->kind == LOOM_OP_LOW_COPY && loom_low_copy_detached(op)) {
-        ++state->detached_copy_node_count;
+      if ((loom_low_copy_isa(op) && loom_low_copy_detached(op)) ||
+          (loom_low_move_isa(op) && loom_low_move_detached(op))) {
+        ++state->detached_transfer_node_count;
       }
       if (loom_low_storage_reserve_isa(op)) {
         IREE_RETURN_IF_ERROR(loom_low_storage_layout_builder_append(

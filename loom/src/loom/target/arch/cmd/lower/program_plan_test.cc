@@ -8,12 +8,16 @@
 
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
+#include "loom/codegen/low/text_asm.h"
 #include "loom/format/text/parser.h"
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
 #include "loom/ops/low/ops.h"
 #include "loom/ops/op_registry.h"
 #include "loom/pass/builtin_registry.h"
+#include "loom/target/arch/cmd/descriptors/descriptors.h"
+#include "loom/target/arch/cmd/lower/serialize.h"
+#include "loom/target/arch/cmd/program.h"
 #include "loom/testing/diagnostic_matchers.h"
 #include "loom/testing/module_ptr.h"
 #include "loom/verify/verify.h"
@@ -42,6 +46,18 @@ class CmdProgramPlanTest : public ::testing::Test {
   ModulePtr ParseAndVerify(const char* source) {
     loom_text_parse_options_t parse_options = {};
     parse_options.max_errors = 20;
+    const loom_low_descriptor_set_provider_t descriptor_set_providers[] = {
+        loom_cmd_core_descriptor_set,
+    };
+    const loom_low_descriptor_registry_t descriptor_registry = {
+        /*.descriptor_sets=*/{},
+        /*.descriptor_set_count=*/{},
+        /*.descriptor_set_providers=*/descriptor_set_providers,
+        /*.descriptor_set_provider_count=*/
+        IREE_ARRAYSIZE(descriptor_set_providers),
+    };
+    loom_low_descriptor_text_asm_environment_initialize(
+        &descriptor_registry, &parse_options.low_asm_environment);
     DiagnosticCapture capture;
     parse_options.diagnostic_sink = capture.sink();
     loom_module_t* module = nullptr;
@@ -255,6 +271,42 @@ command.program.def public @parameterized() launch(%parameters: buffer, %target:
   EXPECT_EQ(root.transient.minimum_alignment, 0u);
 
   loom_cmd_program_plan_deinitialize(&plan);
+}
+
+TEST_F(CmdProgramPlanTest, SerializesMovedReferenceValues) {
+  ModulePtr module = ParseAndVerify(R"(
+low.func.def target<cmd.core> abi(command_program) @moved_binding() {
+  %binding = low.resource<command_input> {index = 0, source_type = buffer} : reg<cmd.binding>
+  %moved = low.move %binding : reg<cmd.binding> -> reg<cmd.binding>
+  %zero_u32 = low.const<cmd.constant.u32> {value = 0} : reg<cmd.u32>
+  %one_u32 = low.const<cmd.constant.u32> {value = 1} : reg<cmd.u32>
+  %zero_u64 = low.const<cmd.constant.u64> {value = 0} : reg<cmd.u64>
+  %length = low.const<cmd.constant.u64> {value = 16} : reg<cmd.u64>
+  %target_ref = low.op<cmd.buffer.ref.binding>(%moved, %zero_u64, %length) : (reg<cmd.binding>, reg<cmd.u64>, reg<cmd.u64>) -> reg<cmd.buffer_ref>
+  low.op<cmd.fill>(%target_ref, %zero_u32, %one_u32) : (reg<cmd.buffer_ref>, reg<cmd.u32>, reg<cmd.u32>)
+  low.return
+}
+)");
+  ASSERT_NE(module, nullptr);
+
+  loom_cmd_program_root_t root = {};
+  root.function_op = FindSymbol(module.get(), IREE_SV("moved_binding"));
+  root.abi_layout.rebindable_binding_count = 1;
+  root.transient.binding_index = UINT32_MAX;
+  loom_cmd_program_plan_t plan = {};
+  plan.root_module = module.get();
+  plan.roots = &root;
+  plan.root_count = 1;
+
+  iree_byte_span_t data = iree_byte_span_empty();
+  IREE_ASSERT_OK(loom_cmd_program_plan_serialize_root(&plan, 0, &data,
+                                                      iree_allocator_system()));
+  loom_cmd_program_t program = {};
+  IREE_ASSERT_OK(loom_cmd_program_parse(
+      iree_make_const_byte_span(data.data, data.data_length), &program));
+  EXPECT_EQ(program.requirements.rebindable_binding_count, 1u);
+  EXPECT_EQ(program.commands.count, 1u);
+  iree_allocator_free(iree_allocator_system(), data.data);
 }
 
 }  // namespace

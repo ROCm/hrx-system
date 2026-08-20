@@ -298,6 +298,15 @@ static void loom_cmd_serialize_constant(loom_cmd_serialize_build_t* build,
   result->payload.scalar = loom_cmd_serialize_constant_value(op);
 }
 
+static void loom_cmd_serialize_transfer(loom_cmd_serialize_build_t* build,
+                                        const loom_op_t* op) {
+  IREE_ASSERT_EQ(op->operand_count, 1u);
+  IREE_ASSERT_EQ(op->result_count, 1u);
+  const loom_cmd_serialize_value_t source =
+      *loom_cmd_serialize_operand(build, loom_op_const_operands(op)[0]);
+  *loom_cmd_serialize_result(build, loom_op_const_results(op)[0]) = source;
+}
+
 static iree_status_t loom_cmd_serialize_buffer_ref(
     loom_cmd_serialize_build_t* build, const loom_op_t* op,
     loom_cmd_program_buffer_role_t role,
@@ -809,6 +818,8 @@ static iree_status_t loom_cmd_serialize_function_body(
       IREE_ASSERT_EQ(loom_low_resource_import_kind(op),
                      LOOM_LOW_RESOURCE_IMPORT_KIND_COMMAND_INPUT);
       IREE_RETURN_IF_ERROR(loom_cmd_serialize_import_resource(build, op));
+    } else if (loom_low_copy_isa(op) || loom_low_move_isa(op)) {
+      loom_cmd_serialize_transfer(build, op);
     } else if (loom_low_return_isa(op)) {
       IREE_ASSERT_EQ(op->operand_count, 0u);
     } else {

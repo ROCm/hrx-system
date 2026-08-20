@@ -669,6 +669,8 @@ enum loom_result_ownership_effect_e {
   LOOM_RESULT_OWNERSHIP_ALIAS = 4,
   // Result receives ownership from a tied operand.
   LOOM_RESULT_OWNERSHIP_TIED = 5,
+  // Result receives the exact ownership state of a consumed operand.
+  LOOM_RESULT_OWNERSHIP_MOVED = 6,
 };
 typedef uint8_t loom_result_ownership_effect_t;
 

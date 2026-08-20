@@ -99,6 +99,8 @@ typedef enum loom_target_compile_report_move_cause_e {
   LOOM_TARGET_COMPILE_REPORT_MOVE_CAUSE_CONSTANT_MATERIALIZATION,
   // A low.copy packet survived allocation and must be emitted as a move.
   LOOM_TARGET_COMPILE_REPORT_MOVE_CAUSE_LOW_COPY,
+  // A low.move packet survived allocation and must be emitted as a move.
+  LOOM_TARGET_COMPILE_REPORT_MOVE_CAUSE_LOW_MOVE,
   // A low.slice packet survived allocation and must be emitted as moves.
   LOOM_TARGET_COMPILE_REPORT_MOVE_CAUSE_LOW_SLICE,
   // A low.concat packet survived allocation and must be emitted as moves.

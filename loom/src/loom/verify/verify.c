@@ -332,8 +332,10 @@ IREE_ATTRIBUTE_ALWAYS_INLINE static inline iree_status_t loom_verify_op(
   loom_verify_semantic_constraints(state, op, vtable);
   IREE_RETURN_IF_ERROR(loom_verify_pending_diagnostic_status(state));
 
-  // Tied result validation and linear ownership consume marking.
+  // Tied result validation and linear tied/moved source consume marking.
   IREE_RETURN_IF_ERROR(loom_verify_tied_results(state, op, vtable));
+  IREE_RETURN_IF_ERROR(loom_verify_pending_diagnostic_status(state));
+  IREE_RETURN_IF_ERROR(loom_verify_moved_results(state, op));
   IREE_RETURN_IF_ERROR(loom_verify_pending_diagnostic_status(state));
 
   // Symbol reference attributes must point to valid symbol table entries.

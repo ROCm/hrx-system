@@ -19,6 +19,8 @@ TEST(LowPlacementTest, ClassifiesEdgeCauses) {
   EXPECT_FALSE(
       loom_low_placement_cause_is_edge(LOOM_LOW_PLACEMENT_CAUSE_LOW_COPY));
   EXPECT_FALSE(
+      loom_low_placement_cause_is_edge(LOOM_LOW_PLACEMENT_CAUSE_LOW_MOVE));
+  EXPECT_FALSE(
       loom_low_placement_cause_is_edge(LOOM_LOW_PLACEMENT_CAUSE_LOW_SLICE));
   EXPECT_FALSE(
       loom_low_placement_cause_is_edge(LOOM_LOW_PLACEMENT_CAUSE_LOW_CONCAT));

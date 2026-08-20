@@ -34,6 +34,8 @@ static loom_value_id_t loom_low_allocation_packet_move_result(
   switch (packet_move_kind) {
     case LOOM_LOW_ALLOCATION_PACKET_MOVE_OP_COPY:
       return loom_low_copy_result(op);
+    case LOOM_LOW_ALLOCATION_PACKET_MOVE_OP_MOVE:
+      return loom_low_move_result(op);
     case LOOM_LOW_ALLOCATION_PACKET_MOVE_OP_SLICE:
       return loom_low_slice_result(op);
     case LOOM_LOW_ALLOCATION_PACKET_MOVE_OP_CONCAT:
@@ -51,6 +53,8 @@ static loom_low_placement_cause_t loom_low_allocation_packet_move_cause(
   switch (packet_move_kind) {
     case LOOM_LOW_ALLOCATION_PACKET_MOVE_OP_COPY:
       return LOOM_LOW_PLACEMENT_CAUSE_LOW_COPY;
+    case LOOM_LOW_ALLOCATION_PACKET_MOVE_OP_MOVE:
+      return LOOM_LOW_PLACEMENT_CAUSE_LOW_MOVE;
     case LOOM_LOW_ALLOCATION_PACKET_MOVE_OP_SLICE:
       return LOOM_LOW_PLACEMENT_CAUSE_LOW_SLICE;
     case LOOM_LOW_ALLOCATION_PACKET_MOVE_OP_CONCAT:

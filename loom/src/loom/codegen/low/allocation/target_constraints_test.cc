@@ -6,6 +6,8 @@
 
 #include "loom/codegen/low/allocation/target_constraints.h"
 
+#include <vector>
+
 #include "iree/base/internal/arena.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
@@ -109,6 +111,29 @@ TEST_F(LowAllocationTargetConstraintsTest, AppliesBudgetToUnboundedClass) {
       &constraints, RegisterClassId(IREE_SV("test.i32")), &capacity));
   EXPECT_TRUE(capacity.is_bounded);
   EXPECT_EQ(capacity.max_units, 7u);
+}
+
+TEST_F(LowAllocationTargetConstraintsTest, ReferenceClassCannotSpill) {
+  const uint16_t reg_class_id = RegisterClassId(IREE_SV("test.i32"));
+  loom_low_descriptor_set_t descriptor_set = *target_.descriptor_set;
+  std::vector<loom_low_reg_class_t> reg_classes(
+      descriptor_set.reg_classes,
+      descriptor_set.reg_classes + descriptor_set.reg_class_count);
+  reg_classes[reg_class_id].flags |= LOOM_LOW_REG_CLASS_FLAG_REFERENCE;
+  descriptor_set.reg_classes = reg_classes.data();
+  target_.descriptor_set = &descriptor_set;
+
+  loom_low_allocation_target_constraints_t constraints = {};
+  IREE_ASSERT_OK(loom_low_allocation_target_constraints_initialize(
+      &module_, &function_op_, &target_, /*budgets=*/nullptr,
+      /*budget_count=*/0, /*reserved_ranges=*/nullptr,
+      /*reserved_range_count=*/0, /*emitter=*/iree_diagnostic_emitter_t{},
+      &arena_, &constraints));
+
+  loom_low_allocation_class_capacity_t capacity = {};
+  IREE_ASSERT_OK(loom_low_allocation_target_constraints_reg_class_capacity(
+      &constraints, reg_class_id, &capacity));
+  EXPECT_FALSE(capacity.is_spillable);
 }
 
 TEST_F(LowAllocationTargetConstraintsTest,

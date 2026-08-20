@@ -44,16 +44,18 @@ enum loom_low_storage_relation_cause_e {
   LOOM_LOW_STORAGE_RELATION_CAUSE_TIED_RESULT = 1,
   // low.copy source/result storage affinity.
   LOOM_LOW_STORAGE_RELATION_CAUSE_LOW_COPY = 2,
+  // low.move source/result storage affinity.
+  LOOM_LOW_STORAGE_RELATION_CAUSE_LOW_MOVE = 3,
   // low.slice source/result subrange affinity.
-  LOOM_LOW_STORAGE_RELATION_CAUSE_LOW_SLICE = 3,
+  LOOM_LOW_STORAGE_RELATION_CAUSE_LOW_SLICE = 4,
   // low.concat source/result contiguous packing affinity.
-  LOOM_LOW_STORAGE_RELATION_CAUSE_LOW_CONCAT = 4,
+  LOOM_LOW_STORAGE_RELATION_CAUSE_LOW_CONCAT = 5,
   // low.br edge payload source/block-argument affinity.
-  LOOM_LOW_STORAGE_RELATION_CAUSE_LOW_BRANCH = 5,
+  LOOM_LOW_STORAGE_RELATION_CAUSE_LOW_BRANCH = 6,
   // low.scf.for initial iter_arg/body-argument affinity.
-  LOOM_LOW_STORAGE_RELATION_CAUSE_LOW_SCF_FOR = 6,
+  LOOM_LOW_STORAGE_RELATION_CAUSE_LOW_SCF_FOR = 7,
   // low.scf.yield payload/result or backedge affinity.
-  LOOM_LOW_STORAGE_RELATION_CAUSE_LOW_SCF_YIELD = 7,
+  LOOM_LOW_STORAGE_RELATION_CAUSE_LOW_SCF_YIELD = 8,
 };
 typedef uint8_t loom_low_storage_relation_cause_t;
 

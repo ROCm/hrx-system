@@ -82,3 +82,20 @@ low.func.def target<test.low.core>(@test_target) @detached_copy(%value: reg<test
   %copy = low.copy %value {detached = true} : reg<test.i32> -> reg<test.i32>
   low.return
 }
+
+// ====
+
+test.target<low_core> @test_target
+
+low.func.def target<test.low.core>(@test_target) @detached_move(%value: reg<test.i32>) -> (reg<test.i32>) asm {
+  %moved = move %value {detached = true} : reg<test.i32> -> reg<test.i32>
+  return %moved
+}
+
+// ----
+test.target<low_core> @test_target
+
+low.func.def target<test.low.core>(@test_target) @detached_move(%value: reg<test.i32>) -> (reg<test.i32>) {
+  %moved = low.move %value {detached = true} : reg<test.i32> -> reg<test.i32>
+  low.return %moved : reg<test.i32>
+}

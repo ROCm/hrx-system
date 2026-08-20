@@ -41,9 +41,10 @@ typedef struct loom_low_placement_build_state_t {
   uint32_t relation_count;
   // Number of collected concrete-location relations.
   iree_host_size_t location_relation_count;
-  // Number of low.copy/slice/concat operations that may require packet moves.
+  // Number of low.copy/move/slice/concat operations that may require packet
+  // moves.
   uint32_t packet_move_group_count;
-  // Total units covered by low.copy/slice/concat relations.
+  // Total units covered by low.copy/move/slice/concat relations.
   iree_host_size_t packet_move_unit_count;
   // Number of low.br operations that may require edge copies.
   uint32_t edge_copy_group_count;
@@ -66,6 +67,7 @@ static bool loom_low_placement_cause_can_alias(
   switch (cause) {
     case LOOM_LOW_PLACEMENT_CAUSE_TIED_RESULT:
     case LOOM_LOW_PLACEMENT_CAUSE_LOW_COPY:
+    case LOOM_LOW_PLACEMENT_CAUSE_LOW_MOVE:
     case LOOM_LOW_PLACEMENT_CAUSE_LOW_SLICE:
     case LOOM_LOW_PLACEMENT_CAUSE_LOW_CONCAT:
     case LOOM_LOW_PLACEMENT_CAUSE_LOW_BRANCH:
@@ -228,6 +230,14 @@ loom_low_placement_collect_storage_relation_cause(
       }
       state->packet_move_unit_count += unit_count;
       return LOOM_LOW_PLACEMENT_CAUSE_LOW_COPY;
+    case LOOM_LOW_STORAGE_RELATION_CAUSE_LOW_MOVE:
+      if ((*move_group_flags & LOOM_LOW_PLACEMENT_MOVE_GROUP_FLAG_PACKET) ==
+          0) {
+        *move_group_flags |= LOOM_LOW_PLACEMENT_MOVE_GROUP_FLAG_PACKET;
+        ++state->packet_move_group_count;
+      }
+      state->packet_move_unit_count += unit_count;
+      return LOOM_LOW_PLACEMENT_CAUSE_LOW_MOVE;
     case LOOM_LOW_STORAGE_RELATION_CAUSE_LOW_SLICE:
       if ((*move_group_flags & LOOM_LOW_PLACEMENT_MOVE_GROUP_FLAG_PACKET) ==
           0) {

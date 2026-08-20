@@ -201,8 +201,9 @@ iree_status_t loom_low_allocation_target_constraints_reg_class_capacity(
     is_bounded = true;
   }
 
-  const bool is_spillable =
-      !iree_any_bit_set(reg_class->flags, LOOM_LOW_REG_CLASS_FLAG_UNSPILLABLE);
+  const bool is_spillable = !iree_any_bit_set(
+      reg_class->flags,
+      LOOM_LOW_REG_CLASS_FLAG_UNSPILLABLE | LOOM_LOW_REG_CLASS_FLAG_REFERENCE);
   *out_capacity = (loom_low_allocation_class_capacity_t){
       .descriptor_reg_class_id = reg_class_id,
       .location_kind =

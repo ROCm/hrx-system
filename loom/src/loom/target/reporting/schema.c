@@ -479,6 +479,7 @@ const loom_target_compile_report_move_cause_descriptor_t
         {LOOM_TARGET_COMPILE_REPORT_MOVE_CAUSE_CONSTANT_MATERIALIZATION,
          IREE_SVL("constant_materialization")},
         {LOOM_TARGET_COMPILE_REPORT_MOVE_CAUSE_LOW_COPY, IREE_SVL("low_copy")},
+        {LOOM_TARGET_COMPILE_REPORT_MOVE_CAUSE_LOW_MOVE, IREE_SVL("low_move")},
         {LOOM_TARGET_COMPILE_REPORT_MOVE_CAUSE_LOW_SLICE,
          IREE_SVL("low_slice")},
         {LOOM_TARGET_COMPILE_REPORT_MOVE_CAUSE_LOW_CONCAT,

@@ -546,6 +546,7 @@ loom_cc_library(
   DEPS
     ::allocation
     ::diagnostics
+    ::target_binding
     iree::base
     iree::base::internal::arena
     loom::codegen::low::allocation::live_range

@@ -18,5 +18,7 @@ void loom_verify_poison_boundaries(loom_verify_state_t* state,
 iree_status_t loom_verify_tied_results(loom_verify_state_t* state,
                                        const loom_op_t* op,
                                        const loom_op_vtable_t* vtable);
+iree_status_t loom_verify_moved_results(loom_verify_state_t* state,
+                                        const loom_op_t* op);
 
 #endif  // LOOM_VERIFY_VERIFY_OWNERSHIP_H_

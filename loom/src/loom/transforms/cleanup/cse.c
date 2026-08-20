@@ -9,6 +9,7 @@
 #include <stdint.h>
 #include <string.h>
 
+#include "loom/analysis/ownership.h"
 #include "loom/codegen/low/function.h"
 #include "loom/codegen/low/pipeline/pass_environment.h"
 #include "loom/codegen/low/target_binding.h"
@@ -707,12 +708,40 @@ static inline bool loom_cse_prevents_cse(loom_trait_flags_t traits) {
                     LOOM_TRAIT_CONVERGENT)) != 0;
 }
 
-static bool loom_cse_use_consumes_operand(const loom_use_t use) {
+static bool loom_cse_result_transfers_operand_ownership(
+    const loom_module_t* module, const loom_op_t* op, uint16_t result_index,
+    uint16_t* out_operand_index) {
+  loom_ownership_result_effect_t effect = {0};
+  if (!loom_ownership_result_effect_at(module, op, result_index, &effect) ||
+      (effect.effect != LOOM_RESULT_OWNERSHIP_TIED &&
+       effect.effect != LOOM_RESULT_OWNERSHIP_MOVED)) {
+    return false;
+  }
+  *out_operand_index = effect.source_operand_index;
+  return true;
+}
+
+static bool loom_cse_op_transfers_operand_ownership(const loom_module_t* module,
+                                                    const loom_op_t* op) {
+  for (uint16_t i = 0; i < op->result_count; ++i) {
+    uint16_t operand_index = 0;
+    if (loom_cse_result_transfers_operand_ownership(module, op, i,
+                                                    &operand_index)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+static bool loom_cse_use_consumes_operand(const loom_module_t* module,
+                                          const loom_use_t use) {
   const loom_op_t* user_op = loom_use_user_op(use);
   const uint16_t operand_index = loom_use_operand_index(use);
-  const loom_tied_result_t* tied_results = loom_op_tied_results(user_op);
-  for (uint16_t i = 0; i < user_op->tied_result_count; ++i) {
-    if (tied_results[i].operand_index == operand_index) {
+  for (uint16_t i = 0; i < user_op->result_count; ++i) {
+    uint16_t source_operand_index = 0;
+    if (loom_cse_result_transfers_operand_ownership(module, user_op, i,
+                                                    &source_operand_index) &&
+        source_operand_index == operand_index) {
       return true;
     }
   }
@@ -730,7 +759,7 @@ static bool loom_cse_result_is_consumed(const loom_module_t* module,
     const loom_value_t* value = loom_module_value(module, result);
     const loom_use_t* use = NULL;
     loom_value_for_each_use(value, use) {
-      if (loom_cse_use_consumes_operand(*use)) {
+      if (loom_cse_use_consumes_operand(module, *use)) {
         return true;
       }
     }
@@ -856,7 +885,7 @@ iree_status_t loom_cse_run(loom_pass_t* pass, loom_module_t* module,
       if (op->result_count == 0) {
         continue;
       }
-      if (op->tied_result_count != 0) {
+      if (loom_cse_op_transfers_operand_ownership(module, op)) {
         continue;
       }
       if (loom_cse_result_is_consumed(module, op)) {

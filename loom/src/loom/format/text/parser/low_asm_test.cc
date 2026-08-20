@@ -648,6 +648,33 @@ TEST_F(LowAsmParserTest, BuildsStructuralCopy) {
   loom_module_free(module);
 }
 
+TEST_F(LowAsmParserTest, BuildsStructuralMove) {
+  loom_module_t* module = ParseOk(
+      "low.func.def target<test.low.core> @move() -> "
+      "(reg<test.i32>) asm {\n"
+      "  %c0 = test.const.i32 7\n"
+      "  %moved = move %c0 : reg<test.i32> -> reg<test.i32>\n"
+      "  return %moved\n"
+      "}\n");
+  ASSERT_NE(module, nullptr);
+
+  loom_op_t* function_op = loom_block_op(loom_module_block(module), 0);
+  loom_block_t* entry = GetEntryBlock(loom_low_func_def_body(function_op));
+  ASSERT_NE(entry, nullptr);
+  ASSERT_EQ(entry->op_count, 3u);
+  loom_op_t* const_op = loom_block_op(entry, 0);
+  loom_op_t* move_op = loom_block_op(entry, 1);
+  ASSERT_TRUE(loom_low_const_isa(const_op));
+  ASSERT_TRUE(loom_low_move_isa(move_op));
+  EXPECT_EQ(loom_low_move_source(move_op), loom_low_const_result(const_op));
+  loom_type_t result_type =
+      loom_module_value_type(module, loom_low_move_result(move_op));
+  ExpectTestLowCoreRegisterType(result_type,
+                                TEST_LOW_CORE_REG_CLASS_ID_TEST_I32, 1);
+
+  loom_module_free(module);
+}
+
 TEST_F(LowAsmParserTest, RejectsAmbiguousInferredResultType) {
   const auto& diagnostics = ParseExpectErrors(
       "low.func.def target<test.low.core> @ambiguous() asm {\n"

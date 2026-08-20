@@ -1598,6 +1598,44 @@ static iree_status_t loom_low_verify_structural_register_parts(
   return loom_low_verify_define_full_register_results(function_state, op);
 }
 
+static bool loom_low_verify_is_source_preserving_structural_op(
+    const loom_op_t* op) {
+  return loom_low_copy_isa(op) || loom_low_slice_isa(op) ||
+         loom_low_concat_isa(op);
+}
+
+static iree_status_t loom_low_verify_reference_source_preserving_ops(
+    loom_low_function_verify_state_t* function_state, const loom_op_t* op) {
+  if (!loom_low_verify_is_source_preserving_structural_op(op)) {
+    return iree_ok_status();
+  }
+  const loom_module_t* module = function_state->state->module;
+  const iree_string_view_t op_name = loom_op_name(module, op);
+  const loom_value_id_t* operands = loom_op_const_operands(op);
+  for (uint16_t i = 0; i < op->operand_count; ++i) {
+    const loom_type_t actual_type = loom_module_value_type(module, operands[i]);
+    if (!loom_low_register_type_resolver_has_class_flags(
+            &function_state->register_type_resolver, actual_type,
+            LOOM_LOW_REG_CLASS_FLAG_REFERENCE)) {
+      continue;
+    }
+    loom_diagnostic_param_t params[] = {
+        loom_param_string(function_state->function_name),
+        loom_param_string(op_name),
+        loom_param_with_field_ref(
+            loom_param_type(actual_type),
+            loom_diagnostic_field_ref(LOOM_DIAGNOSTIC_FIELD_OPERAND, i)),
+    };
+    IREE_RETURN_IF_ERROR(loom_low_verify_emit(function_state->state, op,
+                                              LOOM_ERR_TARGET_071, params,
+                                              IREE_ARRAYSIZE(params), NULL, 0));
+    if (loom_low_verify_should_stop(function_state->state)) {
+      return iree_ok_status();
+    }
+  }
+  return iree_ok_status();
+}
+
 static iree_status_t loom_low_verify_type_changing_tied_results(
     loom_low_function_verify_state_t* function_state, const loom_op_t* op,
     iree_string_view_t op_name, const loom_low_descriptor_packet_t* packet) {
@@ -1933,6 +1971,8 @@ static iree_status_t loom_low_verify_walk_op(void* user_data, loom_op_t* op,
     if (loom_low_resource_isa(op)) {
       IREE_RETURN_IF_ERROR(loom_low_verify_resource(function_state, op));
     }
+    IREE_RETURN_IF_ERROR(
+        loom_low_verify_reference_source_preserving_ops(function_state, op));
     IREE_RETURN_IF_ERROR(
         loom_low_verify_structural_register_parts(function_state, op));
     if (loom_traits_are_compile_time_only(op->traits)) {

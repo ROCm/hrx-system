@@ -135,6 +135,7 @@ from loom.dsl import (
     LegacyFormat,
     LiteralMatchesElementType,
     MemoryAccessInterface,
+    MovedResult,
     NoAncestor,
     OffsetCountMatchesRank,
     Op,
@@ -1868,6 +1869,14 @@ class TestTypeDef:
         assert type_def.semantic == TypeSemantic.CONTROL_TOKEN
         assert type_def.contracts == (ContractFamily.KERNEL_ASYNC,)
 
+    def test_managed_reference_semantic_is_explicit(self) -> None:
+        type_def = TypeDef(
+            "test.ref",
+            semantic=TypeSemantic.MANAGED_REFERENCE,
+        )
+
+        assert type_def.semantic == TypeSemantic.MANAGED_REFERENCE
+
     def test_descriptor_parameters_support_positional_and_keyed_formats(self) -> None:
         type_def = TypeDef(
             "test.matrix",
@@ -2706,6 +2715,51 @@ class TestOwnershipEffects:
         result_effect = op.ownership_effects[0]
         assert isinstance(result_effect, ResultOwnershipEffect)
         assert result_effect.result == "result"
+
+    def test_moved_result_ownership_effect(self) -> None:
+        op = Op(
+            "test.resource.move",
+            operands=[Operand("source", POOL)],
+            results=[Result("result", POOL)],
+            ownership_effects=[MovedResult("result", "source")],
+        )
+        result_effect = op.ownership_effects[0]
+        assert isinstance(result_effect, ResultOwnershipEffect)
+        assert result_effect.result == "result"
+        assert result_effect.source == "source"
+
+    def test_moved_result_ownership_effect_requires_fixed_fields(self) -> None:
+        with _raises(ValueError, match="fixed operand/result"):
+            Op(
+                "test.resource.move_many",
+                operands=[Operand("sources", POOL, variadic=True)],
+                results=[Result("results", POOL, variadic=True)],
+                ownership_effects=[MovedResult("results", "sources")],
+            )
+
+    def test_moved_result_source_may_only_move_once(self) -> None:
+        with _raises(ValueError, match="only one moved result"):
+            Op(
+                "test.resource.move_twice",
+                operands=[Operand("source", POOL)],
+                results=[Result("lhs", POOL), Result("rhs", POOL)],
+                ownership_effects=[
+                    MovedResult("lhs", "source"),
+                    MovedResult("rhs", "source"),
+                ],
+            )
+
+    def test_moved_result_source_cannot_have_operand_effect(self) -> None:
+        with _raises(ValueError, match="may not also declare"):
+            Op(
+                "test.resource.bad_move",
+                operands=[Operand("source", POOL)],
+                results=[Result("result", POOL)],
+                ownership_effects=[
+                    Consume("source"),
+                    MovedResult("result", "source"),
+                ],
+            )
 
     def test_alias_result_ownership_effect_requires_fixed_fields(self) -> None:
         with _raises(ValueError, match="fixed operand/result"):

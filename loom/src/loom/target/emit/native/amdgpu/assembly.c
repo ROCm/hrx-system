@@ -3608,6 +3608,7 @@ static iree_status_t loom_amdgpu_append_structural_packet(
   const loom_op_t* op = context->packet->node->op;
   switch (op->kind) {
     case LOOM_OP_LOW_COPY:
+    case LOOM_OP_LOW_MOVE:
       return loom_amdgpu_append_copy_packet(user_data, context);
     case LOOM_OP_LOW_SLICE:
       return loom_amdgpu_append_slice_packet(user_data, context);

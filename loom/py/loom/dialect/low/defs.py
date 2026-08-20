@@ -80,6 +80,7 @@ from loom.dsl import (
     ImplicitTerminator,
     IterArgsMatchResults,
     LoopLikeInterface,
+    MovedResult,
     NoAncestor,
     Op,
     Operand,
@@ -1077,6 +1078,46 @@ low_copy = Op(
 )
 
 # ============================================================================
+# low.move — ownership-preserving virtual-register transfer
+# ============================================================================
+
+low_move = Op(
+    "low.move",
+    group=low_ops,
+    phase=OpPhase.EXECUTABLE,
+    doc=("Transfer a virtual-register value and its exact ownership state to a fresh virtual-register identity. The source is invalid after the move."),
+    operands=[Operand("source", REGISTER)],
+    attrs=[
+        AttrDef(
+            "detached",
+            ATTR_TYPE_BOOL,
+            default=False,
+            elide_default=True,
+            doc="Require physical storage disjoint from the move source.",
+        ),
+    ],
+    results=[Result("result", REGISTER, allocates=True)],
+    constraints=[
+        SameRegisterClass("source", "result"),
+    ],
+    traits=[STORAGE_RELATION],
+    ownership_effects=[MovedResult("result", "source")],
+    verify="loom_low_move_verify",
+    facts="loom_low_move_facts",
+    format=[
+        Ref("source"),
+        AttrDict(),
+        COLON,
+        TypeOf("source"),
+        ARROW,
+        ResultType("result"),
+    ],
+    examples=[
+        "%moved = low.move %value : reg<cmd.binding> -> reg<cmd.binding>",
+    ],
+)
+
+# ============================================================================
 # low.slice — project a contiguous subrange from a register range
 # ============================================================================
 
@@ -1464,6 +1505,7 @@ ALL_LOW_OPS: tuple[Op, ...] = (
     low_op,
     low_const,
     low_copy,
+    low_move,
     low_slice,
     low_concat,
     low_invoke,
