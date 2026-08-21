@@ -190,19 +190,9 @@ function(iree_execution_test_suite)
       ${_RULE_LABELS}
   )
   set(_ENVIRONMENT_VARS "PYTHONDONTWRITEBYTECODE=1")
-  if(_TOOL_PYTHON_PACKAGE_DIRS)
-    list(REMOVE_DUPLICATES _TOOL_PYTHON_PACKAGE_DIRS)
-    if(NOT "$ENV{PYTHONPATH}" STREQUAL "")
-      list(APPEND _TOOL_PYTHON_PACKAGE_DIRS "$ENV{PYTHONPATH}")
-    endif()
-    if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
-      # Windows uses semi-colon delimiters, but so does CMake, so escape them.
-      list(JOIN _TOOL_PYTHON_PACKAGE_DIRS "\\;" _TOOL_PYTHONPATH)
-    else()
-      list(JOIN _TOOL_PYTHON_PACKAGE_DIRS ":" _TOOL_PYTHONPATH)
-    endif()
-    list(APPEND _ENVIRONMENT_VARS "PYTHONPATH=${_TOOL_PYTHONPATH}")
-  endif()
+  iree_python_test_add_package_dirs(
+    "${_TEST_NAME}" ${_TOOL_PYTHON_PACKAGE_DIRS}
+  )
   if(_RULE_SANITIZER_SUPPRESSIONS)
     iree_append_sanitizer_suppression_environment(
       _ENVIRONMENT_VARS
