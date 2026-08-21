@@ -209,7 +209,7 @@ jobs:
       - name: Install developer tools
         shell: pwsh
         run: |
-          $bazelOutputRoot = (Join-Path $env:RUNNER_TEMP "bazel").Replace('\', '/')
+          $bazelOutputRoot = (Join-Path $env:SystemDrive "b").Replace('\', '/')
           "startup --output_user_root=$bazelOutputRoot" |
             Out-File -FilePath .bazelrc.local -Encoding ascii -Append
           python --version
