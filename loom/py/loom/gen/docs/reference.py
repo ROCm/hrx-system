@@ -79,8 +79,10 @@ REFERENCE_SECTIONS = (
 # explicit decision about its user-facing role instead of silently publishing it
 # according to declaration or import order.
 DIALECT_REFERENCE_SPECS = (
+    DialectReferenceSpec("module", "program"),
     DialectReferenceSpec("scalar", "program"),
     DialectReferenceSpec("func", "program"),
+    DialectReferenceSpec("template", "program"),
     DialectReferenceSpec("encoding", "program"),
     DialectReferenceSpec("pool", "program"),
     DialectReferenceSpec("global", "program"),

@@ -76,6 +76,18 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "callable_effects",
+    srcs = ["callable_effects.c"],
+    hdrs = ["callable_effects.h"],
+    deps = [
+        ":op_defs",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/rewrite:rewriter",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
     name = "storage_facts",
     srcs = ["storage_facts.c"],
     hdrs = ["storage_facts.h"],
@@ -102,6 +114,7 @@ loom_cc_test(
         "//loom/src/loom/ops/kernel",
         "//loom/src/loom/ops/low",
         "//loom/src/loom/ops/target",
+        "//loom/src/loom/ops/template",
         "//loom/src/loom/ops/test",
         "//loom/src/loom/target:low_descriptor_registry_core_test",
         "//loom/src/loom/target:types",
@@ -187,12 +200,14 @@ loom_cc_library(
         "//loom/src/loom/ops/index",
         "//loom/src/loom/ops/kernel",
         "//loom/src/loom/ops/low",
+        "//loom/src/loom/ops/module",
         "//loom/src/loom/ops/pass",
         "//loom/src/loom/ops/pool",
         "//loom/src/loom/ops/sanitizer",
         "//loom/src/loom/ops/scalar",
         "//loom/src/loom/ops/scf",
         "//loom/src/loom/ops/target",
+        "//loom/src/loom/ops/template",
         "//loom/src/loom/ops/vector",
         "//loom/src/loom/ops/view",
         "//runtime/src/iree/base",
@@ -258,6 +273,8 @@ loom_cc_test(
         "//loom/src/loom/ops/func",
         "//loom/src/loom/ops/index",
         "//loom/src/loom/ops/kernel",
+        "//loom/src/loom/ops/module",
+        "//loom/src/loom/ops/template",
         "//loom/src/loom/ops/test",
         "//loom/src/loom/ops/vector",
         "//loom/src/loom/util:fact_table",

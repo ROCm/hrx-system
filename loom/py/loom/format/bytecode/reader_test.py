@@ -24,6 +24,8 @@ from loom.dialect.test.defs import (
     test_parameterized_attr,
     test_parameterized_attr_array,
     test_signed_enum_set_attrs,
+    test_symbol_array_attrs,
+    test_symbol_set_attrs,
 )
 from loom.format.bytecode.encoding import (
     decode_varint,
@@ -39,6 +41,7 @@ from loom.format.bytecode.writer import (
     SECTION_IR,
     SECTION_LOCATIONS,
     SECTION_SOURCE_TRIVIA,
+    SECTION_SYMBOL_REFERENCES,
     SECTION_SYMBOLS,
     SOURCE_TRIVIA_LEADING_BLANK_LINE,
     write_module,
@@ -84,6 +87,9 @@ from loom.ir import (
     StorageType,
     Symbol,
     SymbolKind,
+    SymbolName,
+    SymbolNameArray,
+    SymbolNameSet,
     TaggedLocation,
     TiedResult,
     Type,
@@ -499,6 +505,25 @@ class TestMalformedSectionDirectory:
             read_module(bytes(data))
 
 
+class TestMalformedSymbolReferences:
+    def test_declared_records_must_fit_section_payload(self) -> None:
+        module = Module(name="test")
+        _make_func(module, "f", [])
+        data = bytearray(write_module(module))
+        module_offset, _module_length = _module_range(data)
+        _entry_offset, section_offset, _section_length = _find_section_entry(
+            data, SECTION_SYMBOL_REFERENCES
+        )
+        offset = module_offset + section_offset
+        symbol_count, offset = decode_varint(data, offset)
+        assert symbol_count == 1
+        assert data[offset] == 0
+        data[offset] = 1
+
+        with pytest.raises(BytecodeError, match="declared records exceed"):
+            read_module(bytes(data))
+
+
 class TestMalformedLocationMode:
     def test_full_locations_mode_is_rejected_until_implemented(self) -> None:
         data = bytearray(write_module(Module(name="test")))
@@ -891,6 +916,52 @@ class TestModuleStructure:
     def test_empty_module(self) -> None:
         loaded = _roundtrip(Module(name="empty"))
         assert len(loaded.symbols) == 0
+
+    def test_provider_imports_roundtrip(self) -> None:
+        module = Module(name="providers")
+        _make_func(module, "resolved", [])
+        module.add_top_level_operation(
+            Operation(
+                name="module.import",
+                attributes={
+                    "provider": "zeta.loom",
+                    "symbols": SymbolNameSet([SymbolName("missing_zeta")]),
+                },
+            )
+        )
+        module.add_top_level_operation(
+            Operation(
+                name="module.import",
+                attributes={
+                    "provider": "alpha.loom",
+                    "symbols": SymbolNameSet(
+                        [SymbolName("resolved"), SymbolName("missing_alpha")]
+                    ),
+                },
+                comments=(" Alpha provider.",),
+                leading_blank_line=True,
+            )
+        )
+
+        original_bytes = write_module(module)
+        loaded = read_module(original_bytes)
+
+        assert [symbol.name for symbol in loaded.symbols] == ["resolved"]
+        provider_imports = [op for op in loaded.body.ops if op.name == "module.import"]
+        assert [op.attributes["provider"] for op in provider_imports] == [
+            "alpha.loom",
+            "zeta.loom",
+        ]
+        assert provider_imports[0].attributes["symbols"] == SymbolNameSet(
+            [SymbolName("missing_alpha"), SymbolName("resolved")]
+        )
+        assert provider_imports[0].comments == (" Alpha provider.",)
+        assert provider_imports[0].leading_blank_line
+        assert provider_imports[1].attributes["symbols"] == SymbolNameSet(
+            [SymbolName("missing_zeta")]
+        )
+        loaded_bytes = write_module(loaded)
+        assert write_module(read_module(loaded_bytes)) == loaded_bytes
 
     def test_module_with_one_function(self) -> None:
         module = Module(name="test")
@@ -2018,6 +2089,96 @@ class TestSignedEnumSetAttributeWireFormat:
 
         with pytest.raises(BytecodeError, match="descriptor-backed"):
             reader._read_attr_value(data, 0)
+
+
+class TestSymbolArrayAttributeWireFormat:
+    def _read_symbol_array(self, data: bytes) -> tuple[SymbolNameArray, int]:
+        reader = BytecodeReader(b"", op_decls=[test_symbol_array_attrs])
+        reader._strings = ["", "a", "b"]
+        attr_def = reader._attr_def_for_op_attr(
+            "test.symbol_array_attrs", "dependencies"
+        )
+        value, offset = reader._read_attr_value(data, 0, attr_def=attr_def)
+        assert isinstance(value, SymbolNameArray)
+        return value, offset
+
+    def test_reads_ordered_duplicate_names(self) -> None:
+        value, offset = self._read_symbol_array(bytes([17, 3, 2, 1, 2]))
+
+        assert value == SymbolNameArray(
+            [SymbolName("b"), SymbolName("a"), SymbolName("b")]
+        )
+        assert offset == 5
+
+    def test_rejects_oversized_array(self) -> None:
+        data = bytes([17]) + encode_varint(0x10000)
+
+        with pytest.raises(BytecodeError, match="exceeds UINT16_MAX"):
+            self._read_symbol_array(data)
+
+    def test_rejects_out_of_range_symbol_name(self) -> None:
+        with pytest.raises(BytecodeError, match="string_id 3 out of range"):
+            self._read_symbol_array(bytes([17, 1, 3]))
+
+    def test_rejects_array_without_field_descriptor(self) -> None:
+        reader = BytecodeReader(b"")
+
+        with pytest.raises(BytecodeError, match="descriptor-backed"):
+            reader._read_attr_value(bytes([17, 0]), 0)
+
+    def test_rejects_array_nested_in_generic_dict(self) -> None:
+        reader = BytecodeReader(b"")
+        reader._strings = ["", "values"]
+        data = bytes([9, 1, 1, 17, 0])
+
+        with pytest.raises(BytecodeError, match="descriptor-backed"):
+            reader._read_attr_value(data, 0)
+
+
+class TestSymbolSetAttributeWireFormat:
+    def _read_symbol_set(self, data: bytes) -> tuple[SymbolNameSet, int]:
+        reader = BytecodeReader(b"", op_decls=[test_symbol_set_attrs])
+        reader._strings = ["", "a", "b"]
+        attr_def = reader._attr_def_for_op_attr("test.symbol_set_attrs", "symbols")
+        value, offset = reader._read_attr_value(data, 0, attr_def=attr_def)
+        assert isinstance(value, SymbolNameSet)
+        return value, offset
+
+    def test_reads_sorted_unique_names(self) -> None:
+        value, offset = self._read_symbol_set(bytes([18, 2, 1, 2]))
+
+        assert value == SymbolNameSet([SymbolName("a"), SymbolName("b")])
+        assert offset == 4
+
+    @pytest.mark.parametrize(
+        "name_ids",
+        [
+            (2, 1),
+            (1, 1),
+        ],
+    )
+    def test_rejects_noncanonical_names(self, name_ids: tuple[int, int]) -> None:
+        with pytest.raises(BytecodeError, match="not sorted and unique"):
+            self._read_symbol_set(bytes([18, 2, *name_ids]))
+
+    def test_rejects_out_of_range_symbol_name(self) -> None:
+        with pytest.raises(BytecodeError, match="string_id 3 out of range"):
+            self._read_symbol_set(bytes([18, 1, 3]))
+
+    def test_rejects_set_without_field_descriptor(self) -> None:
+        reader = BytecodeReader(b"")
+
+        with pytest.raises(BytecodeError, match="descriptor-backed"):
+            reader._read_attr_value(bytes([18, 0]), 0)
+
+    def test_rejects_set_for_symbol_array_field(self) -> None:
+        reader = BytecodeReader(b"", op_decls=[test_symbol_array_attrs])
+        attr_def = reader._attr_def_for_op_attr(
+            "test.symbol_array_attrs", "dependencies"
+        )
+
+        with pytest.raises(BytecodeError, match="descriptor-backed"):
+            reader._read_attr_value(bytes([18, 0]), 0, attr_def=attr_def)
 
 
 class TestParameterizedAttributeWireFormat:

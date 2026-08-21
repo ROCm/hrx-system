@@ -18,6 +18,7 @@
 #include "loom/ops/kernel/ops.h"
 #include "loom/ops/op_defs.h"
 #include "loom/ops/target/facts.h"
+#include "loom/ops/template/ops.h"
 #include "loom/ops/view/ops.h"
 #include "loom/util/fact_table.h"
 #include "loom/util/walk.h"
@@ -852,7 +853,7 @@ static iree_status_t loom_kernel_verify_group_origin_if_local(
   // lifetime verification. Runtime calls remain unsupported ownership
   // boundaries and are deliberately rejected here.
   if (defining_op && (loom_kernel_async_group_isa(defining_op) ||
-                      loom_func_apply_isa(defining_op))) {
+                      loom_template_apply_isa(defining_op))) {
     return iree_ok_status();
   }
   return loom_kernel_emit_value_user_constraint(

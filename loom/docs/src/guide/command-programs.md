@@ -158,6 +158,14 @@ which undeclared symbol a call intended. Linking the `model` archive against
 the `layer` archive resolves the exact declaration; omitting that dependency
 leaves an unresolved program symbol.
 
+This example deliberately uses the import-free form because its Bazel target
+already supplies the complete layer archive. Larger separately packaged
+programs may constrain exact program definitions with
+[`module.import`](source-modules.md#declarations-state-contracts-imports-state-availability).
+The [linking workflow](../workflows/link-and-package.md#link-transitive-dependencies-incrementally)
+shows the same model-to-layer-to-kernel shape across a standalone partial
+artifact.
+
 During command preparation, reachable program launches are clone-inlined in
 callee-before-caller order. Each selected root becomes a closed command body,
 while independently selected roots and shared definitions remain ordinary

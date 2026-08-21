@@ -19,7 +19,7 @@ from loom.builder_model import (
     BuilderParam,
     BuilderParamKind,
     BuilderSignature,
-    python_name,
+    dialect_python_name,
     signatures_for_ops,
 )
 from loom.builtin_types import ALL_BUILTIN_TYPES
@@ -27,6 +27,8 @@ from loom.dsl import (
     ATTR_TYPE_ENUM_ARRAY,
     ATTR_TYPE_PARAMETERIZED_ARRAY,
     ATTR_TYPE_SIGNED_ENUM_SET,
+    ATTR_TYPE_SYMBOL_ARRAY,
+    ATTR_TYPE_SYMBOL_SET,
     AttrDef,
     Op,
     TypeDef,
@@ -39,6 +41,9 @@ from loom.ir import (
     ParameterizedAttrArray,
     Region,
     SignedEnumSetAttr,
+    SymbolName,
+    SymbolNameArray,
+    SymbolNameSet,
     Type,
 )
 from loom.stable_id import stable_id_from_string
@@ -226,6 +231,14 @@ class OpCallable:
                             == ATTR_TYPE_PARAMETERIZED_ARRAY
                         ):
                             value = _normalize_parameterized_attr_array(
+                                op.name, param.attr_def, value
+                            )
+                        elif (
+                            param.attr_def is not None
+                            and param.attr_def.attr_type
+                            in (ATTR_TYPE_SYMBOL_ARRAY, ATTR_TYPE_SYMBOL_SET)
+                        ):
+                            value = _normalize_symbol_collection_attr(
                                 op.name, param.attr_def, value
                             )
                         attributes[param.name] = value
@@ -609,6 +622,42 @@ def _normalize_parameterized_attr_array(
     return array
 
 
+def _normalize_symbol_collection_attr(
+    op_name: str, attr_def: AttrDef, value: Any
+) -> SymbolNameArray | SymbolNameSet:
+    """Normalizes an ordered symbol array or symbol set."""
+    values = (
+        value.values if isinstance(value, SymbolNameArray | SymbolNameSet) else value
+    )
+    if isinstance(values, str | bytes | bytearray) or not isinstance(values, Iterable):
+        raise TypeError(
+            f"{op_name}: {attr_def.attr_type.replace('_', ' ')} "
+            f"'{attr_def.name}' must be an iterable "
+            "of symbol names"
+        )
+    names: list[SymbolName] = []
+    for index, element in enumerate(values):
+        if not isinstance(element, str):
+            raise TypeError(
+                f"{op_name}: {attr_def.attr_type.replace('_', ' ')} "
+                f"'{attr_def.name}' element {index} "
+                f"must be a symbol name, got {element!r}"
+            )
+        if element.startswith("@"):
+            raise ValueError(
+                f"{op_name}: {attr_def.attr_type.replace('_', ' ')} "
+                f"'{attr_def.name}' element {index} "
+                "must not include '@'"
+            )
+        names.append(SymbolName(element))
+    if attr_def.attr_type == ATTR_TYPE_SYMBOL_ARRAY:
+        return SymbolNameArray(names)
+    try:
+        return SymbolNameSet(names)
+    except ValueError as exc:
+        raise ValueError(f"{op_name}: symbol set '{attr_def.name}' {exc}") from exc
+
+
 def _normalize_result_names(
     op: Op,
     results: Sequence[Type | TiedResultSpec],
@@ -717,7 +766,7 @@ def _build_dialect_registries(ops: Sequence[Op]) -> dict[str, _DialectRegistry]:
         grouped_ops.setdefault(dialect_name, []).append(op)
     registries: dict[str, _DialectRegistry] = {}
     for dialect_name, dialect_ops in sorted(grouped_ops.items()):
-        attr_name = python_name(dialect_name)
+        attr_name = dialect_python_name(dialect_name)
         registries[attr_name] = _DialectRegistry(
             attr_name=attr_name,
             ir_name=dialect_name,
@@ -739,6 +788,7 @@ def default_ops() -> tuple[Op, ...]:
     from loom.dialect.kernel import ALL_KERNEL_OPS
     from loom.dialect.llvmir import ALL_LLVMIR_OPS
     from loom.dialect.low import ALL_LOW_OPS
+    from loom.dialect.module import ALL_MODULE_OPS
     from loom.dialect.pass_ import ALL_PASS_OPS
     from loom.dialect.pool import ALL_POOL_OPS
     from loom.dialect.sanitizer import ALL_SANITIZER_OPS
@@ -761,6 +811,7 @@ def default_ops() -> tuple[Op, ...]:
         *ALL_KERNEL_OPS,
         *ALL_LLVMIR_OPS,
         *ALL_LOW_OPS,
+        *ALL_MODULE_OPS,
         *ALL_PASS_OPS,
         *ALL_POOL_OPS,
         *ALL_SANITIZER_OPS,

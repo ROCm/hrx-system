@@ -110,6 +110,8 @@ __all__ = [
     "ATTR_TYPE_ENCODING",
     "ATTR_TYPE_ANY",
     "ATTR_TYPE_SYMBOL",
+    "ATTR_TYPE_SYMBOL_ARRAY",
+    "ATTR_TYPE_SYMBOL_SET",
     "ATTR_TYPE_FLAGS",
     "ATTR_TYPE_PREDICATE_LIST",
     "ATTR_TYPE_DICT",
@@ -135,6 +137,8 @@ __all__ = [
     "ELEMENTWISE",
     "DECOMPOSABLE",
     "SYMBOL_DEFINE",
+    "MODULE_SCOPE",
+    "KeyedModuleRecord",
     "ISOLATED_FROM_ABOVE",
     "NON_DETERMINISTIC",
     "UNKNOWN_EFFECTS",
@@ -529,6 +533,8 @@ ATTR_TYPE_BYTES = "bytes"
 ATTR_TYPE_ENCODING = "encoding"
 ATTR_TYPE_ANY = "any"
 ATTR_TYPE_SYMBOL = "symbol"
+ATTR_TYPE_SYMBOL_ARRAY = "symbol_array"
+ATTR_TYPE_SYMBOL_SET = "symbol_set"
 ATTR_TYPE_FLAGS = "flags"
 ATTR_TYPE_PREDICATE_LIST = "predicate_list"
 ATTR_TYPE_DICT = "dict"  # Named attribute dictionary.
@@ -551,6 +557,8 @@ _VALID_ATTR_TYPES = frozenset(
         ATTR_TYPE_ENCODING,
         ATTR_TYPE_ANY,
         ATTR_TYPE_SYMBOL,
+        ATTR_TYPE_SYMBOL_ARRAY,
+        ATTR_TYPE_SYMBOL_SET,
         ATTR_TYPE_FLAGS,
         ATTR_TYPE_PREDICATE_LIST,
         ATTR_TYPE_DICT,
@@ -564,6 +572,8 @@ _VALID_SYMBOL_INTERFACES = frozenset(
     {
         "func_like",
         "callable",
+        "template_family",
+        "template_provider",
         "global",
         "executable",
         "record",
@@ -576,6 +586,14 @@ _VALID_SYMBOL_INTERFACES = frozenset(
 )
 
 
+@unique
+class SymbolReferenceRole(Enum):
+    """Compile-time graph role of a symbol reference occurrence."""
+
+    DEPENDENCY = "dependency"
+    AVAILABILITY = "availability"
+
+
 @dataclass(frozen=True, slots=True)
 class SymbolReference:
     """Declares the expected target contract of a symbol attr.
@@ -583,21 +601,25 @@ class SymbolReference:
     name: Human-readable expected symbol class used in diagnostics.
     interfaces: Generated symbol-definition interfaces accepted by the attr.
         These are structural contracts, not op names or bytecode wire kinds.
+        An empty tuple accepts any symbol without imposing an additional
+        interface constraint.
+    role: Whether the reference contributes a dependency edge or only records
+        where an otherwise non-live symbol may be found during compilation.
     """
 
     name: str
     interfaces: tuple[str, ...]
+    role: SymbolReferenceRole
 
     def __init__(
         self,
         name: str,
         interfaces: list[str] | tuple[str, ...],
+        role: SymbolReferenceRole = SymbolReferenceRole.DEPENDENCY,
     ) -> None:
         frozen_interfaces = tuple(interfaces)
         if not name:
             raise ValueError("SymbolReference: name must be non-empty")
-        if not frozen_interfaces:
-            raise ValueError("SymbolReference: interfaces must be non-empty")
         for interface in frozen_interfaces:
             if interface not in _VALID_SYMBOL_INTERFACES:
                 raise ValueError(
@@ -605,8 +627,13 @@ class SymbolReference:
                     f"'{interface}', must be one of "
                     f"{sorted(_VALID_SYMBOL_INTERFACES)}"
                 )
+        if not isinstance(role, SymbolReferenceRole):
+            raise ValueError(
+                f"SymbolReference: role must be a SymbolReferenceRole, got {role!r}"
+            )
         object.__setattr__(self, "name", name)
         object.__setattr__(self, "interfaces", frozen_interfaces)
+        object.__setattr__(self, "role", role)
 
 
 @unique
@@ -794,8 +821,10 @@ class AttrDef:
     attr_type: The kind of attribute value. Must be one of the ATTR_TYPE_*
         constants. Scoped enums use a stable key at format boundaries and a
         dense ordinal interpreted by the enclosing representation contract in
-        C IR. Parameterized attribute arrays preserve order and repeated
-        families and are valid only in descriptor-backed fields.
+        C IR. Parameterized attribute arrays and ordinary symbol arrays
+        preserve order and repeated elements. Symbol sets are ordered by exact
+        symbol-name bytes and contain no duplicates. All three collection kinds
+        are valid only in descriptor-backed fields.
     doc: Human-readable description.
     default: Default value (None = required, not optional).
     enum_def: For enum and enum-array attrs, the EnumDef describing valid
@@ -812,6 +841,8 @@ class AttrDef:
     parameterized_attr: Optional exact family constraint for parameterized
         attributes or every element of a parameterized attribute array. None
         leaves the family open.
+    symbol_ref: Target interface and graph-role contract for a symbol or every
+        element of a symbol array or symbol set.
     """
 
     name: str
@@ -861,9 +892,26 @@ class AttrDef:
                     f"AttrDef '{self.name}': scoped_enum attributes cannot "
                     "have defaults"
                 )
-        if self.symbol_ref is not None and self.attr_type != ATTR_TYPE_SYMBOL:
+        if self.symbol_ref is not None and self.attr_type not in (
+            ATTR_TYPE_SYMBOL,
+            ATTR_TYPE_SYMBOL_ARRAY,
+            ATTR_TYPE_SYMBOL_SET,
+        ):
             raise ValueError(
-                f"AttrDef '{self.name}': symbol_ref requires attr_type='symbol'"
+                f"AttrDef '{self.name}': symbol_ref requires "
+                "attr_type='symbol', 'symbol_array', or 'symbol_set'"
+            )
+        if (
+            self.attr_type
+            in (
+                ATTR_TYPE_SYMBOL_ARRAY,
+                ATTR_TYPE_SYMBOL_SET,
+            )
+            and self.symbol_ref is None
+        ):
+            raise ValueError(
+                f"AttrDef '{self.name}': attr_type='{self.attr_type}' requires "
+                "symbol_ref"
             )
         if self.parameterized_attr is not None and self.attr_type not in (
             ATTR_TYPE_PARAMETERIZED,
@@ -1096,6 +1144,10 @@ CONSTANT_LIKE = Trait("ConstantLike")
 ELEMENTWISE = Trait("Elementwise")
 DECOMPOSABLE = Trait("Decomposable")
 SYMBOL_DEFINE = Trait("SymbolDefine")
+# Op is valid only as a direct child of the module body. Module-owned operations
+# use this independently from SymbolDefine so they do not enter the symbol table
+# or pretend to own a symbol identity.
+MODULE_SCOPE = Trait("ModuleScope")
 # Op's regions cannot reference values from the enclosing scope.
 # Values enter the region only through block arguments. Passes must
 # not substitute inner values with outer definitions.
@@ -1503,6 +1555,12 @@ _RESOURCE_TYPE_CONSTRAINTS = frozenset(
 def AllTypesMatch(*fields: str) -> Trait:
     """All named fields must have identical types."""
     return Trait("AllTypesMatch", *fields)
+
+
+def KeyedModuleRecord(key_attr: str) -> Trait:
+    """Declares attr-only module metadata canonically ordered by one key."""
+
+    return Trait("KeyedModuleRecord", key_attr)
 
 
 def HasAncestor(op_name: str) -> Trait:
@@ -2922,6 +2980,7 @@ _DESCRIPTOR_PARAMETER_TYPES = frozenset(
         ATTR_TYPE_BYTES,
         ATTR_TYPE_ENCODING,
         ATTR_TYPE_SYMBOL,
+        ATTR_TYPE_SYMBOL_ARRAY,
         ATTR_TYPE_DICT,
         ATTR_TYPE_PARAMETERIZED,
         ATTR_TYPE_PARAMETERIZED_ARRAY,
@@ -4794,6 +4853,8 @@ class CallLikeKind(Enum):
     # Command-program invocation edge. Its operands are staged specialization
     # values followed by issue-time buffer bindings.
     COMMAND_PROGRAM = "command_program"
+    # Exact compile-time template implementation call.
+    TEMPLATE = "template"
 
 
 class InlinePolicy(Enum):
@@ -4890,9 +4951,9 @@ class FuncLikeInterface(NamedTuple):
     # Region name for the function body. None for bodyless ops that
     # only declare a signature without providing an implementation.
     body: str | None = None
-    # String attr naming the abstract op this function implements
-    # (for template/ukernel dispatch). None for def/decl.
-    implements: str | None = None
+    # Symbol attr naming the template family implemented by this function.
+    # None for function kinds that are not template providers.
+    template_family: str | None = None
     # I64 attr for dispatch priority among competing implementations.
     # None for def/decl.
     priority: str | None = None
@@ -5292,6 +5353,58 @@ def _validate_condition_refinement(
         )
 
 
+def _validate_keyed_module_record(
+    op_name: str,
+    operands: tuple[Operand, ...],
+    results: tuple[Result | TiedResult, ...],
+    attrs: tuple[AttrDef, ...],
+    successors: tuple[Successor, ...],
+    regions: tuple[RegionDef, ...],
+    traits: tuple[Trait, ...],
+    effects: tuple[Effect, ...],
+    ownership_effects: tuple[OperandOwnershipEffect | ResultOwnershipEffect, ...],
+) -> None:
+    record_traits = [trait for trait in traits if trait.name == "KeyedModuleRecord"]
+    if not record_traits:
+        return
+    if len(record_traits) != 1 or len(record_traits[0].args) != 1:
+        raise ValueError(
+            f"Op '{op_name}': KeyedModuleRecord requires exactly one key attr"
+        )
+    if not any(trait.name == "ModuleScope" for trait in traits):
+        raise ValueError(
+            f"Op '{op_name}': KeyedModuleRecord requires the ModuleScope trait"
+        )
+    unsupported_traits = sorted(
+        trait.name
+        for trait in traits
+        if trait.name not in ("KeyedModuleRecord", "ModuleScope", "Pure")
+    )
+    if unsupported_traits:
+        raise ValueError(
+            f"Op '{op_name}': KeyedModuleRecord cannot carry semantic traits "
+            f"{unsupported_traits}"
+        )
+    if operands or results or successors or regions or effects or ownership_effects:
+        raise ValueError(f"Op '{op_name}': KeyedModuleRecord must be attr-only")
+    key_attr_name = record_traits[0].args[0]
+    key_attr = next((attr for attr in attrs if attr.name == key_attr_name), None)
+    if key_attr is None:
+        raise ValueError(
+            f"Op '{op_name}': KeyedModuleRecord key attr "
+            f"'{key_attr_name}' is not declared"
+        )
+    if (
+        key_attr.attr_type != ATTR_TYPE_STRING
+        or key_attr.optional
+        or key_attr.default is not None
+    ):
+        raise ValueError(
+            f"Op '{op_name}': KeyedModuleRecord key attr "
+            f"'{key_attr_name}' must be a required string"
+        )
+
+
 @dataclass(frozen=True, slots=True)
 class Op:
     """A complete operation declaration.
@@ -5598,6 +5711,17 @@ class Op:
         _validate_trait_field_contracts(
             name, frozen_operands, frozen_results, tuple(traits)
         )
+        _validate_keyed_module_record(
+            name,
+            frozen_operands,
+            frozen_results,
+            frozen_attrs,
+            frozen_successors,
+            frozen_regions,
+            tuple(traits),
+            frozen_effects,
+            frozen_ownership_effects,
+        )
         _validate_scoped_enum_fields(name, frozen_format, frozen_attrs)
         _validate_attr_params_fields(name, frozen_format, frozen_attrs)
         _validate_func_args_partitions(name, frozen_format, frozen_attrs)
@@ -5673,6 +5797,15 @@ class Op:
     def has_trait(self, trait_name: str) -> bool:
         """Check if this op has a trait by name."""
         return any(t.name == trait_name for t in self.traits)
+
+    @property
+    def keyed_module_record_attr(self) -> str | None:
+        """Returns the canonical module-record key attr, when declared."""
+
+        for trait in self.traits:
+            if trait.name == "KeyedModuleRecord":
+                return trait.args[0]
+        return None
 
     @property
     def effective_phase(self) -> OpPhase | None:

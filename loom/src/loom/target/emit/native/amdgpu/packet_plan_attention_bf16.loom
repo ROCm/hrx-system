@@ -1,6 +1,8 @@
 // Fixed 4096-token, 18-head, 256-wide online BF16 attention workload.
 amdgpu.target<gfx1250> @gfx1250
 
+template.decl @benchmark.attention_bf16.m16n16(%query: buffer, %key: buffer, %value: buffer, %output: buffer, %query_tile: index, %query_head: index, %lane: index)
+
 kernel.def target(@gfx1250) export("planner_attention_bf16") @planner_attention_bf16() {
   %unit = index.constant 1 : index
   %query_tile_extent = index.constant 16 : index
@@ -13,11 +15,11 @@ kernel.def target(@gfx1250) export("planner_attention_bf16") @planner_attention_
   %query_tile = kernel.workgroup.id<x> : index
   %query_head = kernel.workgroup.id<y> : index
   %lane = kernel.workitem.id<x> : index
-  func.apply<benchmark.attention_bf16.m16n16>(%query, %key, %value, %output, %query_tile, %query_head, %lane) : (buffer, buffer, buffer, buffer, index, index, index)
+  template.apply<@benchmark.attention_bf16.m16n16>(%query, %key, %value, %output, %query_tile, %query_head, %lane) : (buffer, buffer, buffer, buffer, index, index, index)
   kernel.return
 }
 
-func.template<benchmark.attention_bf16.m16n16> target(@gfx1250) priority(20) @planner_attention_bf16_gfx1250(%query: buffer, %key: buffer, %value: buffer, %output: buffer, %query_tile: index, %query_head: index, %lane: index) {
+template.def<@benchmark.attention_bf16.m16n16> target(@gfx1250) priority(20) @planner_attention_bf16_gfx1250(%query: buffer, %key: buffer, %value: buffer, %output: buffer, %query_tile: index, %query_head: index, %lane: index) {
   %k_step_gfx1250 = index.constant 32 : index
   %base = index.constant 0 : offset
   %probability_scratch_bytes = index.constant 512 : offset
@@ -333,5 +335,5 @@ func.template<benchmark.attention_bf16.m16n16> target(@gfx1250) priority(20) @pl
   vector.fragment.store<result> %output13, %output_view[%query_origin, %channel13] shape [%m, %n] : vector<8xf32>, view<[%padded_token_count]x[%hidden_size]xbf16>
   vector.fragment.store<result> %output14, %output_view[%query_origin, %channel14] shape [%m, %n] : vector<8xf32>, view<[%padded_token_count]x[%hidden_size]xbf16>
   vector.fragment.store<result> %output15, %output_view[%query_origin, %channel15] shape [%m, %n] : vector<8xf32>, view<[%padded_token_count]x[%hidden_size]xbf16>
-  func.return
+  template.return
 }

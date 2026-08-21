@@ -964,6 +964,7 @@ static bool loom_parse_type_parameter_token_is_present(
     case LOOM_ATTR_I64_ARRAY:
     case LOOM_ATTR_ENUM_ARRAY:
     case LOOM_ATTR_SIGNED_ENUM_SET:
+    case LOOM_ATTR_SYMBOL_ARRAY:
     case LOOM_ATTR_PARAMETERIZED_ARRAY:
       return token.kind == LOOM_TOKEN_LBRACKET;
     case LOOM_ATTR_SYMBOL:

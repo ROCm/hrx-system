@@ -226,17 +226,21 @@ func.def public @preserves_sanitizer_site_location(%arg: i32) -> (i32) {
 
 // RUN: pass inline-callables
 
-func.template<test.addi> hot inline @double_template(%value: i32) -> (i32) {
+template.decl @test.addi(%value: i32) -> (i32)
+
+template.def<@test.addi> hot @double_template(%value: i32) -> (i32) {
   %doubled = test.addi %value, %value : i32
-  func.return %doubled : i32
+  template.return %doubled : i32
 }
 
 func.def public @entry(%arg: i32) -> (i32) {
-  %result = func.call @double_template(%arg) : (i32) -> (i32)
+  %result = template.call @double_template(%arg) : (i32) -> (i32)
   func.return %result : i32
 }
 
 // ----
+template.decl @test.addi(%value: i32) -> (i32)
+
 func.def public @entry(%arg: i32) -> (i32) {
   %doubled = test.addi %arg, %arg : i32
   func.return %doubled : i32
@@ -246,18 +250,20 @@ func.def public @entry(%arg: i32) -> (i32) {
 
 // RUN: pass inline-callables
 
-func.template<test.addi> inline @double_template(%value: i32) -> (i32) {
+template.decl @test.addi(%value: i32) -> (i32)
+
+template.def<@test.addi> @double_template(%value: i32) -> (i32) {
   %doubled = test.addi %value, %value : i32
-  func.return %doubled : i32
+  template.return %doubled : i32
 }
 
 func.def inline @apply_double(%value: i32) -> (i32) {
-  %result = func.apply<test.addi>(%value) : (i32) -> (i32)
+  %result = template.apply<@test.addi>(%value) : (i32) -> (i32)
   func.return %result : i32
 }
 
 func.def public @exact_entry(%arg: i32) -> (i32) {
-  %result = func.call @double_template(%arg) : (i32) -> (i32)
+  %result = template.call @double_template(%arg) : (i32) -> (i32)
   func.return %result : i32
 }
 
@@ -267,9 +273,11 @@ func.def public @abstract_entry(%arg: i32) -> (i32) {
 }
 
 // ----
-func.template<test.addi> inline @double_template(%value: i32) -> (i32) {
+template.decl @test.addi(%value: i32) -> (i32)
+
+template.def<@test.addi> @double_template(%value: i32) -> (i32) {
   %doubled = test.addi %value, %value : i32
-  func.return %doubled : i32
+  template.return %doubled : i32
 }
 
 func.def public @exact_entry(%arg: i32) -> (i32) {
@@ -278,7 +286,7 @@ func.def public @exact_entry(%arg: i32) -> (i32) {
 }
 
 func.def public @abstract_entry(%arg: i32) -> (i32) {
-  %result = func.apply<test.addi>(%arg) : (i32) -> (i32)
+  %result = template.apply<@test.addi>(%arg) : (i32) -> (i32)
   func.return %result : i32
 }
 

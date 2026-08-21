@@ -89,6 +89,7 @@ from loom.ir import (
     StorageSpace,
     StorageType,
     SymbolName,
+    SymbolNameArray,
     Type,
     TypeKind,
     Use,
@@ -1546,6 +1547,13 @@ class TestRoundTrip:
             "}\n"
         )
 
+    def test_module_scope_metadata(self) -> None:
+        self._roundtrip_text("test.module_metadata\n")
+
+    def test_rejects_body_operation_at_module_scope(self) -> None:
+        with pytest.raises(ParseError, match="not permitted at module scope"):
+            _op_parser().parse("test.yield\n")
+
     def test_enum_arrays_preserve_order_duplicates_and_open_values(self) -> None:
         text = "test.enum_array_attrs [low, high, low] using [middle, <42>, middle]"
         op = _parse_op(text)
@@ -1590,6 +1598,27 @@ class TestRoundTrip:
             _parse_op("test.signed_enum_set_attrs [low, -low]")
         with pytest.raises(ParseError, match="invalid enum value"):
             _parse_op("test.signed_enum_set_attrs [middle, other]")
+
+    def test_symbol_arrays_preserve_order_duplicates_and_presence(self) -> None:
+        text = "test.symbol_array_attrs [@b, @a, @b] using [@a]"
+        op = _parse_op(text)
+        assert op.attributes["dependencies"] == SymbolNameArray(
+            [SymbolName("b"), SymbolName("a"), SymbolName("b")]
+        )
+        assert op.attributes["available"] == SymbolNameArray([SymbolName("a")])
+        assert _op_printer().print_operation(op, Module()) == text
+
+        absent = _parse_op("test.symbol_array_attrs []")
+        present_empty = _parse_op("test.symbol_array_attrs [] using []")
+        assert absent.attributes["dependencies"] == SymbolNameArray()
+        assert "available" not in absent.attributes
+        assert present_empty.attributes["available"] == SymbolNameArray()
+        assert _op_printer().print_operation(absent, Module()) == (
+            "test.symbol_array_attrs []"
+        )
+        assert _op_printer().print_operation(present_empty, Module()) == (
+            "test.symbol_array_attrs [] using []"
+        )
 
     def test_parameterized_attr_prints_in_declaration_order(self) -> None:
         op = _parse_op(

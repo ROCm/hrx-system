@@ -727,10 +727,10 @@ class KeyRef:
     The field names a string attribute storing the key.
 
     Examples:
-        func.template<tile.contract> device @name(...)
+        template.def<@tile.contract> device @name(...)
         llvmir.intrinsic<llvm.memcpy> (...)
         low.func.def target<amdgpu.rdna3_5.core>(@gfx1151) @name(...)
-        func.apply<qwen.q4.matmul>(%weights, %input) : (...) -> (...)
+        template.apply<@qwen.q4.matmul>(%weights, %input) : (...) -> (...)
     """
 
     field: str

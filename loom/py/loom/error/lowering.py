@@ -436,14 +436,14 @@ ERR_LOWERING_044 = ErrorDef(
     ),
 )
 
-# ERR_LOWERING_045: Func apply selection failed.
+# ERR_LOWERING_045: Template application resolution failed.
 ERR_LOWERING_045 = ErrorDef(
     domain=ErrorDomain.LOWERING,
     code=45,
     severity=Severity.ERROR,
-    summary="Func apply selection failed.",
+    summary="Template application resolution failed.",
     message=(
-        "{phase_name} cannot select an implementation for {op_name}"
+        "{phase_name} cannot resolve {op_name} against template family "
         "<{contract_key}>: {failure_code}"
     ),
     params=(
@@ -453,9 +453,9 @@ ERR_LOWERING_045 = ErrorDef(
         ErrorParam("failure_code", ParamKind.STRING),
     ),
     fix_hint=(
-        "Add a matching func.template provider, make target, caller context, "
-        "and value predicates resolvable before final selection, or call a "
-        "specific implementation with func.call inline"
+        "Add a matching template.def provider, make target, caller context, "
+        "and value predicates resolvable before final selection, or correct "
+        "the constraints on an exact template.call"
     ),
 )
 
@@ -499,28 +499,28 @@ ERR_LOWERING_047 = ErrorDef(
     ),
 )
 
-# ERR_LOWERING_048: Func apply target condition is unresolved.
+# ERR_LOWERING_048: Template application target condition is unresolved.
 ERR_LOWERING_048 = ErrorDef(
     domain=ErrorDomain.LOWERING,
     code=48,
     severity=Severity.ERROR,
-    summary="Func apply target condition is unresolved.",
+    summary="Template application target condition is unresolved.",
     message=(
         "{phase_name} cannot select an implementation for {op_name}"
-        "<{contract_key}> because @{provider_name} has unresolved condition "
+        "<{contract_key}> because @{constraint_owner_name} has unresolved condition "
         "#{condition_name}"
     ),
     params=(
         ErrorParam("op_name", ParamKind.STRING),
         ErrorParam("phase_name", ParamKind.STRING),
         ErrorParam("contract_key", ParamKind.STRING),
-        ErrorParam("provider_name", ParamKind.STRING),
+        ErrorParam("constraint_owner_name", ParamKind.STRING),
         ErrorParam("condition_name", ParamKind.STRING),
     ),
     fix_hint=(
         "Supply target facts that decide the condition, add a provider whose "
-        "applicability is proven, or call a specific implementation with "
-        "func.call inline"
+        "applicability is proven, or correct the constraints on an exact "
+        "template.call"
     ),
 )
 

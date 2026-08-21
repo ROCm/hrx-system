@@ -210,6 +210,27 @@ static bool loom_print_pipeline_attr_value_is_printable(
              loom_print_pipeline_is_printable_name(
                  ctx->module->strings.entries[name_id], /*allow_dot=*/false);
     }
+    case LOOM_ATTR_SYMBOL_ARRAY:
+    case LOOM_ATTR_SYMBOL_SET: {
+      if (!descriptor || descriptor->attr_kind != attr->kind ||
+          (attr->count > 0 && !attr->symbol_refs)) {
+        return false;
+      }
+      for (uint16_t i = 0; i < attr->count; ++i) {
+        loom_symbol_ref_t ref = attr->symbol_refs[i];
+        if (ref.module_id != 0 || ref.symbol_id >= ctx->module->symbols.count) {
+          return false;
+        }
+        loom_string_id_t name_id =
+            ctx->module->symbols.entries[ref.symbol_id].name_id;
+        if (name_id >= ctx->module->strings.count ||
+            !loom_print_pipeline_is_printable_name(
+                ctx->module->strings.entries[name_id], /*allow_dot=*/false)) {
+          return false;
+        }
+      }
+      return true;
+    }
     case LOOM_ATTR_TYPE:
       return attr->type_id < ctx->module->types.count;
     case LOOM_ATTR_ENCODING:

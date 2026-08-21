@@ -68,6 +68,8 @@ from loom.dsl import (
     ATTR_TYPE_PARAMETERIZED_ARRAY,
     ATTR_TYPE_SIGNED_ENUM_SET,
     ATTR_TYPE_SYMBOL,
+    ATTR_TYPE_SYMBOL_ARRAY,
+    ATTR_TYPE_SYMBOL_SET,
     BY_REFERENCE,
     CONSTANT_LIKE,
     CONVERGENT,
@@ -78,6 +80,7 @@ from loom.dsl import (
     INTEGER,
     INVOLUTION,
     ISOLATED_FROM_ABOVE,
+    MODULE_SCOPE,
     POISON_BOUNDARY,
     POOL,
     PURE,
@@ -131,6 +134,7 @@ from loom.dsl import (
     Successor,
     SymbolDefinition,
     SymbolReference,
+    SymbolReferenceRole,
     TargetLikeInterface,
     TiedResult,
     TypeDef,
@@ -266,8 +270,8 @@ test_options_attr = ParameterizedAttrDef(
             "target",
             ATTR_TYPE_SYMBOL,
             optional=True,
-            symbol_ref=SymbolReference("record", ["record"]),
-            doc="Optional record symbol dependency.",
+            symbol_ref=SymbolReference("record", ["record"], role=SymbolReferenceRole.AVAILABILITY),
+            doc="Optional record symbol availability anchor.",
         ),
         AttrDef(
             "tiles",
@@ -349,7 +353,7 @@ test_matrix_type = TypeDef(
             "target",
             ATTR_TYPE_SYMBOL,
             optional=True,
-            symbol_ref=SymbolReference("record", ["record"]),
+            symbol_ref=SymbolReference("record", ["record"], role=SymbolReferenceRole.AVAILABILITY),
         ),
     ],
     format=[
@@ -2067,7 +2071,7 @@ test_template_param_symbol = Op(
         AttrDef(
             "target",
             "symbol",
-            symbol_ref=SymbolReference("record", ["record"]),
+            symbol_ref=SymbolReference("record", ["record"], role=SymbolReferenceRole.AVAILABILITY),
         ),
     ],
     format=[
@@ -2289,6 +2293,78 @@ test_signed_enum_set_attrs = Op(
     examples=[
         "test.signed_enum_set_attrs [low, -middle, high] using []",
     ],
+)
+
+# ============================================================================
+# test.symbol_array_attrs — descriptor-backed symbol-array attributes
+# ============================================================================
+
+test_symbol_array_attrs = Op(
+    "test.symbol_array_attrs",
+    group=test_ops,
+    doc="Test op with dependency and availability symbol arrays.",
+    attrs=[
+        AttrDef(
+            "dependencies",
+            ATTR_TYPE_SYMBOL_ARRAY,
+            symbol_ref=SymbolReference("record", ["record"]),
+            doc="Ordered record dependencies.",
+        ),
+        AttrDef(
+            "available",
+            ATTR_TYPE_SYMBOL_ARRAY,
+            symbol_ref=SymbolReference(
+                "symbol",
+                [],
+                role=SymbolReferenceRole.AVAILABILITY,
+            ),
+            optional=True,
+            doc="Ordered symbols available from an external provider.",
+        ),
+    ],
+    format=[
+        Attr("dependencies"),
+        OptionalGroup(
+            [kw("using"), Attr("available")],
+            anchor="available",
+        ),
+    ],
+    examples=[
+        "test.symbol_array_attrs [@b, @a, @b] using [@a]",
+    ],
+)
+
+# ============================================================================
+# test.symbol_set_attrs — self-describing symbol-set attributes
+# ============================================================================
+
+test_symbol_set_attrs = Op(
+    "test.symbol_set_attrs",
+    group=test_ops,
+    doc="Test op with a canonical symbol set.",
+    attrs=[
+        AttrDef(
+            "symbols",
+            ATTR_TYPE_SYMBOL_SET,
+            symbol_ref=SymbolReference("record", ["record"]),
+            doc="Sorted unique record references.",
+        ),
+    ],
+    format=[Attr("symbols")],
+    examples=["test.symbol_set_attrs [@a, @b]"],
+)
+
+# ============================================================================
+# test.module_metadata — module-scope operation placement
+# ============================================================================
+
+test_module_metadata = Op(
+    "test.module_metadata",
+    group=test_ops,
+    doc="Test non-symbol metadata owned directly by a module body.",
+    traits=[MODULE_SCOPE],
+    format=[],
+    examples=["test.module_metadata"],
 )
 
 # ============================================================================
@@ -3049,10 +3125,13 @@ ALL_TEST_OPS: tuple[Op, ...] = (
     test_fact_cluster_uniform,
     test_enum_array_attrs,
     test_signed_enum_set_attrs,
+    test_symbol_array_attrs,
+    test_symbol_set_attrs,
     test_parameterized_attr,
     test_compact_parameterized_attr,
     test_parameterized_attr_array,
     test_attr_params,
     test_condition_refines_positive,
     test_partitioned_call,
+    test_module_metadata,
 )

@@ -7,7 +7,7 @@
 #include "loom/target/arch/cmd/lower/program_composition.h"
 
 #include "loom/analysis/scc.h"
-#include "loom/analysis/symbol_dependencies.h"
+#include "loom/analysis/symbol_references.h"
 #include "loom/error/error_catalog.h"
 #include "loom/ir/module.h"
 #include "loom/rewrite/callable.h"
@@ -20,18 +20,19 @@ typedef struct loom_cmd_program_composition_t {
   const loom_module_t* diagnostic_module;
   // Caller-owned structured diagnostic sink.
   iree_diagnostic_emitter_t diagnostic_emitter;
-  // Immutable symbol dependency snapshot indexing command call sites.
-  loom_symbol_dependency_table_t dependencies;
+  // Immutable symbol reference snapshot indexing command call sites.
+  loom_symbol_reference_table_t references;
 } loom_cmd_program_composition_t;
 
 static bool loom_cmd_program_composition_is_call(
     const loom_cmd_program_composition_t* composition,
-    const loom_symbol_dependency_edge_t* edge) {
-  if (edge->kind != LOOM_SYMBOL_DEPENDENCY_EDGE_CALL || !edge->user_op) {
+    const loom_symbol_reference_occurrence_t* occurrence) {
+  if (occurrence->kind != LOOM_SYMBOL_REFERENCE_OCCURRENCE_CALL ||
+      !occurrence->user_op) {
     return false;
   }
   const loom_call_like_t call =
-      loom_call_like_cast(composition->module, (loom_op_t*)edge->user_op);
+      loom_call_like_cast(composition->module, (loom_op_t*)occurrence->user_op);
   return loom_call_like_isa(call) &&
          loom_call_like_kind(call) == LOOM_CALL_LIKE_KIND_COMMAND_PROGRAM;
 }
@@ -41,17 +42,17 @@ static iree_status_t loom_cmd_program_composition_visit_successors(
     loom_scc_successor_callback_t successor) {
   const loom_cmd_program_composition_t* composition =
       (const loom_cmd_program_composition_t*)user_data;
-  IREE_ASSERT_LT(node, composition->dependencies.symbol_count);
-  loom_symbol_dependency_edge_id_t edge_id =
-      composition->dependencies.symbols[node].first_outgoing_edge_id;
-  while (edge_id != LOOM_SYMBOL_DEPENDENCY_EDGE_ID_INVALID) {
-    const loom_symbol_dependency_edge_t* edge =
-        &composition->dependencies.edges[edge_id];
-    if (loom_cmd_program_composition_is_call(composition, edge)) {
+  IREE_ASSERT_LT(node, composition->references.symbol_count);
+  loom_symbol_reference_occurrence_id_t occurrence_id =
+      composition->references.symbols[node].first_outgoing_occurrence_id;
+  while (occurrence_id != LOOM_SYMBOL_REFERENCE_OCCURRENCE_ID_INVALID) {
+    const loom_symbol_reference_occurrence_t* occurrence =
+        &composition->references.occurrences[occurrence_id];
+    if (loom_cmd_program_composition_is_call(composition, occurrence)) {
       IREE_RETURN_IF_ERROR(
-          successor.fn(successor.user_data, edge->target_symbol_id));
+          successor.fn(successor.user_data, occurrence->target_symbol_id));
     }
-    edge_id = edge->next_outgoing_edge_id;
+    occurrence_id = occurrence->next_outgoing_occurrence_id;
   }
   return iree_ok_status();
 }
@@ -111,19 +112,19 @@ static iree_status_t loom_cmd_program_composition_inline_component(
     loom_rewriter_t* rewriter) {
   IREE_ASSERT_EQ(component->node_count, 1u);
   const iree_host_size_t source_symbol_id = component->nodes[0];
-  loom_symbol_dependency_edge_id_t edge_id =
-      composition->dependencies.symbols[source_symbol_id]
-          .first_outgoing_edge_id;
+  loom_symbol_reference_occurrence_id_t occurrence_id =
+      composition->references.symbols[source_symbol_id]
+          .first_outgoing_occurrence_id;
   iree_status_t status = iree_ok_status();
-  while (edge_id != LOOM_SYMBOL_DEPENDENCY_EDGE_ID_INVALID &&
+  while (occurrence_id != LOOM_SYMBOL_REFERENCE_OCCURRENCE_ID_INVALID &&
          iree_status_is_ok(status)) {
-    const loom_symbol_dependency_edge_t* edge =
-        &composition->dependencies.edges[edge_id];
-    if (loom_cmd_program_composition_is_call(composition, edge)) {
-      status =
-          loom_callable_inline_direct_call(rewriter, (loom_op_t*)edge->user_op);
+    const loom_symbol_reference_occurrence_t* occurrence =
+        &composition->references.occurrences[occurrence_id];
+    if (loom_cmd_program_composition_is_call(composition, occurrence)) {
+      status = loom_callable_inline_direct_call(
+          rewriter, (loom_op_t*)occurrence->user_op);
     }
-    edge_id = edge->next_outgoing_edge_id;
+    occurrence_id = occurrence->next_outgoing_occurrence_id;
   }
   return status;
 }
@@ -146,8 +147,8 @@ iree_status_t loom_cmd_program_composition_flatten(
       .diagnostic_module = diagnostic_module,
       .diagnostic_emitter = diagnostic_emitter,
   };
-  IREE_RETURN_IF_ERROR(loom_symbol_dependency_table_build(
-      module, arena, &composition.dependencies));
+  IREE_RETURN_IF_ERROR(loom_symbol_reference_table_build(
+      module, arena, &composition.references));
 
   iree_host_size_t* root_nodes = NULL;
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(

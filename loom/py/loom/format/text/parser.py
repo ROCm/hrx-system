@@ -121,6 +121,8 @@ from loom.ir import (
     SignedEnumSetAttr,
     StaticDim,
     SymbolName,
+    SymbolNameArray,
+    SymbolNameSet,
     TaggedLocation,
     Type,
     TypeKind,
@@ -834,6 +836,38 @@ def _parse_descriptor_attr_value_from_tokens(
             return SignedEnumSetAttr(positive_values, negative_values)
         case "symbol":
             return tokenizer.expect(TokenKind.SYMBOL).text
+        case "symbol_array" | "symbol_set":
+            collection_name = descriptor.attr_type.replace("_", "-")
+            tokenizer.expect(TokenKind.LBRACKET)
+            names: list[SymbolName] = []
+            seen_names: set[SymbolName] | None = (
+                set() if descriptor.attr_type == "symbol_set" else None
+            )
+            if not tokenizer.at(TokenKind.RBRACKET):
+                while True:
+                    if len(names) == 0xFFFF:
+                        raise ParseError(
+                            f"{collection_name} length exceeds UINT16_MAX",
+                            tokenizer.peek().location,
+                            filename,
+                        )
+                    token = tokenizer.expect(TokenKind.SYMBOL)
+                    name = SymbolName(token.text)
+                    if seen_names is not None:
+                        if name in seen_names:
+                            raise ParseError(
+                                f"duplicate symbol name '@{name}' in symbol set",
+                                token.location,
+                                filename,
+                            )
+                        seen_names.add(name)
+                    names.append(name)
+                    if not tokenizer.try_consume(TokenKind.COMMA):
+                        break
+            tokenizer.expect(TokenKind.RBRACKET)
+            if descriptor.attr_type == "symbol_set":
+                return SymbolNameSet(names)
+            return SymbolNameArray(names)
         case "type":
             if scope is None or type_registry is None:
                 raise ValueError("type attribute parsing requires a type context")
@@ -1489,7 +1523,13 @@ def _type_optional_present(
                             TokenKind.BARE_IDENT,
                             TokenKind.LANGLE,
                         )
-                    case "enum_array" | "i64_array" | "parameterized_array":
+                    case (
+                        "enum_array"
+                        | "i64_array"
+                        | "symbol_array"
+                        | "symbol_set"
+                        | "parameterized_array"
+                    ):
                         return token.kind == TokenKind.LBRACKET
                     case "bool":
                         return token.kind == TokenKind.BARE_IDENT
@@ -1962,10 +2002,10 @@ class Parser:
                 self._parse_attribute_alias()
                 continue
 
-            # Top-level symbol-defining op: func.def, func.decl, test.func, etc.
+            # Top-level symbol definition or module-scope operation.
             if tok.at(TokenKind.OP_NAME):
                 op = self._parse_operation()
-                self._register_symbol(op)
+                self._register_top_level_operation(op)
                 continue
 
             raise ParseError(
@@ -2026,25 +2066,25 @@ class Parser:
         self._encoding_aliases[alias_tok.text] = instance
         self._module.add_encoding(instance)
 
-    def _register_symbol(self, op: Operation) -> None:
-        """Register a top-level symbol-defining op in the module's symbol table.
-
-        Called after _parse_operation() for any op appearing at module level.
-        """
+    def _register_top_level_operation(self, op: Operation) -> None:
+        """Attach a parsed operation to the module body and applicable index."""
         op_decl = self._op_registry.get(op.name)
-        if op_decl is None or not op_decl.has_trait("SymbolDefine"):
-            location = SourceLocation(1, 1, 0)
-            op_location = self._module.locations.get(op.location_id)
-            if isinstance(op_location, FileLocation):
-                location = SourceLocation(
-                    op_location.start_line, op_location.start_col, 0
-                )
-            raise ParseError(
-                f"top-level op '{op.name}' does not declare a generated symbol",
-                location,
-                self._tokenizer._filename,
-            )
-        self._module.add_symbol(symbol_from_operation(op, op_decl))
+        if op_decl is not None and op_decl.has_trait("SymbolDefine"):
+            self._module.add_symbol(symbol_from_operation(op, op_decl))
+            return
+        if op_decl is not None and op_decl.has_trait("ModuleScope"):
+            self._module.add_top_level_operation(op)
+            return
+
+        location = SourceLocation(1, 1, 0)
+        op_location = self._module.locations.get(op.location_id)
+        if isinstance(op_location, FileLocation):
+            location = SourceLocation(op_location.start_line, op_location.start_col, 0)
+        raise ParseError(
+            f"op '{op.name}' is not permitted at module scope",
+            location,
+            self._tokenizer._filename,
+        )
 
     def _parse_func_arg(self) -> tuple[str, Type, int]:
         """Parse one function argument: %name: type.

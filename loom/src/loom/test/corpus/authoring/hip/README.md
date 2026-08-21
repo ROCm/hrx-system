@@ -44,7 +44,7 @@ python dev.py bazel run //loom/src/loom/tools/loom-opt:loom-opt -- \
 | `q8`, `q4`, `u8`, `s8`, `u4`, `s4`, `v_dot4_i32_iu8`, `dp4a` | `vector.bitunpacku`, `vector.bitunpacks`, `vector.dot4i<u8s8>` | `q8_q4_signedness.loom` |
 | `q2`, `q3`, `q4`, `q5`, `q6`, split high bits, lookup tables, offset-binary, packed-dot repack | `vector.bitunpacku`, `vector.bitfield.extractu`, `vector.bitfield.insert`, `vector.table.lookup`, `vector.dot8i4` | `packed_field_contracts.loom` |
 | dynamic lower-bound unroll, missing facts | structured diagnostic, exact/range facts | `q8_hip_shaped_unroll_unresolved.loom` |
-| wave size, template, specialization, fallback | targetless `func.apply`, typed `func.template ... requires`, `#target.subgroup.size` | `target_provider_selection.loom` |
+| wave size, template, specialization, fallback | targetless `template.apply`, typed `template.def ... requires`, `#target.subgroup.size` | `target_provider_selection.loom` |
 | targetless template device function, `expf`, target math policy, inline | invocation specialization, then authoring expansion and math legalization | `template_math_legalization.loom` |
 | `__cluster_dims__`, cluster multicast, async-to-LDS, `s_wait_asynccnt`, b128 | static `cluster_size`, `kernel.async.cluster.gather`, async groups and waits | `cluster_b128_multicast.loom` |
 
@@ -652,7 +652,7 @@ vector.dot8i4<s4u4>
 ## Target-Fact Provider Selection
 
 Tags: `HIP template`, `CUDA template`, wave size, subgroup size,
-specialization, fallback, targetless, `func.apply`, `func.template`, `requires`,
+specialization, fallback, targetless, `template.apply`, `template.def`, `requires`,
 `where`, `#target.subgroup.size`, `priority`.
 
 HIP habit:
@@ -669,9 +669,9 @@ int scale_i32(int value) {
 Loom spelling:
 
 ```loom
-func.template<hip.recipe.scale_i32> requires [#target.subgroup.size<64>] priority(20) @scale_i32_subgroup_64(%value: i32) -> (i32) { ... }
-func.template<hip.recipe.scale_i32> requires [#target.subgroup.size<32>] priority(20) @scale_i32_subgroup_32(%value: i32) -> (i32) { ... }
-func.template<hip.recipe.scale_i32> priority(1) @scale_i32_fallback(%value: i32) -> (i32) { ... }
+template.def<@hip.recipe.scale_i32> requires [#target.subgroup.size<64>] priority(20) @scale_i32_subgroup_64(%value: i32) -> (i32) { ... }
+template.def<@hip.recipe.scale_i32> requires [#target.subgroup.size<32>] priority(20) @scale_i32_subgroup_32(%value: i32) -> (i32) { ... }
+template.def<@hip.recipe.scale_i32> priority(1) @scale_i32_fallback(%value: i32) -> (i32) { ... }
 
 kernel.def @selects_subgroup_provider() {
   %c1 = index.constant 1 : index
@@ -679,13 +679,13 @@ kernel.def @selects_subgroup_provider() {
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%subgroup_size, %c1, %c1) : index
 } launch(%input: buffer, %output: buffer) {
   ...
-  %scaled = func.apply<hip.recipe.scale_i32>(%value) : (i32) -> (i32)
+  %scaled = template.apply<@hip.recipe.scale_i32>(%value) : (i32) -> (i32)
   ...
   kernel.return
 }
 ```
 
-`func.apply<contract>` is the call-site demand. `func.template<contract>` rows
+`template.apply<@contract>` is the call-site demand. `template.def<@contract>` rows
 are providers. `requires [...]` states typed facts that the application site
 must prove, while `where [...]` constrains the provider's formal SSA values.
 Both are conjunctive, and `priority(...)` orders providers whose applicability
@@ -876,7 +876,7 @@ instead of assuming an operation selected the same instruction as HIP C++.
 
 Tags: `template`, wave size, subgroup size, targetless specialization.
 
-Use `func.apply<contract>` at call sites and `func.template<contract>`
+Use `template.apply<@contract>` at call sites and `template.def<@contract>`
 providers for implementations. Normalized requirements such as subgroup size
 use typed `requires` clauses without naming a backend or target. Keep a correct
 lower-priority fallback for profiles that cannot prove a specialization, and

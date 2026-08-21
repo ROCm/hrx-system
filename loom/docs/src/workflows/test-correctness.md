@@ -86,7 +86,11 @@ Libraries are linked whole in argument order. They satisfy declarations that
 already exist in the authored input; merely placing a definition in a library
 does not make an undeclared call valid. This is the same explicit dependency
 contract used by
-[`loom-link`](link-and-package.md#declarations-make-partial-linking-explicit).
+[`loom-link`](link-and-package.md#link-transitive-dependencies-incrementally).
+Test wrappers normally keep this declaration-only form because the runner has
+already been given the exact archive universe. They do not need
+`module.import` unless a test specifically exercises provider-constrained
+selection.
 
 This shape lets a library repository keep target-independent helpers under
 `motif/` and test-only wrapper kernels under the corresponding `test/`

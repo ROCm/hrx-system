@@ -32,6 +32,16 @@ typedef struct loom_target_resolved_specialization_t {
   // Profile facts projected once for all requests sharing |target_profile|.
   const loom_target_facts_t* projected_profile_facts;
 
+  // First request sharing |target_profile| and its projected facts.
+  iree_host_size_t projected_profile_owner_ordinal;
+
+  // Context ordinal assigned to a targetless use of the projected profile.
+  // Only the projected-profile owner stores this shared value.
+  loom_target_context_ordinal_t targetless_context_ordinal;
+
+  // Context ordinal retained by the produced function version.
+  loom_target_context_ordinal_t target_context_ordinal;
+
   // Function facts projected at specialization construction.
   const loom_func_symbol_facts_t* function_facts;
 
@@ -140,6 +150,8 @@ static iree_status_t loom_target_specialization_resolve_function(
       .function_facts = function_facts,
       .authored_target_name = authored_target_name,
       .target_requirement_symbol_facts = target_requirement_symbol_facts,
+      .targetless_context_ordinal = LOOM_TARGET_CONTEXT_ORDINAL_INVALID,
+      .target_context_ordinal = LOOM_TARGET_CONTEXT_ORDINAL_INVALID,
   };
   return iree_ok_status();
 }
@@ -174,11 +186,14 @@ static iree_status_t loom_target_specialization_prepare_versions(
 
   for (iree_host_size_t i = 0; i < specialization_count; ++i) {
     loom_target_resolved_specialization_t* specialization = &specializations[i];
+    specialization->projected_profile_owner_ordinal = i;
     for (iree_host_size_t j = 0; j < i; ++j) {
       const loom_target_resolved_specialization_t* prior = &specializations[j];
       if (prior->target_profile == specialization->target_profile) {
         specialization->projected_profile_facts =
             prior->projected_profile_facts;
+        specialization->projected_profile_owner_ordinal =
+            prior->projected_profile_owner_ordinal;
         break;
       }
     }
@@ -190,6 +205,7 @@ static iree_status_t loom_target_specialization_prepare_versions(
     }
   }
 
+  iree_host_size_t next_target_context_ordinal = 0;
   for (iree_host_size_t i = 0; i < specialization_count; ++i) {
     loom_target_resolved_specialization_t* specialization = &specializations[i];
     const loom_target_facts_t* projected_profile_facts =
@@ -217,6 +233,8 @@ static iree_status_t loom_target_specialization_prepare_versions(
                 specialization->target_requirement_symbol_facts &&
             prior->resolved_target.facts != NULL) {
           resolved_facts = prior->resolved_target.facts;
+          specialization->target_context_ordinal =
+              prior->target_context_ordinal;
           break;
         }
       }
@@ -228,6 +246,28 @@ static iree_status_t loom_target_specialization_prepare_versions(
             specialization->target_requirement_symbol_facts->projection,
             refined_context_facts);
         resolved_facts = refined_context_facts;
+      }
+    } else {
+      loom_target_resolved_specialization_t* profile_owner =
+          &specializations[specialization->projected_profile_owner_ordinal];
+      specialization->target_context_ordinal =
+          profile_owner->targetless_context_ordinal;
+    }
+    if (specialization->target_context_ordinal ==
+        LOOM_TARGET_CONTEXT_ORDINAL_INVALID) {
+      if (next_target_context_ordinal >= LOOM_TARGET_CONTEXT_ORDINAL_INVALID) {
+        return iree_make_status(
+            IREE_STATUS_RESOURCE_EXHAUSTED,
+            "target specialization exceeds %u invocation contexts",
+            (unsigned)LOOM_TARGET_CONTEXT_ORDINAL_INVALID);
+      }
+      specialization->target_context_ordinal =
+          (loom_target_context_ordinal_t)next_target_context_ordinal++;
+      if (specialization->target_requirement_symbol_facts == NULL) {
+        loom_target_resolved_specialization_t* profile_owner =
+            &specializations[specialization->projected_profile_owner_ordinal];
+        profile_owner->targetless_context_ordinal =
+            specialization->target_context_ordinal;
       }
     }
     specialization->resolved_target = (loom_resolved_target_t){
@@ -263,6 +303,12 @@ static iree_status_t loom_target_specialization_prepare_versions(
                 ? specialization->target_requirement_symbol_facts->projection
                 : NULL,
         .resolved_target = specialization->resolved_target,
+        .target_context_ordinal = specialization->target_context_ordinal,
+        .authored_target_is_exact =
+            specialization->target_requirement_symbol_facts != NULL &&
+            loom_target_facts_are_equivalent(
+                specialization->target_requirement_symbol_facts->projection,
+                specialization->resolved_target.facts),
         .function_target_facts = function_facts,
     };
   }

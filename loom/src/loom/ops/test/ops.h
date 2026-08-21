@@ -301,13 +301,16 @@ enum {
   LOOM_OP_TEST_FACT_CLUSTER_UNIFORM = LOOM_OP_KIND(LOOM_DIALECT_TEST, 105),
   LOOM_OP_TEST_ENUM_ARRAY_ATTRS = LOOM_OP_KIND(LOOM_DIALECT_TEST, 106),
   LOOM_OP_TEST_SIGNED_ENUM_SET_ATTRS = LOOM_OP_KIND(LOOM_DIALECT_TEST, 107),
-  LOOM_OP_TEST_PARAMETERIZED_ATTR = LOOM_OP_KIND(LOOM_DIALECT_TEST, 108),
-  LOOM_OP_TEST_COMPACT_PARAMETERIZED_ATTR = LOOM_OP_KIND(LOOM_DIALECT_TEST, 109),
-  LOOM_OP_TEST_PARAMETERIZED_ATTR_ARRAY = LOOM_OP_KIND(LOOM_DIALECT_TEST, 110),
-  LOOM_OP_TEST_ATTR_PARAMS = LOOM_OP_KIND(LOOM_DIALECT_TEST, 111),
-  LOOM_OP_TEST_CONDITION_REFINES_POSITIVE = LOOM_OP_KIND(LOOM_DIALECT_TEST, 112),
-  LOOM_OP_TEST_PARTITIONED_CALL = LOOM_OP_KIND(LOOM_DIALECT_TEST, 113),
-  LOOM_OP_TEST_COUNT_ = 114,
+  LOOM_OP_TEST_SYMBOL_ARRAY_ATTRS = LOOM_OP_KIND(LOOM_DIALECT_TEST, 108),
+  LOOM_OP_TEST_SYMBOL_SET_ATTRS = LOOM_OP_KIND(LOOM_DIALECT_TEST, 109),
+  LOOM_OP_TEST_PARAMETERIZED_ATTR = LOOM_OP_KIND(LOOM_DIALECT_TEST, 110),
+  LOOM_OP_TEST_COMPACT_PARAMETERIZED_ATTR = LOOM_OP_KIND(LOOM_DIALECT_TEST, 111),
+  LOOM_OP_TEST_PARAMETERIZED_ATTR_ARRAY = LOOM_OP_KIND(LOOM_DIALECT_TEST, 112),
+  LOOM_OP_TEST_ATTR_PARAMS = LOOM_OP_KIND(LOOM_DIALECT_TEST, 113),
+  LOOM_OP_TEST_CONDITION_REFINES_POSITIVE = LOOM_OP_KIND(LOOM_DIALECT_TEST, 114),
+  LOOM_OP_TEST_PARTITIONED_CALL = LOOM_OP_KIND(LOOM_DIALECT_TEST, 115),
+  LOOM_OP_TEST_MODULE_METADATA = LOOM_OP_KIND(LOOM_DIALECT_TEST, 116),
+  LOOM_OP_TEST_COUNT_ = 117,
 };
 
 // Synthetic flags for TemplateParamFlags parser/printer coverage.
@@ -2228,6 +2231,33 @@ iree_status_t loom_test_signed_enum_set_attrs_build(
     loom_location_id_t location,
     loom_op_t** out_op);
 
+// LOOM_OP_TEST_SYMBOL_ARRAY_ATTRS: Test op with dependency and availability symbol arrays.
+// test.symbol_array_attrs [@b, @a, @b] using [@a]
+LOOM_DEFINE_ISA(loom_test_symbol_array_attrs_isa, LOOM_OP_TEST_SYMBOL_ARRAY_ATTRS)
+LOOM_DEFINE_ATTR_SYMBOL_ARRAY(loom_test_symbol_array_attrs_dependencies, 0)
+LOOM_DEFINE_ATTR_SYMBOL_ARRAY(loom_test_symbol_array_attrs_available, 1)
+enum loom_test_symbol_array_attrs_build_flag_bits_e {
+  LOOM_TEST_SYMBOL_ARRAY_ATTRS_BUILD_FLAG_HAS_AVAILABLE = 1u << 0,
+};
+typedef uint32_t loom_test_symbol_array_attrs_build_flags_t;
+iree_status_t loom_test_symbol_array_attrs_build(
+    loom_builder_t* builder,
+    loom_test_symbol_array_attrs_build_flags_t build_flags,
+    loom_symbol_ref_array_t dependencies,
+    loom_optional loom_symbol_ref_array_t available,
+    loom_location_id_t location,
+    loom_op_t** out_op);
+
+// LOOM_OP_TEST_SYMBOL_SET_ATTRS: Test op with a canonical symbol set.
+// test.symbol_set_attrs [@a, @b]
+LOOM_DEFINE_ISA(loom_test_symbol_set_attrs_isa, LOOM_OP_TEST_SYMBOL_SET_ATTRS)
+LOOM_DEFINE_ATTR_SYMBOL_SET(loom_test_symbol_set_attrs_symbols, 0)
+iree_status_t loom_test_symbol_set_attrs_build(
+    loom_builder_t* builder,
+    loom_symbol_ref_array_t symbols,
+    loom_location_id_t location,
+    loom_op_t** out_op);
+
 // LOOM_OP_TEST_PARAMETERIZED_ATTR: Test op carrying an exact descriptor-backed attribute family.
 // test.parameterized_attr #test.options<mode = fast>
 LOOM_DEFINE_ISA(loom_test_parameterized_attr_isa, LOOM_OP_TEST_PARAMETERIZED_ATTR)
@@ -2307,6 +2337,14 @@ iree_status_t loom_test_partitioned_call_build(
     iree_host_size_t specializations_count,
     const loom_value_id_t* bindings,
     iree_host_size_t bindings_count,
+    loom_location_id_t location,
+    loom_op_t** out_op);
+
+// LOOM_OP_TEST_MODULE_METADATA: Test non-symbol metadata owned directly by a module body.
+// test.module_metadata
+LOOM_DEFINE_ISA(loom_test_module_metadata_isa, LOOM_OP_TEST_MODULE_METADATA)
+iree_status_t loom_test_module_metadata_build(
+    loom_builder_t* builder,
     loom_location_id_t location,
     loom_op_t** out_op);
 

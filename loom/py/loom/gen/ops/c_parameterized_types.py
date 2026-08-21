@@ -233,8 +233,12 @@ def generate_metadata_lines(types: Sequence[TypeDef]) -> list[str]:
                 lines.extend(f"    {_bstring(keyword) if (keyword := cases_by_value.get(value)) is not None else 'NULL'}," for value in range(max_value + 1))
                 lines.append("};")
             if parameter.symbol_ref is not None:
-                flags = c_symbols.symbol_interface_flags(parameter.symbol_ref.interfaces)
-                lines.append(f"static const loom_symbol_reference_descriptor_t {prefix}_{parameter.name}_symbol_ref = {{{_bstring(parameter.symbol_ref.name)}, {flags}}};")
+                c_symbols.append_symbol_reference_descriptor(
+                    lines,
+                    f"{prefix}_{parameter.name}_symbol_ref",
+                    parameter.symbol_ref,
+                    _bstring(parameter.symbol_ref.name),
+                )
 
         lines.append(f"static const loom_attr_descriptor_t {prefix}_parameter_desc[] = {{")
         for parameter in type_def.params:

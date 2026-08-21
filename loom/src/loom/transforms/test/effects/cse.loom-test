@@ -24,18 +24,22 @@ func.def @pure_calls_cse_after_canonicalize(%value: i32) -> (i32, i32) {
 
 // ====
 
-// func.apply is a contract demand. It has no direct callee to inspect, so pure
+// template.apply is a contract demand. It has no direct callee to inspect, so pure
 // apply sites must carry explicit purity until selection rewrites them.
 // RUN: pass canonicalize,cse
+template.decl @test.effect(%value: i32) -> (i32)
+
 func.def @pure_applies_cse_after_canonicalize(%value: i32) -> (i32, i32) {
-  %lhs = func.apply<test.effect>(%value) pure : (i32) -> (i32)
-  %rhs = func.apply<test.effect>(%value) pure : (i32) -> (i32)
+  %lhs = template.apply<@test.effect>(%value) pure : (i32) -> (i32)
+  %rhs = template.apply<@test.effect>(%value) pure : (i32) -> (i32)
   func.return %lhs, %rhs : i32, i32
 }
 
 // ----
+template.decl @test.effect(%value: i32) -> (i32)
+
 func.def @pure_applies_cse_after_canonicalize(%value: i32) -> (i32, i32) {
-  %lhs = func.apply<test.effect>(%value) pure : (i32) -> (i32)
+  %lhs = template.apply<@test.effect>(%value) pure : (i32) -> (i32)
   func.return %lhs, %lhs : i32, i32
 }
 

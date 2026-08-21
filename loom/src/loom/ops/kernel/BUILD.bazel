@@ -51,6 +51,7 @@ loom_generated_cc_library(
         "//loom/src/loom/ops/index",
         "//loom/src/loom/ops/scf",
         "//loom/src/loom/ops/target",
+        "//loom/src/loom/ops/template",
         "//loom/src/loom/ops/view",
         "//loom/src/loom/rewrite:rewriter",
         "//loom/src/loom/target:facts",

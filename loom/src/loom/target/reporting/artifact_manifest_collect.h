@@ -13,7 +13,7 @@
 
 #include "iree/base/api.h"
 #include "iree/base/internal/arena.h"
-#include "loom/analysis/symbol_dependencies.h"
+#include "loom/analysis/symbol_references.h"
 #include "loom/ir/ir.h"
 #include "loom/target/entry_selection.h"
 #include "loom/target/reporting/artifact_manifest.h"
@@ -73,7 +73,7 @@ void loom_target_artifact_manifest_collect_options_initialize(
 //
 // NONE mode only clears |out_manifest|. SUMMARY mode collects cheap structural
 // facts already present in selected entries, target facts, and the symbol
-// dependency table. DETAILS and ANALYSIS modes additionally collect
+// reference table. DETAILS and ANALYSIS modes additionally collect
 // per-parameter rows from function signatures. Expensive artifact byte scans,
 // hashing, disassembly, target-specific static analysis, and pass reports are
 // intentionally outside this shared collector.
@@ -82,7 +82,7 @@ void loom_target_artifact_manifest_collect_options_initialize(
 // |module|, |entries|, and static literals and must not outlive them.
 iree_status_t loom_target_artifact_manifest_collect_from_entries(
     const loom_module_t* module, loom_target_entry_list_t entries,
-    const loom_symbol_dependency_table_t* dependency_table,
+    const loom_symbol_reference_table_t* reference_table,
     const loom_target_artifact_manifest_collect_options_t* options,
     iree_arena_allocator_t* arena,
     loom_target_artifact_manifest_t* out_manifest);
@@ -90,7 +90,7 @@ iree_status_t loom_target_artifact_manifest_collect_from_entries(
 // Collects and formats a manifest for selected emitted entries.
 //
 // NONE mode returns empty JSON contents. Other modes build the symbol
-// dependency table needed by global-use reporting, collect target-neutral
+// reference table needed by global-use reporting, collect target-neutral
 // manifest facts, and format JSON into allocator-owned contents.
 iree_status_t loom_target_artifact_manifest_collect_json_from_entries(
     const loom_module_t* module, loom_target_entry_list_t entries,

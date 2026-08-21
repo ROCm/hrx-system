@@ -12,8 +12,8 @@ In this chapter, you will learn:
 - how function modifiers state visibility, purity, placement, and inline policy;
 - how `scf.if` and `scf.for` produce SSA values;
 - why loop-carried state is explicit; and
-- when to request an implementation contract with `func.apply` instead of
-  naming one function.
+- when to request an implementation from a template family instead of naming
+  one function.
 
 ## Define a typed callable
 
@@ -60,6 +60,12 @@ The declaration records what this module requires. A linker can satisfy it from
 an explicitly supplied source or bytecode library. A missing declaration is a
 source verification error; a library search is never allowed to invent the
 dependency after seeing an unresolved call.
+
+This declaration-only form is intentionally sufficient when the linker or an
+embedding already constructs the complete provider universe. A
+[`module.import`](source-modules.md#declarations-state-contracts-imports-state-availability)
+can additionally constrain the exact definition to one or more opaque provider
+keys without causing source-time file loading.
 
 Exact calls are appropriate when identity is part of the algorithm: one bit
 decoder, one reference function, or one helper whose precise implementation the
@@ -178,14 +184,14 @@ Use the smallest construct that preserves the program distinction:
 The structured form is part of the optimization input. Lowering to branches is
 a target decision, not source authoring work.
 
-## Request a contract when identity is not fixed
+## Request a template family when identity is not fixed
 
 An exact call says *which symbol*. A
-[`func.apply`](../reference/dialects/func/ops/apply.md) says *which
-implementation contract* and lets specialization select an eligible provider.
+[`template.apply`](../reference/dialects/template/ops/apply.md) says *which
+template family* and lets specialization select an eligible provider.
 
 The composition example's motif contains a concrete helper and two providers
-for one contract:
+for one family:
 
 **Source:** [`loom/docs/examples/elementwise-transform/motif.loom`](https://github.com/ROCm/hrx-system/blob/main/loom/docs/examples/elementwise-transform/motif.loom)
 
@@ -193,13 +199,13 @@ for one contract:
 --8<-- "examples/elementwise-transform/motif.loom"
 ```
 
-The kernel requests that contract without naming either provider:
+The kernel requests that family without naming either provider:
 
 ```loom
-%result = func.apply<guide.elementwise_transform>(%value) : (f32) -> (f32)
+%result = template.apply<@guide.elementwise_transform>(%value) : (f32) -> (f32)
 ```
 
-Provider selection uses the contract key, exact signature, available facts,
+Provider selection uses the family symbol, exact signature, available facts,
 requirements, and explicit priority. File order and module path do not break
 ties. The wave32 provider is eligible only when the application-site target
 facts prove a subgroup size of 32; the portable provider remains the fallback.

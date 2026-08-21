@@ -2,12 +2,14 @@ amdgpu.target<gfx11-generic> @gfx11_family
 
 amdgpu.target<gfx12-5-generic> @gfx12_5_family
 
-func.template<demo.target_family> target(@gfx11_family) @gfx11_provider(%value: i32) -> (i32) {
-  func.return %value : i32
+template.decl @demo.target_family(%value: i32) -> (i32)
+
+template.def<@demo.target_family> target(@gfx11_family) @gfx11_provider(%value: i32) -> (i32) {
+  template.return %value : i32
 }
 
-func.template<demo.target_family> target(@gfx12_5_family) @gfx12_5_provider(%value: i32) -> (i32) {
-  func.return %value : i32
+template.def<@demo.target_family> target(@gfx12_5_family) @gfx12_5_provider(%value: i32) -> (i32) {
+  template.return %value : i32
 }
 
 kernel.def export("target_family_template_provider") @target_family_template_provider() {
@@ -17,7 +19,7 @@ kernel.def export("target_family_template_provider") @target_family_template_pro
   %base = index.constant 0 : offset
   %output_index = index.constant 0 : index
   %value = scalar.constant 42 : i32
-  %selected = func.apply<demo.target_family>(%value) : (i32) -> (i32)
+  %selected = template.apply<@demo.target_family>(%value) : (i32) -> (i32)
   %global = buffer.assume.memory_space<global> %output : buffer
   %view = buffer.view %global[%base] : buffer -> view<1xi32>
   view.store %selected, %view[%output_index] : i32, view<1xi32>

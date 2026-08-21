@@ -65,12 +65,12 @@ typedef enum loom_target_low_structural_legality_flag_bits_e {
 typedef uint32_t loom_target_low_structural_legality_flags_t;
 
 // Bitset of built-in dialect ids a target-low legality provider can handle.
-typedef uint32_t loom_target_low_legality_builtin_dialect_bits_t;
+typedef uint64_t loom_target_low_legality_builtin_dialect_bits_t;
 
 // Returns true if |bits| contains |dialect_id|.
 static inline bool loom_target_low_legality_builtin_dialect_bits_contain(
     loom_target_low_legality_builtin_dialect_bits_t bits, uint8_t dialect_id) {
-  return dialect_id < 32 && iree_any_bit_set(bits, 1u << dialect_id);
+  return dialect_id < 64 && iree_any_bit_set(bits, UINT64_C(1) << dialect_id);
 }
 
 typedef iree_status_t (*loom_target_low_legality_try_op_fn_t)(

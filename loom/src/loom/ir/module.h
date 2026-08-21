@@ -39,6 +39,8 @@ typedef struct loom_module_size_hints_t {
   iree_host_size_t type_count;
   // Expected interned encoding count.
   iree_host_size_t encoding_count;
+  // Expected source identifier count.
+  iree_host_size_t source_count;
   // Expected module symbol count.
   iree_host_size_t symbol_count;
 } loom_module_size_hints_t;
@@ -254,6 +256,14 @@ iree_status_t loom_module_register_source(loom_module_t* module,
                                           iree_string_view_t name,
                                           loom_source_id_t* out_source_id);
 
+// Appends a source identifier known to be absent from |module| and returns its
+// module-local ID. The name is copied into module-owned arena storage. Callers
+// establish uniqueness at their input boundary; use
+// loom_module_register_source when the name may already be present.
+iree_status_t loom_module_append_source(loom_module_t* module,
+                                        iree_string_view_t name,
+                                        loom_source_id_t* out_source_id);
+
 // Attaches the file header to |module|. Each line omits the leading // and its
 // conventional single separating space; additional indentation remains part
 // of the payload. The payloads are copied into |module|. A module has at most
@@ -356,6 +366,38 @@ iree_status_t loom_module_intern_string(loom_module_t* module,
 // Returns LOOM_STRING_ID_INVALID if |string| has not been interned.
 loom_string_id_t loom_module_lookup_string(const loom_module_t* module,
                                            iree_string_view_t string);
+
+// Canonicalizes a trusted mutable symbol-reference array in place.
+//
+// Every reference must name a module-local symbol. Exact symbol-name bytes
+// define ordering and identity. Returns one duplicate reference when two
+// symbols have the same name or a null reference when the set is unique. The
+// array remains caller-owned and is not retained by |module|.
+loom_symbol_ref_t loom_module_canonicalize_symbol_set(
+    const loom_module_t* module, loom_symbol_ref_t* refs, uint16_t ref_count);
+
+// Tries to build a symbol-set attribute in |module|.
+//
+// The input may be in any order and may point to temporary storage. Every
+// reference must name a module-local symbol. Exact symbol-name bytes define
+// ordering and identity. A duplicate name is reported through
+// |out_duplicate_ref| without constructing an error status so text parsers can
+// attach a structured diagnostic to the authored occurrences; |out_attr| is
+// absent in that case. Otherwise the sorted immutable payload is copied into
+// the module arena and |out_duplicate_ref| is null.
+iree_status_t loom_module_try_make_symbol_set(
+    loom_module_t* module, loom_symbol_ref_array_t refs,
+    loom_symbol_ref_t* out_duplicate_ref, loom_attribute_t* out_attr);
+
+// Canonicalizes one attribute value into module-owned storage.
+//
+// Pointer-backed payloads in |value| may use temporary storage and are copied
+// recursively. String, type, encoding, symbol, and SSA value references must
+// already use |module| identities. |descriptor| supplies the field contract
+// for descriptor-backed kinds and may be NULL for a generic attribute value.
+iree_status_t loom_module_make_canonical_attribute(
+    loom_module_t* module, const loom_attr_descriptor_t* descriptor,
+    loom_attribute_t value, loom_attribute_t* out_value);
 
 // Builds a canonical DICT attribute in |module| from |entries|.
 //
@@ -470,6 +512,24 @@ iree_status_t loom_module_intern_type(loom_module_t* module, loom_type_t type,
 iree_status_t loom_module_intern_type_id(loom_module_t* module,
                                          loom_type_t type,
                                          loom_type_id_t* out_type_id);
+
+// Interns one type whose immediate structural dependencies are already
+// interned in |module|.
+//
+// |structural_dependency_ids| lists function arguments/results, dialect type
+// parameters, or a typed register's value type in representation order. It is
+// empty for all other type kinds. The corresponding by-value types in |type|
+// must be exact copies of those module entries. Pointer-backed storage owned by
+// |type| may be temporary; only its top-level payload is copied because nested
+// payloads are retained by the canonical dependency entries.
+//
+// This is the topological construction path for validated serialized type
+// tables. General callers with arbitrary recursive type values use
+// loom_module_intern_type_id instead.
+iree_status_t loom_module_intern_topological_type_id(
+    loom_module_t* module, loom_type_t type,
+    const loom_type_id_t* structural_dependency_ids,
+    iree_host_size_t structural_dependency_count, loom_type_id_t* out_type_id);
 
 // Interns a function type directly from argument and result type arrays. If a
 // structurally identical function type already exists, returns the canonical

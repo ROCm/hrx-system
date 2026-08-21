@@ -58,6 +58,18 @@ loom_ir_remap_symbol_callback_make(loom_ir_remap_symbol_fn_t fn,
   };
 }
 
+// Storage strategy for source-to-target SSA value correspondence.
+typedef enum loom_ir_remap_value_map_kind_e {
+  // Allocates storage in proportion to the number of installed mappings.
+  // Suitable for partial rewrites over a much larger source module.
+  LOOM_IR_REMAP_VALUE_MAP_SPARSE = 0,
+  // Allocates one target value ID per source value snapshot row. Unmapped rows
+  // remain invalid; this does not reserve or otherwise create target values.
+  // Suitable for complete module projections that consume nearly all live
+  // source definitions.
+  LOOM_IR_REMAP_VALUE_MAP_SOURCE_INDEXED = 1,
+} loom_ir_remap_value_map_kind_t;
+
 // Remap behavior knobs supplied at initialization.
 typedef struct loom_ir_remap_options_t {
   // Allows unmapped SSA value references to remain unchanged when source and
@@ -69,6 +81,8 @@ typedef struct loom_ir_remap_options_t {
   // Invokes |remap_symbol| for same-module symbol refs instead of preserving
   // them by identity.
   bool remap_same_module_symbols;
+  // Storage strategy for SSA value correspondence.
+  loom_ir_remap_value_map_kind_t value_map_kind;
 } loom_ir_remap_options_t;
 
 // Sparse SSA value mapping entry.
@@ -89,7 +103,11 @@ typedef struct loom_ir_remap_t {
   iree_arena_allocator_t* arena;
   // Source-module value table count captured at remap initialization.
   iree_host_size_t source_value_snapshot_count;
-  // Open-addressed source value ID -> target value ID entries.
+  // Target value IDs indexed directly by source value ID, or NULL when using
+  // sparse correspondence. Unmapped rows contain LOOM_VALUE_ID_INVALID.
+  loom_value_id_t* target_values_by_source;
+  // Open-addressed source value ID -> target value ID entries. Remains NULL
+  // when using source-indexed correspondence.
   loom_ir_remap_value_entry_t* value_map_entries;
   // Number of installed SSA value mappings.
   iree_host_size_t mapped_value_count;
@@ -163,6 +181,12 @@ iree_status_t loom_ir_remap_map_block(loom_ir_remap_t* remap,
 bool loom_ir_remap_try_lookup_block(const loom_ir_remap_t* remap,
                                     const loom_block_t* source_block,
                                     loom_block_t** out_target_block);
+
+// Remaps one source-module symbol reference according to the configured symbol
+// policy. Invalid references remain invalid.
+iree_status_t loom_ir_remap_symbol_ref(loom_ir_remap_t* remap,
+                                       loom_symbol_ref_t source_ref,
+                                       loom_symbol_ref_t* out_target_ref);
 
 // Resolves one successor block reference according to the remap's missing-block
 // policy. Same-module remaps keep unmapped blocks unchanged; cross-module

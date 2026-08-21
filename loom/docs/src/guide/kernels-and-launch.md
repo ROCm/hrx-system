@@ -154,10 +154,10 @@ belong to different stages and answer different questions.
 Templates can state the same dependency as an eligibility requirement:
 
 ```loom
-func.template<guide.elementwise_transform> requires [#target.subgroup.size<32>] priority(20) @wave32_elementwise_transform(%value: f32) -> (f32) {
+template.def<@guide.elementwise_transform> requires [#target.subgroup.size<32>] priority(20) @wave32_elementwise_transform(%value: f32) -> (f32) {
   %two = scalar.constant 2.0 : f32
   %result = scalar.mulf %value, %two : f32
-  func.return %result : f32
+  template.return %result : f32
 }
 ```
 
@@ -190,6 +190,9 @@ checks both groups against the resolved definition or declaration.
 As with function calls, the declaration is mandatory. Linking searches only
 the explicitly supplied modules and libraries for that exact symbol; it never
 discovers a kernel merely because an undeclared launch happens to name it.
+The declaration may remain import-free, or a
+[`module.import`](source-modules.md#declarations-state-contracts-imports-state-availability)
+may restrict its possible definitions to explicitly bound provider keys.
 
 ## Evaluate the compiled launch contract
 

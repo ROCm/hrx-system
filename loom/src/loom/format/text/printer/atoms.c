@@ -1077,6 +1077,31 @@ static iree_status_t loom_print_attr_impl(
       return loom_output_stream_write_format(stream, "@<symbol:%" PRIu16 ">",
                                              ref.symbol_id);
     }
+    case LOOM_ATTR_SYMBOL_ARRAY:
+    case LOOM_ATTR_SYMBOL_SET: {
+      if (!descriptor || descriptor->attr_kind != attr->kind) {
+        return iree_make_status(
+            IREE_STATUS_FAILED_PRECONDITION,
+            "printing a symbol collection requires a descriptor-backed "
+            "operation "
+            "field");
+      }
+      if (attr->count > 0 && !attr->symbol_refs) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "symbol collection attr has count %u but NULL values", attr->count);
+      }
+      IREE_RETURN_IF_ERROR(loom_output_stream_write_char(stream, '['));
+      for (uint16_t i = 0; i < attr->count; ++i) {
+        if (i > 0) {
+          IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, ", "));
+        }
+        loom_attribute_t element = loom_attr_symbol(attr->symbol_refs[i]);
+        IREE_RETURN_IF_ERROR(loom_print_attr_impl(stream, &element, module,
+                                                  descriptor, type_context));
+      }
+      return loom_output_stream_write_char(stream, ']');
+    }
     case LOOM_ATTR_I64_ARRAY: {
       IREE_RETURN_IF_ERROR(loom_output_stream_write_char(stream, '['));
       for (uint16_t i = 0; i < attr->count; ++i) {

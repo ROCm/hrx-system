@@ -17,6 +17,7 @@ from loom.dsl import (
     FuncLikeInterface,
     InlinePolicy,
     Op,
+    SymbolReferenceRole,
     TypeConstraint,
     type_constraint_name,
 )
@@ -37,6 +38,8 @@ from loom.ir import (
     ShapedType,
     StorageType,
     Symbol,
+    SymbolNameArray,
+    SymbolNameSet,
     Type,
     TypeKind,
 )
@@ -96,15 +99,15 @@ class ModuleVerifier:
     def verify(self) -> None:
         """Verify the module and append diagnostics for every detected error."""
         self._verify_symbol_table()
-        for symbol_index, symbol in enumerate(self.module.symbols):
-            path = f"symbol[{symbol_index}] @{symbol.name}"
-            if symbol.op is None:
-                self.diagnostics.error(
-                    "symbol has no defining operation",
-                    source=path,
-                )
-                continue
-            self._verify_operation(symbol.op, path, parent_stack=())
+        self._verify_top_level_operation_ownership()
+        for operation_index, operation in enumerate(self.module.body.ops):
+            self._verify_operation(
+                operation,
+                f"module operation[{operation_index}]",
+                parent_stack=(),
+            )
+        if not self.diagnostics.has_errors:
+            self._verify_keyed_module_records()
 
     def _verify_symbol_table(self) -> None:
         seen: dict[str, int] = {}
@@ -123,6 +126,78 @@ class ModuleVerifier:
                 continue
             seen[symbol.name] = symbol_index
             self._symbols_by_name[symbol.name] = symbol
+
+    def _verify_top_level_operation_ownership(self) -> None:
+        body_operation_ids = {id(operation) for operation in self.module.body.ops}
+        indexed_operation_ids: dict[int, int] = {}
+        for symbol_index, symbol in enumerate(self.module.symbols):
+            path = f"symbol[{symbol_index}] @{symbol.name}"
+            if symbol.op is None:
+                self.diagnostics.error(
+                    "symbol has no defining operation",
+                    source=path,
+                )
+                continue
+            operation_id = id(symbol.op)
+            if operation_id not in body_operation_ids:
+                self.diagnostics.error(
+                    "symbol defining operation is not owned by the module body",
+                    source=path,
+                )
+            previous_symbol_index = indexed_operation_ids.get(operation_id)
+            if previous_symbol_index is not None:
+                self.diagnostics.error(
+                    "symbol defining operation has multiple symbol-table entries",
+                    source=path,
+                    details=(
+                        f"operation is also indexed by symbol[{previous_symbol_index}]",
+                    ),
+                )
+                continue
+            indexed_operation_ids[operation_id] = symbol_index
+
+        for operation_index, operation in enumerate(self.module.body.ops):
+            op_decl = self.registry.op(operation.name)
+            if op_decl is None:
+                continue
+            if not (
+                op_decl.has_trait("SymbolDefine") or op_decl.has_trait("ModuleScope")
+            ):
+                self.diagnostics.error(
+                    "op is not permitted at module scope",
+                    source=f"module operation[{operation_index}] {operation.name}",
+                )
+                continue
+            if not op_decl.has_trait("SymbolDefine"):
+                continue
+            if id(operation) not in indexed_operation_ids:
+                self.diagnostics.error(
+                    "module body symbol definition is missing from the symbol table",
+                    source=f"module operation[{operation_index}] {operation.name}",
+                )
+
+    def _verify_keyed_module_records(self) -> None:
+        seen: dict[tuple[str, str], int] = {}
+        for operation_index, operation in enumerate(self.module.body.ops):
+            if operation.is_dead:
+                continue
+            declaration = self.registry.op(operation.name)
+            if declaration is None or declaration.keyed_module_record_attr is None:
+                continue
+            key = operation.attributes[declaration.keyed_module_record_attr]
+            identity = (operation.name, key)
+            previous_index = seen.get(identity)
+            if previous_index is not None:
+                self.diagnostics.error(
+                    "duplicate keyed module record",
+                    source=f"module operation[{operation_index}] {operation.name}",
+                    details=(
+                        f"key is {key!r}",
+                        f"previous record is module operation[{previous_index}]",
+                    ),
+                )
+                continue
+            seen[identity] = operation_index
 
     def _verify_operation(
         self,
@@ -564,45 +639,73 @@ class ModuleVerifier:
             symbol_ref = attr_def.symbol_ref
             if symbol_ref is None or attr_def.name not in operation.attributes:
                 continue
-            target_name = operation.attributes[attr_def.name]
-            if not isinstance(target_name, str):
+            value = operation.attributes[attr_def.name]
+            if attr_def.attr_type == "symbol_array":
+                if not isinstance(value, SymbolNameArray):
+                    self.diagnostics.error(
+                        "symbol reference array attribute must be a SymbolNameArray",
+                        source=path,
+                        details=(f"attribute '{attr_def.name}' has value {value!r}",),
+                    )
+                    continue
+                target_names = tuple(value)
+            elif attr_def.attr_type == "symbol_set":
+                if not isinstance(value, SymbolNameSet):
+                    self.diagnostics.error(
+                        "symbol reference set attribute must be a SymbolNameSet",
+                        source=path,
+                        details=(f"attribute '{attr_def.name}' has value {value!r}",),
+                    )
+                    continue
+                target_names = tuple(value)
+            elif isinstance(value, str):
+                target_names = (value,)
+            else:
                 self.diagnostics.error(
                     "symbol reference attribute must be a string",
                     source=path,
-                    details=(f"attribute '{attr_def.name}' has value {target_name!r}",),
+                    details=(f"attribute '{attr_def.name}' has value {value!r}",),
                 )
                 continue
-            target_symbol = self._symbols_by_name.get(target_name)
-            if target_symbol is None:
+            for index, target_name in enumerate(target_names):
+                field = f"attribute '{attr_def.name}'"
+                if attr_def.attr_type in ("symbol_array", "symbol_set"):
+                    field += f" element {index}"
+                target_symbol = self._symbols_by_name.get(target_name)
+                if target_symbol is None:
+                    if symbol_ref.role is SymbolReferenceRole.AVAILABILITY:
+                        continue
+                    self.diagnostics.error(
+                        "unresolved symbol reference",
+                        source=path,
+                        details=(f"{field} references @{target_name}",),
+                    )
+                    continue
+                target_decl = (
+                    self.registry.op(target_symbol.op.name)
+                    if target_symbol.op is not None
+                    else None
+                )
+                target_symbol_def = target_decl.symbol_def if target_decl else None
+                if target_symbol_def is None:
+                    continue
+                if not symbol_ref.interfaces:
+                    continue
+                if any(
+                    interface in target_symbol_def.interfaces
+                    for interface in symbol_ref.interfaces
+                ):
+                    continue
                 self.diagnostics.error(
-                    "unresolved symbol reference",
+                    "symbol reference target has wrong interface",
                     source=path,
-                    details=(f"attribute '{attr_def.name}' references @{target_name}",),
+                    details=(
+                        f"{field} references @{target_name}",
+                        "expected one of "
+                        f"{', '.join(symbol_ref.interfaces)} for {symbol_ref.name}",
+                        f"target provides {', '.join(target_symbol_def.interfaces)}",
+                    ),
                 )
-                continue
-            target_decl = (
-                self.registry.op(target_symbol.op.name)
-                if target_symbol.op is not None
-                else None
-            )
-            target_symbol_def = target_decl.symbol_def if target_decl else None
-            if target_symbol_def is None:
-                continue
-            if any(
-                interface in target_symbol_def.interfaces
-                for interface in symbol_ref.interfaces
-            ):
-                continue
-            self.diagnostics.error(
-                "symbol reference target has wrong interface",
-                source=path,
-                details=(
-                    f"attribute '{attr_def.name}' references @{target_name}",
-                    "expected one of "
-                    f"{', '.join(symbol_ref.interfaces)} for {symbol_ref.name}",
-                    f"target provides {', '.join(target_symbol_def.interfaces)}",
-                ),
-            )
 
     def _verify_traits(
         self,
@@ -612,6 +715,15 @@ class ModuleVerifier:
     ) -> None:
         for trait in op_decl.traits:
             match trait.name:
+                case "ModuleScope":
+                    if parent_stack:
+                        self.diagnostics.error(
+                            "module-scope op is nested",
+                            source=path,
+                            details=(
+                                "operation must be a direct child of the module body",
+                            ),
+                        )
                 case "HasParent":
                     parent_name = parent_stack[-1].name if parent_stack else None
                     if not trait.args or parent_name == trait.args[0]:
@@ -653,7 +765,7 @@ class ModuleVerifier:
     ) -> bool:
         for operation in reversed(parent_stack):
             declaration = self.registry.op(operation.name)
-            if operation.name == "func.template":
+            if operation.name == "template.def":
                 return True
             if declaration:
                 for interface in declaration.interfaces:

@@ -64,6 +64,7 @@ CALL_LIKE_KIND_MAP: dict[CallLikeKind, str] = {
     CallLikeKind.LOW_INTERNAL: "LOOM_CALL_LIKE_KIND_LOW_INTERNAL",
     CallLikeKind.LOW_INVOKE: "LOOM_CALL_LIKE_KIND_LOW_INVOKE",
     CallLikeKind.COMMAND_PROGRAM: "LOOM_CALL_LIKE_KIND_COMMAND_PROGRAM",
+    CallLikeKind.TEMPLATE: "LOOM_CALL_LIKE_KIND_TEMPLATE",
 }
 
 OWNERSHIP_CARRIER_MAP: dict[OwnershipCarrier, str] = {
@@ -132,6 +133,7 @@ TRAIT_MAP: dict[str, str] = {
     "Elementwise": "LOOM_TRAIT_ELEMENTWISE",
     "Decomposable": "LOOM_TRAIT_DECOMPOSABLE",
     "SymbolDefine": "LOOM_TRAIT_SYMBOL_DEFINE",
+    "ModuleScope": "LOOM_TRAIT_MODULE_SCOPE",
     "IsolatedFromAbove": "LOOM_TRAIT_ISOLATED_FROM_ABOVE",
     "NonDeterministic": "LOOM_TRAIT_NON_DETERMINISTIC",
     "UnknownEffects": "LOOM_TRAIT_UNKNOWN_EFFECTS",
@@ -331,6 +333,8 @@ ATTR_KIND_MAP: dict[str, str] = {
     "i64_array": "LOOM_ATTR_I64_ARRAY",
     "bytes": "LOOM_ATTR_BYTES",
     "symbol": "LOOM_ATTR_SYMBOL",
+    "symbol_array": "LOOM_ATTR_SYMBOL_ARRAY",
+    "symbol_set": "LOOM_ATTR_SYMBOL_SET",
     "type": "LOOM_ATTR_TYPE",
     "encoding": "LOOM_ATTR_ENCODING",
     "predicate_list": "LOOM_ATTR_PREDICATE_LIST",

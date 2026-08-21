@@ -12,6 +12,7 @@
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
 #include "loom/ops/func/ops.h"
+#include "loom/ops/template/ops.h"
 #include "loom/ops/test/ops.h"
 
 namespace loom {
@@ -24,6 +25,7 @@ class CallableInlineTest : public ::testing::Test {
                                      &block_pool_);
     loom_context_initialize(iree_allocator_system(), &context_);
     RegisterDialect(LOOM_DIALECT_FUNC, loom_func_dialect_vtables);
+    RegisterDialect(LOOM_DIALECT_TEMPLATE, loom_template_dialect_vtables);
     RegisterDialect(LOOM_DIALECT_TEST, loom_test_dialect_vtables);
     IREE_ASSERT_OK(loom_context_finalize(&context_));
     IREE_ASSERT_OK(loom_module_allocate(&context_, IREE_SV("test"),
@@ -105,13 +107,14 @@ class CallableInlineTest : public ::testing::Test {
 
   loom_op_t* BuildNegateTemplate(loom_symbol_ref_t callee,
                                  loom_type_t value_type) {
-    loom_string_id_t implements = InternString(IREE_SV("test.neg"));
+    const loom_symbol_ref_t family = MakeSymbol(IREE_SV("test.neg"));
     loom_op_t* func_op = nullptr;
-    IREE_CHECK_OK(loom_func_template_build(
-        &module_builder_, 0, implements, 0, 0, 0, 0, 0, 0,
-        loom_symbol_ref_null(), loom_parameterized_attr_array_empty(), 0,
-        callee, &value_type, 1, &value_type, 1, nullptr, 0, nullptr, 0,
-        LOOM_LOCATION_UNKNOWN, &func_op));
+    IREE_CHECK_OK(loom_template_def_build(
+        &module_builder_, /*build_flags=*/0, family, /*visibility=*/0,
+        /*retain=*/0, /*cc=*/0, /*purity=*/0, /*temperature=*/0,
+        loom_symbol_ref_null(), loom_parameterized_attr_array_empty(),
+        /*priority=*/0, callee, &value_type, 1, &value_type, 1, nullptr, 0,
+        nullptr, 0, LOOM_LOCATION_UNKNOWN, &func_op));
     loom_func_like_t func = loom_func_like_cast(module_, func_op);
     uint16_t arg_count = 0;
     const loom_value_id_t* args = loom_func_like_arg_ids(func, &arg_count);
@@ -123,8 +126,8 @@ class CallableInlineTest : public ::testing::Test {
                                       LOOM_LOCATION_UNKNOWN, &neg_op));
     loom_value_id_t negated = loom_test_neg_result(neg_op);
     loom_op_t* return_op = nullptr;
-    IREE_CHECK_OK(loom_func_return_build(&body_builder, &negated, 1,
-                                         LOOM_LOCATION_UNKNOWN, &return_op));
+    IREE_CHECK_OK(loom_template_return_build(
+        &body_builder, &negated, 1, LOOM_LOCATION_UNKNOWN, &return_op));
     return func_op;
   }
 
@@ -175,6 +178,36 @@ class CallableInlineTest : public ::testing::Test {
                                        1, &value_type, 1, nullptr, 0,
                                        LOOM_LOCATION_UNKNOWN, &call_op));
     loom_value_id_t call_result = loom_func_call_results(call_op).values[0];
+    SetValueName(call_result, IREE_SV("call_result"));
+    loom_op_t* return_op = nullptr;
+    IREE_CHECK_OK(loom_func_return_build(&body_builder, &call_result, 1,
+                                         LOOM_LOCATION_UNKNOWN, &return_op));
+    *out_call_op = call_op;
+    return func_op;
+  }
+
+  loom_op_t* BuildTemplateCaller(loom_symbol_ref_t caller,
+                                 loom_symbol_ref_t callee,
+                                 loom_type_t value_type,
+                                 loom_op_t** out_call_op) {
+    loom_op_t* func_op = nullptr;
+    IREE_CHECK_OK(loom_func_def_build(
+        &module_builder_, 0, 0, 0, 0, 0, 0, 0, loom_symbol_ref_null(), 0,
+        loom_named_attr_slice_empty(), LOOM_STRING_ID_INVALID,
+        loom_named_attr_slice_empty(), caller, &value_type, 1, &value_type, 1,
+        nullptr, 0, nullptr, 0, LOOM_LOCATION_UNKNOWN, &func_op));
+    loom_func_like_t func = loom_func_like_cast(module_, func_op);
+    uint16_t arg_count = 0;
+    const loom_value_id_t* args = loom_func_like_arg_ids(func, &arg_count);
+    IREE_ASSERT_EQ(arg_count, 1);
+
+    loom_builder_t body_builder = BodyBuilder(func_op);
+    loom_op_t* call_op = nullptr;
+    IREE_CHECK_OK(loom_template_call_build(
+        &body_builder, /*build_flags=*/0, /*purity=*/0, /*temperature=*/0,
+        callee, args, 1, &value_type, 1, nullptr, 0, LOOM_LOCATION_UNKNOWN,
+        &call_op));
+    loom_value_id_t call_result = loom_template_call_results(call_op).values[0];
     SetValueName(call_result, IREE_SV("call_result"));
     loom_op_t* return_op = nullptr;
     IREE_CHECK_OK(loom_func_return_build(&body_builder, &call_result, 1,
@@ -420,7 +453,8 @@ TEST_F(CallableInlineTest, InlinesExactTemplateCall) {
   loom_symbol_ref_t caller_ref = MakeSymbol(IREE_SV("caller"));
   BuildNegateTemplate(callee_ref, i32);
   loom_op_t* call_op = nullptr;
-  loom_op_t* caller_op = BuildCaller(caller_ref, callee_ref, i32, &call_op);
+  loom_op_t* caller_op =
+      BuildTemplateCaller(caller_ref, callee_ref, i32, &call_op);
 
   loom_rewriter_t rewriter = {};
   IREE_ASSERT_OK(

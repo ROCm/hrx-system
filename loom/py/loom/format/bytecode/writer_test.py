@@ -30,6 +30,7 @@ from loom.dialect.low import ALL_LOW_OPS
 from loom.dialect.pass_ import ALL_PASS_OPS
 from loom.dialect.scalar import ALL_SCALAR_OPS
 from loom.dialect.target import ALL_TARGET_OPS, ALL_TARGET_PARAMETERIZED_ATTRS
+from loom.dialect.template import ALL_TEMPLATE_OPS
 from loom.dialect.test import (
     ALL_TEST_OPS,
     ALL_TEST_PARAMETERIZED_ATTRS,
@@ -111,6 +112,8 @@ from loom.ir import (
     Symbol,
     SymbolKind,
     SymbolName,
+    SymbolNameArray,
+    SymbolNameSet,
     TaggedLocation,
     TiedResult,
     Type,
@@ -185,7 +188,12 @@ def _text_parser(
     include_pass: bool = False,
 ) -> Parser:
     parser = Parser()
-    ops = list(ALL_FUNC_OPS) + list(ALL_CFG_OPS) + list(ALL_TEST_OPS)
+    ops = (
+        list(ALL_FUNC_OPS)
+        + list(ALL_TEMPLATE_OPS)
+        + list(ALL_CFG_OPS)
+        + list(ALL_TEST_OPS)
+    )
     if include_encoding:
         _append_unique(ops, ALL_ENCODING_OPS)
     if include_global:
@@ -227,7 +235,12 @@ def _text_printer(
     include_pass: bool = False,
 ) -> Printer:
     printer = Printer()
-    ops = list(ALL_FUNC_OPS) + list(ALL_CFG_OPS) + list(ALL_TEST_OPS)
+    ops = (
+        list(ALL_FUNC_OPS)
+        + list(ALL_TEMPLATE_OPS)
+        + list(ALL_CFG_OPS)
+        + list(ALL_TEST_OPS)
+    )
     if include_encoding:
         _append_unique(ops, ALL_ENCODING_OPS)
     if include_global:
@@ -1514,6 +1527,61 @@ class TestCrossFormatRoundTrip:
         assert "optional_features" not in body_ops[2].attributes
         assert _roundtrip_text_through_bytecode(text) == text
 
+    def test_symbol_arrays_survive_bytecode_with_presence_and_order(self) -> None:
+        text = (
+            "test.func @symbol_arrays() {\n"
+            "  test.symbol_array_attrs [@b, @a, @b] using [@a]\n"
+            "  test.symbol_array_attrs [] using []\n"
+            "  test.symbol_array_attrs []\n"
+            "  test.yield\n"
+            "}\n"
+            "\n"
+            "test.record @a\n"
+            "\n"
+            "test.record @b\n"
+        )
+
+        loaded = _parse_write_read(text)
+        function = next(
+            symbol.op for symbol in loaded.symbols if symbol.name == "symbol_arrays"
+        )
+        assert function is not None
+        body_ops = function.regions[0].blocks[0].ops
+        assert body_ops[0].attributes["dependencies"] == SymbolNameArray(
+            [SymbolName("b"), SymbolName("a"), SymbolName("b")]
+        )
+        assert body_ops[0].attributes["available"] == SymbolNameArray([SymbolName("a")])
+        assert body_ops[1].attributes["available"] == SymbolNameArray()
+        assert "available" not in body_ops[2].attributes
+        roundtrip_text = _roundtrip_text_through_bytecode(text)
+        assert roundtrip_text == text, roundtrip_text
+
+    def test_symbol_sets_survive_bytecode_in_canonical_order(self) -> None:
+        text = (
+            "test.func @symbol_sets() {\n"
+            "  test.symbol_set_attrs [@zeta, @alpha]\n"
+            "  test.symbol_set_attrs []\n"
+            "  test.yield\n"
+            "}\n"
+            "\n"
+            "test.record @alpha\n"
+            "\n"
+            "test.record @zeta\n"
+        )
+        expected = text.replace("[@zeta, @alpha]", "[@alpha, @zeta]")
+
+        loaded = _parse_write_read(text)
+        function = next(
+            symbol.op for symbol in loaded.symbols if symbol.name == "symbol_sets"
+        )
+        assert function is not None
+        body_ops = function.regions[0].blocks[0].ops
+        assert body_ops[0].attributes["symbols"] == SymbolNameSet(
+            [SymbolName("alpha"), SymbolName("zeta")]
+        )
+        assert body_ops[1].attributes["symbols"] == SymbolNameSet()
+        assert _roundtrip_text_through_bytecode(text) == expected
+
     def test_parameterized_attrs_survive_bytecode_with_named_slots(self) -> None:
         text = (
             "test.func @parameterized() {\n"
@@ -1631,6 +1699,40 @@ class TestCrossFormatRoundTrip:
         operation = Operation(
             name="test.attrs",
             attributes={"dict": {"modes": EnumArrayAttr([1, 7])}},
+        )
+        body = Region(blocks=[Block(ops=[operation, Operation(name="test.yield")])])
+        function = Operation(
+            name="test.func",
+            attributes={"callee": "f"},
+            regions=[body],
+        )
+        module.add_symbol(Symbol(name="f", kind=SymbolKind.FUNC_DEF, op=function))
+
+        with pytest.raises(ValueError, match="descriptor-backed field"):
+            write_module(module)
+
+    def test_symbol_array_in_generic_dict_is_rejected(self) -> None:
+        module = Module(name="test")
+        operation = Operation(
+            name="test.attrs",
+            attributes={"dict": {"symbols": SymbolNameArray([SymbolName("record")])}},
+        )
+        body = Region(blocks=[Block(ops=[operation, Operation(name="test.yield")])])
+        function = Operation(
+            name="test.func",
+            attributes={"callee": "f"},
+            regions=[body],
+        )
+        module.add_symbol(Symbol(name="f", kind=SymbolKind.FUNC_DEF, op=function))
+
+        with pytest.raises(ValueError, match="descriptor-backed field"):
+            write_module(module)
+
+    def test_symbol_set_in_generic_dict_is_rejected(self) -> None:
+        module = Module(name="test")
+        operation = Operation(
+            name="test.attrs",
+            attributes={"dict": {"symbols": SymbolNameSet([SymbolName("record")])}},
         )
         body = Region(blocks=[Block(ops=[operation, Operation(name="test.yield")])])
         function = Operation(
@@ -1761,7 +1863,7 @@ class TestCrossFormatRoundTrip:
                     "target",
                     "symbol",
                     optional=True,
-                    symbol_ref=SymbolReference("record", ["record"]),
+                    symbol_ref=SymbolReference("function", ["func_like"]),
                 ),
                 AttrDef("tag", "string", optional=True),
                 AttrDef("priority", "i64", optional=True),
@@ -1778,7 +1880,7 @@ class TestCrossFormatRoundTrip:
             results=[result_id],
             attributes={
                 "callee": "entry",
-                "target": "gfx1100",
+                "target": "entry",
                 "tag": "amdgpu",
                 "priority": 3,
             },
@@ -1797,26 +1899,28 @@ class TestCrossFormatRoundTrip:
         assert symbol.op is not None
         assert symbol.op.attributes == {
             "callee": "entry",
-            "target": "gfx1100",
+            "target": "entry",
             "tag": "amdgpu",
             "priority": 3,
         }
 
-    def test_func_template_metadata_survives_bytecode(self) -> None:
+    def test_template_metadata_survives_bytecode(self) -> None:
         text = (
-            "func.template<tile.contract> device "
+            "template.decl @tile.contract(%input: f32) -> (f32)\n"
+            "\n"
+            "template.def<@tile.contract> device "
             "requires [#target.subgroup.size<64>] "
             "priority(7) @kernel(%input: f32) -> (f32) {\n"
-            "  func.return %input : f32\n"
+            "  template.return %input : f32\n"
             "}\n"
         )
 
         loaded = _parse_write_read(text)
-        assert len(loaded.symbols) == 1
-        symbol = loaded.symbols[0]
-        assert symbol.kind == SymbolKind.FUNC_TEMPLATE
+        assert len(loaded.symbols) == 2
+        symbol = loaded.symbols[1]
+        assert symbol.kind == SymbolKind.TEMPLATE_DEF
         assert symbol.op is not None
-        assert symbol.op.attributes["implements"] == "tile.contract"
+        assert symbol.op.attributes["family"] == "tile.contract"
         assert symbol.op.attributes["priority"] == 7
         assert symbol.op.attributes["cc"] == "device"
         requirements = symbol.op.attributes["requires"]
@@ -1951,11 +2055,11 @@ class TestCrossFormatRoundTrip:
         with pytest.raises(TypeError, match="uint8 ordinal"):
             write_module(module)
 
-    def test_symbol_without_bytecode_payload_kind_fails_loud(self) -> None:
+    def test_unresolved_symbol_without_provider_anchor_fails_loud(self) -> None:
         module = Module()
         module.add_symbol(Symbol(name="opaque", kind=SymbolKind.NONE))
 
-        with pytest.raises(ValueError, match="no bytecode symbol payload kind"):
+        with pytest.raises(ValueError, match="not a provider anchor"):
             write_module(module)
 
     def test_operand_dict_survives_bytecode(self) -> None:
@@ -2260,6 +2364,7 @@ class TestCrossFormatRoundTrip:
             "  %r = test.attrs %x {target = @target} : f32\n"
             "  test.yield %r : f32\n"
             "}\n"
+            "func.decl @target()\n"
         )
 
         parser = Parser()

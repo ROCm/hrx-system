@@ -148,14 +148,16 @@ ERR_STRUCTURE_010 = ErrorDef(
     fix_hint="'{attr_name}' must use one of its declared enum values",
 )
 
-# ERR_STRUCTURE_011: Non-symbol op at module level.
+# ERR_STRUCTURE_011: Operation not permitted at module level.
 ERR_STRUCTURE_011 = ErrorDef(
     domain=ErrorDomain.STRUCTURE,
     code=11,
     severity=Severity.ERROR,
-    summary="Non-symbol-defining op at module level.",
-    message="'{op_name}' cannot appear at module level (only symbol-defining "
-    "ops like func.def and func.decl are allowed here)",
+    summary="Operation is not permitted at module level.",
+    message=(
+        "'{op_name}' cannot appear at module level (only symbol-defining or "
+        "module-scope operations are allowed here)"
+    ),
     params=(ErrorParam("op_name", ParamKind.STRING),),
     fix_hint="Move '{op_name}' inside a function body",
 )
@@ -802,6 +804,49 @@ ERR_STRUCTURE_048 = ErrorDef(
     fix_hint="Remove trailing word pairs with no positive or negative assertions",
 )
 
+# ERR_STRUCTURE_049: Module-scope operation is nested.
+ERR_STRUCTURE_049 = ErrorDef(
+    domain=ErrorDomain.STRUCTURE,
+    code=49,
+    severity=Severity.ERROR,
+    summary="Module-scope operation is nested.",
+    message="'{op_name}' may appear only as a direct child of the module body",
+    params=(ErrorParam("op_name", ParamKind.STRING),),
+    fix_hint="Move '{op_name}' to the module body",
+)
+
+# ERR_STRUCTURE_050: Symbol set is not strictly ordered.
+ERR_STRUCTURE_050 = ErrorDef(
+    domain=ErrorDomain.STRUCTURE,
+    code=50,
+    severity=Severity.ERROR,
+    summary="Symbol set is not strictly ordered.",
+    message=(
+        "attribute '{attr_name}' symbol set places '@{current_name}' "
+        "after '@{previous_name}'"
+    ),
+    params=(
+        ErrorParam("attr_name", ParamKind.STRING),
+        ErrorParam("current_name", ParamKind.STRING),
+        ErrorParam("previous_name", ParamKind.STRING),
+    ),
+    fix_hint="Sort symbol names and remove duplicate entries",
+)
+
+# ERR_STRUCTURE_051: Duplicate keyed module record.
+ERR_STRUCTURE_051 = ErrorDef(
+    domain=ErrorDomain.STRUCTURE,
+    code=51,
+    severity=Severity.ERROR,
+    summary="Duplicate keyed module record.",
+    message="duplicate '{op_name}' module record with key '{record_key}'",
+    params=(
+        ErrorParam("op_name", ParamKind.STRING),
+        ErrorParam("record_key", ParamKind.STRING),
+    ),
+    fix_hint="Merge the duplicate records or give each record a unique key",
+)
+
 ALL_STRUCTURE_ERRORS: tuple[ErrorDef, ...] = (
     ERR_STRUCTURE_001,
     ERR_STRUCTURE_002,
@@ -850,4 +895,7 @@ ALL_STRUCTURE_ERRORS: tuple[ErrorDef, ...] = (
     ERR_STRUCTURE_046,
     ERR_STRUCTURE_047,
     ERR_STRUCTURE_048,
+    ERR_STRUCTURE_049,
+    ERR_STRUCTURE_050,
+    ERR_STRUCTURE_051,
 )

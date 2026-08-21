@@ -1230,7 +1230,7 @@ loom_func_like_t loom_func_like_cast(const loom_module_t* module,
                                      loom_op_t* op);
 
 // Returns the body region of a func-like op, or NULL for bodyless ops
-// (func.decl, func.ukernel) or if |func| is not valid.
+// (func.decl, template.ukernel) or if |func| is not valid.
 loom_region_t* loom_func_like_body(loom_func_like_t func);
 
 // Returns the body region index, or LOOM_REGION_INDEX_NONE for bodyless ops or
@@ -1351,14 +1351,12 @@ loom_parameterized_attr_array_t loom_func_like_requires(loom_func_like_t func);
 // has no distinct specialization arguments or |func| is invalid.
 int64_t loom_func_like_specialization_count(loom_func_like_t func);
 
-// Returns the implements string ID for template/ukernel ops — the name of the
-// op kind this function provides an implementation for. Returns
-// LOOM_STRING_ID_INVALID for def/decl ops, ops with no implements attr, or
-// if |func| is not valid.
-loom_string_id_t loom_func_like_implements(loom_func_like_t func);
+// Returns the template family implemented by |func|, or an invalid reference
+// when the function-like symbol is not a template provider.
+loom_symbol_ref_t loom_func_like_template_family(loom_func_like_t func);
 
-// Returns the dispatch priority for template/ukernel ops. Returns 0 for
-// def/decl ops, ops with no priority attr, or if |func| is not valid.
+// Returns the dispatch priority for concrete providers. Returns 0 for ops with
+// no priority attr or if |func| is not valid.
 int64_t loom_func_like_priority(loom_func_like_t func);
 
 //===----------------------------------------------------------------------===//
@@ -1780,6 +1778,20 @@ loom_attribute_t loom_memory_access_atomic_scope(loom_memory_access_t access);
     return loom_attr_as_symbol(loom_op_attrs(op)[(index)]);        \
   }
 
+// Defines a function that reads a symbol-array attribute by index.
+#define LOOM_DEFINE_ATTR_SYMBOL_ARRAY(func_name, index)                  \
+  enum { func_name##_ATTR_INDEX = (index) };                             \
+  static inline loom_symbol_ref_array_t func_name(const loom_op_t* op) { \
+    return loom_attr_as_symbol_array(loom_op_attrs(op)[(index)]);        \
+  }
+
+// Defines a function that reads a symbol-set attribute by index.
+#define LOOM_DEFINE_ATTR_SYMBOL_SET(func_name, index)                    \
+  enum { func_name##_ATTR_INDEX = (index) };                             \
+  static inline loom_symbol_ref_array_t func_name(const loom_op_t* op) { \
+    return loom_attr_as_symbol_set(loom_op_attrs(op)[(index)]);          \
+  }
+
 // Defines a function that reads a string attribute by index.
 #define LOOM_DEFINE_ATTR_STRING(func_name, index)                 \
   enum { func_name##_ATTR_INDEX = (index) };                      \
@@ -2039,6 +2051,11 @@ iree_status_t loom_builder_copy_signed_enum_set_attr_storage(
     loom_builder_t* builder, loom_signed_enum_set_t set,
     iree_string_view_t label, const uint64_t** out_storage,
     uint16_t* out_word_count);
+
+// Copies a symbol-array attribute payload into the builder arena.
+iree_status_t loom_builder_copy_symbol_array_attr_storage(
+    loom_builder_t* builder, loom_symbol_ref_array_t values,
+    iree_string_view_t label, const loom_symbol_ref_t** out_storage);
 
 // Copies a predicate-list attribute payload into the builder arena.
 iree_status_t loom_builder_copy_predicate_list_attr_storage(

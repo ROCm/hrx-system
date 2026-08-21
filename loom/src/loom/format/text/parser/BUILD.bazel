@@ -48,6 +48,7 @@ loom_cc_library(
     ],
     visibility = ["//loom/src/loom/format/text:__pkg__"],
     deps = [
+        "//loom/src/loom/analysis:symbol_references",
         "//loom/src/loom/error:diagnostic",
         "//loom/src/loom/error:error_defs",
         "//loom/src/loom/error:renderer",

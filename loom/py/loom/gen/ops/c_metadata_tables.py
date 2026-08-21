@@ -353,8 +353,12 @@ def _emit_attr_descriptor_table(
                     parameter.enum_def,
                 )
         if parameter.symbol_ref is not None:
-            flags = c_symbols.symbol_interface_flags(parameter.symbol_ref.interfaces)
-            lines.append(f"static const loom_symbol_reference_descriptor_t {prefix}_{parameter.name}_symbol_ref = {{{_bstring_expr(parameter.symbol_ref.name)}, {flags}}};")
+            c_symbols.append_symbol_reference_descriptor(
+                lines,
+                f"{prefix}_{parameter.name}_symbol_ref",
+                parameter.symbol_ref,
+                _bstring_expr(parameter.symbol_ref.name),
+            )
 
     table_name = f"{prefix}_parameter_desc"
     lines.append(f"static const loom_attr_descriptor_t {table_name}[] = {{")
@@ -805,9 +809,13 @@ def generate_tables_c(
         for attr_def in non_flags:
             if attr_def.symbol_ref is None:
                 continue
-            flags = c_symbols.symbol_interface_flags(attr_def.symbol_ref.interfaces)
             descriptor_name = f"{prefix}_{attr_def.name}_symbol_ref"
-            lines.append(f"static const loom_symbol_reference_descriptor_t {descriptor_name} = {{{_bstring_expr(attr_def.symbol_ref.name)}, {flags}}};")
+            c_symbols.append_symbol_reference_descriptor(
+                lines,
+                descriptor_name,
+                attr_def.symbol_ref,
+                _bstring_expr(attr_def.symbol_ref.name),
+            )
 
         # Attribute descriptors.
         if non_flags:
@@ -1014,6 +1022,8 @@ def generate_tables_c(
             vtable_flag_bits.append("LOOM_OP_VTABLE_TYPE_PROPAGATION_CANDIDATE")
         if any(kind == "LOOM_FORMAT_KIND_OPERAND_DICT" for kind, _, _ in elements):
             vtable_flag_bits.append("LOOM_OP_VTABLE_HAS_OPERAND_DICT")
+        if op.keyed_module_record_attr is not None:
+            vtable_flag_bits.append("LOOM_OP_VTABLE_KEYED_MODULE_RECORD")
         vtable_flags_str = " | ".join(vtable_flag_bits) if vtable_flag_bits else "0"
 
         sym_kind = _symbol_kind(op)
@@ -1088,6 +1098,13 @@ def generate_tables_c(
         if has_flags:
             lines.append(f"    .instance_flags_case_names = {prefix}_instance_flags_names,")
             lines.append(f"    .instance_flags_case_count = IREE_ARRAYSIZE({prefix}_instance_flags_names),")
+        if op.keyed_module_record_attr is not None:
+            key_attr_index = c_queries.resolve_attr_index(
+                op,
+                op.keyed_module_record_attr,
+                "KeyedModuleRecord",
+            )
+            lines.append(f"    .module_record_key_attr_index = {key_attr_index},")
         for spec in c_interfaces.INTERFACES:
             interface_ptr = interface_ptrs[spec.vtable_field]
             if interface_ptr != "NULL":

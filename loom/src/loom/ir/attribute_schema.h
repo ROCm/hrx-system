@@ -54,7 +54,19 @@ enum loom_symbol_interface_bits_e {
   LOOM_SYMBOL_INTERFACE_CALLABLE = 1u << 8,
   // Function-like symbol defines or declares a reusable command program.
   LOOM_SYMBOL_INTERFACE_COMMAND_PROGRAM = 1u << 9,
+  // Symbol defines an abstract compile-time callable family.
+  LOOM_SYMBOL_INTERFACE_TEMPLATE_FAMILY = 1u << 10,
+  // Symbol defines a concrete compile-time template implementation.
+  LOOM_SYMBOL_INTERFACE_TEMPLATE_PROVIDER = 1u << 11,
 };
+
+enum loom_symbol_reference_role_e {
+  // Zero/default: the reference contributes to reachability and link closure.
+  LOOM_SYMBOL_REFERENCE_ROLE_DEPENDENCY = 0,
+  // The reference records where a symbol may be found without retaining it.
+  LOOM_SYMBOL_REFERENCE_ROLE_AVAILABILITY = 1,
+};
+typedef uint8_t loom_symbol_reference_role_t;
 
 // Generated metadata for a symbol-reference attribute.
 typedef struct loom_symbol_reference_descriptor_t {
@@ -62,7 +74,12 @@ typedef struct loom_symbol_reference_descriptor_t {
   loom_bstring_t name;
   // Structural symbol interfaces accepted by this reference.
   loom_symbol_interface_flags_t interfaces;
+  // Compile-time graph role of each reference occurrence.
+  loom_symbol_reference_role_t role;
 } loom_symbol_reference_descriptor_t;
+
+static_assert(sizeof(loom_symbol_reference_descriptor_t) == 16,
+              "symbol reference descriptors must remain 16 bytes");
 
 static inline iree_string_view_t loom_symbol_reference_descriptor_name(
     const loom_symbol_reference_descriptor_t* descriptor) {
@@ -83,7 +100,8 @@ typedef struct loom_attr_descriptor_t {
   const loom_bstring_t* enum_case_names;
   // Mutually exclusive reference contract selected by |attr_kind|.
   union {
-    // Expected symbol target contract for SYMBOL attributes.
+    // Expected symbol target contract for SYMBOL, SYMBOL_ARRAY, and SYMBOL_SET
+    // attributes.
     const loom_symbol_reference_descriptor_t* symbol_ref;
     // Expected family kind for PARAMETERIZED attributes and every element of
     // PARAMETERIZED_ARRAY attributes, or LOOM_PARAMETERIZED_ATTR_KIND_ANY when
@@ -165,7 +183,8 @@ static inline bool loom_attr_descriptor_accepts_kind(
   return kind > LOOM_ATTR_ABSENT && kind < LOOM_ATTR_COUNT_ &&
          kind != LOOM_ATTR_ANY && kind != LOOM_ATTR_SCOPED_ENUM &&
          kind != LOOM_ATTR_ENUM_ARRAY && kind != LOOM_ATTR_SIGNED_ENUM_SET &&
-         kind != LOOM_ATTR_PARAMETERIZED_ARRAY;
+         kind != LOOM_ATTR_PARAMETERIZED_ARRAY &&
+         kind != LOOM_ATTR_SYMBOL_ARRAY && kind != LOOM_ATTR_SYMBOL_SET;
 }
 
 // Returns the explicit zero/false scalar value implied by ELIDE_DEFAULT.

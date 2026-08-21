@@ -90,15 +90,18 @@ loom_cc_library(
     loom::error::error_defs
     loom::error::renderer
     loom::format::bytecode::format
+    loom::format::bytecode::index
     loom::format::bytecode::reader
+    loom::format::bytecode::selected_reader
     loom::format::bytecode::writer
     loom::format::text::parser
     loom::format::text::printer
     loom::ir
     loom::ir::facts
+    loom::link::index_materializer
     loom::link::linker
     loom::link::module_index
-    loom::link::planner
+    loom::link::provider_resolver
     loom::ops::func
     loom::ops::global
     loom::ops::kernel
@@ -115,7 +118,7 @@ loom_cc_library(
     loom::pass::value_facts
     loom::sanitizer::options
     loom::target::function_version
-    loom::target::module_sealing
+    loom::target::function_version_projection
     loom::target::pipeline
     loom::target::predicate
     loom::target::profile

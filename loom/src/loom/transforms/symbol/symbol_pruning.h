@@ -48,8 +48,9 @@ bool loom_symbol_pruning_symbol_is_erasable(const loom_module_t* module,
                                             const loom_symbol_t* symbol);
 
 // Root query for loom_symbol_liveness_compute using the ordinary symbol-DCE
-// retention policy. The user data may be NULL or a
-// loom_symbol_pruning_options_t pointer.
+// retention policy. Unlinked placeholders are reached only by concrete
+// dependency edges; their mere presence in the symbol table does not make them
+// roots. The user data may be NULL or a loom_symbol_pruning_options_t pointer.
 bool loom_symbol_pruning_symbol_is_root(void* user_data,
                                         const loom_module_t* module,
                                         loom_symbol_id_t symbol_id,

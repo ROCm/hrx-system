@@ -156,6 +156,27 @@ TEST_F(ModuleTest, RegisterEmptySource) {
   loom_module_free(module);
 }
 
+TEST_F(ModuleTest, AppendSourcePreservesInsertionOrder) {
+  loom_module_size_hints_t hints = {};
+  hints.source_count = 2;
+  loom_module_t* module = NULL;
+  IREE_ASSERT_OK(loom_module_allocate(&context_, IREE_SV("test"), &block_pool_,
+                                      &hints, iree_allocator_system(),
+                                      &module));
+
+  loom_source_id_t first_id = LOOM_SOURCE_ID_INVALID;
+  loom_source_id_t second_id = LOOM_SOURCE_ID_INVALID;
+  IREE_ASSERT_OK(
+      loom_module_append_source(module, IREE_SV("a.loom"), &first_id));
+  IREE_ASSERT_OK(
+      loom_module_append_source(module, IREE_SV("b.loom"), &second_id));
+
+  EXPECT_EQ(first_id, 0u);
+  EXPECT_EQ(second_id, 1u);
+  EXPECT_GE(module->sources.capacity, 2u);
+  loom_module_free(module);
+}
+
 TEST_F(ModuleTest, RegisterSourceRejectsInvalidSentinelId) {
   loom_module_t* module = NULL;
   IREE_ASSERT_OK(loom_module_allocate(&context_, IREE_SV("test"), &block_pool_,
@@ -320,6 +341,20 @@ TEST_F(ModuleTest, CompactSymbolsDropsUnreferencedTombstonesAndRenumbersRefs) {
   IREE_ASSERT_OK(loom_test_record_build(
       &builder, 0, 0, (loom_symbol_ref_t){0, keep_b_symbol_id},
       loom_make_named_attr_slice(NULL, 0), LOOM_LOCATION_UNKNOWN, &keep_b_op));
+  loom_symbol_ref_t dependency_refs[] = {
+      {0, keep_b_symbol_id},
+      {0, keep_a_symbol_id},
+      {0, keep_b_symbol_id},
+  };
+  loom_symbol_ref_t availability_refs[] = {{0, keep_a_symbol_id}};
+  loom_op_t* refs_op = NULL;
+  IREE_ASSERT_OK(loom_test_symbol_array_attrs_build(
+      &builder, LOOM_TEST_SYMBOL_ARRAY_ATTRS_BUILD_FLAG_HAS_AVAILABLE,
+      loom_make_symbol_ref_array(dependency_refs,
+                                 IREE_ARRAYSIZE(dependency_refs)),
+      loom_make_symbol_ref_array(availability_refs,
+                                 IREE_ARRAYSIZE(availability_refs)),
+      LOOM_LOCATION_UNKNOWN, &refs_op));
 
   iree_arena_allocator_t scratch_arena;
   iree_arena_initialize(&block_pool_, &scratch_arena);
@@ -338,6 +373,16 @@ TEST_F(ModuleTest, CompactSymbolsDropsUnreferencedTombstonesAndRenumbersRefs) {
   loom_named_attr_slice_t dict = loom_test_record_dict(keep_a_op);
   ASSERT_EQ(dict.count, 1u);
   EXPECT_EQ(loom_attr_as_symbol(dict.entries[0].value).symbol_id, 1u);
+  loom_symbol_ref_array_t dependencies =
+      loom_test_symbol_array_attrs_dependencies(refs_op);
+  ASSERT_EQ(dependencies.count, 3u);
+  EXPECT_EQ(dependencies.values[0].symbol_id, 1u);
+  EXPECT_EQ(dependencies.values[1].symbol_id, 0u);
+  EXPECT_EQ(dependencies.values[2].symbol_id, 1u);
+  loom_symbol_ref_array_t available =
+      loom_test_symbol_array_attrs_available(refs_op);
+  ASSERT_EQ(available.count, 1u);
+  EXPECT_EQ(available.values[0].symbol_id, 0u);
 
   loom_module_free(module);
 }
@@ -864,6 +909,104 @@ TEST_F(ModuleTest, BlockRemoveArgRejectsPredicateAttributeUses) {
                         loom_block_remove_arg(module, entry_block, 0));
   EXPECT_EQ(entry_block->arg_count, 1u);
   EXPECT_EQ(loom_block_arg_id(entry_block, 0), argument);
+
+  loom_module_free(module);
+}
+
+//===----------------------------------------------------------------------===//
+// Source comments
+//===----------------------------------------------------------------------===//
+
+TEST_F(ModuleTest, AttachedCommentsUseOneModuleOwnedStorageSpan) {
+  loom_module_t* module = NULL;
+  IREE_ASSERT_OK(loom_module_allocate(&context_, IREE_SV("test"), &block_pool_,
+                                      NULL, iree_allocator_system(), &module));
+
+  loom_block_t* block = loom_module_block(module);
+  loom_builder_t builder;
+  loom_builder_initialize(module, &module->arena, block, &builder);
+  loom_op_t* op = NULL;
+  IREE_ASSERT_OK(loom_test_constant_build(
+      &builder, loom_attr_i64(1), loom_type_scalar(LOOM_SCALAR_TYPE_I32),
+      LOOM_LOCATION_UNKNOWN, &op));
+
+  char op_head[] = " op";
+  char op_tail[] = " operation";
+  iree_string_view_t op_comments[] = {
+      iree_make_string_view(op_head, sizeof(op_head) - 1),
+      iree_string_view_empty(),
+      iree_make_string_view(op_tail, sizeof(op_tail) - 1),
+  };
+  IREE_ASSERT_OK(loom_module_attach_op_comments(module, op, op_comments,
+                                                IREE_ARRAYSIZE(op_comments)));
+
+  char block_head[] = " block";
+  char block_tail[] = " tail";
+  iree_string_view_t block_comments[] = {
+      iree_make_string_view(block_head, sizeof(block_head) - 1),
+      iree_string_view_empty(),
+      iree_make_string_view(block_tail, sizeof(block_tail) - 1),
+  };
+  const iree_host_size_t used_size_before = module->arena.used_allocation_size;
+  IREE_ASSERT_OK(loom_module_attach_block_comments(
+      module, block, block_comments, IREE_ARRAYSIZE(block_comments)));
+  const iree_host_size_t block_storage_size =
+      sizeof(block_comments) + sizeof(block_head) - 1 + sizeof(block_tail) - 1;
+  EXPECT_EQ(module->arena.used_allocation_size - used_size_before,
+            iree_host_align(block_storage_size, iree_max_align_t));
+
+  memset(op_head, '#', sizeof(op_head) - 1);
+  memset(op_tail, '#', sizeof(op_tail) - 1);
+  memset(op_comments, 0, sizeof(op_comments));
+  memset(block_head, '#', sizeof(block_head) - 1);
+  memset(block_tail, '#', sizeof(block_tail) - 1);
+  memset(block_comments, 0, sizeof(block_comments));
+
+  iree_host_size_t comment_count = 0;
+  const iree_string_view_t* stored_comments =
+      loom_module_op_comments(module, op, &comment_count);
+  ASSERT_EQ(comment_count, 3u);
+  ASSERT_NE(stored_comments, nullptr);
+  EXPECT_EQ(stored_comments[0].data,
+            reinterpret_cast<const char*>(stored_comments + comment_count));
+  EXPECT_TRUE(iree_string_view_equal(stored_comments[0], IREE_SV(" op")));
+  EXPECT_EQ(stored_comments[1].data, nullptr);
+  EXPECT_EQ(stored_comments[1].size, 0u);
+  EXPECT_EQ(stored_comments[2].data,
+            stored_comments[0].data + stored_comments[0].size);
+  EXPECT_TRUE(
+      iree_string_view_equal(stored_comments[2], IREE_SV(" operation")));
+
+  stored_comments = loom_module_block_comments(module, block, &comment_count);
+  ASSERT_EQ(comment_count, 3u);
+  ASSERT_NE(stored_comments, nullptr);
+  EXPECT_EQ(stored_comments[0].data,
+            reinterpret_cast<const char*>(stored_comments + comment_count));
+  EXPECT_TRUE(iree_string_view_equal(stored_comments[0], IREE_SV(" block")));
+  EXPECT_EQ(stored_comments[1].data, nullptr);
+  EXPECT_EQ(stored_comments[1].size, 0u);
+  EXPECT_EQ(stored_comments[2].data,
+            stored_comments[0].data + stored_comments[0].size);
+  EXPECT_TRUE(iree_string_view_equal(stored_comments[2], IREE_SV(" tail")));
+
+  loom_module_free(module);
+}
+
+TEST_F(ModuleTest, AttachedCommentsRejectStorageSizeOverflow) {
+  loom_module_t* module = NULL;
+  IREE_ASSERT_OK(loom_module_allocate(&context_, IREE_SV("test"), &block_pool_,
+                                      NULL, iree_allocator_system(), &module));
+
+  const iree_string_view_t comments[] = {
+      iree_make_string_view("x", IREE_HOST_SIZE_MAX),
+  };
+  const iree_host_size_t used_size_before = module->arena.used_allocation_size;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_RESOURCE_EXHAUSTED,
+      loom_module_attach_block_comments(module, loom_module_block(module),
+                                        comments, IREE_ARRAYSIZE(comments)));
+  EXPECT_EQ(module->comments.count, 0u);
+  EXPECT_EQ(module->arena.used_allocation_size, used_size_before);
 
   loom_module_free(module);
 }
@@ -1560,6 +1703,113 @@ TEST_F(ModuleTest, LookupString) {
 }
 
 //===----------------------------------------------------------------------===//
+// Symbol-set attributes
+//===----------------------------------------------------------------------===//
+
+TEST_F(ModuleTest, MakeSymbolSetSortsByNameAndCopiesReferences) {
+  loom_module_t* module = NULL;
+  IREE_ASSERT_OK(loom_module_allocate(&context_, IREE_SV("test"), &block_pool_,
+                                      NULL, iree_allocator_system(), &module));
+
+  loom_string_id_t zeta_name = LOOM_STRING_ID_INVALID;
+  loom_string_id_t alpha_name = LOOM_STRING_ID_INVALID;
+  IREE_ASSERT_OK(
+      loom_module_intern_string(module, IREE_SV("zeta"), &zeta_name));
+  IREE_ASSERT_OK(
+      loom_module_intern_string(module, IREE_SV("alpha"), &alpha_name));
+  uint16_t zeta_symbol = LOOM_SYMBOL_ID_INVALID;
+  uint16_t alpha_symbol = LOOM_SYMBOL_ID_INVALID;
+  IREE_ASSERT_OK(loom_module_add_symbol(module, zeta_name, &zeta_symbol));
+  IREE_ASSERT_OK(loom_module_add_symbol(module, alpha_name, &alpha_symbol));
+  ASSERT_LT(zeta_symbol, alpha_symbol)
+      << "setup must distinguish symbol-id order from name order";
+
+  loom_symbol_ref_t refs[] = {
+      {/*.module_id=*/0, /*.symbol_id=*/zeta_symbol},
+      {/*.module_id=*/0, /*.symbol_id=*/alpha_symbol},
+  };
+  loom_symbol_ref_t duplicate_ref = loom_symbol_ref_null();
+  loom_attribute_t attr = loom_attr_absent();
+  IREE_ASSERT_OK(loom_module_try_make_symbol_set(
+      module, loom_make_symbol_ref_array(refs, IREE_ARRAYSIZE(refs)),
+      &duplicate_ref, &attr));
+
+  EXPECT_FALSE(loom_symbol_ref_is_valid(duplicate_ref));
+  ASSERT_EQ(attr.kind, LOOM_ATTR_SYMBOL_SET);
+  loom_symbol_ref_array_t set = loom_attr_as_symbol_set(attr);
+  ASSERT_EQ(set.count, 2);
+  ASSERT_NE(set.values, refs);
+  EXPECT_EQ(set.values[0].symbol_id, alpha_symbol);
+  EXPECT_EQ(set.values[1].symbol_id, zeta_symbol);
+
+  loom_symbol_ref_t reversed_refs[] = {
+      {/*.module_id=*/0, /*.symbol_id=*/alpha_symbol},
+      {/*.module_id=*/0, /*.symbol_id=*/zeta_symbol},
+  };
+  loom_attribute_t equal_attr = loom_attr_absent();
+  IREE_ASSERT_OK(loom_module_try_make_symbol_set(
+      module,
+      loom_make_symbol_ref_array(reversed_refs, IREE_ARRAYSIZE(reversed_refs)),
+      &duplicate_ref, &equal_attr));
+  EXPECT_TRUE(loom_attribute_equal(&attr, &equal_attr));
+  EXPECT_EQ(loom_attribute_hash(&attr), loom_attribute_hash(&equal_attr));
+
+  refs[0].symbol_id = alpha_symbol;
+  EXPECT_EQ(set.values[1].symbol_id, zeta_symbol);
+  loom_module_free(module);
+}
+
+TEST_F(ModuleTest, MakeSymbolSetReportsDuplicateName) {
+  loom_module_t* module = NULL;
+  IREE_ASSERT_OK(loom_module_allocate(&context_, IREE_SV("test"), &block_pool_,
+                                      NULL, iree_allocator_system(), &module));
+
+  loom_string_id_t name = LOOM_STRING_ID_INVALID;
+  IREE_ASSERT_OK(loom_module_intern_string(module, IREE_SV("shared"), &name));
+  uint16_t first_symbol = LOOM_SYMBOL_ID_INVALID;
+  uint16_t second_symbol = LOOM_SYMBOL_ID_INVALID;
+  IREE_ASSERT_OK(loom_module_add_symbol(module, name, &first_symbol));
+  IREE_ASSERT_OK(loom_module_add_symbol(module, name, &second_symbol));
+
+  loom_symbol_ref_t refs[] = {
+      {/*.module_id=*/0, /*.symbol_id=*/first_symbol},
+      {/*.module_id=*/0, /*.symbol_id=*/second_symbol},
+  };
+  loom_symbol_ref_t duplicate_ref = loom_symbol_ref_null();
+  loom_attribute_t attr = loom_attr_i64(42);
+  IREE_ASSERT_OK(loom_module_try_make_symbol_set(
+      module, loom_make_symbol_ref_array(refs, IREE_ARRAYSIZE(refs)),
+      &duplicate_ref, &attr));
+
+  EXPECT_TRUE(loom_symbol_ref_is_valid(duplicate_ref));
+  EXPECT_EQ(module->symbols.entries[duplicate_ref.symbol_id].name_id, name);
+  EXPECT_TRUE(loom_attr_is_absent(attr));
+  loom_module_free(module);
+}
+
+TEST_F(ModuleTest, MakeSymbolSetValidatesReferencesAndEmptySet) {
+  loom_module_t* module = NULL;
+  IREE_ASSERT_OK(loom_module_allocate(&context_, IREE_SV("test"), &block_pool_,
+                                      NULL, iree_allocator_system(), &module));
+
+  loom_symbol_ref_t duplicate_ref = loom_symbol_ref_null();
+  loom_attribute_t attr = loom_attr_absent();
+  IREE_ASSERT_OK(loom_module_try_make_symbol_set(
+      module, loom_symbol_ref_array_empty(), &duplicate_ref, &attr));
+  EXPECT_FALSE(loom_symbol_ref_is_valid(duplicate_ref));
+  EXPECT_EQ(attr.kind, LOOM_ATTR_SYMBOL_SET);
+  EXPECT_EQ(attr.count, 0);
+  EXPECT_EQ(loom_attr_as_symbol_set(attr).values, nullptr);
+
+  loom_symbol_ref_t remote_ref = {/*.module_id=*/1, /*.symbol_id=*/0};
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_module_try_make_symbol_set(
+                            module, loom_make_symbol_ref_array(&remote_ref, 1),
+                            &duplicate_ref, &attr));
+  loom_module_free(module);
+}
+
+//===----------------------------------------------------------------------===//
 // Canonical dictionary attributes
 //===----------------------------------------------------------------------===//
 
@@ -1601,6 +1851,43 @@ TEST_F(ModuleTest, MakeCanonicalAttrDictSortsByKeySpellingAndCopiesEntries) {
   EXPECT_EQ(attr.dict_entries[1].value.i64, 2);
 
   IREE_ASSERT_OK(loom_module_verify_canonical_attr_dict(module, attr));
+  loom_module_free(module);
+}
+
+TEST_F(ModuleTest, MakeCanonicalAttributeCopiesTemporaryNestedPayloads) {
+  loom_module_t* module = NULL;
+  IREE_ASSERT_OK(loom_module_allocate(&context_, IREE_SV("test"), &block_pool_,
+                                      NULL, iree_allocator_system(), &module));
+
+  loom_string_id_t key_id = LOOM_STRING_ID_INVALID;
+  IREE_ASSERT_OK(loom_module_intern_string(module, IREE_SV("key"), &key_id));
+  int64_t temporary_values[] = {3, 5, 8};
+  loom_named_attr_t temporary_entries[] = {
+      {
+          /*.name_id=*/key_id,
+          /*.reserved=*/{},
+          /*.value=*/
+          loom_attr_i64_array(temporary_values,
+                              IREE_ARRAYSIZE(temporary_values)),
+      },
+  };
+  loom_attribute_t canonical = loom_attr_absent();
+  IREE_ASSERT_OK(loom_module_make_canonical_attribute(
+      module, /*descriptor=*/NULL,
+      loom_make_canonical_attr_dict(temporary_entries,
+                                    IREE_ARRAYSIZE(temporary_entries)),
+      &canonical));
+
+  temporary_values[0] = 99;
+  temporary_entries[0].value = loom_attr_i64(42);
+  ASSERT_EQ(canonical.kind, LOOM_ATTR_DICT);
+  ASSERT_EQ(canonical.count, 1u);
+  ASSERT_EQ(canonical.dict_entries[0].value.kind, LOOM_ATTR_I64_ARRAY);
+  ASSERT_EQ(canonical.dict_entries[0].value.count, 3u);
+  EXPECT_EQ(canonical.dict_entries[0].value.i64_array[0], 3);
+  EXPECT_EQ(canonical.dict_entries[0].value.i64_array[1], 5);
+  EXPECT_EQ(canonical.dict_entries[0].value.i64_array[2], 8);
+
   loom_module_free(module);
 }
 
@@ -2620,6 +2907,74 @@ TEST_F(ModuleTest, InternTypeIdReturnsCanonicalId) {
   loom_module_free(module);
 }
 
+TEST_F(ModuleTest, InternTopologicalTypeHandlesDeepCanonicalChain) {
+  constexpr iree_host_size_t kDepth = 4096;
+  loom_module_t* module = NULL;
+  const loom_module_size_hints_t hints = {
+      /*.type_count=*/kDepth + 1,
+  };
+  IREE_ASSERT_OK(loom_module_allocate(&context_, IREE_SV("test"), &block_pool_,
+                                      &hints, iree_allocator_system(),
+                                      &module));
+
+  loom_type_id_t dependency_id = LOOM_TYPE_ID_INVALID;
+  IREE_ASSERT_OK(loom_module_intern_topological_type_id(
+      module, loom_type_scalar(LOOM_SCALAR_TYPE_I32),
+      /*structural_dependency_ids=*/NULL,
+      /*structural_dependency_count=*/0, &dependency_id));
+  ASSERT_EQ(dependency_id, 0u);
+
+  struct FunctionTypeStorage {
+    // Number of argument types.
+    uint16_t arg_count;
+    // Number of result types.
+    uint16_t result_count;
+    // Alignment padding matching loom_func_type_data_t.
+    uint32_t reserved;
+    // Single immediate dependency payload.
+    loom_type_t types[1];
+  } source = {};
+  static_assert(sizeof(FunctionTypeStorage) ==
+                sizeof(loom_func_type_data_t) + sizeof(loom_type_t));
+  source.arg_count = 1;
+  for (iree_host_size_t i = 0; i < kDepth; ++i) {
+    source.types[0] = module->types.entries[dependency_id];
+    const loom_type_t type =
+        loom_type_function(reinterpret_cast<loom_func_type_data_t*>(&source));
+    loom_type_id_t type_id = LOOM_TYPE_ID_INVALID;
+    IREE_ASSERT_OK(loom_module_intern_topological_type_id(
+        module, type, &dependency_id, /*structural_dependency_count=*/1,
+        &type_id));
+    ASSERT_EQ(type_id, i + 1);
+    dependency_id = type_id;
+  }
+
+  source.types[0] = module->types.entries[dependency_id - 1];
+  const loom_type_t duplicate =
+      loom_type_function(reinterpret_cast<loom_func_type_data_t*>(&source));
+  const loom_type_id_t duplicate_dependency_id = dependency_id - 1;
+  loom_type_id_t duplicate_id = LOOM_TYPE_ID_INVALID;
+  IREE_ASSERT_OK(loom_module_intern_topological_type_id(
+      module, duplicate, &duplicate_dependency_id,
+      /*structural_dependency_count=*/1, &duplicate_id));
+  EXPECT_EQ(duplicate_id, dependency_id);
+  EXPECT_EQ(module->types.count, kDepth + 1);
+
+  const loom_func_type_data_t* deepest_data =
+      loom_type_func_data(module->types.entries[dependency_id]);
+  ASSERT_NE(deepest_data, nullptr);
+  const loom_type_t expected_dependency =
+      module->types.entries[dependency_id - 1];
+  EXPECT_EQ(deepest_data->types[0].header, expected_dependency.header);
+  EXPECT_EQ(deepest_data->types[0].encoding_id,
+            expected_dependency.encoding_id);
+  EXPECT_EQ(deepest_data->types[0].encoding_flags,
+            expected_dependency.encoding_flags);
+  EXPECT_EQ(deepest_data->types[0].dims[0], expected_dependency.dims[0]);
+  EXPECT_EQ(deepest_data->types[0].dims[1], expected_dependency.dims[1]);
+  loom_module_free(module);
+}
+
 TEST_F(ModuleTest, InternDifferentTypes) {
   loom_module_t* module = NULL;
   IREE_ASSERT_OK(loom_module_allocate(&context_, IREE_SV("test"), &block_pool_,
@@ -2831,6 +3186,16 @@ TEST_F(ModuleTest, InternFunctionTypeDirectAndPackedFormsDedup) {
   EXPECT_TRUE(loom_type_equal(direct_interned, packed_interned));
   EXPECT_EQ(loom_type_func_data(direct_interned),
             loom_type_func_data(packed_interned));
+  EXPECT_EQ(module->arena.total_allocation_size, allocation_size);
+
+  const loom_type_id_t dependency_ids[] = {0, 1, 2};
+  loom_type_id_t topological_type_id = LOOM_TYPE_ID_INVALID;
+  IREE_ASSERT_OK(loom_module_intern_topological_type_id(
+      module, packed_source, dependency_ids, IREE_ARRAYSIZE(dependency_ids),
+      &topological_type_id));
+  EXPECT_EQ(topological_type_id, 3u);
+  EXPECT_EQ(module->types.hashes[topological_type_id],
+            loom_type_hash(module->types.entries[topological_type_id]));
   EXPECT_EQ(module->arena.total_allocation_size, allocation_size);
 
   iree_allocator_free(iree_allocator_system(),
@@ -3079,6 +3444,7 @@ TEST_F(ModuleTest, SizeHints) {
       /*.string_count=*/50,
       /*.type_count=*/20,
       /*.encoding_count=*/12,
+      /*.source_count=*/6,
       /*.symbol_count=*/10,
   };
   loom_module_t* module = NULL;
@@ -3092,6 +3458,7 @@ TEST_F(ModuleTest, SizeHints) {
   EXPECT_GE(module->types.capacity, 20u);
   EXPECT_GE(module->encodings.capacity, 12u);
   EXPECT_GE(module->encoding_intern.capacity, 12u);
+  EXPECT_GE(module->sources.capacity, 6u);
   EXPECT_GE(module->symbols.capacity, 10u);
   loom_module_free(module);
 }

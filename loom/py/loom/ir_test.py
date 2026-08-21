@@ -22,6 +22,7 @@ from loom.dialect.test import (
     test_tile_attr,
     test_variant_set_type,
 )
+from loom.dsl import AttrDef, Dialect, ParameterizedAttrDef, SymbolReference
 from loom.ir import (
     BF16,
     BUFFER_TYPE,
@@ -81,6 +82,8 @@ from loom.ir import (
     Symbol,
     SymbolKind,
     SymbolName,
+    SymbolNameArray,
+    SymbolNameSet,
     SymbolRef,
     TaggedLocation,
     TiedResult,
@@ -662,6 +665,50 @@ class TestCanonicalAttrDict:
 
 
 class TestParameterizedAttr:
+    def test_canonicalizes_symbol_array_parameters(self) -> None:
+        family = ParameterizedAttrDef(
+            "test.providers",
+            group=Dialect("test"),
+            parameters=[
+                AttrDef(
+                    "values",
+                    "symbol_array",
+                    symbol_ref=SymbolReference("record", ["record"]),
+                )
+            ],
+        )
+
+        value = ParameterizedAttr(
+            family,
+            {
+                "values": [
+                    SymbolName("b"),
+                    SymbolName("a"),
+                    SymbolName("b"),
+                ]
+            },
+        )
+
+        assert value.get("values") == SymbolNameArray(
+            [SymbolName("b"), SymbolName("a"), SymbolName("b")]
+        )
+
+    def test_rejects_untyped_symbol_array_parameters(self) -> None:
+        family = ParameterizedAttrDef(
+            "test.providers",
+            group=Dialect("test"),
+            parameters=[
+                AttrDef(
+                    "values",
+                    "symbol_array",
+                    symbol_ref=SymbolReference("record", ["record"]),
+                )
+            ],
+        )
+
+        with pytest.raises(TypeError, match="symbol name array element 0"):
+            ParameterizedAttr(family, {"values": ["untyped"]})
+
     def test_compact_primary_preserves_named_declaration_order_storage(self) -> None:
         compact = test_compact_attr(label="wave", value=64)
 
@@ -927,6 +974,57 @@ class TestOperations:
             with pytest.raises(ValueError, match="signed enum set positive"):
                 SignedEnumSetAttr([value])  # type: ignore[list-item]
 
+    def test_symbol_name_array_preserves_order_and_duplicates(self) -> None:
+        values = SymbolNameArray(
+            [
+                SymbolName("provider_b"),
+                SymbolName("provider_a"),
+                SymbolName("provider_b"),
+            ]
+        )
+        op = Operation(
+            kind=4,
+            name="test.symbol_array_attrs",
+            attributes={"providers": values},
+        )
+
+        assert op.attributes["providers"] is values
+        assert values.values == (
+            SymbolName("provider_b"),
+            SymbolName("provider_a"),
+            SymbolName("provider_b"),
+        )
+        assert len(SymbolNameArray()) == 0
+
+    def test_symbol_name_array_rejects_untyped_strings(self) -> None:
+        with pytest.raises(TypeError, match="symbol name array element 1"):
+            SymbolNameArray([SymbolName("typed"), "untyped"])  # type: ignore[list-item]
+
+    def test_symbol_name_set_sorts_and_rejects_duplicates(self) -> None:
+        values = SymbolNameSet(
+            [
+                SymbolName("provider_b"),
+                SymbolName("provider_a"),
+            ]
+        )
+
+        assert values.values == (
+            SymbolName("provider_a"),
+            SymbolName("provider_b"),
+        )
+        assert len(SymbolNameSet()) == 0
+        with pytest.raises(ValueError, match="duplicate symbol name '@provider_a'"):
+            SymbolNameSet(
+                [
+                    SymbolName("provider_a"),
+                    SymbolName("provider_a"),
+                ]
+            )
+
+    def test_symbol_name_set_rejects_untyped_strings(self) -> None:
+        with pytest.raises(TypeError, match="symbol name set element 1"):
+            SymbolNameSet([SymbolName("typed"), "untyped"])  # type: ignore[list-item]
+
     def test_op_with_nested_canonical_attr_dict(self) -> None:
         op = Operation(
             kind=4,
@@ -1162,6 +1260,15 @@ class TestModule:
         sym = Symbol(name="foo", kind=SymbolKind.FUNC_DEF, op=func_op)
         sid = m.add_symbol(sym)
         assert m.symbols[sid].name == "foo"
+        assert m.body.ops == [func_op]
+
+    def test_add_top_level_operation(self) -> None:
+        m = Module()
+        metadata_op = Operation(name="test.module_metadata")
+        operation_index = m.add_top_level_operation(metadata_op)
+        assert operation_index == 0
+        assert m.body.ops == [metadata_op]
+        assert not m.symbols
 
     def test_rebuild_value_metadata(self) -> None:
         m = Module()

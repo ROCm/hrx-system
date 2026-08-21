@@ -19,6 +19,14 @@
 extern "C" {
 #endif
 
+// Compilation-local target-context position carried by function versions.
+//
+// The ordinal has no IR or serialization representation. Equal ordinals in
+// one function-version owner identify the same resolved target context.
+typedef uint16_t loom_target_context_ordinal_t;
+#define LOOM_TARGET_CONTEXT_ORDINAL_INVALID \
+  ((loom_target_context_ordinal_t)UINT16_MAX)
+
 typedef struct loom_target_function_version_t {
   // Generic compiler function-version base. Must remain the first field.
   loom_function_version_t base;
@@ -37,6 +45,13 @@ typedef struct loom_target_function_version_t {
   // without rediscovering its family. Its facts exclude function-local ABI or
   // export overlays.
   loom_resolved_target_t resolved_target;
+
+  // Dense compilation-local identity of |resolved_target|.
+  loom_target_context_ordinal_t target_context_ordinal;
+
+  // True when the live function's authored target definition is an exact IR
+  // witness for |resolved_target|.
+  bool authored_target_is_exact;
 
   // Non-NULL function target facts used to compile this version, including
   // its function-local ABI and export contract.

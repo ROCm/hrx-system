@@ -10,8 +10,8 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "loom/analysis/symbol_dependencies.h"
 #include "loom/analysis/symbol_facts.h"
+#include "loom/analysis/symbol_references.h"
 #include "loom/error/error_catalog.h"
 #include "loom/ir/module.h"
 #include "loom/ops/func_symbol_facts.h"
@@ -72,6 +72,9 @@ typedef struct loom_target_callgraph_context_t loom_target_callgraph_context_t;
 struct loom_target_callgraph_context_t {
   // Stable compiler-owned target resolution represented by this context.
   loom_resolved_target_t resolved_target;
+
+  // Compilation-local identity retained by every version in this context.
+  loom_target_context_ordinal_t target_context_ordinal;
 
   // Requirement applied to construct this context, or NULL for a targetless
   // root context.
@@ -165,8 +168,8 @@ typedef struct loom_target_callgraph_state_t {
   // Typed pass statistics storage.
   loom_target_callgraph_specialization_statistics_t* statistics;
 
-  // Post-authoring symbol dependency snapshot.
-  loom_symbol_dependency_table_t dependencies;
+  // Post-authoring symbol reference snapshot.
+  loom_symbol_reference_table_t references;
 
   // Lazy symbol-fact cache valid until materialization begins.
   loom_symbol_fact_table_t fact_table;
@@ -197,6 +200,9 @@ typedef struct loom_target_callgraph_state_t {
 
   // Number of entries allocated in |concrete_rows_by_symbol|.
   iree_host_size_t concrete_symbol_capacity;
+
+  // First context ordinal not carried by an existing function version.
+  iree_host_size_t next_target_context_ordinal;
 
   // True while every reachable edge has a valid materialization plan.
   bool plan_valid;
@@ -316,6 +322,7 @@ static loom_target_callgraph_context_t* loom_target_callgraph_find_root_context(
 static iree_status_t loom_target_callgraph_get_root_context(
     loom_target_callgraph_state_t* state,
     loom_resolved_target_t resolved_target,
+    loom_target_context_ordinal_t target_context_ordinal,
     const loom_target_facts_t* requirement,
     loom_target_callgraph_context_t** out_context) {
   *out_context = loom_target_callgraph_find_root_context(state, resolved_target,
@@ -327,6 +334,7 @@ static iree_status_t loom_target_callgraph_get_root_context(
                                            (void**)&context));
   *context = (loom_target_callgraph_context_t){
       .resolved_target = resolved_target,
+      .target_context_ordinal = target_context_ordinal,
       .applied_requirement = requirement,
       .next_root = state->root_contexts,
   };
@@ -360,8 +368,8 @@ loom_target_callgraph_find_derived_context(
   return NULL;
 }
 
-static const loom_target_facts_t*
-loom_target_callgraph_find_existing_equivalent_facts(
+static const loom_target_callgraph_context_t*
+loom_target_callgraph_find_existing_equivalent_context(
     const loom_target_callgraph_state_t* state,
     loom_symbol_id_t source_symbol_id,
     const loom_target_facts_t* candidate_facts) {
@@ -372,7 +380,7 @@ loom_target_callgraph_find_existing_equivalent_facts(
     if (row->existing_version != NULL &&
         loom_target_facts_are_equivalent(row->context->resolved_target.facts,
                                          candidate_facts)) {
-      return row->context->resolved_target.facts;
+      return row->context;
     }
     row_id = row->next_symbol_row_id;
   }
@@ -419,14 +427,28 @@ static iree_status_t loom_target_callgraph_derive_context(
   loom_target_facts_builder_apply_requirement(
       callee->authored_target_requirement, candidate_facts);
 
-  const loom_target_facts_t* derived_facts =
-      loom_target_callgraph_find_existing_equivalent_facts(
+  const loom_target_callgraph_context_t* existing_context =
+      loom_target_callgraph_find_existing_equivalent_context(
           state, callee_symbol_id, candidate_facts);
-  if (derived_facts == NULL) {
+  const loom_target_facts_t* derived_facts = NULL;
+  loom_target_context_ordinal_t target_context_ordinal =
+      LOOM_TARGET_CONTEXT_ORDINAL_INVALID;
+  if (existing_context != NULL) {
+    derived_facts = existing_context->resolved_target.facts;
+    target_context_ordinal = existing_context->target_context_ordinal;
+  } else {
     loom_target_facts_t* stable_facts = NULL;
     IREE_RETURN_IF_ERROR(loom_target_facts_builder_clone(
         candidate_facts, state->version_owner->arena, &stable_facts));
     derived_facts = stable_facts;
+    if (state->next_target_context_ordinal >=
+        LOOM_TARGET_CONTEXT_ORDINAL_INVALID) {
+      return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                              "target callgraph exceeds %u invocation contexts",
+                              (unsigned)LOOM_TARGET_CONTEXT_ORDINAL_INVALID);
+    }
+    target_context_ordinal =
+        (loom_target_context_ordinal_t)state->next_target_context_ordinal++;
   }
 
   loom_target_callgraph_context_t* context = NULL;
@@ -438,6 +460,7 @@ static iree_status_t loom_target_callgraph_derive_context(
               .provider = parent->resolved_target.provider,
               .facts = derived_facts,
           },
+      .target_context_ordinal = target_context_ordinal,
       .applied_requirement = callee->authored_target_requirement,
       .parent = parent,
       .next_sibling = parent->first_child,
@@ -535,11 +558,16 @@ static iree_status_t loom_target_callgraph_seed_versions(
     loom_target_function_version_t* version = loom_target_function_version_cast(
         loom_target_function_version_snapshot_handle_at(&snapshot, symbol_id));
     if (version == NULL) continue;
+    const iree_host_size_t next_target_context_ordinal =
+        (iree_host_size_t)version->target_context_ordinal + 1;
+    if (next_target_context_ordinal > state->next_target_context_ordinal) {
+      state->next_target_context_ordinal = next_target_context_ordinal;
+    }
     IREE_RETURN_IF_ERROR(
         loom_target_callgraph_prepare_symbol(state, symbol_id));
     loom_target_callgraph_context_t* context = NULL;
     IREE_RETURN_IF_ERROR(loom_target_callgraph_get_root_context(
-        state, version->resolved_target,
+        state, version->resolved_target, version->target_context_ordinal,
         state->symbols[symbol_id].authored_target_requirement, &context));
     loom_target_callgraph_row_id_t row_id =
         LOOM_TARGET_CALLGRAPH_ROW_ID_INVALID;
@@ -558,15 +586,16 @@ static iree_status_t loom_target_callgraph_plan_reachable_rows(
         state->rows[row_id].source_symbol_id;
     loom_target_callgraph_context_t* caller_context =
         state->rows[row_id].context;
-    loom_symbol_dependency_edge_id_t edge_id =
-        state->dependencies.symbols[caller_source_symbol_id]
-            .first_outgoing_edge_id;
+    loom_symbol_reference_occurrence_id_t edge_id =
+        state->references.symbols[caller_source_symbol_id]
+            .first_outgoing_occurrence_id;
     while (state->plan_valid &&
-           edge_id != LOOM_SYMBOL_DEPENDENCY_EDGE_ID_INVALID) {
-      const loom_symbol_dependency_edge_t* edge =
-          &state->dependencies.edges[edge_id];
-      edge_id = edge->next_outgoing_edge_id;
-      if (edge->kind != LOOM_SYMBOL_DEPENDENCY_EDGE_CALL ||
+           edge_id != LOOM_SYMBOL_REFERENCE_OCCURRENCE_ID_INVALID) {
+      const loom_symbol_reference_occurrence_t* edge =
+          &state->references.occurrences[edge_id];
+      edge_id = edge->next_outgoing_occurrence_id;
+      if (!loom_symbol_reference_occurrence_is_dependency(edge) ||
+          edge->kind != LOOM_SYMBOL_REFERENCE_OCCURRENCE_CALL ||
           edge->user_op == NULL) {
         continue;
       }
@@ -764,6 +793,11 @@ static iree_status_t loom_target_callgraph_prepare_materializations(
         .authored_target_name = info->authored_target_name,
         .target_requirement_facts = info->authored_target_requirement,
         .resolved_target = row->context->resolved_target,
+        .target_context_ordinal = row->context->target_context_ordinal,
+        .authored_target_is_exact = info->authored_target_requirement != NULL &&
+                                    loom_target_facts_are_equivalent(
+                                        info->authored_target_requirement,
+                                        row->context->resolved_target.facts),
         .function_target_facts = function_target_facts,
     };
     row->pending_version = version;
@@ -954,8 +988,8 @@ iree_status_t loom_target_callgraph_specialization_run(loom_pass_t* pass,
   if (state.source_symbol_count == 0 || version_owner->list.count == 0) {
     return iree_ok_status();
   }
-  IREE_RETURN_IF_ERROR(loom_symbol_dependency_table_build(module, pass->arena,
-                                                          &state.dependencies));
+  IREE_RETURN_IF_ERROR(loom_symbol_reference_table_build(module, pass->arena,
+                                                         &state.references));
   IREE_RETURN_IF_ERROR(loom_target_callgraph_seed_versions(&state));
   if (!state.plan_valid) return iree_ok_status();
   IREE_RETURN_IF_ERROR(loom_target_callgraph_plan_reachable_rows(&state));

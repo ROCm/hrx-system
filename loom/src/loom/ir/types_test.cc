@@ -263,6 +263,35 @@ TEST_F(ModuleTypesTest, RegisterValueTypeParticipatesInStructuralLifecycle) {
   EXPECT_FALSE(loom_type_equal(source, target));
 }
 
+TEST_F(ModuleTypesTest, ValueRemapComposesDiscontiguousSpans) {
+  loom_type_t source = loom_type_shaped_2d(
+      LOOM_TYPE_VECTOR, LOOM_SCALAR_TYPE_F32, loom_dim_pack_dynamic(7),
+      loom_dim_pack_dynamic(11), 0);
+  loom_type_t target = loom_type_shaped_2d(
+      LOOM_TYPE_VECTOR, LOOM_SCALAR_TYPE_F32, loom_dim_pack_dynamic(9),
+      loom_dim_pack_dynamic(13), 0);
+  loom_value_id_t source_outer[] = {7};
+  loom_value_id_t target_outer[] = {9};
+  loom_value_id_t source_inner[] = {11};
+  loom_value_id_t target_inner[] = {13};
+  const loom_type_value_remap_t inner_remap = {
+      /*.source_values=*/source_inner,
+      /*.target_values=*/target_inner,
+      /*.count=*/IREE_ARRAYSIZE(source_inner),
+  };
+  const loom_type_value_remap_t remap = {
+      /*.source_values=*/source_outer,
+      /*.target_values=*/target_outer,
+      /*.count=*/IREE_ARRAYSIZE(source_outer),
+      /*.next=*/&inner_remap,
+  };
+
+  EXPECT_TRUE(
+      loom_type_equal_after_value_remap(module_, source, target, &remap));
+  EXPECT_FALSE(
+      loom_type_equal_after_value_remap(module_, source, target, &inner_remap));
+}
+
 TEST(TypesTest, RegisterClassNamesMustBeNamespaceQualified) {
   EXPECT_TRUE(loom_register_class_name_is_qualified(IREE_SV("amdgpu.vgpr")));
   EXPECT_TRUE(

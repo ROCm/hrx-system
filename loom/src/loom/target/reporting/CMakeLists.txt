@@ -35,7 +35,7 @@ loom_cc_library(
     ::artifact_manifest
     iree::base
     iree::base::internal::arena
-    loom::analysis::symbol_dependencies
+    loom::analysis::symbol_references
     loom::ir
     loom::ops::low
     loom::ops::op_defs
@@ -166,7 +166,7 @@ loom_cc_test(
     iree::base::internal::arena
     iree::testing::gtest
     iree::testing::gtest_main
-    loom::analysis::symbol_dependencies
+    loom::analysis::symbol_references
     loom::codegen::low::text_asm
     loom::format::text::parser
     loom::ir

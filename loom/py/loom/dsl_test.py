@@ -41,6 +41,8 @@ from loom.dsl import (
     ANY_ENCODING,
     ATTR_TYPE_PARAMETERIZED,
     ATTR_TYPE_SYMBOL,
+    ATTR_TYPE_SYMBOL_ARRAY,
+    ATTR_TYPE_SYMBOL_SET,
     BUFFER,
     BY_REFERENCE,
     COMMUTATIVE,
@@ -65,6 +67,7 @@ from loom.dsl import (
     INTEGER_ELEMENT,
     INVOLUTION,
     MEMORY_FENCE,
+    MODULE_SCOPE,
     NON_DETERMINISTIC,
     OFFSET,
     POOL,
@@ -129,6 +132,7 @@ from loom.dsl import (
     HasRankOneVector,
     HasRegister,
     ImplicitTerminator,
+    KeyedModuleRecord,
     LastAxisGroupedBy,
     LegacyFieldDefault,
     LegacyFieldMapping,
@@ -161,6 +165,8 @@ from loom.dsl import (
     Successor,
     SymbolDefinition,
     SymbolKernelContract,
+    SymbolReference,
+    SymbolReferenceRole,
     TargetFactSpecialization,
     TargetLikeInterface,
     TotalBitCountEqual,
@@ -382,6 +388,46 @@ class TestAttrDef:
         AttrDef("test", "enum", enum_def=_cmpi_preds)  # enum needs enum_def.
         AttrDef("test", "enum_array", enum_def=_cmpi_preds)
         AttrDef("test", "signed_enum_set", enum_def=_cmpi_preds)
+        AttrDef(
+            "test",
+            ATTR_TYPE_SYMBOL_ARRAY,
+            symbol_ref=SymbolReference("record", ["record"]),
+        )
+        AttrDef(
+            "test",
+            ATTR_TYPE_SYMBOL_SET,
+            symbol_ref=SymbolReference("record", ["record"]),
+        )
+
+    def test_symbol_array_requires_reference_contract(self) -> None:
+        with _raises(ValueError, match="symbol_array.*requires symbol_ref"):
+            AttrDef("providers", ATTR_TYPE_SYMBOL_ARRAY)
+
+    def test_symbol_set_requires_reference_contract(self) -> None:
+        with _raises(ValueError, match="symbol_set.*requires symbol_ref"):
+            AttrDef("providers", ATTR_TYPE_SYMBOL_SET)
+
+    def test_symbol_set_cannot_be_a_parameter(self) -> None:
+        with _raises(ValueError, match="unsupported kind 'symbol_set'"):
+            ParameterizedAttrDef(
+                "test.providers",
+                group=Dialect("test"),
+                parameters=[
+                    AttrDef(
+                        "providers",
+                        ATTR_TYPE_SYMBOL_SET,
+                        symbol_ref=SymbolReference("record", ["record"]),
+                    )
+                ],
+            )
+
+    def test_symbol_reference_contract_requires_symbol_kind(self) -> None:
+        with _raises(ValueError, match="symbol_ref requires"):
+            AttrDef(
+                "providers",
+                "i64_array",
+                symbol_ref=SymbolReference("record", ["record"]),
+            )
 
     def test_open_enum_array(self) -> None:
         attr = AttrDef("modes", "enum_array", enum_def=_cmpi_preds, open_enum=True)
@@ -2388,6 +2434,35 @@ class TestOp:
         assert op.has_trait("Pure")
         assert not op.has_trait("Idempotent")
 
+    def test_keyed_module_record_contract(self) -> None:
+        op = Op(
+            "module.record",
+            attrs=[AttrDef("key", "string"), AttrDef("payload", "i64")],
+            traits=[MODULE_SCOPE, KeyedModuleRecord("key")],
+        )
+        assert op.keyed_module_record_attr == "key"
+
+    def test_keyed_module_record_requires_attr_only_module_metadata(self) -> None:
+        with _raises(ValueError, match="requires the ModuleScope trait"):
+            Op(
+                "test.record",
+                attrs=[AttrDef("key", "string")],
+                traits=[KeyedModuleRecord("key")],
+            )
+        with _raises(ValueError, match="key attr 'key' must be a required string"):
+            Op(
+                "module.record",
+                attrs=[AttrDef("key", "string", optional=True)],
+                traits=[MODULE_SCOPE, KeyedModuleRecord("key")],
+            )
+        with _raises(ValueError, match="must be attr-only"):
+            Op(
+                "module.record",
+                operands=[Operand("input", ANY)],
+                attrs=[AttrDef("key", "string")],
+                traits=[MODULE_SCOPE, KeyedModuleRecord("key")],
+            )
+
     def test_no_traits(self) -> None:
         op = Op("test.op")
         # An op with no effects, no traits, and no allocating results
@@ -2983,6 +3058,27 @@ class TestScopedEnumOp:
                 attrs=[AttrDef("descriptor", "string")],
                 format=[ScopedEnumRef("descriptor")],
             )
+
+
+class TestSymbolReference:
+    def test_defaults_to_dependency_role(self) -> None:
+        reference = SymbolReference("function", ["callable"])
+        assert reference.interfaces == ("callable",)
+        assert reference.role is SymbolReferenceRole.DEPENDENCY
+
+    def test_accepts_availability_role(self) -> None:
+        reference = SymbolReference(
+            "record", ["record"], role=SymbolReferenceRole.AVAILABILITY
+        )
+        assert reference.role is SymbolReferenceRole.AVAILABILITY
+
+    def test_accepts_unconstrained_symbol_interface(self) -> None:
+        reference = SymbolReference("symbol", [], role=SymbolReferenceRole.AVAILABILITY)
+        assert reference.interfaces == ()
+
+    def test_rejects_untyped_role(self) -> None:
+        with _raises(ValueError, match="role must be a SymbolReferenceRole"):
+            SymbolReference("record", ["record"], role="availability")  # type: ignore[arg-type]
 
 
 class TestSymbolKernelContract:

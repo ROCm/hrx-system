@@ -99,6 +99,16 @@ typedef struct loom_verify_state_t {
     iree_host_size_t word_count;
   } static_encodings;
 
+  // Module symbols named by top-level availability metadata. An unresolved
+  // dependency is valid when its symbol is available from an external source.
+  struct {
+    // Dense bitset indexed by module symbol ID.
+    uint64_t* bits;
+
+    // Number of allocated words in bits.
+    iree_host_size_t word_count;
+  } available_symbols;
+
   // Scratch arena for all verification-time allocations.
   iree_arena_allocator_t arena;
 

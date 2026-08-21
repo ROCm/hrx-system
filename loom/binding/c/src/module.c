@@ -23,7 +23,7 @@
 #include "loom/format/text/parser.h"
 #include "loom/format/text/printer.h"
 #include "loom/ir/function_version.h"
-#include "loom/target/module_sealing.h"
+#include "loom/target/function_version_projection.h"
 #include "loomc/iree.h"
 #include "result.h"
 #include "source.h"
@@ -89,7 +89,7 @@ typedef struct loomc_module_ir_projection_t {
   // Module to serialize, borrowing the source or owned by this projection.
   const loom_module_t* module;
 
-  // Derived sealed module, or NULL when the source is already self-contained.
+  // Derived projected module, or NULL when the source is self-contained.
   loom_module_t* owned_module;
 
   // Block pool backing |owned_module| while it is live.
@@ -153,9 +153,11 @@ static loomc_status_t loomc_module_ir_projection_initialize(
   iree_arena_block_pool_initialize(LOOMC_MODULE_SERIALIZE_BLOCK_SIZE,
                                    iree_allocator_from_loomc(allocator),
                                    &out_projection->block_pool);
-  loomc_status_t status = loomc_status_from_iree(loom_target_module_seal(
-      source_internal_module, function_versions, &out_projection->block_pool,
-      iree_allocator_from_loomc(allocator), &out_projection->owned_module));
+  loomc_status_t status =
+      loomc_status_from_iree(loom_target_function_versions_project_module(
+          source_internal_module, function_versions,
+          &out_projection->block_pool, iree_allocator_from_loomc(allocator),
+          &out_projection->owned_module));
   if (loomc_status_is_ok(status)) {
     out_projection->module = out_projection->owned_module;
   } else {
@@ -959,10 +961,12 @@ loomc_status_t loomc_module_clone(const loomc_module_t* source_module,
   loomc_status_t status = loomc_module_create_empty(
       source_module->context, workspace, allocator, &module);
   if (loomc_status_is_ok(status)) {
-    status = loomc_status_from_iree(loom_target_module_seal(
-        source_internal_module, loomc_module_function_versions(source_module),
-        loomc_module_block_pool(module), iree_allocator_from_loomc(allocator),
-        &cloned_internal_module));
+    status =
+        loomc_status_from_iree(loom_target_function_versions_project_module(
+            source_internal_module,
+            loomc_module_function_versions(source_module),
+            loomc_module_block_pool(module),
+            iree_allocator_from_loomc(allocator), &cloned_internal_module));
   }
   if (loomc_status_is_ok(status)) {
     status = loomc_module_set_loom_module(module, cloned_internal_module);

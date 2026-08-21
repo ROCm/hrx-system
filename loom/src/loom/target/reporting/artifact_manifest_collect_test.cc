@@ -11,7 +11,7 @@
 #include "iree/base/internal/arena.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
-#include "loom/analysis/symbol_dependencies.h"
+#include "loom/analysis/symbol_references.h"
 #include "loom/codegen/low/text_asm.h"
 #include "loom/format/text/parser.h"
 #include "loom/ir/context.h"
@@ -80,9 +80,9 @@ class ArtifactManifestCollectTest : public ::testing::Test {
     return ModulePtr(module);
   }
 
-  iree_status_t SelectEntriesAndBuildDependencies(
+  iree_status_t SelectEntriesAndBuildReferences(
       const loom_module_t* module, loom_target_entry_list_t* out_entries,
-      loom_symbol_dependency_table_t* out_dependencies) {
+      loom_symbol_reference_table_t* out_references) {
     loom_target_entry_options_t options = {};
     loom_target_entry_diagnostic_emitter_t diagnostic_emitter = {};
     loom_target_entry_diagnostic_emitter_initialize(
@@ -98,8 +98,8 @@ class ArtifactManifestCollectTest : public ::testing::Test {
       return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                               "expected exported entries");
     }
-    return loom_symbol_dependency_table_build(module, &analysis_arena_,
-                                              out_dependencies);
+    return loom_symbol_reference_table_build(module, &analysis_arena_,
+                                             out_references);
   }
 
   iree_string_view_t CollectAndFormat(
@@ -108,12 +108,12 @@ class ArtifactManifestCollectTest : public ::testing::Test {
       loom_target_artifact_manifest_mode_t format_mode,
       iree_string_builder_t* builder) {
     loom_target_entry_list_t entries;
-    loom_symbol_dependency_table_t dependencies;
+    loom_symbol_reference_table_t references;
     IREE_CHECK_OK(
-        SelectEntriesAndBuildDependencies(module, &entries, &dependencies));
+        SelectEntriesAndBuildReferences(module, &entries, &references));
     loom_target_artifact_manifest_t manifest;
     IREE_CHECK_OK(loom_target_artifact_manifest_collect_from_entries(
-        module, entries, &dependencies, collect_options, &analysis_arena_,
+        module, entries, &references, collect_options, &analysis_arena_,
         &manifest));
 
     iree_string_builder_initialize(iree_allocator_system(), builder);
@@ -519,7 +519,7 @@ TEST_F(ArtifactManifestCollectTest, NoneModeLeavesManifestEmpty) {
   loom_target_artifact_manifest_t manifest;
   IREE_ASSERT_OK(loom_target_artifact_manifest_collect_from_entries(
       /*module=*/nullptr, loom_target_entry_list_t{},
-      /*dependency_table=*/nullptr, &options, /*arena=*/nullptr, &manifest));
+      /*reference_table=*/nullptr, &options, /*arena=*/nullptr, &manifest));
   EXPECT_TRUE(iree_string_view_is_empty(manifest.artifact.format));
   EXPECT_EQ(manifest.function_count, 0u);
   EXPECT_EQ(manifest.global_count, 0u);

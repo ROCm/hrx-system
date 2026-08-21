@@ -4,23 +4,25 @@
 // AMDGPU, SPIR-V, or another backend that projects a subgroup-size fact.
 // Both specialized providers and the fallback implement the same contract:
 // double one i32 value. Selection changes the implementation, not semantics.
-func.template<hip.recipe.scale_i32> requires [#target.subgroup.size<64>] priority(20) @scale_i32_subgroup_64(%value: i32) -> (i32) {
+template.decl @hip.recipe.scale_i32(%value: i32) -> (i32)
+
+template.def<@hip.recipe.scale_i32> requires [#target.subgroup.size<64>] priority(20) @scale_i32_subgroup_64(%value: i32) -> (i32) {
   %scale_factor = scalar.constant 2 : i32
   %scaled = scalar.muli %value, %scale_factor : i32
-  func.return %scaled : i32
+  template.return %scaled : i32
 }
 
-func.template<hip.recipe.scale_i32> requires [#target.subgroup.size<32>] priority(20) @scale_i32_subgroup_32(%value: i32) -> (i32) {
+template.def<@hip.recipe.scale_i32> requires [#target.subgroup.size<32>] priority(20) @scale_i32_subgroup_32(%value: i32) -> (i32) {
   %scaled = scalar.addi %value, %value : i32
-  func.return %scaled : i32
+  template.return %scaled : i32
 }
 
 // A correct fallback keeps the library usable when subgroup size is unknown or
 // neither specialized size applies.
-func.template<hip.recipe.scale_i32> priority(1) @scale_i32_fallback(%value: i32) -> (i32) {
+template.def<@hip.recipe.scale_i32> priority(1) @scale_i32_fallback(%value: i32) -> (i32) {
   %shift = scalar.constant 1 : i32
   %scaled = scalar.shli %value, %shift : i32
-  func.return %scaled : i32
+  template.return %scaled : i32
 }
 
 // The source does not select a backend or processor. A live JIT projects facts
@@ -36,7 +38,7 @@ kernel.def @selects_subgroup_provider() {
   %input_view = buffer.view %input[%base] : buffer -> view<1xi32>
   %output_view = buffer.view %output[%base] : buffer -> view<1xi32>
   %value = view.load %input_view[%element_index] : view<1xi32> -> i32
-  %scaled = func.apply<hip.recipe.scale_i32>(%value) : (i32) -> (i32)
+  %scaled = template.apply<@hip.recipe.scale_i32>(%value) : (i32) -> (i32)
   view.store %scaled, %output_view[%element_index] : i32, view<1xi32>
   kernel.return
 }

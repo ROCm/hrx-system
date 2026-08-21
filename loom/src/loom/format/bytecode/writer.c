@@ -8,10 +8,13 @@
 
 #include <string.h>
 
+#include "loom/analysis/symbol_references.h"
 #include "loom/format/bytecode/varint.h"
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
+#include "loom/ir/module_record.h"
 #include "loom/ir/parameterized_type.h"
+#include "loom/ops/module/ops.h"
 #include "loom/ops/op_defs.h"
 
 #define LOOM_BYTECODE_DEFAULT_PRODUCER "loom-c"
@@ -373,6 +376,14 @@ typedef struct loom_bytecode_numbering_t {
   // Representation contract selected once for the function being numbered.
   const loom_low_repr_descriptor_set_t* active_low_descriptor_set;
 
+  // Bidirectional symbol order used by every ordinal-bearing wire section.
+  struct {
+    // Module symbol IDs indexed by presentation-ordered wire ordinal.
+    loom_symbol_id_t* module_ids;
+    // Presentation-ordered wire ordinals indexed by module symbol ID.
+    loom_symbol_id_t* wire_ordinals;
+  } symbol_order;
+
   // Writer string ID to string view table for the STRINGS section.
   iree_string_view_t* string_entries;
   // Number of writer strings assigned.
@@ -410,6 +421,21 @@ typedef struct loom_bytecode_numbering_t {
   // Allocated capacity of op_entries.
   iree_host_size_t op_capacity;
 } loom_bytecode_numbering_t;
+
+// Returns the module symbol ID assigned to |wire_ordinal|.
+static loom_symbol_id_t loom_bytecode_module_symbol_id(
+    const loom_bytecode_numbering_t* numbering, loom_symbol_id_t wire_ordinal) {
+  IREE_ASSERT(wire_ordinal < numbering->module->symbols.count);
+  return numbering->symbol_order.module_ids[wire_ordinal];
+}
+
+// Returns the wire ordinal assigned to |module_symbol_id|.
+static loom_symbol_id_t loom_bytecode_wire_symbol_ordinal(
+    const loom_bytecode_numbering_t* numbering,
+    loom_symbol_id_t module_symbol_id) {
+  IREE_ASSERT(module_symbol_id < numbering->module->symbols.count);
+  return numbering->symbol_order.wire_ordinals[module_symbol_id];
+}
 
 static uint32_t loom_bytecode_type_hash_mix_bytes(uint32_t hash,
                                                   const void* data,
@@ -824,6 +850,60 @@ static iree_status_t loom_bytecode_numbering_append_string(
   return iree_ok_status();
 }
 
+// Builds the stable module-ID to presentation-ordered wire-ordinal mapping.
+static iree_status_t loom_bytecode_numbering_initialize_symbol_order(
+    loom_bytecode_numbering_t* numbering) {
+  const loom_module_t* module = numbering->module;
+  if (module->symbols.count == 0) {
+    return iree_ok_status();
+  }
+
+  // Both directions share one dense arena allocation. Symbol IDs are bounded
+  // below LOOM_SYMBOL_ID_INVALID by module construction.
+  loom_symbol_id_t* storage = NULL;
+  IREE_RETURN_IF_ERROR(
+      iree_arena_allocate_array(numbering->arena, module->symbols.count,
+                                2 * sizeof(*storage), (void**)&storage));
+  numbering->symbol_order.module_ids = storage;
+  numbering->symbol_order.wire_ordinals = storage + module->symbols.count;
+  memset(numbering->symbol_order.wire_ordinals, 0xFF,
+         module->symbols.count * sizeof(*storage));
+
+  loom_symbol_id_t wire_ordinal = 0;
+  const loom_block_t* module_block =
+      loom_region_const_entry_block(module->body);
+  const loom_op_t* op = NULL;
+  loom_block_for_each_op(module_block, op) {
+    loom_symbol_ref_t symbol_ref = loom_symbol_ref_null();
+    if (!loom_op_defining_symbol_ref(module, op, &symbol_ref)) {
+      continue;
+    }
+    if (module->symbols.entries[symbol_ref.symbol_id].defining_op != op) {
+      continue;
+    }
+    IREE_ASSERT_EQ(numbering->symbol_order.wire_ordinals[symbol_ref.symbol_id],
+                   LOOM_SYMBOL_ID_INVALID);
+    numbering->symbol_order.module_ids[wire_ordinal] = symbol_ref.symbol_id;
+    numbering->symbol_order.wire_ordinals[symbol_ref.symbol_id] = wire_ordinal;
+    ++wire_ordinal;
+  }
+
+  // Symbols without a live top-level defining op have no physical presentation
+  // anchor. Preserve their stable module-table order after all definitions.
+  for (loom_symbol_id_t module_symbol_id = 0;
+       module_symbol_id < module->symbols.count; ++module_symbol_id) {
+    if (numbering->symbol_order.wire_ordinals[module_symbol_id] !=
+        LOOM_SYMBOL_ID_INVALID) {
+      continue;
+    }
+    numbering->symbol_order.module_ids[wire_ordinal] = module_symbol_id;
+    numbering->symbol_order.wire_ordinals[module_symbol_id] = wire_ordinal;
+    ++wire_ordinal;
+  }
+  IREE_ASSERT_EQ(wire_ordinal, module->symbols.count);
+  return iree_ok_status();
+}
+
 // Initializes the numbering context. All allocations come from |arena|,
 // which the caller owns. No individual frees needed — the arena handles
 // bulk deallocation.
@@ -833,6 +913,8 @@ static iree_status_t loom_bytecode_numbering_initialize(
   memset(numbering, 0, sizeof(*numbering));
   numbering->module = module;
   numbering->arena = arena;
+  IREE_RETURN_IF_ERROR(
+      loom_bytecode_numbering_initialize_symbol_order(numbering));
 
   // Module string map: parallel array for O(1) module_string_id → writer_id.
   if (module->strings.count > 0) {
@@ -1410,6 +1492,34 @@ static iree_status_t loom_bytecode_get_signed_enum_set(
   return iree_ok_status();
 }
 
+static iree_status_t loom_bytecode_get_symbol_collection(
+    const loom_bytecode_numbering_t* numbering, loom_attribute_t attr,
+    const loom_attr_descriptor_t* descriptor,
+    loom_symbol_ref_array_t* out_array) {
+  if (!descriptor || descriptor->attr_kind != attr.kind) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "symbol collections require a descriptor-backed field");
+  }
+  if (attr.count > 0 && !attr.symbol_refs) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "symbol collection has nonzero count but NULL references");
+  }
+  *out_array = loom_make_symbol_ref_array(attr.symbol_refs, attr.count);
+  for (iree_host_size_t i = 0; i < out_array->count; ++i) {
+    const loom_symbol_ref_t ref = out_array->values[i];
+    if (!loom_symbol_ref_is_valid(ref) || ref.module_id != 0 ||
+        ref.symbol_id >= numbering->module->symbols.count) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "symbol collection reference %" PRIhsz
+                              " is not a local module symbol",
+                              i);
+    }
+  }
+  return iree_ok_status();
+}
+
 static iree_status_t loom_bytecode_get_parameterized_attr(
     const loom_bytecode_numbering_t* numbering, loom_attribute_t attr,
     const loom_attr_descriptor_t* descriptor,
@@ -1605,6 +1715,19 @@ static iree_status_t loom_bytecode_number_attr_value_at_depth(
           ref.symbol_id < numbering->module->symbols.count) {
         const loom_symbol_t* target_symbol =
             &numbering->module->symbols.entries[ref.symbol_id];
+        IREE_RETURN_IF_ERROR(loom_bytecode_numbering_intern_module_string(
+            numbering, target_symbol->name_id, &unused_id));
+      }
+      break;
+    }
+    case LOOM_ATTR_SYMBOL_ARRAY:
+    case LOOM_ATTR_SYMBOL_SET: {
+      loom_symbol_ref_array_t array = loom_symbol_ref_array_empty();
+      IREE_RETURN_IF_ERROR(loom_bytecode_get_symbol_collection(
+          numbering, attr, descriptor, &array));
+      for (iree_host_size_t i = 0; i < array.count; ++i) {
+        const loom_symbol_t* target_symbol =
+            &numbering->module->symbols.entries[array.values[i].symbol_id];
         IREE_RETURN_IF_ERROR(loom_bytecode_numbering_intern_module_string(
             numbering, target_symbol->name_id, &unused_id));
       }
@@ -2335,11 +2458,14 @@ static iree_status_t loom_bytecode_symbol_kind_byte(loom_symbol_kind_t kind,
     case LOOM_SYMBOL_FUNC_DECL:
       *out_byte = LOOM_BYTECODE_SYMBOL_FUNC_DECL;
       return iree_ok_status();
-    case LOOM_SYMBOL_FUNC_TEMPLATE:
-      *out_byte = LOOM_BYTECODE_SYMBOL_FUNC_TEMPLATE;
+    case LOOM_SYMBOL_TEMPLATE_DECL:
+      *out_byte = LOOM_BYTECODE_SYMBOL_TEMPLATE_DECL;
       return iree_ok_status();
-    case LOOM_SYMBOL_FUNC_UKERNEL:
-      *out_byte = LOOM_BYTECODE_SYMBOL_FUNC_UKERNEL;
+    case LOOM_SYMBOL_TEMPLATE_DEF:
+      *out_byte = LOOM_BYTECODE_SYMBOL_TEMPLATE_DEF;
+      return iree_ok_status();
+    case LOOM_SYMBOL_TEMPLATE_UKERNEL:
+      *out_byte = LOOM_BYTECODE_SYMBOL_TEMPLATE_UKERNEL;
       return iree_ok_status();
     case LOOM_SYMBOL_GLOBAL:
       *out_byte = LOOM_BYTECODE_SYMBOL_GLOBAL;
@@ -2349,6 +2475,9 @@ static iree_status_t loom_bytecode_symbol_kind_byte(loom_symbol_kind_t kind,
       return iree_ok_status();
     case LOOM_SYMBOL_RECORD:
       *out_byte = LOOM_BYTECODE_SYMBOL_RECORD;
+      return iree_ok_status();
+    case LOOM_SYMBOL_NONE:
+      *out_byte = LOOM_BYTECODE_SYMBOL_ANCHOR;
       return iree_ok_status();
     default:
       break;
@@ -2443,9 +2572,11 @@ static iree_status_t loom_bytecode_count_serialized_bodies(
       .block_count = 0,
       .op_count = 0,
   };
-  for (iree_host_size_t symbol_index = 0; symbol_index < module->symbols.count;
-       ++symbol_index) {
-    const loom_symbol_t* symbol = &module->symbols.entries[symbol_index];
+  for (loom_symbol_id_t wire_ordinal = 0; wire_ordinal < module->symbols.count;
+       ++wire_ordinal) {
+    const loom_symbol_id_t module_symbol_id =
+        loom_bytecode_module_symbol_id(numbering, wire_ordinal);
+    const loom_symbol_t* symbol = &module->symbols.entries[module_symbol_id];
     loom_symbol_kind_t bytecode_kind = loom_symbol_bytecode_kind(symbol);
     bool is_function_like =
         loom_symbol_implements(symbol, LOOM_SYMBOL_INTERFACE_FUNC_LIKE) ||
@@ -2759,6 +2890,28 @@ static iree_status_t loom_bytecode_write_attr_value_at_depth(
           writer, LOOM_BYTECODE_ATTR_SYMBOL));
       IREE_RETURN_IF_ERROR(
           loom_bytecode_page_writer_write_uvarint(writer, string_writer_id));
+      break;
+    }
+    case LOOM_ATTR_SYMBOL_ARRAY:
+    case LOOM_ATTR_SYMBOL_SET: {
+      loom_symbol_ref_array_t array = loom_symbol_ref_array_empty();
+      IREE_RETURN_IF_ERROR(loom_bytecode_get_symbol_collection(
+          numbering, attr, descriptor, &array));
+      IREE_RETURN_IF_ERROR(loom_bytecode_page_writer_write_u8(
+          writer, attr.kind == LOOM_ATTR_SYMBOL_SET
+                      ? LOOM_BYTECODE_ATTR_SYMBOL_SET
+                      : LOOM_BYTECODE_ATTR_SYMBOL_ARRAY));
+      IREE_RETURN_IF_ERROR(
+          loom_bytecode_page_writer_write_uvarint(writer, array.count));
+      for (iree_host_size_t i = 0; i < array.count; ++i) {
+        const loom_symbol_t* target =
+            &numbering->module->symbols.entries[array.values[i].symbol_id];
+        uint32_t string_writer_id = 0;
+        IREE_RETURN_IF_ERROR(loom_bytecode_numbering_intern_module_string(
+            numbering, target->name_id, &string_writer_id));
+        IREE_RETURN_IF_ERROR(
+            loom_bytecode_page_writer_write_uvarint(writer, string_writer_id));
+      }
       break;
     }
     case LOOM_ATTR_TYPE: {
@@ -3095,6 +3248,27 @@ static iree_status_t loom_bytecode_emit_attr_value_at_depth(
           loom_bytecode_emit_u8(builder, LOOM_BYTECODE_ATTR_SYMBOL));
       IREE_RETURN_IF_ERROR(
           loom_bytecode_emit_uvarint(builder, string_writer_id));
+      break;
+    }
+    case LOOM_ATTR_SYMBOL_ARRAY:
+    case LOOM_ATTR_SYMBOL_SET: {
+      loom_symbol_ref_array_t array = loom_symbol_ref_array_empty();
+      IREE_RETURN_IF_ERROR(loom_bytecode_get_symbol_collection(
+          numbering, attr, descriptor, &array));
+      IREE_RETURN_IF_ERROR(loom_bytecode_emit_u8(
+          builder, attr.kind == LOOM_ATTR_SYMBOL_SET
+                       ? LOOM_BYTECODE_ATTR_SYMBOL_SET
+                       : LOOM_BYTECODE_ATTR_SYMBOL_ARRAY));
+      IREE_RETURN_IF_ERROR(loom_bytecode_emit_uvarint(builder, array.count));
+      for (iree_host_size_t i = 0; i < array.count; ++i) {
+        const loom_symbol_t* target =
+            &numbering->module->symbols.entries[array.values[i].symbol_id];
+        uint32_t string_writer_id = 0;
+        IREE_RETURN_IF_ERROR(loom_bytecode_numbering_intern_module_string(
+            numbering, target->name_id, &string_writer_id));
+        IREE_RETURN_IF_ERROR(
+            loom_bytecode_emit_uvarint(builder, string_writer_id));
+      }
       break;
     }
     case LOOM_ATTR_TYPE: {
@@ -3514,9 +3688,11 @@ static iree_status_t loom_bytecode_write_ir_section(
   const loom_module_t* module = numbering->module;
   iree_host_size_t section_start = page_writer->total_written;
 
-  for (iree_host_size_t symbol_index = 0; symbol_index < module->symbols.count;
-       ++symbol_index) {
-    const loom_symbol_t* symbol = &module->symbols.entries[symbol_index];
+  for (loom_symbol_id_t wire_ordinal = 0; wire_ordinal < module->symbols.count;
+       ++wire_ordinal) {
+    const loom_symbol_id_t module_symbol_id =
+        loom_bytecode_module_symbol_id(numbering, wire_ordinal);
+    const loom_symbol_t* symbol = &module->symbols.entries[module_symbol_id];
     loom_symbol_kind_t bytecode_kind = loom_symbol_bytecode_kind(symbol);
     bool is_function_like =
         loom_symbol_implements(symbol, LOOM_SYMBOL_INTERFACE_FUNC_LIKE) ||
@@ -3525,8 +3701,8 @@ static iree_status_t loom_bytecode_write_ir_section(
         loom_symbol_implements(symbol, LOOM_SYMBOL_INTERFACE_RECORD) ||
         bytecode_kind == LOOM_SYMBOL_RECORD;
     if (!symbol->defining_op) {
-      ir_offsets[symbol_index].offset = 0;
-      ir_offsets[symbol_index].length = 0;
+      ir_offsets[module_symbol_id].offset = 0;
+      ir_offsets[module_symbol_id].length = 0;
       continue;
     }
 
@@ -3537,14 +3713,14 @@ static iree_status_t loom_bytecode_write_ir_section(
       loom_func_like_t func_like =
           loom_func_like_cast(module, symbol->defining_op);
       if (!loom_func_like_isa(func_like)) {
-        ir_offsets[symbol_index].offset = 0;
-        ir_offsets[symbol_index].length = 0;
+        ir_offsets[module_symbol_id].offset = 0;
+        ir_offsets[module_symbol_id].length = 0;
         continue;
       }
       root_region_count = loom_bytecode_count_root_regions(func_like.op);
       if (root_region_count == 0) {
-        ir_offsets[symbol_index].offset = 0;
-        ir_offsets[symbol_index].length = 0;
+        ir_offsets[module_symbol_id].offset = 0;
+        ir_offsets[module_symbol_id].length = 0;
         continue;
       }
       first_region_index = func_like.vtable->body_region_index;
@@ -3568,8 +3744,8 @@ static iree_status_t loom_bytecode_write_ir_section(
     } else if (is_record && symbol->defining_op->region_count == 1) {
       root_region_count = loom_bytecode_count_root_regions(symbol->defining_op);
       if (root_region_count == 0) {
-        ir_offsets[symbol_index].offset = 0;
-        ir_offsets[symbol_index].length = 0;
+        ir_offsets[module_symbol_id].offset = 0;
+        ir_offsets[module_symbol_id].length = 0;
         continue;
       }
 
@@ -3577,8 +3753,8 @@ static iree_status_t loom_bytecode_write_ir_section(
       IREE_RETURN_IF_ERROR(
           loom_bytecode_number_record(numbering, symbol->defining_op));
     } else {
-      ir_offsets[symbol_index].offset = 0;
-      ir_offsets[symbol_index].length = 0;
+      ir_offsets[module_symbol_id].offset = 0;
+      ir_offsets[module_symbol_id].length = 0;
       continue;
     }
 
@@ -3649,8 +3825,8 @@ static iree_status_t loom_bytecode_write_ir_section(
                               " exceeds uint32 maximum",
                               body_length);
     }
-    ir_offsets[symbol_index].offset = body_start - section_start;
-    ir_offsets[symbol_index].length = (uint32_t)body_length;
+    ir_offsets[module_symbol_id].offset = body_start - section_start;
+    ir_offsets[module_symbol_id].length = (uint32_t)body_length;
   }
 
   return iree_ok_status();
@@ -3673,10 +3849,8 @@ static bool loom_bytecode_func_metadata_attr_is_shared(
       attr_index == func_like->predicates_attr_index) {
     return true;
   }
-  if ((vtable->symbol_kind == LOOM_SYMBOL_FUNC_TEMPLATE ||
-       vtable->symbol_kind == LOOM_SYMBOL_FUNC_UKERNEL) &&
-      (attr_index == func_like->implements_attr_index ||
-       attr_index == func_like->priority_attr_index)) {
+  if (attr_index == func_like->template_family_attr_index ||
+      attr_index == func_like->priority_attr_index) {
     return true;
   }
   return false;
@@ -3842,23 +4016,21 @@ static iree_status_t loom_bytecode_write_func_metadata(
     }
   }
 
-  // Template/ukernel dispatch metadata: the name of the op kind this function
-  // provides an implementation for, and its matching priority. Written only
-  // for templates and ukernels; absent for def/decl.
-  const loom_op_vtable_t* vtable = loom_op_vtable(module, func_like.op);
-  loom_string_id_t implements_id = loom_func_like_implements(func_like);
-  if (vtable->symbol_kind == LOOM_SYMBOL_FUNC_TEMPLATE ||
-      vtable->symbol_kind == LOOM_SYMBOL_FUNC_UKERNEL) {
-    if (implements_id == LOOM_STRING_ID_INVALID) {
+  // Template provider metadata references the family by module-local symbol
+  // ordinal. This preserves symbol identity across private families and lets
+  // selected materialization project the reference without string lookup.
+  loom_symbol_ref_t template_family = loom_func_like_template_family(func_like);
+  if (func_like.vtable->template_family_attr_index != LOOM_ATTR_INDEX_NONE) {
+    if (!loom_symbol_ref_is_valid(template_family) ||
+        template_family.module_id != 0 ||
+        template_family.symbol_id >= module->symbols.count) {
       return iree_make_status(
           IREE_STATUS_INVALID_ARGUMENT,
-          "template/ukernel function symbol must have implements metadata");
+          "template provider symbol must reference a module-local family");
     }
-    uint32_t implements_string_id = 0;
-    IREE_RETURN_IF_ERROR(loom_bytecode_numbering_intern_module_string(
-        numbering, implements_id, &implements_string_id));
-    IREE_RETURN_IF_ERROR(
-        loom_bytecode_emit_uvarint(builder, implements_string_id));
+    IREE_RETURN_IF_ERROR(loom_bytecode_emit_uvarint(
+        builder, loom_bytecode_wire_symbol_ordinal(numbering,
+                                                   template_family.symbol_id)));
     IREE_RETURN_IF_ERROR(loom_bytecode_emit_uvarint(
         builder, (uint64_t)loom_func_like_priority(func_like)));
   }
@@ -4147,9 +4319,11 @@ static iree_status_t loom_bytecode_write_symbols_section(
   uint32_t import_index = 0;
   uint32_t export_index = 0;
 
-  for (iree_host_size_t symbol_index = 0; symbol_index < module->symbols.count;
-       ++symbol_index) {
-    const loom_symbol_t* symbol = &module->symbols.entries[symbol_index];
+  for (loom_symbol_id_t wire_ordinal = 0; wire_ordinal < module->symbols.count;
+       ++wire_ordinal) {
+    const loom_symbol_id_t module_symbol_id =
+        loom_bytecode_module_symbol_id(numbering, wire_ordinal);
+    const loom_symbol_t* symbol = &module->symbols.entries[module_symbol_id];
     loom_bytecode_symbol_linkage_t linkage;
     IREE_RETURN_IF_ERROR(
         loom_bytecode_symbol_linkage(module, symbol, &linkage));
@@ -4247,7 +4421,7 @@ static iree_status_t loom_bytecode_write_symbols_section(
                                                  numbering->arena);
         IREE_RETURN_IF_ERROR(loom_bytecode_write_func_metadata(
             builder, numbering, module, func_like, &signature_numbering,
-            ir_offsets[symbol_index]));
+            ir_offsets[module_symbol_id]));
       }
     } else if (has_global_metadata && symbol->defining_op) {
       loom_bytecode_value_numbering_t signature_numbering;
@@ -4259,10 +4433,263 @@ static iree_status_t loom_bytecode_write_symbols_section(
     } else if (has_record_metadata && symbol->defining_op) {
       IREE_RETURN_IF_ERROR(loom_bytecode_write_record_metadata(
           builder, numbering, module, symbol->defining_op,
-          ir_offsets[symbol_index]));
+          ir_offsets[module_symbol_id]));
     }
   }
 
+  return iree_ok_status();
+}
+
+typedef struct loom_bytecode_provider_import_plan_t {
+  // First module.import row in the canonical module record plan.
+  iree_host_size_t first_record_index;
+  // Number of contiguous module.import rows.
+  iree_host_size_t provider_count;
+  // Total anchors across all providers.
+  uint32_t anchor_count;
+  // Writer STRINGS ordinals in canonical provider order.
+  uint32_t* provider_string_ids;
+} loom_bytecode_provider_import_plan_t;
+
+static iree_status_t loom_bytecode_provider_import_plan_initialize(
+    const loom_module_t* module, const loom_module_record_plan_t* record_plan,
+    iree_arena_allocator_t* arena,
+    loom_bytecode_provider_import_plan_t* out_plan) {
+  *out_plan = (loom_bytecode_provider_import_plan_t){0};
+  uint64_t* anchor_usage_bits = NULL;
+  const loom_module_record_t* previous_import = NULL;
+  for (iree_host_size_t i = 0; i < record_plan->record_count; ++i) {
+    const loom_module_record_t* record = &record_plan->records[i];
+    if (!loom_module_import_isa(record->op)) continue;
+    if (out_plan->provider_count == 0) {
+      out_plan->first_record_index = i;
+      const iree_host_size_t usage_word_count =
+          (module->symbols.count + 63) / 64;
+      if (usage_word_count > 0) {
+        IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+            arena, usage_word_count, sizeof(*anchor_usage_bits),
+            (void**)&anchor_usage_bits));
+        memset(anchor_usage_bits, 0,
+               usage_word_count * sizeof(*anchor_usage_bits));
+      }
+    }
+    if (previous_import &&
+        iree_string_view_equal(previous_import->key, record->key)) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "duplicate module.import provider %.*s",
+                              (int)record->key.size, record->key.data);
+    }
+    previous_import = record;
+
+    loom_symbol_ref_array_t anchors = loom_module_import_symbols(record->op);
+    if (anchors.count > UINT32_MAX - out_plan->anchor_count) {
+      return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                              "provider anchor count exceeds UINT32_MAX");
+    }
+    out_plan->anchor_count += anchors.count;
+    for (uint16_t anchor_index = 0; anchor_index < anchors.count;
+         ++anchor_index) {
+      const loom_symbol_ref_t anchor = anchors.values[anchor_index];
+      if (anchor.module_id != 0 || anchor.symbol_id >= module->symbols.count) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "module.import provider %.*s has invalid symbol anchor %u:%u",
+            (int)record->key.size, record->key.data, anchor.module_id,
+            anchor.symbol_id);
+      }
+      anchor_usage_bits[anchor.symbol_id / 64] |= UINT64_C(1)
+                                                  << (anchor.symbol_id % 64);
+    }
+    ++out_plan->provider_count;
+  }
+
+  for (iree_host_size_t i = 0; i < module->symbols.count; ++i) {
+    const loom_symbol_t* symbol = &module->symbols.entries[i];
+    if (loom_symbol_bytecode_kind(symbol) != LOOM_SYMBOL_NONE) continue;
+    const bool has_unresolved_shape = symbol->definition == NULL &&
+                                      symbol->defining_op == NULL &&
+                                      symbol->flags == 0;
+    const bool is_provider_anchor =
+        anchor_usage_bits &&
+        iree_any_bit_set(anchor_usage_bits[i / 64], UINT64_C(1) << (i % 64));
+    if (!has_unresolved_shape || !is_provider_anchor) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "symbol %" PRIhsz
+          " with no bytecode payload is not an unresolved provider anchor",
+          i);
+    }
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t loom_bytecode_number_provider_imports(
+    loom_bytecode_numbering_t* numbering,
+    const loom_module_record_plan_t* record_plan,
+    loom_bytecode_provider_import_plan_t* provider_plan) {
+  if (provider_plan->provider_count == 0) return iree_ok_status();
+  IREE_RETURN_IF_ERROR(
+      iree_arena_allocate_array(numbering->arena, provider_plan->provider_count,
+                                sizeof(*provider_plan->provider_string_ids),
+                                (void**)&provider_plan->provider_string_ids));
+  for (iree_host_size_t i = 0; i < provider_plan->provider_count; ++i) {
+    const loom_module_record_t* record =
+        &record_plan->records[provider_plan->first_record_index + i];
+    IREE_RETURN_IF_ERROR(loom_bytecode_numbering_intern_module_string(
+        numbering, loom_module_import_provider(record->op),
+        &provider_plan->provider_string_ids[i]));
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t loom_bytecode_write_provider_imports_section(
+    loom_bytecode_page_writer_t* page_writer,
+    const loom_bytecode_numbering_t* numbering,
+    const loom_module_record_plan_t* record_plan,
+    const loom_bytecode_provider_import_plan_t* provider_plan) {
+  const loom_module_t* module = numbering->module;
+  IREE_RETURN_IF_ERROR(loom_bytecode_page_writer_write_uvarint(
+      page_writer, provider_plan->provider_count));
+  IREE_RETURN_IF_ERROR(loom_bytecode_page_writer_write_uvarint(
+      page_writer, provider_plan->anchor_count));
+  for (iree_host_size_t i = 0; i < provider_plan->provider_count; ++i) {
+    const loom_module_record_t* record =
+        &record_plan->records[provider_plan->first_record_index + i];
+
+    IREE_RETURN_IF_ERROR(loom_bytecode_page_writer_write_uvarint(
+        page_writer, provider_plan->provider_string_ids[i]));
+
+    loom_symbol_ref_array_t anchors = loom_module_import_symbols(record->op);
+    IREE_RETURN_IF_ERROR(
+        loom_bytecode_page_writer_write_uvarint(page_writer, anchors.count));
+    for (uint16_t anchor_index = 0; anchor_index < anchors.count;
+         ++anchor_index) {
+      IREE_RETURN_IF_ERROR(loom_bytecode_page_writer_write_uvarint(
+          page_writer, loom_bytecode_wire_symbol_ordinal(
+                           numbering, anchors.values[anchor_index].symbol_id)));
+    }
+
+    iree_host_size_t comment_count = 0;
+    const iree_string_view_t* comments =
+        loom_module_op_comments(module, record->op, &comment_count);
+    IREE_RETURN_IF_ERROR(loom_bytecode_page_writer_write_source_trivia(
+        page_writer,
+        iree_any_bit_set(record->op->flags, LOOM_OP_FLAG_LEADING_BLANK_LINE),
+        comments, comment_count));
+  }
+  return iree_ok_status();
+}
+
+//===----------------------------------------------------------------------===//
+// Symbol reference index
+//===----------------------------------------------------------------------===//
+
+// Prepared analysis and aggregate counts written to SYMBOL_REFERENCES.
+typedef struct loom_bytecode_symbol_reference_plan_t {
+  // Canonical reference analysis whose linked rows are emitted directly.
+  loom_symbol_reference_table_t table;
+  // Number of dependency-role occurrences across all source rows.
+  iree_host_size_t dependency_count;
+  // Number of dependency-role occurrences in the module-root row.
+  uint32_t module_dependency_count;
+} loom_bytecode_symbol_reference_plan_t;
+
+static uint32_t loom_bytecode_count_dependency_occurrences(
+    const loom_symbol_reference_table_t* table,
+    loom_symbol_reference_occurrence_id_t first_occurrence_id) {
+  uint32_t dependency_count = 0;
+  loom_symbol_reference_occurrence_id_t occurrence_id = first_occurrence_id;
+  while (occurrence_id != LOOM_SYMBOL_REFERENCE_OCCURRENCE_ID_INVALID) {
+    const loom_symbol_reference_occurrence_t* occurrence =
+        &table->occurrences[occurrence_id];
+    if (loom_symbol_reference_occurrence_is_dependency(occurrence)) {
+      ++dependency_count;
+    }
+    occurrence_id = occurrence->next_outgoing_occurrence_id;
+  }
+  return dependency_count;
+}
+
+static iree_status_t loom_bytecode_symbol_reference_plan_initialize(
+    const loom_module_t* module, iree_arena_allocator_t* arena,
+    loom_bytecode_symbol_reference_plan_t* out_plan) {
+  *out_plan = (loom_bytecode_symbol_reference_plan_t){0};
+  IREE_RETURN_IF_ERROR(
+      loom_symbol_reference_table_build(module, arena, &out_plan->table));
+
+  for (iree_host_size_t i = 0; i < out_plan->table.occurrence_count; ++i) {
+    if (loom_symbol_reference_occurrence_is_dependency(
+            &out_plan->table.occurrences[i])) {
+      ++out_plan->dependency_count;
+    }
+  }
+  out_plan->module_dependency_count =
+      loom_bytecode_count_dependency_occurrences(
+          &out_plan->table, out_plan->table.first_module_occurrence_id);
+
+  return iree_ok_status();
+}
+
+static iree_status_t loom_bytecode_write_dependency_row(
+    loom_bytecode_page_writer_t* page_writer,
+    const loom_bytecode_numbering_t* numbering,
+    const loom_symbol_reference_table_t* table,
+    loom_symbol_reference_occurrence_id_t first_occurrence_id,
+    uint32_t dependency_count) {
+  IREE_RETURN_IF_ERROR(
+      loom_bytecode_page_writer_write_uvarint(page_writer, dependency_count));
+  loom_symbol_reference_occurrence_id_t occurrence_id = first_occurrence_id;
+  while (occurrence_id != LOOM_SYMBOL_REFERENCE_OCCURRENCE_ID_INVALID) {
+    const loom_symbol_reference_occurrence_t* occurrence =
+        &table->occurrences[occurrence_id];
+    if (loom_symbol_reference_occurrence_is_dependency(occurrence)) {
+      IREE_RETURN_IF_ERROR(loom_bytecode_page_writer_write_uvarint(
+          page_writer, loom_bytecode_wire_symbol_ordinal(
+                           numbering, occurrence->target_symbol_id)));
+    }
+    occurrence_id = occurrence->next_outgoing_occurrence_id;
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t loom_bytecode_write_symbol_references_section(
+    loom_bytecode_page_writer_t* page_writer,
+    const loom_bytecode_numbering_t* numbering,
+    const loom_bytecode_symbol_reference_plan_t* plan) {
+  const loom_symbol_reference_table_t* table = &plan->table;
+  IREE_RETURN_IF_ERROR(loom_bytecode_page_writer_write_uvarint(
+      page_writer, table->symbol_count));
+  IREE_RETURN_IF_ERROR(loom_bytecode_page_writer_write_uvarint(
+      page_writer, plan->dependency_count));
+  IREE_RETURN_IF_ERROR(loom_bytecode_page_writer_write_uvarint(
+      page_writer, table->template_demands.count));
+  IREE_RETURN_IF_ERROR(loom_bytecode_write_dependency_row(
+      page_writer, numbering, table, table->first_module_occurrence_id,
+      plan->module_dependency_count));
+  for (loom_symbol_id_t wire_ordinal = 0; wire_ordinal < table->symbol_count;
+       ++wire_ordinal) {
+    const loom_symbol_id_t module_symbol_id =
+        loom_bytecode_module_symbol_id(numbering, wire_ordinal);
+    const loom_symbol_reference_symbol_occurrences_t* symbol =
+        &table->symbols[module_symbol_id];
+    const uint32_t dependency_count =
+        loom_bytecode_count_dependency_occurrences(
+            table, symbol->first_outgoing_occurrence_id);
+    IREE_RETURN_IF_ERROR(loom_bytecode_write_dependency_row(
+        page_writer, numbering, table, symbol->first_outgoing_occurrence_id,
+        dependency_count));
+    IREE_RETURN_IF_ERROR(loom_bytecode_page_writer_write_uvarint(
+        page_writer, symbol->template_demand_count));
+    loom_template_demand_id_t demand_id = symbol->first_template_demand_id;
+    while (demand_id != LOOM_TEMPLATE_DEMAND_ID_INVALID) {
+      const loom_template_demand_t* demand =
+          &table->template_demands.values[demand_id];
+      IREE_RETURN_IF_ERROR(loom_bytecode_page_writer_write_uvarint(
+          page_writer, loom_bytecode_wire_symbol_ordinal(
+                           numbering, demand->family_symbol_id)));
+      demand_id = demand->next_source_demand_id;
+    }
+  }
   return iree_ok_status();
 }
 
@@ -4814,6 +5241,18 @@ iree_status_t loom_bytecode_write_module(
   numbering.low_repr_environment = options ? options->low_repr_environment
                                            : (loom_low_repr_environment_t){0};
 
+  loom_module_record_plan_t record_plan = {0};
+  bool record_plan_initialized = false;
+  if (iree_status_is_ok(status)) {
+    status = loom_module_record_plan_initialize(module, &record_plan);
+    record_plan_initialized = iree_status_is_ok(status);
+  }
+  loom_bytecode_provider_import_plan_t provider_import_plan = {0};
+  if (iree_status_is_ok(status)) {
+    status = loom_bytecode_provider_import_plan_initialize(
+        module, &record_plan, &arena, &provider_import_plan);
+  }
+
   // Pass 1: Number module metadata. Function signatures and bodies are numbered
   // during IR section writing.
   if (iree_status_is_ok(status)) {
@@ -4822,18 +5261,31 @@ iree_status_t loom_bytecode_write_module(
         &numbering, module->name_id, &unused_id);
   }
   if (iree_status_is_ok(status)) {
-    for (iree_host_size_t i = 0;
-         i < module->symbols.count && iree_status_is_ok(status); ++i) {
+    for (loom_symbol_id_t wire_ordinal = 0;
+         wire_ordinal < module->symbols.count && iree_status_is_ok(status);
+         ++wire_ordinal) {
+      const loom_symbol_id_t module_symbol_id =
+          loom_bytecode_module_symbol_id(&numbering, wire_ordinal);
       uint32_t unused_id = 0;
       status = loom_bytecode_numbering_intern_module_string(
-          &numbering, module->symbols.entries[i].name_id, &unused_id);
+          &numbering, module->symbols.entries[module_symbol_id].name_id,
+          &unused_id);
     }
+  }
+  if (iree_status_is_ok(status)) {
+    status = loom_bytecode_number_provider_imports(&numbering, &record_plan,
+                                                   &provider_import_plan);
   }
   if (iree_status_is_ok(status)) {
     for (iree_host_size_t i = 0;
          i < module->encodings.count && iree_status_is_ok(status); ++i) {
       status = loom_bytecode_number_encoding(&numbering, (uint16_t)(i + 1));
     }
+  }
+  loom_bytecode_symbol_reference_plan_t symbol_reference_plan = {0};
+  if (iree_status_is_ok(status)) {
+    status = loom_bytecode_symbol_reference_plan_initialize(
+        module, &arena, &symbol_reference_plan);
   }
 
   // File header: magic, version, location mode, module count, producer string.
@@ -4913,6 +5365,9 @@ iree_status_t loom_bytecode_write_module(
   iree_host_size_t section_count = 0;
   section_write_order[section_count++] = LOOM_BYTECODE_SECTION_IR;
   section_write_order[section_count++] = LOOM_BYTECODE_SECTION_SYMBOLS;
+  section_write_order[section_count++] = LOOM_BYTECODE_SECTION_PROVIDER_IMPORTS;
+  section_write_order[section_count++] =
+      LOOM_BYTECODE_SECTION_SYMBOL_REFERENCES;
   section_write_order[section_count++] = LOOM_BYTECODE_SECTION_STRINGS;
   section_write_order[section_count++] = LOOM_BYTECODE_SECTION_SOURCES;
   section_write_order[section_count++] = LOOM_BYTECODE_SECTION_TYPES;
@@ -5009,6 +5464,33 @@ iree_status_t loom_bytecode_write_module(
         iree_string_builder_size(&symbols_builder);
   }
   iree_string_builder_deinitialize(&symbols_builder);
+
+  // Provider imports use direct SYMBOLS ordinals and the canonical
+  // keyed-module-record projection.
+  if (iree_status_is_ok(status)) {
+    section_offsets[LOOM_BYTECODE_SECTION_PROVIDER_IMPORTS] =
+        page_writer.total_written - module_start;
+    status = loom_bytecode_write_provider_imports_section(
+        &page_writer, &numbering, &record_plan, &provider_import_plan);
+    if (iree_status_is_ok(status)) {
+      section_lengths[LOOM_BYTECODE_SECTION_PROVIDER_IMPORTS] =
+          page_writer.total_written - module_start -
+          section_offsets[LOOM_BYTECODE_SECTION_PROVIDER_IMPORTS];
+    }
+  }
+
+  // Symbol references preserve the direct metadata-only dependency graph.
+  if (iree_status_is_ok(status)) {
+    section_offsets[LOOM_BYTECODE_SECTION_SYMBOL_REFERENCES] =
+        page_writer.total_written - module_start;
+    status = loom_bytecode_write_symbol_references_section(
+        &page_writer, &numbering, &symbol_reference_plan);
+    if (iree_status_is_ok(status)) {
+      section_lengths[LOOM_BYTECODE_SECTION_SYMBOL_REFERENCES] =
+          page_writer.total_written - module_start -
+          section_offsets[LOOM_BYTECODE_SECTION_SYMBOL_REFERENCES];
+    }
+  }
 
   // Strings section: all interned strings from the numbering context.
   if (iree_status_is_ok(status)) {
@@ -5141,6 +5623,9 @@ iree_status_t loom_bytecode_write_module(
 
   // All numbering tables, value maps, and ir_offsets were arena-allocated.
   // One call returns all blocks to the shared pool.
+  if (record_plan_initialized) {
+    loom_module_record_plan_deinitialize(&record_plan);
+  }
   iree_arena_deinitialize(&arena);
 
   IREE_TRACE_ZONE_END(z0);

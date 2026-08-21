@@ -23,14 +23,14 @@ loom_cc_binary(
     loom::codegen::low::repr
     loom::codegen::low::text_asm
     loom::error::diagnostic
-    loom::format::bytecode::reader
     loom::format::bytecode::writer
     loom::format::text::parser
     loom::format::text::printer
     loom::ir
-    loom::link::linker
+    loom::link::index_materializer
     loom::link::module_index
     loom::link::planner
+    loom::link::provider_resolver
     loom::target::configured::provider
     loom::target::provider
     loom::tooling::cli::help

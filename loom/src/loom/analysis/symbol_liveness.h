@@ -8,14 +8,14 @@
 //
 // The engine computes live module symbols from an explicit root policy,
 // concrete symbol dependency edges, and optional dialect/provider contributed
-// edges derived from indexed abstract contract demands.
+// edges derived from indexed template-family demands.
 
 #ifndef LOOM_ANALYSIS_SYMBOL_LIVENESS_H_
 #define LOOM_ANALYSIS_SYMBOL_LIVENESS_H_
 
 #include "iree/base/api.h"
 #include "iree/base/internal/arena.h"
-#include "loom/analysis/symbol_dependencies.h"
+#include "loom/analysis/symbol_references.h"
 #include "loom/ir/ir.h"
 
 #ifdef __cplusplus
@@ -42,19 +42,19 @@ typedef bool (*loom_symbol_liveness_root_query_fn_t)(
     void* user_data, const loom_module_t* module, loom_symbol_id_t symbol_id,
     const loom_symbol_t* symbol);
 
-// Visits one abstract contract demand owned by a reachable symbol and may add
+// Visits one template-family demand owned by a reachable symbol and may add
 // synthetic liveness edges through loom_symbol_liveness_mark_* helpers.
-typedef iree_status_t (*loom_symbol_liveness_visit_contract_demand_fn_t)(
+typedef iree_status_t (*loom_symbol_liveness_visit_template_demand_fn_t)(
     void* user_data, loom_symbol_liveness_contributor_context_t* context,
-    const loom_func_contract_demand_t* demand);
+    const loom_template_demand_t* demand);
 
 // Context passed to liveness contributors.
 typedef struct loom_symbol_liveness_contributor_context_t {
   // Module being analyzed.
   const loom_module_t* module;
 
-  // Concrete symbol dependencies for the same module snapshot.
-  const loom_symbol_dependency_table_t* dependencies;
+  // Concrete symbol references for the same module snapshot.
+  const loom_symbol_reference_table_t* references;
 
   // Arena owned by this liveness computation.
   iree_arena_allocator_t* arena;
@@ -71,11 +71,11 @@ typedef struct loom_symbol_liveness_contributor_context_t {
 
 // Dialect/provider liveness contributor.
 typedef struct loom_symbol_liveness_contributor_t {
-  // Optional callback invoked for each contract demand owned by a reachable
+  // Optional callback invoked for each template demand owned by a reachable
   // symbol.
-  loom_symbol_liveness_visit_contract_demand_fn_t visit_contract_demand;
+  loom_symbol_liveness_visit_template_demand_fn_t visit_template_demand;
 
-  // Opaque payload passed to visit_contract_demand.
+  // Opaque payload passed to visit_template_demand.
   void* user_data;
 } loom_symbol_liveness_contributor_t;
 
@@ -103,8 +103,8 @@ typedef struct loom_symbol_liveness_t {
   // Module this result describes.
   const loom_module_t* module;
 
-  // Concrete dependency table used for this result.
-  const loom_symbol_dependency_table_t* dependencies;
+  // Concrete reference table used for this result.
+  const loom_symbol_reference_table_t* references;
 
   // One byte per symbol: non-zero means live.
   const uint8_t* live_symbols;
@@ -132,7 +132,7 @@ iree_status_t loom_symbol_liveness_mark_symbol_ref(
 // Computes symbol liveness into |arena|.
 iree_status_t loom_symbol_liveness_compute(
     const loom_module_t* module,
-    const loom_symbol_dependency_table_t* dependencies,
+    const loom_symbol_reference_table_t* references,
     const loom_symbol_liveness_options_t* options,
     iree_arena_allocator_t* arena, loom_symbol_liveness_t* out_liveness);
 

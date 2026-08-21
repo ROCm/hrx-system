@@ -10,6 +10,7 @@
 #include "iree/base/api.h"
 #include "loom/format/text/printer/context.h"
 #include "loom/ir/ir.h"
+#include "loom/ir/module_record.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -58,7 +59,8 @@ iree_status_t loom_print_region_body(
 
 // Prints a module body using canonical top-level block/op traversal.
 iree_status_t loom_print_module_body(loom_print_context_t* ctx,
-                                     const loom_region_t* region);
+                                     const loom_region_t* region,
+                                     const loom_module_record_plan_t* plan);
 
 #ifdef __cplusplus
 }  // extern "C"

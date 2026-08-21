@@ -6,6 +6,7 @@
 
 load(
     "//loom/build_tools/bazel:build_defs.bzl",
+    "loom_cc_benchmark",
     "loom_cc_library",
     "loom_cc_test",
 )
@@ -90,8 +91,8 @@ loom_cc_library(
         ":function_contract",
         ":function_version",
         ":pass_environment",
-        "//loom/src/loom/analysis:symbol_dependencies",
         "//loom/src/loom/analysis:symbol_facts",
+        "//loom/src/loom/analysis:symbol_references",
         "//loom/src/loom/error:error_defs",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:func_symbol_facts",
@@ -142,30 +143,26 @@ loom_cc_library(
 )
 
 loom_cc_library(
-    name = "module_sealing",
-    srcs = ["module_sealing.c"],
-    hdrs = ["module_sealing.h"],
+    name = "function_version_projection",
+    srcs = ["function_version_projection.c"],
+    hdrs = ["function_version_projection.h"],
     deps = [
-        ":facts",
         ":function_version",
         ":provider",
-        "//loom/src/loom/analysis:symbol_facts",
         "//loom/src/loom/ir",
-        "//loom/src/loom/ir:symbol_map",
-        "//loom/src/loom/link:linker",
         "//loom/src/loom/ops:op_defs",
-        "//loom/src/loom/ops/target",
+        "//loom/src/loom/rewrite:module_projection",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
     ],
 )
 
 loom_cc_test(
-    name = "module_sealing_test",
-    srcs = ["module_sealing_test.cc"],
+    name = "function_version_projection_test",
+    srcs = ["function_version_projection_test.cc"],
     deps = [
         ":facts_builder",
-        ":module_sealing",
+        ":function_version_projection",
         ":provider",
         ":specialization",
         "//loom/src/loom/format/text:parser",
@@ -181,6 +178,26 @@ loom_cc_test(
         "//runtime/src/iree/base/internal:arena",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_benchmark(
+    name = "function_version_projection_benchmark",
+    srcs = ["function_version_projection_benchmark.cc"],
+    deps = [
+        ":facts_builder",
+        ":function_version",
+        ":function_version_projection",
+        ":provider",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops/func",
+        "//loom/src/loom/ops/target",
+        "//loom/src/loom/ops/test",
+        "//loom/src/loom/target/test:target_record_table",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:benchmark_main",
     ],
 )
 

@@ -64,12 +64,25 @@ __all__ = [
     "BuilderSignature",
     "attr_type_hint",
     "builder_method_names",
+    "dialect_python_name",
     "signature_for_op",
     "signatures_for_ops",
 ]
 
 
 _PYTHON_KEYWORDS = frozenset(keyword.kwlist)
+
+# Public LoomBuilder members that cannot also name a dialect namespace.
+_LOOM_BUILDER_MEMBER_NAMES = frozenset(
+    {
+        "insertion_block",
+        "ir",
+        "location",
+        "module",
+        "region",
+        "value",
+    }
+)
 
 
 class BuilderParamKind(Enum):
@@ -148,6 +161,8 @@ def attr_type_hint(attr_def: AttrDef | None) -> str:
             return "SignedEnumSetAttr | Mapping[str | int, bool]"
         case "symbol":
             return "str"
+        case "symbol_array" | "symbol_set":
+            return "Sequence[str]"
         case "type":
             return "Type"
         case "i64_array":
@@ -200,6 +215,14 @@ def builder_method_names(ops: tuple[Op, ...] | list[Op]) -> list[str]:
 def python_name(name: str) -> str:
     """Return a Python-safe spelling for a dialect, op, or parameter name."""
     if name in _PYTHON_KEYWORDS:
+        return name + "_"
+    return name
+
+
+def dialect_python_name(name: str) -> str:
+    """Return the unambiguous LoomBuilder namespace for a dialect."""
+    name = python_name(name)
+    if name in _LOOM_BUILDER_MEMBER_NAMES:
         return name + "_"
     return name
 

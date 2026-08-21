@@ -172,33 +172,35 @@ loom_cc_test(
 )
 
 loom_cc_library(
-    name = "func_provider_catalog",
-    srcs = ["func_provider_catalog.c"],
-    hdrs = ["func_provider_catalog.h"],
+    name = "template_provider_catalog",
+    srcs = ["template_provider_catalog.c"],
+    hdrs = ["template_provider_catalog.h"],
     deps = [
         ":symbol_facts",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:func_symbol_facts",
         "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops/target",
+        "//loom/src/loom/rewrite:remap",
+        "//loom/src/loom/target:facts",
         "//loom/src/loom/util:adaptive_sort",
-        "//loom/src/loom/util:walk",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
     ],
 )
 
 loom_cc_test(
-    name = "func_provider_catalog_test",
-    srcs = ["func_provider_catalog_test.cc"],
+    name = "template_provider_catalog_test",
+    srcs = ["template_provider_catalog_test.cc"],
     deps = [
-        ":func_provider_catalog",
         ":symbol_facts",
+        ":template_provider_catalog",
         "//loom/src/loom/format/text:parser",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:op_defs",
         "//loom/src/loom/ops/func",
-        "//loom/src/loom/ops/kernel",
         "//loom/src/loom/ops/target",
+        "//loom/src/loom/ops/template",
         "//loom/src/loom/ops/test",
         "//loom/src/loom/testing:module_ptr",
         "//runtime/src/iree/base/internal:arena",
@@ -666,24 +668,25 @@ loom_cc_test(
 )
 
 loom_cc_library(
-    name = "symbol_dependencies",
-    srcs = ["symbol_dependencies.c"],
-    hdrs = ["symbol_dependencies.h"],
+    name = "symbol_references",
+    srcs = ["symbol_references.c"],
+    hdrs = ["symbol_references.h"],
     deps = [
         ":scc",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:op_defs",
         "//loom/src/loom/ops/func",
+        "//loom/src/loom/ops/template",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
     ],
 )
 
 loom_cc_test(
-    name = "symbol_dependencies_test",
-    srcs = ["symbol_dependencies_test.cc"],
+    name = "symbol_references_test",
+    srcs = ["symbol_references_test.cc"],
     deps = [
-        ":symbol_dependencies",
+        ":symbol_references",
         "//loom/src/loom/format/text:parser",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:op_defs",
@@ -691,6 +694,7 @@ loom_cc_test(
         "//loom/src/loom/ops/func",
         "//loom/src/loom/ops/global",
         "//loom/src/loom/ops/target",
+        "//loom/src/loom/ops/template",
         "//loom/src/loom/ops/test",
         "//loom/src/loom/testing:module_ptr",
         "//runtime/src/iree/base/internal:arena",
@@ -731,7 +735,7 @@ loom_cc_library(
     srcs = ["symbol_liveness.c"],
     hdrs = ["symbol_liveness.h"],
     deps = [
-        ":symbol_dependencies",
+        ":symbol_references",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:op_defs",
         "//runtime/src/iree/base",
@@ -743,12 +747,14 @@ loom_cc_test(
     name = "symbol_liveness_test",
     srcs = ["symbol_liveness_test.cc"],
     deps = [
-        ":symbol_dependencies",
         ":symbol_liveness",
+        ":symbol_references",
         "//loom/src/loom/format/text:parser",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:op_defs",
         "//loom/src/loom/ops/func",
+        "//loom/src/loom/ops/template",
+        "//loom/src/loom/ops/test",
         "//loom/src/loom/testing:module_ptr",
         "//runtime/src/iree/base/internal:arena",
         "//runtime/src/iree/testing:gtest",

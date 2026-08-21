@@ -103,8 +103,8 @@ loom_cc_library(
     ::pass_environment
     iree::base
     iree::base::internal::arena
-    loom::analysis::symbol_dependencies
     loom::analysis::symbol_facts
+    loom::analysis::symbol_references
     loom::error::error_defs
     loom::ir
     loom::ops::func_symbol_facts
@@ -158,34 +158,30 @@ loom_cc_library(
 
 loom_cc_library(
   NAME
-    module_sealing
+    function_version_projection
   HDRS
-    "module_sealing.h"
+    "function_version_projection.h"
   SRCS
-    "module_sealing.c"
+    "function_version_projection.c"
   DEPS
-    ::facts
     ::function_version
     ::provider
     iree::base
     iree::base::internal::arena
-    loom::analysis::symbol_facts
     loom::ir
-    loom::ir::symbol_map
-    loom::link::linker
     loom::ops::op_defs
-    loom::ops::target
+    loom::rewrite::module_projection
   PUBLIC
 )
 
 loom_cc_test(
   NAME
-    module_sealing_test
+    function_version_projection_test
   SRCS
-    "module_sealing_test.cc"
+    "function_version_projection_test.cc"
   DEPS
     ::facts_builder
-    ::module_sealing
+    ::function_version_projection
     ::provider
     ::specialization
     iree::base
@@ -201,6 +197,28 @@ loom_cc_test(
     loom::ops::test
     loom::target::test::target_record_table
     loom::testing::module_ptr
+)
+
+loom_cc_benchmark(
+  NAME
+    function_version_projection_benchmark
+  SRCS
+    "function_version_projection_benchmark.cc"
+  DEPS
+    ::facts_builder
+    ::function_version
+    ::function_version_projection
+    ::provider
+    iree::base
+    iree::base::internal::arena
+    iree::testing::benchmark_main
+    loom::ir
+    loom::ops::func
+    loom::ops::op_defs
+    loom::ops::target
+    loom::ops::test
+    loom::target::test::target_record_table
+  TESTONLY
 )
 
 loom_cc_test(

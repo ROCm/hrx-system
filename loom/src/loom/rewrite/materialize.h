@@ -61,6 +61,8 @@ iree_status_t loom_ir_clone_block_ops(
     loom_ir_remap_t* remap, const loom_ir_clone_block_options_t* options);
 
 // Clones |source_region| and returns a new target-module-owned region.
+// Successor edges are projected through the parallel region block ordinals;
+// the clone does not retain source-to-target block mappings in |remap|.
 iree_status_t loom_ir_clone_region(loom_builder_t* builder,
                                    const loom_region_t* source_region,
                                    loom_ir_remap_t* remap,

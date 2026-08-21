@@ -7,6 +7,7 @@
 #include <string.h>
 
 #include "loom/error/error_catalog.h"
+#include "loom/ir/module_record.h"
 #include "loom/verify/verify_constraints.h"
 #include "loom/verify/verify_diagnostics.h"
 #include "loom/verify/verify_ownership.h"
@@ -513,6 +514,40 @@ static void loom_verify_state_deinitialize(loom_verify_state_t* state) {
   iree_arena_deinitialize(&state->arena);
 }
 
+static iree_status_t loom_verify_keyed_module_records(
+    loom_verify_state_t* state) {
+  loom_module_record_plan_t plan;
+  IREE_RETURN_IF_ERROR(
+      loom_module_record_plan_initialize(state->module, &plan));
+  iree_status_t status = iree_ok_status();
+  for (iree_host_size_t i = 1;
+       iree_status_is_ok(status) && i < plan.record_count; ++i) {
+    const loom_module_record_t* previous = &plan.records[i - 1];
+    const loom_module_record_t* current = &plan.records[i];
+    if (!loom_module_record_identity_equal(previous, current)) continue;
+    loom_diagnostic_param_t params[] = {
+        loom_param_string(loom_op_vtable_name(current->vtable)),
+        loom_param_string(current->key),
+    };
+    loom_diagnostic_related_op_t related_ops[] = {{
+        .label = IREE_SV("previous record here"),
+        .op = previous->op,
+    }};
+    loom_diagnostic_emission_t emission = {
+        .op = current->op,
+        .error = LOOM_ERR_STRUCTURE_051,
+        .params = params,
+        .param_count = IREE_ARRAYSIZE(params),
+        .related_ops = related_ops,
+        .related_op_count = IREE_ARRAYSIZE(related_ops),
+    };
+    loom_verify_emit_diagnostic(state, &emission);
+    status = loom_verify_pending_diagnostic_status(state);
+  }
+  loom_module_record_plan_deinitialize(&plan);
+  return status;
+}
+
 iree_status_t loom_verify_module(const loom_module_t* module,
                                  const loom_verify_options_t* options,
                                  loom_verify_result_t* out_result) {
@@ -535,6 +570,11 @@ iree_status_t loom_verify_module(const loom_module_t* module,
     loom_verify_state_deinitialize(&state);
     return diagnostic_status;
   }
+  diagnostic_status = loom_verify_prepare_available_symbols(&state);
+  if (!iree_status_is_ok(diagnostic_status)) {
+    loom_verify_state_deinitialize(&state);
+    return diagnostic_status;
+  }
 
   // Interned parameterized types are module-level values. Verify their symbol
   // parameters once instead of rediscovering the same type graph from every
@@ -548,9 +588,8 @@ iree_status_t loom_verify_module(const loom_module_t* module,
 
   // Walk the module body.
   if (module->body) {
-    // Module-level invariant: only symbol-defining ops (func.def,
-    // func.decl, etc.) are allowed at the top level. Ops without
-    // LOOM_TRAIT_SYMBOL_DEFINE belong inside function bodies.
+    // Module-level invariant: top-level operations either define a symbol or
+    // explicitly declare module-scope ownership.
     if (module->body->block_count > 0) {
       loom_block_t* entry = loom_region_entry_block(module->body);
       const loom_op_t* op = NULL;
@@ -558,7 +597,8 @@ iree_status_t loom_verify_module(const loom_module_t* module,
         const loom_op_vtable_t* vtable =
             loom_verify_lookup_vtable(&state, op->kind);
         if (vtable &&
-            !iree_any_bit_set(vtable->traits, LOOM_TRAIT_SYMBOL_DEFINE)) {
+            !iree_any_bit_set(vtable->traits, LOOM_TRAIT_SYMBOL_DEFINE |
+                                                  LOOM_TRAIT_MODULE_SCOPE)) {
           iree_string_view_t op_name = loom_op_vtable_name(vtable);
           loom_diagnostic_param_t params[] = {
               loom_param_string(op_name),
@@ -579,6 +619,16 @@ iree_status_t loom_verify_module(const loom_module_t* module,
     if (!iree_status_is_ok(walk_status)) {
       loom_verify_state_deinitialize(&state);
       return walk_status;
+    }
+
+    // The record plan consumes generated key descriptors and verified string
+    // attributes directly. Structural errors suppress this dependent check.
+    if (out_result->error_count == 0) {
+      diagnostic_status = loom_verify_keyed_module_records(&state);
+      if (!iree_status_is_ok(diagnostic_status)) {
+        loom_verify_state_deinitialize(&state);
+        return diagnostic_status;
+      }
     }
   }
 
@@ -615,6 +665,11 @@ iree_status_t loom_verify_function(const loom_module_t* module,
       loom_verify_state_initialize(&state, module, options, out_result));
 
   iree_status_t verify_status = loom_verify_prepare_static_encodings(&state);
+  if (!iree_status_is_ok(verify_status)) {
+    loom_verify_state_deinitialize(&state);
+    return verify_status;
+  }
+  verify_status = loom_verify_prepare_available_symbols(&state);
   if (!iree_status_is_ok(verify_status)) {
     loom_verify_state_deinitialize(&state);
     return verify_status;

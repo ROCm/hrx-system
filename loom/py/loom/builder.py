@@ -252,8 +252,9 @@ class IRBuilder:
     and operations. It validates types and constraints at construction
     time (fail-fast, no silent errors).
 
-    Symbol-defining ops are appended to module.symbols. Non-symbol ops are
-    appended to insertion_block, which must be set before building body ops.
+    Symbol-defining ops are indexed by module.symbols. ModuleScope ops are
+    appended directly to the module body. Other operations are appended to
+    insertion_block, which must be set before building body ops.
     """
 
     def __init__(
@@ -495,7 +496,7 @@ class IRBuilder:
                 )
 
     def _insert_operation(self, op_decl: Op, operation: Operation) -> None:
-        """Insert operation into module symbol state or the current block."""
+        """Insert an operation according to its generated placement traits."""
         if op_decl.has_trait("SymbolDefine"):
             symbol_index = self._module.add_symbol(
                 symbol_from_operation(operation, op_decl)
@@ -511,10 +512,14 @@ class IRBuilder:
             )
             return
 
+        if op_decl.has_trait("ModuleScope"):
+            self._module.add_top_level_operation(operation)
+            return
+
         if self._insertion_block is None:
             raise ValueError(
-                f"Op '{op_decl.name}' is not a module symbol and no insertion "
-                "block is set."
+                f"Op '{op_decl.name}' is neither a module symbol nor a "
+                "module-scope operation, and no insertion block is set."
             )
         self._insertion_block.ops.append(operation)
         block_index = self._find_block_index(self._insertion_block)
@@ -528,10 +533,8 @@ class IRBuilder:
 
     def _find_block_index(self, target_block: Block) -> int:
         """Returns target_block's index in an attached region, if any."""
-        for symbol in self._module.symbols:
-            if symbol.op is None:
-                continue
-            block_index = self._find_block_index_in_operation(symbol.op, target_block)
+        for operation in self._module.body.ops:
+            block_index = self._find_block_index_in_operation(operation, target_block)
             if block_index is not None:
                 return block_index
         return VALUE_DEF_BLOCK_NONE

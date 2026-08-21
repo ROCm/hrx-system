@@ -9,6 +9,7 @@
 #include <cstdio>
 #include <cstring>
 #include <fstream>
+#include <initializer_list>
 #include <iterator>
 #include <memory>
 #include <string>
@@ -83,8 +84,8 @@ static iree_status_t RegisterFakeTargetContext(loom_context_t* context) {
 
 static iree_status_t MaterializeFakeTargetDefinition(
     loom_builder_t* builder, const loom_resolved_target_t* resolved_target,
-    loom_symbol_ref_t symbol, loom_location_id_t location,
-    loom_op_t** out_target_op) {
+    loom_symbol_ref_t symbol, loom_location_id_t location) {
+  loom_op_t* target_op = nullptr;
   return loom_test_target_build(
       builder, /*build_flags=*/0,
       (loom_test_target_kind_t)resolved_target->facts->selector, symbol,
@@ -103,7 +104,7 @@ static iree_status_t MaterializeFakeTargetDefinition(
       /*memory_space_host=*/0, /*memory_space_descriptor=*/0, /*abi=*/0,
       /*export_symbol=*/LOOM_STRING_ID_INVALID, /*linkage=*/0,
       /*contract_set_key=*/LOOM_STRING_ID_INVALID, /*contract_feature_bits=*/0,
-      location, out_target_op);
+      location, &target_op);
 }
 
 static const loom_target_provider_t kFakeTargetProvider = {
@@ -371,10 +372,18 @@ void FinishIndex(loomc_link_index_builder_t* builder,
 
 void AddSource(loomc_link_index_builder_t* builder, loomc_source_t* source,
                const char* provider_name,
-               loomc_link_provider_role_t provider_role) {
+               loomc_link_provider_role_t provider_role,
+               std::initializer_list<const char*> import_keys = {}) {
+  std::vector<loomc_string_view_t> import_key_views;
+  import_key_views.reserve(import_keys.size());
+  for (const char* import_key : import_keys) {
+    import_key_views.push_back(loomc_make_cstring_view(import_key));
+  }
   loomc_link_index_source_options_t options = {
       /*.provider_name=*/loomc_make_cstring_view(provider_name),
       /*.role=*/provider_role,
+      /*.import_keys=*/import_key_views.data(),
+      /*.import_key_count=*/import_key_views.size(),
   };
   LOOMC_ASSERT_OK(
       loomc_link_index_builder_add_source(builder, source, &options, nullptr));
@@ -397,6 +406,68 @@ ModulePtr LinkIndex(loomc_linker_t* linker, loomc_workspace_t* workspace,
   LOOMC_EXPECT_OK(status);
   *out_result = ResultPtr(result);
   return ModulePtr(module);
+}
+
+struct ProviderSourceSpec {
+  // Opaque module.import key supplied by this provider.
+  const char* import_key;
+  // Authored Loom source text.
+  const char* source_text;
+};
+
+struct ProviderLinkArtifact {
+  // Link result carrying diagnostics and success state.
+  ResultPtr result;
+  // Standalone bytecode output when linking succeeded.
+  SourcePtr bytecode;
+  // Canonical text output when linking succeeded.
+  std::string text;
+};
+
+ProviderLinkArtifact LinkProviderSourcesToBytecode(
+    loomc_source_t* input_source,
+    std::initializer_list<ProviderSourceSpec> providers,
+    loomc_link_flags_t flags) {
+  ContextPtr context = CreateContext();
+  BuilderPtr builder = CreateBuilder(context.get());
+  AddSource(builder.get(), input_source, "input-diagnostics",
+            LOOMC_LINK_PROVIDER_ROLE_INPUT);
+
+  std::vector<SourcePtr> provider_sources;
+  provider_sources.reserve(providers.size());
+  for (const ProviderSourceSpec& provider : providers) {
+    provider_sources.push_back(
+        CreateTextSource(provider.import_key, provider.source_text));
+    AddSource(builder.get(), provider_sources.back().get(), provider.import_key,
+              LOOMC_LINK_PROVIDER_ROLE_LIBRARY, {provider.import_key});
+  }
+
+  LinkIndexPtr link_index;
+  FinishIndex(builder.get(), &link_index);
+  LinkerPtr linker = CreateLinker(context.get());
+  WorkspacePtr workspace = CreateWorkspace();
+  const loomc_string_view_t roots[] = {
+      loomc_make_cstring_view("@entry"),
+  };
+  const loomc_link_options_t options = {
+      /*.type=*/LOOMC_STRUCTURE_TYPE_NONE,
+      /*.structure_size=*/0,
+      /*.next=*/nullptr,
+      /*.link_index=*/nullptr,
+      /*.module_name=*/loomc_string_view_empty(),
+      /*.root_symbols=*/roots,
+      /*.root_symbol_count=*/IREE_ARRAYSIZE(roots),
+      /*.flags=*/flags,
+  };
+  ProviderLinkArtifact artifact;
+  ModulePtr module = LinkIndex(linker.get(), workspace.get(), link_index.get(),
+                               &options, &artifact.result);
+  if (module) {
+    artifact.text = SerializeModuleToText(module.get());
+    artifact.bytecode = SerializeModuleToSource(
+        module.get(), LOOMC_SOURCE_FORMAT_BYTECODE, "partial.loombc");
+  }
+  return artifact;
 }
 
 bool ModuleHasSymbol(const loom_module_t* module, const char* name) {
@@ -667,12 +738,132 @@ func.def public @unused_library(%x: i32) -> (i32) {
   EXPECT_TRUE(bytecode_path.Remove());
 }
 
+TEST(LinkTest, PartialProviderImportsAreReusableAndOrderInvariant) {
+  static constexpr char kRootSource[] = R"(
+module.import "provider-a" [@a]
+module.import "provider-b" [@b]
+
+func.decl @a(%x: i32) -> (i32)
+func.decl @b(%x: i32) -> (i32)
+
+func.def public @entry(%x: i32) -> (i32) {
+  %a = func.call @a(%x) : (i32) -> (i32)
+  %b = func.call @b(%a) : (i32) -> (i32)
+  func.return %b : i32
+}
+)";
+  static constexpr char kProviderASource[] = R"(
+module.import "provider-c" [@c]
+
+func.decl @c(%x: i32) -> (i32)
+
+func.def @a(%x: i32) -> (i32) {
+  %helper = func.call @a_helper(%x) : (i32) -> (i32)
+  %c = func.call @c(%helper) : (i32) -> (i32)
+  func.return %c : i32
+}
+
+func.def @a_helper(%x: i32) -> (i32) {
+  func.return %x : i32
+}
+)";
+  static constexpr char kProviderBSource[] = R"(
+func.def @b(%x: i32) -> (i32) {
+  func.return %x : i32
+}
+)";
+  static constexpr char kProviderCSource[] = R"(
+func.def @c(%x: i32) -> (i32) {
+  func.return %x : i32
+}
+)";
+
+  SourcePtr root = CreateTextSource("root.loom", kRootSource);
+  ProviderLinkArtifact partial_a = LinkProviderSourcesToBytecode(
+      root.get(), {{"provider-a", kProviderASource}},
+      LOOMC_LINK_FLAG_ALLOW_UNRESOLVED_SYMBOLS);
+  ASSERT_TRUE(loomc_result_succeeded(partial_a.result.get()));
+  ASSERT_NE(partial_a.bytecode.get(), nullptr);
+  EXPECT_EQ(partial_a.text.find("provider-a"), std::string::npos);
+  EXPECT_NE(partial_a.text.find("module.import \"provider-b\" [@b]"),
+            std::string::npos);
+  EXPECT_NE(partial_a.text.find("module.import \"provider-c\" [@c]"),
+            std::string::npos);
+  EXPECT_NE(partial_a.text.find("func.def @a"), std::string::npos);
+  EXPECT_NE(partial_a.text.find("func.def @a_helper"), std::string::npos);
+  EXPECT_NE(partial_a.text.find("func.decl @b"), std::string::npos);
+  EXPECT_NE(partial_a.text.find("func.decl @c"), std::string::npos);
+
+  ProviderLinkArtifact unresolved = LinkProviderSourcesToBytecode(
+      partial_a.bytecode.get(), /*providers=*/{}, /*flags=*/0);
+  EXPECT_EQ(unresolved.bytecode.get(), nullptr);
+  ExpectFailedResultCode(unresolved.result.get(), "LINK/MATERIALIZE");
+
+  ProviderLinkArtifact final_ab =
+      LinkProviderSourcesToBytecode(partial_a.bytecode.get(),
+                                    {
+                                        {"provider-b", kProviderBSource},
+                                        {"provider-c", kProviderCSource},
+                                    },
+                                    /*flags=*/0);
+  ASSERT_TRUE(loomc_result_succeeded(final_ab.result.get()));
+  ASSERT_NE(final_ab.bytecode.get(), nullptr);
+  EXPECT_EQ(final_ab.text.find("module.import"), std::string::npos)
+      << final_ab.text;
+  EXPECT_EQ(final_ab.text.find("func.decl @a"), std::string::npos);
+  EXPECT_EQ(final_ab.text.find("func.decl @b"), std::string::npos);
+  EXPECT_EQ(final_ab.text.find("func.decl @c"), std::string::npos);
+
+  ProviderLinkArtifact partial_b = LinkProviderSourcesToBytecode(
+      root.get(), {{"provider-b", kProviderBSource}},
+      LOOMC_LINK_FLAG_ALLOW_UNRESOLVED_SYMBOLS);
+  ASSERT_TRUE(loomc_result_succeeded(partial_b.result.get()));
+  ASSERT_NE(partial_b.bytecode.get(), nullptr);
+  EXPECT_NE(partial_b.text.find("module.import \"provider-a\" [@a]"),
+            std::string::npos);
+  EXPECT_EQ(partial_b.text.find("provider-b"), std::string::npos);
+  EXPECT_EQ(partial_b.text.find("provider-c"), std::string::npos);
+
+  ProviderLinkArtifact final_ba =
+      LinkProviderSourcesToBytecode(partial_b.bytecode.get(),
+                                    {
+                                        {"provider-a", kProviderASource},
+                                        {"provider-c", kProviderCSource},
+                                    },
+                                    /*flags=*/0);
+  ASSERT_TRUE(loomc_result_succeeded(final_ba.result.get()));
+  ASSERT_NE(final_ba.bytecode.get(), nullptr);
+  EXPECT_EQ(final_ba.text, final_ab.text);
+
+  ContextPtr context = CreateContext();
+  WorkspacePtr workspace = CreateWorkspace();
+  ModulePtr final_ab_module = DeserializeModuleFromSource(
+      context.get(), workspace.get(), final_ab.bytecode.get());
+  ModulePtr final_ba_module = DeserializeModuleFromSource(
+      context.get(), workspace.get(), final_ba.bytecode.get());
+  const loom_module_t* final_ab_internal =
+      loomc_module_const_loom_module(final_ab_module.get());
+  const loom_module_t* final_ba_internal =
+      loomc_module_const_loom_module(final_ba_module.get());
+  ASSERT_NE(final_ab_internal, nullptr);
+  ASSERT_NE(final_ba_internal, nullptr);
+  VerifyModule(final_ab_internal);
+  VerifyModule(final_ba_internal);
+  EXPECT_TRUE(ModuleHasSymbol(final_ab_internal, "entry"));
+  EXPECT_TRUE(ModuleHasSymbol(final_ab_internal, "a"));
+  EXPECT_TRUE(ModuleHasSymbol(final_ab_internal, "a_helper"));
+  EXPECT_TRUE(ModuleHasSymbol(final_ab_internal, "b"));
+  EXPECT_TRUE(ModuleHasSymbol(final_ab_internal, "c"));
+}
+
 TEST(LinkTest, SelectiveRootPullsBytecodeApplyProviders) {
   ContextPtr context = CreateContext();
   BuilderPtr builder = CreateBuilder(context.get());
   SourcePtr harness = CreateTextSource("harness.loom", R"(
+template.decl @demo.targeted(%x: i32) -> (i32)
+
 func.def public @caller(%x: i32) -> (i32) {
-  %y = func.apply<demo.targeted>(%x) : (i32) -> (i32)
+  %y = template.apply<@demo.targeted>(%x) : (i32) -> (i32)
   func.return %y : i32
 }
 
@@ -681,16 +872,19 @@ func.def public @unused_harness(%x: i32) -> (i32) {
 }
 )");
   std::vector<uint8_t> library_bytes = WriteBytecodeModule(R"(
-func.template<demo.targeted> priority(20) @fast_provider(%x: i32) -> (i32) {
-  func.return %x : i32
+template.decl @demo.targeted(%x: i32) -> (i32)
+template.decl @demo.unused(%x: i32) -> (i32)
+
+template.def<@demo.targeted> priority(20) @fast_provider(%x: i32) -> (i32) {
+  template.return %x : i32
 }
 
-func.template<demo.targeted> priority(1) @fallback_provider(%x: i32) -> (i32) {
-  func.return %x : i32
+template.def<@demo.targeted> priority(1) @fallback_provider(%x: i32) -> (i32) {
+  template.return %x : i32
 }
 
-func.template<demo.unused> @unused_provider(%x: i32) -> (i32) {
-  func.return %x : i32
+template.def<@demo.unused> @unused_provider(%x: i32) -> (i32) {
+  template.return %x : i32
 }
 )");
   SourcePtr library =
@@ -729,7 +923,7 @@ func.template<demo.unused> @unused_provider(%x: i32) -> (i32) {
   VerifyModule(internal_module);
   EXPECT_TRUE(ModuleHasSymbol(internal_module, "caller"));
   EXPECT_TRUE(ModuleHasSymbol(internal_module, "fast_provider"));
-  EXPECT_TRUE(ModuleHasSymbol(internal_module, "fallback_provider"));
+  EXPECT_FALSE(ModuleHasSymbol(internal_module, "fallback_provider"));
   EXPECT_FALSE(ModuleHasSymbol(internal_module, "unused_harness"));
   EXPECT_FALSE(ModuleHasSymbol(internal_module, "unused_provider"));
 }
@@ -891,8 +1085,12 @@ TEST(LinkTest, LinkThenCompileSpecializesEntryForTemplateSelection) {
   ContextPtr context = CreateContext(target_environment.get());
   BuilderPtr builder = CreateBuilder(context.get());
   SourcePtr root_source = CreateTextSource("root.loom", R"(
-func.def public @entry(%arg: i32) -> (i32) {
-  %result = func.apply<demo.capi_selected>(%arg) : (i32) -> (i32)
+target.decl @selected_link_target
+
+template.decl @demo.capi_selected(%arg: i32) -> (i32)
+
+func.def public target(@selected_link_target) @entry(%arg: i32) -> (i32) {
+  %result = template.apply<@demo.capi_selected>(%arg) : (i32) -> (i32)
   func.return %result : i32
 }
 )");
@@ -900,17 +1098,19 @@ func.def public @entry(%arg: i32) -> (i32) {
 test.target<low_core> @selected_link_target
 test.target<quirky> @other_target
 
-func.template<demo.capi_selected> target(@selected_link_target) priority(20) @selected_provider(%value: i32) -> (i32) {
+template.decl @demo.capi_selected(%value: i32) -> (i32)
+
+template.def<@demo.capi_selected> target(@selected_link_target) priority(20) @selected_provider(%value: i32) -> (i32) {
   %selected = test.addi %value, %value : i32
-  func.return %selected : i32
+  template.return %selected : i32
 }
 
-func.template<demo.capi_selected> target(@other_target) priority(30) @other_provider(%value: i32) -> (i32) {
-  func.return %value : i32
+template.def<@demo.capi_selected> target(@other_target) priority(30) @other_provider(%value: i32) -> (i32) {
+  template.return %value : i32
 }
 
-func.template<demo.capi_selected> priority(1) @fallback_provider(%value: i32) -> (i32) {
-  func.return %value : i32
+template.def<@demo.capi_selected> priority(1) @fallback_provider(%value: i32) -> (i32) {
+  template.return %value : i32
 }
 )");
   AddSource(builder.get(), root_source.get(), "root",
@@ -945,8 +1145,8 @@ func.template<demo.capi_selected> priority(1) @fallback_provider(%value: i32) ->
   ASSERT_NE(linked_module, nullptr);
   VerifyModule(linked_module);
   EXPECT_TRUE(ModuleHasSymbol(linked_module, "selected_provider"));
-  EXPECT_TRUE(ModuleHasSymbol(linked_module, "other_provider"));
-  EXPECT_TRUE(ModuleHasSymbol(linked_module, "fallback_provider"));
+  EXPECT_FALSE(ModuleHasSymbol(linked_module, "other_provider"));
+  EXPECT_FALSE(ModuleHasSymbol(linked_module, "fallback_provider"));
 
   CompilerPtr compiler = CreateCompiler(context.get());
   PassProgramPtr pass_program = CreatePassProgramFromPipelineText(
@@ -990,7 +1190,7 @@ func.template<demo.capi_selected> priority(1) @fallback_provider(%value: i32) ->
             std::string::npos);
   EXPECT_NE(compiled_text.find("test.addi %arg, %arg : i32"), std::string::npos)
       << compiled_text;
-  EXPECT_EQ(compiled_text.find("func.apply<demo.capi_selected>"),
+  EXPECT_EQ(compiled_text.find("template.apply<@demo.capi_selected>"),
             std::string::npos);
   EXPECT_EQ(compiled_text.find("@selected_provider"), std::string::npos);
   EXPECT_EQ(compiled_text.find("@other_provider"), std::string::npos);
@@ -1094,6 +1294,57 @@ func.def public @from_bytecode(%x: i32) -> (i32) {
   ASSERT_NE(linked_module, nullptr);
   VerifyModule(linked_module);
   EXPECT_TRUE(ModuleHasSymbol(linked_module, "from_bytecode"));
+}
+
+TEST(LinkTest, ArchiveStripRemovesBytecodeTestSymbols) {
+  std::vector<uint8_t> bytecode = WriteBytecodeModule(R"(
+func.def public @kernel(%x: i32) -> (i32) {
+  func.return %x : i32
+}
+
+check.case public @kernel_case {
+  %input = check.literal value(1) : i32
+  %actual = func.call @kernel(%input) : (i32) -> (i32)
+  check.expect.equal actual(%actual) expected(%input) : i32
+  check.return
+}
+
+check.benchmark<@kernel_case> @kernel_bench
+)");
+  ContextPtr context = CreateContext();
+  BuilderPtr builder = CreateBuilder(context.get());
+  SourcePtr source = CreateSource(LOOMC_SOURCE_FORMAT_BYTECODE, "module.loombc",
+                                  bytecode.data(), bytecode.size());
+  AddSource(builder.get(), source.get(), "bytecode",
+            LOOMC_LINK_PROVIDER_ROLE_INPUT);
+
+  LinkIndexPtr link_index;
+  FinishIndex(builder.get(), &link_index);
+  LinkerPtr linker = CreateLinker(context.get());
+  WorkspacePtr workspace = CreateWorkspace();
+  loomc_link_options_t options = {
+      /*.type=*/LOOMC_STRUCTURE_TYPE_NONE,
+      /*.structure_size=*/0,
+      /*.next=*/nullptr,
+      /*.link_index=*/nullptr,
+      /*.module_name=*/loomc_string_view_empty(),
+      /*.root_symbols=*/nullptr,
+      /*.root_symbol_count=*/0,
+      /*.flags=*/LOOMC_LINK_FLAG_STRIP_TEST_SYMBOLS,
+  };
+  ResultPtr result;
+  ModulePtr module = LinkIndex(linker.get(), workspace.get(), link_index.get(),
+                               &options, &result);
+
+  ASSERT_TRUE(loomc_result_succeeded(result.get()));
+  ASSERT_NE(module.get(), nullptr);
+  const loom_module_t* linked_module =
+      loomc_module_const_loom_module(module.get());
+  ASSERT_NE(linked_module, nullptr);
+  VerifyModule(linked_module);
+  EXPECT_TRUE(ModuleHasSymbol(linked_module, "kernel"));
+  EXPECT_FALSE(ModuleHasSymbol(linked_module, "kernel_case"));
+  EXPECT_FALSE(ModuleHasSymbol(linked_module, "kernel_bench"));
 }
 
 TEST(LinkTest, LinkModuleMaterializesConfigFromBytecodeIndex) {

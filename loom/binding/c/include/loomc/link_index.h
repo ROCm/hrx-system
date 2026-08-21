@@ -184,11 +184,22 @@ typedef struct loomc_link_index_source_slot_t {
 /// String views are borrowed for the duration of the builder call that consumes
 /// this descriptor unless that call explicitly documents a copy.
 typedef struct loomc_link_index_source_options_t {
-  /// Stable provider label for diagnostics and private-name determinism.
+  /// Stable provider label for diagnostics and private-name determinism. This
+  /// label is not implicitly available as a `module.import` provider key.
   loomc_string_view_t provider_name;
 
   /// Provider search precedence role.
   loomc_link_provider_role_t role;
+
+  /// Opaque `module.import` provider keys bound to this source slot.
+  ///
+  /// A source may publish several aliases. Each key may be bound by exactly
+  /// one source in the finished index. The builder copies this array and every
+  /// key when the source slot is reserved.
+  const loomc_string_view_t* import_keys;
+
+  /// Number of entries in `import_keys`.
+  loomc_host_size_t import_key_count;
 } loomc_link_index_source_options_t;
 
 /// Indexed provider metadata.
@@ -443,7 +454,11 @@ LOOMC_API_EXPORT bool loomc_link_index_lookup_global(
     const loomc_link_index_t* link_index, loomc_string_view_t name,
     loomc_link_index_symbol_t* out_symbol);
 
-/// Returns the next duplicate global symbol for `symbol`.
+/// Returns the next duplicate global symbol in selected-first order.
+///
+/// Begin enumeration with a symbol returned by
+/// `loomc_link_index_lookup_global` and pass each returned duplicate back to
+/// continue until this returns false.
 ///
 /// @param link_index Index to inspect.
 /// @param symbol Symbol previously returned from this index.

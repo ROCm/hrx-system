@@ -25,6 +25,7 @@
 #include "loom/ops/op_registry.h"
 #include "loom/ops/pass/ops.h"
 #include "loom/ops/target/facts.h"
+#include "loom/ops/template/ops.h"
 #include "loom/pass/builder.h"
 #include "loom/pass/registry.h"
 #include "loom/pass/testing/registry_verify.h"
@@ -283,10 +284,10 @@ class AmdgpuProviderTest : public ::testing::Test {
         /*.provider=*/&loom_amdgpu_target_provider,
         /*.facts=*/facts,
     };
-    loom_op_t* target_op = nullptr;
     IREE_CHECK_OK(loom_amdgpu_target_provider.materialize_definition(
-        &builder, &resolved_target, target_ref, LOOM_LOCATION_UNKNOWN,
-        &target_op));
+        &builder, &resolved_target, target_ref, LOOM_LOCATION_UNKNOWN));
+    loom_op_t* target_op =
+        module->symbols.entries[target_symbol_id].defining_op;
     IREE_ASSERT(target_op != nullptr);
     if (out_target_op != nullptr) *out_target_op = target_op;
     return module;
@@ -365,8 +366,8 @@ class AmdgpuProviderTest : public ::testing::Test {
     IREE_ASSERT(block != nullptr);
     for (const loom_op_t* op = block->first_op; op != nullptr;
          op = op->next_op) {
-      if (loom_func_call_isa(op)) {
-        return loom_func_call_callee(op);
+      if (loom_template_call_isa(op)) {
+        return loom_template_call_callee(op);
       }
     }
     return loom_symbol_ref_null();
@@ -887,38 +888,40 @@ TEST_F(AmdgpuProviderTest, ExhaustsSupportedProfileRelations) {
 }
 
 TEST_F(AmdgpuProviderTest, SelectsRequirementsPerFunctionTarget) {
-  ModulePtr module = Parse(
-      IREE_SV("amdgpu.target<gfx1150> @gfx1150\n"
-              "amdgpu.target<gfx1151> @gfx1151\n"
-              "amdgpu.target<gfx11-generic> @gfx11_generic\n"
-              "amdgpu.target<gfx1170> @gfx1170\n"
-              "\n"
-              "func.template<demo.pick> target(@gfx1150) priority(30) "
-              "@gfx1150_provider(%value: i32) -> (i32) {\n"
-              "  func.return %value : i32\n"
-              "}\n"
-              "\n"
-              "func.template<demo.pick> target(@gfx11_generic) priority(20) "
-              "@gfx11_provider(%value: i32) -> (i32) {\n"
-              "  func.return %value : i32\n"
-              "}\n"
-              "\n"
-              "func.template<demo.pick> priority(1) "
-              "@fallback(%value: i32) -> (i32) {\n"
-              "  func.return %value : i32\n"
-              "}\n"
-              "\n"
-              "func.def public target(@gfx1151) "
-              "@entry_gfx1151(%value: i32) -> (i32) {\n"
-              "  %result = func.apply<demo.pick>(%value) : (i32) -> (i32)\n"
-              "  func.return %result : i32\n"
-              "}\n"
-              "\n"
-              "func.def public target(@gfx1170) "
-              "@entry_gfx1170(%value: i32) -> (i32) {\n"
-              "  %result = func.apply<demo.pick>(%value) : (i32) -> (i32)\n"
-              "  func.return %result : i32\n"
-              "}\n"));
+  ModulePtr module = Parse(IREE_SV(
+      "amdgpu.target<gfx1150> @gfx1150\n"
+      "amdgpu.target<gfx1151> @gfx1151\n"
+      "amdgpu.target<gfx11-generic> @gfx11_generic\n"
+      "amdgpu.target<gfx1170> @gfx1170\n"
+      "\n"
+      "template.decl @demo.pick(%value: i32) -> (i32)\n"
+      "\n"
+      "template.def<@demo.pick> target(@gfx1150) priority(30) "
+      "@gfx1150_provider(%value: i32) -> (i32) {\n"
+      "  template.return %value : i32\n"
+      "}\n"
+      "\n"
+      "template.def<@demo.pick> target(@gfx11_generic) priority(20) "
+      "@gfx11_provider(%value: i32) -> (i32) {\n"
+      "  template.return %value : i32\n"
+      "}\n"
+      "\n"
+      "template.def<@demo.pick> priority(1) "
+      "@fallback(%value: i32) -> (i32) {\n"
+      "  template.return %value : i32\n"
+      "}\n"
+      "\n"
+      "func.def public target(@gfx1151) "
+      "@entry_gfx1151(%value: i32) -> (i32) {\n"
+      "  %result = template.apply<@demo.pick>(%value) : (i32) -> (i32)\n"
+      "  func.return %result : i32\n"
+      "}\n"
+      "\n"
+      "func.def public target(@gfx1170) "
+      "@entry_gfx1170(%value: i32) -> (i32) {\n"
+      "  %result = template.apply<@demo.pick>(%value) : (i32) -> (i32)\n"
+      "  func.return %result : i32\n"
+      "}\n"));
 
   const loom_symbol_ref_t generic_target_ref =
       FindSymbolRef(module.get(), IREE_SV("gfx11_generic"));

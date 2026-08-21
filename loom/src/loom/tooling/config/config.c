@@ -564,6 +564,8 @@ static iree_status_t loom_tooling_config_copy_attr(
       return iree_ok_status();
     }
     case LOOM_ATTR_SYMBOL:
+    case LOOM_ATTR_SYMBOL_ARRAY:
+    case LOOM_ATTR_SYMBOL_SET:
     case LOOM_ATTR_TYPE:
     case LOOM_ATTR_PREDICATE_LIST:
     case LOOM_ATTR_SCOPED_ENUM:

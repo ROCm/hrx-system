@@ -375,6 +375,21 @@ func.def public @wide() -> (index) {
             leaf64_version->resolved_target.facts);
   EXPECT_NE(left_version->resolved_target.facts,
             wide_version->resolved_target.facts);
+  EXPECT_EQ(left_version->target_context_ordinal,
+            right_version->target_context_ordinal);
+  EXPECT_EQ(left_version->target_context_ordinal,
+            middle32_version->target_context_ordinal);
+  EXPECT_EQ(left_version->target_context_ordinal,
+            leaf32_version->target_context_ordinal);
+  EXPECT_EQ(wide_version->target_context_ordinal,
+            middle64_version->target_context_ordinal);
+  EXPECT_EQ(wide_version->target_context_ordinal,
+            leaf64_version->target_context_ordinal);
+  EXPECT_NE(left_version->target_context_ordinal,
+            wide_version->target_context_ordinal);
+  EXPECT_FALSE(left_version->authored_target_is_exact);
+  EXPECT_FALSE(middle32_version->authored_target_is_exact);
+  EXPECT_FALSE(leaf32_version->authored_target_is_exact);
   EXPECT_EQ(
       middle32_version->resolved_target.facts->storage.snapshot.subgroup_size,
       32u);
@@ -530,6 +545,15 @@ func.def public @root() {
   EXPECT_EQ(
       helper_version->resolved_target.facts->storage.snapshot.subgroup_size,
       32u);
+  EXPECT_TRUE(helper_version->authored_target_is_exact);
+  const loom_target_function_version_t* root_version =
+      Version(specialization.function_versions,
+              Function(module.get(), IREE_SV("root")));
+  ASSERT_NE(root_version, nullptr);
+  EXPECT_NE(helper_version->target_context_ordinal,
+            root_version->target_context_ordinal);
+  const loom_target_context_ordinal_t helper_context_ordinal =
+      helper_version->target_context_ordinal;
 
   EXPECT_FALSE(Run(module.get(), &specialization.function_versions));
   EXPECT_EQ(specialization.function_versions.list.count, 2u);
@@ -538,6 +562,11 @@ func.def public @root() {
       OnlySemanticCallee(module.get(), Function(module.get(), IREE_SV("root")))
           .symbol_id,
       helper_ref.symbol_id);
+  const loom_target_function_version_t* rerun_helper_version =
+      Version(module.get(), specialization.function_versions, helper_ref);
+  ASSERT_NE(rerun_helper_version, nullptr);
+  EXPECT_EQ(rerun_helper_version->target_context_ordinal,
+            helper_context_ordinal);
 }
 
 TEST_F(TargetCallgraphSpecializationTest,

@@ -214,6 +214,24 @@ iree_py_binary(
 )
 
 iree_py_binary(
+    name = "c_tables_module_generator",
+    srcs = C_TABLES_SRCS,
+    main = "c_tables.py",
+    visibility = GENERATOR_VISIBILITY,
+    deps = C_TABLES_BASE_DEPS + ["//loom/py/loom/dialect/module"],
+)
+
+iree_py_binary(
+    name = "c_tables_template_generator",
+    main_module = "loom.gen.ops.c_tables",
+    visibility = GENERATOR_VISIBILITY,
+    deps = C_TABLES_BASE_DEPS + [
+        "//loom/py/loom/dialect/func",
+        "//loom/py/loom/dialect/template",
+    ],
+)
+
+iree_py_binary(
     name = "c_tables_pass_generator",
     main_module = "loom.gen.ops.c_tables",
     visibility = GENERATOR_VISIBILITY,

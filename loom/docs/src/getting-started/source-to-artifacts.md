@@ -44,6 +44,50 @@ details, and unreachable helpers and providers can disappear after selection.
 The linker resolves declared symbol relationships; merely placing a module in
 a library does not make its entire contents live.
 
+## Compose explicit modules
+
+Every `.loom` file verifies independently. An exact call into another module
+therefore needs a local declaration that states the complete contract. A
+[`module.import`](../reference/dialects/module/ops/import.md) may additionally
+name which supplied provider can satisfy that declaration:
+
+**Source:** [`loom/docs/examples/module-composition/root.loom`](https://github.com/ROCm/hrx-system/blob/main/loom/docs/examples/module-composition/root.loom)
+
+```loom title="root.loom"
+--8<-- "examples/module-composition/root.loom"
+```
+
+The string `"layer.loom"` is an opaque provider key, not a request to open a
+file. The CLI invocation below explicitly supplies `layer.loom` and binds its
+exact path spelling as that key. An in-memory embedding can bind a logical key
+to a source without involving a filesystem.
+
+The layer itself imports a function from `kernels.loom`. The checked workflow
+links only the available layer, writes a standalone partial `.loombc`, reloads
+it, and then supplies the kernel provider:
+
+```shell
+loom/docs/examples/module-composition/run.sh build/module-composition
+```
+
+Imports are optional. A declaration without a corresponding `module.import`
+can resolve from a compatible definition in the explicitly supplied module
+universe. The `elementwise-transform` example below intentionally uses that
+simpler form: its build and embedding already choose the complete library set.
+The import-free path remains useful for generated in-memory programs, test
+wrappers, and small compositions where provider routing adds no information.
+
+| Source contract | Selection behavior |
+| --- | --- |
+| Exact declaration | Resolve a compatible definition from the explicitly supplied universe. |
+| `module.import` plus exact declaration | Resolve only from providers bound to one of the named keys. |
+| `template.decl` plus `template.apply` | Select an eligible family provider from the supplied universe; imports never gate templates. |
+
+The [linking workflow](../workflows/link-and-package.md) follows partial and
+transitive composition in detail. The [source-module
+chapter](../guide/source-modules.md#declarations-state-contracts-imports-state-availability)
+defines the language contract.
+
 ## Exact calls and selectable implementations
 
 Loom separates naming one implementation from requesting an implementation
@@ -52,12 +96,14 @@ that satisfies a contract.
 | Source construct | Meaning |
 | --- | --- |
 | [`func.def`](../reference/dialects/func/ops/def.md) and [`func.call`](../reference/dialects/func/ops/call.md) | Define and call an exact helper by symbol. |
-| [`func.template`](../reference/dialects/func/ops/template.md) | Provide a visible implementation of a named contract. |
-| [`func.apply`](../reference/dialects/func/ops/apply.md) | Request an implementation of that contract at compile time. |
+| [`template.decl`](../reference/dialects/template/ops/decl.md) | Declare a stable compile-time family contract in the module that uses or implements it. |
+| [`template.def`](../reference/dialects/template/ops/def.md) | Provide one selectable implementation of that family. |
+| [`template.apply`](../reference/dialects/template/ops/apply.md) | Request an implementation of that family at compile time. |
+| [`template.call`](../reference/dialects/template/ops/call.md) | Call one named template implementation without candidate ranking. |
 
 An exact bit-manipulation helper is naturally a `func.call`. An operation whose
 best implementation depends on element format, shape facts, subgroup size, or
-target capabilities is naturally a `func.apply`. During specialization, Loom
+target capabilities is naturally a `template.apply`. During specialization, Loom
 matches the reachable providers, their predicates and requirements, and the
 known facts. The selected provider becomes an ordinary callable boundary that
 normal inlining and optimization can remove.
@@ -84,8 +130,9 @@ The wave32 provider is eligible only when the selected target establishes a
 subgroup size of 32. The fallback stays targetless, so the motif remains useful
 to targets that know nothing about AMDGPU.
 
-The complete operation inventory lives in the generated
-[`func` dialect reference](../reference/dialects/func/index.md).
+The complete operation inventories live in the generated
+[`func`](../reference/dialects/func/index.md) and
+[`template`](../reference/dialects/template/index.md) dialect references.
 
 ## A kernel owns two contracts
 
@@ -226,20 +273,22 @@ constructs that exist today.
 ## Follow one composition to Low
 
 The three source listings above are repository `.loom` files, not prose copies.
-With the Loom tools on `PATH`, this command formats them, links and specializes
-the `@elementwise_transform` root, compiles its kernel for the generic GFX11
-profile, and
-prints every Loom command it runs:
+With the Loom tools on `PATH`, this command formats them, archives the explicit
+program and provider universe, then specializes and compiles the kernel for the
+generic GFX11 profile. It prints every Loom command it runs:
 
 ```shell
 loom/docs/examples/elementwise-transform/run.sh \
   gfx11-generic build/elementwise-transform/gfx11-generic
 ```
 
-The resulting directory contains the specialized `elementwise-transform.loom`,
-a VMFB, an HSACO, and the captured target Low IR. The documentation build
-invokes that same script and regenerates the views below; neither output is
-checked-in source.
+The resulting directory contains the linkable `elementwise-transform.loom`
+archive, a VMFB, an HSACO, and the captured target Low IR. Archive mode matters
+here because target facts arrive at the following `loom-compile` boundary: a
+closed targetless selective link would correctly choose the portable fallback
+and discard the wave32 alternative before those facts exist. The documentation
+build invokes the same script and regenerates the views below; neither output
+is checked-in source.
 
 === "GFX11 kernel Low"
 
@@ -254,8 +303,8 @@ checked-in source.
     ```
 
 The GFX11 tab comes directly from the installed-tool workflow above. The
-command-program tab shows compiler-owned materialization of the same linked
-root. Until command-program materialization has a published installed-tool
+command-program tab shows compiler-owned materialization from the same archived
+program. Until command-program materialization has a published installed-tool
 surface, treat that tab as verified compiler output rather than a CLI recipe.
 
 ## Embedding chooses the deployment policy

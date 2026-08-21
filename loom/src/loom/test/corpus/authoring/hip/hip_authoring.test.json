@@ -542,14 +542,14 @@
           "path": "{tmp}/target_provider_gfx11_generic_trace.jsonl",
           "contains": [
             "\"pass\":\"select-templates\"",
-            "amdgpu.target<gfx11-generic> @__loom_sealed_target_0",
-            "kernel.def retain target(@__loom_sealed_target_0)",
+            "amdgpu.target<gfx11-generic> @__loom_sealed_target_0_0",
+            "kernel.def retain target(@__loom_sealed_target_0_0)",
             "%subgroup_size = index.constant 32 : index",
             "func.call inline @scale_i32_subgroup_32",
             "scalar.addi %value, %value : i32"
           ],
           "not_contains": [
-            "func.apply",
+            "template.apply",
             "%subgroup_size = target.subgroup.size",
             "scale_i32_subgroup_64",
             "scale_i32_fallback"
@@ -593,14 +593,14 @@
           "path": "{tmp}/target_provider_gfx9_4_generic_trace.jsonl",
           "contains": [
             "\"pass\":\"select-templates\"",
-            "amdgpu.target<gfx9-4-generic> @__loom_sealed_target_0",
-            "kernel.def retain target(@__loom_sealed_target_0)",
+            "amdgpu.target<gfx9-4-generic> @__loom_sealed_target_0_0",
+            "kernel.def retain target(@__loom_sealed_target_0_0)",
             "%subgroup_size = index.constant 64 : index",
             "func.call inline @scale_i32_subgroup_64",
             "scalar.muli %value, %scale_factor : i32"
           ],
           "not_contains": [
-            "func.apply",
+            "template.apply",
             "%subgroup_size = target.subgroup.size",
             "scale_i32_subgroup_32",
             "scale_i32_fallback"
@@ -644,14 +644,14 @@
           "path": "{tmp}/target_provider_gfx1151_trace.jsonl",
           "contains": [
             "\"pass\":\"select-templates\"",
-            "amdgpu.target<gfx1151> @__loom_sealed_target_0",
-            "kernel.def retain target(@__loom_sealed_target_0)",
+            "amdgpu.target<gfx1151> @__loom_sealed_target_0_0",
+            "kernel.def retain target(@__loom_sealed_target_0_0)",
             "%subgroup_size = index.constant 32 : index",
             "func.call inline @scale_i32_subgroup_32"
           ],
           "not_contains": [
             "amdgpu.target<gfx11-generic>",
-            "func.apply",
+            "template.apply",
             "%subgroup_size = target.subgroup.size",
             "scale_i32_subgroup_64",
             "scale_i32_fallback"

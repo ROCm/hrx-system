@@ -41,6 +41,11 @@ static uint32_t loom_hash_u32_extend(uint32_t hash, uint32_t value) {
   return loom_hash_bytes_extend(hash, &value, sizeof(value));
 }
 
+// Extends an FNV-1a hash with one uint64_t.
+static uint32_t loom_hash_u64_extend(uint32_t hash, uint64_t value) {
+  return loom_hash_bytes_extend(hash, &value, sizeof(value));
+}
+
 static uint32_t loom_hash_string_view(iree_string_view_t string) {
   return loom_hash_bytes(string.data, string.size);
 }
@@ -271,17 +276,29 @@ static iree_status_t loom_string_table_ensure_capacity(
 
 static iree_status_t loom_type_table_ensure_capacity(
     iree_arena_allocator_t* arena, loom_type_table_t* table) {
-  if (table->count < table->capacity) return iree_ok_status();
-  iree_host_size_t new_capacity =
-      table->capacity > 0 ? table->capacity * 2 : 64;
+  if (table->count < table->capacity) {
+    return iree_ok_status();
+  }
+  iree_host_size_t new_capacity = 64;
+  if (table->capacity > 0 &&
+      !iree_host_size_checked_mul(table->capacity, 2, &new_capacity)) {
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "type table capacity overflow");
+  }
   loom_type_t* new_entries = NULL;
+  uint32_t* new_hashes = NULL;
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
       arena, new_capacity, sizeof(loom_type_t), (void**)&new_entries));
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      arena, new_capacity, sizeof(uint32_t), (void**)&new_hashes));
   memset(new_entries, 0, new_capacity * sizeof(loom_type_t));
+  memset(new_hashes, 0, new_capacity * sizeof(uint32_t));
   if (table->count > 0) {
     memcpy(new_entries, table->entries, table->count * sizeof(loom_type_t));
+    memcpy(new_hashes, table->hashes, table->count * sizeof(uint32_t));
   }
   table->entries = new_entries;
+  table->hashes = new_hashes;
   table->capacity = new_capacity;
   return iree_ok_status();
 }
@@ -527,6 +544,7 @@ static iree_status_t loom_module_initialize_tables(
   iree_host_size_t string_capacity = 512;
   iree_host_size_t type_capacity = 64;
   iree_host_size_t encoding_capacity = 0;
+  iree_host_size_t source_capacity = 0;
   iree_host_size_t symbol_capacity = 32;
 
   if (hints) {
@@ -536,14 +554,25 @@ static iree_status_t loom_module_initialize_tables(
         (iree_host_size_t)(hints->type_count * LOOM_MODULE_GROWTH_FACTOR);
     encoding_capacity =
         (iree_host_size_t)(hints->encoding_count * LOOM_MODULE_GROWTH_FACTOR);
+    source_capacity =
+        (iree_host_size_t)(hints->source_count * LOOM_MODULE_GROWTH_FACTOR);
     symbol_capacity =
         (iree_host_size_t)(hints->symbol_count * LOOM_MODULE_GROWTH_FACTOR);
-    if (string_capacity < 8) string_capacity = 8;
-    if (type_capacity < 8) type_capacity = 8;
+    if (string_capacity < 8) {
+      string_capacity = 8;
+    }
+    if (type_capacity < 8) {
+      type_capacity = 8;
+    }
     if (hints->encoding_count > 0 && encoding_capacity < 8) {
       encoding_capacity = 8;
     }
-    if (symbol_capacity < 4) symbol_capacity = 4;
+    if (hints->source_count > 0 && source_capacity < 4) {
+      source_capacity = 4;
+    }
+    if (symbol_capacity < 4) {
+      symbol_capacity = 4;
+    }
   }
 
   // Value segments are allocated lazily as values are defined. The matching
@@ -569,8 +598,11 @@ static iree_status_t loom_module_initialize_tables(
   IREE_RETURN_IF_ERROR(
       iree_arena_allocate_array(arena, type_capacity, sizeof(loom_type_t),
                                 (void**)&module->types.entries));
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      arena, type_capacity, sizeof(uint32_t), (void**)&module->types.hashes));
   module->types.capacity = type_capacity;
   memset(module->types.entries, 0, type_capacity * sizeof(loom_type_t));
+  memset(module->types.hashes, 0, type_capacity * sizeof(uint32_t));
 
   // Encodings. Modules without an encoding count hint retain lazy allocation.
   if (encoding_capacity > 0) {
@@ -578,6 +610,14 @@ static iree_status_t loom_module_initialize_tables(
         arena, encoding_capacity, sizeof(loom_encoding_t),
         (void**)&module->encodings.entries));
     module->encodings.capacity = encoding_capacity;
+  }
+
+  // Sources. Modules without a source count hint retain lazy allocation.
+  if (source_capacity > 0) {
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        arena, source_capacity, sizeof(iree_string_view_t),
+        (void**)&module->sources.entries));
+    module->sources.capacity = source_capacity;
   }
 
   // Symbols.
@@ -1013,6 +1053,17 @@ static iree_status_t loom_module_mark_symbol_references_in_attr(
       }
       return iree_ok_status();
     }
+    case LOOM_ATTR_SYMBOL_ARRAY:
+    case LOOM_ATTR_SYMBOL_SET: {
+      for (uint16_t i = 0; i < attr->count; ++i) {
+        loom_symbol_ref_t symbol_ref = attr->symbol_refs[i];
+        if (loom_symbol_ref_is_valid(symbol_ref) && symbol_ref.module_id == 0 &&
+            symbol_ref.symbol_id < module->symbols.count) {
+          referenced_symbols[symbol_ref.symbol_id] = 1;
+        }
+      }
+      return iree_ok_status();
+    }
     case LOOM_ATTR_DICT:
       if (dict_depth >= LOOM_ATTR_AGGREGATE_MAX_NESTING_DEPTH) {
         return iree_make_status(
@@ -1156,6 +1207,44 @@ static iree_status_t loom_module_remap_symbol_attr(
       }
       if (new_symbol_id != symbol_ref.symbol_id) {
         out_target_attr->symbol.symbol_id = new_symbol_id;
+        *out_changed = true;
+      }
+      return iree_ok_status();
+    }
+    case LOOM_ATTR_SYMBOL_ARRAY:
+    case LOOM_ATTR_SYMBOL_SET: {
+      if (source_attr.count == 0) return iree_ok_status();
+      loom_symbol_ref_t* target_refs = NULL;
+      for (uint16_t i = 0; i < source_attr.count; ++i) {
+        loom_symbol_ref_t source_ref = source_attr.symbol_refs[i];
+        if (!loom_symbol_ref_is_valid(source_ref) ||
+            source_ref.module_id != 0 ||
+            source_ref.symbol_id >= old_symbol_count) {
+          continue;
+        }
+        uint16_t new_symbol_id = new_symbol_ids[source_ref.symbol_id];
+        if (new_symbol_id == LOOM_SYMBOL_ID_INVALID) {
+          return iree_make_status(
+              IREE_STATUS_FAILED_PRECONDITION,
+              "symbol array attribute element %u references dropped symbol "
+              "id %u",
+              (unsigned)i, (unsigned)source_ref.symbol_id);
+        }
+        if (new_symbol_id == source_ref.symbol_id) continue;
+        if (!target_refs) {
+          IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+              &module->arena, source_attr.count, sizeof(*target_refs),
+              (void**)&target_refs));
+          memcpy(target_refs, source_attr.symbol_refs,
+                 (iree_host_size_t)source_attr.count * sizeof(*target_refs));
+        }
+        target_refs[i].symbol_id = new_symbol_id;
+      }
+      if (target_refs) {
+        *out_target_attr =
+            source_attr.kind == LOOM_ATTR_SYMBOL_SET
+                ? loom_attr_symbol_set(target_refs, source_attr.count)
+                : loom_attr_symbol_array(target_refs, source_attr.count);
         *out_changed = true;
       }
       return iree_ok_status();
@@ -1498,6 +1587,14 @@ iree_status_t loom_module_register_source(loom_module_t* module,
     }
   }
 
+  return loom_module_append_source(module, name, out_source_id);
+}
+
+iree_status_t loom_module_append_source(loom_module_t* module,
+                                        iree_string_view_t name,
+                                        loom_source_id_t* out_source_id) {
+  *out_source_id = LOOM_SOURCE_ID_INVALID;
+
   // Source IDs are 0-based uint16_t. LOOM_SOURCE_ID_INVALID is the null
   // sentinel, so the maximum valid ID is LOOM_SOURCE_ID_INVALID - 1.
   if (module->sources.count >= LOOM_SOURCE_ID_INVALID) {
@@ -1618,30 +1715,47 @@ static const loom_comment_attachment_t* loom_module_find_comment_attachment(
   return NULL;
 }
 
-static iree_status_t loom_module_copy_comments(
+// Stores one attachment's views and payload bytes in one module-arena
+// allocation.
+static iree_status_t loom_module_store_comments(
     loom_module_t* module, const iree_string_view_t* comments,
     iree_host_size_t comment_count, iree_string_view_t** out_comments) {
   *out_comments = NULL;
-  if (comment_count == 0) return iree_ok_status();
   if (!comments) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "comment_count > 0 requires non-NULL comments");
   }
 
-  iree_string_view_t* copied_comments = NULL;
-  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(&module->arena, comment_count,
-                                                 sizeof(*copied_comments),
-                                                 (void**)&copied_comments));
+  iree_host_size_t comment_payload_size = 0;
   for (iree_host_size_t i = 0; i < comment_count; ++i) {
-    char* copied_data = NULL;
-    if (comments[i].size > 0) {
-      IREE_RETURN_IF_ERROR(iree_arena_allocate(&module->arena, comments[i].size,
-                                               (void**)&copied_data));
-      memcpy(copied_data, comments[i].data, comments[i].size);
+    if (!iree_host_size_checked_add(comment_payload_size, comments[i].size,
+                                    &comment_payload_size)) {
+      return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                              "comment payload storage size overflow");
     }
-    copied_comments[i] = iree_make_string_view(copied_data, comments[i].size);
   }
-  *out_comments = copied_comments;
+  iree_host_size_t storage_size = 0;
+  if (!iree_host_size_checked_mul_add(comment_payload_size, comment_count,
+                                      sizeof(*comments), &storage_size)) {
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "comment storage size overflow");
+  }
+
+  iree_string_view_t* stored_comments = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate(&module->arena, storage_size,
+                                           (void**)&stored_comments));
+  char* stored_payload = (char*)(stored_comments + comment_count);
+  for (iree_host_size_t i = 0; i < comment_count; ++i) {
+    if (comments[i].size > 0) {
+      memcpy(stored_payload, comments[i].data, comments[i].size);
+      stored_comments[i] =
+          iree_make_string_view(stored_payload, comments[i].size);
+      stored_payload += comments[i].size;
+    } else {
+      stored_comments[i] = iree_string_view_empty();
+    }
+  }
+  *out_comments = stored_comments;
   return iree_ok_status();
 }
 
@@ -1649,7 +1763,9 @@ static iree_status_t loom_module_attach_comments(
     loom_module_t* module, loom_comment_owner_kind_t owner_kind,
     const void* owner, const iree_string_view_t* comments,
     iree_host_size_t comment_count) {
-  if (comment_count == 0) return iree_ok_status();
+  if (comment_count == 0) {
+    return iree_ok_status();
+  }
   if (!owner) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "comment attachment requires non-NULL owner");
@@ -1664,9 +1780,9 @@ static iree_status_t loom_module_attach_comments(
                             "comments are already attached to owner");
   }
 
-  iree_string_view_t* copied_comments = NULL;
-  IREE_RETURN_IF_ERROR(loom_module_copy_comments(
-      module, comments, comment_count, &copied_comments));
+  iree_string_view_t* stored_comments = NULL;
+  IREE_RETURN_IF_ERROR(loom_module_store_comments(
+      module, comments, comment_count, &stored_comments));
   IREE_RETURN_IF_ERROR(
       loom_comment_table_ensure_capacity(&module->arena, &module->comments));
   module->comments.entries[module->comments.count++] =
@@ -1674,7 +1790,7 @@ static iree_status_t loom_module_attach_comments(
           .owner = owner,
           .owner_kind = owner_kind,
           .comment_count = (uint16_t)comment_count,
-          .comments = copied_comments,
+          .comments = stored_comments,
       };
   return iree_ok_status();
 }
@@ -2289,6 +2405,140 @@ loom_string_id_t loom_module_lookup_string(const loom_module_t* module,
 }
 
 //===----------------------------------------------------------------------===//
+// Symbol-set attributes
+//===----------------------------------------------------------------------===//
+
+static iree_status_t loom_module_resolve_symbol_ref_name(
+    const loom_module_t* module, loom_symbol_ref_t ref,
+    iree_string_view_t* out_name) {
+  if (!loom_symbol_ref_is_valid(ref) || ref.module_id != 0 ||
+      ref.symbol_id >= module->symbols.count) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "symbol set reference {module=%u, symbol=%u} is not a valid local "
+        "symbol (module has %" PRIhsz " symbols)",
+        (unsigned)ref.module_id, (unsigned)ref.symbol_id,
+        module->symbols.count);
+  }
+  const loom_string_id_t name_id =
+      module->symbols.entries[ref.symbol_id].name_id;
+  *out_name = module->strings.entries[name_id];
+  return iree_ok_status();
+}
+
+static int loom_module_compare_symbol_refs_by_name(const loom_module_t* module,
+                                                   loom_symbol_ref_t lhs,
+                                                   loom_symbol_ref_t rhs) {
+  loom_string_id_t lhs_name_id = module->symbols.entries[lhs.symbol_id].name_id;
+  loom_string_id_t rhs_name_id = module->symbols.entries[rhs.symbol_id].name_id;
+  return iree_string_view_compare(module->strings.entries[lhs_name_id],
+                                  module->strings.entries[rhs_name_id]);
+}
+
+static void loom_module_sift_symbol_ref_heap(const loom_module_t* module,
+                                             loom_symbol_ref_t* refs,
+                                             iree_host_size_t root,
+                                             iree_host_size_t count) {
+  while (root * 2 + 1 < count) {
+    iree_host_size_t larger = root;
+    iree_host_size_t left = root * 2 + 1;
+    iree_host_size_t right = left + 1;
+    if (loom_module_compare_symbol_refs_by_name(module, refs[larger],
+                                                refs[left]) < 0) {
+      larger = left;
+    }
+    if (right < count && loom_module_compare_symbol_refs_by_name(
+                             module, refs[larger], refs[right]) < 0) {
+      larger = right;
+    }
+    if (larger == root) return;
+    loom_symbol_ref_t temporary = refs[root];
+    refs[root] = refs[larger];
+    refs[larger] = temporary;
+    root = larger;
+  }
+}
+
+static void loom_module_sort_symbol_refs_by_name(const loom_module_t* module,
+                                                 loom_symbol_ref_t* refs,
+                                                 iree_host_size_t count) {
+  for (iree_host_size_t start = count / 2; start > 0; --start) {
+    loom_module_sift_symbol_ref_heap(module, refs, start - 1, count);
+  }
+  for (iree_host_size_t end = count; end > 1; --end) {
+    loom_symbol_ref_t temporary = refs[0];
+    refs[0] = refs[end - 1];
+    refs[end - 1] = temporary;
+    loom_module_sift_symbol_ref_heap(module, refs, 0, end - 1);
+  }
+}
+
+static iree_status_t loom_module_validate_symbol_set(
+    const loom_module_t* module, const loom_symbol_ref_t* refs,
+    iree_host_size_t ref_count) {
+  if (ref_count > UINT16_MAX) {
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "symbol set has %" PRIhsz " elements, max %u",
+                            ref_count, (unsigned)UINT16_MAX);
+  }
+  if (ref_count > 0 && !refs) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "non-empty symbol set has a NULL payload");
+  }
+  for (iree_host_size_t i = 0; i < ref_count; ++i) {
+    iree_string_view_t name = iree_string_view_empty();
+    IREE_RETURN_IF_ERROR(
+        loom_module_resolve_symbol_ref_name(module, refs[i], &name));
+  }
+  return iree_ok_status();
+}
+
+loom_symbol_ref_t loom_module_canonicalize_symbol_set(
+    const loom_module_t* module, loom_symbol_ref_t* refs, uint16_t ref_count) {
+  loom_module_sort_symbol_refs_by_name(module, refs, ref_count);
+  for (uint16_t i = 1; i < ref_count; ++i) {
+    if (loom_module_compare_symbol_refs_by_name(module, refs[i - 1], refs[i]) ==
+        0) {
+      return refs[i];
+    }
+  }
+  return loom_symbol_ref_null();
+}
+
+iree_status_t loom_module_try_make_symbol_set(
+    loom_module_t* module, loom_symbol_ref_array_t refs,
+    loom_symbol_ref_t* out_duplicate_ref, loom_attribute_t* out_attr) {
+  *out_duplicate_ref = loom_symbol_ref_null();
+  *out_attr = loom_attr_absent();
+  IREE_RETURN_IF_ERROR(
+      loom_module_validate_symbol_set(module, refs.values, refs.count));
+  if (refs.count == 0) {
+    *out_attr = loom_attr_symbol_set(NULL, 0);
+    return iree_ok_status();
+  }
+
+  const iree_arena_checkpoint_t checkpoint =
+      iree_arena_checkpoint_save(&module->arena);
+  loom_symbol_ref_t* sorted_refs = NULL;
+  iree_status_t status = iree_arena_allocate_array(
+      &module->arena, refs.count, sizeof(*sorted_refs), (void**)&sorted_refs);
+  if (!iree_status_is_ok(status)) {
+    iree_arena_checkpoint_restore(&checkpoint);
+    return status;
+  }
+  memcpy(sorted_refs, refs.values, refs.count * sizeof(*sorted_refs));
+  *out_duplicate_ref = loom_module_canonicalize_symbol_set(
+      module, sorted_refs, (uint16_t)refs.count);
+  if (loom_symbol_ref_is_valid(*out_duplicate_ref)) {
+    iree_arena_checkpoint_restore(&checkpoint);
+    return iree_ok_status();
+  }
+
+  *out_attr = loom_attr_symbol_set(sorted_refs, (uint16_t)refs.count);
+  return iree_ok_status();
+}
+
+//===----------------------------------------------------------------------===//
 // Canonical dictionary attributes
 //===----------------------------------------------------------------------===//
 
@@ -2369,7 +2619,9 @@ static iree_status_t loom_module_make_canonical_attr_dict_entries(
                                 "duplicate dict attribute key '%.*s'",
                                 (int)key_name.size, key_name.data);
       }
-      if (comparison > 0) break;
+      if (comparison > 0) {
+        break;
+      }
 
       canonical_entries[insert_index] = canonical_entries[insert_index - 1];
       --insert_index;
@@ -2680,6 +2932,49 @@ static iree_status_t loom_module_canonicalize_attr_value(
     case LOOM_ATTR_SYMBOL:
       *out_value = loom_attr_symbol(value.symbol);
       return iree_ok_status();
+    case LOOM_ATTR_SYMBOL_ARRAY: {
+      if (descriptor == NULL) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "symbol array attributes require a descriptor-backed field");
+      }
+      if (value.count == 0) {
+        *out_value = loom_attr_symbol_array(NULL, 0);
+        return iree_ok_status();
+      }
+      if (value.symbol_refs == NULL) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "non-empty symbol array attribute has a NULL payload");
+      }
+      loom_symbol_ref_t* values = NULL;
+      IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+          &module->arena, value.count, sizeof(*values), (void**)&values));
+      memcpy(values, value.symbol_refs,
+             (iree_host_size_t)value.count * sizeof(*values));
+      *out_value = loom_attr_symbol_array(values, value.count);
+      return iree_ok_status();
+    }
+    case LOOM_ATTR_SYMBOL_SET: {
+      if (descriptor == NULL) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "symbol set attributes require a descriptor-backed field");
+      }
+      loom_symbol_ref_t duplicate_ref = loom_symbol_ref_null();
+      IREE_RETURN_IF_ERROR(loom_module_try_make_symbol_set(
+          module, loom_make_symbol_ref_array(value.symbol_refs, value.count),
+          &duplicate_ref, out_value));
+      if (loom_symbol_ref_is_valid(duplicate_ref)) {
+        iree_string_view_t duplicate_name = iree_string_view_empty();
+        IREE_RETURN_IF_ERROR(loom_module_resolve_symbol_ref_name(
+            module, duplicate_ref, &duplicate_name));
+        return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "symbol set contains duplicate '@%.*s'",
+                                (int)duplicate_name.size, duplicate_name.data);
+      }
+      return iree_ok_status();
+    }
     case LOOM_ATTR_TYPE:
       if (value.type_id == LOOM_TYPE_ID_INVALID ||
           value.type_id >= module->types.count) {
@@ -2830,6 +3125,13 @@ static iree_status_t loom_module_canonicalize_attr_value(
   return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                           "attribute value has unknown kind %u",
                           (unsigned)value.kind);
+}
+
+iree_status_t loom_module_make_canonical_attribute(
+    loom_module_t* module, const loom_attr_descriptor_t* descriptor,
+    loom_attribute_t value, loom_attribute_t* out_value) {
+  return loom_module_canonicalize_attr_value(module, descriptor, value,
+                                             /*depth=*/0, out_value);
 }
 
 iree_status_t loom_module_make_canonical_attr_dict(
@@ -3083,6 +3385,49 @@ static iree_status_t loom_module_verify_canonical_attr_value(
       }
       return iree_ok_status();
     }
+    case LOOM_ATTR_SYMBOL_ARRAY: {
+      IREE_RETURN_IF_ERROR(loom_module_verify_canonical_attr_header(
+          value, IREE_SV("symbol array attribute")));
+      if (descriptor == NULL) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "symbol array attributes require a descriptor-backed field");
+      }
+      if ((value->count > 0) != (value->symbol_refs != NULL)) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "symbol array attribute pointer does not match its element count");
+      }
+      return iree_ok_status();
+    }
+    case LOOM_ATTR_SYMBOL_SET: {
+      IREE_RETURN_IF_ERROR(loom_module_verify_canonical_attr_header(
+          value, IREE_SV("symbol set attribute")));
+      if (descriptor == NULL) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "symbol set attributes require a descriptor-backed field");
+      }
+      if ((value->count > 0) != (value->symbol_refs != NULL)) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "symbol set attribute pointer does not match its element count");
+      }
+      iree_string_view_t previous_name = iree_string_view_empty();
+      for (uint16_t i = 0; i < value->count; ++i) {
+        iree_string_view_t current_name = iree_string_view_empty();
+        IREE_RETURN_IF_ERROR(loom_module_resolve_symbol_ref_name(
+            module, value->symbol_refs[i], &current_name));
+        if (i > 0 &&
+            iree_string_view_compare(previous_name, current_name) >= 0) {
+          return iree_make_status(
+              IREE_STATUS_INVALID_ARGUMENT,
+              "symbol set attribute is not sorted and unique");
+        }
+        previous_name = current_name;
+      }
+      return iree_ok_status();
+    }
     case LOOM_ATTR_PREDICATE_LIST: {
       IREE_RETURN_IF_ERROR(loom_module_verify_canonical_attr_header(
           value, IREE_SV("predicate list attribute")));
@@ -3296,6 +3641,19 @@ typedef struct loom_function_type_equal_context_t {
   uint16_t result_count;
 } loom_function_type_equal_context_t;
 
+// One type assembled over canonical immediate dependencies already interned in
+// the module. Dependency IDs follow the type's representation order.
+typedef struct loom_topological_type_context_t {
+  // Module owning every dependency ID.
+  const loom_module_t* module;
+  // Temporary top-level type representation.
+  loom_type_t type;
+  // Canonical immediate dependency IDs in representation order.
+  const loom_type_id_t* dependency_ids;
+  // Number of entries in dependency_ids.
+  iree_host_size_t dependency_count;
+} loom_topological_type_context_t;
+
 typedef iree_status_t (*loom_module_type_clone_fn_t)(loom_module_t* module,
                                                      const void* clone_context,
                                                      loom_type_t* out_type);
@@ -3354,6 +3712,85 @@ static bool loom_type_equal_fn(const void* context, uint32_t index) {
   return loom_type_equal(ctx->module->types.entries[index], ctx->type);
 }
 
+// Compares only the immediate structure of a topologically assembled type.
+// Nested type identities are canonical module entries and therefore compare by
+// their exact by-value storage instead of recursively walking their payloads.
+static bool loom_topological_type_equal_fn(const void* context,
+                                           uint32_t index) {
+  const loom_topological_type_context_t* ctx =
+      (const loom_topological_type_context_t*)context;
+  const loom_type_t existing = ctx->module->types.entries[index];
+  const loom_type_t candidate = ctx->type;
+  if (existing.header != candidate.header ||
+      existing.encoding_id != candidate.encoding_id ||
+      existing.encoding_flags != candidate.encoding_flags) {
+    return false;
+  }
+
+  switch (loom_type_kind(candidate)) {
+    case LOOM_TYPE_FUNCTION: {
+      const loom_func_type_data_t* existing_data =
+          loom_type_func_data(existing);
+      const loom_func_type_data_t* candidate_data =
+          loom_type_func_data(candidate);
+      if (existing_data == NULL || candidate_data == NULL ||
+          existing_data->arg_count != candidate_data->arg_count ||
+          existing_data->result_count != candidate_data->result_count) {
+        return false;
+      }
+      for (iree_host_size_t i = 0; i < ctx->dependency_count; ++i) {
+        if (!loom_type_has_same_storage(
+                existing_data->types[i],
+                ctx->module->types.entries[ctx->dependency_ids[i]])) {
+          return loom_type_equal(existing, candidate);
+        }
+      }
+      return true;
+    }
+    case LOOM_TYPE_DIALECT: {
+      if (loom_type_dialect_name_id(existing) !=
+          loom_type_dialect_name_id(candidate)) {
+        return false;
+      }
+      const loom_type_t* existing_parameters =
+          loom_type_dialect_params(existing);
+      if (ctx->dependency_count > 0 && existing_parameters == NULL) {
+        return false;
+      }
+      for (iree_host_size_t i = 0; i < ctx->dependency_count; ++i) {
+        if (!loom_type_has_same_storage(
+                existing_parameters[i],
+                ctx->module->types.entries[ctx->dependency_ids[i]])) {
+          return loom_type_equal(existing, candidate);
+        }
+      }
+      return true;
+    }
+    case LOOM_TYPE_REGISTER: {
+      if (ctx->dependency_count == 0) {
+        return loom_type_equal(existing, candidate);
+      }
+      const loom_register_type_data_t* existing_data =
+          loom_type_register_data(existing);
+      const loom_register_type_data_t* candidate_data =
+          loom_type_register_data(candidate);
+      if (existing_data == NULL || candidate_data == NULL ||
+          existing_data->carrier_payload0 != candidate_data->carrier_payload0 ||
+          existing_data->carrier_payload1 != candidate_data->carrier_payload1) {
+        return false;
+      }
+      if (loom_type_has_same_storage(
+              existing_data->value_type,
+              ctx->module->types.entries[ctx->dependency_ids[0]])) {
+        return true;
+      }
+      return loom_type_equal(existing, candidate);
+    }
+    default:
+      return loom_type_equal(existing, candidate);
+  }
+}
+
 // Compares one interned module type against temporary arg/result arrays for a
 // first-class function signature that has not been packed into a FAM payload.
 static bool loom_function_type_equal_fn(const void* context, uint32_t index) {
@@ -3404,6 +3841,52 @@ static uint32_t loom_function_type_hash(const loom_type_t* arg_types,
   return hash;
 }
 
+// Computes loom_type_hash() without recursively hashing canonical immediate
+// dependencies. Their structural hashes were recorded when the dependencies
+// were interned earlier in the topological sequence.
+static uint32_t loom_topological_type_hash(
+    const loom_topological_type_context_t* context) {
+  const loom_type_t type = context->type;
+  uint32_t hash = 2166136261u;
+  hash = loom_hash_u32_extend(hash, type.header);
+  hash = loom_hash_u16_extend(hash, type.encoding_id);
+  hash = loom_hash_u16_extend(hash, type.encoding_flags);
+
+  switch (loom_type_kind(type)) {
+    case LOOM_TYPE_FUNCTION: {
+      const loom_func_type_data_t* data = loom_type_func_data(type);
+      hash = loom_hash_u16_extend(hash, data->arg_count);
+      hash = loom_hash_u16_extend(hash, data->result_count);
+      hash = loom_hash_u16_extend(hash, (uint16_t)context->dependency_count);
+      for (iree_host_size_t i = 0; i < context->dependency_count; ++i) {
+        hash = loom_hash_u32_extend(
+            hash, context->module->types.hashes[context->dependency_ids[i]]);
+      }
+      return hash;
+    }
+    case LOOM_TYPE_DIALECT:
+      hash = loom_hash_u32_extend(hash, loom_type_dialect_name_id(type));
+      hash = loom_hash_u16_extend(hash, (uint16_t)context->dependency_count);
+      for (iree_host_size_t i = 0; i < context->dependency_count; ++i) {
+        hash = loom_hash_u32_extend(
+            hash, context->module->types.hashes[context->dependency_ids[i]]);
+      }
+      return hash;
+    case LOOM_TYPE_REGISTER: {
+      if (context->dependency_count == 0) {
+        return loom_type_hash(type);
+      }
+      const loom_register_type_data_t* data = loom_type_register_data(type);
+      hash = loom_hash_u64_extend(hash, data->carrier_payload0);
+      hash = loom_hash_u64_extend(hash, data->carrier_payload1);
+      return loom_hash_u32_extend(
+          hash, context->module->types.hashes[context->dependency_ids[0]]);
+    }
+    default:
+      return loom_type_hash(type);
+  }
+}
+
 static iree_status_t loom_module_clone_type_payload(loom_module_t* module,
                                                     loom_type_t type,
                                                     loom_type_t* out_type);
@@ -3443,6 +3926,69 @@ static iree_status_t loom_module_clone_type_from_context(
     loom_module_t* module, const void* clone_context, loom_type_t* out_type) {
   loom_type_t type = *(const loom_type_t*)clone_context;
   return loom_module_clone_type_payload(module, type, out_type);
+}
+
+// Retains only the top-level payload of a type whose nested types are already
+// canonical module entries.
+static iree_status_t loom_module_clone_topological_type_from_context(
+    loom_module_t* module, const void* clone_context, loom_type_t* out_type) {
+  const loom_topological_type_context_t* ctx =
+      (const loom_topological_type_context_t*)clone_context;
+  const loom_type_t type = ctx->type;
+  switch (loom_type_kind(type)) {
+    case LOOM_TYPE_FUNCTION: {
+      const loom_func_type_data_t* source_data = loom_type_func_data(type);
+      iree_host_size_t allocation_size = 0;
+      IREE_RETURN_IF_ERROR(IREE_STRUCT_LAYOUT(
+          sizeof(loom_func_type_data_t), &allocation_size,
+          IREE_STRUCT_FIELD_FAM(ctx->dependency_count, loom_type_t)));
+      loom_func_type_data_t* target_data = NULL;
+      IREE_RETURN_IF_ERROR(iree_arena_allocate(&module->arena, allocation_size,
+                                               (void**)&target_data));
+      target_data->arg_count = source_data->arg_count;
+      target_data->result_count = source_data->result_count;
+      target_data->reserved = 0;
+      for (iree_host_size_t i = 0; i < ctx->dependency_count; ++i) {
+        target_data->types[i] = module->types.entries[ctx->dependency_ids[i]];
+      }
+      *out_type = loom_type_function(target_data);
+      return iree_ok_status();
+    }
+    case LOOM_TYPE_DIALECT: {
+      loom_type_t* target_parameters = NULL;
+      if (ctx->dependency_count > 0) {
+        IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+            &module->arena, ctx->dependency_count, sizeof(*target_parameters),
+            (void**)&target_parameters));
+      }
+      for (iree_host_size_t i = 0; i < ctx->dependency_count; ++i) {
+        target_parameters[i] = module->types.entries[ctx->dependency_ids[i]];
+      }
+      *out_type =
+          loom_type_dialect(loom_type_dialect_name_id(type),
+                            (uint16_t)ctx->dependency_count, target_parameters);
+      return iree_ok_status();
+    }
+    case LOOM_TYPE_REGISTER: {
+      if (ctx->dependency_count == 0) {
+        return loom_module_clone_type_payload(module, type, out_type);
+      }
+      const loom_register_type_data_t* source_data =
+          loom_type_register_data(type);
+      loom_register_type_data_t* target_data = NULL;
+      IREE_RETURN_IF_ERROR(iree_arena_allocate(
+          &module->arena, sizeof(*target_data), (void**)&target_data));
+      *target_data = (loom_register_type_data_t){
+          .carrier_payload0 = source_data->carrier_payload0,
+          .carrier_payload1 = source_data->carrier_payload1,
+          .value_type = module->types.entries[ctx->dependency_ids[0]],
+      };
+      *out_type = loom_type_register_payload_with_value_type(target_data);
+      return iree_ok_status();
+    }
+    default:
+      return loom_module_clone_type_payload(module, type, out_type);
+  }
 }
 
 // Clones one temporary first-class function signature described by
@@ -3645,6 +4191,7 @@ static iree_status_t loom_module_intern_type_impl(
   }
 
   module->types.entries[new_index] = type;
+  module->types.hashes[new_index] = hash;
   module->types.count++;
   *out_interned_type = type;
   if (out_type_id) *out_type_id = (loom_type_id_t)new_index;
@@ -3673,6 +4220,62 @@ static loom_type_t loom_module_canonicalize_shaped_type_attachment(
   type.encoding_id = 0;
   type.encoding_flags = 0;
   return type;
+}
+
+iree_status_t loom_module_intern_topological_type_id(
+    loom_module_t* module, loom_type_t type,
+    const loom_type_id_t* structural_dependency_ids,
+    iree_host_size_t structural_dependency_count, loom_type_id_t* out_type_id) {
+  if (out_type_id == NULL) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "type id output is NULL");
+  }
+  *out_type_id = LOOM_TYPE_ID_INVALID;
+
+  type = loom_module_canonicalize_shaped_type_attachment(module, type);
+  iree_host_size_t expected_dependency_count = 0;
+  switch (loom_type_kind(type)) {
+    case LOOM_TYPE_FUNCTION: {
+      const loom_func_type_data_t* data = loom_type_func_data(type);
+      IREE_ASSERT(data != NULL);
+      expected_dependency_count =
+          (iree_host_size_t)data->arg_count + data->result_count;
+      break;
+    }
+    case LOOM_TYPE_DIALECT:
+      expected_dependency_count = loom_type_dialect_param_count(type);
+      break;
+    case LOOM_TYPE_REGISTER:
+      expected_dependency_count =
+          loom_type_register_has_value_type(type) ? 1 : 0;
+      break;
+    default:
+      break;
+  }
+  IREE_ASSERT(expected_dependency_count == structural_dependency_count);
+  IREE_ASSERT(structural_dependency_count == 0 ||
+              structural_dependency_ids != NULL);
+  for (iree_host_size_t i = 0; i < structural_dependency_count; ++i) {
+    IREE_ASSERT(structural_dependency_ids[i] < module->types.count);
+  }
+
+  const loom_topological_type_context_t context = {
+      .module = module,
+      .type = type,
+      .dependency_ids = structural_dependency_ids,
+      .dependency_count = structural_dependency_count,
+  };
+  const uint32_t hash = loom_topological_type_hash(&context);
+  loom_type_t interned_type = {0};
+  iree_status_t status = loom_module_intern_type_impl(
+      module, hash, loom_topological_type_equal_fn, &context,
+      loom_module_clone_topological_type_from_context, &context, &interned_type,
+      out_type_id, /*out_miss=*/NULL);
+  if (iree_status_is_ok(status) && loom_type_is_register(interned_type) &&
+      loom_type_register_has_value_type(interned_type)) {
+    loom_module_note_recent_register_type(module, *out_type_id);
+  }
+  return status;
 }
 
 static iree_status_t loom_module_intern_type_with_dependencies(
@@ -4148,6 +4751,8 @@ static iree_status_t loom_module_replace_attribute_value_refs_impl(
     case LOOM_ATTR_ENUM:
     case LOOM_ATTR_SCOPED_ENUM:
     case LOOM_ATTR_SYMBOL:
+    case LOOM_ATTR_SYMBOL_ARRAY:
+    case LOOM_ATTR_SYMBOL_SET:
     case LOOM_ATTR_I64_ARRAY:
     case LOOM_ATTR_ENUM_ARRAY:
     case LOOM_ATTR_SIGNED_ENUM_SET:

@@ -8,11 +8,19 @@ invocation did not provide.
 ## Inputs and libraries
 
 Positional inputs are primary modules. Repeated `--library=path` options add
-provider modules searched after the primary inputs:
+provider modules searched after the primary inputs. Every supplied path also
+publishes its exact string as an opaque `module.import` provider key. The root
+below declares `@project_layer` locally and constrains its definition to the
+provider bound as `"layer.loom"`:
+
+```loom title="root.loom"
+--8<-- "examples/module-composition/root.loom"
+```
 
 ```shell
 loom-link root.loom \
-  --library=providers.loombc \
+  --library=layer.loom \
+  --library=kernels.loom \
   --root=@entry \
   --mode=link \
   --to=bc \
@@ -23,10 +31,14 @@ Inputs may mix `.loom` text and `.loombc` bytecode. `--from=auto`, the default,
 detects their encoding independently. `--to=text|bc` controls the one linked
 module written to `--output` or standard output.
 
-Primary versus library is a lookup priority, not a reachability rule. A symbol
+The provider key is an exact string match. `loom-link` does not canonicalize the
+path or search for imported files. Embeddings may bind other logical keys
+through the LoomC API. `module.import` is optional: without one, a compatible
+exact definition can satisfy a declaration from the explicit input universe.
+Primary versus library is a lookup priority, not a reachability rule: a symbol
 becomes live because it is a root or reachable dependency, not because it came
 from a primary input. Provider module order also does not override template
-matching: contracts, signatures, facts, requirements, and explicit provider
+matching; contracts, signatures, facts, requirements, and explicit provider
 priority decide which template is eligible.
 
 ## Inspect before linking
@@ -75,19 +87,23 @@ loom-link model.loom \
   --output=elementwise-transform.loom
 ```
 
-This is the exact composition exercised by the [source-to-artifacts
-walkthrough](../getting-started/source-to-artifacts.md#follow-one-composition-to-low).
-`@elementwise_transform` reaches its declared kernel and the template providers
-needed for `guide.elementwise_transform`; unrelated private symbols can
-disappear.
+This produces a closed program for the facts known at the link boundary. In
+the targetless `elementwise-transform` example it selects the portable provider
+and discards the unresolved wave32 alternative. When target facts arrive only
+at compilation, the [source-to-artifacts
+walkthrough](../getting-started/source-to-artifacts.md#follow-one-composition-to-low)
+uses archive mode instead and lets `loom-compile` perform the target-aware
+selection. In either mode, unrelated private symbols can disappear as soon as
+the chosen boundary no longer needs them.
 
 Repeated `--root=@symbol` options select several roots from one catalog. Add
 `--include-exported-roots` when the module's exported symbols should join the
 explicit root set.
 
-Configuration bindings are applied to each materialized input before dependency
-walking. This lets value and target predicates eliminate provider alternatives
-whose requirements are impossible for the selected configuration:
+Configuration bindings are applied to the composed analysis module before each
+reachability and template-selection step. This lets newly reachable code expose
+additional demands while value and target predicates eliminate provider
+alternatives that are impossible for the selected configuration:
 
 ```shell
 loom-link root.loom \
@@ -134,24 +150,85 @@ them is useful when the embedding owns validation or when executable
 specifications should not ship in the runtime artifact. It does not change the
 production symbols' semantics.
 
-## Declarations make partial linking explicit
+## Link transitive dependencies incrementally
 
 An exact call or launch is legal in an independently verified module only when
 that module contains the compatible definition or declaration. Libraries may
 satisfy those declared dependencies when linked. They may not retroactively
 make an undeclared call valid.
 
-Selective linking resolves declarations that the supplied modules can satisfy
-and preserves unresolved declarations in a valid partial result. For example, a
-root that declares dependencies from `module_a` and `module_b`, linked with only
-`module_a`, retains the `module_b` declaration. The linker does not chase a
-filesystem import graph or silently add the missing module. A later closed
-artifact boundary must supply or reject that dependency.
+For a declaration with no imports, selective linking considers compatible
+definitions from the explicitly supplied universe. If `module.import` names the
+declaration, selection is restricted to providers bound to those keys. A strict
+link rejects a reachable imported declaration that remains unresolved. Add
+`--allow-unresolved` to produce a reusable partial artifact instead.
 
-`func.apply` follows the parallel contract-provider model. A library makes
-provider candidates visible; specialization selects an eligible provider from
-the explicit set. The source path and library order never stand in for matching
-rules.
+The checked composition example has three independently verifiable modules:
+
+```text
+root.loom  --@project_layer-->  layer.loom  --@scale-->  kernels.loom
+```
+
+The layer provider introduces its own kernel demand:
+
+```loom title="layer.loom"
+--8<-- "examples/module-composition/layer.loom"
+```
+
+Supplying only the layer consumes the root's satisfied import and retains the
+new transitive import in standalone bytecode:
+
+```shell
+loom-link root.loom \
+  --library=layer.loom \
+  --root=@entry \
+  --allow-unresolved \
+  --to=bc \
+  --output=partial.loombc
+```
+
+The generated partial module is ordinary Loom IR. It contains the selected
+layer body, the reachable root, and the unsatisfied kernel contract:
+
+```loom title="partial.loom"
+--8<-- "generated/examples/module-composition/partial.loom"
+```
+
+A later invocation can reload that artifact in a fresh process and supply only
+the remaining provider:
+
+```shell
+loom-link partial.loombc \
+  --library=kernels.loom \
+  --root=@entry \
+  --to=text \
+  --output=linked.loom
+```
+
+```loom title="linked.loom"
+--8<-- "generated/examples/module-composition/linked.loom"
+```
+
+The final module contains each reachable definition once and no longer needs
+an import or declaration. The linker did not chase the layer's key during the
+first invocation, and it did not require the root to name the layer's transitive
+dependencies. A diamond of callers reaching the same global declaration still
+selects one compatible definition by symbol identity; path reachability does
+not clone one copy per route.
+
+Run the exact formatting, partial-link, bytecode-reload, and final-link sequence
+with:
+
+```shell
+loom/docs/examples/module-composition/run.sh build/module-composition
+```
+
+`template.apply` follows the parallel family-provider model. The using module
+declares the family with `template.decl`; each explicitly supplied library may
+repeat that declaration and contribute providers. Specialization selects an
+eligible provider from that explicit universe. `module.import` is not used for
+template families, and source path and library order never stand in for
+matching rules.
 
 ## Choose the output for the next boundary
 

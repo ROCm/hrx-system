@@ -532,7 +532,7 @@ iree_status_t loom_print_format_elements(loom_print_context_t* ctx,
       }
       case LOOM_FORMAT_KIND_KEY_REF: {
         // Bare symbolic key in angle brackets, glued to the preceding token:
-        // func.template<tile.contract>. The field_index references a string
+        // template.def<@tile.contract>. The field_index references a string
         // attribute holding the canonical key spelling.
         if (element->field_index >= op->attribute_count) {
           return iree_make_status(

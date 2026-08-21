@@ -8,6 +8,7 @@
 
 #include <string.h>
 
+#include "loom/analysis/symbol_references.h"
 #include "loom/error/error_catalog.h"
 #include "loom/format/text/parser/accumulator.h"
 #include "loom/format/text/parser/aliases.h"
@@ -280,6 +281,10 @@ static iree_status_t loom_parser_resolve_pending_successor_refs(
 
 static iree_status_t loom_parser_verify_symbols_resolved(
     loom_parser_t* parser) {
+  loom_symbol_reference_table_t reference_table;
+  IREE_RETURN_IF_ERROR(loom_symbol_reference_table_build(
+      parser->module, &parser->parser_arena, &reference_table));
+
   for (iree_host_size_t i = 0;
        i < parser->symbol_origins.count && !loom_parser_at_error_limit(parser);
        ++i) {
@@ -287,6 +292,25 @@ static iree_status_t loom_parser_verify_symbols_resolved(
     const loom_symbol_t* symbol =
         &parser->module->symbols.entries[origin.symbol_id];
     if (symbol->definition && symbol->defining_op) continue;
+
+    bool has_reference = false;
+    bool has_availability = false;
+    loom_symbol_reference_occurrence_id_t occurrence_id =
+        reference_table.symbols[origin.symbol_id].first_incoming_occurrence_id;
+    while (occurrence_id != LOOM_SYMBOL_REFERENCE_OCCURRENCE_ID_INVALID) {
+      const loom_symbol_reference_occurrence_t* occurrence =
+          &reference_table.occurrences[occurrence_id];
+      has_reference = true;
+      if (occurrence->role == LOOM_SYMBOL_REFERENCE_ROLE_AVAILABILITY) {
+        has_availability = true;
+        break;
+      }
+      occurrence_id = occurrence->next_incoming_occurrence_id;
+    }
+    if (has_reference && has_availability) {
+      continue;
+    }
+
     loom_diagnostic_param_t params[] = {
         loom_param_string(origin.token.text),
     };
@@ -1189,9 +1213,9 @@ iree_status_t loom_text_parse(iree_string_view_t source,
                                                         /*pending_start=*/0);
   }
 
-  // A symbol-table placeholder exists only to support a forward reference
-  // within this parse. Every symbol must have an explicit declaration or
-  // definition by the time the full module has been consumed.
+  // A dependency placeholder exists only to support a forward reference
+  // within this parse and must resolve before parsing completes. Availability
+  // references intentionally preserve unresolved provider anchors.
   if (iree_status_is_ok(status) && parser.error_count == 0) {
     status = loom_parser_verify_symbols_resolved(&parser);
   }

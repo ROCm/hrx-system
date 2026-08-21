@@ -93,6 +93,7 @@ loom_cc_test(
         "//loom/src/loom/ops/pass",
         "//loom/src/loom/ops/scalar",
         "//loom/src/loom/ops/target",
+        "//loom/src/loom/ops/template",
         "//loom/src/loom/ops/test",
         "//loom/src/loom/pass:registry",
         "//loom/src/loom/pass:tooling",

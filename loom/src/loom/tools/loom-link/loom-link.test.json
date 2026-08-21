@@ -15,7 +15,8 @@
             "--root=@entry",
             "--print-plan",
             "--list-symbols",
-            "--strip-check"
+            "--strip-check",
+            "--allow-unresolved"
           ]
         }
       }
@@ -54,7 +55,7 @@
       }
     },
     {
-      "name": "links text corpus into harness",
+      "name": "links import-free declarations in archive mode",
       "steps": [
         {
           "name": "write-harness",
@@ -76,7 +77,8 @@
             "tool": "loom-link",
             "args": [
               "{tmp}/harness.loom",
-              "{tmp}/corpus.loom"
+              "{tmp}/corpus.loom",
+              "--mode=archive"
             ]
           },
           "stdout": {
@@ -86,13 +88,16 @@
               "%y = func.call @identity(%x) : (i32) -> (i32)",
               "func.return %y : i32"
             ],
-            "not_contains": ["func.decl @identity"]
+            "not_contains": [
+              "module.import",
+              "func.decl @identity"
+            ]
           }
         }
       ]
     },
     {
-      "name": "links bytecode library",
+      "name": "selectively links import-free bytecode declaration",
       "steps": [
         {
           "name": "write-harness",
@@ -145,6 +150,192 @@
               "func.def @unused",
               "func.decl @identity"
             ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "selects nested templates from bytecode library",
+      "steps": [
+        {
+          "name": "write-root",
+          "write": {
+            "path": "{tmp}/template-root.loom",
+            "text": "template.decl @demo.outer(%x: i32) -> (i32)\ntemplate.decl @demo.inner(%x: i32) -> (i32)\n\nfunc.def public @entry(%x: i32) -> (i32) {\n  %result = template.apply<@demo.outer>(%x) : (i32) -> (i32)\n  func.return %result : i32\n}\n"
+          }
+        },
+        {
+          "name": "write-library",
+          "write": {
+            "path": "{tmp}/template-library.loom",
+            "text": "template.decl @demo.outer(%x: i32) -> (i32)\ntemplate.decl @demo.inner(%x: i32) -> (i32)\ntemplate.decl @demo.unused(%x: i32) -> (i32)\n\ntemplate.def<@demo.outer> priority(20) @outer_fast(%x: i32) -> (i32) {\n  %result = template.apply<@demo.inner>(%x) : (i32) -> (i32)\n  template.return %result : i32\n}\n\ntemplate.def<@demo.outer> priority(1) @outer_fallback(%x: i32) -> (i32) {\n  template.return %x : i32\n}\n\ntemplate.def<@demo.inner> priority(20) @inner_fast(%x: i32) -> (i32) {\n  template.return %x : i32\n}\n\ntemplate.def<@demo.inner> priority(1) @inner_fallback(%x: i32) -> (i32) {\n  template.return %x : i32\n}\n\ntemplate.def<@demo.unused> @unused(%x: i32) -> (i32) {\n  template.return %x : i32\n}\n"
+          }
+        },
+        {
+          "name": "encode-library",
+          "run": {
+            "tool": "loom-format",
+            "args": [
+              "--from=text",
+              "--to=bc",
+              "--output={tmp}/template-library.loombc",
+              "{tmp}/template-library.loom"
+            ]
+          }
+        },
+        {
+          "name": "link",
+          "run": {
+            "tool": "loom-link",
+            "args": [
+              "{tmp}/template-root.loom",
+              "--library={tmp}/template-library.loombc",
+              "--root=@entry"
+            ]
+          },
+          "stdout": {
+            "contains": {
+              "unordered": [
+                "template.apply<@demo.outer>",
+                "template.def<@demo.outer> priority(20) @outer_fast",
+                "template.apply<@demo.inner>",
+                "template.def<@demo.inner> priority(20) @inner_fast"
+              ]
+            },
+            "not_contains": [
+              "@outer_fallback",
+              "@inner_fallback",
+              "@unused"
+            ]
+          }
+        },
+        {
+          "name": "archive-library",
+          "run": {
+            "tool": "loom-link",
+            "args": [
+              "{tmp}/template-library.loombc",
+              "--mode=archive"
+            ]
+          },
+          "stdout": {
+            "contains": {
+              "unordered": [
+                "@outer_fast",
+                "@outer_fallback",
+                "@inner_fast",
+                "@inner_fallback",
+                "@unused"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "relinks partial provider bytecode",
+      "steps": [
+        {
+          "name": "write-root",
+          "write": {
+            "path": "{tmp}/root.loom",
+            "text": "module.import \"provider-a.loom\" [@a]\nmodule.import \"provider-b.loom\" [@b]\n\nfunc.decl @a(%x: i32) -> (i32)\nfunc.decl @b(%x: i32) -> (i32)\n\nfunc.def public @entry(%x: i32) -> (i32) {\n  %a = func.call @a(%x) : (i32) -> (i32)\n  %b = func.call @b(%a) : (i32) -> (i32)\n  func.return %b : i32\n}\n"
+          }
+        },
+        {
+          "name": "write-provider-a",
+          "write": {
+            "path": "{tmp}/provider-a.loom",
+            "text": "module.import \"provider-c.loom\" [@c]\n\nfunc.decl @c(%x: i32) -> (i32)\n\nfunc.def @a(%x: i32) -> (i32) {\n  %helper = func.call @a_helper(%x) : (i32) -> (i32)\n  %c = func.call @c(%helper) : (i32) -> (i32)\n  func.return %c : i32\n}\n\nfunc.def @a_helper(%x: i32) -> (i32) {\n  func.return %x : i32\n}\n"
+          }
+        },
+        {
+          "name": "write-provider-b",
+          "write": {
+            "path": "{tmp}/provider-b.loom",
+            "text": "func.def @b(%x: i32) -> (i32) {\n  func.return %x : i32\n}\n"
+          }
+        },
+        {
+          "name": "write-provider-c",
+          "write": {
+            "path": "{tmp}/provider-c.loom",
+            "text": "func.def @c(%x: i32) -> (i32) {\n  func.return %x : i32\n}\n"
+          }
+        },
+        {
+          "name": "link-partial",
+          "run": {
+            "tool": "loom-link",
+            "args": [
+              "root.loom",
+              "provider-a.loom",
+              "--root=@entry",
+              "--allow-unresolved",
+              "--to=bc",
+              "--output=partial.loombc"
+            ]
+          },
+          "files": [
+            {
+              "path": "{tmp}/partial.loombc",
+              "non_empty": true
+            }
+          ]
+        },
+        {
+          "name": "show-partial",
+          "run": {
+            "tool": "loom-format",
+            "args": ["partial.loombc"]
+          },
+          "stdout": {
+            "contains": {
+              "unordered": [
+                "module.import \"provider-b.loom\" [@b]",
+                "module.import \"provider-c.loom\" [@c]",
+                "func.def @a(",
+                "func.def @a_helper("
+              ]
+            },
+            "not_contains": ["provider-a.loom\" [@a]"]
+          }
+        },
+        {
+          "name": "reject-incomplete-final-link",
+          "run": {
+            "tool": "loom-link",
+            "args": ["partial.loombc", "--root=@entry"]
+          },
+          "exit": {
+            "nonzero": true
+          },
+          "stderr": {
+            "contains": ["has no available concrete definition"]
+          }
+        },
+        {
+          "name": "finish-link",
+          "run": {
+            "tool": "loom-link",
+            "args": [
+              "partial.loombc",
+              "provider-b.loom",
+              "--library=provider-c.loom",
+              "--root=@entry"
+            ]
+          },
+          "stdout": {
+            "contains": {
+              "unordered": [
+                "func.def public retain @entry(",
+                "func.def @a(",
+                "func.def @a_helper(",
+                "func.def @b(",
+                "func.def @c("
+              ]
+            },
+            "not_contains": ["module.import", "func.decl"]
           }
         }
       ]

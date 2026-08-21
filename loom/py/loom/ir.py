@@ -23,6 +23,7 @@ import math
 from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import dataclass, field
 from enum import IntEnum, unique
+from itertools import pairwise
 from typing import Any
 
 from loom.location_tag import (
@@ -134,6 +135,8 @@ __all__ = [
     "symbol_from_operation",
     "SymbolRef",
     "SymbolName",
+    "SymbolNameArray",
+    "SymbolNameSet",
     "SYMBOL_FLAG_IMPORT",
     "SYMBOL_FLAG_DECLARATION",
     "SYMBOL_FLAG_TEST_ONLY",
@@ -1276,6 +1279,7 @@ def _canonicalize_parameterized_value(
         ATTR_TYPE_SIGNED_ENUM_SET,
         ATTR_TYPE_STRING,
         ATTR_TYPE_SYMBOL,
+        ATTR_TYPE_SYMBOL_ARRAY,
         ATTR_TYPE_TYPE,
     )
 
@@ -1367,6 +1371,13 @@ def _canonicalize_parameterized_value(
             if not isinstance(value, SymbolName):
                 raise type_error("a symbol name")
             return value
+        case kind if kind == ATTR_TYPE_SYMBOL_ARRAY:
+            values = value.values if isinstance(value, SymbolNameArray) else value
+            if isinstance(values, str | bytes | bytearray) or not isinstance(
+                values, Iterable
+            ):
+                raise type_error("an iterable of symbol names")
+            return SymbolNameArray(values)
         case kind if kind == ATTR_TYPE_DICT:
             if not isinstance(value, Mapping):
                 raise type_error("an attribute dictionary")
@@ -1797,11 +1808,12 @@ class SymbolKind(IntEnum):
     NONE = -1
     FUNC_DEF = 0
     FUNC_DECL = 1
-    FUNC_TEMPLATE = 2
-    FUNC_UKERNEL = 3
-    GLOBAL = 4
-    EXECUTABLE = 5
-    RECORD = 6
+    TEMPLATE_DECL = 2
+    TEMPLATE_DEF = 3
+    TEMPLATE_UKERNEL = 4
+    GLOBAL = 5
+    EXECUTABLE = 6
+    RECORD = 7
 
 
 # Symbol flags.
@@ -1826,6 +1838,81 @@ class SymbolName(str):
     """Module-local symbol-name attribute payload."""
 
     __slots__ = ()
+
+
+@dataclass(frozen=True, slots=True, init=False)
+class SymbolNameArray:
+    """Ordered module-local symbol-name attribute payloads.
+
+    The enclosing field descriptor owns the symbol interface and reference
+    role. Ordering and duplicate names are preserved.
+    """
+
+    values: tuple[SymbolName, ...]
+
+    def __init__(self, values: Iterable[SymbolName] = ()) -> None:
+        frozen_values = tuple(values)
+        if len(frozen_values) > 0xFFFF:
+            raise ValueError(
+                f"symbol name array length {len(frozen_values)} exceeds UINT16_MAX"
+            )
+        for index, value in enumerate(frozen_values):
+            if not isinstance(value, SymbolName):
+                raise TypeError(
+                    f"symbol name array element {index} must be a SymbolName, "
+                    f"got {value!r}"
+                )
+        object.__setattr__(self, "values", frozen_values)
+
+    def __iter__(self) -> Iterator[SymbolName]:
+        return iter(self.values)
+
+    def __len__(self) -> int:
+        return len(self.values)
+
+
+@dataclass(frozen=True, slots=True, init=False)
+class SymbolNameSet:
+    """Canonical module-local symbol-name set attribute payloads.
+
+    Values are stored in strict UTF-8 byte order with no duplicates. The
+    enclosing field descriptor owns the symbol interface and reference role.
+    """
+
+    values: tuple[SymbolName, ...]
+
+    def __init__(self, values: Iterable[SymbolName] = ()) -> None:
+        frozen_values = tuple(values)
+        if len(frozen_values) > 0xFFFF:
+            raise ValueError(
+                f"symbol name set length {len(frozen_values)} exceeds UINT16_MAX"
+            )
+        for index, value in enumerate(frozen_values):
+            if not isinstance(value, SymbolName):
+                raise TypeError(
+                    f"symbol name set element {index} must be a SymbolName, "
+                    f"got {value!r}"
+                )
+        ordered_values = tuple(
+            sorted(frozen_values, key=lambda value: value.encode("utf-8"))
+        )
+        for previous, current in pairwise(ordered_values):
+            if previous == current:
+                raise ValueError(f"duplicate symbol name '@{current}'")
+        object.__setattr__(self, "values", ordered_values)
+
+    def __iter__(self) -> Iterator[SymbolName]:
+        return iter(self.values)
+
+    def __len__(self) -> int:
+        return len(self.values)
+
+    @classmethod
+    def _from_canonical_values(cls, values: tuple[SymbolName, ...]) -> SymbolNameSet:
+        """Construct from an already validated strict UTF-8 ordering."""
+        result = object.__new__(cls)
+        object.__setattr__(result, "values", values)
+        return result
 
 
 @dataclass(slots=True)
@@ -1862,8 +1949,9 @@ class Symbol:
 _BYTECODE_SYMBOL_KIND_BY_NAME: dict[str, SymbolKind] = {
     "LOOM_SYMBOL_FUNC_DEF": SymbolKind.FUNC_DEF,
     "LOOM_SYMBOL_FUNC_DECL": SymbolKind.FUNC_DECL,
-    "LOOM_SYMBOL_FUNC_TEMPLATE": SymbolKind.FUNC_TEMPLATE,
-    "LOOM_SYMBOL_FUNC_UKERNEL": SymbolKind.FUNC_UKERNEL,
+    "LOOM_SYMBOL_TEMPLATE_DECL": SymbolKind.TEMPLATE_DECL,
+    "LOOM_SYMBOL_TEMPLATE_DEF": SymbolKind.TEMPLATE_DEF,
+    "LOOM_SYMBOL_TEMPLATE_UKERNEL": SymbolKind.TEMPLATE_UKERNEL,
     "LOOM_SYMBOL_GLOBAL": SymbolKind.GLOBAL,
     "LOOM_SYMBOL_EXECUTABLE": SymbolKind.EXECUTABLE,
     "LOOM_SYMBOL_RECORD": SymbolKind.RECORD,
@@ -2011,8 +2099,10 @@ class LocationTable:
 class Module:
     """Top-level IR container.
 
-    Owns all IR through its tables. The module is the unit of
-    serialization, linking, and compilation.
+    Owns all IR through its top-level body and uniqued tables. The symbol table
+    indexes symbol-defining operations in the body; it is not an operation
+    ownership container. The module is the unit of serialization, linking, and
+    compilation.
     """
 
     name: str = ""
@@ -2027,6 +2117,9 @@ class Module:
     values: list[Value] = field(default_factory=list)
     symbols: list[Symbol] = field(default_factory=list)
     encodings: list[EncodingInstance] = field(default_factory=list)
+
+    # Single module-scope block owning every top-level operation.
+    body: Block = field(default_factory=Block)
 
     # Source table is on the context, but for standalone modules
     # we keep a local source list.
@@ -2043,10 +2136,18 @@ class Module:
         return self.locations.add(loc)
 
     def add_symbol(self, symbol: Symbol) -> int:
-        """Add a symbol, returning its ID."""
+        """Add a symbol and its defining operation, returning its ID."""
         sym_id = len(self.symbols)
         self.symbols.append(symbol)
+        if symbol.op is not None:
+            self.body.ops.append(symbol.op)
         return sym_id
+
+    def add_top_level_operation(self, operation: Operation) -> int:
+        """Add a non-symbol module-scope operation, returning its ordinal."""
+        operation_index = len(self.body.ops)
+        self.body.ops.append(operation)
+        return operation_index
 
     def add_encoding(self, instance: EncodingInstance) -> int:
         """Add an encoding instance, returning its index. Deduplicates."""
@@ -2161,7 +2262,7 @@ def record_operation_value_metadata(
 
 
 def rebuild_value_metadata(module: Module) -> None:
-    """Rebuild all def/use metadata from module.symbols and nested regions."""
+    """Rebuild all def/use metadata from the module body and nested regions."""
     for value in module.values:
         value.flags &= ~VALUE_FLAG_BLOCK_ARG
         value.def_op_index = VALUE_DEF_OP_NONE
@@ -2169,15 +2270,20 @@ def rebuild_value_metadata(module: Module) -> None:
         value.def_result_index = 0
         value.uses.clear()
 
-    for symbol_index, symbol in enumerate(module.symbols):
-        if symbol.op is None:
-            continue
-        operand_def_count = len(symbol.op.operands) if not symbol.op.regions else 0
+    symbol_operation_ids = {
+        id(symbol.op) for symbol in module.symbols if symbol.op is not None
+    }
+    for operation_index, operation in enumerate(module.body.ops):
+        operand_def_count = (
+            len(operation.operands)
+            if id(operation) in symbol_operation_ids and not operation.regions
+            else 0
+        )
         record_operation_value_metadata(
             module,
-            symbol.op,
+            operation,
             block_index=VALUE_DEF_BLOCK_NONE,
-            op_index=symbol_index,
+            op_index=operation_index,
             operand_def_count=operand_def_count,
         )
 

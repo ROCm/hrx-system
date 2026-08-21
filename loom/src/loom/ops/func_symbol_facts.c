@@ -190,11 +190,13 @@ static iree_status_t loom_func_symbol_fact_compute(
   facts->temperature = loom_func_like_temperature(func);
   facts->inline_policy = loom_func_like_inline_policy(func);
   facts->has_body = loom_func_like_body(func) != NULL;
-  facts->implements_id = loom_func_like_implements(func);
-  if (facts->implements_id != LOOM_STRING_ID_INVALID) {
+  facts->template_family = loom_func_like_template_family(func);
+  if (loom_symbol_ref_is_valid(facts->template_family)) {
+    const loom_symbol_t* family_symbol =
+        &module->symbols.entries[facts->template_family.symbol_id];
     IREE_RETURN_IF_ERROR(loom_func_symbol_string_from_id(
-        module, facts->implements_id, IREE_SV("implements"),
-        &facts->implements));
+        module, family_symbol->name_id, IREE_SV("template family"),
+        &facts->template_family_name));
   }
   facts->priority = loom_func_like_priority(func);
   facts->argument_ids = loom_func_like_arg_ids(func, &facts->argument_count);

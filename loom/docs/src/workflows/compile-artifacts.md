@@ -79,9 +79,10 @@ Root selection is reachability, not name filtering after compilation. Unused
 functions, providers, configurations, checks, and kernels are absent from the
 materialized compile module.
 
-Use [`loom-link`](link-and-package.md) first when several independently shipped
-modules must be composed. Use `--root` directly when one linked catalog already
-contains the complete declared dependency graph.
+Use [`loom-link`](link-and-package.md#link-transitive-dependencies-incrementally)
+first when several independently shipped modules must be composed. Use
+`--root` directly when one linked catalog already contains the complete
+declared dependency graph.
 
 ## Bind compile-time configuration
 

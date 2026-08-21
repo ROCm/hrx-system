@@ -14,8 +14,8 @@
 #define LOOM_LINK_PLANNER_H_
 
 #include "iree/base/api.h"
-#include "iree/base/internal/arena.h"
 #include "loom/link/module_index.h"
+#include "loom/link/provider_resolver.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -55,8 +55,7 @@ typedef enum loom_link_plan_live_reason_e {
   LOOM_LINK_PLAN_LIVE_ROOT = 1,
   // Selected because another live symbol references it.
   LOOM_LINK_PLAN_LIVE_DEPENDENCY = 2,
-  // Selected because another live symbol contains a func.apply for the
-  // provider's implementation contract.
+  // Selected explicitly after template specialization chose this provider.
   LOOM_LINK_PLAN_LIVE_PROVIDER = 3,
 } loom_link_plan_live_reason_t;
 
@@ -65,14 +64,6 @@ typedef enum loom_link_plan_live_reason_e {
 typedef bool (*loom_link_plan_strip_symbol_fn_t)(
     void* user_data, const loom_link_module_index_t* index,
     const loom_link_module_index_symbol_t* symbol);
-
-// Optional materializer for dependency scanning of indexed modules whose IR is
-// not already materialized. Implementations must keep |out_module| alive until
-// loom_link_plan_build returns.
-typedef iree_status_t (*loom_link_plan_materialize_module_fn_t)(
-    void* user_data, const loom_link_module_index_t* index,
-    const loom_link_module_index_module_t* module,
-    const loom_module_t** out_module);
 
 // Options controlling one planning operation.
 typedef struct loom_link_plan_options_t {
@@ -90,10 +81,17 @@ typedef struct loom_link_plan_options_t {
   loom_link_plan_strip_symbol_fn_t strip_symbol;
   // User data passed to strip_symbol.
   void* strip_symbol_user_data;
-  // Optional on-demand materializer for unmaterialized indexed modules.
-  loom_link_plan_materialize_module_fn_t materialize_module;
-  // User data passed to materialize_module.
-  void* materialize_module_user_data;
+  // Optional resolver prepared against this plan's module index provider set.
+  const loom_link_provider_resolver_t* provider_resolver;
+  // Exact template providers already chosen by specialization. These are
+  // additional selective roots whose ordinary dependencies and nested
+  // template-family demands participate in the same closure.
+  struct {
+    // Number of index-wide symbol ordinals.
+    iree_host_size_t count;
+    // Index-wide template.def/template.ukernel symbol ordinals.
+    const iree_host_size_t* values;
+  } selected_template_providers;
 } loom_link_plan_options_t;
 
 // One live symbol selection in a plan.
@@ -112,11 +110,10 @@ typedef struct loom_link_plan_symbol_t {
 
 // Builds a link plan from |index|.
 //
-// |block_pool| backs planner-owned dependency tables. The caller owns the
-// returned plan and must release it with loom_link_plan_free().
+// The caller owns the returned plan and must release it with
+// loom_link_plan_free().
 iree_status_t loom_link_plan_build(const loom_link_module_index_t* index,
                                    const loom_link_plan_options_t* options,
-                                   iree_arena_block_pool_t* block_pool,
                                    iree_allocator_t allocator,
                                    loom_link_plan_t** out_plan);
 
@@ -127,6 +124,9 @@ void loom_link_plan_free(loom_link_plan_t* plan);
 const loom_link_module_index_t* loom_link_plan_index(
     const loom_link_plan_t* plan);
 
+// Returns the mode that selected |plan|.
+loom_link_plan_mode_t loom_link_plan_mode(const loom_link_plan_t* plan);
+
 // Returns the number of live symbol selections.
 iree_host_size_t loom_link_plan_symbol_count(const loom_link_plan_t* plan);
 
@@ -134,9 +134,24 @@ iree_host_size_t loom_link_plan_symbol_count(const loom_link_plan_t* plan);
 const loom_link_plan_symbol_t* loom_link_plan_symbol_at(
     const loom_link_plan_t* plan, iree_host_size_t ordinal);
 
+// Returns the number of reachable template-family demands.
+iree_host_size_t loom_link_plan_demanded_template_family_count(
+    const loom_link_plan_t* plan);
+
+// Returns demanded template-family ordinal |ordinal|, or INVALID when out of
+// range. Each family appears once in first-reachable order.
+loom_link_template_family_ordinal_t loom_link_plan_demanded_template_family_at(
+    const loom_link_plan_t* plan, iree_host_size_t ordinal);
+
 // Returns true when |symbol_ordinal| is live in |plan|.
 bool loom_link_plan_contains_symbol(const loom_link_plan_t* plan,
                                     iree_host_size_t symbol_ordinal);
+
+// Returns true when a concrete provider satisfied |symbol_ordinal|'s
+// compile-time provider imports. Every availability anchor for the symbol is
+// consumed when projecting the plan.
+bool loom_link_plan_symbol_imports_resolved(const loom_link_plan_t* plan,
+                                            iree_host_size_t symbol_ordinal);
 
 #ifdef __cplusplus
 }

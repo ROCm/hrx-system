@@ -109,9 +109,10 @@ python dev.py bazel run \
 ```
 
 The authoring pattern to notice is that correctness policy and benchmark rows
-live beside the source. `func.apply` requests an implementation contract,
-`func.template` providers satisfy those contracts, and explicit config bindings
-select compile-time choices while case parameters remain runtime values.
+live beside the source. `template.apply` requests an implementation from a
+declared family, `template.def` operations provide the candidates, and explicit
+config bindings select compile-time choices while case parameters remain
+runtime values.
 
 The authoring README includes the direct quantized AMDGPU flow for
 `loom-compile` HSACO emission, artifact manifests, compile reports, IR dumps,
@@ -172,6 +173,8 @@ Run the host-only examples:
 python dev.py bazel run //loom/binding/c/example:source_info
 python dev.py bazel run //loom/binding/c/example:compile_text
 python dev.py bazel run //loom/binding/c/example:link_modules
+python dev.py bazel run //loom/binding/c/example:link_modules -- \
+  --provider-import
 ```
 
 These examples are deliberately small, but they show the intended embedding
@@ -180,6 +183,10 @@ shape:
 ```text
 source -> module -> link/index -> compile -> result diagnostics/artifacts
 ```
+
+The [in-memory composition guide](docs/src/integration/module-composition.md)
+uses `link_modules` to compare import-free declaration linking with logical
+provider-key selection over the same caller-owned sources.
 
 The API is staged instead of one file-oriented entry point because embedders
 need different compositions:

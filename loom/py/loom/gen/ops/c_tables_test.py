@@ -51,10 +51,13 @@ from loom.dsl import (
     ATTR_TYPE_PREDICATE_LIST,
     ATTR_TYPE_STRING,
     ATTR_TYPE_SYMBOL,
+    ATTR_TYPE_SYMBOL_ARRAY,
+    ATTR_TYPE_SYMBOL_SET,
     DECOMPOSABLE,
     ELEMENTWISE,
     HINT,
     INTEGER,
+    MODULE_SCOPE,
     POOL,
     SYMBOL_DEFINE,
     TERMINATOR,
@@ -85,6 +88,7 @@ from loom.dsl import (
     FuncLikeInterfaceFlag,
     HasParent,
     IterArgsMatchResults,
+    KeyedModuleRecord,
     LiteralMatchesElementType,
     LoopLikeInterface,
     MemoryAccessInterface,
@@ -111,6 +115,8 @@ from loom.dsl import (
     SymbolDefinition,
     SymbolDefinitionFlag,
     SymbolKernelContract,
+    SymbolReference,
+    SymbolReferenceRole,
     SymbolValueContract,
     TargetFactSpecialization,
     TargetLikeInterface,
@@ -514,6 +520,39 @@ def test_generate_parameterized_attribute_family_metadata() -> None:
     assert ".attr_kind = LOOM_ATTR_PARAMETERIZED" in tables_c
     assert ".reference.parameterized_attr_kind = LOOM_PARAMETERIZED_ATTR_TEST_TILE" in tables_c
     assert ".reference.parameterized_attr_kind = LOOM_PARAMETERIZED_ATTR_KIND_ANY" in tables_c
+
+
+def test_generate_symbol_reference_roles_for_all_descriptor_owners() -> None:
+    dialect = Dialect("test", dialect_id=0x01)
+    dependency = SymbolReference("record", ["record"])
+    availability = SymbolReference("symbol", [], role=SymbolReferenceRole.AVAILABILITY)
+    options = ParameterizedAttrDef(
+        "test.options",
+        group=dialect,
+        parameters=[AttrDef("target", ATTR_TYPE_SYMBOL, symbol_ref=availability)],
+    )
+    holder = Op(
+        "test.holder",
+        group=dialect,
+        attrs=[
+            AttrDef("dependency", ATTR_TYPE_SYMBOL, symbol_ref=dependency),
+            AttrDef("available", ATTR_TYPE_SYMBOL, symbol_ref=availability),
+        ],
+    )
+    handle = TypeDef(
+        "test.handle",
+        params=[AttrDef("target", ATTR_TYPE_SYMBOL, symbol_ref=availability)],
+        format=[Param("target")],
+    )
+
+    tables_c = generate_tables_c("test", 0x01, [holder], [options])
+    _, _, type_tables_c = generate_type_registry([handle])
+
+    assert tables_c.count(".role = LOOM_SYMBOL_REFERENCE_ROLE_DEPENDENCY,") == 1
+    assert tables_c.count(".role = LOOM_SYMBOL_REFERENCE_ROLE_AVAILABILITY,") == 2
+    assert ".role = LOOM_SYMBOL_REFERENCE_ROLE_AVAILABILITY," in type_tables_c
+    assert tables_c.count(".interfaces = 0,") == 2
+    assert ".interfaces = 0," in type_tables_c
 
 
 def test_generate_encoding_family_metadata() -> None:
@@ -1089,6 +1128,20 @@ def test_generate_tables_omits_type_propagation_flag_for_scalar_only_constraints
 
     assert "LOOM_OP_VTABLE_TYPE_PROPAGATION_CANDIDATE" not in tables_c
     assert ".vtable_flags =" not in tables_c
+
+
+def test_generate_tables_emits_keyed_module_record_metadata() -> None:
+    op = Op(
+        "module.record",
+        group=Dialect("module"),
+        attrs=[AttrDef("payload", ATTR_TYPE_I64), AttrDef("key", ATTR_TYPE_STRING)],
+        traits=[MODULE_SCOPE, KeyedModuleRecord("key")],
+    )
+
+    tables_c = generate_tables_c("module", 0x01, [op])
+
+    assert ".vtable_flags = LOOM_OP_VTABLE_KEYED_MODULE_RECORD," in tables_c
+    assert ".module_record_key_attr_index = 1," in tables_c
 
 
 def test_generate_tables_derives_decomposable_for_same_type_elementwise_vector_ops() -> None:
@@ -2094,6 +2147,83 @@ def test_generate_descriptor_backed_signed_enum_set_surface() -> None:
     assert optional_guard < optional_copy < optional_assignment
     assert "LOOM_ATTR_SIGNED_ENUM_SET" in tables_c
     assert ".enum_case_names" in tables_c
+
+
+def test_generate_descriptor_backed_symbol_collection_surface() -> None:
+    op = Op(
+        "test.symbol_arrays",
+        group=Dialect("test"),
+        attrs=[
+            AttrDef(
+                "dependencies",
+                ATTR_TYPE_SYMBOL_SET,
+                symbol_ref=SymbolReference("record", ["record"]),
+            ),
+            AttrDef(
+                "available",
+                ATTR_TYPE_SYMBOL_ARRAY,
+                symbol_ref=SymbolReference(
+                    "record",
+                    ["record"],
+                    role=SymbolReferenceRole.AVAILABILITY,
+                ),
+                optional=True,
+            ),
+        ],
+        format=[
+            Attr("dependencies"),
+            OptionalGroup([Attr("available")], anchor="available"),
+        ],
+    )
+
+    ops_h = generate_ops_h("test", 0, [op])
+    builders_c = generate_builders_c("test", [op])
+    tables_c = generate_tables_c("test", 0, [op])
+
+    assert "LOOM_DEFINE_ATTR_SYMBOL_SET(loom_test_symbol_arrays_dependencies, 0)" in ops_h
+    assert "loom_symbol_ref_array_t dependencies" in ops_h
+    assert "loom_optional loom_symbol_ref_array_t available" in ops_h
+    assert "LOOM_TEST_SYMBOL_ARRAYS_BUILD_FLAG_HAS_AVAILABLE" in ops_h
+    assert "loom_builder_copy_symbol_array_attr_storage" in builders_c
+    assert "loom_module_try_make_symbol_set" in builders_c
+    assert "loom_attr_symbol_array(_available_storage" in builders_c
+    build_set = builders_c.index("loom_module_try_make_symbol_set")
+    allocate = builders_c.index("loom_builder_allocate_op")
+    set_assignment = builders_c.index("loom_op_attrs(*out_op)[0] = _dependencies_set")
+    assert build_set < allocate < set_assignment
+    optional_guard = builders_c.index("iree_any_bit_set(build_flags, LOOM_TEST_SYMBOL_ARRAYS_BUILD_FLAG_HAS_AVAILABLE)")
+    optional_copy = builders_c.index("loom_builder_copy_symbol_array_attr_storage(", optional_guard)
+    optional_assignment = builders_c.index("loom_attr_symbol_array(_available_storage", optional_copy)
+    assert optional_guard < optional_copy < optional_assignment
+    assert "LOOM_ATTR_SYMBOL_SET" in tables_c
+    assert ".role = LOOM_SYMBOL_REFERENCE_ROLE_DEPENDENCY" in tables_c
+    assert ".role = LOOM_SYMBOL_REFERENCE_ROLE_AVAILABILITY" in tables_c
+
+
+def test_generate_symbol_array_parameter_surface() -> None:
+    family = ParameterizedAttrDef(
+        "test.providers",
+        group=Dialect("test"),
+        parameters=[
+            AttrDef(
+                "values",
+                ATTR_TYPE_SYMBOL_ARRAY,
+                symbol_ref=SymbolReference("record", ["record"]),
+            )
+        ],
+    )
+
+    ops_h = generate_ops_h("test", 0, [], parameterized_attrs=[family])
+    builders_c = generate_builders_c("test", [], parameterized_attrs=[family])
+    tables_c = generate_tables_c("test", 0, [], parameterized_attrs=[family])
+
+    assert "loom_symbol_ref_array_t loom_test_providers_attr_values" in ops_h
+    assert "loom_symbol_ref_array_t values" in ops_h
+    assert "loom_attr_as_symbol_array" in ops_h
+    assert "loom_attr_symbol_array(values.values" in builders_c
+    assert "values.count > UINT16_MAX" in builders_c
+    assert "LOOM_ATTR_SYMBOL_ARRAY" in tables_c
+    assert ".role = LOOM_SYMBOL_REFERENCE_ROLE_DEPENDENCY" in tables_c
 
 
 def test_generate_builders_copy_i64_array_attrs_into_builder_arena() -> None:

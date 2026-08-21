@@ -8,6 +8,7 @@
 #define LOOMC_LINK_INDEX_STORAGE_H_
 
 #include "loom/link/module_index.h"
+#include "loom/link/provider_resolver.h"
 #include "loomc/context.h"
 #include "loomc/link_index.h"
 #include "loomc/source.h"
@@ -24,6 +25,10 @@ LOOMC_API_PRIVATE loomc_context_t* loomc_link_index_context(
 // Returns the internal module index owned by a frozen public link index.
 LOOMC_API_PRIVATE const loom_link_module_index_t* loomc_link_index_module_index(
     const loomc_link_index_t* link_index);
+
+// Returns the immutable compile-time provider resolver owned by the index.
+LOOMC_API_PRIVATE const loom_link_provider_resolver_t*
+loomc_link_index_provider_resolver(const loomc_link_index_t* link_index);
 
 // Returns the retained source for provider_ordinal, or NULL if out of range.
 LOOMC_API_PRIVATE const loomc_source_t* loomc_link_index_source_for_provider(

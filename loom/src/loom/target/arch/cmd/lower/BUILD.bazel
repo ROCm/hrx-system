@@ -36,7 +36,7 @@ loom_cc_library(
     hdrs = ["program_composition.h"],
     deps = [
         "//loom/src/loom/analysis:scc",
-        "//loom/src/loom/analysis:symbol_dependencies",
+        "//loom/src/loom/analysis:symbol_references",
         "//loom/src/loom/error:emitter",
         "//loom/src/loom/error:error_defs",
         "//loom/src/loom/ir",

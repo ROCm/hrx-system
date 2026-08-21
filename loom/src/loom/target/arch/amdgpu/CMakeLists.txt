@@ -416,6 +416,7 @@ loom_cc_test(
     loom::ops::op_registry
     loom::ops::pass
     loom::ops::target
+    loom::ops::template
     loom::pass::builder
     loom::pass::registry
     loom::pass::testing::registry_verify

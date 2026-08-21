@@ -168,7 +168,7 @@ INTERFACES: tuple[InterfaceSpec, ...] = (
                 expected_attr_type=ATTR_TYPE_I64,
             ),
             InterfaceFieldSpec("body", "body_region_index", "region"),
-            InterfaceFieldSpec("implements", "implements_attr_index", "attr"),
+            InterfaceFieldSpec("template_family", "template_family_attr_index", "attr"),
             InterfaceFieldSpec("priority", "priority_attr_index", "attr"),
             InterfaceFieldSpec("args", "args_operand_field_index", "operand"),
             InterfaceFieldSpec("flags", "flags", "func_like_flags"),

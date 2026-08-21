@@ -28,12 +28,14 @@ iree_py_library(
     loom::py::loom::dialect::kernel::kernel
     loom::py::loom::dialect::llvmir::llvmir
     loom::py::loom::dialect::low::low
+    loom::py::loom::dialect::module::module
     loom::py::loom::dialect::pass_::pass_
     loom::py::loom::dialect::pool::pool
     loom::py::loom::dialect::sanitizer::sanitizer
     loom::py::loom::dialect::scalar::scalar
     loom::py::loom::dialect::scf::scf
     loom::py::loom::dialect::target::target
+    loom::py::loom::dialect::template::template
     loom::py::loom::dialect::tensor::tensor
     loom::py::loom::dialect::test::test
     loom::py::loom::dialect::tile::tile

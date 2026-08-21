@@ -95,6 +95,7 @@ loom_cc_test(
     loom::ops::pass
     loom::ops::scalar
     loom::ops::target
+    loom::ops::template
     loom::ops::test
     loom::pass::registry
     loom::pass::tooling

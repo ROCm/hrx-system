@@ -628,39 +628,39 @@ static iree_status_t loom_target_artifact_manifest_collect_functions(
   return iree_ok_status();
 }
 
-static iree_status_t loom_target_artifact_manifest_dependency_edge(
-    const loom_symbol_dependency_table_t* dependency_table,
-    loom_symbol_dependency_edge_id_t edge_id,
-    const loom_symbol_dependency_edge_t** out_edge) {
-  if (edge_id >= dependency_table->edge_count) {
+static iree_status_t loom_target_artifact_manifest_reference_occurrence(
+    const loom_symbol_reference_table_t* reference_table,
+    loom_symbol_reference_occurrence_id_t occurrence_id,
+    const loom_symbol_reference_occurrence_t** out_occurrence) {
+  if (occurrence_id >= reference_table->occurrence_count) {
     return iree_make_status(
         IREE_STATUS_FAILED_PRECONDITION,
-        "dependency edge id %u is out of range for table with %" PRIhsz
-        " edges",
-        (unsigned)edge_id, dependency_table->edge_count);
+        "reference occurrence id %u is out of range for table with %" PRIhsz
+        " occurrences",
+        (unsigned)occurrence_id, reference_table->occurrence_count);
   }
-  *out_edge = &dependency_table->edges[edge_id];
+  *out_occurrence = &reference_table->occurrences[occurrence_id];
   return iree_ok_status();
 }
 
 static iree_status_t loom_target_artifact_manifest_mark_function_closure(
     loom_target_entry_list_t entries,
-    const loom_symbol_dependency_table_t* dependency_table,
+    const loom_symbol_reference_table_t* reference_table,
     iree_arena_allocator_t* arena, uint8_t* function_marks) {
-  if (dependency_table->symbol_count == 0) return iree_ok_status();
+  if (reference_table->symbol_count == 0) return iree_ok_status();
   loom_symbol_id_t* stack = NULL;
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      arena, dependency_table->symbol_count, sizeof(*stack), (void**)&stack));
+      arena, reference_table->symbol_count, sizeof(*stack), (void**)&stack));
   iree_host_size_t stack_count = 0;
 
   for (uint16_t i = 0; i < entries.count; ++i) {
     const loom_symbol_id_t symbol_id = entries.values[i].func_ref.symbol_id;
-    if (symbol_id >= dependency_table->symbol_count) {
+    if (symbol_id >= reference_table->symbol_count) {
       return iree_make_status(
           IREE_STATUS_FAILED_PRECONDITION,
-          "artifact manifest entry symbol id %u is out of range for dependency "
+          "artifact manifest entry symbol id %u is out of range for reference "
           "table with %" PRIhsz " symbols",
-          (unsigned)symbol_id, dependency_table->symbol_count);
+          (unsigned)symbol_id, reference_table->symbol_count);
     }
     if (!function_marks[symbol_id]) {
       function_marks[symbol_id] = 1;
@@ -670,26 +670,27 @@ static iree_status_t loom_target_artifact_manifest_mark_function_closure(
 
   while (stack_count > 0) {
     const loom_symbol_id_t symbol_id = stack[--stack_count];
-    loom_symbol_dependency_edge_id_t edge_id =
-        dependency_table->symbols[symbol_id].first_outgoing_edge_id;
-    while (edge_id != LOOM_SYMBOL_DEPENDENCY_EDGE_ID_INVALID) {
-      const loom_symbol_dependency_edge_t* edge = NULL;
-      IREE_RETURN_IF_ERROR(loom_target_artifact_manifest_dependency_edge(
-          dependency_table, edge_id, &edge));
-      if (edge->kind == LOOM_SYMBOL_DEPENDENCY_EDGE_CALL) {
-        if (edge->target_symbol_id >= dependency_table->symbol_count) {
+    loom_symbol_reference_occurrence_id_t edge_id =
+        reference_table->symbols[symbol_id].first_outgoing_occurrence_id;
+    while (edge_id != LOOM_SYMBOL_REFERENCE_OCCURRENCE_ID_INVALID) {
+      const loom_symbol_reference_occurrence_t* edge = NULL;
+      IREE_RETURN_IF_ERROR(loom_target_artifact_manifest_reference_occurrence(
+          reference_table, edge_id, &edge));
+      if (loom_symbol_reference_occurrence_is_dependency(edge) &&
+          edge->kind == LOOM_SYMBOL_REFERENCE_OCCURRENCE_CALL) {
+        if (edge->target_symbol_id >= reference_table->symbol_count) {
           return iree_make_status(
               IREE_STATUS_FAILED_PRECONDITION,
-              "dependency call target symbol id %u is out of range for table "
+              "call target symbol id %u is out of range for table "
               "with %" PRIhsz " symbols",
-              (unsigned)edge->target_symbol_id, dependency_table->symbol_count);
+              (unsigned)edge->target_symbol_id, reference_table->symbol_count);
         }
         if (!function_marks[edge->target_symbol_id]) {
           function_marks[edge->target_symbol_id] = 1;
           stack[stack_count++] = edge->target_symbol_id;
         }
       }
-      edge_id = edge->next_outgoing_edge_id;
+      edge_id = edge->next_outgoing_occurrence_id;
     }
   }
   return iree_ok_status();
@@ -697,44 +698,45 @@ static iree_status_t loom_target_artifact_manifest_mark_function_closure(
 
 static iree_status_t loom_target_artifact_manifest_mark_used_globals(
     loom_target_entry_list_t entries,
-    const loom_symbol_dependency_table_t* dependency_table,
+    const loom_symbol_reference_table_t* reference_table,
     iree_arena_allocator_t* arena, uint8_t* global_marks,
     iree_host_size_t* out_global_count) {
   *out_global_count = 0;
-  if (dependency_table->symbol_count == 0 || entries.count == 0) {
+  if (reference_table->symbol_count == 0 || entries.count == 0) {
     return iree_ok_status();
   }
 
   uint8_t* function_marks = NULL;
   IREE_RETURN_IF_ERROR(loom_target_artifact_manifest_allocate_array(
-      arena, dependency_table->symbol_count, sizeof(*function_marks),
+      arena, reference_table->symbol_count, sizeof(*function_marks),
       (void**)&function_marks));
   IREE_RETURN_IF_ERROR(loom_target_artifact_manifest_mark_function_closure(
-      entries, dependency_table, arena, function_marks));
+      entries, reference_table, arena, function_marks));
 
   iree_host_size_t global_count = 0;
-  for (iree_host_size_t i = 0; i < dependency_table->symbol_count; ++i) {
+  for (iree_host_size_t i = 0; i < reference_table->symbol_count; ++i) {
     if (!function_marks[i]) continue;
-    loom_symbol_dependency_edge_id_t edge_id =
-        dependency_table->symbols[i].first_outgoing_edge_id;
-    while (edge_id != LOOM_SYMBOL_DEPENDENCY_EDGE_ID_INVALID) {
-      const loom_symbol_dependency_edge_t* edge = NULL;
-      IREE_RETURN_IF_ERROR(loom_target_artifact_manifest_dependency_edge(
-          dependency_table, edge_id, &edge));
-      if (edge->kind == LOOM_SYMBOL_DEPENDENCY_EDGE_GLOBAL_ACCESS) {
-        if (edge->target_symbol_id >= dependency_table->symbol_count) {
+    loom_symbol_reference_occurrence_id_t edge_id =
+        reference_table->symbols[i].first_outgoing_occurrence_id;
+    while (edge_id != LOOM_SYMBOL_REFERENCE_OCCURRENCE_ID_INVALID) {
+      const loom_symbol_reference_occurrence_t* edge = NULL;
+      IREE_RETURN_IF_ERROR(loom_target_artifact_manifest_reference_occurrence(
+          reference_table, edge_id, &edge));
+      if (loom_symbol_reference_occurrence_is_dependency(edge) &&
+          edge->kind == LOOM_SYMBOL_REFERENCE_OCCURRENCE_GLOBAL_ACCESS) {
+        if (edge->target_symbol_id >= reference_table->symbol_count) {
           return iree_make_status(
               IREE_STATUS_FAILED_PRECONDITION,
-              "dependency global target symbol id %u is out of range for "
+              "global target symbol id %u is out of range for "
               "table with %" PRIhsz " symbols",
-              (unsigned)edge->target_symbol_id, dependency_table->symbol_count);
+              (unsigned)edge->target_symbol_id, reference_table->symbol_count);
         }
         if (!global_marks[edge->target_symbol_id]) {
           global_marks[edge->target_symbol_id] = 1;
           ++global_count;
         }
       }
-      edge_id = edge->next_outgoing_edge_id;
+      edge_id = edge->next_outgoing_occurrence_id;
     }
   }
 
@@ -744,7 +746,7 @@ static iree_status_t loom_target_artifact_manifest_mark_used_globals(
 
 static iree_status_t loom_target_artifact_manifest_collect_globals(
     const loom_module_t* module, loom_target_entry_list_t entries,
-    const loom_symbol_dependency_table_t* dependency_table,
+    const loom_symbol_reference_table_t* reference_table,
     const iree_string_view_t* target_name_refs,
     iree_host_size_t target_name_count, iree_arena_allocator_t* arena,
     loom_target_artifact_manifest_global_t** out_globals,
@@ -761,7 +763,7 @@ static iree_status_t loom_target_artifact_manifest_collect_globals(
       (void**)&global_marks));
   iree_host_size_t global_count = 0;
   IREE_RETURN_IF_ERROR(loom_target_artifact_manifest_mark_used_globals(
-      entries, dependency_table, arena, global_marks, &global_count));
+      entries, reference_table, arena, global_marks, &global_count));
   if (global_count == 0) return iree_ok_status();
 
   loom_target_artifact_manifest_global_t* globals = NULL;
@@ -800,7 +802,7 @@ static iree_status_t loom_target_artifact_manifest_collect_globals(
 
 iree_status_t loom_target_artifact_manifest_collect_from_entries(
     const loom_module_t* module, loom_target_entry_list_t entries,
-    const loom_symbol_dependency_table_t* dependency_table,
+    const loom_symbol_reference_table_t* reference_table,
     const loom_target_artifact_manifest_collect_options_t* options,
     iree_arena_allocator_t* arena,
     loom_target_artifact_manifest_t* out_manifest) {
@@ -829,21 +831,20 @@ iree_status_t loom_target_artifact_manifest_collect_from_entries(
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "artifact manifest entry list is missing values");
   }
-  if (!dependency_table) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "artifact manifest symbol dependency table is NULL");
+  if (!reference_table) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "artifact manifest symbol reference table is NULL");
   }
-  if (dependency_table->module != module) {
+  if (reference_table->module != module) {
     return iree_make_status(
         IREE_STATUS_FAILED_PRECONDITION,
-        "artifact manifest dependency table belongs to another module");
+        "artifact manifest reference table belongs to another module");
   }
-  if (dependency_table->symbol_count != module->symbols.count) {
+  if (reference_table->symbol_count != module->symbols.count) {
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "artifact manifest dependency table has %" PRIhsz
+                            "artifact manifest reference table has %" PRIhsz
                             " symbols but module has %" PRIhsz " symbols",
-                            dependency_table->symbol_count,
+                            reference_table->symbol_count,
                             module->symbols.count);
   }
   if (!arena) {
@@ -865,7 +866,7 @@ iree_status_t loom_target_artifact_manifest_collect_from_entries(
   loom_target_artifact_manifest_global_t* globals = NULL;
   iree_host_size_t global_count = 0;
   IREE_RETURN_IF_ERROR(loom_target_artifact_manifest_collect_globals(
-      module, entries, dependency_table, target_name_refs, target_count, arena,
+      module, entries, reference_table, target_name_refs, target_count, arena,
       &globals, &global_count));
 
   loom_target_artifact_format_t artifact_format = options->artifact_format;
@@ -921,13 +922,13 @@ iree_status_t loom_target_artifact_manifest_collect_json_from_entries(
                             "artifact manifest arena is NULL");
   }
 
-  loom_symbol_dependency_table_t dependency_table = {0};
+  loom_symbol_reference_table_t reference_table = {0};
   IREE_RETURN_IF_ERROR(
-      loom_symbol_dependency_table_build(module, arena, &dependency_table));
+      loom_symbol_reference_table_build(module, arena, &reference_table));
 
   loom_target_artifact_manifest_t manifest = {0};
   IREE_RETURN_IF_ERROR(loom_target_artifact_manifest_collect_from_entries(
-      module, entries, &dependency_table, options, arena, &manifest));
+      module, entries, &reference_table, options, arena, &manifest));
 
   loom_target_artifact_manifest_format_options_t format_options;
   loom_target_artifact_manifest_format_options_initialize(&format_options);

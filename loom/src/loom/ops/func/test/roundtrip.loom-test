@@ -33,6 +33,15 @@ func.decl @extern_matmul(%a: f32, %b: f32) -> (f32)
 
 // ====
 
+// Compile-time family declarations own stable contracts without becoming
+// ordinary callable symbols or naming provider-library paths.
+
+template.decl @test.effect(%value: i32) -> (i32)
+
+template.decl @test.constrained(%M: index, %value: tensor<[%M]xf32>) -> (tensor<[%M]xf32>) where [mul(%M, 16)]
+
+// ====
+
 // Declaration contract carrying author inline policy for provider-backed import.
 func.decl hot inline @extern_small_helper(%x: f32) -> (f32)
 
@@ -55,17 +64,19 @@ func.decl public import("upstream") @relu(%x: f32) -> (f32)
 
 // Retained private callable symbols remain ordinary private symbols but are
 // preserved by symbol DCE.
+template.decl @test.effect(%value: i32) -> (i32)
+
 func.def retain @retained_identity(%x: f32) -> (f32) {
   func.return %x : f32
 }
 
 func.decl retain @retained_extern(%x: f32) -> (f32)
 
-func.template<test.effect> retain @retained_template(%value: i32) -> (i32) {
-  func.return %value : i32
+template.def<@test.effect> retain @retained_template(%value: i32) -> (i32) {
+  template.return %value : i32
 }
 
-func.ukernel<test.effect> retain @retained_ukernel(%value: i32) -> (i32)
+template.ukernel<@test.effect> retain @retained_ukernel(%value: i32) -> (i32)
 
 // ====
 
@@ -95,16 +106,18 @@ func.def deinitializer @teardown() {
 
 // ====
 
-// Template and ukernel policy modifiers share the same author-facing spelling;
-// func.apply names the implementation contract key rather than a direct symbol.
-func.template<test.effect> hot inline @pure_template(%value: i32) -> (i32) {
-  func.return %value : i32
+// Template and ukernel temperature modifiers share the same author-facing
+// spelling; template.apply names a family rather than a direct implementation.
+template.decl @test.effect(%value: i32) -> (i32)
+
+template.def<@test.effect> hot @pure_template(%value: i32) -> (i32) {
+  template.return %value : i32
 }
 
-func.ukernel<test.effect> cold noinline @opaque_template(%value: i32) -> (i32)
+template.ukernel<@test.effect> cold @opaque_template(%value: i32) -> (i32)
 
 func.def @apply_with_edge_policy(%value: i32) -> (i32) {
-  %result = func.apply<test.effect>(%value) cold : (i32) -> (i32)
+  %result = template.apply<@test.effect>(%value) cold : (i32) -> (i32)
   func.return %result : i32
 }
 
@@ -114,12 +127,14 @@ func.def @apply_with_edge_policy(%value: i32) -> (i32) {
 // actually require. Identity and normalized target facts are independent.
 test.target<low_core> @gfx1100
 
-func.template<test.effect> target(@gfx1100) priority(10) @gfx11_template(%value: i32) -> (i32) {
-  func.return %value : i32
+template.decl @test.effect(%value: i32) -> (i32)
+
+template.def<@test.effect> target(@gfx1100) priority(10) @gfx11_template(%value: i32) -> (i32) {
+  template.return %value : i32
 }
 
-func.template<test.effect> requires [#target.subgroup.size<64>] priority(7) @subgroup_64_template(%value: i32) -> (i32) where [eq(%value, 7)] {
-  func.return %value : i32
+template.def<@test.effect> requires [#target.subgroup.size<64>] priority(7) @subgroup_64_template(%value: i32) -> (i32) where [eq(%value, 7)] {
+  template.return %value : i32
 }
 
-func.ukernel<test.effect> requires [#target.subgroup.size<32>] priority(5) @subgroup_32_opaque(%value: i32) -> (i32)
+template.ukernel<@test.effect> requires [#target.subgroup.size<32>] priority(5) @subgroup_32_opaque(%value: i32) -> (i32)

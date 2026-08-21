@@ -81,6 +81,10 @@ class TestSymbol:
     def test_complex(self) -> None:
         assert _texts("@dn_layer") == ["dn_layer"]
 
+    def test_dotted(self) -> None:
+        assert _texts("@demo.quantized_dot") == ["demo.quantized_dot"]
+        assert _kinds("@demo.quantized_dot") == [TokenKind.SYMBOL]
+
     def test_error_bare_at(self) -> None:
         with pytest.raises(ParseError, match="expected identifier"):
             _tokens("@ ")

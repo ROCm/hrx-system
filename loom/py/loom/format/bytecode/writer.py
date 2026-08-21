@@ -22,6 +22,7 @@ import struct
 from collections.abc import Iterable, Mapping
 from typing import Any, ClassVar, cast
 
+from loom.dsl import FuncLikeInterface, SymbolReferenceRole
 from loom.fields import compute_layout, resolve_fields
 from loom.format.bytecode.encoding import ByteBuffer
 from loom.format.bytecode.op_decls import (
@@ -61,8 +62,11 @@ from loom.ir import (
     SignedEnumSetAttr,
     StaticDim,
     StorageType,
+    Symbol,
     SymbolKind,
     SymbolName,
+    SymbolNameArray,
+    SymbolNameSet,
     TaggedLocation,
     Type,
     TypeKind,
@@ -99,10 +103,14 @@ SECTION_SYMBOLS = 6
 SECTION_IR = 7
 SECTION_RESOURCES = 8
 SECTION_SOURCE_TRIVIA = 9
+SECTION_PROVIDER_IMPORTS = 10
+SECTION_SYMBOL_REFERENCES = 11
 
 SECTION_WRITE_ORDER = (
     SECTION_IR,
     SECTION_SYMBOLS,
+    SECTION_PROVIDER_IMPORTS,
+    SECTION_SYMBOL_REFERENCES,
     SECTION_STRINGS,
     SECTION_SOURCES,
     SECTION_TYPES,
@@ -116,8 +124,9 @@ FUNCTION_SYMBOL_KINDS = frozenset(
     {
         SymbolKind.FUNC_DEF,
         SymbolKind.FUNC_DECL,
-        SymbolKind.FUNC_TEMPLATE,
-        SymbolKind.FUNC_UKERNEL,
+        SymbolKind.TEMPLATE_DECL,
+        SymbolKind.TEMPLATE_DEF,
+        SymbolKind.TEMPLATE_UKERNEL,
     }
 )
 
@@ -143,6 +152,8 @@ ATTR_KIND_ENUM_ARRAY = 13
 ATTR_KIND_PARAMETERIZED = 14
 ATTR_KIND_PARAMETERIZED_ARRAY = 15
 ATTR_KIND_SIGNED_ENUM_SET = 16
+ATTR_KIND_SYMBOL_ARRAY = 17
+ATTR_KIND_SYMBOL_SET = 18
 
 # Type kind bytes. These must match loom_bytecode_type_kind_e, not just the
 # current Python enum spelling.
@@ -169,7 +180,7 @@ BYTECODE_IR_KIND_BY_TYPE_KIND: dict[int, TypeKind] = {
 
 # File magic and version.
 MAGIC = b"LOOM"
-FORMAT_VERSION = 24
+FORMAT_VERSION = 29
 PRODUCER = "loom-py"
 
 SOURCE_TRIVIA_LEADING_BLANK_LINE = 1
@@ -183,6 +194,7 @@ SYMBOL_FLAG_RETAIN = 0x0008
 SYMBOL_FLAG_DECLARATION = 0x0010
 SYMBOL_FLAG_TEST_ONLY = 0x0020
 _SYMBOL_FLAG_PREDICATES = 0x0040
+SYMBOL_KIND_ANCHOR = 8
 
 
 # ============================================================================
@@ -256,6 +268,195 @@ class NumberingContext:
 
 
 # ============================================================================
+# Symbol reference projection
+# ============================================================================
+
+
+class _SymbolReferenceProjectionBuilder:
+    """Builds wire-symbol dependency and abstract-provider rows."""
+
+    def __init__(
+        self,
+        module: Module,
+        wire_symbol_indices: dict[str, int],
+        op_decls_by_name: Mapping[str, Any],
+        numbering: NumberingContext,
+    ) -> None:
+        self._module = module
+        self._wire_symbol_indices = wire_symbol_indices
+        self._op_decls_by_name = op_decls_by_name
+        self._numbering = numbering
+        self._module_dependencies: list[int] = []
+        self._symbol_dependencies: list[list[int]] = [[] for _ in wire_symbol_indices]
+        self._symbol_template_demands: list[list[int]] = [
+            [] for _ in wire_symbol_indices
+        ]
+
+    def build(
+        self,
+    ) -> tuple[
+        tuple[int, ...],
+        tuple[tuple[int, ...], ...],
+        tuple[tuple[int, ...], ...],
+    ]:
+        """Builds rows in the linked-list order used by the C analysis."""
+        for operation in self._module.body.ops:
+            self._visit_operation(None, operation)
+        for encoding in self._module.encodings:
+            self._visit_encoding(None, encoding)
+        return (
+            tuple(reversed(self._module_dependencies)),
+            tuple(tuple(reversed(row)) for row in self._symbol_dependencies),
+            tuple(tuple(reversed(row)) for row in self._symbol_template_demands),
+        )
+
+    def _add_dependency(self, source_symbol_index: int | None, name: str) -> None:
+        try:
+            target_symbol_index = self._wire_symbol_indices[name]
+        except KeyError as exc:
+            raise ValueError(f"unresolved symbol dependency {name!r}") from exc
+        if source_symbol_index is None:
+            self._module_dependencies.append(target_symbol_index)
+        else:
+            self._symbol_dependencies[source_symbol_index].append(target_symbol_index)
+
+    def _visit_attr(
+        self,
+        source_symbol_index: int | None,
+        value: Any,
+        attr_def: Any | None = None,
+    ) -> None:
+        attr_type = getattr(attr_def, "attr_type", None)
+        symbol_ref = getattr(attr_def, "symbol_ref", None)
+        is_availability = (
+            symbol_ref is not None
+            and symbol_ref.role is SymbolReferenceRole.AVAILABILITY
+        )
+        if attr_type == "symbol" or isinstance(value, SymbolName):
+            if not is_availability:
+                self._add_dependency(source_symbol_index, str(value))
+            return
+        if attr_type == "symbol_array" or isinstance(value, SymbolNameArray):
+            if not is_availability:
+                for name in value:
+                    self._add_dependency(source_symbol_index, str(name))
+            return
+        if attr_type == "symbol_set" or isinstance(value, SymbolNameSet):
+            if not is_availability:
+                for name in value:
+                    self._add_dependency(source_symbol_index, str(name))
+            return
+        if isinstance(value, _IR_TYPE_CLASSES):
+            self._visit_type(source_symbol_index, cast(Type, value))
+            return
+        if isinstance(value, EncodingInstance):
+            self._visit_encoding(source_symbol_index, value)
+            return
+        if isinstance(value, ParameterizedAttr):
+            for parameter, slot in zip(
+                value.definition.parameters, value.slots, strict=True
+            ):
+                if slot is not None:
+                    self._visit_attr(source_symbol_index, slot, parameter)
+            return
+        if isinstance(value, ParameterizedAttrArray):
+            for element in value:
+                self._visit_attr(source_symbol_index, element)
+            return
+        if isinstance(value, Mapping):
+            for nested_value in value.values():
+                self._visit_attr(source_symbol_index, nested_value)
+            return
+        if isinstance(value, list | tuple):
+            for nested_value in value:
+                self._visit_attr(source_symbol_index, nested_value)
+
+    def _visit_encoding(
+        self, source_symbol_index: int | None, encoding: EncodingInstance
+    ) -> None:
+        for _, parameter_value in encoding.params:
+            self._visit_attr(source_symbol_index, parameter_value)
+
+    def _visit_type(self, source_symbol_index: int | None, ir_type: Type) -> None:
+        match ir_type:
+            case ShapedType(element_type=element_type, encoding=encoding):
+                self._visit_type(source_symbol_index, element_type)
+                if isinstance(encoding, EncodingInstance):
+                    self._visit_encoding(source_symbol_index, encoding)
+            case FunctionType(arg_types=args, result_types=results):
+                for nested_type in (*args, *results):
+                    self._visit_type(source_symbol_index, nested_type)
+            case DialectType(params=parameters):
+                for nested_type in parameters:
+                    self._visit_type(source_symbol_index, nested_type)
+            case ParameterizedType(definition=definition, slots=slots):
+                for parameter, value in zip(definition.params, slots, strict=True):
+                    if value is not None:
+                        self._visit_attr(source_symbol_index, value, parameter)
+            case RegisterType(value_type=value_type) if value_type is not None:
+                self._visit_type(source_symbol_index, value_type)
+            case _:
+                pass
+
+    def _visit_value(self, source_symbol_index: int | None, value_id: int) -> None:
+        if 0 <= value_id < len(self._module.values):
+            self._visit_type(source_symbol_index, self._module.values[value_id].type)
+
+    def _visit_region(self, source_symbol_index: int | None, region: Region) -> None:
+        for block in region.blocks:
+            for argument_id in block.arg_ids:
+                self._visit_value(source_symbol_index, argument_id)
+            for operation in block.ops:
+                self._visit_operation(source_symbol_index, operation)
+
+    def _visit_operation(
+        self, source_symbol_index: int | None, operation: Operation
+    ) -> None:
+        op_decl = self._op_decls_by_name.get(operation.name)
+        symbol_def = getattr(op_decl, "symbol_def", None)
+        nested_source_symbol_index = source_symbol_index
+        if symbol_def is not None:
+            symbol_name = operation.attributes.get(symbol_def.field)
+            if isinstance(symbol_name, str):
+                try:
+                    nested_source_symbol_index = self._wire_symbol_indices[symbol_name]
+                except KeyError as exc:
+                    raise ValueError(
+                        f"symbol-defining operation {operation.name!r} names "
+                        f"unindexed symbol {symbol_name!r}"
+                    ) from exc
+
+        if operation.name == "template.apply":
+            family = operation.attributes.get("family")
+            if nested_source_symbol_index is None:
+                raise ValueError("template.apply is not owned by a module symbol")
+            if not isinstance(family, str):
+                raise ValueError("template.apply family must be a symbol")
+            try:
+                family_symbol_ordinal = self._wire_symbol_indices[family]
+            except KeyError as exc:
+                raise ValueError(
+                    f"template.apply references unknown family {family!r}"
+                ) from exc
+            self._symbol_template_demands[nested_source_symbol_index].append(
+                family_symbol_ordinal
+            )
+
+        for value_id in (*operation.operands, *operation.results):
+            self._visit_value(nested_source_symbol_index, value_id)
+        for key, value in operation.attributes.items():
+            if symbol_def is not None and key == symbol_def.field:
+                continue
+            self._visit_attr(
+                nested_source_symbol_index,
+                value,
+                attr_def_for_op(self._op_decls_by_name, operation.name, key),
+            )
+        for region in operation.regions:
+            self._visit_region(nested_source_symbol_index, region)
+
+
+# ============================================================================
 # Bytecode writer
 # ============================================================================
 
@@ -291,9 +492,64 @@ class BytecodeWriter:
         self._location_mode = location_mode
         self._op_decls_by_name = build_op_decl_map(op_decls)
         self._ctx = NumberingContext()
+        (
+            self._provider_imports,
+            self._wire_symbols,
+            self._wire_symbol_indices,
+        ) = self._build_provider_import_projection()
         self._number_module()
+        (
+            self._module_dependencies,
+            self._symbol_dependencies,
+            self._symbol_template_demands,
+        ) = _SymbolReferenceProjectionBuilder(
+            self._module,
+            self._wire_symbol_indices,
+            self._op_decls_by_name,
+            self._ctx,
+        ).build()
 
     # --- Pass 1: Numbering ---
+
+    def _build_provider_import_projection(
+        self,
+    ) -> tuple[tuple[Operation, ...], list[Symbol], dict[str, int]]:
+        """Build canonical providers and the complete wire symbol projection."""
+        providers = sorted(
+            (op for op in self._module.body.ops if op.name == "module.import"),
+            key=lambda op: str(op.attributes.get("provider", "")).encode("utf-8"),
+        )
+        previous_provider: str | None = None
+        anchor_names: set[str] = set()
+        for op in providers:
+            provider = op.attributes.get("provider")
+            symbols = op.attributes.get("symbols")
+            if not isinstance(provider, str):
+                raise ValueError("module.import provider must be a string")
+            if not isinstance(symbols, SymbolNameSet):
+                raise ValueError("module.import symbols must be a SymbolNameSet")
+            if previous_provider == provider:
+                raise ValueError(f"duplicate module.import provider {provider!r}")
+            previous_provider = provider
+            anchor_names.update(symbols)
+
+        wire_symbols = list(self._module.symbols)
+        symbol_indices: dict[str, int] = {}
+        for symbol_index, symbol in enumerate(wire_symbols):
+            if symbol.name in symbol_indices:
+                raise ValueError(f"duplicate symbol name {symbol.name!r}")
+            symbol_indices[symbol.name] = symbol_index
+        for name in sorted(anchor_names, key=lambda value: value.encode("utf-8")):
+            if name in symbol_indices:
+                continue
+            symbol_indices[name] = len(wire_symbols)
+            wire_symbols.append(Symbol(name=name, kind=SymbolKind.NONE))
+        for symbol in wire_symbols:
+            if symbol.kind == SymbolKind.NONE and symbol.name not in anchor_names:
+                raise ValueError(
+                    f"unresolved symbol {symbol.name!r} is not a provider anchor"
+                )
+        return tuple(providers), wire_symbols, symbol_indices
 
     def _number_module(self) -> None:
         """Walk the module and assign IDs to all entities."""
@@ -307,7 +563,7 @@ class BytecodeWriter:
         self._ctx.sources = list(module.sources)
 
         # Walk symbols.
-        for symbol in module.symbols:
+        for symbol in self._wire_symbols:
             self._ctx.intern_string(symbol.name)
             if symbol.source_module:
                 self._ctx.intern_string(symbol.source_module)
@@ -325,6 +581,9 @@ class BytecodeWriter:
                         f"symbol {symbol.name!r} of kind {symbol.kind.name} "
                         "has no supported defining op"
                     )
+
+        for provider_import in self._provider_imports:
+            self._ctx.intern_string(provider_import.attributes["provider"])
 
         # Encodings: recursively number child encoding params before parents so
         # the ENCODINGS section has no forward references.
@@ -360,10 +619,6 @@ class BytecodeWriter:
             for arg in predicate.args:
                 if arg.tag == "value" and isinstance(arg.value, str):
                     self._ctx.intern_string(arg.value)
-
-        implements = op.attributes.get("implements")
-        if isinstance(implements, str):
-            self._ctx.intern_string(implements)
 
         for key, value in op.attributes.items():
             if key in shared_attr_keys:
@@ -463,14 +718,10 @@ class BytecodeWriter:
                 attr_name = getattr(func_like, field_name, None)
                 if attr_name is not None:
                     keys.add(attr_name)
-            if symbol_def.bytecode_kind in (
-                "LOOM_SYMBOL_FUNC_TEMPLATE",
-                "LOOM_SYMBOL_FUNC_UKERNEL",
-            ):
-                for field_name in ("implements", "priority"):
-                    attr_name = getattr(func_like, field_name, None)
-                    if attr_name is not None:
-                        keys.add(attr_name)
+            for field_name in ("template_family", "priority"):
+                attr_name = getattr(func_like, field_name, None)
+                if attr_name is not None:
+                    keys.add(attr_name)
         return frozenset(keys)
 
     def _symbol_definition_flags(self, op: Operation) -> int:
@@ -677,9 +928,20 @@ class BytecodeWriter:
         aggregate_nesting_depth: int = 0,
     ) -> None:
         """Intern strings referenced by attribute values."""
-        if getattr(attr_def, "attr_type", None) == "enum":
+        attr_type = getattr(attr_def, "attr_type", None)
+        if attr_type == "enum":
             return
-        if isinstance(value, ParameterizedAttr):
+        if isinstance(value, SymbolNameArray):
+            if attr_type != "symbol_array":
+                raise ValueError("symbol arrays require a descriptor-backed field")
+            for name in value:
+                self._ctx.intern_string(str(name))
+        elif isinstance(value, SymbolNameSet):
+            if attr_type != "symbol_set":
+                raise ValueError("symbol sets require a descriptor-backed field")
+            for name in value:
+                self._ctx.intern_string(str(name))
+        elif isinstance(value, ParameterizedAttr):
             if aggregate_nesting_depth >= ATTR_AGGREGATE_MAX_NESTING_DEPTH:
                 raise ValueError(
                     "aggregate attribute nesting exceeds maximum depth "
@@ -755,6 +1017,8 @@ class BytecodeWriter:
         ir_bytes, ir_offsets = self._write_ir()
         sections[SECTION_IR] = ir_bytes
         sections[SECTION_SYMBOLS] = self._write_symbols(ir_offsets)
+        sections[SECTION_PROVIDER_IMPORTS] = self._write_provider_imports()
+        sections[SECTION_SYMBOL_REFERENCES] = self._write_symbol_references()
         return self._assemble(sections, self._module_allocation_counts())
 
     def _write_strings(self) -> bytes:
@@ -1461,6 +1725,8 @@ class BytecodeWriter:
             aggregate_nesting_depth,
         ):
             return
+        if self._dispatch_symbol_attr_value(buf, value, attr_def):
+            return
         if attr_type == "predicate_list":
             if not isinstance(value, list) or not all(
                 isinstance(predicate, Predicate) for predicate in value
@@ -1476,14 +1742,6 @@ class BytecodeWriter:
         if isinstance(value, list) and value and isinstance(value[0], Predicate):
             buf.write_u8(ATTR_KIND_PREDICATE_LIST)
             self._write_predicate_list(buf, value, value_numbers_by_name)
-            return
-        if attr_type == "symbol":
-            if not isinstance(value, str):
-                raise TypeError(
-                    f"symbol attribute value must be a string, got {value!r}"
-                )
-            buf.write_u8(ATTR_KIND_SYMBOL)
-            buf.write_varint(self._ctx.strings[value])
             return
         if self._dispatch_enum_attr_value(buf, value, attr_def):
             return
@@ -1535,6 +1793,10 @@ class BytecodeWriter:
             raise ValueError("enum arrays require a descriptor-backed field")
         elif isinstance(value, SignedEnumSetAttr):
             raise ValueError("signed enum sets require a descriptor-backed field")
+        elif isinstance(value, SymbolNameArray):
+            raise ValueError("symbol arrays require a descriptor-backed field")
+        elif isinstance(value, SymbolNameSet):
+            raise ValueError("symbol sets require a descriptor-backed field")
         elif isinstance(value, Mapping):
             self._write_dict_attr_value(
                 buf, value, value_numbers_by_name, aggregate_nesting_depth
@@ -1640,6 +1902,45 @@ class BytecodeWriter:
         for word in positive_words + negative_words:
             buf.write_u64_le(word)
 
+    def _dispatch_symbol_attr_value(
+        self,
+        buf: ByteBuffer,
+        value: Any,
+        attr_def: Any | None,
+    ) -> bool:
+        """Write a descriptor-backed symbol payload when applicable."""
+        attr_type = getattr(attr_def, "attr_type", None)
+        if attr_type == "symbol":
+            if not isinstance(value, str):
+                raise TypeError(
+                    f"symbol attribute value must be a string, got {value!r}"
+                )
+            buf.write_u8(ATTR_KIND_SYMBOL)
+            buf.write_varint(self._ctx.strings[value])
+            return True
+        if attr_type == "symbol_array":
+            if not isinstance(value, SymbolNameArray):
+                raise TypeError(
+                    "symbol-array attribute value must be SymbolNameArray, "
+                    f"got {value!r}"
+                )
+            buf.write_u8(ATTR_KIND_SYMBOL_ARRAY)
+            buf.write_varint(len(value))
+            for name in value:
+                buf.write_varint(self._ctx.strings[str(name)])
+            return True
+        if attr_type == "symbol_set":
+            if not isinstance(value, SymbolNameSet):
+                raise TypeError(
+                    f"symbol-set attribute value must be SymbolNameSet, got {value!r}"
+                )
+            buf.write_u8(ATTR_KIND_SYMBOL_SET)
+            buf.write_varint(len(value))
+            for name in value:
+                buf.write_varint(self._ctx.strings[str(name)])
+            return True
+        return False
+
     # Predicate arg tag bytes.
     _PRED_ARG_TAG_VALUE = 1
     _PRED_ARG_TAG_CONST = 2
@@ -1701,6 +2002,41 @@ class BytecodeWriter:
             case _:
                 raise ValueError(f"unknown predicate arg tag: {arg.tag!r}")
 
+    def _write_function_implementation_metadata(
+        self,
+        buf: ByteBuffer,
+        op: Operation,
+        symbol_name: str,
+        func_like: FuncLikeInterface,
+    ) -> None:
+        """Write the fixed implementation metadata declared by a FuncLike op."""
+        if func_like.template_family is None:
+            return
+        template_family = op.attributes.get(func_like.template_family)
+        if not isinstance(template_family, str):
+            raise ValueError(
+                f"{op.name} symbol {symbol_name!r} must have a template family symbol"
+            )
+        try:
+            template_family_symbol_ordinal = self._wire_symbol_indices[template_family]
+        except KeyError as exc:
+            raise ValueError(
+                f"{op.name} symbol {symbol_name!r} references unknown template "
+                f"family {template_family!r}"
+            ) from exc
+        priority = (
+            op.attributes.get(func_like.priority, 0)
+            if func_like.priority is not None
+            else 0
+        )
+        if not isinstance(priority, int) or priority < 0:
+            raise ValueError(
+                f"{op.name} symbol {symbol_name!r} priority "
+                "must be a non-negative integer"
+            )
+        buf.write_varint(template_family_symbol_ordinal)
+        buf.write_varint(priority)
+
     def _write_symbols(self, ir_offsets: dict[int, tuple[int, int]]) -> bytes:
         """Write the SYMBOLS section.
 
@@ -1710,7 +2046,7 @@ class BytecodeWriter:
         start of the symbol entries to each import/export entry.
         """
         buf = ByteBuffer()
-        symbols = self._module.symbols
+        symbols = self._wire_symbols
 
         # Classify symbols into imports and exports.
         import_indices: list[int] = []
@@ -1745,9 +2081,10 @@ class BytecodeWriter:
             entry_offsets[symbol_index] = buf.position - entries_start
             buf.write_varint(self._ctx.strings[symbol.name])
             if symbol.kind == SymbolKind.NONE:
-                raise ValueError(
-                    f"symbol {symbol.name!r} has no bytecode symbol payload kind"
-                )
+                buf.write_u8(SYMBOL_KIND_ANCHOR)
+                buf.write_u8(1)
+                buf.write_u16_le(0)
+                continue
             buf.write_u8(symbol.kind.value)
             buf.write_u8(0 if (symbol.flags & SYMBOL_FLAG_PUBLIC) else 1)
             if symbol.op is None:
@@ -1781,6 +2118,9 @@ class BytecodeWriter:
             if symbol.kind in FUNCTION_SYMBOL_KINDS and symbol.op is not None:
                 op = symbol.op
                 module = self._module
+                func_like = func_like_interface_for_op(self._op_decls_by_name, op.name)
+                if func_like is None:
+                    raise ValueError(f"function symbol {op.name!r} is not FuncLike")
 
                 buf.write_varint(self._ctx.ops[op.name] + 1)
                 self._write_source_trivia(buf, op.leading_blank_line, op.comments)
@@ -1846,24 +2186,9 @@ class BytecodeWriter:
                     self._value_numbers_by_name(signature_value_numbers),
                 )
 
-                if symbol.kind in (
-                    SymbolKind.FUNC_TEMPLATE,
-                    SymbolKind.FUNC_UKERNEL,
-                ):
-                    implements = op.attributes.get("implements")
-                    if not isinstance(implements, str):
-                        raise ValueError(
-                            f"{op.name} symbol {symbol.name!r} must have "
-                            "a string implements attr"
-                        )
-                    priority = op.attributes.get("priority", 0)
-                    if not isinstance(priority, int) or priority < 0:
-                        raise ValueError(
-                            f"{op.name} symbol {symbol.name!r} priority "
-                            "must be a non-negative integer"
-                        )
-                    buf.write_varint(self._ctx.strings[implements])
-                    buf.write_varint(priority)
+                self._write_function_implementation_metadata(
+                    buf, op, symbol.name, func_like
+                )
 
                 shared_attr_keys = self._shared_func_metadata_attr_keys(op)
                 payload_attrs = [
@@ -1988,6 +2313,53 @@ class BytecodeWriter:
                 entry_offsets[symbol_idx],
             )
 
+        return buf.get_bytes()
+
+    def _write_provider_imports(self) -> bytes:
+        """Write canonical compile-time provider availability records."""
+        buf = ByteBuffer()
+        total_anchor_count = sum(
+            len(cast(SymbolNameSet, op.attributes["symbols"]))
+            for op in self._provider_imports
+        )
+        buf.write_varint(len(self._provider_imports))
+        buf.write_varint(total_anchor_count)
+        for op in self._provider_imports:
+            provider = cast(str, op.attributes["provider"])
+            symbols = cast(SymbolNameSet, op.attributes["symbols"])
+            buf.write_varint(self._ctx.strings[provider])
+            buf.write_varint(len(symbols))
+            for name in symbols:
+                buf.write_varint(self._wire_symbol_indices[name])
+            self._write_source_trivia(buf, op.leading_blank_line, op.comments)
+        return buf.get_bytes()
+
+    def _write_symbol_references(self) -> bytes:
+        """Write direct dependency and abstract-provider demand rows."""
+        buf = ByteBuffer()
+        total_dependency_count = len(self._module_dependencies) + sum(
+            len(row) for row in self._symbol_dependencies
+        )
+        total_template_demand_count = sum(
+            len(row) for row in self._symbol_template_demands
+        )
+        buf.write_varint(len(self._wire_symbols))
+        buf.write_varint(total_dependency_count)
+        buf.write_varint(total_template_demand_count)
+        buf.write_varint(len(self._module_dependencies))
+        for target_symbol_index in self._module_dependencies:
+            buf.write_varint(target_symbol_index)
+        for dependencies, template_demands in zip(
+            self._symbol_dependencies,
+            self._symbol_template_demands,
+            strict=True,
+        ):
+            buf.write_varint(len(dependencies))
+            for target_symbol_index in dependencies:
+                buf.write_varint(target_symbol_index)
+            buf.write_varint(len(template_demands))
+            for family_symbol_ordinal in template_demands:
+                buf.write_varint(family_symbol_ordinal)
         return buf.get_bytes()
 
     # --- File assembly ---
