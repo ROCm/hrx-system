@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Mapping
 
 ARGUMENT_SEPARATOR_ENV = "IREE_BAZEL_LAUNCH_ARGUMENT_SEPARATOR"
+CALLER_ARGUMENTS_ENV = "IREE_BAZEL_LAUNCH_CALLER_ARGUMENTS"
 CALLER_CWD_ENV = "IREE_BAZEL_LAUNCH_CALLER_CWD"
 MATERIALIZE_ENV = "IREE_BAZEL_LAUNCH_MATERIALIZE"
 RUNFILES_ARGUMENTS_ENV = "IREE_BAZEL_LAUNCH_RUNFILES_ARGUMENTS"
@@ -24,6 +25,7 @@ RUNFILES_ENVIRONMENT_NAMES_ENV = "IREE_BAZEL_LAUNCH_RUNFILES_ENVIRONMENT_NAMES"
 SCRIPT_PATH_ENV = "IREE_BAZEL_LAUNCH_SCRIPT_PATH"
 CONTROL_ENVIRONMENT_NAMES = (
     ARGUMENT_SEPARATOR_ENV,
+    CALLER_ARGUMENTS_ENV,
     CALLER_CWD_ENV,
     MATERIALIZE_ENV,
     RUNFILES_ARGUMENTS_ENV,
@@ -70,6 +72,7 @@ def configured_environment(
     *,
     caller_cwd: Path,
     argument_separator: str,
+    caller_arguments: list[str],
     runfiles_arguments: list[str],
     marked_runfiles_arguments: list[str],
     runfiles_environment_names: list[str],
@@ -86,6 +89,10 @@ def configured_environment(
         if environment_name_key(name) not in control_name_keys
     }
     environment[ARGUMENT_SEPARATOR_ENV] = argument_separator
+    environment[CALLER_ARGUMENTS_ENV] = json.dumps(
+        caller_arguments,
+        separators=(",", ":"),
+    )
     environment[CALLER_CWD_ENV] = str(caller_cwd)
     environment[RUNFILES_ARGUMENTS_ENV] = json.dumps(
         {
@@ -171,6 +178,7 @@ def prepare_launch(
     environment = dict(os.environ if environ is None else environ)
     try:
         argument_separator = environment.pop(ARGUMENT_SEPARATOR_ENV)
+        encoded_caller_arguments = environment.pop(CALLER_ARGUMENTS_ENV)
         caller_cwd = Path(environment.pop(CALLER_CWD_ENV))
         encoded_arguments = environment.pop(RUNFILES_ARGUMENTS_ENV)
         encoded_names = environment.pop(RUNFILES_ENVIRONMENT_NAMES_ENV)
@@ -184,6 +192,15 @@ def prepare_launch(
         raise ValueError(f"invalid {MATERIALIZE_ENV} value")
     if not argument_separator:
         raise ValueError("Bazel launcher argument separator is empty")
+
+    try:
+        caller_arguments = json.loads(encoded_caller_arguments)
+    except json.JSONDecodeError as exc:
+        raise ValueError("invalid caller argument list") from exc
+    if not isinstance(caller_arguments, list) or any(
+        not isinstance(argument, str) for argument in caller_arguments
+    ):
+        raise ValueError("caller arguments must contain strings")
 
     try:
         runfiles_arguments = json.loads(encoded_arguments)
@@ -222,7 +239,6 @@ def prepare_launch(
         raise ValueError("Bazel launcher argument separator is missing or duplicated")
     separator_position = separator_positions[0]
     default_arguments = bazel_argv[1:separator_position]
-    caller_arguments = bazel_argv[separator_position + 1 :]
 
     try:
         runfiles_environment_names = json.loads(encoded_names)
@@ -260,9 +276,9 @@ def prepare_launch(
             *rewritten_arguments,
             *default_arguments[position + len(expected_arguments) :],
         ]
-    # Bazel formats Windows --run_under commands through Bash and supplies the
-    # target as an unquoted native path, making that argv token lossy. The
-    # configured graph path travels in the run-under prefix and is authoritative.
+    # Bazel formats --run_under commands through a host shell, making native
+    # Windows paths in both the target token and caller arguments lossy. The
+    # configured graph path and original caller arguments are authoritative.
     if not executable_path.is_file():
         raise FileNotFoundError(
             f"configured Bazel target executable does not exist: {executable_path}"

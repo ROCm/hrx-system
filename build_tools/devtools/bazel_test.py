@@ -263,6 +263,7 @@ class BazelTest(unittest.TestCase):
             self.assertEqual(launch.target, "//pkg:tool")
             self.assertEqual(launch.run_cwd, temporary_path)
             self.assertEqual(launch.argument_separator, "separator")
+            self.assertEqual(launch.program_args, ["--flag", "two words"])
             self.assertEqual(launch.runfiles_arguments, ["--input=path/to/input"])
             self.assertEqual(
                 launch.runfiles_environment_names,

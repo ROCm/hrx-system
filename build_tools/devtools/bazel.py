@@ -140,6 +140,7 @@ class BazelLaunch:
     script_path: Path
     run_cwd: Path
     argument_separator: str
+    program_args: list[str] = field(default_factory=list)
     runfiles_arguments: list[str] = field(default_factory=list)
     marked_runfiles_arguments: list[str] = field(default_factory=list)
     runfiles_environment_names: list[str] = field(default_factory=list)
@@ -163,6 +164,7 @@ class BazelLaunch:
             base_env,
             caller_cwd=self.run_cwd,
             argument_separator=self.argument_separator,
+            caller_arguments=self.program_args,
             runfiles_arguments=self.runfiles_arguments,
             marked_runfiles_arguments=self.marked_runfiles_arguments,
             runfiles_environment_names=self.runfiles_environment_names,
@@ -800,6 +802,7 @@ def generate_bazel_launch(
         script_path=script_path,
         run_cwd=run_cwd,
         argument_separator=argument_separator,
+        program_args=program_args,
         runfiles_arguments=metadata.runfiles_arguments,
         marked_runfiles_arguments=metadata.marked_runfiles_arguments,
         runfiles_environment_names=metadata.runfiles_environment_names,

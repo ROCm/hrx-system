@@ -53,6 +53,7 @@ class BazelLauncherTest(unittest.TestCase):
                     },
                     caller_cwd=temporary_path,
                     argument_separator="separator",
+                    caller_arguments=[],
                     runfiles_arguments=[],
                     marked_runfiles_arguments=[],
                     runfiles_environment_names=[],
@@ -80,6 +81,9 @@ class BazelLauncherTest(unittest.TestCase):
             script_path = temporary_path / "launch.sh"
             environment = {
                 bazel_launcher.ARGUMENT_SEPARATOR_ENV: "separator",
+                bazel_launcher.CALLER_ARGUMENTS_ENV: json.dumps(
+                    ["runtime/libexample.so"]
+                ),
                 bazel_launcher.CALLER_CWD_ENV: str(caller_cwd),
                 bazel_launcher.RUNFILES_ARGUMENTS_ENV: json.dumps(
                     {
@@ -127,14 +131,19 @@ class BazelLauncherTest(unittest.TestCase):
             for name in bazel_launcher.CONTROL_ENVIRONMENT_NAMES:
                 self.assertNotIn(name, launch.env)
 
-    def test_prepare_launch_uses_graph_executable_when_bazel_token_is_lossy(self):
+    def test_prepare_launch_uses_configured_values_when_bazel_tokens_are_lossy(self):
         with tempfile.TemporaryDirectory() as temporary_dir:
             temporary_path = Path(temporary_dir)
             executable_path = self.create_executable_fixture(temporary_path)
+            caller_arguments = [
+                r"C:\Users\runner\AppData\Local\Temp\ready file",
+                "--literal=three words",
+            ]
             environment = bazel_launcher.configured_environment(
                 {},
                 caller_cwd=temporary_path,
                 argument_separator="separator",
+                caller_arguments=caller_arguments,
                 runfiles_arguments=[],
                 marked_runfiles_arguments=[],
                 runfiles_environment_names=[],
@@ -145,6 +154,8 @@ class BazelLauncherTest(unittest.TestCase):
                 self.launcher_argv(
                     executable_path,
                     "separator",
+                    r"C:UsersrunnerAppDataLocalTempready file",
+                    "--literal=three words",
                     bazel_executable=(
                         "C:homerunner_work_tempbazel"
                         "execroot_mainbazel-outbinexample.exe"
@@ -154,7 +165,7 @@ class BazelLauncherTest(unittest.TestCase):
                 initial_cwd=temporary_path,
             )
 
-            self.assertEqual(launch.argv, [str(executable_path)])
+            self.assertEqual(launch.argv, [str(executable_path), *caller_arguments])
 
     def test_resolve_marked_runfiles_arguments_handles_plural_expansion(self):
         with tempfile.TemporaryDirectory() as temporary_dir:
@@ -185,6 +196,7 @@ class BazelLauncherTest(unittest.TestCase):
                 {"IREE_EXAMPLE_LIBRARY": "missing.so"},
                 caller_cwd=temporary_path,
                 argument_separator="separator",
+                caller_arguments=[],
                 runfiles_arguments=[],
                 marked_runfiles_arguments=[],
                 runfiles_environment_names=["IREE_EXAMPLE_LIBRARY"],
@@ -207,6 +219,7 @@ class BazelLauncherTest(unittest.TestCase):
                 {"iree_example_library": str(library_path)},
                 caller_cwd=temporary_path,
                 argument_separator="separator",
+                caller_arguments=[],
                 runfiles_arguments=[],
                 marked_runfiles_arguments=[],
                 runfiles_environment_names=["IREE_EXAMPLE_LIBRARY"],
@@ -241,6 +254,7 @@ class BazelLauncherTest(unittest.TestCase):
                 },
                 caller_cwd=temporary_path,
                 argument_separator="separator",
+                caller_arguments=["two words"],
                 runfiles_arguments=[],
                 marked_runfiles_arguments=[],
                 runfiles_environment_names=["IREE_EXAMPLE_LIBRARY"],
@@ -276,6 +290,7 @@ class BazelLauncherTest(unittest.TestCase):
                 {"IREE_EXAMPLE_LIBRARY": str(library_path)},
                 caller_cwd=temporary_path,
                 argument_separator="separator",
+                caller_arguments=["two words"],
                 runfiles_arguments=[],
                 marked_runfiles_arguments=[],
                 runfiles_environment_names=["IREE_EXAMPLE_LIBRARY"],
@@ -313,6 +328,7 @@ class BazelLauncherTest(unittest.TestCase):
                 {"IREE_EXAMPLE_LIBRARY": "missing.so"},
                 caller_cwd=temporary_path,
                 argument_separator="separator",
+                caller_arguments=[],
                 runfiles_arguments=[],
                 marked_runfiles_arguments=[],
                 runfiles_environment_names=["IREE_EXAMPLE_LIBRARY"],
@@ -371,6 +387,7 @@ class BazelLauncherTest(unittest.TestCase):
                 environment,
                 caller_cwd=caller_cwd,
                 argument_separator="separator",
+                caller_arguments=["two words"],
                 runfiles_arguments=[],
                 marked_runfiles_arguments=[],
                 runfiles_environment_names=["IREE_EXAMPLE_LIBRARY"],
