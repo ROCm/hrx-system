@@ -4,7 +4,11 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+# Python developer tools have no CMake target surface.
+# bazel-to-cmake: skip
+
 load("@rules_python//python:defs.bzl", "py_binary", "py_library", "py_test")
+load("//build_tools/bazel:cc.bzl", "iree_cc_binary")
 
 package(default_visibility = ["//visibility:public"])
 
@@ -14,6 +18,7 @@ py_library(
         "__init__.py",
         "aliases.py",
         "bazel.py",
+        "bazel_launcher.py",
         "ci.py",
         "ci_config.py",
         "cli.py",
@@ -59,6 +64,11 @@ py_binary(
     main = "bazel_smoke_test.py",
 )
 
+iree_cc_binary(
+    name = "bazel_launcher_integration_fixture",
+    srcs = ["bazel_launcher_integration_fixture.c"],
+)
+
 py_binary(
     name = "cli_smoke_test",
     srcs = [
@@ -81,6 +91,29 @@ py_binary(
     ],
     imports = ["build_tools/devtools"],
     main = "cmake_smoke_test.py",
+)
+
+py_test(
+    name = "bazel_test",
+    srcs = [
+        "bazel.py",
+        "bazel_launcher.py",
+        "bazel_test.py",
+        "command_plan.py",
+        "environment.py",
+        "fuzz.py",
+    ],
+    main = "bazel_test.py",
+    deps = ["//build_tools/bazel:compile_commands_merge_lib"],
+)
+
+py_test(
+    name = "bazel_launcher_test",
+    srcs = [
+        "bazel_launcher.py",
+        "bazel_launcher_test.py",
+    ],
+    main = "bazel_launcher_test.py",
 )
 
 py_test(
@@ -113,6 +146,7 @@ py_test(
     srcs = [
         "aliases.py",
         "bazel.py",
+        "bazel_launcher.py",
         "cli.py",
         "cli_test.py",
         "cmake.py",

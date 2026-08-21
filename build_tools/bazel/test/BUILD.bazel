@@ -54,6 +54,8 @@ iree_cc_binary(
     name = "dynamic_library_environment_binary_fixture",
     testonly = True,
     srcs = ["dynamic_library_environment_test.c"],
+    args = ["$(rootpath :dynamic_library_dependency.so)"],
+    data = [":dynamic_library_dependency.so"],
     env = {"IREE_TEST_SOURCE_ENV": "source"},
     tags = ["manual"],
     deps = [":dynamic_library_environment_library"],
@@ -62,6 +64,8 @@ iree_cc_binary(
 iree_cc_test(
     name = "dynamic_library_environment_execution_test",
     srcs = ["dynamic_library_environment_test.c"],
+    args = ["$(rootpath :dynamic_library_dependency.so)"],
+    data = [":dynamic_library_dependency.so"],
     env = {"IREE_TEST_SOURCE_ENV": "source"},
     shard_count = 2,
     deps = [":dynamic_library_environment_library"],
@@ -70,6 +74,8 @@ iree_cc_test(
 iree_executable_test(
     name = "dynamic_library_environment_wrapper_test",
     src = ":dynamic_library_environment_binary_fixture",
+    args = ["$(rootpath :dynamic_library_dependency.so)"],
+    data = [":dynamic_library_dependency.so"],
 )
 
 iree_cc_benchmark(

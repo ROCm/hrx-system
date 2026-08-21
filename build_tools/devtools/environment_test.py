@@ -39,6 +39,63 @@ class EnvironmentTest(unittest.TestCase):
 
         self.assertEqual(result, "C:/tools/bash.exe")
 
+    def test_windows_bazel_shell_uses_space_free_short_path(self):
+        long_path = "C:/Program Files/Git/bin/bash.exe"
+        short_path = "C:/PROGRA~1/Git/bin/bash.exe"
+        with mock.patch.object(
+            environment,
+            "_read_windows_short_path",
+            return_value=short_path,
+        ) as read_short_path:
+            result = environment.find_windows_bazel_sh(
+                {environment.BAZEL_SH_ENV: long_path},
+                platform_name="nt",
+            )
+
+        self.assertEqual(result, short_path)
+        read_short_path.assert_called_once_with(long_path)
+
+    def test_windows_bazel_shell_aliases_installation_when_short_names_are_disabled(
+        self,
+    ):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            temporary_path = Path(temporary_directory)
+            git_root = temporary_path / "Program Files" / "Git"
+            bash_executable = git_root / "usr/bin/bash.exe"
+            bash_executable.parent.mkdir(parents=True)
+            bash_executable.write_bytes(b"")
+            alias_root = temporary_path / "aliases"
+            created_junctions: list[tuple[Path, Path]] = []
+
+            def create_test_junction(link: Path, target: Path) -> None:
+                created_junctions.append((link, target))
+                link.symlink_to(target, target_is_directory=True)
+
+            result = environment.bazel_compatible_windows_shell_path(
+                str(bash_executable),
+                platform_name="nt",
+                short_path_reader=lambda _path: None,
+                alias_root=alias_root,
+                junction_creator=create_test_junction,
+            )
+
+            result_path = Path(result)
+            self.assertFalse(any(character.isspace() for character in result))
+            self.assertTrue(result_path.samefile(bash_executable))
+            self.assertEqual(len(created_junctions), 1)
+            self.assertEqual(created_junctions[0][1], git_root)
+
+            repeated_result = environment.bazel_compatible_windows_shell_path(
+                str(bash_executable),
+                platform_name="nt",
+                short_path_reader=lambda _path: None,
+                alias_root=alias_root,
+                junction_creator=create_test_junction,
+            )
+
+            self.assertEqual(repeated_result, result)
+            self.assertEqual(len(created_junctions), 1)
+
     def test_non_windows_host_does_not_search_for_bazel_shell(self):
         with mock.patch.object(environment.shutil, "which") as which:
             result = environment.find_windows_bazel_sh({}, platform_name="posix")
