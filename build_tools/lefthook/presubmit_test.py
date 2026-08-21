@@ -208,12 +208,35 @@ class PresubmitTest(unittest.TestCase):
         self.assertEqual(len(commands[0][3:]), presubmit.C_FORMAT_BATCH_SIZE)
         self.assertEqual(run_parallel_commands.call_args.kwargs["jobs"], 3)
 
-    def test_stage_files_skips_git_add_when_worktree_is_clean(self):
-        clean_diff = presubmit.subprocess.CompletedProcess(
-            args=["git", "diff"], returncode=0
+    def test_command_argument_batches_stay_below_portable_limit(self):
+        arguments = [f"path/{index}/{'x' * 64}.py" for index in range(20)]
+        with mock.patch.object(presubmit, "COMMAND_LINE_CHARACTER_LIMIT", 256):
+            commands = presubmit.command_argument_batches(
+                ["tool", "--check"], arguments
+            )
+
+        self.assertGreater(len(commands), 1)
+        self.assertEqual(
+            [argument for command in commands for argument in command[2:]],
+            arguments,
         )
+        for command in commands:
+            self.assertLessEqual(len(subprocess.list2cmdline(command)), 256)
+
+    def test_full_tree_coherence_does_not_expand_git_pathspecs(self):
+        with mock.patch.object(presubmit, "git_unstaged_files") as git_unstaged_files:
+            self.assertEqual(
+                presubmit.index_worktree_conflicts(
+                    input_scope(["file.c"] * 10_000, mode="all")
+                ),
+                [],
+            )
+
+        git_unstaged_files.assert_not_called()
+
+    def test_stage_files_skips_git_add_when_worktree_is_clean(self):
         with (
-            mock.patch.object(presubmit.subprocess, "run", return_value=clean_diff),
+            mock.patch.object(presubmit, "git_unstaged_files", return_value=[]),
             mock.patch.object(
                 presubmit, "run_command", return_value=True
             ) as run_command,
@@ -223,18 +246,22 @@ class PresubmitTest(unittest.TestCase):
         run_command.assert_not_called()
 
     def test_stage_files_adds_formatter_changes(self):
-        dirty_diff = presubmit.subprocess.CompletedProcess(
-            args=["git", "diff"], returncode=1
-        )
         with (
-            mock.patch.object(presubmit.subprocess, "run", return_value=dirty_diff),
+            mock.patch.object(
+                presubmit,
+                "git_unstaged_files",
+                return_value=["build_tools/file.py"],
+            ),
             mock.patch.object(
                 presubmit, "run_command", return_value=True
             ) as run_command,
         ):
             self.assertTrue(presubmit.stage_files(["build_tools/file.py"], False))
 
-        self.assertEqual(run_command.call_args.args[0][0:3], ["git", "add", "--"])
+        self.assertEqual(
+            run_command.call_args.args[0][0:4],
+            ["git", "--literal-pathspecs", "add", "--"],
+        )
 
     def test_fixing_the_index_stops_before_validation_and_names_paths(self):
         args = types.SimpleNamespace(fail_on_fix=True, fix=True)
@@ -565,7 +592,7 @@ class PresubmitTest(unittest.TestCase):
         self.assertIn("-S", command)
         self.assertIn("build_tools/clang_tidy", command)
         self.assertIn(f"-DLLVM_DIR={llvm_package_dir}", command)
-        self.assertIn("-DClang_DIR=/opt/llvm/lib/cmake/clang", command)
+        self.assertIn(f"-DClang_DIR={llvm_package_dir.parent / 'clang'}", command)
 
     def test_cmake_generated_compile_inputs_command_uses_cmake_build(self):
         with mock.patch.object(presubmit, "clang_tidy_jobs", return_value=23):
@@ -867,6 +894,7 @@ class PresubmitTest(unittest.TestCase):
         inputs = input_scope(["runtime/src/iree/base/status.c"])
         with (
             contextlib.redirect_stdout(output),
+            mock.patch.object(presubmit.sys, "platform", "linux"),
             mock.patch.object(presubmit.shutil, "which", return_value=None),
             mock.patch.object(presubmit, "run_command") as run_command,
         ):

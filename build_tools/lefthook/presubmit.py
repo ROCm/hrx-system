@@ -68,6 +68,8 @@ C_INCLUDE_FRAGMENT_EXTENSIONS = {
     ".inl",
 }
 C_ANALYSIS_EXTENSIONS = C_FORMAT_EXTENSIONS | C_INCLUDE_FRAGMENT_EXTENSIONS
+# Keep spawned commands below Win32's CreateProcess limit after argument quoting.
+COMMAND_LINE_CHARACTER_LIMIT = 16_000
 C_FORMAT_BATCH_SIZE = 64
 C_FORMAT_DEFAULT_MAX_JOBS = 16
 SEMGREP_CONFIG = "build_tools/static_analysis/semgrep/iree.yml"
@@ -591,6 +593,30 @@ def run_parallel_commands(
     return False
 
 
+def command_argument_batches(
+    command_prefix: list[str], arguments: list[str]
+) -> list[list[str]]:
+    """Partitions trailing command arguments at a portable command-line size."""
+    if not arguments:
+        return []
+    prefix_length = len(subprocess.list2cmdline(command_prefix))
+    command = list(command_prefix)
+    command_length = prefix_length
+    commands = []
+    for argument in arguments:
+        argument_length = len(subprocess.list2cmdline([argument])) + 1
+        if len(command) > len(command_prefix) and (
+            command_length + argument_length > COMMAND_LINE_CHARACTER_LIMIT
+        ):
+            commands.append(command)
+            command = list(command_prefix)
+            command_length = prefix_length
+        command.append(argument)
+        command_length += argument_length
+    commands.append(command)
+    return commands
+
+
 def run_inline_check(description: str, action, verbose: bool) -> bool:
     print(f"[run] {description}")
     sys.stdout.flush()
@@ -674,15 +700,19 @@ def git_diff_files(*revisions: str, cached: bool = False) -> list[str]:
 def git_unstaged_files(paths: list[str]) -> list[str]:
     if not paths:
         return []
-    return git_list(
+    command_prefix = [
+        "--literal-pathspecs",
+        "diff",
+        "--name-only",
+        "-z",
+        "--no-renames",
+        "--",
+    ]
+    return unique_paths(
         [
-            "--literal-pathspecs",
-            "diff",
-            "--name-only",
-            "-z",
-            "--no-renames",
-            "--",
-            *paths,
+            path
+            for command in command_argument_batches(command_prefix, paths)
+            for path in git_list(command)
         ]
     )
 
@@ -811,10 +841,11 @@ def selected_files(args: argparse.Namespace) -> list[str]:
 
 def index_worktree_conflicts(inputs: PresubmitInputs) -> list[str]:
     selected_path_set = set(inputs.selected_paths)
-    unstaged_path_set = set(git_unstaged_files(inputs.selected_paths))
     if inputs.mode in ("staged", "commit", "amend"):
+        unstaged_path_set = set(git_unstaged_files(inputs.selected_paths))
         return sorted(selected_path_set.intersection(unstaged_path_set))
     if inputs.mode == "explicit":
+        unstaged_path_set = set(git_unstaged_files(inputs.selected_paths))
         staged_path_set = set(commit_files())
         return sorted(
             selected_path_set.intersection(unstaged_path_set, staged_path_set)
@@ -849,28 +880,21 @@ def existing_files(paths: list[str]) -> list[str]:
     return [path for path in paths if (REPO_ROOT / path).is_file()]
 
 
-def has_unstaged_changes(paths: list[str]) -> bool:
-    if not paths:
-        return False
-    result = subprocess.run(
-        ["git", "diff", "--quiet", "--", *paths],
-        cwd=REPO_ROOT,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
-    if result.returncode == 0:
-        return False
-    if result.returncode == 1:
-        return True
-    raise subprocess.CalledProcessError(result.returncode, result.args)
-
-
 def stage_files(paths: list[str], verbose: bool) -> bool:
     if not paths:
         return True
-    if not has_unstaged_changes(paths):
+    unstaged_files = git_unstaged_files(paths)
+    if not unstaged_files:
         return True
-    return run_command(["git", "add", "--", *paths], "Stage local fixups", verbose)
+    commands = command_argument_batches(
+        ["git", "--literal-pathspecs", "add", "--"], unstaged_files
+    )
+    return run_parallel_commands(
+        commands,
+        "Stage local fixups",
+        verbose,
+        jobs=1,
+    )
 
 
 def index_tree() -> str:
@@ -1171,11 +1195,11 @@ def run_buildifier(paths: list[str], fix: bool, verbose: bool) -> bool:
         return skip_step("Buildifier", "no Bazel files")
     if not require_tool("buildifier", "Buildifier"):
         return False
-    command = ["buildifier", "-lint=off"]
+    command_prefix = ["buildifier", "-lint=off"]
     if not fix:
-        command.append("-mode=check")
-    command += files
-    ok = run_command(command, "Buildifier", verbose)
+        command_prefix.append("-mode=check")
+    commands = command_argument_batches(command_prefix, files)
+    ok = run_parallel_commands(commands, "Buildifier", verbose, jobs=1)
     if fix and ok:
         ok = stage_files(files, verbose)
     return ok
@@ -1188,17 +1212,17 @@ def run_ruff(paths: list[str], fix: bool, verbose: bool) -> bool:
     if not require_tool("ruff", "Ruff"):
         return False
     ok = True
-    lint_command = ["ruff", "check", "--cache-dir", ".ruff_cache"]
+    lint_command_prefix = ["ruff", "check", "--cache-dir", ".ruff_cache"]
     if fix:
-        lint_command.append("--fix")
-    lint_command += files
-    ok = run_command(lint_command, "Ruff lint", verbose) and ok
+        lint_command_prefix.append("--fix")
+    lint_commands = command_argument_batches(lint_command_prefix, files)
+    ok = run_parallel_commands(lint_commands, "Ruff lint", verbose, jobs=1) and ok
 
-    format_command = ["ruff", "format", "--cache-dir", ".ruff_cache"]
+    format_command_prefix = ["ruff", "format", "--cache-dir", ".ruff_cache"]
     if not fix:
-        format_command.append("--check")
-    format_command += files
-    ok = run_command(format_command, "Ruff format", verbose) and ok
+        format_command_prefix.append("--check")
+    format_commands = command_argument_batches(format_command_prefix, files)
+    ok = run_parallel_commands(format_commands, "Ruff format", verbose, jobs=1) and ok
 
     if fix:
         ok = stage_files(files, verbose) and ok
@@ -1597,8 +1621,9 @@ def run_semgrep(inputs: PresubmitInputs, profile: str, verbose: bool) -> bool:
             semgrep_validate_command(), "Semgrep config validation", verbose
         )
     if files:
+        commands = command_argument_batches(semgrep_scan_command([]), files)
         ok = (
-            run_command(semgrep_scan_command(files), "Semgrep hard rules", verbose)
+            run_parallel_commands(commands, "Semgrep hard rules", verbose, jobs=1)
             and ok
         )
     return ok
