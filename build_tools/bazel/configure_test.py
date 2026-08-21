@@ -10,7 +10,7 @@ import importlib.util
 import sys
 import tempfile
 import unittest
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from unittest import mock
 
 CONFIGURE_BAZEL_PATH = Path(__file__).with_name("configure.py")
@@ -41,9 +41,19 @@ class ConfigureBazelTest(unittest.TestCase):
     def assert_rocm_path(self, config: str, rocm_root: Path) -> None:
         self.assertIn(
             self.configure_bazel.bazelrc_line(
-                "common", f"--repo_env=IREE_ROCM_PATH={rocm_root}"
+                "common",
+                "--repo_env=IREE_ROCM_PATH="
+                + self.configure_bazel.as_bazel_path(rocm_root),
             ),
             config,
+        )
+
+    def test_bazel_paths_use_forward_slashes_on_windows(self):
+        path = PureWindowsPath(r"C:\home\runner\rocm-root")
+
+        self.assertEqual(
+            self.configure_bazel.as_bazel_path(path),
+            "C:/home/runner/rocm-root",
         )
 
     def test_non_windows_host_does_not_require_long_path_policy(self):

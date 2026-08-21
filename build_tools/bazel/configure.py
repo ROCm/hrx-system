@@ -15,7 +15,7 @@ import shlex
 import sys
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from pathlib import Path
+from pathlib import Path, PurePath
 
 LOOM_EXECUTE_SUBSTRATES = ("iree_hal", "iree_vm")
 LOOM_IMPORTERS = ("mlir", "tilelang")
@@ -437,6 +437,11 @@ def parse_define(define: str) -> tuple[str, str]:
     return name, value
 
 
+def as_bazel_path(path: PurePath) -> str:
+    """Returns a filesystem path in Bazel's platform-neutral spelling."""
+    return path.as_posix()
+
+
 def resolve_rocm_path(path: str) -> str:
     if not path:
         raise SystemExit("IREE_ROCM_PATH must not be empty.")
@@ -445,7 +450,7 @@ def resolve_rocm_path(path: str) -> str:
         raise SystemExit(f"IREE_ROCM_PATH does not exist: {resolved}")
     if not (resolved / "include").is_dir():
         raise SystemExit(f"IREE_ROCM_PATH has no include directory: {resolved}")
-    return str(resolved)
+    return as_bazel_path(resolved)
 
 
 def apply_define(request: ConfigRequest, define: str) -> None:
