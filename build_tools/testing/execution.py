@@ -388,10 +388,8 @@ class ExecutionRunner:
         )
         path.parent.mkdir(parents=True, exist_ok=True)
         if "text" in write:
-            path.write_text(
-                _as_string(write["text"], f"{case_name}:{step_name}.write.text"),
-                encoding="utf-8",
-            )
+            text = _as_string(write["text"], f"{case_name}:{step_name}.write.text")
+            path.write_bytes(text.encode("utf-8"))
         elif "bytes" in write:
             path.write_bytes(
                 bytes(

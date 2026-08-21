@@ -100,6 +100,18 @@ class ExecutionUnitTest(unittest.TestCase):
                 ),
             )
 
+    def test_write_text_preserves_utf8_bytes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "fixture.txt"
+            text = "héllo\nworld\n"
+            runner = execution.ExecutionRunner(tools={})
+
+            runner._run_write_step(
+                "fixture case", "write fixture", {"path": str(path), "text": text}
+            )
+
+            self.assertEqual(path.read_bytes(), text.encode("utf-8"))
+
     def test_contains_ordering(self):
         runner = execution.ExecutionRunner(tools={})
         runner._check_contains(
