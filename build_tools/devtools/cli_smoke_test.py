@@ -31,6 +31,7 @@ CI_DRY_RUN_COMMANDS = (
     ("iree-bazel-amdgpu-ubsan",),
     ("iree-bazel-vulkan",),
     ("iree-cmake-cpu",),
+    ("iree-cmake-repository-build",),
     ("iree-cmake-cpu-asan",),
     ("iree-cmake-cpu-msan",),
     ("iree-cmake-cpu-tsan",),

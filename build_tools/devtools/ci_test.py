@@ -204,6 +204,51 @@ class CiTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "repository-wide"):
             ci.steps_from_args(args)
 
+    def test_cmake_repository_build_covers_supported_graph_with_prebuilts(self):
+        args = ci.parse_arguments(["iree-cmake-repository-build"])
+
+        steps = ci.steps_from_args(args)
+
+        self.assertEqual(
+            [step.name for step in steps],
+            ["Configure CMake", "Build repository", "Test repository smoke"],
+        )
+        configure_step = steps[0]
+        for _driver, define in ci.CMAKE_HAL_DRIVER_DEFINES:
+            self.assertIn(f"-D{define}=ON", configure_step.argv)
+        for _target, define in ci.CMAKE_LOOM_TARGET_DEFINES:
+            self.assertIn(f"-D{define}=ON", configure_step.argv)
+        for _importer, define in ci.CMAKE_LOOM_IMPORTER_DEFINES:
+            self.assertIn(f"-D{define}=ON", configure_step.argv)
+        for option in ci.AMDGPU_DEVICE_BINARY_PREBUILT_OPTIONS:
+            self.assertIn(option, configure_step.argv)
+        for option in ci.AMDGPU_DEVICE_BINARY_SOURCE_OPTIONS:
+            self.assertNotIn(option, configure_step.argv)
+        self.assertFalse(
+            any(
+                option.startswith("-DIREE_HAL_AMDGPU_TARGETS=")
+                or option.startswith("-DLOOM_TARGET_AMDGPU_TARGETS=")
+                for option in configure_step.argv
+            )
+        )
+        build_step = steps[1]
+        self.assertEqual(build_step.argv[-2:], ("build", "--parallel"))
+        smoke_step = steps[2]
+        for regex in ci_config.CMAKE_REPOSITORY_SMOKE_CTEST_REGEXES:
+            self.assertTrue(any(regex in arg for arg in smoke_step.argv))
+        self.assertTrue(
+            any(
+                ci_config.CTEST_RESOURCE_LABEL_EXCLUDE_REGEX in arg
+                for arg in smoke_step.argv
+            )
+        )
+        self.assertTrue(
+            any(
+                ci_config.CTEST_MANUAL_LABEL_EXCLUDE_REGEX in arg
+                for arg in smoke_step.argv
+            )
+        )
+
     def test_amdgpu_dry_run_does_not_embed_machine_paths(self):
         args = ci.parse_arguments(
             [
@@ -1017,6 +1062,37 @@ class CiTest(unittest.TestCase):
         self.assertIn("windows_toolchain: ${{ matrix.toolchain }}", ci_block)
         self.assertIn("uses: ./.github/workflows/build_core_windows.yml", ci_block)
         self.assertIn('ctest_label_exclude_regex: "runtime-resource=|manual"', ci_block)
+
+    def test_iree_cmake_windows_workflow_separates_build_and_test_roles(self):
+        block = self.workflow_job_block(
+            ".github/workflows/ci_iree_cmake.yml", "windows_cmake"
+        )
+
+        self.assertIn("runs-on: azure-windows-scale-rocm", block)
+        self.assertRegex(
+            block,
+            r"name: Windows / Repository / MSVC Build\n"
+            r"\s+command: iree-cmake-repository-build\n"
+            r"\s+host_toolchain: msvc\n"
+            r"\s+fetch_rocm: false",
+        )
+        self.assertRegex(
+            block,
+            r"name: Windows / CPU\n"
+            r"\s+command: iree-cmake-cpu\n"
+            r"\s+host_toolchain: clang-cl\n"
+            r"\s+fetch_rocm: true",
+        )
+        self.assertIn("if: matrix.fetch_rocm", block)
+        self.assertIn("python build_tools/ci_core_windows.py fetch-rocm", block)
+        self.assertNotRegex(
+            block,
+            r"ci_core_windows\.py (build|test|package|extract-packages)",
+        )
+        self.assertNotIn("uses: ./.github/workflows/build_core_windows.yml", block)
+        self.assertIn("VsDevCmd.bat", block)
+        self.assertIn('if "${{ matrix.host_toolchain }}"=="msvc"', block)
+        self.assertIn("build_tools/devtools/ci.py ${{ matrix.command }}", block)
 
     def test_iree_workflows_do_not_trigger_on_libhrx_only_paths(self):
         for path in (
