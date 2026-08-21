@@ -362,20 +362,20 @@ TEST_F(ViewRegionsTest, PrecomputesReusedMemoryIndexExpression) {
   loom_view_region_table_t table = {0};
   Analyze(&facts, &table);
 
-  loom_symbolic_expr_t expression = {0};
-  ASSERT_TRUE(loom_symbolic_expr_context_try_lookup(table.expression_context,
-                                                    deep_index, &expression));
-  ASSERT_TRUE(loom_symbolic_expr_is_linear(&expression));
-  EXPECT_EQ(expression.constant, 40);
-  ASSERT_EQ(expression.term_count, 1u);
-  EXPECT_EQ(expression.terms[0].value_id, source_index);
-  loom_symbolic_expr_t repeated_expression = {0};
-  EXPECT_TRUE(loom_symbolic_expr_context_try_lookup(
-      table.expression_context, deep_index, &repeated_expression));
-  EXPECT_EQ(repeated_expression.terms, expression.terms);
-  loom_symbolic_expr_t unrelated_expression = {0};
-  EXPECT_FALSE(loom_symbolic_expr_context_try_lookup(
-      table.expression_context, unrelated_index, &unrelated_expression));
+  loom_symbolic_expr_summary_t summary = {};
+  ASSERT_TRUE(loom_symbolic_expr_context_try_lookup_summary(
+      table.expression_context, deep_index, &summary));
+  ASSERT_TRUE(loom_symbolic_expr_is_linear(&summary.expression));
+  EXPECT_EQ(summary.expression.constant, 40);
+  ASSERT_EQ(summary.expression.term_count, 1u);
+  EXPECT_EQ(summary.expression.terms[0].value_id, source_index);
+  loom_symbolic_expr_summary_t repeated_summary = {};
+  EXPECT_TRUE(loom_symbolic_expr_context_try_lookup_summary(
+      table.expression_context, deep_index, &repeated_summary));
+  EXPECT_EQ(repeated_summary.expression.terms, summary.expression.terms);
+  loom_symbolic_expr_summary_t unrelated_summary = {};
+  EXPECT_FALSE(loom_symbolic_expr_context_try_lookup_summary(
+      table.expression_context, unrelated_index, &unrelated_summary));
 }
 
 TEST_F(ViewRegionsTest, ProvesSymbolicOffsetCancellation) {

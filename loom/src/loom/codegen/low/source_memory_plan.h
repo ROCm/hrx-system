@@ -303,11 +303,11 @@ void loom_low_source_memory_access_plan_make_summary(
 
 // Builds a target-independent source memory plan for source memory ops.
 //
-// When present, |view_regions| is only queried with a non-mutating lookup and
-// must already have been analyzed by the caller. This lets lowering reuse its
-// function-local analysis without turning each memory access into a producer
-// walk or analysis construction site. Passing NULL intentionally restricts
-// planning to view-reference facts already published for the source view.
+// When present, |view_regions| is only queried with non-mutating lookups and
+// must already have been analyzed by the caller. View bases and dynamic index
+// expressions then reuse function-local summaries without turning each access
+// into a producer walk. Passing NULL intentionally restricts planning to facts
+// already published for the source view and index values.
 //
 // Returns false when the source op cannot be decomposed into a complete source
 // plan. Targets are responsible for checking their own memory spaces, address

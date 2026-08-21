@@ -1335,6 +1335,48 @@ TEST_F(SourceMemoryPlanTest, DynamicDenseLoadFactorsMaddWorkitemIndex) {
   EXPECT_EQ(plan.dynamic_terms[0].byte_facts.range_hi, 504);
 }
 
+TEST_F(SourceMemoryPlanTest, DynamicDenseLoadFactorsDeepAffineIndex) {
+  loom_value_id_t buffer = DefineBufferArg();
+  loom_value_id_t source_index = DefineIndexArg();
+  loom_value_id_t layout = BuildDenseLayout();
+  loom_value_id_t base_offset =
+      loom_index_constant_result(BuildOffsetConstant(0));
+
+  loom_op_t* view_op = nullptr;
+  IREE_ASSERT_OK(loom_buffer_view_build(&builder_, buffer, base_offset,
+                                        ViewType1D(256, layout),
+                                        LOOM_LOCATION_UNKNOWN, &view_op));
+  loom_value_id_t one = loom_index_constant_result(BuildIndexConstant(1));
+  loom_value_id_t deep_index = source_index;
+  for (int i = 0; i < 40; ++i) {
+    loom_op_t* add_op = nullptr;
+    IREE_ASSERT_OK(loom_index_add_build(
+        &builder_, deep_index, one, loom_type_scalar(LOOM_SCALAR_TYPE_INDEX),
+        LOOM_LOCATION_UNKNOWN, &add_op));
+    deep_index = loom_index_add_result(add_op);
+  }
+  const loom_value_id_t dynamic_indices[] = {deep_index};
+  int64_t static_indices[] = {INT64_MIN};
+  loom_op_t* load_op = nullptr;
+  IREE_ASSERT_OK(loom_vector_load_build(
+      &builder_, 0, loom_buffer_view_result(view_op), dynamic_indices,
+      IREE_ARRAYSIZE(dynamic_indices), static_indices,
+      IREE_ARRAYSIZE(static_indices), 0, 0, VectorType1D(1),
+      LOOM_LOCATION_UNKNOWN, &load_op));
+
+  loom_value_fact_table_t facts = {0};
+  ComputeFacts(&facts);
+  loom_low_source_memory_access_plan_t plan = {};
+  loom_low_source_memory_access_diagnostic_t diagnostic = {0};
+  ASSERT_TRUE(BuildPlan(&facts, load_op, &plan, &diagnostic));
+  EXPECT_EQ(plan.static_byte_offset, 160);
+  EXPECT_TRUE(plan.source_index_static_offset_extracted);
+  ASSERT_EQ(plan.dynamic_term_count, 1u);
+  EXPECT_EQ(plan.dynamic_terms[0].index, source_index);
+  EXPECT_EQ(plan.dynamic_terms[0].byte_stride, 4);
+  EXPECT_EQ(plan.dynamic_terms[0].byte_shift, 2u);
+}
+
 TEST_F(SourceMemoryPlanTest, DynamicDenseLoadClassifiesMultipleIndices) {
   loom_value_id_t buffer = DefineBufferArg();
   loom_value_id_t first_index = DefineIndexArg();
