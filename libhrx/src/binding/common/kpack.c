@@ -12,7 +12,7 @@
 #include "iree/base/internal/math.h"
 #include "iree/io/file_handle.h"
 
-#if defined(HRX_ENABLE_ZSTD)
+#if defined(IREE_HAVE_ZSTD)
 #include <zstd.h>
 #endif
 
@@ -687,7 +687,7 @@ static iree_status_t kpack_decompress_zstd(
     const iree_hal_streaming_kpack_archive_t* archive, uint64_t ordinal,
     uint64_t original_size, iree_allocator_t host_allocator, void** out_kernel,
     iree_host_size_t* out_kernel_size) {
-#if !defined(HRX_ENABLE_ZSTD)
+#if !defined(IREE_HAVE_ZSTD)
   (void)archive;
   (void)ordinal;
   (void)original_size;
@@ -696,8 +696,7 @@ static iree_status_t kpack_decompress_zstd(
   (void)out_kernel_size;
   return iree_make_status(
       IREE_STATUS_UNIMPLEMENTED,
-      "kpack zstd-per-kernel archive requires building HRX with "
-      "HRX_ENABLE_ZSTD (install libzstd and rebuild)");
+      "kpack zstd-per-kernel archive requires the HRX HIP binding");
 #else
   // Cap the decompressed size before allocating the output buffer for it.
   if (original_size > KPACK_MAX_CODE_OBJECT_BYTES) {
@@ -765,7 +764,7 @@ static iree_status_t kpack_decompress_zstd(
   }
   // Unreachable: the loop returns at i == ordinal, and ordinal < num_kernels.
   return iree_make_status(IREE_STATUS_INTERNAL, "kpack zstd frame walk failed");
-#endif  // HRX_ENABLE_ZSTD
+#endif  // IREE_HAVE_ZSTD
 }
 
 iree_status_t iree_hal_streaming_kpack_archive_get_kernel(

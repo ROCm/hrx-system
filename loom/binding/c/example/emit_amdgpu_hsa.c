@@ -1380,7 +1380,7 @@ static hsa_status_t emit_amdgpu_hsa_find_memory_pool(hsa_amd_memory_pool_t pool,
       return HSA_STATUS_SUCCESS;
     }
   }
-  hsa_amd_memory_pool_global_flag_t global_flags = 0;
+  uint32_t global_flags = 0;
   EMIT_AMDGPU_HSA_CALL_STATUS(status, search->api, hsa_amd_memory_pool_get_info,
                               pool, HSA_AMD_MEMORY_POOL_INFO_GLOBAL_FLAGS,
                               &global_flags);

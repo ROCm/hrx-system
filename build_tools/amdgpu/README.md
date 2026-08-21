@@ -152,7 +152,7 @@ incompatible instead of referencing missing tool labels.
 `iree_amdgpu_binary_variants[_embed_data]` accepts `source_format = "hip"` for
 device-only HIP fixtures that need ROCm device libraries such as `ocml.bc` and
 `ockl.bc`. This changes only the AMDGPU device compilation pipeline: host C and
-C++ compilation continues to use the configured host LLVM toolchain.
+C++ compilation continues to use the configured host compiler.
 
 ## CMake Integration
 
@@ -190,10 +190,13 @@ the consuming C/C++ code a generated table of contents. Test-owned HSACOs should
 use the embed-data form so installed tests, Bazel runfiles, and local CMake
 builds all consume the same in-process bytes.
 
-These rules require configured LLVM/ROCm tools through the existing CMake
-variables: `IREE_CLANG_BINARY`, `IREE_LLVM_LINK_BINARY`, `IREE_LLD_BINARY`, and
-`IREE_CLANG_BUILTIN_HEADERS_PATH`, with `IREE_LLVM_OBJCOPY_BINARY` required when
-`MINIMIZE` is used.
+These rules consume the resolved
+`IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN_*` capability configured by the containing
+project. The device clang, llvm-ar, llvm-link, lld, llvm-objcopy, and clang
+resource headers form one tool set independent of `CMAKE_C_COMPILER`. Direct
+source-producing rules fail when that capability is unavailable. Variant and
+CTS aggregates expose no source-built artifacts, allowing normal builds to use
+checked-in device binaries without discovering LLVM or ROCm tools.
 
 ## Consumer Shape
 

@@ -1095,10 +1095,6 @@ def _emit_header(descriptor_sets: Sequence[AmdgpuDescriptorSetInfo]) -> str:
         "",
         '#include "loom/target/arch/amdgpu/target_info_defs.h"',
         "",
-        "// Canonical AMDHSA target-ID prefix.",
-        "extern const iree_string_view_t",
-        "    loom_amdgpu_target_info_amdhsa_target_id_prefix;",
-        "",
         "// Generated dense descriptor-set ordinals.",
     ]
     lines.extend(f"#define {amdgpu_descriptor_set_ordinal_constant_name(info.key)} {_u16_expr(amdgpu_descriptor_set_ordinal(info.key))}" for info in descriptor_sets)

@@ -85,6 +85,7 @@ hrx_cc_library(
         "//runtime/src/iree/hal",
         "//runtime/src/iree/hal/utils:resource_set",
         "//runtime/src/iree/io:file_handle",
+        "//third_party:zstd",
     ],
 )
 
@@ -158,6 +159,7 @@ hrx_cc_test(
         "//runtime/src/iree/base",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
+        "//third_party:zstd",
     ],
 )
 

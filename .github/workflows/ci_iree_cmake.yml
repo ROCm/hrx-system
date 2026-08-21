@@ -122,6 +122,71 @@ jobs:
           echo "python3 build_tools/devtools/ci.py ${{ matrix.command }} --keep-going"
           python3 build_tools/devtools/ci.py ${{ matrix.command }} --keep-going
 
+  windows_cmake:
+    name: ${{ matrix.name }}
+    runs-on: azure-windows-scale-rocm
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows / Repository / MSVC Build
+            command: iree-cmake-repository-build
+            host_toolchain: msvc
+            fetch_rocm: false
+          - name: Windows / CPU
+            command: iree-cmake-cpu
+            host_toolchain: clang-cl
+            fetch_rocm: true
+    env:
+      HRX_ARTIFACT_SET: core
+      HRX_DOWNLOAD_CACHE_DIR: ${{ github.workspace }}\build\iree-cmake-windows\downloads
+      HRX_OUTPUT_DIR: ${{ github.workspace }}\build\iree-cmake-windows
+      HRX_RELEASE_TYPE: nightly
+      HRX_ROCM_ROOT: ${{ github.workspace }}\build\iree-cmake-windows\rocm-root
+      IREE_CI_PYTHON: python
+      PIP_CACHE_DIR: ${{ github.workspace }}\build\iree-cmake-windows\caches\pip
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.12"
+
+      - name: Fetch ROCm toolchain
+        if: matrix.fetch_rocm
+        run: |
+          python -m pip install --upgrade boto3 zstandard
+          python build_tools/ci_core_windows.py fetch-rocm
+
+      - name: Install developer tools
+        shell: pwsh
+        run: |
+          python --version
+          python dev.py cmake setup --venv
+          "$PWD\.venv\Scripts" | Out-File -FilePath $env:GITHUB_PATH -Append
+
+      - name: Run IREE CMake CI
+        shell: cmd
+        run: |
+          for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do set "VS_INSTALL=%%i"
+          if not defined VS_INSTALL exit /b 1
+          call "%VS_INSTALL%\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64
+          if "${{ matrix.host_toolchain }}"=="msvc" (
+            set "CC=cl.exe"
+            set "CXX=cl.exe"
+            set "AR=lib.exe"
+          ) else (
+            if not exist "%HRX_ROCM_ROOT%\lib\llvm\bin\clang-cl.exe" exit /b 1
+            if not exist "%HRX_ROCM_ROOT%\lib\llvm\bin\llvm-lib.exe" exit /b 1
+            set "CC=%HRX_ROCM_ROOT%\lib\llvm\bin\clang-cl.exe"
+            set "CXX=%HRX_ROCM_ROOT%\lib\llvm\bin\clang-cl.exe"
+            set "AR=%HRX_ROCM_ROOT%\lib\llvm\bin\llvm-lib.exe"
+          )
+          python build_tools/devtools/ci.py ${{ matrix.command }} --keep-going
+
   linux_cmake_vulkan:
     name: ${{ matrix.name }}
     runs-on: [self-hosted, Linux, X64, gpu_navi4x]

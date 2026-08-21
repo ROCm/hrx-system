@@ -12,8 +12,13 @@
 // Blit kernel utilities
 //===----------------------------------------------------------------------===//
 
+#define IREE_HAL_AMDGPU_BLIT_VECTOR_ELEMENT_SIZE 16
+
+#if defined(IREE_AMDGPU_TARGET_DEVICE)
+
 // 2 uint64_t values totaling 16 bytes.
-typedef uint64_t iree_amdgpu_uint64x2_t __attribute__((vector_size(16)));
+typedef uint64_t iree_amdgpu_uint64x2_t
+    __attribute__((vector_size(IREE_HAL_AMDGPU_BLIT_VECTOR_ELEMENT_SIZE)));
 // Unaligned view of a 16-byte vector. The __packed__ attribute on the
 // enclosing struct propagates to the |value| member, so a dereference of a
 // iree_amdgpu_unaligned_uint64x2_t* generates unaligned loads/stores instead
@@ -23,6 +28,14 @@ typedef uint64_t iree_amdgpu_uint64x2_t __attribute__((vector_size(16)));
 typedef struct IREE_AMDGPU_ATTRIBUTE_PACKED {
   iree_amdgpu_uint64x2_t value;
 } iree_amdgpu_unaligned_uint64x2_t;
+IREE_AMDGPU_STATIC_ASSERT(sizeof(iree_amdgpu_uint64x2_t) ==
+                              IREE_HAL_AMDGPU_BLIT_VECTOR_ELEMENT_SIZE,
+                          "blit vector element size mismatch");
+IREE_AMDGPU_STATIC_ASSERT(sizeof(iree_amdgpu_unaligned_uint64x2_t) ==
+                              IREE_HAL_AMDGPU_BLIT_VECTOR_ELEMENT_SIZE,
+                          "unaligned blit vector element size mismatch");
+
+#endif  // IREE_AMDGPU_TARGET_DEVICE
 
 // 128 bytes is enough to amortize launch overhead over at least one full
 // vector store per lane at wave32; anything smaller stays on the scalar byte
@@ -32,7 +45,8 @@ typedef struct IREE_AMDGPU_ATTRIBUTE_PACKED {
 // vector paths.
 #define IREE_HAL_AMDGPU_BLIT_UNALIGNED_MIN_BYTES 128
 
-#define IREE_HAL_AMDGPU_FILL_BLOCK_ELEMENT_SIZE sizeof(iree_amdgpu_uint64x2_t)
+#define IREE_HAL_AMDGPU_FILL_BLOCK_ELEMENT_SIZE \
+  IREE_HAL_AMDGPU_BLIT_VECTOR_ELEMENT_SIZE
 #define IREE_HAL_AMDGPU_FILL_BLOCK_COUNT 4
 #define IREE_HAL_AMDGPU_FILL_BLOCK_UNALIGNED_MIN_SIZE \
   IREE_HAL_AMDGPU_BLIT_UNALIGNED_MIN_BYTES
@@ -40,7 +54,8 @@ typedef struct IREE_AMDGPU_ATTRIBUTE_PACKED {
 #define IREE_HAL_AMDGPU_FILL_BLOCK_X4_ELEMENT_SIZE sizeof(uint32_t)
 #define IREE_HAL_AMDGPU_FILL_BLOCK_X4_COUNT 16
 
-#define IREE_HAL_AMDGPU_COPY_BLOCK_ELEMENT_SIZE sizeof(iree_amdgpu_uint64x2_t)
+#define IREE_HAL_AMDGPU_COPY_BLOCK_ELEMENT_SIZE \
+  IREE_HAL_AMDGPU_BLIT_VECTOR_ELEMENT_SIZE
 #define IREE_HAL_AMDGPU_COPY_BLOCK_COUNT 1
 #define IREE_HAL_AMDGPU_COPY_BLOCK_UNALIGNED_MIN_SIZE \
   IREE_HAL_AMDGPU_BLIT_UNALIGNED_MIN_BYTES

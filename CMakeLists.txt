@@ -43,10 +43,6 @@ set(IREE_ROCM_PATH "" CACHE PATH
   "ROCm or TheRock SDK root used for ROCm headers and device tooling.")
 if(IREE_ROCM_PATH)
   list(PREPEND CMAKE_PREFIX_PATH "${IREE_ROCM_PATH}")
-  if(NOT DEFINED IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN_ROCM_PATH)
-    set(IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN_ROCM_PATH "${IREE_ROCM_PATH}" CACHE PATH
-      "ROCm or TheRock SDK root used for compiling AMDGPU device binaries.")
-  endif()
 endif()
 
 option(BUILD_SHARED_LIBS
@@ -135,6 +131,7 @@ include("${CMAKE_CURRENT_LIST_DIR}/build_tools/third_party/googletest/googletest
 include("${CMAKE_CURRENT_LIST_DIR}/build_tools/third_party/google_benchmark/google_benchmark.cmake")
 include("${CMAKE_CURRENT_LIST_DIR}/build_tools/third_party/flatcc/flatcc.cmake")
 include("${CMAKE_CURRENT_LIST_DIR}/build_tools/third_party/libbacktrace/libbacktrace.cmake")
+include("${CMAKE_CURRENT_LIST_DIR}/build_tools/third_party/zstd/zstd.cmake")
 include("${CMAKE_CURRENT_LIST_DIR}/build_tools/third_party/rocm/headers.cmake")
 include("${CMAKE_CURRENT_LIST_DIR}/build_tools/third_party/spirv_tools/spirv_tools.cmake")
 include("${CMAKE_CURRENT_LIST_DIR}/build_tools/third_party/vulkan_headers/vulkan_headers.cmake")
@@ -150,6 +147,9 @@ if(IREE_ENABLE_THREADING AND (IREE_BUILD_TESTS OR IREE_BUILD_BENCHMARKS))
 endif()
 iree_configure_flatcc()
 iree_configure_libbacktrace()
+if(LIBHRX_BUILD AND LIBHRX_BUILD_HIP_BINDING)
+  iree_configure_zstd()
+endif()
 if(IREE_HAL_DRIVER_AMDGPU)
   iree_configure_rocm_hsa_runtime_headers()
   iree_configure_rocm_aqlprofile_sdk_headers()

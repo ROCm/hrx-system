@@ -374,7 +374,7 @@ iree_hal_amdgpu_slab_provider_query_memory_pool_properties(
         "allocations");
   }
 
-  hsa_region_global_flag_t global_flags = 0;
+  uint32_t global_flags = 0;
   IREE_RETURN_IF_ERROR(iree_hsa_amd_memory_pool_get_info(
       IREE_LIBHSA(libhsa), memory_pool, HSA_AMD_MEMORY_POOL_INFO_GLOBAL_FLAGS,
       &global_flags));

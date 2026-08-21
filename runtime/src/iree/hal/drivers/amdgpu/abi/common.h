@@ -65,12 +65,22 @@ typedef uint64_t uintptr_t;
 
 #endif  // IREE_AMDGPU_TARGET_DEVICE
 
-// Both device and host targets use GCC/Clang so the compiler attribute syntax
-// is identical. The AMDGPU driver is Linux-only and always compiled with Clang.
+// Device code uses ROCm Clang while host code uses the configured platform
+// compiler. Keep shared ABI declarations independent of the host toolchain.
+#if defined(_MSC_VER)
+#define IREE_AMDGPU_RESTRICT __restrict
+#define IREE_AMDGPU_ALIGNAS(x) __declspec(align(x))
+#define IREE_AMDGPU_ALIGNOF(x) __alignof(x)
+#define IREE_AMDGPU_ATTRIBUTE_ALWAYS_INLINE __forceinline
+#else
 #define IREE_AMDGPU_RESTRICT __restrict__
 #define IREE_AMDGPU_ALIGNAS(x) __attribute__((aligned(x)))
 #define IREE_AMDGPU_ALIGNOF(x) __alignof__(x)
 #define IREE_AMDGPU_ATTRIBUTE_ALWAYS_INLINE __attribute__((always_inline))
+#endif  // _MSC_VER
+
+// Packed declarations are confined to device sources compiled with ROCm
+// Clang.
 #define IREE_AMDGPU_ATTRIBUTE_PACKED __attribute__((__packed__))
 
 #if defined(__cplusplus)

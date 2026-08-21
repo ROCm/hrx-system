@@ -768,6 +768,9 @@ static inline bool loom_amdgpu_processor_properties_support_hsaco(
       properties, LOOM_AMDGPU_PROCESSOR_INFO_FLAG_HSACO_EMISSION);
 }
 
+// Canonical AMDHSA target-ID prefix provided by the generated target tables.
+extern const iree_string_view_t loom_amdgpu_target_info_amdhsa_target_id_prefix;
+
 // Returns the number of known AMDGPU processor fact rows.
 iree_host_size_t loom_amdgpu_target_info_processor_count(void);
 

@@ -11,6 +11,12 @@
 
 namespace {
 
+TEST(AmdgpuTargetInfoTest, GeneratedTargetIdPrefixHasCLinkage) {
+  EXPECT_TRUE(
+      iree_string_view_equal(loom_amdgpu_target_info_amdhsa_target_id_prefix,
+                             IREE_SV("amdgcn-amd-amdhsa--")));
+}
+
 TEST(AmdgpuTargetInfoTest, IteratesProcessors) {
   const iree_host_size_t count = loom_amdgpu_target_info_processor_count();
   ASSERT_GT(count, 0u);

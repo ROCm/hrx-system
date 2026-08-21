@@ -944,6 +944,7 @@ iree_cc_test(
     iree::io::file_handle
     iree::testing::gtest
     iree::testing::gtest_main
+    iree::testing::temp_file
   LABELS
     "iree-build-requirement=runtime.hal.amdgpu"
     "iree-run-requirement=runtime.resource.amd_gpu"
@@ -1215,6 +1216,7 @@ iree_cc_test(
     iree::io::file_handle
     iree::testing::gtest
     iree::testing::gtest_main
+    iree::testing::temp_file
   LABELS
     "iree-build-requirement=runtime.hal.amdgpu"
     "iree-run-requirement=runtime.resource.amd_gpu"

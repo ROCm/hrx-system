@@ -43,6 +43,18 @@ CMAKE_HAL_DRIVER_DEFINES = (
     ("vulkan", "IREE_HAL_DRIVER_VULKAN"),
     ("webgpu", "IREE_HAL_DRIVER_WEBGPU"),
 )
+CMAKE_LOOM_TARGET_DEFINES = (
+    ("amdgpu", "LOOM_TARGET_AMDGPU"),
+    ("iree_vm", "LOOM_TARGET_IREE_VM"),
+    ("llvmir", "LOOM_TARGET_LLVMIR"),
+    ("spirv", "LOOM_TARGET_SPIRV"),
+    ("wasm", "LOOM_TARGET_WASM"),
+    ("x86", "LOOM_TARGET_X86"),
+)
+CMAKE_LOOM_IMPORTER_DEFINES = (
+    ("mlir", "LOOM_IMPORT_MLIR"),
+    ("tilelang", "LOOM_IMPORT_TILELANG"),
+)
 CI_SUPPORTED_HAL_DRIVERS = frozenset(driver for driver, _ in BAZEL_HAL_DRIVER_DEFINES)
 REPOSITORY_BUILD_HAL_DRIVERS = (
     "amdgpu",
@@ -67,6 +79,10 @@ AMDGPU_DEVICE_BINARY_SOURCE_OPTIONS = (
     "-DIREE_HAL_AMDGPU_DEVICE_BINARY_BUILD_MODE=source",
     "-DIREE_HAL_AMDGPU_DEVICE_TOOLCHAIN=rocm",
 )
+AMDGPU_DEVICE_BINARY_PREBUILT_OPTIONS = (
+    "-DIREE_HAL_AMDGPU_DEVICE_BINARY_BUILD_MODE=prebuilt",
+    "-DIREE_HAL_AMDGPU_DEVICE_TOOLCHAIN=none",
+)
 BAZEL_COMMANDS = {
     "iree-bazel-cpu": ("cpu", None),
     "iree-bazel-repository-build": ("repository-build", None),
@@ -84,6 +100,7 @@ BAZEL_COMMANDS = {
 }
 CMAKE_COMMANDS = {
     "iree-cmake-cpu": ("cpu", None),
+    "iree-cmake-repository-build": ("repository-build", None),
     "iree-cmake-cpu-asan": ("cpu", "asan"),
     "iree-cmake-cpu-msan": ("cpu", "msan"),
     "iree-cmake-cpu-tsan": ("cpu", "tsan"),
@@ -280,7 +297,10 @@ def cmake_configure_step(
     command_name: str,
     *,
     enabled_drivers: tuple[str, ...] = (),
-    amdgpu_target_selector: str = ci_config.DEFAULT_AMDGPU_TARGET_SELECTOR,
+    enabled_loom_targets: tuple[str, ...] | None = None,
+    enabled_loom_importers: tuple[str, ...] | None = None,
+    amdgpu_target_selector: str | None = ci_config.DEFAULT_AMDGPU_TARGET_SELECTOR,
+    amdgpu_device_binary_mode: str = "source",
     sanitizer: str | None = None,
     build_tests: bool | None = None,
 ) -> CiStep:
@@ -300,11 +320,31 @@ def cmake_configure_step(
     ]
     for driver, define in CMAKE_HAL_DRIVER_DEFINES:
         command.append(f"-D{define}={'ON' if driver in enabled_driver_set else 'OFF'}")
+    if enabled_loom_targets is not None:
+        enabled_loom_target_set = frozenset(enabled_loom_targets)
+        for target, define in CMAKE_LOOM_TARGET_DEFINES:
+            command.append(
+                f"-D{define}={'ON' if target in enabled_loom_target_set else 'OFF'}"
+            )
+    if enabled_loom_importers is not None:
+        enabled_loom_importer_set = frozenset(enabled_loom_importers)
+        for importer, define in CMAKE_LOOM_IMPORTER_DEFINES:
+            command.append(
+                f"-D{define}={'ON' if importer in enabled_loom_importer_set else 'OFF'}"
+            )
     if "amdgpu" in enabled_driver_set:
         command.append(ROCM_PINNED_DEPENDENCY_MODE_OPTION)
-        command.append(f"-DIREE_HAL_AMDGPU_TARGETS={amdgpu_target_selector}")
-        command.append("-DLOOM_TARGET_AMDGPU_TARGETS=iree_hal")
-        command.extend(cmake_amdgpu_device_binary_options())
+        if amdgpu_target_selector is not None:
+            command.append(f"-DIREE_HAL_AMDGPU_TARGETS={amdgpu_target_selector}")
+            command.append("-DLOOM_TARGET_AMDGPU_TARGETS=iree_hal")
+        if amdgpu_device_binary_mode == "source":
+            command.extend(cmake_amdgpu_device_binary_options())
+        elif amdgpu_device_binary_mode == "prebuilt":
+            command.extend(AMDGPU_DEVICE_BINARY_PREBUILT_OPTIONS)
+        else:
+            raise ValueError(
+                f"unsupported AMDGPU device binary mode: {amdgpu_device_binary_mode}"
+            )
     if sanitizer is not None:
         command.append("-DIREE_ENABLE_ASSERTIONS=ON")
         command.extend(CMAKE_SANITIZER_OPTIONS[sanitizer])
@@ -538,6 +578,30 @@ def cmake_cpu_steps(command_name: str, sanitizer: str | None) -> list[CiStep]:
     return steps
 
 
+def cmake_repository_build_steps(command_name: str) -> list[CiStep]:
+    return [
+        cmake_configure_step(
+            command_name,
+            enabled_drivers=REPOSITORY_BUILD_HAL_DRIVERS,
+            enabled_loom_targets=REPOSITORY_BUILD_LOOM_TARGETS,
+            enabled_loom_importers=REPOSITORY_BUILD_LOOM_IMPORTERS,
+            amdgpu_target_selector=None,
+            amdgpu_device_binary_mode="prebuilt",
+        ),
+        cmake_build_step(command_name, "Build repository"),
+        cmake_test_step(
+            command_name,
+            "Test repository smoke",
+            regex=combine_ctest_regex(*ci_config.CMAKE_REPOSITORY_SMOKE_CTEST_REGEXES),
+            label_exclude_regex=combine_ctest_regex(
+                ci_config.CTEST_RESOURCE_LABEL_EXCLUDE_REGEX,
+                ci_config.CTEST_MANUAL_LABEL_EXCLUDE_REGEX,
+            ),
+            parallelism=2,
+        ),
+    ]
+
+
 def cmake_amdgpu_steps(
     command_name: str, sanitizer: str | None, target_selector: str
 ) -> list[CiStep]:
@@ -676,6 +740,10 @@ def cmake_target_steps(
 ) -> list[CiStep]:
     if target_group == "cpu":
         return cmake_cpu_steps(command_name, sanitizer)
+    if target_group == "repository-build":
+        if sanitizer is not None:
+            raise ValueError("CMake repository builds do not support sanitizers")
+        return cmake_repository_build_steps(command_name)
     if target_group == "amdgpu":
         return cmake_amdgpu_steps(command_name, sanitizer, amdgpu_target_selector)
     if target_group == "loom-amdgpu":

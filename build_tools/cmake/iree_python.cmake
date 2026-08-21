@@ -202,6 +202,31 @@ function(iree_py_library_collect_package_dirs OUTPUT_PACKAGE_DIRS TARGET_NAME)
   set(${OUTPUT_PACKAGE_DIRS} "${_PACKAGE_DIRS}" PARENT_SCOPE)
 endfunction()
 
+# Prepends Python package directories to the PYTHONPATH of a CTest test.
+#
+# CTest applies ENVIRONMENT_MODIFICATION entries sequentially. Reverse the
+# directories before prepending them so their declared precedence is preserved.
+# The path_list_prepend operation selects the native path separator at test time
+# and retains any PYTHONPATH inherited by CTest.
+function(iree_python_test_add_package_dirs TEST_NAME)
+  set(_PACKAGE_DIRS ${ARGN})
+  if(NOT _PACKAGE_DIRS)
+    return()
+  endif()
+
+  list(REMOVE_DUPLICATES _PACKAGE_DIRS)
+  list(REVERSE _PACKAGE_DIRS)
+  set(_PYTHONPATH_MODIFICATIONS)
+  foreach(_PACKAGE_DIR IN LISTS _PACKAGE_DIRS)
+    list(APPEND _PYTHONPATH_MODIFICATIONS
+      "PYTHONPATH=path_list_prepend:${_PACKAGE_DIR}"
+    )
+  endforeach()
+  set_property(TEST "${TEST_NAME}" APPEND PROPERTY ENVIRONMENT_MODIFICATION
+    ${_PYTHONPATH_MODIFICATIONS}
+  )
+endfunction()
+
 # iree_local_py_test()
 #
 # CMake function to run python test with provided python package paths.
@@ -260,17 +285,9 @@ function(iree_local_py_test)
 
   set(_IREE_INSTALL_PACKAGE_DIRS ${_RULE_PACKAGE_DIRS})
 
-  # Extend the PYTHONPATH environment variable with _RULE_PACKAGE_DIRS.
-  list(APPEND _RULE_PACKAGE_DIRS "$ENV{PYTHONPATH}")
-  if(${CMAKE_SYSTEM_NAME} STREQUAL "Windows")
-    # Windows uses semi-colon delimiters, but so does CMake, so escape them.
-    list(JOIN _RULE_PACKAGE_DIRS "\\;" _PYTHONPATH)
-  else()
-    list(JOIN _RULE_PACKAGE_DIRS ":" _PYTHONPATH)
-  endif()
+  iree_python_test_add_package_dirs("${_NAME_PATH}" ${_RULE_PACKAGE_DIRS})
   set_property(TEST ${_NAME_PATH} PROPERTY ENVIRONMENT
-      "PYTHONPATH=${_PYTHONPATH}"
-      "PYTHONDONTWRITEBYTECODE=1"
+    "PYTHONDONTWRITEBYTECODE=1"
   )
 
   set(_TEST_BUILD_TARGETS)

@@ -252,6 +252,8 @@ Flatcc:           //third_party:flatcc
                   iree-flatcc-cli
                   iree::third_party::flatcc_parsing
                   iree::third_party::flatcc_runtime
+Zstd:             //third_party:zstd
+                  iree::third_party::zstd
 Libbacktrace:     //third_party:libbacktrace
                   iree::third_party::libbacktrace, or an empty
                   IREE_LIBBACKTRACE_TARGET when disabled or unsupported

@@ -35,6 +35,21 @@ def quote_command(argv: list[str]) -> str:
     return shlex.join(argv)
 
 
+def _resolve_subprocess_argv(
+    argv: list[str], env: dict[str, str] | None = None
+) -> list[str]:
+    if not is_windows() or env is None or "PATH" not in env:
+        return argv
+
+    # CreateProcess resolves a bare executable before applying the child's
+    # replacement environment. Resolve it ourselves so a PATH supplied with a
+    # command step has the same executable-selection semantics on every host.
+    executable = shutil.which(argv[0], path=env["PATH"])
+    if executable is None:
+        return argv
+    return [executable, *argv[1:]]
+
+
 @dataclass(frozen=True)
 class CommandStep:
     argv: list[str]
@@ -81,11 +96,12 @@ class CommandStep:
         return "\n".join(pieces)
 
     def run(self, verbose: bool = False) -> int:
+        argv = _resolve_subprocess_argv(self.argv, self.env)
         if verbose:
-            print(f"dev.py: {self.label or quote_command(self.argv)}")
-            print("  " + quote_command(self.argv))
+            print(f"dev.py: {self.label or quote_command(argv)}")
+            print("  " + quote_command(argv))
             sys.stdout.flush()
-        return subprocess.run(self.argv, cwd=self.cwd, env=self.env).returncode
+        return subprocess.run(argv, cwd=self.cwd, env=self.env).returncode
 
 
 @dataclass(frozen=True)
@@ -104,21 +120,22 @@ class ExecCommandStep:
         ).describe()
 
     def run(self, verbose: bool = False) -> int:
+        argv = _resolve_subprocess_argv(self.argv, self.env)
         if verbose:
-            print(f"dev.py: {self.label or quote_command(self.argv)}")
-            print("  " + quote_command(self.argv))
+            print(f"dev.py: {self.label or quote_command(argv)}")
+            print("  " + quote_command(argv))
             sys.stdout.flush()
         try:
             # Windows does not provide the POSIX process-overlay contract this
             # terminal step relies on. Run synchronously so child output and
             # the terminal exit code are propagated to the caller.
             if is_windows():
-                return subprocess.run(self.argv, cwd=self.cwd, env=self.env).returncode
+                return subprocess.run(argv, cwd=self.cwd, env=self.env).returncode
             os.chdir(self.cwd)
-            os.execvpe(self.argv[0], self.argv, self.env or os.environ)
+            os.execvpe(argv[0], argv, self.env or os.environ)
         except OSError as exc:
             print(
-                f"dev.py: failed to exec {quote_command(self.argv)}: {exc}",
+                f"dev.py: failed to exec {quote_command(argv)}: {exc}",
                 file=sys.stderr,
             )
             return 127
@@ -144,13 +161,14 @@ class CheckCommandStep:
         return command
 
     def run(self, verbose: bool = False) -> int:
+        argv = _resolve_subprocess_argv(self.argv, self.env)
         if verbose:
-            print(f"dev.py: {self.label or quote_command(self.argv)}")
-            print("  " + quote_command(self.argv))
+            print(f"dev.py: {self.label or quote_command(argv)}")
+            print("  " + quote_command(argv))
             sys.stdout.flush()
         try:
             result = subprocess.run(
-                self.argv,
+                argv,
                 cwd=self.cwd,
                 env=self.env,
                 stdout=subprocess.PIPE,
@@ -159,7 +177,7 @@ class CheckCommandStep:
             )
         except OSError as exc:
             print(
-                f"dev.py: failed to run {quote_command(self.argv)}: {exc}",
+                f"dev.py: failed to run {quote_command(argv)}: {exc}",
                 file=sys.stderr,
             )
             return 127
@@ -170,7 +188,7 @@ class CheckCommandStep:
             return result.returncode
         if self.expected_pattern and not re.search(self.expected_pattern, output):
             print(
-                f"dev.py: expected {quote_command(self.argv)} output to match "
+                f"dev.py: expected {quote_command(argv)} output to match "
                 f"/{self.expected_pattern}/",
                 file=sys.stderr,
             )
@@ -200,13 +218,14 @@ class OptionalCheckCommandStep:
         return command
 
     def run(self, verbose: bool = False) -> int:
+        argv = _resolve_subprocess_argv(self.argv, self.env)
         if verbose:
-            print(f"dev.py: {self.label or quote_command(self.argv)}")
-            print("  " + quote_command(self.argv))
+            print(f"dev.py: {self.label or quote_command(argv)}")
+            print("  " + quote_command(argv))
             sys.stdout.flush()
         try:
             result = subprocess.run(
-                self.argv,
+                argv,
                 cwd=self.cwd,
                 env=self.env,
                 stdout=subprocess.PIPE,
@@ -215,8 +234,7 @@ class OptionalCheckCommandStep:
             )
         except FileNotFoundError:
             print(
-                f"dev.py: warning: optional tool {quote_command(self.argv)} "
-                "is not available"
+                f"dev.py: warning: optional tool {quote_command(argv)} is not available"
             )
             if self.hint:
                 print(f"dev.py: hint: {self.hint}")
@@ -226,7 +244,7 @@ class OptionalCheckCommandStep:
             print(output)
         if result.returncode != 0:
             print(
-                f"dev.py: warning: optional tool {quote_command(self.argv)} "
+                f"dev.py: warning: optional tool {quote_command(argv)} "
                 f"exited {result.returncode}"
             )
             if self.hint:
@@ -234,7 +252,7 @@ class OptionalCheckCommandStep:
             return 0
         if self.expected_pattern and not re.search(self.expected_pattern, output):
             print(
-                f"dev.py: warning: expected {quote_command(self.argv)} output "
+                f"dev.py: warning: expected {quote_command(argv)} output "
                 f"to match /{self.expected_pattern}/"
             )
             if self.hint:

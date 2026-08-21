@@ -96,6 +96,36 @@ class CommandPlanTest(unittest.TestCase):
         self.assertIn("dev.py: loud command", output.getvalue())
         self.assertIn(sys.executable, output.getvalue())
 
+    def test_windows_command_step_resolves_executable_from_child_path(self):
+        child_path = "C:/source/.venv/Scripts;C:/Windows/System32"
+        resolved_executable = "C:/source/.venv/Scripts/lefthook.exe"
+        step = CommandStep(
+            ["lefthook", "version"],
+            cwd=Path.cwd(),
+            env={"PATH": child_path},
+        )
+        completed_process = subprocess.CompletedProcess(step.argv, 0)
+
+        with (
+            mock.patch.object(command_plan, "is_windows", return_value=True),
+            mock.patch.object(
+                command_plan.shutil,
+                "which",
+                return_value=resolved_executable,
+            ) as mock_which,
+            mock.patch.object(
+                subprocess, "run", return_value=completed_process
+            ) as mock_run,
+        ):
+            self.assertEqual(step.run(), 0)
+
+        mock_which.assert_called_once_with("lefthook", path=child_path)
+        mock_run.assert_called_once_with(
+            [resolved_executable, "version"],
+            cwd=step.cwd,
+            env=step.env,
+        )
+
     def test_exec_command_step_replaces_current_process(self):
         step = ExecCommandStep(["tool", "arg"], cwd=Path.cwd(), env={"PATH": "test"})
 

@@ -40,7 +40,7 @@ _PREBUILT_TOOL_BZL = """\
 \"\"\"Rule for exposing pre-built binaries as executable Bazel targets.\"\"\"
 
 def _prebuilt_tool_impl(ctx):
-    out = ctx.actions.declare_file(ctx.label.name)
+    out = ctx.actions.declare_file(ctx.label.name + "{EXECUTABLE_SUFFIX}")
     ctx.actions.symlink(
         output = out,
         target_file = ctx.file.src,
@@ -80,27 +80,27 @@ package(default_visibility = ["//visibility:public"])
 
 prebuilt_tool(
     name = "clang",
-    src = "bin/clang",
+    src = "bin/clang{EXECUTABLE_SUFFIX}",
 )
 
 prebuilt_tool(
     name = "llvm-ar",
-    src = "bin/llvm-ar",
+    src = "bin/llvm-ar{EXECUTABLE_SUFFIX}",
 )
 
 prebuilt_tool(
     name = "llvm-link",
-    src = "bin/llvm-link",
+    src = "bin/llvm-link{EXECUTABLE_SUFFIX}",
 )
 
 prebuilt_tool(
     name = "lld",
-    src = "bin/lld",
+    src = "bin/lld{EXECUTABLE_SUFFIX}",
 )
 
 prebuilt_tool(
     name = "llvm-objcopy",
-    src = "bin/llvm-objcopy",
+    src = "bin/llvm-objcopy{EXECUTABLE_SUFFIX}",
 )
 
 filegroup(
@@ -118,7 +118,7 @@ _ROCM_DEVICE_LIBRARIES_BUILD = """\
 
 prebuilt_tool(
     name = "clang-offload-bundler",
-    src = "bin/clang-offload-bundler",
+    src = "bin/clang-offload-bundler{EXECUTABLE_SUFFIX}",
 )
 
 filegroup(
@@ -217,25 +217,23 @@ AMDGPU_HIP_DEVICE_LIBRARIES_MARKER = ""
 AMDGPU_CLANG_OFFLOAD_BUNDLER_TOOL = ""
 """
 
-def _split_env_list(value):
-    if not value:
-        return []
-    normalized = value
-    for separator in [",", ";", "\n", "\t", " "]:
-        normalized = normalized.replace(separator, ":")
-    return [part for part in normalized.split(":") if part]
+def _normalize_path(path):
+    return path.replace("\\", "/")
 
 def _join_path(left, right):
+    left = _normalize_path(left)
     if left.endswith("/"):
         return left + right
     return left + "/" + right
 
 def _dirname(path):
+    path = _normalize_path(path)
     if "/" not in path:
         return "."
     return path.rsplit("/", 1)[0]
 
 def _basename(path):
+    path = _normalize_path(path)
     if "/" not in path:
         return path
     return path.rsplit("/", 1)[1]
@@ -245,16 +243,28 @@ def _append_unique(values, new_values):
         if value not in values:
             values.append(value)
 
-def _is_executable(repository_ctx, path):
-    result = repository_ctx.execute(["test", "-x", path], quiet = True)
-    return result.return_code == 0
+def _is_windows(repository_ctx):
+    return repository_ctx.os.name.lower().startswith("windows")
 
-def _find_tool(
+def _resolve_executable(repository_ctx, candidate):
+    candidates = [_normalize_path(candidate)]
+    if _is_windows(repository_ctx) and not candidate.lower().endswith(".exe"):
+        candidates.append(_normalize_path(candidate) + ".exe")
+    for path in candidates:
+        if not repository_ctx.path(path).exists:
+            continue
+        if _is_windows(repository_ctx):
+            return str(repository_ctx.path(path))
+        result = repository_ctx.execute(["test", "-x", path], quiet = True)
+        if result.return_code == 0:
+            return str(repository_ctx.path(path))
+    return ""
+
+def _try_find_tool(
         repository_ctx,
         names,
         directories,
         explicit_env_vars,
-        description,
         additional_candidates = ()):
     candidates = []
     for env_var in explicit_env_vars:
@@ -267,8 +277,27 @@ def _find_tool(
             candidates.append(_join_path(directory, name))
 
     for candidate in candidates:
-        if _is_executable(repository_ctx, candidate):
-            return str(repository_ctx.path(candidate))
+        resolved = _resolve_executable(repository_ctx, candidate)
+        if resolved:
+            return resolved
+    return ""
+
+def _find_tool(
+        repository_ctx,
+        names,
+        directories,
+        explicit_env_vars,
+        description,
+        additional_candidates = ()):
+    tool = _try_find_tool(
+        repository_ctx,
+        names,
+        directories,
+        explicit_env_vars,
+        additional_candidates,
+    )
+    if tool:
+        return tool
 
     fail("Could not find {}. Tried env vars [{}] and candidate directories [{}].".format(
         description,
@@ -293,51 +322,22 @@ def _candidate_rocm_roots(repository_ctx):
         "ROCM_HOME",
         "HIP_PATH",
     ]:
-        for value in _split_env_list(repository_ctx.getenv(env_var)):
-            _append_unique(roots, [value])
-            if env_var == "HIP_PATH" and _basename(value) == "hip":
-                _append_unique(roots, [_dirname(value)])
-
-    hipcc = repository_ctx.which("hipcc")
-    if hipcc:
-        _append_unique(roots, [_dirname(_dirname(str(hipcc)))])
-
-    if repository_ctx.path("/opt/rocm").exists:
-        _append_unique(roots, ["/opt/rocm"])
+        value = repository_ctx.getenv(env_var)
+        if not value:
+            continue
+        value = _normalize_path(value)
+        _append_unique(roots, [value])
+        if env_var == "HIP_PATH" and _basename(value) == "hip":
+            _append_unique(roots, [_dirname(value)])
     return roots
 
-def _candidate_tool_dirs(repository_ctx, mode):
-    dirs = []
-    for env_var in [
-        "IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN_LLVM_TOOLS_DIR",
-        "IREE_HOST_BIN_DIR",
-        "IREE_HOST_TOOLS",
-        "IREE_HOST_TOOLS_DIR",
-        "IREE_BINARY_DIR",
-        "IREE_LLVM_TOOLS_DIR",
-        "IREE_LLVM_TOOL_DIR",
-        "LLVM_TOOLS_BINARY_DIR",
-        "LLVM_BINARY_DIR",
-    ]:
-        for value in _split_env_list(repository_ctx.getenv(env_var)):
-            _append_unique(dirs, [value])
-
-    expanded_dirs = []
-    for directory in dirs:
-        expanded_dirs.extend([
-            directory,
-            _join_path(directory, "bin"),
-            _join_path(directory, "llvm-project/bin"),
-            _join_path(directory, "llvm/bin"),
-            _join_path(directory, "lib/llvm/bin"),
-        ])
-    dirs = []
-    _append_unique(dirs, expanded_dirs)
-
-    if mode in ["auto", "rocm"]:
-        for root in _candidate_rocm_roots(repository_ctx):
-            _append_unique(dirs, _rocm_tool_dirs(root))
-    return dirs
+def _llvm_tool_dirs(root):
+    return [
+        root,
+        _join_path(root, "bin"),
+        _join_path(root, "llvm/bin"),
+        _join_path(root, "lib/llvm/bin"),
+    ]
 
 def _clang_tool_candidates(repository_ctx, clang, names):
     candidates = []
@@ -352,13 +352,10 @@ def _clang_tool_candidates(repository_ctx, clang, names):
         printed_name = result.stdout.strip()
         if not printed_name:
             continue
-        if printed_name.startswith("/"):
-            _append_unique(candidates, [printed_name])
-        else:
-            _append_unique(candidates, [
-                _join_path(clang_dir, printed_name),
-                printed_name,
-            ])
+        _append_unique(candidates, [
+            printed_name,
+            _join_path(clang_dir, printed_name),
+        ])
     return candidates
 
 def _detect_clang_resource_dir(repository_ctx, clang):
@@ -379,17 +376,50 @@ def _select_invocable_clang(repository_ctx, clang):
     if not resource_version:
         return clang
     clang_basename = _basename(clang)
+    executable_suffix = ""
+    if clang_basename.lower().endswith(".exe"):
+        clang_basename = clang_basename[:-4]
+        executable_suffix = ".exe"
     if clang_basename.endswith("-" + resource_version):
         return clang
-    versioned_clang = _join_path(_dirname(clang), clang_basename + "-" + resource_version)
-    if _is_executable(repository_ctx, versioned_clang):
-        return str(repository_ctx.path(versioned_clang))
+    versioned_clang = _join_path(
+        _dirname(clang),
+        clang_basename + "-" + resource_version + executable_suffix,
+    )
+    resolved_clang = _resolve_executable(repository_ctx, versioned_clang)
+    if resolved_clang:
+        return resolved_clang
     return clang
+
+def _validate_amdgpu_clang(repository_ctx, clang):
+    probe_source = repository_ctx.path("amdgpu_device_toolchain_probe.c")
+    repository_ctx.file(
+        "amdgpu_device_toolchain_probe.c",
+        "void iree_amdgpu_probe(void) {}\n",
+    )
+    result = repository_ctx.execute(
+        [
+            clang,
+            "-target",
+            "amdgcn-amd-amdhsa",
+            "-mcpu=gfx900",
+            "-nogpulib",
+            "-x",
+            "c",
+            "-std=c11",
+            "-fsyntax-only",
+            str(probe_source),
+        ],
+        quiet = True,
+    )
+    if result.return_code != 0:
+        fail("Configured AMDGPU device clang cannot target amdgcn-amd-amdhsa: {}\n{}".format(
+            clang,
+            result.stderr,
+        ))
 
 def _detect_clang_resource_include(repository_ctx, clang):
     explicit = repository_ctx.getenv("IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN_CLANG_RESOURCE_INCLUDE")
-    if not explicit:
-        explicit = repository_ctx.getenv("IREE_CLANG_BUILTIN_HEADERS_PATH")
     if explicit:
         path = repository_ctx.path(explicit)
         if not path.exists:
@@ -411,7 +441,7 @@ def _is_rocm_device_library_dir(repository_ctx, candidate):
             return False
     return True
 
-def _detect_rocm_device_libraries(repository_ctx, clang):
+def _detect_rocm_device_libraries(repository_ctx, clang, rocm_root):
     candidates = []
     explicit = repository_ctx.getenv(
         "IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN_ROCM_DEVICE_LIB_PATH",
@@ -423,18 +453,30 @@ def _detect_rocm_device_libraries(repository_ctx, clang):
     llvm_root = _dirname(_dirname(_dirname(resource_dir)))
     candidates.append(_join_path(llvm_root, "amdgcn/bitcode"))
 
-    for root in _candidate_rocm_roots(repository_ctx):
+    if rocm_root:
         candidates.extend([
-            _join_path(root, "amdgcn/bitcode"),
-            _join_path(root, "lib/amdgcn/bitcode"),
-            _join_path(root, "llvm/amdgcn/bitcode"),
-            _join_path(root, "lib/llvm/amdgcn/bitcode"),
+            _join_path(rocm_root, "amdgcn/bitcode"),
+            _join_path(rocm_root, "lib/amdgcn/bitcode"),
+            _join_path(rocm_root, "llvm/amdgcn/bitcode"),
+            _join_path(rocm_root, "lib/llvm/amdgcn/bitcode"),
         ])
 
     for candidate in candidates:
         if _is_rocm_device_library_dir(repository_ctx, candidate):
             return str(repository_ctx.path(candidate))
     return ""
+
+def _has_explicit_device_tools(repository_ctx):
+    for env_var in [
+        "IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN_CLANG_BINARY",
+        "IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN_LLVM_AR_BINARY",
+        "IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN_LLVM_LINK_BINARY",
+        "IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN_LLD_BINARY",
+        "IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN_LLVM_OBJCOPY_BINARY",
+    ]:
+        if repository_ctx.getenv(env_var):
+            return True
+    return False
 
 def _validate_clang_resource_include(repository_ctx, clang_resource_include):
     marker = _join_path(clang_resource_include, "stddef.h")
@@ -447,10 +489,17 @@ def _write_local_toolchain_repo(
         clang_resource_include,
         rocm_device_libraries):
     _validate_clang_resource_include(repository_ctx, clang_resource_include)
-    repository_ctx.file("prebuilt_tool.bzl", _PREBUILT_TOOL_BZL)
+    executable_suffix = ".exe" if _is_windows(repository_ctx) else ""
+    repository_ctx.file(
+        "prebuilt_tool.bzl",
+        _PREBUILT_TOOL_BZL.replace("{EXECUTABLE_SUFFIX}", executable_suffix),
+    )
     repository_ctx.file("bin/.keep", "")
     for name, path in tools.items():
-        repository_ctx.symlink(repository_ctx.path(path), "bin/" + name)
+        repository_ctx.symlink(
+            repository_ctx.path(path),
+            "bin/" + name + executable_suffix,
+        )
     repository_ctx.symlink(
         repository_ctx.path(clang_resource_include),
         "clang_resource_include",
@@ -462,8 +511,9 @@ def _write_local_toolchain_repo(
         )
     repository_ctx.file(
         "BUILD.bazel",
-        _LOCAL_BUILD_TEMPLATE +
-        (_ROCM_DEVICE_LIBRARIES_BUILD if rocm_device_libraries else ""),
+        (_LOCAL_BUILD_TEMPLATE +
+         (_ROCM_DEVICE_LIBRARIES_BUILD if rocm_device_libraries else ""))
+            .replace("{EXECUTABLE_SUFFIX}", executable_suffix),
     )
     repository_ctx.file(
         "paths.bzl",
@@ -486,23 +536,41 @@ def _amdgpu_device_toolchain_repo_impl(repository_ctx):
         repository_ctx.file("paths.bzl", _LLVM_PROJECT_PATHS)
         return
 
-    tool_dirs = _candidate_tool_dirs(repository_ctx, mode)
-    if mode == "rocm" and not tool_dirs:
-        fail("IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN=rocm requires a ROCm/TheRock root such as IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN_ROCM_PATH, IREE_ROCM_PATH, ROCM_PATH, ROCM_ROOT, ROCM_HOME, HIP_PATH, hipcc on PATH, or /opt/rocm.")
+    rocm_root = ""
+    tool_dirs = []
+    if mode in ["auto", "rocm"]:
+        rocm_roots = _candidate_rocm_roots(repository_ctx)
+        if rocm_roots:
+            rocm_root = rocm_roots[0]
+            tool_dirs = _rocm_tool_dirs(rocm_root)
+        elif mode == "rocm":
+            fail("IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN=rocm requires a configured ROCm/TheRock root such as IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN_ROCM_PATH or IREE_ROCM_PATH.")
+
+    if not rocm_root and mode in ["auto", "llvm-tools"]:
+        llvm_tools_dir = repository_ctx.getenv(
+            "IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN_LLVM_TOOLS_DIR",
+        )
+        if llvm_tools_dir:
+            tool_dirs = _llvm_tool_dirs(_normalize_path(llvm_tools_dir))
+        elif mode == "auto" and not _has_explicit_device_tools(repository_ctx):
+            repository_ctx.file("BUILD.bazel", _STUB_BUILD)
+            repository_ctx.file("paths.bzl", _STUB_PATHS)
+            return
 
     clang = _find_tool(
         repository_ctx,
         ["clang", "amdclang", "clang-22"],
         tool_dirs,
-        ["IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN_CLANG_BINARY", "IREE_CLANG_BINARY", "CLANG"],
+        ["IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN_CLANG_BINARY"],
         "clang with AMDGPU support",
     )
     clang = _select_invocable_clang(repository_ctx, clang)
+    _validate_amdgpu_clang(repository_ctx, clang)
     llvm_ar = _find_tool(
         repository_ctx,
         ["llvm-ar"],
         tool_dirs,
-        ["IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN_LLVM_AR_BINARY", "IREE_LLVM_AR_BINARY", "LLVM_AR"],
+        ["IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN_LLVM_AR_BINARY"],
         "llvm-ar",
         additional_candidates = _clang_tool_candidates(repository_ctx, clang, ["llvm-ar"]),
     )
@@ -510,7 +578,7 @@ def _amdgpu_device_toolchain_repo_impl(repository_ctx):
         repository_ctx,
         ["llvm-link"],
         tool_dirs,
-        ["IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN_LLVM_LINK_BINARY", "IREE_LLVM_LINK_BINARY", "LLVM_LINK"],
+        ["IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN_LLVM_LINK_BINARY"],
         "llvm-link",
         additional_candidates = _clang_tool_candidates(repository_ctx, clang, ["llvm-link"]),
     )
@@ -518,7 +586,7 @@ def _amdgpu_device_toolchain_repo_impl(repository_ctx):
         repository_ctx,
         ["lld", "ld.lld"],
         tool_dirs,
-        ["IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN_LLD_BINARY", "IREE_LLD_BINARY", "LLD", "LD_LLD"],
+        ["IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN_LLD_BINARY"],
         "lld",
         additional_candidates = _clang_tool_candidates(repository_ctx, clang, ["lld", "ld.lld"]),
     )
@@ -526,12 +594,16 @@ def _amdgpu_device_toolchain_repo_impl(repository_ctx):
         repository_ctx,
         ["llvm-objcopy"],
         tool_dirs,
-        ["IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN_LLVM_OBJCOPY_BINARY", "IREE_LLVM_OBJCOPY_BINARY", "LLVM_OBJCOPY"],
+        ["IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN_LLVM_OBJCOPY_BINARY"],
         "llvm-objcopy",
         additional_candidates = _clang_tool_candidates(repository_ctx, clang, ["llvm-objcopy"]),
     )
     clang_resource_include = _detect_clang_resource_include(repository_ctx, clang)
-    rocm_device_libraries = _detect_rocm_device_libraries(repository_ctx, clang)
+    rocm_device_libraries = _detect_rocm_device_libraries(
+        repository_ctx,
+        clang,
+        rocm_root,
+    )
     tools = {
         "clang": clang,
         "lld": lld,
@@ -540,18 +612,21 @@ def _amdgpu_device_toolchain_repo_impl(repository_ctx):
         "llvm-objcopy": llvm_objcopy,
     }
     if rocm_device_libraries:
-        tools["clang-offload-bundler"] = _find_tool(
+        clang_offload_bundler = _try_find_tool(
             repository_ctx,
             ["clang-offload-bundler"],
             tool_dirs,
             ["IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN_CLANG_OFFLOAD_BUNDLER_BINARY"],
-            "clang-offload-bundler",
             additional_candidates = _clang_tool_candidates(
                 repository_ctx,
                 clang,
                 ["clang-offload-bundler"],
             ),
         )
+        if clang_offload_bundler:
+            tools["clang-offload-bundler"] = clang_offload_bundler
+        else:
+            rocm_device_libraries = ""
 
     _write_local_toolchain_repo(
         repository_ctx,
@@ -563,7 +638,6 @@ def _amdgpu_device_toolchain_repo_impl(repository_ctx):
 amdgpu_device_toolchain_repo = repository_rule(
     implementation = _amdgpu_device_toolchain_repo_impl,
     environ = [
-        "CLANG",
         "HIP_PATH",
         "IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN",
         "IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN_CLANG_BINARY",
@@ -576,26 +650,7 @@ amdgpu_device_toolchain_repo = repository_rule(
         "IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN_LLVM_TOOLS_DIR",
         "IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN_ROCM_PATH",
         "IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN_ROCM_DEVICE_LIB_PATH",
-        "IREE_CLANG_BINARY",
-        "IREE_CLANG_BUILTIN_HEADERS_PATH",
-        "IREE_HOST_BIN_DIR",
-        "IREE_HOST_TOOLS",
-        "IREE_HOST_TOOLS_DIR",
-        "IREE_BINARY_DIR",
-        "IREE_LLD_BINARY",
-        "IREE_LLVM_AR_BINARY",
-        "IREE_LLVM_LINK_BINARY",
-        "IREE_LLVM_OBJCOPY_BINARY",
-        "IREE_LLVM_TOOL_DIR",
-        "IREE_LLVM_TOOLS_DIR",
         "IREE_ROCM_PATH",
-        "LD_LLD",
-        "LLD",
-        "LLVM_AR",
-        "LLVM_BINARY_DIR",
-        "LLVM_LINK",
-        "LLVM_OBJCOPY",
-        "LLVM_TOOLS_BINARY_DIR",
         "ROCM_HOME",
         "ROCM_PATH",
         "ROCM_ROOT",

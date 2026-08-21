@@ -40,6 +40,15 @@ enum iree_io_stdio_stream_mode_bits_t {
 };
 typedef uint32_t iree_io_stdio_stream_mode_t;
 
+// Opens a stdio file at the UTF-8 |path| using the fopen-compatible |mode|.
+// The returned FILE* must be closed by the caller with fclose.
+//
+// Windows paths are opened through the wide-character CRT boundary and support
+// extended-length paths without requiring a process manifest or system policy.
+IREE_API_EXPORT iree_status_t
+iree_io_stdio_file_open(iree_string_view_t path, const char* mode,
+                        iree_allocator_t host_allocator, FILE** out_file);
+
 // Wraps an existing stdio |handle|. If |owns_handle| is true then the
 // file will be closed when the stream is destroyed.
 IREE_API_EXPORT iree_status_t iree_io_stdio_stream_wrap(

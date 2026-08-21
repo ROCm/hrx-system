@@ -15,6 +15,7 @@ cc_library(
         allow_empty = False,
     ),
     includes = ["include"],
+    deps = [":hsa_runtime_headers"],
 )
 
 cc_library(
@@ -23,5 +24,8 @@ cc_library(
         ["include/hsa/*.h"],
         allow_empty = False,
     ),
-    includes = ["include"],
+    includes = [
+        "include",
+        "include/hsa",
+    ],
 )

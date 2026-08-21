@@ -60,7 +60,7 @@ TEST_F(VMemTest, FindCoarseGlobalMemoryPool) {
       &libhsa, topology.gpu_agents[0], &gpu_pool));
   EXPECT_NE(gpu_pool.handle, 0);
 
-  hsa_region_global_flag_t global_flags = (hsa_region_global_flag_t)0;
+  uint32_t global_flags = 0;
   IREE_ASSERT_OK(iree_hsa_amd_memory_pool_get_info(
       IREE_LIBHSA(&libhsa), gpu_pool, HSA_AMD_MEMORY_POOL_INFO_GLOBAL_FLAGS,
       &global_flags));
@@ -81,7 +81,7 @@ TEST_F(VMemTest, FindFineGlobalMemoryPool) {
   }
   EXPECT_NE(gpu_pool.handle, 0);
 
-  hsa_region_global_flag_t global_flags = (hsa_region_global_flag_t)0;
+  uint32_t global_flags = 0;
   IREE_ASSERT_OK(iree_hsa_amd_memory_pool_get_info(
       IREE_LIBHSA(&libhsa), gpu_pool, HSA_AMD_MEMORY_POOL_INFO_GLOBAL_FLAGS,
       &global_flags));

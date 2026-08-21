@@ -17,6 +17,7 @@
 #endif  // defined(IREE_PLATFORM_WINDOWS)
 
 #include "iree/base/internal/path.h"
+#include "iree/io/stdio_stream.h"
 
 static iree_status_t loom_tooling_file_path_dup(iree_string_view_t path,
                                                 iree_allocator_t allocator,
@@ -201,17 +202,8 @@ iree_status_t loom_tooling_output_stream_open(
     return iree_ok_status();
   }
 
-  char* path_cstring = NULL;
-  IREE_RETURN_IF_ERROR(
-      loom_tooling_file_path_dup(path, allocator, &path_cstring));
-  FILE* file = fopen(path_cstring, "wb");
-  const int open_error = file == NULL ? errno : 0;
-  iree_allocator_free(allocator, path_cstring);
-  if (file == NULL) {
-    return iree_make_status(iree_status_code_from_errno(open_error),
-                            "failed to open output stream '%.*s' (%d)",
-                            (int)path.size, path.data, open_error);
-  }
+  FILE* file = NULL;
+  IREE_RETURN_IF_ERROR(iree_io_stdio_file_open(path, "wb", allocator, &file));
   out_output->file = file;
   out_output->close_file = true;
   loom_output_stream_for_file(file, &out_output->stream);

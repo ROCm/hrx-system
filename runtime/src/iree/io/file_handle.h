@@ -209,9 +209,9 @@ iree_io_file_handle_flush(iree_io_file_handle_t* handle);
 IREE_API_EXPORT bool iree_io_file_handle_uses_async_io(
     const iree_io_file_handle_t* handle);
 
-// Creates a new platform file at |path| for usage as defined by |mode|.
-// The file will be extended to |initial_size| upon creation.
-// Returns IREE_STATUS_ALREADY_EXISTS if the file already exists.
+// Creates or overwrites a platform file at |path| for usage as defined by
+// |mode|.
+// Existing contents are discarded and the file is resized to |initial_size|.
 // Returns IREE_STATUS_PERMISSION_DENIED if the file cannot be created.
 IREE_API_EXPORT iree_status_t iree_io_file_handle_create(
     iree_io_file_mode_t mode, iree_string_view_t path, uint64_t initial_size,

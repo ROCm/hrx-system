@@ -124,16 +124,20 @@ static void iree_hal_amdgpu_pm4_transfer_record_initialize(
     iree_hsa_fence_scope_t barrier_acquire_scope,
     iree_hsa_fence_scope_t barrier_release_scope,
     iree_hal_amdgpu_pm4_transfer_record_t* out_record) {
-  memset(out_record, 0, sizeof(*out_record));
-  out_record->header.length = sizeof(*out_record);
-  out_record->header.opcode = opcode;
-  out_record->source = source;
-  out_record->target = target;
-  out_record->length = length;
-  out_record->command_index = command_index;
-  out_record->flags = flags;
-  out_record->barrier_acquire_scope = barrier_acquire_scope;
-  out_record->barrier_release_scope = barrier_release_scope;
+  *out_record = (iree_hal_amdgpu_pm4_transfer_record_t){
+      .header =
+          {
+              .length = sizeof(*out_record),
+              .opcode = opcode,
+          },
+      .source = source,
+      .target = target,
+      .length = length,
+      .command_index = command_index,
+      .flags = flags,
+      .barrier_acquire_scope = barrier_acquire_scope,
+      .barrier_release_scope = barrier_release_scope,
+  };
 }
 
 static void iree_hal_amdgpu_pm4_transfer_record_initialize_fill(

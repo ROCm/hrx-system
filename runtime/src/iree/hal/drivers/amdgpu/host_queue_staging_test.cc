@@ -6,11 +6,8 @@
 
 #include "iree/hal/drivers/amdgpu/host_queue_staging.h"
 
-#include <cerrno>
 #include <cstdint>
 #include <cstring>
-#include <fstream>
-#include <string>
 #include <vector>
 
 #include "iree/hal/api.h"
@@ -21,13 +18,11 @@
 #include "iree/hal/drivers/amdgpu/queue_affinity.h"
 #include "iree/hal/drivers/amdgpu/system.h"
 #include "iree/hal/drivers/amdgpu/util/aql_emitter.h"
+#include "iree/io/file_contents.h"
 #include "iree/io/file_handle.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
-
-#if IREE_FILE_IO_ENABLE
-#include <unistd.h>
-#endif  // IREE_FILE_IO_ENABLE
+#include "iree/testing/temp_file.h"
 
 namespace iree::hal::amdgpu {
 namespace {
@@ -89,36 +84,6 @@ static iree_status_t EnqueueRawBlockingBarrier(
   return iree_ok_status();
 }
 
-static iree_status_t WriteAll(int fd, const uint8_t* data, size_t length) {
-#if IREE_FILE_IO_ENABLE
-  size_t total_written = 0;
-  while (total_written < length) {
-    const ssize_t written =
-        write(fd, data + total_written, length - total_written);
-    if (written < 0 && errno == EINTR) continue;
-    if (written < 0) {
-      return iree_make_status(iree_status_code_from_errno(errno),
-                              "write failed after %" PRIhsz " of %" PRIhsz
-                              " bytes: %s",
-                              total_written, length, strerror(errno));
-    }
-    if (written == 0) {
-      return iree_make_status(IREE_STATUS_UNAVAILABLE,
-                              "write made no progress after %" PRIhsz
-                              " of %" PRIhsz " bytes",
-                              total_written, length);
-    }
-    total_written += (size_t)written;
-  }
-  return iree_ok_status();
-#else
-  (void)fd;
-  (void)data;
-  (void)length;
-  return iree_make_status(IREE_STATUS_UNAVAILABLE, "file I/O is disabled");
-#endif  // IREE_FILE_IO_ENABLE
-}
-
 static void ExpectByteRangeRepeated(const std::vector<uint8_t>& data,
                                     uint8_t pattern) {
   for (size_t i = 0; i < data.size(); ++i) {
@@ -161,14 +126,6 @@ class HostQueueStagingTest : public ::testing::Test {
   static void TearDownTestSuite() {
     iree_hal_amdgpu_topology_deinitialize(&topology_);
     iree_hal_amdgpu_libhsa_deinitialize(&libhsa_);
-  }
-
-  void TearDown() override {
-#if IREE_FILE_IO_ENABLE
-    for (const auto& path : temp_paths_) {
-      unlink(path.c_str());
-    }
-#endif  // IREE_FILE_IO_ENABLE
   }
 
   class TestLogicalDevice {
@@ -277,78 +234,74 @@ class HostQueueStagingTest : public ::testing::Test {
                                                    host_allocator_);
   }
 
-  iree_status_t CreateTempFileWithContents(const std::vector<uint8_t>& data,
-                                           std::string* out_path) {
+  iree_status_t CreateTempFileWithContents(
+      const std::vector<uint8_t>& data, iree::testing::TempFilePath* out_path) {
 #if IREE_FILE_IO_ENABLE
-    *out_path = std::string();
-    char temp_path[] = "/tmp/iree_hal_amdgpu_staging_XXXXXX";
-    int fd = mkstemp(temp_path);
-    if (fd < 0) {
-      return iree_make_status(iree_status_code_from_errno(errno),
-                              "mkstemp failed: %s", strerror(errno));
-    }
-    temp_paths_.push_back(temp_path);
-    iree_status_t status = WriteAll(fd, data.data(), data.size());
-    if (close(fd) != 0) {
-      status = iree_status_join(
-          status, iree_make_status(iree_status_code_from_errno(errno),
-                                   "close failed: %s", strerror(errno)));
-    }
-    if (iree_status_is_ok(status)) {
-      *out_path = temp_path;
-    }
-    return status;
+    *out_path =
+        iree::testing::TempFilePath("iree_hal_amdgpu_host_queue_staging");
+    return iree_io_file_contents_write(
+        out_path->path_view(),
+        iree_make_const_byte_span(data.data(), data.size()),
+        iree_allocator_system());
 #else
     (void)data;
-    *out_path = std::string();
+    out_path->Reset();
     return iree_make_status(IREE_STATUS_UNAVAILABLE, "file I/O is disabled");
 #endif  // IREE_FILE_IO_ENABLE
   }
 
   iree_status_t CreatePatternedTempFile(size_t size, uint8_t pattern,
-                                        std::string* out_path) {
+                                        iree::testing::TempFilePath* out_path) {
     std::vector<uint8_t> data(size, pattern);
     return CreateTempFileWithContents(data, out_path);
   }
 
-  iree_status_t TruncateTempFile(const std::string& path, size_t length) {
+  iree_status_t TruncateTempFile(const iree::testing::TempFilePath& path) {
 #if IREE_FILE_IO_ENABLE
-    if (truncate(path.c_str(), length) != 0) {
-      return iree_make_status(iree_status_code_from_errno(errno),
-                              "truncate failed: %s", strerror(errno));
-    }
+    // The HAL retains its imported handle while this handle truncates the file.
+    // Both handles must admit the other's access on Windows.
+    iree_io_file_handle_t* handle = NULL;
+    IREE_RETURN_IF_ERROR(iree_io_file_handle_create(
+        IREE_IO_FILE_MODE_WRITE | IREE_IO_FILE_MODE_SHARE_READ |
+            IREE_IO_FILE_MODE_SHARE_WRITE,
+        path.path_view(), /*initial_size=*/0, iree_allocator_system(),
+        &handle));
+    iree_io_file_handle_release(handle);
     return iree_ok_status();
 #else
     (void)path;
-    (void)length;
     return iree_make_status(IREE_STATUS_UNAVAILABLE, "file I/O is disabled");
 #endif  // IREE_FILE_IO_ENABLE
   }
 
-  std::vector<uint8_t> ReadTempFileContents(const std::string& path,
-                                            size_t length) {
-    std::vector<uint8_t> data(length);
-    std::ifstream file(path, std::ios::binary);
-    EXPECT_TRUE(file.good());
-    if (file.good()) {
-      file.read(reinterpret_cast<char*>(data.data()),
-                static_cast<std::streamsize>(data.size()));
-      EXPECT_EQ(file.gcount(), static_cast<std::streamsize>(data.size()));
-    }
-    return data;
+  iree_status_t ReadTempFileContents(const iree::testing::TempFilePath& path,
+                                     std::vector<uint8_t>* out_data) {
+    out_data->clear();
+    iree_io_file_contents_t* contents = NULL;
+    IREE_RETURN_IF_ERROR(iree_io_file_contents_read(
+        path.path_view(), iree_allocator_system(), &contents));
+    out_data->assign(
+        contents->const_buffer.data,
+        contents->const_buffer.data + contents->const_buffer.data_length);
+    iree_io_file_contents_free(contents);
+    return iree_ok_status();
   }
 
-  iree_status_t ImportFdFile(iree_hal_device_t* device, const std::string& path,
-                             iree_hal_memory_access_t access,
-                             iree_hal_file_t** out_file) {
-    iree_io_file_mode_t mode = IREE_IO_FILE_MODE_READ | IREE_IO_FILE_MODE_ASYNC;
+  iree_status_t ImportNativeFile(iree_hal_device_t* device,
+                                 const iree::testing::TempFilePath& path,
+                                 iree_hal_memory_access_t access,
+                                 iree_hal_file_t** out_file) {
+    // Tests inspect or truncate the backing path while the HAL retains this
+    // imported handle.
+    iree_io_file_mode_t mode =
+        IREE_IO_FILE_MODE_READ | IREE_IO_FILE_MODE_ASYNC |
+        IREE_IO_FILE_MODE_SHARE_READ | IREE_IO_FILE_MODE_SHARE_WRITE;
     if (iree_all_bits_set(access, IREE_HAL_MEMORY_ACCESS_WRITE)) {
       mode |= IREE_IO_FILE_MODE_WRITE;
     }
     iree_io_file_handle_t* handle = NULL;
-    IREE_RETURN_IF_ERROR(
-        iree_io_file_handle_open(mode, iree_make_cstring_view(path.c_str()),
-                                 iree_allocator_system(), &handle));
+    IREE_RETURN_IF_ERROR(iree_io_file_handle_open(
+        mode, path.path_view(), iree_allocator_system(), &handle));
     iree_status_t status = iree_hal_file_import(
         device, IREE_HAL_QUEUE_AFFINITY_ANY, access, handle,
         IREE_HAL_EXTERNAL_FILE_FLAG_NONE, out_file);
@@ -496,8 +449,6 @@ class HostQueueStagingTest : public ::testing::Test {
   static iree_allocator_t host_allocator_;
   static iree_hal_amdgpu_libhsa_t libhsa_;
   static iree_hal_amdgpu_topology_t topology_;
-
-  std::vector<std::string> temp_paths_;
 };
 
 iree_allocator_t HostQueueStagingTest::host_allocator_;
@@ -536,12 +487,12 @@ TEST_F(HostQueueStagingTest, OneSlotLargeReadCompletesThroughSlotWaiter) {
   ASSERT_EQ(physical_device->file_staging_pool.slot_count, 1u);
 
   std::vector<uint8_t> file_data = MakePatternData(kMultiSlotTransferSize);
-  std::string path;
+  iree::testing::TempFilePath path;
   IREE_ASSERT_OK(CreateTempFileWithContents(file_data, &path));
 
   Ref<iree_hal_file_t> file;
-  IREE_ASSERT_OK(ImportFdFile(test_device.base_device(), path,
-                              IREE_HAL_MEMORY_ACCESS_READ, file.out()));
+  IREE_ASSERT_OK(ImportNativeFile(test_device.base_device(), path,
+                                  IREE_HAL_MEMORY_ACCESS_READ, file.out()));
   Ref<iree_hal_buffer_t> buffer;
   IREE_ASSERT_OK(CreatePatternedDeviceBuffer(
       test_device.allocator(), test_device.base_device(),
@@ -568,12 +519,13 @@ TEST_F(HostQueueStagingTest,
   IREE_ASSERT_OK(CreateTestDevice(&options, &test_device));
 
   std::vector<uint8_t> file_data = MakePatternData(kMultiSlotTransferSize);
-  std::string path;
+  iree::testing::TempFilePath path;
   IREE_ASSERT_OK(CreateTempFileWithContents(file_data, &path));
 
   Ref<iree_hal_file_t> source_file;
-  IREE_ASSERT_OK(ImportFdFile(test_device.base_device(), path,
-                              IREE_HAL_MEMORY_ACCESS_READ, source_file.out()));
+  IREE_ASSERT_OK(ImportNativeFile(test_device.base_device(), path,
+                                  IREE_HAL_MEMORY_ACCESS_READ,
+                                  source_file.out()));
   std::vector<uint8_t> output_data(kMultiSlotTransferSize, 0);
   Ref<iree_hal_file_t> output_file;
   IREE_ASSERT_OK(ImportHostAllocationFile(test_device.base_device(),
@@ -664,11 +616,11 @@ TEST_F(HostQueueStagingTest, OneSlotLargeWriteCompletesThroughSlotWaiter) {
   ASSERT_NE(physical_device, nullptr);
   ASSERT_EQ(physical_device->file_staging_pool.slot_count, 1u);
 
-  std::string path;
+  iree::testing::TempFilePath path;
   IREE_ASSERT_OK(CreatePatternedTempFile(kMultiSlotTransferSize, 0x00, &path));
 
   Ref<iree_hal_file_t> file;
-  IREE_ASSERT_OK(ImportFdFile(
+  IREE_ASSERT_OK(ImportNativeFile(
       test_device.base_device(), path,
       IREE_HAL_MEMORY_ACCESS_READ | IREE_HAL_MEMORY_ACCESS_WRITE, file.out()));
   Ref<iree_hal_buffer_t> buffer;
@@ -681,8 +633,8 @@ TEST_F(HostQueueStagingTest, OneSlotLargeWriteCompletesThroughSlotWaiter) {
                                    /*target_offset=*/0,
                                    kMultiSlotTransferSize));
 
-  std::vector<uint8_t> contents =
-      ReadTempFileContents(path, kMultiSlotTransferSize);
+  std::vector<uint8_t> contents;
+  IREE_ASSERT_OK(ReadTempFileContents(path, &contents));
   ASSERT_EQ(contents.size(), kMultiSlotTransferSize);
   ExpectByteRangeRepeated(contents, 0xA7);
 }
@@ -704,10 +656,10 @@ TEST_F(HostQueueStagingTest, CapacityParkedStagedWriteRetriesAfterPostDrain) {
   iree_hal_amdgpu_host_queue_t* queue = test_device.first_host_queue();
   ASSERT_NE(queue, nullptr);
 
-  std::string path;
+  iree::testing::TempFilePath path;
   IREE_ASSERT_OK(CreatePatternedTempFile(kMultiSlotTransferSize, 0x00, &path));
   Ref<iree_hal_file_t> file;
-  IREE_ASSERT_OK(ImportFdFile(
+  IREE_ASSERT_OK(ImportNativeFile(
       test_device.base_device(), path,
       IREE_HAL_MEMORY_ACCESS_READ | IREE_HAL_MEMORY_ACCESS_WRITE, file.out()));
 
@@ -771,8 +723,8 @@ TEST_F(HostQueueStagingTest, CapacityParkedStagedWriteRetriesAfterPostDrain) {
   IREE_ASSERT_OK(status);
   EXPECT_TRUE(write_parked);
 
-  std::vector<uint8_t> contents =
-      ReadTempFileContents(path, kMultiSlotTransferSize);
+  std::vector<uint8_t> contents;
+  IREE_ASSERT_OK(ReadTempFileContents(path, &contents));
   ASSERT_EQ(contents.size(), kMultiSlotTransferSize);
   ExpectByteRangeRepeated(contents, 0x3C);
 }
@@ -786,12 +738,12 @@ TEST_F(HostQueueStagingTest, ShortReadFailsTerminalSignal) {
   IREE_ASSERT_OK(CreateTestDevice(&options, &test_device));
 
   std::vector<uint8_t> file_data = MakePatternData(kStagingSlotSize);
-  std::string path;
+  iree::testing::TempFilePath path;
   IREE_ASSERT_OK(CreateTempFileWithContents(file_data, &path));
 
   Ref<iree_hal_file_t> file;
-  IREE_ASSERT_OK(ImportFdFile(test_device.base_device(), path,
-                              IREE_HAL_MEMORY_ACCESS_READ, file.out()));
+  IREE_ASSERT_OK(ImportNativeFile(test_device.base_device(), path,
+                                  IREE_HAL_MEMORY_ACCESS_READ, file.out()));
   Ref<iree_hal_buffer_t> buffer;
   IREE_ASSERT_OK(CreatePatternedDeviceBuffer(
       test_device.allocator(), test_device.base_device(), kStagingSlotSize,
@@ -817,7 +769,7 @@ TEST_F(HostQueueStagingTest, ShortReadFailsTerminalSignal) {
       test_device.base_device(), kQueueAffinity0, wait_list, signal_list, file,
       /*source_offset=*/0, buffer, /*target_offset=*/0, kStagingSlotSize,
       IREE_HAL_READ_FLAG_NONE));
-  IREE_ASSERT_OK(TruncateTempFile(path, /*length=*/0));
+  IREE_ASSERT_OK(TruncateTempFile(path));
   IREE_ASSERT_OK(
       iree_hal_semaphore_signal(wait_semaphore, wait_value, /*frontier=*/NULL));
 
