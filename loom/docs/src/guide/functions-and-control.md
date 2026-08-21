@@ -61,6 +61,12 @@ an explicitly supplied source or bytecode library. A missing declaration is a
 source verification error; a library search is never allowed to invent the
 dependency after seeing an unresolved call.
 
+This declaration-only form is intentionally sufficient when the linker or an
+embedding already constructs the complete provider universe. A
+[`module.import`](source-modules.md#declarations-state-contracts-imports-state-availability)
+can additionally constrain the exact definition to one or more opaque provider
+keys without causing source-time file loading.
+
 Exact calls are appropriate when identity is part of the algorithm: one bit
 decoder, one reference function, or one helper whose precise implementation the
 caller selected.

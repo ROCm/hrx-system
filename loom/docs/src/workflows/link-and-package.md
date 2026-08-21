@@ -8,12 +8,19 @@ invocation did not provide.
 ## Inputs and libraries
 
 Positional inputs are primary modules. Repeated `--library=path` options add
-provider modules searched after the primary inputs. Every supplied path
-publishes its exact string as an opaque `module.import` provider key:
+provider modules searched after the primary inputs. Every supplied path also
+publishes its exact string as an opaque `module.import` provider key. The root
+below declares `@project_layer` locally and constrains its definition to the
+provider bound as `"layer.loom"`:
+
+```loom title="root.loom"
+--8<-- "examples/module-composition/root.loom"
+```
 
 ```shell
 loom-link root.loom \
-  --library=providers.loombc \
+  --library=layer.loom \
+  --library=kernels.loom \
   --root=@entry \
   --mode=link \
   --to=bc \
@@ -25,12 +32,14 @@ detects their encoding independently. `--to=text|bc` controls the one linked
 module written to `--output` or standard output.
 
 The provider key is an exact string match. `loom-link` does not canonicalize the
-path or search for imported files. Build systems embedding Loom may bind other
-logical keys through the LoomC API. Primary versus library is a lookup priority,
-not a reachability rule: a symbol becomes live because it is a root or reachable
-dependency, not because it came from a primary input. Provider module order also
-does not override template matching; contracts, signatures, facts,
-requirements, and explicit provider priority decide which template is eligible.
+path or search for imported files. Embeddings may bind other logical keys
+through the LoomC API. `module.import` is optional: without one, a compatible
+exact definition can satisfy a declaration from the explicit input universe.
+Primary versus library is a lookup priority, not a reachability rule: a symbol
+becomes live because it is a root or reachable dependency, not because it came
+from a primary input. Provider module order also does not override template
+matching; contracts, signatures, facts, requirements, and explicit provider
+priority decide which template is eligible.
 
 ## Inspect before linking
 
@@ -141,33 +150,78 @@ them is useful when the embedding owns validation or when executable
 specifications should not ship in the runtime artifact. It does not change the
 production symbols' semantics.
 
-## Declarations make partial linking explicit
+## Link transitive dependencies incrementally
 
 An exact call or launch is legal in an independently verified module only when
 that module contains the compatible definition or declaration. Libraries may
 satisfy those declared dependencies when linked. They may not retroactively
 make an undeclared call valid.
 
-Selective linking resolves declarations whose named provider libraries were
-supplied. A strict link rejects reachable imports that remain unresolved. Add
-`--allow-unresolved` to produce a reusable partial artifact instead:
+For a declaration with no imports, selective linking considers compatible
+definitions from the explicitly supplied universe. If `module.import` names the
+declaration, selection is restricted to providers bound to those keys. A strict
+link rejects a reachable imported declaration that remains unresolved. Add
+`--allow-unresolved` to produce a reusable partial artifact instead.
+
+The checked composition example has three independently verifiable modules:
+
+```text
+root.loom  --@project_layer-->  layer.loom  --@scale-->  kernels.loom
+```
+
+The layer provider introduces its own kernel demand:
+
+```loom title="layer.loom"
+--8<-- "examples/module-composition/layer.loom"
+```
+
+Supplying only the layer consumes the root's satisfied import and retains the
+new transitive import in standalone bytecode:
 
 ```shell
 loom-link root.loom \
-  --library=module_a.loombc \
+  --library=layer.loom \
   --root=@entry \
   --allow-unresolved \
   --to=bc \
   --output=partial.loombc
 ```
 
-If the root imports declarations from `module_a.loombc` and
-`module_b.loombc`, this invocation consumes the satisfied `module_a.loombc`
-import and retains the `module_b.loombc` declaration and import. Imports reached
-through the selected `module_a.loombc` implementation are retained as well. A
-later invocation can use `partial.loombc` as its positional input and supply the
-remaining paths with `--library`. The linker does not chase a filesystem import
-graph or silently add a missing module.
+The generated partial module is ordinary Loom IR. It contains the selected
+layer body, the reachable root, and the unsatisfied kernel contract:
+
+```loom title="partial.loom"
+--8<-- "generated/examples/module-composition/partial.loom"
+```
+
+A later invocation can reload that artifact in a fresh process and supply only
+the remaining provider:
+
+```shell
+loom-link partial.loombc \
+  --library=kernels.loom \
+  --root=@entry \
+  --to=text \
+  --output=linked.loom
+```
+
+```loom title="linked.loom"
+--8<-- "generated/examples/module-composition/linked.loom"
+```
+
+The final module contains each reachable definition once and no longer needs
+an import or declaration. The linker did not chase the layer's key during the
+first invocation, and it did not require the root to name the layer's transitive
+dependencies. A diamond of callers reaching the same global declaration still
+selects one compatible definition by symbol identity; path reachability does
+not clone one copy per route.
+
+Run the exact formatting, partial-link, bytecode-reload, and final-link sequence
+with:
+
+```shell
+loom/docs/examples/module-composition/run.sh build/module-composition
+```
 
 `template.apply` follows the parallel family-provider model. The using module
 declares the family with `template.decl`; each explicitly supplied library may

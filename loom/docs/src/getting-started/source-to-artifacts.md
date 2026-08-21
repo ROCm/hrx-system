@@ -44,6 +44,50 @@ details, and unreachable helpers and providers can disappear after selection.
 The linker resolves declared symbol relationships; merely placing a module in
 a library does not make its entire contents live.
 
+## Compose explicit modules
+
+Every `.loom` file verifies independently. An exact call into another module
+therefore needs a local declaration that states the complete contract. A
+[`module.import`](../reference/dialects/module/ops/import.md) may additionally
+name which supplied provider can satisfy that declaration:
+
+**Source:** [`loom/docs/examples/module-composition/root.loom`](https://github.com/ROCm/hrx-system/blob/main/loom/docs/examples/module-composition/root.loom)
+
+```loom title="root.loom"
+--8<-- "examples/module-composition/root.loom"
+```
+
+The string `"layer.loom"` is an opaque provider key, not a request to open a
+file. The CLI invocation below explicitly supplies `layer.loom` and binds its
+exact path spelling as that key. An in-memory embedding can bind a logical key
+to a source without involving a filesystem.
+
+The layer itself imports a function from `kernels.loom`. The checked workflow
+links only the available layer, writes a standalone partial `.loombc`, reloads
+it, and then supplies the kernel provider:
+
+```shell
+loom/docs/examples/module-composition/run.sh build/module-composition
+```
+
+Imports are optional. A declaration without a corresponding `module.import`
+can resolve from a compatible definition in the explicitly supplied module
+universe. The `elementwise-transform` example below intentionally uses that
+simpler form: its build and embedding already choose the complete library set.
+The import-free path remains useful for generated in-memory programs, test
+wrappers, and small compositions where provider routing adds no information.
+
+| Source contract | Selection behavior |
+| --- | --- |
+| Exact declaration | Resolve a compatible definition from the explicitly supplied universe. |
+| `module.import` plus exact declaration | Resolve only from providers bound to one of the named keys. |
+| `template.decl` plus `template.apply` | Select an eligible family provider from the supplied universe; imports never gate templates. |
+
+The [linking workflow](../workflows/link-and-package.md) follows partial and
+transitive composition in detail. The [source-module
+chapter](../guide/source-modules.md#declarations-state-contracts-imports-state-availability)
+defines the language contract.
+
 ## Exact calls and selectable implementations
 
 Loom separates naming one implementation from requesting an implementation
