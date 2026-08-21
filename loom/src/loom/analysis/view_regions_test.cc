@@ -242,8 +242,7 @@ class ViewRegionsTest : public ::testing::Test {
     loom_symbolic_expr_context_initialize(module_, facts, &analysis_arena_,
                                           &expression_context_);
     IREE_ASSERT_OK(loom_view_region_table_initialize(
-        facts, &value_domain_, &expression_context_, &analysis_arena_,
-        out_table));
+        &value_domain_, &expression_context_, out_table));
     IREE_ASSERT_OK(loom_view_region_table_analyze(out_table));
   }
 

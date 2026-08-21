@@ -12,6 +12,7 @@
 #include "iree/base/internal/arena.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
+#include "loom/analysis/view_regions.h"
 #include "loom/error/error_catalog.h"
 #include "loom/ir/attribute.h"
 #include "loom/ir/context.h"
@@ -476,6 +477,17 @@ TEST_F(LowContractQuerySourceMemoryTest,
 
   loom_value_fact_table_t facts = {};
   ComputeFacts(&facts);
+  loom_local_value_domain_t value_domain = {};
+  IREE_ASSERT_OK(loom_local_value_domain_acquire_for_region(
+      module_, loom_func_like_body(function_), &analysis_arena_,
+      &value_domain));
+  loom_symbolic_expr_context_t expression_context = {};
+  loom_symbolic_expr_context_initialize(module_, &facts, &analysis_arena_,
+                                        &expression_context);
+  loom_view_region_table_t view_regions = {};
+  IREE_ASSERT_OK(loom_view_region_table_initialize(
+      &value_domain, &expression_context, &view_regions));
+  IREE_ASSERT_OK(loom_view_region_table_analyze(&view_regions));
   const loom_low_lower_source_memory_t source_memory = {
       /*.flags=*/0,
       /*.operation_kind=*/LOOM_LOW_SOURCE_MEMORY_OPERATION_LOAD,
@@ -573,6 +585,8 @@ TEST_F(LowContractQuerySourceMemoryTest,
   environment.function = function_;
   environment.target_facts = &target_facts;
   environment.fact_table = &facts;
+  environment.value_domain = &value_domain;
+  environment.view_regions = &view_regions;
   environment.arena = &arena;
   loom_target_contract_query_result_t result =
       loom_target_contract_query_result_empty();
@@ -582,6 +596,7 @@ TEST_F(LowContractQuerySourceMemoryTest,
   EXPECT_EQ(result.outcome, LOOM_TARGET_CONTRACT_QUERY_LEGAL);
   EXPECT_EQ(result.rule_index, 0);
 
+  loom_local_value_domain_release(&value_domain);
   iree_arena_deinitialize(&arena);
   iree_arena_block_pool_deinitialize(&block_pool);
 }

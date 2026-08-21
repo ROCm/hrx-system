@@ -112,7 +112,7 @@ typedef struct loom_target_legalization_context_t {
   const loom_low_descriptor_set_t* descriptor_set;
   // Source value facts visible to legalizers.
   const loom_value_fact_table_t* fact_table;
-  // Optional view-region analysis visible to legalizers.
+  // Analyzed view-region table visible to legalizers.
   const loom_view_region_table_t* view_regions;
   // Dense function-local value domain valid for the current callback.
   const loom_local_value_domain_t* value_domain;

@@ -364,11 +364,9 @@ static iree_status_t loom_movement_apply_vector_access(
   *out_applied = false;
   const loom_type_t view_type =
       loom_module_value_type(analysis->module, view_value_id);
-  const loom_fact_context_t* fact_context =
-      analysis->fact_table ? &analysis->fact_table->context : NULL;
-  if (!loom_vector_memory_access_describe(fact_context, analysis->module,
-                                          view_type, vector_type,
-                                          &request->vector_access)) {
+  if (!loom_vector_memory_access_describe(
+          &analysis->fact_table->context, analysis->module, view_type,
+          vector_type, &request->vector_access)) {
     diagnostic->rejection_bits |= LOOM_MOVEMENT_REJECTION_VECTOR_ACCESS;
     return iree_ok_status();
   }
@@ -972,12 +970,11 @@ iree_status_t loom_movement_analysis_initialize(
   *out_analysis = (loom_movement_analysis_t){0};
   out_analysis->module = value_domain->module;
   out_analysis->fact_table = fact_table;
-  out_analysis->arena = arena;
   loom_symbolic_expr_context_initialize(value_domain->module, fact_table, arena,
                                         &out_analysis->expression_context);
-  return loom_view_region_table_initialize(fact_table, value_domain,
+  return loom_view_region_table_initialize(value_domain,
                                            &out_analysis->expression_context,
-                                           arena, &out_analysis->view_regions);
+                                           &out_analysis->view_regions);
 }
 
 iree_status_t loom_movement_analysis_analyze(

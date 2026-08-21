@@ -248,10 +248,7 @@ typedef struct loom_movement_analysis_t {
   const loom_module_t* module;
 
   // Current value facts consumed by endpoint and layout queries.
-  loom_value_fact_table_t* fact_table;
-
-  // Arena backing view-region and symbolic-expression storage.
-  iree_arena_allocator_t* arena;
+  const loom_value_fact_table_t* fact_table;
 
   // Function-local symbolic expressions shared with view-region analysis.
   loom_symbolic_expr_context_t expression_context;

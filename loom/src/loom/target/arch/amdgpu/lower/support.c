@@ -621,8 +621,8 @@ static bool loom_amdgpu_source_memory_access_prefers_vgpr(
   }
   loom_low_source_memory_access_plan_t plan = {0};
   loom_low_source_memory_access_diagnostic_t diagnostic = {0};
-  if (!loom_low_source_memory_access_plan_build_with_view_regions(
-          module, fact_table, view_regions, source_op, &plan, &diagnostic)) {
+  if (!loom_low_source_memory_access_plan_build(view_regions, source_op, &plan,
+                                                &diagnostic)) {
     return true;
   }
   if (plan.operation_kind != LOOM_LOW_SOURCE_MEMORY_OPERATION_LOAD ||

@@ -1655,8 +1655,7 @@ static bool loom_amdgpu_fragment_memory_analyze(
                           loom_dim_pack_static(1), /*encoding_id=*/0);
   loom_low_source_memory_access_plan_t source_access = {0};
   loom_low_source_memory_access_diagnostic_t source_diagnostic = {0};
-  if (!loom_low_source_memory_access_plan_build_indexed_with_view_regions(
-          environment->module, environment->fact_table,
+  if (!loom_low_source_memory_access_plan_build_indexed(
           environment->view_regions, operation_kind, source->view,
           source->dynamic_indices, source->static_indices, scalar_vector_type,
           (loom_vector_memory_cache_policy_t){0}, &source_access,

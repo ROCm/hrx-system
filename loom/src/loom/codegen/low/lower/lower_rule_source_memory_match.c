@@ -27,13 +27,11 @@ loom_low_lower_rule_source_memory_state_resolve(
   IREE_ASSERT_EQ(state->source_op, source_op);
   if (!state->plan_attempted) {
     state->plan_attempted = true;
-    if (match_context->fact_table != NULL) {
+    if (match_context->view_regions != NULL) {
       IREE_ASSERT(state->access_plan != NULL);
-      state->plan_available =
-          loom_low_source_memory_access_plan_build_with_view_regions(
-              match_context->module, match_context->fact_table,
-              match_context->view_regions, source_op, state->access_plan,
-              &state->diagnostic);
+      state->plan_available = loom_low_source_memory_access_plan_build(
+          match_context->view_regions, source_op, state->access_plan,
+          &state->diagnostic);
     }
   }
   return state->plan_available ? state->access_plan : NULL;

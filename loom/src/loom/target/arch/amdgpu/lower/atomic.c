@@ -1299,9 +1299,8 @@ static bool loom_amdgpu_atomic_select(
   *memory_diagnostic = (loom_amdgpu_memory_access_diagnostic_t){0};
   *diagnostic = (loom_amdgpu_atomic_diagnostic_t){0};
 
-  if (!loom_low_source_memory_access_plan_build_with_view_regions(
-          module, fact_table, view_regions, source_op, &out_selection->source,
-          source_diagnostic)) {
+  if (!loom_low_source_memory_access_plan_build(
+          view_regions, source_op, &out_selection->source, source_diagnostic)) {
     return false;
   }
   loom_amdgpu_atomic_operation_kind_t memory_operation_kind =

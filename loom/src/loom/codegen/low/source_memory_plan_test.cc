@@ -294,12 +294,10 @@ class SourceMemoryPlanTest : public ::testing::Test {
     loom_symbolic_expr_context_initialize(module_, facts, &analysis_arena_,
                                           &expression_context);
     IREE_CHECK_OK(loom_view_region_table_initialize(
-        facts, &value_domain, &expression_context, &analysis_arena_,
-        &view_regions));
+        &value_domain, &expression_context, &view_regions));
     IREE_CHECK_OK(loom_view_region_table_analyze(&view_regions));
-    const bool built =
-        loom_low_source_memory_access_plan_build_with_view_regions(
-            module_, facts, &view_regions, op, out_plan, out_diagnostic);
+    const bool built = loom_low_source_memory_access_plan_build(
+        &view_regions, op, out_plan, out_diagnostic);
     loom_local_value_domain_release(&value_domain);
     return built;
   }
@@ -318,14 +316,11 @@ class SourceMemoryPlanTest : public ::testing::Test {
     loom_symbolic_expr_context_initialize(module_, facts, &analysis_arena_,
                                           &expression_context);
     IREE_CHECK_OK(loom_view_region_table_initialize(
-        facts, &value_domain, &expression_context, &analysis_arena_,
-        &view_regions));
+        &value_domain, &expression_context, &view_regions));
     IREE_CHECK_OK(loom_view_region_table_analyze(&view_regions));
-    const bool built =
-        loom_low_source_memory_access_plan_build_view_with_view_regions(
-            module_, facts, &view_regions,
-            LOOM_LOW_SOURCE_MEMORY_OPERATION_LOAD, view, cache_policy, out_plan,
-            out_diagnostic);
+    const bool built = loom_low_source_memory_access_plan_build_view(
+        &view_regions, LOOM_LOW_SOURCE_MEMORY_OPERATION_LOAD, view,
+        cache_policy, out_plan, out_diagnostic);
     loom_local_value_domain_release(&value_domain);
     return built;
   }

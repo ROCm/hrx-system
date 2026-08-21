@@ -189,9 +189,8 @@ static bool loom_amdgpu_prefetch_select_source(
   }
 
   loom_low_source_memory_access_diagnostic_t source_diagnostic = {0};
-  if (!loom_low_source_memory_access_plan_build_with_view_regions(
-          module, fact_table, view_regions, source_op, &out_plan->source,
-          &source_diagnostic)) {
+  if (!loom_low_source_memory_access_plan_build(
+          view_regions, source_op, &out_plan->source, &source_diagnostic)) {
     *out_decision_key = source_diagnostic.rejection_bits != 0
                             ? loom_low_source_memory_access_rejection_key(
                                   source_diagnostic.rejection_bits)

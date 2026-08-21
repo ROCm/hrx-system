@@ -1575,8 +1575,8 @@ static bool loom_amdgpu_sanitizer_race_access_plan_build(
 
   loom_low_source_memory_access_plan_t source = {0};
   loom_vector_memory_cache_policy_t cache_policy = {0};
-  if (!loom_low_source_memory_access_plan_build_indexed_with_view_regions(
-          module, fact_table, view_regions, source_kind, view_value_id,
+  if (!loom_low_source_memory_access_plan_build_indexed(
+          view_regions, source_kind, view_value_id,
           loom_sanitizer_race_access_indices(op),
           loom_sanitizer_race_access_static_indices(op), vector_type,
           cache_policy, &source, out_source_diagnostic)) {

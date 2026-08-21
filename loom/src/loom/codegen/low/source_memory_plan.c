@@ -113,9 +113,6 @@ loom_low_source_memory_access_vector_offset_kind(
   if (offset_value == LOOM_VALUE_ID_INVALID) {
     return LOOM_LOW_SOURCE_MEMORY_VECTOR_OFFSET_NONE;
   }
-  if (!fact_table) {
-    return LOOM_LOW_SOURCE_MEMORY_VECTOR_OFFSET_OTHER;
-  }
   const loom_value_facts_t facts =
       loom_value_fact_table_lookup(fact_table, offset_value);
   return loom_low_source_memory_access_offset_facts_are_identity_iota(
@@ -179,7 +176,7 @@ static void loom_low_source_memory_access_dynamic_index_source(
       };
   *out_source = LOOM_LOW_SOURCE_MEMORY_DYNAMIC_INDEX_SOURCE_VALUE;
   *out_dimension = LOOM_KERNEL_DIMENSION_COUNT_;
-  if (!fact_table || index == LOOM_VALUE_ID_INVALID ||
+  if (index == LOOM_VALUE_ID_INVALID ||
       !loom_value_fact_table_has_entry(fact_table, index)) {
     return;
   }
@@ -771,8 +768,7 @@ static bool loom_low_source_memory_facts_are_stronger(
 static loom_value_id_t loom_low_source_memory_symbolic_term_materialized_value(
     const loom_value_fact_table_t* fact_table,
     const loom_symbolic_term_t* expression_term) {
-  if (!fact_table ||
-      expression_term->relation_value_id == LOOM_VALUE_ID_INVALID ||
+  if (expression_term->relation_value_id == LOOM_VALUE_ID_INVALID ||
       expression_term->relation_value_id == expression_term->value_id ||
       !loom_value_fact_table_has_entry(fact_table,
                                        expression_term->relation_value_id) ||
@@ -938,68 +934,45 @@ static bool loom_low_source_memory_access_add_view_region_byte_offset(
 }
 
 static bool loom_low_source_memory_access_add_view_base_byte_offset(
-    const loom_module_t* module, const loom_value_fact_table_t* fact_table,
     const loom_view_region_table_t* view_regions,
     const loom_vector_memory_access_t* vector_access,
     loom_value_id_t view_value_id, loom_low_source_memory_access_plan_t* plan,
     loom_low_source_memory_access_diagnostic_t* diagnostic,
     int64_t* inout_static_byte_offset) {
-  loom_value_fact_view_reference_t view_reference = {0};
-  if (!loom_value_facts_query_view_reference(
-          &fact_table->context,
-          loom_value_fact_table_lookup(fact_table, view_value_id),
-          &view_reference)) {
+  const loom_module_t* module = view_regions->module;
+  const loom_value_fact_table_t* fact_table = view_regions->fact_table;
+  const loom_view_region_t* view_region = NULL;
+  if (!loom_view_region_table_try_lookup(view_regions, view_value_id,
+                                         &view_region)) {
     diagnostic->rejection_bits |=
         LOOM_LOW_SOURCE_MEMORY_ACCESS_REJECTION_VIEW_SOURCE;
     return false;
   }
 
-  const loom_view_region_t* view_region = NULL;
-  if (view_regions && loom_view_region_table_try_lookup(
-                          view_regions, view_value_id, &view_region)) {
-    loom_vector_memory_access_t base_vector_access = {0};
-    const loom_vector_memory_access_t* view_base_access = vector_access;
-    if (view_region->base_view_value_id != LOOM_VALUE_ID_INVALID &&
-        view_region->base_view_value_id < module->values.count) {
-      const loom_type_t base_view_type =
-          loom_module_value_type(module, view_region->base_view_value_id);
-      if (loom_type_is_view(base_view_type) &&
-          loom_vector_memory_access_describe(
-              &fact_table->context, module, base_view_type,
-              vector_access->vector_type, &base_vector_access)) {
-        view_base_access = &base_vector_access;
-      }
-    }
-    if (!loom_low_source_memory_access_add_view_region_byte_offset(
-            fact_table, view_base_access, view_region, plan, diagnostic,
-            inout_static_byte_offset)) {
-      return false;
-    }
-  } else {
-    int64_t view_base_byte_offset = 0;
-    if (loom_low_source_memory_access_exact_i64(view_reference.base_byte_offset,
-                                                &view_base_byte_offset)) {
-      int64_t static_byte_offset = 0;
-      if (!iree_checked_add_i64(*inout_static_byte_offset,
-                                view_base_byte_offset, &static_byte_offset)) {
-        diagnostic->rejection_bits |=
-            LOOM_LOW_SOURCE_MEMORY_ACCESS_REJECTION_VIEW_BASE_OVERFLOW;
-        return false;
-      }
-      plan->static_view_base_byte_offset = view_base_byte_offset;
-      *inout_static_byte_offset = static_byte_offset;
-    } else {
-      diagnostic->rejection_bits |=
-          LOOM_LOW_SOURCE_MEMORY_ACCESS_REJECTION_VIEW_BASE;
-      return false;
+  loom_vector_memory_access_t base_vector_access = {0};
+  const loom_vector_memory_access_t* view_base_access = vector_access;
+  if (view_region->base_view_value_id != LOOM_VALUE_ID_INVALID &&
+      view_region->base_view_value_id < module->values.count) {
+    const loom_type_t base_view_type =
+        loom_module_value_type(module, view_region->base_view_value_id);
+    if (loom_type_is_view(base_view_type) &&
+        loom_vector_memory_access_describe(
+            &fact_table->context, module, base_view_type,
+            vector_access->vector_type, &base_vector_access)) {
+      view_base_access = &base_vector_access;
     }
   }
+  if (!loom_low_source_memory_access_add_view_region_byte_offset(
+          fact_table, view_base_access, view_region, plan, diagnostic,
+          inout_static_byte_offset)) {
+    return false;
+  }
 
-  plan->memory_space = view_reference.memory_space;
-  plan->root_value_id = view_reference.root_value_id;
+  plan->memory_space = view_region->memory_space;
+  plan->root_value_id = view_region->root_value_id;
   plan->root_minimum_alignment = loom_low_source_memory_clamp_alignment(
-      view_reference.root_minimum_alignment);
-  plan->alias_scope_id = view_reference.alias_scope_id;
+      view_region->root_minimum_alignment);
+  plan->alias_scope_id = view_region->alias_scope_id;
   return true;
 }
 
@@ -1236,7 +1209,6 @@ loom_low_source_memory_classify_address_layout(
 }
 
 static bool loom_low_source_memory_access_plan_from_components(
-    const loom_module_t* module, const loom_value_fact_table_t* fact_table,
     const loom_view_region_table_t* view_regions,
     loom_low_source_memory_operation_kind_t operation_kind,
     loom_value_id_t view_value_id, loom_value_slice_t dynamic_indices,
@@ -1244,26 +1216,23 @@ static bool loom_low_source_memory_access_plan_from_components(
     loom_type_t vector_type, loom_vector_memory_cache_policy_t cache_policy,
     loom_low_source_memory_access_plan_t* out_plan,
     loom_low_source_memory_access_diagnostic_t* out_diagnostic) {
-  *out_plan = (loom_low_source_memory_access_plan_t){
-      .operation_kind = operation_kind,
-      .view_value_id = view_value_id,
-      .base_view_value_id = view_value_id,
-      .memory_space = LOOM_VALUE_FACT_MEMORY_SPACE_UNKNOWN,
-      .root_value_id = LOOM_VALUE_ID_INVALID,
-      .root_minimum_alignment = 1,
-      .alias_scope_id = LOOM_VALUE_FACT_ALIAS_SCOPE_ID_NONE,
-      .dynamic_view_base_value_id = LOOM_VALUE_ID_INVALID,
-      .dynamic_view_base_byte_facts = loom_value_facts_unknown(),
-      .minimum_alignment = 1,
-      .cache_policy = cache_policy,
-  };
-  *out_diagnostic = (loom_low_source_memory_access_diagnostic_t){0};
+  out_plan->operation_kind = operation_kind;
+  out_plan->view_value_id = view_value_id;
+  out_plan->base_view_value_id = view_value_id;
+  out_plan->root_value_id = LOOM_VALUE_ID_INVALID;
+  out_plan->root_minimum_alignment = 1;
+  out_plan->alias_scope_id = LOOM_VALUE_FACT_ALIAS_SCOPE_ID_NONE;
+  out_plan->dynamic_view_base_value_id = LOOM_VALUE_ID_INVALID;
+  out_plan->dynamic_view_base_byte_facts = loom_value_facts_unknown();
+  out_plan->minimum_alignment = 1;
+  out_plan->cache_policy = cache_policy;
+  const loom_module_t* module = view_regions->module;
+  const loom_value_fact_table_t* fact_table = view_regions->fact_table;
 
   loom_vector_memory_access_t vector_access;
-  const loom_fact_context_t* fact_context =
-      fact_table ? &fact_table->context : NULL;
-  if (!loom_vector_memory_access_describe(fact_context, module, view_type,
-                                          vector_type, &vector_access)) {
+  if (!loom_vector_memory_access_describe(&fact_table->context, module,
+                                          view_type, vector_type,
+                                          &vector_access)) {
     out_diagnostic->rejection_bits |=
         LOOM_LOW_SOURCE_MEMORY_ACCESS_REJECTION_DESCRIBE_FAILED;
     return false;
@@ -1338,8 +1307,8 @@ static bool loom_low_source_memory_access_plan_from_components(
     return false;
   }
   if (!loom_low_source_memory_access_add_view_base_byte_offset(
-          module, fact_table, view_regions, &vector_access, view_value_id,
-          out_plan, out_diagnostic, &static_byte_offset)) {
+          view_regions, &vector_access, view_value_id, out_plan, out_diagnostic,
+          &static_byte_offset)) {
     return false;
   }
 
@@ -1380,13 +1349,11 @@ static bool loom_low_source_memory_access_plan_from_components(
             },
         .materialized_dynamic_value_id = source_index,
     };
-    if (view_regions != NULL) {
-      loom_symbolic_expr_summary_t analyzed_summary = {0};
-      if (loom_symbolic_expr_context_try_lookup_summary(
-              view_regions->expression_context, source_index,
-              &analyzed_summary)) {
-        index_summary = analyzed_summary;
-      }
+    loom_symbolic_expr_summary_t analyzed_summary = {0};
+    if (loom_symbolic_expr_context_try_lookup_summary(
+            view_regions->expression_context, source_index,
+            &analyzed_summary)) {
+      index_summary = analyzed_summary;
     }
 
     const loom_symbolic_expr_t* index_expression = &index_summary.expression;
@@ -1594,13 +1561,35 @@ static bool loom_low_source_memory_access_plan_from_components(
   return true;
 }
 
-bool loom_low_source_memory_access_plan_build_with_view_regions(
-    const loom_module_t* module, const loom_value_fact_table_t* fact_table,
+static bool loom_low_source_memory_access_plan_build_indexed_impl(
+    const loom_view_region_table_t* view_regions,
+    loom_low_source_memory_operation_kind_t operation_kind,
+    loom_value_id_t view_value_id, loom_value_slice_t dynamic_indices,
+    loom_attribute_t static_indices, loom_type_t vector_type,
+    loom_vector_memory_cache_policy_t cache_policy,
+    loom_low_source_memory_access_plan_t* out_plan,
+    loom_low_source_memory_access_diagnostic_t* out_diagnostic) {
+  const loom_module_t* module = view_regions->module;
+  if (view_value_id >= module->values.count) {
+    out_diagnostic->rejection_bits |=
+        LOOM_LOW_SOURCE_MEMORY_ACCESS_REJECTION_VIEW_SOURCE;
+    return false;
+  }
+  const loom_type_t view_type = loom_module_value_type(module, view_value_id);
+  return loom_low_source_memory_access_plan_from_components(
+      view_regions, operation_kind, view_value_id, dynamic_indices,
+      static_indices, view_type, vector_type, cache_policy, out_plan,
+      out_diagnostic);
+}
+
+bool loom_low_source_memory_access_plan_build(
     const loom_view_region_table_t* view_regions, const loom_op_t* source_op,
     loom_low_source_memory_access_plan_t* out_plan,
     loom_low_source_memory_access_diagnostic_t* out_diagnostic) {
   *out_plan = (loom_low_source_memory_access_plan_t){0};
   *out_diagnostic = (loom_low_source_memory_access_diagnostic_t){0};
+  const loom_module_t* module = view_regions->module;
+  const loom_value_fact_table_t* fact_table = view_regions->fact_table;
 
   loom_memory_access_t access = loom_memory_access_cast(module, source_op);
   if (!loom_memory_access_isa(access)) {
@@ -1637,12 +1626,11 @@ bool loom_low_source_memory_access_plan_build_with_view_regions(
   const loom_type_t vector_type =
       loom_low_source_memory_access_payload_vector_type(module, source_op,
                                                         access, view_type);
-  const bool built =
-      loom_low_source_memory_access_plan_build_indexed_with_view_regions(
-          module, fact_table, view_regions, operation_kind, view_value_id,
-          loom_memory_access_dynamic_indices(access),
-          loom_memory_access_static_indices(access), vector_type, cache_policy,
-          out_plan, out_diagnostic);
+  const bool built = loom_low_source_memory_access_plan_build_indexed_impl(
+      view_regions, operation_kind, view_value_id,
+      loom_memory_access_dynamic_indices(access),
+      loom_memory_access_static_indices(access), vector_type, cache_policy,
+      out_plan, out_diagnostic);
   if (built) {
     out_plan->vector_offset_kind =
         loom_low_source_memory_access_vector_offset_kind(
@@ -1651,8 +1639,7 @@ bool loom_low_source_memory_access_plan_build_with_view_regions(
   return built;
 }
 
-bool loom_low_source_memory_access_plan_build_indexed_with_view_regions(
-    const loom_module_t* module, const loom_value_fact_table_t* fact_table,
+bool loom_low_source_memory_access_plan_build_indexed(
     const loom_view_region_table_t* view_regions,
     loom_low_source_memory_operation_kind_t operation_kind,
     loom_value_id_t view_value_id, loom_value_slice_t dynamic_indices,
@@ -1662,20 +1649,12 @@ bool loom_low_source_memory_access_plan_build_indexed_with_view_regions(
     loom_low_source_memory_access_diagnostic_t* out_diagnostic) {
   *out_plan = (loom_low_source_memory_access_plan_t){0};
   *out_diagnostic = (loom_low_source_memory_access_diagnostic_t){0};
-  if (view_value_id >= module->values.count) {
-    out_diagnostic->rejection_bits |=
-        LOOM_LOW_SOURCE_MEMORY_ACCESS_REJECTION_VIEW_SOURCE;
-    return false;
-  }
-  const loom_type_t view_type = loom_module_value_type(module, view_value_id);
-  return loom_low_source_memory_access_plan_from_components(
-      module, fact_table, view_regions, operation_kind, view_value_id,
-      dynamic_indices, static_indices, view_type, vector_type, cache_policy,
-      out_plan, out_diagnostic);
+  return loom_low_source_memory_access_plan_build_indexed_impl(
+      view_regions, operation_kind, view_value_id, dynamic_indices,
+      static_indices, vector_type, cache_policy, out_plan, out_diagnostic);
 }
 
-bool loom_low_source_memory_access_plan_build_view_with_view_regions(
-    const loom_module_t* module, const loom_value_fact_table_t* fact_table,
+bool loom_low_source_memory_access_plan_build_view(
     const loom_view_region_table_t* view_regions,
     loom_low_source_memory_operation_kind_t operation_kind,
     loom_value_id_t view_value_id,
@@ -1684,6 +1663,7 @@ bool loom_low_source_memory_access_plan_build_view_with_view_regions(
     loom_low_source_memory_access_diagnostic_t* out_diagnostic) {
   *out_plan = (loom_low_source_memory_access_plan_t){0};
   *out_diagnostic = (loom_low_source_memory_access_diagnostic_t){0};
+  const loom_module_t* module = view_regions->module;
   if (view_value_id >= module->values.count) {
     out_diagnostic->rejection_bits |=
         LOOM_LOW_SOURCE_MEMORY_ACCESS_REJECTION_VIEW_SOURCE;
@@ -1704,10 +1684,9 @@ bool loom_low_source_memory_access_plan_build_view_with_view_regions(
   loom_attribute_t static_indices =
       loom_attr_i64_array(zero_indices, loom_type_rank(result_view_type));
 
-  return loom_low_source_memory_access_plan_build_indexed_with_view_regions(
-      module, fact_table, view_regions, operation_kind, access_view_id,
-      dynamic_indices, static_indices, vector_type, cache_policy, out_plan,
-      out_diagnostic);
+  return loom_low_source_memory_access_plan_build_indexed_impl(
+      view_regions, operation_kind, access_view_id, dynamic_indices,
+      static_indices, vector_type, cache_policy, out_plan, out_diagnostic);
 }
 
 iree_string_view_t loom_low_source_memory_access_rejection_key(

@@ -301,19 +301,14 @@ void loom_low_source_memory_access_plan_make_summary(
     loom_low_byte_interval_t* out_interval,
     loom_low_memory_access_summary_t* out_summary);
 
-// Builds a target-independent source memory plan for source memory ops.
-//
-// When present, |view_regions| is only queried with non-mutating lookups and
-// must already have been analyzed by the caller. View bases and dynamic index
-// expressions then reuse function-local summaries without turning each access
-// into a producer walk. Passing NULL intentionally restricts planning to facts
-// already published for the source view and index values.
+// Builds a target-independent source memory plan for source memory ops from an
+// analyzed function-local view-region table. Planning only performs
+// non-mutating summary lookups and never walks source producers.
 //
 // Returns false when the source op cannot be decomposed into a complete source
 // plan. Targets are responsible for checking their own memory spaces, address
 // forms, descriptor availability, immediate ranges, and register footprints.
-bool loom_low_source_memory_access_plan_build_with_view_regions(
-    const loom_module_t* module, const loom_value_fact_table_t* fact_table,
+bool loom_low_source_memory_access_plan_build(
     const loom_view_region_table_t* view_regions, const loom_op_t* source_op,
     loom_low_source_memory_access_plan_t* out_plan,
     loom_low_source_memory_access_diagnostic_t* out_diagnostic);
@@ -323,8 +318,7 @@ bool loom_low_source_memory_access_plan_build_with_view_regions(
 // This is the component-level sibling of vector.load/store planning for source
 // ops that are not themselves memory transfers but still name a logical view
 // element or vector footprint, such as sanitizer access assertions.
-bool loom_low_source_memory_access_plan_build_indexed_with_view_regions(
-    const loom_module_t* module, const loom_value_fact_table_t* fact_table,
+bool loom_low_source_memory_access_plan_build_indexed(
     const loom_view_region_table_t* view_regions,
     loom_low_source_memory_operation_kind_t operation_kind,
     loom_value_id_t view_value_id, loom_value_slice_t dynamic_indices,
@@ -341,8 +335,7 @@ bool loom_low_source_memory_access_plan_build_indexed_with_view_regions(
 // supplied. Targets use this for memory-to-memory movement ops such as async
 // global-to-workgroup gathers, where the source IR names a view projection
 // rather than an indexed vector load.
-bool loom_low_source_memory_access_plan_build_view_with_view_regions(
-    const loom_module_t* module, const loom_value_fact_table_t* fact_table,
+bool loom_low_source_memory_access_plan_build_view(
     const loom_view_region_table_t* view_regions,
     loom_low_source_memory_operation_kind_t operation_kind,
     loom_value_id_t view_value_id,
