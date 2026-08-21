@@ -771,9 +771,10 @@ endfunction()
 
 # iree_symlink_tool
 #
-# Adds a command to TARGET which symlinks a tool from elsewhere
+# Adds a command to TARGET which aliases a tool from elsewhere
 # (FROM_TOOL_TARGET_NAME) to a local file name (TO_EXE_NAME) in the current
-# binary directory.
+# binary directory. Windows uses a copy because file symlinks require
+# Developer Mode or elevated privileges.
 #
 # Parameters:
 #   TARGET: Local target to which to add the symlink command (i.e. an
@@ -797,6 +798,11 @@ function(iree_symlink_tool)
   set(_FROM_TOOL_TARGET ${_RULE_FROM_TOOL_TARGET})
   set(_TO_TOOL_PATH "${CMAKE_CURRENT_BINARY_DIR}/${_RULE_TO_EXE_NAME}${CMAKE_EXECUTABLE_SUFFIX}")
   get_filename_component(_TO_TOOL_DIR "${_TO_TOOL_PATH}" DIRECTORY)
+  if(WIN32)
+    set(_TO_TOOL_MATERIALIZATION_COMMAND copy_if_different)
+  else()
+    set(_TO_TOOL_MATERIALIZATION_COMMAND create_symlink)
+  endif()
 
   add_custom_command(
     TARGET "${_TARGET}"
@@ -806,7 +812,7 @@ function(iree_symlink_tool)
     COMMAND
       ${CMAKE_COMMAND} -E make_directory "${_TO_TOOL_DIR}"
     COMMAND
-      ${CMAKE_COMMAND} -E create_symlink
+      ${CMAKE_COMMAND} -E ${_TO_TOOL_MATERIALIZATION_COMMAND}
         "$<TARGET_FILE:${_FROM_TOOL_TARGET}>"
         "${_TO_TOOL_PATH}"
   )

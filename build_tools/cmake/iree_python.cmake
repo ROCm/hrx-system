@@ -15,13 +15,19 @@ function(_iree_py_library_source_target OUTPUT_TARGET SOURCE_FILE)
   if(NOT TARGET "${_SOURCE_TARGET}")
     set(_SOURCE_BIN_PATH "${CMAKE_CURRENT_BINARY_DIR}/${SOURCE_FILE}")
     get_filename_component(_SOURCE_BIN_DIR "${_SOURCE_BIN_PATH}" DIRECTORY)
+    # Windows file symlinks require Developer Mode or elevated privileges.
+    if(WIN32)
+      set(_SOURCE_MATERIALIZATION_COMMAND copy_if_different)
+    else()
+      set(_SOURCE_MATERIALIZATION_COMMAND create_symlink)
+    endif()
     add_custom_command(
       OUTPUT
         "${_SOURCE_BIN_PATH}"
       COMMAND
         ${CMAKE_COMMAND} -E make_directory "${_SOURCE_BIN_DIR}"
       COMMAND
-        ${CMAKE_COMMAND} -E create_symlink
+        ${CMAKE_COMMAND} -E ${_SOURCE_MATERIALIZATION_COMMAND}
           "${CMAKE_CURRENT_SOURCE_DIR}/${SOURCE_FILE}"
           "${_SOURCE_BIN_PATH}"
       DEPENDS
