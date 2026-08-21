@@ -1068,17 +1068,16 @@ iree_status_t stage_windows_dpu_code_buffer(
           command->pathb_code_staged_size - command->control_buffer_size);
       std::memset(code_cpu_ptr + stale_tail_offset, 0, stale_tail_size);
     }
-    std::memcpy(code_cpu_ptr, command->control_buffer->buffer.cpu_ptr,
-                static_cast<size_t>(command->control_buffer_size));
   }
   {
     mcdm::Error error;
-    if (!mcdm::CommitPathBCodeWrite(
-            command->device->api, command->device->device, aperture,
-            code_offset, static_cast<uint64_t>(command->control_buffer_size),
-            &error)) {
+    const mcdm::CpuCopyRange code_range = {
+        code_offset, command->control_buffer->buffer.cpu_ptr,
+        static_cast<uint64_t>(command->control_buffer_size)};
+    if (!mcdm::CopyAndCommitPathBCodeWrites(aperture, &code_range, 1,
+                                            &error)) {
       return status_from_mcdm_error(
-          "amdxdna Windows MCDM path-B single aperture code commit failed",
+          "amdxdna Windows MCDM path-B single aperture code staging failed",
           error);
     }
     // Compact Commit is CPU clflush. That flush does not snoop the NPU cache,
