@@ -1168,6 +1168,13 @@ class BuildFileFunctions(object):
     def iree_build_test(self, **kwargs):
         pass
 
+    def iree_generated_files(self, tags=None, **kwargs):
+        if self._should_skip_target(tags=tags):
+            return
+        raise NotImplementedError(
+            "iree_generated_files requires an explicit CMake projection"
+        )
+
     def iree_msvc_masm_library(self, **kwargs):
         # CMakeLists.txt owns its equivalent custom ml.exe/ml64.exe invocation.
         pass

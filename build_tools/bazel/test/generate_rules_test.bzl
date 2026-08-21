@@ -92,10 +92,50 @@ def _test_generated_files_declares_action_contract_impl(env, target):
     _expect_basename(env, action.inputs.to_list(), "generate_rule_fixture.in")
     _expect_basename(env, action.inputs.to_list(), "generate_rule_fixture.data")
 
+def _test_generated_files_accepts_repeated_basenames(name, **kwargs):
+    util.helper_target(
+        iree_generated_files,
+        name = name + "_subject",
+        outs = [
+            "first/shared.h",
+            "second/shared.h",
+        ],
+        output_args = {
+            "first/shared.h": "--first={path}",
+            "second/shared.h": "--second={path}",
+        },
+        tags = ["manual"],
+        tool = "//build_tools/bazel/test:generate_rule_fixture_tool",
+    )
+    analysis_test(
+        name = name,
+        impl = _test_generated_files_accepts_repeated_basenames_impl,
+        target = name + "_subject",
+        **kwargs
+    )
+
+def _test_generated_files_accepts_repeated_basenames_impl(env, target):
+    actions = target[TestingAspectInfo].actions
+    env.expect.that_int(len(actions)).equals(1)
+    action_args = actions[0].argv
+    _expect_arg_with_prefix_and_suffix(
+        env,
+        action_args,
+        "--first=",
+        "first/shared.h",
+    )
+    _expect_arg_with_prefix_and_suffix(
+        env,
+        action_args,
+        "--second=",
+        "second/shared.h",
+    )
+
 def generate_rules_test_suite(name):
     test_suite(
         name = name,
         tests = [
             _test_generated_files_declares_action_contract,
+            _test_generated_files_accepts_repeated_basenames,
         ],
     )
