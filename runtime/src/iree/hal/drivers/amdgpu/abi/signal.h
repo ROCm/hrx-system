@@ -42,9 +42,13 @@ typedef hsa_signal_t iree_hsa_signal_t;
 
 #endif  // IREE_AMDGPU_TARGET_DEVICE
 
-// No-op signal that will immediately succeed when waited on and be ignored when
-// signaling.
-#define iree_hsa_signal_null() (iree_hsa_signal_t){0}
+// Returns a no-op signal that will immediately succeed when waited on and be
+// ignored when signaling.
+static IREE_AMDGPU_ATTRIBUTE_ALWAYS_INLINE inline iree_hsa_signal_t
+iree_hsa_signal_null(void) {
+  iree_hsa_signal_t signal = {0};
+  return signal;
+}
 
 // Returns true if the given signal is null.
 #define iree_hsa_signal_is_null(signal) ((signal).handle == 0)
