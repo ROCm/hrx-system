@@ -952,11 +952,13 @@ def exec_path(
 ) -> int:
     try:
         os.chdir(cwd)
-        bazel_launcher.exec_process(argv, env or os.environ)
-    except OSError as exc:
-        print(f"dev.py: failed to exec {quote_command(argv)}: {exc}", file=sys.stderr)
+        return bazel_launcher.handoff_process(argv, env or os.environ)
+    except (OSError, ValueError) as exc:
+        print(
+            f"dev.py: failed to execute {quote_command(argv)}: {exc}",
+            file=sys.stderr,
+        )
         return 127
-    raise AssertionError("os.execvpe returned unexpectedly")
 
 
 def cleanup_try_scratch(scratch_dir: Path) -> None:

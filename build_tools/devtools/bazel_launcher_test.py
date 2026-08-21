@@ -331,21 +331,21 @@ class BazelLauncherTest(unittest.TestCase):
             self.assertIn("points to missing file", error_output.getvalue())
             self.assertFalse(script_path.exists())
 
-    def test_exec_process_quotes_windows_arguments_for_the_crt(self):
+    def test_handoff_process_waits_for_the_direct_windows_child(self):
         argv = [r"C:\Program Files\Python\python.exe", "two words", 'a"b']
         environment = {"PATH": r"C:\Windows"}
+        completed = subprocess.CompletedProcess(argv, 37)
 
         with (
             mock.patch.object(bazel_launcher.os, "name", "nt"),
-            mock.patch.object(bazel_launcher.os, "execvpe") as execvpe,
+            mock.patch.object(
+                bazel_launcher.subprocess, "run", return_value=completed
+            ) as run_process,
         ):
-            bazel_launcher.exec_process(argv, environment)
+            result = bazel_launcher.handoff_process(argv, environment)
 
-        execvpe.assert_called_once_with(
-            argv[0],
-            [subprocess.list2cmdline([argument]) for argument in argv],
-            environment,
-        )
+        self.assertEqual(result, 37)
+        run_process.assert_called_once_with(argv, env=environment)
 
     def test_main_preserves_the_full_process_handoff_contract(self):
         with tempfile.TemporaryDirectory() as temporary_dir:

@@ -363,15 +363,17 @@ def remove_launch_script(script_path: Path) -> None:
         )
 
 
-def exec_process(argv: list[str], environment: Mapping[str, str]) -> None:
-    """Overlays the current process while preserving native argument parsing."""
-    exec_argv = argv
+def handoff_process(argv: list[str], environment: Mapping[str, str]) -> int:
+    """Overlays on POSIX or waits for a direct child on Windows."""
     if os.name == "nt":
-        # The Windows CRT exec family joins argv without quoting embedded
-        # whitespace. Quote each token using the same encoding Python's
-        # subprocess module uses for CreateProcess command lines.
-        exec_argv = [subprocess.list2cmdline([argument]) for argument in argv]
-    os.execvpe(argv[0], exec_argv, environment)
+        # Windows cannot replace the current process image. The CRT exec family
+        # starts a child and terminates the caller, which signals the launcher's
+        # process handle while the target is still running. Remain as the
+        # target's direct parent so callers retain a valid lifetime and exit-code
+        # contract without introducing a command interpreter.
+        return subprocess.run(argv, env=environment).returncode
+    os.execvpe(argv[0], argv, environment)
+    raise AssertionError("os.execvpe returned unexpectedly")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -386,13 +388,12 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         remove_launch_script(launch.script_path)
         os.chdir(launch.cwd)
-        exec_process(launch.argv, launch.env)
+        return handoff_process(launch.argv, launch.env)
     except (OSError, ValueError) as exc:
         if script_path_value is not None and not parent_owns_script:
             remove_launch_script(Path(script_path_value))
         print(f"iree-bazel-launcher: {exc}", file=sys.stderr)
         return 127
-    raise AssertionError("os.execvpe returned unexpectedly")
 
 
 if __name__ == "__main__":
