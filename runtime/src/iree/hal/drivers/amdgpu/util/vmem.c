@@ -39,12 +39,12 @@ static hsa_status_t iree_hal_amdgpu_find_global_memory_pool_iterator(
   if (!alloc_allowed) return HSA_STATUS_SUCCESS;
 
   // Match if flags are present.
-  hsa_region_global_flag_t global_flag = 0;
+  uint32_t global_flags = 0;
   hsa_status = iree_hsa_amd_memory_pool_get_info_raw(
       state->libhsa, memory_pool, HSA_AMD_MEMORY_POOL_INFO_GLOBAL_FLAGS,
-      &global_flag);
+      &global_flags);
   if (hsa_status != HSA_STATUS_SUCCESS) return hsa_status;
-  if (global_flag & state->match_flags) {
+  if (global_flags & state->match_flags) {
     state->best_pool = memory_pool;
     return HSA_STATUS_INFO_BREAK;
   }
