@@ -55,7 +55,7 @@
       }
     },
     {
-      "name": "links text corpus into harness",
+      "name": "links import-free declarations in archive mode",
       "steps": [
         {
           "name": "write-harness",
@@ -77,7 +77,8 @@
             "tool": "loom-link",
             "args": [
               "{tmp}/harness.loom",
-              "{tmp}/corpus.loom"
+              "{tmp}/corpus.loom",
+              "--mode=archive"
             ]
           },
           "stdout": {
@@ -87,13 +88,16 @@
               "%y = func.call @identity(%x) : (i32) -> (i32)",
               "func.return %y : i32"
             ],
-            "not_contains": ["func.decl @identity"]
+            "not_contains": [
+              "module.import",
+              "func.decl @identity"
+            ]
           }
         }
       ]
     },
     {
-      "name": "links bytecode library",
+      "name": "selectively links import-free bytecode declaration",
       "steps": [
         {
           "name": "write-harness",

@@ -254,15 +254,13 @@ static bool loom_link_plan_symbol_satisfies_declaration(
 }
 
 static const loom_link_module_index_symbol_t*
-loom_link_plan_find_legacy_concrete_duplicate_for_declaration(
+loom_link_plan_find_unconstrained_definition_for_declaration(
     const loom_link_plan_t* plan,
     const loom_link_module_index_symbol_t* declaration) {
   const loom_link_module_index_symbol_t* symbol =
       loom_link_module_index_lookup_name(plan->index, declaration->name);
   while (symbol) {
-    if (symbol != declaration &&
-        !loom_link_plan_symbol_is_declaration_like(symbol) &&
-        iree_any_bit_set(symbol->flags, LOOM_LINK_SYMBOL_FLAG_HAS_BODY)) {
+    if (loom_link_plan_symbol_satisfies_declaration(declaration, symbol)) {
       return symbol;
     }
     symbol = loom_link_module_index_next_same_name(plan->index, symbol);
@@ -484,10 +482,11 @@ static iree_status_t loom_link_plan_resolve_declaration(
   if (imports.count != 0) {
     IREE_RETURN_IF_ERROR(loom_link_plan_find_imported_symbol_for_declaration(
         plan, options, declaration, imports, &selected_symbol));
-  } else if (declaration->template_family_ordinal ==
-             LOOM_LINK_TEMPLATE_FAMILY_ORDINAL_INVALID) {
+  } else {
+    // Declarations without provider constraints resolve by ordinary global
+    // symbol identity across the explicitly supplied module universe.
     selected_symbol =
-        loom_link_plan_find_legacy_concrete_duplicate_for_declaration(
+        loom_link_plan_find_unconstrained_definition_for_declaration(
             plan, declaration);
   }
   if (!selected_symbol) {

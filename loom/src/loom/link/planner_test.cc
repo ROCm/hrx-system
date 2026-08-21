@@ -559,7 +559,7 @@ func.def @helper(%x: i32) -> (i32) {
   EXPECT_TRUE(ContainsSymbol(plan.get(), helper));
 }
 
-TEST_F(LinkPlannerTest, SelectiveDeclarationPullsConcreteProviderDefinition) {
+TEST_F(LinkPlannerTest, SelectiveImportFreeDeclarationPullsConcreteDefinition) {
   loom_module_t* harness = Parse(IREE_SV(R"(
 func.decl public @callee(%x: i32) -> (i32)
 

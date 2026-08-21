@@ -196,7 +196,7 @@ class LinkerTest : public ::testing::Test {
   std::vector<loom_module_t*> modules_;
 };
 
-TEST_F(LinkerTest, ConcreteDefinitionSupersedesDeclaration) {
+TEST_F(LinkerTest, MaterializedModulesResolveImportFreeDeclaration) {
   loom_module_t* harness = Parse(IREE_SV(R"(
 func.decl @identity(%x: i32) -> (i32)
 
