@@ -41,6 +41,94 @@ or:
 python dev.py cmake hook
 ```
 
+## Windows Host Builds
+
+Windows builds require an x64 MSVC ABI environment even when `clang-cl` is the
+host compiler. Install Python 3.12, Visual Studio 2022 Build Tools with the x64
+C++ tools and a Windows SDK, and Ninja. Install LLVM separately when building
+with `clang-cl`. The CI CMake version is 3.31.6; using that version locally
+removes an otherwise unhelpful source of generator differences.
+
+Start from an x64 Visual Studio developer shell so `INCLUDE`, `LIB`, the SDK
+tools, and the MSVC linker are available. Git for Windows also ships a Unix
+program named `link.exe`, so compiler activation order is load-bearing:
+
+```powershell
+where.exe cl
+where.exe link
+```
+
+The first `link.exe` must be the MSVC linker, not Git's `usr\bin\link.exe`.
+Create the repository tool environment and add the CI-pinned CMake plus Ninja:
+
+```powershell
+python dev.py cmake setup --venv
+.\.venv\Scripts\python.exe -m pip install --upgrade cmake==3.31.6 ninja
+python dev.py cmake doctor
+```
+
+Keep Windows build trees short and keep one tree per compiler. The following is
+the host-only Loom baseline: it builds the VM and x86 target paths without
+requiring ROCm, Vulkan, WebGPU, or libHRX.
+
+```powershell
+$baseOptions = @(
+  '-GNinja'
+  '-DCMAKE_BUILD_TYPE=RelWithDebInfo'
+  '-DIREE_BUILD_TESTS=ON'
+  '-DIREE_BUILD_BENCHMARKS=ON'
+  '-DLIBHRX_BUILD=OFF'
+  '-DIREE_DEPENDENCY_MODE=pinned'
+  '-DIREE_HAL_DRIVER_AMDGPU=OFF'
+  '-DIREE_HAL_DRIVER_HIP=OFF'
+  '-DIREE_HAL_DRIVER_VULKAN=OFF'
+  '-DIREE_HAL_DRIVER_WEBGPU=OFF'
+  '-DLOOM_TARGET_AMDGPU=OFF'
+  '-DLOOM_TARGET_SPIRV=OFF'
+  '-DLOOM_TARGET_WASM=OFF'
+)
+
+$llvmBin = 'C:\Program Files\LLVM\bin'
+$env:PATH = "$llvmBin;$env:PATH"
+$env:CC = "$llvmBin\clang-cl.exe"
+$env:CXX = "$llvmBin\clang-cl.exe"
+$env:AR = "$llvmBin\llvm-lib.exe"
+python dev.py --cmake-build-dir C:\b\hrx-clang cmake configure @baseOptions
+python dev.py --cmake-build-dir C:\b\hrx-clang cmake build `
+  loom-compile iree-run-loom loom-check loom-format loom-opt loom-link `
+  iree-test-loom iree-benchmark-loom --parallel 8
+python dev.py --cmake-build-dir C:\b\hrx-clang cmake test `
+  -R '^loom/tools/(.*execution_test|loom-check/test/.*)$' -j 8
+```
+
+Reset the compiler selection for the distinct MSVC tree. The separate build
+directory, rather than shell state, keeps compiler identities from leaking
+across configurations:
+
+```powershell
+$env:CC = 'cl.exe'
+$env:CXX = 'cl.exe'
+$env:AR = 'lib.exe'
+python dev.py --cmake-build-dir C:\b\hrx-msvc cmake configure @baseOptions
+python dev.py --cmake-build-dir C:\b\hrx-msvc cmake build `
+  loom-compile iree-run-loom loom-check loom-format loom-opt loom-link `
+  iree-test-loom iree-benchmark-loom --parallel 8
+python dev.py --cmake-build-dir C:\b\hrx-msvc cmake test `
+  -R '^loom/tools/(.*execution_test|loom-check/test/.*)$' -j 8
+```
+
+Repository-wide Loom hygiene has a broader compiler-capability contract than
+the host-only smoke: `loom-format` verifies every tracked standalone module
+with the AMDGPU, IREE VM, LLVM IR, SPIR-V, and x86 target descriptors. A CMake
+tree used for `cmake precommit` therefore needs AMDGPU and SPIR-V target support
+even when their HAL drivers remain disabled:
+
+```powershell
+python dev.py --cmake-build-dir C:\b\hrx-clang-presubmit cmake configure `
+  @baseOptions -DLOOM_TARGET_AMDGPU=ON -DLOOM_TARGET_SPIRV=ON
+python dev.py --cmake-build-dir C:\b\hrx-clang-presubmit cmake precommit
+```
+
 ## Command Shape
 
 Put wrapper execution and tool-environment options before the build-system
@@ -72,6 +160,10 @@ iree-bazel-run //runtime/src/iree/base:allocator_benchmark
 iree-cmake-configure -DIREE_HAL_DRIVER_AMDGPU=ON
 iree-cmake-test -R hrx
 ```
+
+CMake build and run commands also accept a unique executable output name, such
+as `loom-compile`. If two packages emit the same filename, use the qualified
+generated alias so the selection remains explicit.
 
 `iree-cmake-test` asks CTest for the exact selected records, builds the
 concrete CMake roots declared by those records, and then runs the same
