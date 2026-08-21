@@ -2781,18 +2781,17 @@ iree_status_t iree_hal_amdxdna_native_buffer_sync(
   if (buffer->type == IREE_HAL_AMDXDNA_NATIVE_BUFFER_TYPE_HOST_ONLY) {
     mcdm::Error error;
     if (buffer->direct_host_mapping) {
-      if (direction == IREE_HAL_AMDXDNA_NATIVE_BUFFER_SYNC_HOST_TO_DEVICE) {
-        if (!mcdm::PublishBufferCpuWrites(buffer->buffer, sync_offset,
-                                          sync_size, &error)) {
-          return status_from_mcdm_error(
-              "amdxdna Windows MCDM host BO publication failed", error);
-        }
-        return iree_ok_status();
-      }
-      if (!mcdm::InvalidateBufferCpuReads(buffer->buffer, sync_offset,
-                                          sync_size, &error)) {
+      // Persistent Lock2 mappings and the NPU share this KMT allocation. Use
+      // the driver's allocation-level coherency boundary in both directions,
+      // matching XRT BO sync. CPU cache-line operations alone cannot invalidate
+      // NPU-side cache state and scale linearly with large immutable weights.
+      if (!mcdm::SyncBuffer(buffer->device->api, buffer->device->device,
+                            buffer->buffer, sync_offset, sync_size, &error)) {
         return status_from_mcdm_error(
-            "amdxdna Windows MCDM host BO cache invalidate failed", error);
+            direction == IREE_HAL_AMDXDNA_NATIVE_BUFFER_SYNC_HOST_TO_DEVICE
+                ? "amdxdna Windows MCDM host BO publication failed"
+                : "amdxdna Windows MCDM host BO acquire failed",
+            error);
       }
       return iree_ok_status();
     }
