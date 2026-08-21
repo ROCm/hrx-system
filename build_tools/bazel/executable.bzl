@@ -17,6 +17,7 @@ load(
     "collect_dynamic_library_bundles",
     "inject_dynamic_library_bindings",
 )
+load(":runfiles.bzl", "create_runfiles_arguments_info")
 
 IreeExecutableInfo = provider(
     doc = "Metadata for an executable alias or test wrapper.",
@@ -140,6 +141,12 @@ def _iree_executable_alias_impl(ctx):
             environment = source_environment.environment,
             inherited_environment = source_environment.inherited_environment,
         ))
+    runfiles_arguments = create_runfiles_arguments_info(
+        ctx,
+        ctx.attr.data + [ctx.attr.src],
+    )
+    if runfiles_arguments != None:
+        providers.append(runfiles_arguments)
     return inject_dynamic_library_bindings(
         ctx,
         providers,
@@ -179,6 +186,12 @@ def _iree_executable_test_impl(ctx):
             inherited_environment = depset(inherited_environment).to_list(),
         ),
     ]
+    runfiles_arguments = create_runfiles_arguments_info(
+        ctx,
+        ctx.attr.data + [ctx.attr.src],
+    )
+    if runfiles_arguments != None:
+        providers.append(runfiles_arguments)
     return inject_dynamic_library_bindings(
         ctx,
         providers,

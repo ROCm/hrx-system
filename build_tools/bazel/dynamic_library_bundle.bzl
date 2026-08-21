@@ -6,6 +6,8 @@
 
 """Runtime-only dynamic-library bundles and dependency-graph collection."""
 
+load(":runfiles.bzl", "IreeRunfilesEnvironmentInfo")
+
 IreeDynamicLibraryBundleInfo = provider(
     doc = "Runtime-only dynamic-library files and exact environment bindings.",
     fields = {
@@ -111,7 +113,9 @@ def inject_dynamic_library_bindings(
 
     The input providers normally come from an existing executable rule. Every
     provider other than DefaultInfo and RunEnvironmentInfo is returned
-    unchanged. If the configured dependency graph contains no bundles, the
+    unchanged, and IreeRunfilesEnvironmentInfo identifies the injected entries
+    for launchers that intentionally change away from Bazel's runfiles working
+    directory. If the configured dependency graph contains no bundles, the
     original provider list is returned without reconstruction.
 
     Args:
@@ -194,6 +198,9 @@ def inject_dynamic_library_bindings(
             result.append(value)
     if run_environment == None:
         result.append(updated_run_environment)
+    result.append(IreeRunfilesEnvironmentInfo(
+        environment = bindings.environment,
+    ))
     return result
 
 def _iree_dynamic_library_bundle_impl(ctx):

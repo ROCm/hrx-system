@@ -14,6 +14,13 @@ load("@rules_testing//lib:truth.bzl", "matching")
 load("@rules_testing//lib:util.bzl", "TestingAspectInfo", "util")
 load("//build_tools/bazel:cc.bzl", "iree_cc_binary", "iree_cc_library")
 load("//build_tools/bazel:cc_test.bzl", "iree_cc_test")
+load(
+    "//build_tools/bazel:runfiles.bzl",
+    "IreeRunfilesArgumentsInfo",
+    "IreeRunfilesEnvironmentInfo",
+    "RUNFILES_PATH_BEGIN",
+    "RUNFILES_PATH_END",
+)
 
 _TEST_DYNAMIC_LIBRARY_ENVIRONMENT = "IREE_TEST_DYNAMIC_LIBRARY_PATH"
 
@@ -214,6 +221,10 @@ def _test_cc_binary_preserves_rules_cc_providers_impl(env, target):
     ).equals("binary")
     if _TEST_DYNAMIC_LIBRARY_ENVIRONMENT in target[RunEnvironmentInfo].environment:
         env.fail("binary without a bundle received a dynamic-library environment")
+    if IreeRunfilesEnvironmentInfo in target:
+        env.fail("binary without a bundle received runfiles environment metadata")
+    if IreeRunfilesArgumentsInfo in target:
+        env.fail("binary without runfile arguments received argument metadata")
 
 def _test_cc_binary_injects_dynamic_library_bindings(name, **kwargs):
     util.helper_target(
@@ -221,6 +232,7 @@ def _test_cc_binary_injects_dynamic_library_bindings(name, **kwargs):
         name = name + "_subject",
         data = [":generate_rule_fixture.data"],
         deps = [":dynamic_library_environment_library"],
+        args = ["--fixture=$(rootpath :generate_rule_fixture.data)"],
         srcs = [name + "_subject.cc"],
         tags = ["manual"],
     )
@@ -234,6 +246,28 @@ def _test_cc_binary_injects_dynamic_library_bindings(name, **kwargs):
 
 def _test_cc_binary_injects_dynamic_library_bindings_impl(env, target):
     _expect_cc_execution_dynamic_library_bindings(env, target)
+
+def _test_cc_binary_describes_runfile_arguments(name, **kwargs):
+    util.helper_target(
+        iree_cc_binary,
+        name = name + "_subject",
+        args = ["--fixture=$(rootpath :generate_rule_fixture.data)"],
+        data = [":generate_rule_fixture.data"],
+        srcs = [name + "_subject.cc"],
+        tags = ["manual"],
+    )
+    analysis_test(
+        name = name,
+        attr_values = {"timeout": "short"},
+        impl = _test_cc_binary_describes_runfile_arguments_impl,
+        target = name + "_subject",
+        **kwargs
+    )
+
+def _test_cc_binary_describes_runfile_arguments_impl(env, target):
+    _expect_runfiles_arguments(env, target)
+    if IreeRunfilesEnvironmentInfo in target:
+        env.fail("binary without a bundle received runfiles environment metadata")
 
 def _test_cc_test_preserves_system_include_inputs(name, **kwargs):
     util.helper_target(
@@ -349,6 +383,10 @@ def _test_cc_test_preserves_rules_cc_providers_impl(env, target):
         )
     if _TEST_DYNAMIC_LIBRARY_ENVIRONMENT in target[RunEnvironmentInfo].environment:
         env.fail("test without a bundle received a dynamic-library environment")
+    if IreeRunfilesEnvironmentInfo in target:
+        env.fail("test without a bundle received runfiles environment metadata")
+    if IreeRunfilesArgumentsInfo in target:
+        env.fail("test without runfile arguments received argument metadata")
 
 def _test_cc_test_injects_dynamic_library_bindings(name, **kwargs):
     util.helper_target(
@@ -356,6 +394,7 @@ def _test_cc_test_injects_dynamic_library_bindings(name, **kwargs):
         name = name + "_subject",
         data = [":generate_rule_fixture.data"],
         deps = [":dynamic_library_environment_library"],
+        args = ["--fixture=$(rootpath :generate_rule_fixture.data)"],
         env = {"IREE_TEST_EXPLICIT_ENV": "explicit"},
         srcs = [name + "_subject.cc"],
         tags = ["manual"],
@@ -376,6 +415,12 @@ def _test_cc_test_injects_dynamic_library_bindings_impl(env, target):
 
 def _expect_cc_execution_dynamic_library_bindings(env, target):
     _expect_cc_executable_providers(env, target)
+
+    _expect_runfiles_arguments(env, target)
+    runfiles_environment = target[IreeRunfilesEnvironmentInfo].environment
+    env.expect.that_str(
+        runfiles_environment[_TEST_DYNAMIC_LIBRARY_ENVIRONMENT].basename,
+    ).equals("dynamic_library_root.so")
     run_environment = target[RunEnvironmentInfo].environment
     library_path = run_environment[_TEST_DYNAMIC_LIBRARY_ENVIRONMENT]
     if not library_path.endswith(
@@ -386,6 +431,18 @@ def _expect_cc_execution_dynamic_library_bindings(env, target):
     _expect_file_basename(env, runfiles, "dynamic_library_root.so")
     _expect_file_basename(env, runfiles, "dynamic_library_dependency.so")
     _expect_file_basename(env, runfiles, "generate_rule_fixture.data")
+
+def _expect_runfiles_arguments(env, target):
+    runfiles_arguments = target[IreeRunfilesArgumentsInfo]
+    env.expect.that_collection(runfiles_arguments.arguments).contains_exactly([
+        "--fixture=build_tools/bazel/test/generate_rule_fixture.data",
+    ])
+    env.expect.that_collection(runfiles_arguments.marked_arguments).contains_exactly([
+        "--fixture=" +
+        RUNFILES_PATH_BEGIN +
+        "build_tools/bazel/test/generate_rule_fixture.data" +
+        RUNFILES_PATH_END,
+    ])
 
 def _test_cc_test_rejects_conflicting_dynamic_library_env(name, **kwargs):
     util.helper_target(
@@ -424,6 +481,7 @@ def cc_rules_test_suite(name):
             _test_cc_binary_links_statically_by_default,
             _test_cc_binary_preserves_rules_cc_providers,
             _test_cc_binary_injects_dynamic_library_bindings,
+            _test_cc_binary_describes_runfile_arguments,
             _test_cc_test_preserves_system_include_inputs,
             _test_cc_test_applies_resource_group_tags,
             _test_cc_test_links_statically_by_default,

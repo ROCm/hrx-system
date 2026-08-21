@@ -12,6 +12,7 @@ load(
     "has_dynamic_library_bundles",
     "inject_dynamic_library_bindings",
 )
+load(":runfiles.bzl", "create_runfiles_arguments_info")
 
 _RULES_CC_LINK_EXTRA_LIB = Label("@rules_cc//:link_extra_lib")
 
@@ -64,7 +65,13 @@ def cc_execution_impl(ctx):
     Returns:
       The complete parent provider list with configured runtime bindings.
     """
-    providers = ctx.super()
+    providers = list(ctx.super())
+    runfiles_arguments = create_runfiles_arguments_info(
+        ctx,
+        ctx.attr.data + ctx.attr.deps + ctx.attr.srcs,
+    )
+    if runfiles_arguments != None:
+        providers.append(runfiles_arguments)
     dependencies = ctx.attr.dynamic_library_data + ctx.attr.dynamic_library_deps
     if not has_dynamic_library_bundles(dependencies):
         return providers
