@@ -986,6 +986,11 @@ loom_low_lower_source_query_scope_callback(
 const loom_local_value_domain_t* loom_low_lower_source_query_scope_value_domain(
     const loom_low_lower_source_query_scope_t* scope);
 
+// Returns the analyzed view regions owned by |scope|.
+iree_status_t loom_low_lower_source_query_scope_view_regions(
+    loom_low_lower_source_query_scope_t* scope,
+    const loom_view_region_table_t** out_view_regions);
+
 // Returns the module being mutated by the current lowering.
 loom_module_t* loom_low_lower_context_module(loom_low_lower_context_t* context);
 

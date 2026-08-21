@@ -195,6 +195,10 @@ typedef struct loom_low_source_memory_access_plan_t {
   // |dynamic_view_base_value_id|. Zero when that value is a recovered dynamic
   // term instead of the authored complete view-base expression.
   int64_t dynamic_view_base_value_static_byte_offset;
+  // Facts for the complete dynamic view-base byte contribution, excluding
+  // |static_view_base_byte_offset|. Unknown when only independent canonical
+  // term facts are available.
+  loom_value_facts_t dynamic_view_base_byte_facts;
   // Minimum provable byte alignment of the final accessed address.
   uint32_t minimum_alignment;
   // Dynamic address terms. The first |dynamic_view_base_term_count| entries
@@ -269,8 +273,9 @@ static inline bool loom_low_source_memory_dynamic_term_fits_unsigned_bit_count(
 }
 
 // Returns facts for the complete dynamic byte offset plus
-// |static_byte_offset|. Exact affine realizations retain relational bounds
-// that cannot be represented independently on their canonical terms.
+// |static_byte_offset|. Aggregate view-base facts and exact indexed
+// realizations retain relational bounds that cannot be represented
+// independently on their canonical terms.
 loom_value_facts_t loom_low_source_memory_dynamic_offset_facts(
     const loom_low_source_memory_access_plan_t* plan,
     int64_t static_byte_offset);
@@ -296,19 +301,14 @@ void loom_low_source_memory_access_plan_make_summary(
     loom_low_byte_interval_t* out_interval,
     loom_low_memory_access_summary_t* out_summary);
 
-// Builds a target-independent source memory plan for source memory ops.
-//
-// When present, |view_regions| is only queried with a non-mutating lookup and
-// must already have been analyzed by the caller. This lets lowering reuse its
-// function-local analysis without turning each memory access into a producer
-// walk or analysis construction site. Passing NULL intentionally restricts
-// planning to view-reference facts already published for the source view.
+// Builds a target-independent source memory plan for source memory ops from an
+// analyzed function-local view-region table. Planning only performs
+// non-mutating summary lookups and never walks source producers.
 //
 // Returns false when the source op cannot be decomposed into a complete source
 // plan. Targets are responsible for checking their own memory spaces, address
 // forms, descriptor availability, immediate ranges, and register footprints.
-bool loom_low_source_memory_access_plan_build_with_view_regions(
-    const loom_module_t* module, const loom_value_fact_table_t* fact_table,
+bool loom_low_source_memory_access_plan_build(
     const loom_view_region_table_t* view_regions, const loom_op_t* source_op,
     loom_low_source_memory_access_plan_t* out_plan,
     loom_low_source_memory_access_diagnostic_t* out_diagnostic);
@@ -318,8 +318,7 @@ bool loom_low_source_memory_access_plan_build_with_view_regions(
 // This is the component-level sibling of vector.load/store planning for source
 // ops that are not themselves memory transfers but still name a logical view
 // element or vector footprint, such as sanitizer access assertions.
-bool loom_low_source_memory_access_plan_build_indexed_with_view_regions(
-    const loom_module_t* module, const loom_value_fact_table_t* fact_table,
+bool loom_low_source_memory_access_plan_build_indexed(
     const loom_view_region_table_t* view_regions,
     loom_low_source_memory_operation_kind_t operation_kind,
     loom_value_id_t view_value_id, loom_value_slice_t dynamic_indices,
@@ -332,12 +331,11 @@ bool loom_low_source_memory_access_plan_build_indexed_with_view_regions(
 //
 // This is the view-payload sibling of vector.load/store planning. It treats the
 // full static footprint of |view_value_id| as the transferred vector payload
-// and preserves dynamic base terms when precomputed view-region summaries are
-// supplied. Targets use this for memory-to-memory movement ops such as async
+// and preserves dynamic base terms from the analyzed view-region summary.
+// Targets use this for memory-to-memory movement ops such as async
 // global-to-workgroup gathers, where the source IR names a view projection
 // rather than an indexed vector load.
-bool loom_low_source_memory_access_plan_build_view_with_view_regions(
-    const loom_module_t* module, const loom_value_fact_table_t* fact_table,
+bool loom_low_source_memory_access_plan_build_view(
     const loom_view_region_table_t* view_regions,
     loom_low_source_memory_operation_kind_t operation_kind,
     loom_value_id_t view_value_id,

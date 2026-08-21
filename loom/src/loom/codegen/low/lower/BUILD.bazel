@@ -121,6 +121,7 @@ loom_cc_test(
     srcs = ["contract_query_test.cc"],
     deps = [
         ":lower",
+        "//loom/src/loom/analysis:view_regions",
         "//loom/src/loom/error:error_defs",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops/buffer",

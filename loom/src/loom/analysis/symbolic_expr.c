@@ -30,9 +30,21 @@ struct loom_symbolic_expr_memo_entry_t {
   // Current memo state for this value ID.
   uint8_t state;
 
+  // SSA value materializing only the expression's dynamic terms, or invalid.
+  loom_value_id_t materialized_dynamic_value_id;
+
   // Cached expression when state is LOOM_SYMBOLIC_EXPR_MEMO_READY.
   loom_symbolic_expr_t expression;
 };
+
+static const loom_symbolic_expr_memo_entry_t*
+loom_symbolic_expr_ready_memo_entry(const loom_symbolic_expr_context_t* context,
+                                    loom_value_id_t value_id) {
+  if (value_id >= context->memo_capacity) return NULL;
+  const loom_symbolic_expr_memo_entry_t* entry =
+      &context->memo_entries[value_id];
+  return entry->state == LOOM_SYMBOLIC_EXPR_MEMO_READY ? entry : NULL;
+}
 
 static loom_value_facts_t loom_symbolic_expr_intersect_integer_facts(
     loom_value_facts_t lhs, loom_value_facts_t rhs) {
@@ -81,6 +93,19 @@ void loom_symbolic_expr_context_reset(loom_symbolic_expr_context_t* context) {
            context->condition_fact_memo_capacity *
                sizeof(*context->condition_fact_memo_entries));
   }
+}
+
+bool loom_symbolic_expr_context_try_lookup_summary(
+    const loom_symbolic_expr_context_t* context, loom_value_id_t value_id,
+    loom_symbolic_expr_summary_t* out_summary) {
+  const loom_symbolic_expr_memo_entry_t* entry =
+      loom_symbolic_expr_ready_memo_entry(context, value_id);
+  if (entry == NULL) return false;
+  *out_summary = (loom_symbolic_expr_summary_t){
+      .expression = entry->expression,
+      .materialized_dynamic_value_id = entry->materialized_dynamic_value_id,
+  };
+  return true;
 }
 
 static iree_status_t loom_symbolic_expr_ensure_memo_capacity(
@@ -565,6 +590,63 @@ typedef struct loom_symbolic_expr_expansion_frame_t {
 
 #define LOOM_SYMBOLIC_EXPR_EXPANSION_INLINE_FRAME_CAPACITY 8
 
+static bool loom_symbolic_expr_memo_entry_is_constant(
+    const loom_symbolic_expr_memo_entry_t* entry) {
+  return entry != NULL && loom_symbolic_expr_is_constant(&entry->expression);
+}
+
+static loom_value_id_t loom_symbolic_expr_expansion_materialized_dynamic_value(
+    const loom_symbolic_expr_context_t* context,
+    const loom_symbolic_expr_expansion_frame_t* frame,
+    const loom_symbolic_expr_t* expression) {
+  if (!loom_symbolic_expr_is_linear(expression) ||
+      expression->term_count == 0) {
+    return LOOM_VALUE_ID_INVALID;
+  }
+  if (expression->constant == 0) return frame->value_id;
+
+  const loom_symbolic_expr_memo_entry_t* source_entry = NULL;
+  switch (frame->kind) {
+    case LOOM_SYMBOLIC_EXPR_EXPANSION_IDENTITY:
+    case LOOM_SYMBOLIC_EXPR_EXPANSION_ASSUME:
+    case LOOM_SYMBOLIC_EXPR_EXPANSION_SELECT:
+      source_entry = loom_symbolic_expr_ready_memo_entry(
+          context, frame->operand_values[0]);
+      break;
+    case LOOM_SYMBOLIC_EXPR_EXPANSION_ADD: {
+      const loom_symbolic_expr_memo_entry_t* left_entry =
+          loom_symbolic_expr_ready_memo_entry(context,
+                                              frame->operand_values[0]);
+      const loom_symbolic_expr_memo_entry_t* right_entry =
+          loom_symbolic_expr_ready_memo_entry(context,
+                                              frame->operand_values[1]);
+      if (loom_symbolic_expr_memo_entry_is_constant(left_entry)) {
+        source_entry = right_entry;
+      } else if (loom_symbolic_expr_memo_entry_is_constant(right_entry)) {
+        source_entry = left_entry;
+      }
+      break;
+    }
+    case LOOM_SYMBOLIC_EXPR_EXPANSION_SUBTRACT: {
+      const loom_symbolic_expr_memo_entry_t* right_entry =
+          loom_symbolic_expr_ready_memo_entry(context,
+                                              frame->operand_values[1]);
+      if (loom_symbolic_expr_memo_entry_is_constant(right_entry)) {
+        source_entry = loom_symbolic_expr_ready_memo_entry(
+            context, frame->operand_values[0]);
+      }
+      break;
+    }
+    case LOOM_SYMBOLIC_EXPR_EXPANSION_MULTIPLY:
+    case LOOM_SYMBOLIC_EXPR_EXPANSION_MULTIPLY_ADD:
+    case LOOM_SYMBOLIC_EXPR_EXPANSION_SHIFT_LEFT:
+    case LOOM_SYMBOLIC_EXPR_EXPANSION_NEGATE:
+      break;
+  }
+  return source_entry != NULL ? source_entry->materialized_dynamic_value_id
+                              : LOOM_VALUE_ID_INVALID;
+}
+
 static iree_status_t loom_symbolic_expr_expansion_request_value(
     loom_symbolic_expr_context_t* context,
     iree_arena_allocator_t* transient_arena, loom_value_id_t value_id,
@@ -965,6 +1047,9 @@ iree_status_t loom_symbolic_expr_from_value(
     if (iree_status_is_ok(status)) {
       loom_symbolic_expr_memo_entry_t* completed_entry =
           &context->memo_entries[completed_value];
+      completed_entry->materialized_dynamic_value_id =
+          loom_symbolic_expr_expansion_materialized_dynamic_value(
+              context, &frames[frame_count - 1], &expression);
       completed_entry->expression = expression;
       completed_entry->state = LOOM_SYMBOLIC_EXPR_MEMO_READY;
       --frame_count;

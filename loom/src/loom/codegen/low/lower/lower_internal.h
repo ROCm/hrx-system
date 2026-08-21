@@ -147,6 +147,21 @@ struct loom_low_lower_module_state_t {
   iree_host_size_t target_state_record_capacity;
 };
 
+typedef enum loom_low_lower_function_analysis_phase_e {
+  LOOM_LOW_LOWER_FUNCTION_ANALYSIS_EMPTY = 0,
+  LOOM_LOW_LOWER_FUNCTION_ANALYSIS_EXPRESSIONS = 1,
+  LOOM_LOW_LOWER_FUNCTION_ANALYSIS_VIEW_REGIONS = 2,
+} loom_low_lower_function_analysis_phase_t;
+
+typedef struct loom_low_lower_function_analysis_t {
+  // Furthest analysis phase completed for the active fact table.
+  loom_low_lower_function_analysis_phase_t phase;
+  // Function-local stable symbolic expressions shared by rules and views.
+  loom_symbolic_expr_context_t expression_context;
+  // View-region table borrowing expression_context.
+  loom_view_region_table_t view_regions;
+} loom_low_lower_function_analysis_t;
+
 typedef struct loom_low_lowering_frame_t {
   // Active source-function value domain for dense per-value lowering state.
   loom_local_value_domain_t value_domain;
@@ -154,12 +169,8 @@ typedef struct loom_low_lowering_frame_t {
   loom_value_fact_table_t* fact_table;
   // Reusable traversal state for condition-fact queries.
   loom_condition_query_t condition_query;
-  // Function-local symbolic proof context initialized on first rule query.
-  loom_symbolic_expr_context_t expression_context;
-  // Fact table used to initialize expression_context.
-  const loom_value_fact_table_t* expression_context_fact_table;
-  // True once expression_context owns arena-backed memo/scratch storage.
-  bool expression_context_initialized;
+  // Stable function analyses advanced monotonically on demand.
+  loom_low_lower_function_analysis_t function_analysis;
   // Per-source-value storage demand flags indexed by source value ordinal.
   loom_low_lower_value_storage_flags_t* value_storage_flags;
   // Source local value ordinal to emitted low value ID map.
@@ -200,12 +211,6 @@ typedef struct loom_low_lowering_frame_t {
   iree_host_size_t memory_access_record_count;
   // Capacity of memory_access_records.
   iree_host_size_t memory_access_record_capacity;
-  // View-region table for the source function, initialized on first use.
-  loom_view_region_table_t view_regions;
-  // True after view_regions has been initialized against value_domain.
-  bool view_regions_initialized;
-  // True after view_regions has recorded per-view read/write flags.
-  bool view_regions_analyzed;
   // Descriptor set used to build rule_descriptor_maps.
   const loom_low_descriptor_set_t* rule_descriptor_map_set;
   // Per-policy-rule-set descriptor-ref to descriptor-row maps.

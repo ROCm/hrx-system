@@ -107,6 +107,7 @@ loom_cc_test(
     iree::base::internal::arena
     iree::testing::gtest
     iree::testing::gtest_main
+    loom::analysis::view_regions
     loom::error::error_defs
     loom::ir
     loom::ops::buffer

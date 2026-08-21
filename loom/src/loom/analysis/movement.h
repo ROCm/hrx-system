@@ -242,16 +242,11 @@ typedef struct loom_movement_request_t {
   loom_vector_memory_access_t vector_access;
 } loom_movement_request_t;
 
-// Per-run analysis state. The caller owns arena and fact_table.
+// Per-run analysis state. The caller owns the arena and fact table borrowed by
+// expression_context.
 typedef struct loom_movement_analysis_t {
-  // Module containing operations and values being classified.
-  const loom_module_t* module;
-
-  // Current value facts consumed by endpoint and layout queries.
-  loom_value_fact_table_t* fact_table;
-
-  // Arena backing view-region and symbolic-expression storage.
-  iree_arena_allocator_t* arena;
+  // Function-local symbolic expressions shared with view-region analysis.
+  loom_symbolic_expr_context_t expression_context;
 
   // View-region analysis reused for endpoint roots and byte intervals.
   loom_view_region_table_t view_regions;
@@ -260,7 +255,7 @@ typedef struct loom_movement_analysis_t {
 // Initializes movement analysis from a caller-owned active local value domain.
 // The domain must remain active until the analysis is dead.
 iree_status_t loom_movement_analysis_initialize(
-    loom_value_fact_table_t* fact_table,
+    const loom_value_fact_table_t* fact_table,
     const loom_local_value_domain_t* value_domain,
     iree_arena_allocator_t* arena, loom_movement_analysis_t* out_analysis);
 

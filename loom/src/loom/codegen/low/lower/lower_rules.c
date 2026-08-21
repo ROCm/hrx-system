@@ -1781,9 +1781,7 @@ void loom_low_lower_rule_match_context_initialize_from_lowering(
       .view_regions = view_regions,
       .source_memory_state = source_memory_state,
       .symbolic_expr_context =
-          loom_low_lower_context_fact_table(context) != NULL
-              ? loom_low_lower_context_symbolic_expr_context(context)
-              : NULL,
+          loom_low_lower_context_symbolic_expr_context(context),
   };
 }
 

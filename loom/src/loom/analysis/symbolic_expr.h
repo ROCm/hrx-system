@@ -77,6 +77,16 @@ typedef struct loom_symbolic_expr_t {
   loom_symbolic_expr_flags_t flags;
 } loom_symbolic_expr_t;
 
+// Stable summary for one analyzed SSA value.
+typedef struct loom_symbolic_expr_summary_t {
+  // Normalized symbolic expression for the value.
+  loom_symbolic_expr_t expression;
+
+  // SSA value exactly materializing expression's nonconstant terms, or
+  // LOOM_VALUE_ID_INVALID when no such value was retained during expansion.
+  loom_value_id_t materialized_dynamic_value_id;
+} loom_symbolic_expr_summary_t;
+
 // Memoized condition-refined facts for one SSA value. This state is owned by
 // loom_symbolic_expr_context_t and retained across context resets.
 typedef struct loom_symbolic_expr_condition_fact_memo_entry_t {
@@ -153,6 +163,13 @@ void loom_symbolic_expr_context_initialize(
 // Clears memoized expressions and condition-refined facts while retaining
 // scratch and memo capacity.
 void loom_symbolic_expr_context_reset(loom_symbolic_expr_context_t* context);
+
+// Copies a previously computed value summary without expanding |value_id| or
+// mutating the context. Returns false when the value has not been computed
+// since the last reset.
+bool loom_symbolic_expr_context_try_lookup_summary(
+    const loom_symbolic_expr_context_t* context, loom_value_id_t value_id,
+    loom_symbolic_expr_summary_t* out_summary);
 
 // Constructs a facts-only expression. This is the conservative result for
 // unsupported nonlinear arithmetic when no precise SSA variable is available.

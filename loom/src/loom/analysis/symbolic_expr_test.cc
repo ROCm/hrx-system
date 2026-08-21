@@ -19,6 +19,10 @@ namespace {
 TEST_F(SymbolicExprTest, UnknownValueIsMemoizedLinearTerm) {
   loom_value_id_t value_id = DefineIndexValue();
 
+  loom_symbolic_expr_summary_t ready_summary = {};
+  EXPECT_FALSE(loom_symbolic_expr_context_try_lookup_summary(
+      &expression_context_, value_id, &ready_summary));
+
   loom_symbolic_expr_t first_expression = {0};
   IREE_ASSERT_OK(loom_symbolic_expr_from_value(&expression_context_, value_id,
                                                &first_expression));
@@ -31,6 +35,14 @@ TEST_F(SymbolicExprTest, UnknownValueIsMemoizedLinearTerm) {
   IREE_ASSERT_OK(loom_symbolic_expr_from_value(&expression_context_, value_id,
                                                &second_expression));
   EXPECT_EQ(second_expression.terms, first_expression.terms);
+
+  EXPECT_TRUE(loom_symbolic_expr_context_try_lookup_summary(
+      &expression_context_, value_id, &ready_summary));
+  EXPECT_EQ(ready_summary.expression.terms, first_expression.terms);
+
+  loom_symbolic_expr_context_reset(&expression_context_);
+  EXPECT_FALSE(loom_symbolic_expr_context_try_lookup_summary(
+      &expression_context_, value_id, &ready_summary));
 }
 
 TEST_F(SymbolicExprTest, ExactIntegerFactsFoldToConstant) {
@@ -172,6 +184,37 @@ TEST_F(SymbolicExprTest, ExpandsIndexMaddWithConstantMultiplier) {
   EXPECT_EQ(expression.terms[0].value_id, row);
   EXPECT_EQ(expression.terms[1].coefficient, 1);
   EXPECT_EQ(expression.terms[1].value_id, column);
+}
+
+TEST_F(SymbolicExprTest, ReadySummaryRetainsConstantFreeMaterialization) {
+  loom_value_id_t row = DefineIndexValue();
+  loom_value_id_t column = DefineIndexValue();
+  loom_value_id_t stride = loom_index_constant_result(BuildIndexConstant(16));
+  loom_op_t* linear_op = nullptr;
+  IREE_ASSERT_OK(loom_index_madd_build(&builder_, row, stride, column,
+                                       loom_type_scalar(LOOM_SCALAR_TYPE_INDEX),
+                                       LOOM_LOCATION_UNKNOWN, &linear_op));
+  loom_value_id_t offset = loom_index_constant_result(BuildIndexConstant(4));
+  loom_op_t* offset_op = nullptr;
+  IREE_ASSERT_OK(loom_index_add_build(&builder_,
+                                      loom_index_madd_result(linear_op), offset,
+                                      loom_type_scalar(LOOM_SCALAR_TYPE_INDEX),
+                                      LOOM_LOCATION_UNKNOWN, &offset_op));
+  loom_value_id_t offset_value = loom_index_add_result(offset_op);
+
+  loom_symbolic_expr_summary_t summary = {};
+  EXPECT_FALSE(loom_symbolic_expr_context_try_lookup_summary(
+      &expression_context_, offset_value, &summary));
+  loom_symbolic_expr_t expression = {};
+  IREE_ASSERT_OK(loom_symbolic_expr_from_value(&expression_context_,
+                                               offset_value, &expression));
+  ASSERT_TRUE(loom_symbolic_expr_context_try_lookup_summary(
+      &expression_context_, offset_value, &summary));
+
+  EXPECT_EQ(summary.expression.constant, 4);
+  ASSERT_EQ(summary.expression.term_count, 2);
+  EXPECT_EQ(summary.materialized_dynamic_value_id,
+            loom_index_madd_result(linear_op));
 }
 
 TEST_F(SymbolicExprTest, DynamicMultiplyFallsBackToResultSymbol) {

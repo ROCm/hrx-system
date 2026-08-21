@@ -47,6 +47,25 @@ kernel.def @asan_relational_launch_bound(%tile_count: index) {
   kernel.return
 }
 
+// A relational bound on the complete view base remains valid when canonical
+// address planning separates the two runtime terms and the static suffix.
+kernel.def @asan_coupled_view_base() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%base: index, %local: index, %output: buffer) {
+  %c0 = index.constant 0 : index
+  %byte_stride = index.constant 4 : offset
+  %header_bytes = index.constant 4 : offset
+  %value = scalar.constant 42 : i32
+  %sum = index.add %base, %local : index
+  %bounded_sum = index.assume %sum [range(%sum, 0, 0)] : index
+  %dynamic_bytes = index.scale %bounded_sum, %byte_stride : index, offset -> offset
+  %payload_bytes = index.add %dynamic_bytes, %header_bytes : offset
+  %output_view = buffer.view %output[%payload_bytes] : buffer -> view<1xi32>
+  view.store %value, %output_view[%c0] : i32, view<1xi32>
+  kernel.return
+}
+
 check.case @asan_global_store_valid_case {
   %output = check.generate.fill value(0) : tensor<1xi32>
   kernel.launch @asan_global_store_valid(%output) : (tensor<1xi32>)
@@ -71,6 +90,17 @@ check.case @asan_relational_launch_bound_case {
   kernel.launch @asan_relational_launch_bound[%tile_count](%output) : [index](tensor<1xi32>)
   %expected = check.generate.fill value(42) : tensor<1xi32>
   check.expect.equal actual(%output) expected(%expected) : tensor<1xi32>
+  check.expect.event<device> {count = 0, type = "asan_report"}
+  check.return
+}
+
+check.case @asan_coupled_view_base_case {
+  %base = check.literal value(0) : index
+  %local = check.literal value(0) : index
+  %output = check.generate.fill value(0) : tensor<2xi32>
+  kernel.launch @asan_coupled_view_base(%base, %local, %output) : (index, index, tensor<2xi32>)
+  %expected = check.generate.iota offset(0) step(42) : tensor<2xi32>
+  check.expect.equal actual(%output) expected(%expected) : tensor<2xi32>
   check.expect.event<device> {count = 0, type = "asan_report"}
   check.return
 }

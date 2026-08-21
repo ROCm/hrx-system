@@ -122,20 +122,8 @@ typedef struct loom_view_region_t {
 
 // Dense analysis table for one function-local value domain.
 typedef struct loom_view_region_table_t {
-  // Module whose SSA values are summarized.
-  const loom_module_t* module;
-
-  // Current fact table consumed by expression and view-reference queries.
-  loom_value_fact_table_t* fact_table;
-
-  // Fact context wrapper for APIs that query fact extensions.
-  loom_fact_context_t fact_context;
-
-  // Arena used for all table, region, and symbolic expression storage.
-  iree_arena_allocator_t* arena;
-
-  // Symbolic expression context shared by all region construction.
-  loom_symbolic_expr_context_t expression_context;
+  // Borrowed symbolic expression context shared by all region construction.
+  loom_symbolic_expr_context_t* expression_context;
 
   // Borrowed active local value domain used for value ID to ordinal mapping.
   const loom_local_value_domain_t* value_domain;
@@ -157,13 +145,12 @@ typedef struct loom_view_region_table_t {
 } loom_view_region_table_t;
 
 // Initializes a view-region table from a caller-owned active local value
-// domain. The table does not compute facts; callers pass the current fact table
-// they want the analysis to consume. The value domain must remain active until
-// the table is dead.
+// domain and its matching symbolic expression context. The value domain and
+// expression context must remain active until the table is dead.
 iree_status_t loom_view_region_table_initialize(
-    loom_value_fact_table_t* fact_table,
     const loom_local_value_domain_t* value_domain,
-    iree_arena_allocator_t* arena, loom_view_region_table_t* out_table);
+    loom_symbolic_expr_context_t* expression_context,
+    loom_view_region_table_t* out_table);
 
 // Ensures a region summary exists for |value_id| when it has a view type.
 // Non-view values return NULL without error.

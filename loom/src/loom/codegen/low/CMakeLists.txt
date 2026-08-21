@@ -801,17 +801,34 @@ loom_cc_library(
     ::memory_access
     iree::base
     iree::base::internal
-    loom::analysis::symbolic_expr_bounded
     loom::analysis::view_regions
     loom::ir
     loom::ir::facts
-    loom::ops::buffer
-    loom::ops::index
     loom::ops::kernel
     loom::ops::vector
     loom::ops::view
     loom::util::fact_table
   PUBLIC
+)
+
+loom_cc_benchmark(
+  NAME
+    source_memory_plan_benchmark
+  SRCS
+    "source_memory_plan_benchmark.cc"
+  DEPS
+    ::source_memory_plan
+    iree::base::internal::arena
+    iree::testing::benchmark_main
+    loom::analysis::view_regions
+    loom::ir
+    loom::ops::buffer
+    loom::ops::encoding
+    loom::ops::index
+    loom::ops::test
+    loom::ops::vector
+    loom::util::fact_table
+  TESTONLY
 )
 
 loom_cc_test(

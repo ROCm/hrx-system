@@ -1655,8 +1655,7 @@ static bool loom_amdgpu_fragment_memory_analyze(
                           loom_dim_pack_static(1), /*encoding_id=*/0);
   loom_low_source_memory_access_plan_t source_access = {0};
   loom_low_source_memory_access_diagnostic_t source_diagnostic = {0};
-  if (!loom_low_source_memory_access_plan_build_indexed_with_view_regions(
-          environment->module, environment->fact_table,
+  if (!loom_low_source_memory_access_plan_build_indexed(
           environment->view_regions, operation_kind, source->view,
           source->dynamic_indices, source->static_indices, scalar_vector_type,
           (loom_vector_memory_cache_policy_t){0}, &source_access,
@@ -1884,9 +1883,8 @@ iree_status_t loom_amdgpu_low_legality_verify_vector_fragment_memory(
   }
 
   const loom_module_t* module = loom_target_low_legality_module(context);
-  const loom_view_region_table_t* view_regions = NULL;
-  IREE_RETURN_IF_ERROR(
-      loom_target_low_legality_view_regions(context, &view_regions));
+  const loom_view_region_table_t* view_regions =
+      loom_target_low_legality_view_regions(context);
   const loom_amdgpu_source_alloca_layout_t* alloca_layout = NULL;
   IREE_RETURN_IF_ERROR(loom_amdgpu_source_alloca_layout_for_low_legality(
       context, &alloca_layout));

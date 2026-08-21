@@ -149,11 +149,10 @@ typedef struct loom_target_low_legality_options_t {
   // verifier limited to target-independent low-compatible types and registered
   // type semantics.
   loom_target_low_legality_type_supported_callback_t type_supported;
-  // Caller-owned facts for |function|.
-  loom_value_fact_table_t* fact_table;
-  // Optional active value domain for |function|'s body. Providers can use this
-  // to request shared function-local analyses without acquiring module scratch.
-  const loom_local_value_domain_t* value_domain;
+  // Caller-owned function analysis shared with contract queries and lowering.
+  // The table carries the matching value domain and stable symbolic expression
+  // context, which owns the current facts.
+  const loom_view_region_table_t* view_regions;
   // Structural source forms permitted by the caller's current phase.
   loom_target_low_structural_legality_flags_t structural_legality_flags;
   // Optional target-specific feedback diagnostics to emit during source
@@ -218,16 +217,13 @@ const loom_low_descriptor_set_t* loom_target_low_legality_descriptor_set(
 const loom_value_fact_table_t* loom_target_low_legality_fact_table(
     const loom_target_low_legality_context_t* context);
 
-// Returns the optional active value domain supplied by the caller.
+// Returns the active value domain owned by the shared function analysis.
 const loom_local_value_domain_t* loom_target_low_legality_value_domain(
     const loom_target_low_legality_context_t* context);
 
-// Returns a lazily analyzed view-region table when the caller supplied a value
-// domain for the checked function. Standalone legality callers that do not
-// provide a domain receive NULL.
-iree_status_t loom_target_low_legality_view_regions(
-    loom_target_low_legality_context_t* context,
-    const loom_view_region_table_t** out_view_regions);
+// Returns the shared analyzed view-region table.
+const loom_view_region_table_t* loom_target_low_legality_view_regions(
+    const loom_target_low_legality_context_t* context);
 
 // Returns the transient arena for the current legality verification. Storage
 // allocated from the arena remains valid until the current verification call

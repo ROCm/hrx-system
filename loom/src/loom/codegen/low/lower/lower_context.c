@@ -298,18 +298,16 @@ loom_condition_query_t* loom_low_lower_context_condition_query(
 
 loom_symbolic_expr_context_t* loom_low_lower_context_symbolic_expr_context(
     loom_low_lower_context_t* context) {
-  const loom_value_fact_table_t* fact_table =
-      loom_low_lower_context_fact_table(context);
-  loom_low_lowering_frame_t* lowering = &context->lowering;
-  if (!lowering->expression_context_initialized ||
-      lowering->expression_context_fact_table != fact_table) {
+  loom_low_lower_function_analysis_t* analysis =
+      &context->lowering.function_analysis;
+  if (analysis->phase < LOOM_LOW_LOWER_FUNCTION_ANALYSIS_EXPRESSIONS) {
     loom_symbolic_expr_context_initialize(
-        loom_low_lower_context_module(context), fact_table,
-        &context->function_arena, &lowering->expression_context);
-    lowering->expression_context_fact_table = fact_table;
-    lowering->expression_context_initialized = true;
+        loom_low_lower_context_module(context),
+        loom_low_lower_context_fact_table(context), &context->function_arena,
+        &analysis->expression_context);
+    analysis->phase = LOOM_LOW_LOWER_FUNCTION_ANALYSIS_EXPRESSIONS;
   }
-  return &lowering->expression_context;
+  return &analysis->expression_context;
 }
 
 loom_sanitizer_reporting_mode_t loom_low_lower_context_sanitizer_reporting_mode(
@@ -321,18 +319,19 @@ iree_status_t loom_low_lower_context_view_regions(
     loom_low_lower_context_t* context,
     const loom_view_region_table_t** out_view_regions) {
   *out_view_regions = NULL;
-  if (!context->lowering.view_regions_initialized) {
+  loom_low_lower_function_analysis_t* analysis =
+      &context->lowering.function_analysis;
+  if (analysis->phase < LOOM_LOW_LOWER_FUNCTION_ANALYSIS_VIEW_REGIONS) {
+    loom_symbolic_expr_context_t* expression_context =
+        loom_low_lower_context_symbolic_expr_context(context);
     IREE_RETURN_IF_ERROR(loom_view_region_table_initialize(
-        context->lowering.fact_table, &context->lowering.value_domain,
-        &context->function_arena, &context->lowering.view_regions));
-    context->lowering.view_regions_initialized = true;
-  }
-  if (!context->lowering.view_regions_analyzed) {
+        &context->lowering.value_domain, expression_context,
+        &analysis->view_regions));
     IREE_RETURN_IF_ERROR(
-        loom_view_region_table_analyze(&context->lowering.view_regions));
-    context->lowering.view_regions_analyzed = true;
+        loom_view_region_table_analyze(&analysis->view_regions));
+    analysis->phase = LOOM_LOW_LOWER_FUNCTION_ANALYSIS_VIEW_REGIONS;
   }
-  *out_view_regions = &context->lowering.view_regions;
+  *out_view_regions = &analysis->view_regions;
   return iree_ok_status();
 }
 

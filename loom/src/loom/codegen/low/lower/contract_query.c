@@ -8,6 +8,7 @@
 
 #include "iree/base/internal/arena.h"
 #include "loom/analysis/symbolic_expr.h"
+#include "loom/analysis/view_regions.h"
 #include "loom/codegen/low/lower/lower_rule_source_memory.h"
 #include "loom/error/error_catalog.h"
 #include "loom/ir/context.h"
@@ -356,7 +357,9 @@ iree_status_t loom_low_lower_query_target_contract(
 
   loom_symbolic_expr_context_t expression_context;
   loom_symbolic_expr_context_t* expression_context_ptr = NULL;
-  if (environment->arena && environment->fact_table) {
+  if (environment->view_regions != NULL) {
+    expression_context_ptr = environment->view_regions->expression_context;
+  } else if (environment->arena && environment->fact_table) {
     loom_symbolic_expr_context_initialize(
         environment->module, environment->fact_table, environment->arena,
         &expression_context);

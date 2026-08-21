@@ -210,7 +210,7 @@ static bool loom_amdgpu_async_gather_select_descriptor(
 }
 
 static bool loom_amdgpu_async_gather_select_source(
-    const loom_module_t* module, const loom_value_fact_table_t* fact_table,
+    const loom_module_t* module,
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_view_region_table_t* view_regions, loom_value_id_t source_view,
     loom_vector_memory_cache_policy_t cache_policy,
@@ -219,10 +219,9 @@ static bool loom_amdgpu_async_gather_select_source(
     uint32_t* out_descriptor_ordinal) {
   *out_descriptor_ordinal = LOOM_LOW_DESCRIPTOR_ORDINAL_NONE;
 
-  if (!loom_low_source_memory_access_plan_build_view_with_view_regions(
-          module, fact_table, view_regions,
-          LOOM_LOW_SOURCE_MEMORY_OPERATION_LOAD, source_view, cache_policy,
-          &selection->source, &diagnostic->source_diagnostic)) {
+  if (!loom_low_source_memory_access_plan_build_view(
+          view_regions, LOOM_LOW_SOURCE_MEMORY_OPERATION_LOAD, source_view,
+          cache_policy, &selection->source, &diagnostic->source_diagnostic)) {
     diagnostic->rejection_bits |=
         LOOM_AMDGPU_ASYNC_GATHER_REJECTION_SOURCE_PLAN;
     return false;
@@ -356,9 +355,8 @@ static bool loom_amdgpu_async_gather_select(
   out_selection->dest_view = loom_kernel_async_gather_dest(source_op);
   uint32_t descriptor_ordinal = LOOM_LOW_DESCRIPTOR_ORDINAL_NONE;
   if (!loom_amdgpu_async_gather_select_source(
-          module, fact_table, descriptor_set, view_regions,
-          out_selection->source_view, cache_policy, out_selection,
-          out_diagnostic, &descriptor_ordinal) ||
+          module, descriptor_set, view_regions, out_selection->source_view,
+          cache_policy, out_selection, out_diagnostic, &descriptor_ordinal) ||
       !loom_amdgpu_async_gather_select_dest(fact_table, alloca_layout,
                                             out_selection->dest_view,
                                             out_selection, out_diagnostic)) {
@@ -513,9 +511,8 @@ static bool loom_amdgpu_cluster_gather_select(
   }
 
   loom_low_source_memory_access_plan_t source = {0};
-  if (!loom_low_source_memory_access_plan_build_view_with_view_regions(
-          module, fact_table, view_regions,
-          LOOM_LOW_SOURCE_MEMORY_OPERATION_LOAD,
+  if (!loom_low_source_memory_access_plan_build_view(
+          view_regions, LOOM_LOW_SOURCE_MEMORY_OPERATION_LOAD,
           loom_kernel_async_cluster_gather_source(source_op), cache_policy,
           &source, &out_diagnostic->source_diagnostic)) {
     out_diagnostic->rejection_bits |=
@@ -540,9 +537,8 @@ static bool loom_amdgpu_cluster_gather_select(
 
   loom_low_source_memory_access_plan_t dest = {0};
   const loom_vector_memory_cache_policy_t no_cache_policy = {0};
-  if (!loom_low_source_memory_access_plan_build_view_with_view_regions(
-          module, fact_table, view_regions,
-          LOOM_LOW_SOURCE_MEMORY_OPERATION_STORE,
+  if (!loom_low_source_memory_access_plan_build_view(
+          view_regions, LOOM_LOW_SOURCE_MEMORY_OPERATION_STORE,
           loom_kernel_async_cluster_gather_dest(source_op), no_cache_policy,
           &dest, &out_diagnostic->dest_diagnostic)) {
     out_diagnostic->rejection_bits |=
@@ -1413,9 +1409,8 @@ static iree_status_t loom_amdgpu_low_legality_verify_kernel_async_gather(
     loom_target_low_legality_context_t* context, const loom_op_t* op) {
   loom_amdgpu_async_gather_selection_t selection = {0};
   loom_amdgpu_async_gather_diagnostic_t diagnostic = {0};
-  const loom_view_region_table_t* view_regions = NULL;
-  IREE_RETURN_IF_ERROR(
-      loom_target_low_legality_view_regions(context, &view_regions));
+  const loom_view_region_table_t* view_regions =
+      loom_target_low_legality_view_regions(context);
   const loom_amdgpu_source_alloca_layout_t* alloca_layout = NULL;
   IREE_RETURN_IF_ERROR(loom_amdgpu_source_alloca_layout_for_low_legality(
       context, &alloca_layout));
@@ -1434,9 +1429,8 @@ static iree_status_t loom_amdgpu_low_legality_verify_kernel_async_gather(
 static iree_status_t
 loom_amdgpu_low_legality_verify_kernel_async_cluster_gather(
     loom_target_low_legality_context_t* context, const loom_op_t* op) {
-  const loom_view_region_table_t* view_regions = NULL;
-  IREE_RETURN_IF_ERROR(
-      loom_target_low_legality_view_regions(context, &view_regions));
+  const loom_view_region_table_t* view_regions =
+      loom_target_low_legality_view_regions(context);
   const loom_amdgpu_source_alloca_layout_t* alloca_layout = NULL;
   IREE_RETURN_IF_ERROR(loom_amdgpu_source_alloca_layout_for_low_legality(
       context, &alloca_layout));

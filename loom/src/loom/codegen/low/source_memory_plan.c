@@ -10,12 +10,10 @@
 
 #include "iree/base/api.h"
 #include "iree/base/internal/math.h"
-#include "loom/analysis/symbolic_expr_bounded.h"
 #include "loom/analysis/view_regions.h"
 #include "loom/codegen/low/memory_access.h"
 #include "loom/ir/facts.h"
 #include "loom/ir/module.h"
-#include "loom/ops/index/ops.h"
 #include "loom/ops/kernel/ops.h"
 #include "loom/ops/vector/ops.h"
 #include "loom/ops/view/ops.h"
@@ -115,9 +113,6 @@ loom_low_source_memory_access_vector_offset_kind(
   if (offset_value == LOOM_VALUE_ID_INVALID) {
     return LOOM_LOW_SOURCE_MEMORY_VECTOR_OFFSET_NONE;
   }
-  if (!fact_table) {
-    return LOOM_LOW_SOURCE_MEMORY_VECTOR_OFFSET_OTHER;
-  }
   const loom_value_facts_t facts =
       loom_value_fact_table_lookup(fact_table, offset_value);
   return loom_low_source_memory_access_offset_facts_are_identity_iota(
@@ -181,7 +176,7 @@ static void loom_low_source_memory_access_dynamic_index_source(
       };
   *out_source = LOOM_LOW_SOURCE_MEMORY_DYNAMIC_INDEX_SOURCE_VALUE;
   *out_dimension = LOOM_KERNEL_DIMENSION_COUNT_;
-  if (!fact_table || index == LOOM_VALUE_ID_INVALID ||
+  if (index == LOOM_VALUE_ID_INVALID ||
       !loom_value_fact_table_has_entry(fact_table, index)) {
     return;
   }
@@ -573,8 +568,7 @@ static void loom_low_source_memory_dynamic_term_compute_expression_byte_facts(
     loom_value_facts_t* out_facts) {
   loom_value_facts_t index_facts = expression_facts;
   loom_value_facts_t domain_facts = loom_value_facts_unknown();
-  if (vector_access != NULL &&
-      dynamic_axis != LOOM_LOW_SOURCE_MEMORY_DYNAMIC_TERM_AXIS_NONE &&
+  if (dynamic_axis != LOOM_LOW_SOURCE_MEMORY_DYNAMIC_TERM_AXIS_NONE &&
       loom_low_source_memory_access_origin_domain_facts(
           fact_table, vector_access, dynamic_axis, &domain_facts)) {
     index_facts = loom_low_source_memory_access_intersect_index_facts(
@@ -599,8 +593,7 @@ static void loom_low_source_memory_dynamic_term_compute_byte_facts(
   loom_value_facts_t index_facts =
       loom_value_fact_table_lookup(fact_table, index);
   loom_value_facts_t domain_facts = loom_value_facts_unknown();
-  if (vector_access != NULL &&
-      dynamic_axis != LOOM_LOW_SOURCE_MEMORY_DYNAMIC_TERM_AXIS_NONE &&
+  if (dynamic_axis != LOOM_LOW_SOURCE_MEMORY_DYNAMIC_TERM_AXIS_NONE &&
       loom_low_source_memory_access_origin_domain_facts(
           fact_table, vector_access, dynamic_axis, &domain_facts)) {
     (void)loom_low_source_memory_access_scale_domain_down(
@@ -613,12 +606,8 @@ static void loom_low_source_memory_dynamic_term_compute_byte_facts(
       out_facts);
 }
 
-static bool loom_low_source_memory_access_single_term_expression_byte_facts(
-    const loom_value_fact_table_t* fact_table,
-    const loom_vector_memory_access_t* vector_access,
-    const loom_symbolic_expr_t* expression,
-    const loom_symbolic_term_t* expression_term, uint8_t dynamic_axis,
-    loom_value_facts_t* out_facts) {
+static bool loom_low_source_memory_access_single_term_dynamic_facts(
+    const loom_symbolic_expr_t* expression, loom_value_facts_t* out_facts) {
   *out_facts = loom_value_facts_unknown();
   if (expression->term_count != 1 ||
       loom_value_facts_is_unknown(expression->facts) ||
@@ -633,21 +622,27 @@ static bool loom_low_source_memory_access_single_term_expression_byte_facts(
     loom_value_facts_subi(&byte_facts, &offset_facts, &byte_facts);
   }
 
-  loom_value_facts_t domain_facts = loom_value_facts_unknown();
-  if (vector_access != NULL &&
-      dynamic_axis != LOOM_LOW_SOURCE_MEMORY_DYNAMIC_TERM_AXIS_NONE &&
-      loom_low_source_memory_access_origin_domain_facts(
-          fact_table, vector_access, dynamic_axis, &domain_facts)) {
-    loom_value_facts_t domain_byte_facts = loom_value_facts_unknown();
-    loom_low_source_memory_dynamic_term_compute_index_byte_facts(
-        fact_table, domain_facts, expression_term->coefficient,
-        /*stride_values=*/NULL, /*stride_value_count=*/0, &domain_byte_facts);
-    byte_facts = loom_low_source_memory_access_intersect_index_facts(
-        byte_facts, domain_byte_facts);
-  }
-
   *out_facts = byte_facts;
   return true;
+}
+
+static void loom_low_source_memory_access_refine_projection_term_byte_facts(
+    const loom_value_fact_table_t* fact_table,
+    const loom_vector_memory_access_t* vector_access,
+    const loom_symbolic_term_t* expression_term, uint8_t dynamic_axis,
+    loom_value_facts_t* inout_facts) {
+  if (dynamic_axis == LOOM_LOW_SOURCE_MEMORY_DYNAMIC_TERM_AXIS_NONE) return;
+  loom_value_facts_t domain_facts = loom_value_facts_unknown();
+  if (!loom_low_source_memory_access_origin_domain_facts(
+          fact_table, vector_access, dynamic_axis, &domain_facts)) {
+    return;
+  }
+  loom_value_facts_t domain_byte_facts = loom_value_facts_unknown();
+  loom_low_source_memory_dynamic_term_compute_index_byte_facts(
+      fact_table, domain_facts, expression_term->coefficient,
+      /*stride_values=*/NULL, /*stride_value_count=*/0, &domain_byte_facts);
+  *inout_facts = loom_low_source_memory_access_intersect_index_facts(
+      *inout_facts, domain_byte_facts);
 }
 
 loom_value_facts_t loom_low_source_memory_dynamic_offset_facts(
@@ -656,6 +651,12 @@ loom_value_facts_t loom_low_source_memory_dynamic_offset_facts(
   loom_value_facts_t offset_facts =
       loom_value_facts_exact_i64(static_byte_offset);
   uint8_t term_ordinal = 0;
+  if (plan->dynamic_view_base_term_count != 0 &&
+      !loom_value_facts_is_unknown(plan->dynamic_view_base_byte_facts)) {
+    loom_value_facts_addi(&offset_facts, &plan->dynamic_view_base_byte_facts,
+                          &offset_facts);
+    term_ordinal = plan->dynamic_view_base_term_count;
+  }
   uint8_t realization_ordinal = 0;
   while (term_ordinal < plan->dynamic_term_count) {
     const loom_low_source_memory_dynamic_realization_t* realization = NULL;
@@ -700,24 +701,6 @@ static bool loom_low_source_memory_access_exact_positive_i64(
   return true;
 }
 
-typedef struct loom_low_source_memory_scaled_index_t {
-  // Base SSA value used as the dynamic address term.
-  loom_value_id_t index;
-  // Facts for the original source expression before extracting static offset.
-  loom_value_facts_t expression_facts;
-  // Positive multiplier applied to |index| in the original source expression.
-  int64_t multiplier;
-  // Constant offset added after the scaled index in the original expression.
-  int64_t offset;
-} loom_low_source_memory_scaled_index_t;
-
-typedef struct loom_low_source_memory_affine_index_term_t {
-  // Base SSA value used as one dynamic address term.
-  loom_value_id_t index;
-  // Positive multiplier applied to |index| in the affine index expression.
-  int64_t multiplier;
-} loom_low_source_memory_affine_index_term_t;
-
 static bool loom_low_source_memory_access_can_extract_static_index_offset(
     int64_t index_offset) {
   // Static byte offsets are modeled as non-negative target-friendly addends.
@@ -725,163 +708,14 @@ static bool loom_low_source_memory_access_can_extract_static_index_offset(
   return index_offset >= 0;
 }
 
-static bool loom_low_source_memory_access_append_affine_index_term(
-    loom_value_id_t index, int64_t multiplier,
-    loom_low_source_memory_affine_index_term_t* terms, uint8_t* inout_count) {
-  if (*inout_count >= LOOM_LOW_SOURCE_MEMORY_DYNAMIC_TERM_CAPACITY ||
-      multiplier <= 0) {
-    return false;
-  }
-  terms[*inout_count] = (loom_low_source_memory_affine_index_term_t){
-      .index = index,
-      .multiplier = multiplier,
-  };
-  *inout_count += 1;
-  return true;
-}
-
-static bool loom_low_source_memory_access_affine_index_terms_from_value(
-    const loom_module_t* module, const loom_value_fact_table_t* fact_table,
-    loom_value_id_t value_id, loom_low_source_memory_affine_index_term_t* terms,
-    uint8_t* inout_count, int64_t* inout_offset) {
-  loom_symbolic_term_t
-      symbolic_terms[LOOM_LOW_SOURCE_MEMORY_DYNAMIC_TERM_CAPACITY] = {0};
-  loom_symbolic_expr_t expression = {0};
-  loom_symbolic_expr_from_value_bounded(
-      module, fact_table, value_id, symbolic_terms,
-      IREE_ARRAYSIZE(symbolic_terms), &expression);
-  if (!loom_symbolic_expr_is_linear(&expression)) {
-    return false;
-  }
-  int64_t offset = 0;
-  if (!iree_checked_add_i64(*inout_offset, expression.constant, &offset)) {
-    return false;
-  }
-  *inout_offset = offset;
-  for (iree_host_size_t i = 0; i < expression.term_count; ++i) {
-    const loom_symbolic_term_t term = expression.terms[i];
-    if (!loom_low_source_memory_access_append_affine_index_term(
-            term.value_id, term.coefficient, terms, inout_count)) {
-      return false;
-    }
-  }
-  return true;
-}
-
-static loom_value_facts_t
-loom_low_source_memory_access_derive_linear_index_facts(
-    const loom_module_t* module, const loom_value_fact_table_t* fact_table,
-    loom_value_id_t value_id) {
-  loom_symbolic_term_t terms[LOOM_LOW_SOURCE_MEMORY_DYNAMIC_TERM_CAPACITY] = {
-      0};
-  loom_symbolic_expr_t expression = {0};
-  loom_symbolic_expr_from_value_bounded(module, fact_table, value_id, terms,
-                                        IREE_ARRAYSIZE(terms), &expression);
-  if (!loom_symbolic_expr_is_linear(&expression)) {
-    return loom_value_fact_table_lookup(fact_table, value_id);
-  }
-  loom_value_facts_t derived_facts =
-      loom_value_facts_exact_i64(expression.constant);
-  for (iree_host_size_t i = 0; i < expression.term_count; ++i) {
-    loom_value_facts_t term_facts =
-        loom_value_fact_table_lookup(fact_table, expression.terms[i].value_id);
-    const loom_value_facts_t coefficient_facts =
-        loom_value_facts_exact_i64(expression.terms[i].coefficient);
-    loom_value_facts_muli(&term_facts, &coefficient_facts, &term_facts);
-    loom_value_facts_addi(&derived_facts, &term_facts, &derived_facts);
-  }
-  return loom_low_source_memory_access_intersect_index_facts(
-      loom_value_fact_table_lookup(fact_table, value_id), derived_facts);
-}
-
-static bool loom_low_source_memory_access_scaled_index_from_value(
-    const loom_module_t* module, const loom_value_fact_table_t* fact_table,
-    loom_value_id_t value_id,
-    loom_low_source_memory_scaled_index_t* out_scaled_index) {
-  *out_scaled_index = (loom_low_source_memory_scaled_index_t){
-      .index = value_id,
-      .expression_facts = loom_value_fact_table_lookup(fact_table, value_id),
-      .multiplier = 1,
-      .offset = 0,
-  };
-  if (value_id >= module->values.count) {
-    return false;
-  }
-  loom_symbolic_term_t terms[1] = {0};
-  loom_symbolic_expr_t expression = {0};
-  loom_symbolic_expr_from_value_bounded(module, fact_table, value_id, terms,
-                                        IREE_ARRAYSIZE(terms), &expression);
-  if (loom_symbolic_expr_is_linear(&expression) && expression.term_count == 1 &&
-      expression.terms[0].coefficient > 0 &&
-      loom_low_source_memory_access_can_extract_static_index_offset(
-          expression.constant)) {
-    if (expression.constant != 0 || expression.terms[0].coefficient != 1) {
-      *out_scaled_index = (loom_low_source_memory_scaled_index_t){
-          .index = expression.terms[0].value_id,
-          .expression_facts = expression.facts,
-          .multiplier = expression.terms[0].coefficient,
-          .offset = expression.constant,
-      };
-      return true;
-    }
-  }
-
-  // Preserve a reusable dynamic address expression while peeling a constant
-  // suffix into the target's static offset field. Expanding the remaining
-  // expression can change its register placement and inhibit target-native
-  // fused address arithmetic.
-  const loom_value_t* value = loom_module_value(module, value_id);
-  if (loom_value_is_block_arg(value)) {
-    return true;
-  }
-  const loom_op_t* defining_op = loom_value_def_op(value);
-  if (defining_op == NULL || !loom_index_add_isa(defining_op)) {
-    return true;
-  }
-  const loom_value_id_t lhs = loom_index_add_lhs(defining_op);
-  const loom_value_id_t rhs = loom_index_add_rhs(defining_op);
-  int64_t lhs_constant = 0;
-  int64_t rhs_constant = 0;
-  const bool lhs_is_constant = loom_low_source_memory_access_exact_i64(
-      loom_value_fact_table_lookup(fact_table, lhs), &lhs_constant);
-  const bool rhs_is_constant = loom_low_source_memory_access_exact_i64(
-      loom_value_fact_table_lookup(fact_table, rhs), &rhs_constant);
-  if (lhs_is_constant == rhs_is_constant) {
-    return true;
-  }
-  const int64_t offset = lhs_is_constant ? lhs_constant : rhs_constant;
-  if (!loom_low_source_memory_access_can_extract_static_index_offset(offset)) {
-    return true;
-  }
-  const loom_value_id_t dynamic_index = lhs_is_constant ? rhs : lhs;
-  loom_value_facts_t expression_facts =
-      loom_low_source_memory_access_derive_linear_index_facts(
-          module, fact_table, dynamic_index);
-  const loom_value_facts_t offset_facts = loom_value_facts_exact_i64(offset);
-  loom_value_facts_addi(&expression_facts, &offset_facts, &expression_facts);
-  *out_scaled_index = (loom_low_source_memory_scaled_index_t){
-      .index = dynamic_index,
-      .expression_facts = expression_facts,
-      .multiplier = 1,
-      .offset = offset,
-  };
-  return true;
-}
-
-static bool loom_low_source_memory_access_apply_scaled_index(
-    const loom_low_source_memory_scaled_index_t* scaled_index,
-    int64_t byte_stride, int64_t static_byte_offset, int64_t* out_byte_stride,
+static bool loom_low_source_memory_access_apply_static_index_offset(
+    int64_t index_offset, int64_t byte_stride, int64_t static_byte_offset,
     int64_t* out_static_byte_offset) {
-  *out_byte_stride = byte_stride;
   *out_static_byte_offset = static_byte_offset;
 
-  int64_t scaled_byte_stride = 0;
   int64_t static_offset_delta = 0;
   int64_t new_static_byte_offset = 0;
-  if (!iree_checked_mul_i64(byte_stride, scaled_index->multiplier,
-                            &scaled_byte_stride) ||
-      !iree_checked_mul_i64(byte_stride, scaled_index->offset,
-                            &static_offset_delta) ||
+  if (!iree_checked_mul_i64(byte_stride, index_offset, &static_offset_delta) ||
       !iree_checked_add_i64(static_byte_offset, static_offset_delta,
                             &new_static_byte_offset)) {
     return false;
@@ -891,8 +725,23 @@ static bool loom_low_source_memory_access_apply_scaled_index(
   if (static_byte_offset >= 0 && new_static_byte_offset < 0) {
     return false;
   }
-  *out_byte_stride = scaled_byte_stride;
   *out_static_byte_offset = new_static_byte_offset;
+  return true;
+}
+
+static bool loom_low_source_memory_access_can_expand_index_expression(
+    const loom_symbolic_expr_t* expression,
+    iree_host_size_t available_term_count) {
+  if (!loom_symbolic_expr_is_linear(expression) ||
+      expression->term_count <= 1 ||
+      expression->term_count > available_term_count ||
+      !loom_low_source_memory_access_can_extract_static_index_offset(
+          expression->constant)) {
+    return false;
+  }
+  for (iree_host_size_t i = 0; i < expression->term_count; ++i) {
+    if (expression->terms[i].coefficient <= 0) return false;
+  }
   return true;
 }
 
@@ -919,8 +768,7 @@ static bool loom_low_source_memory_facts_are_stronger(
 static loom_value_id_t loom_low_source_memory_symbolic_term_materialized_value(
     const loom_value_fact_table_t* fact_table,
     const loom_symbolic_term_t* expression_term) {
-  if (!fact_table ||
-      expression_term->relation_value_id == LOOM_VALUE_ID_INVALID ||
+  if (expression_term->relation_value_id == LOOM_VALUE_ID_INVALID ||
       expression_term->relation_value_id == expression_term->value_id ||
       !loom_value_fact_table_has_entry(fact_table,
                                        expression_term->relation_value_id) ||
@@ -936,14 +784,25 @@ static loom_value_id_t loom_low_source_memory_symbolic_term_materialized_value(
              : expression_term->value_id;
 }
 
+typedef enum loom_low_source_memory_view_expression_role_e {
+  // Root-relative byte terms have no logical view axis.
+  LOOM_LOW_SOURCE_MEMORY_VIEW_EXPRESSION_ROOT_BASE = 0,
+  // Projection-relative byte terms may inherit a logical view axis.
+  LOOM_LOW_SOURCE_MEMORY_VIEW_EXPRESSION_PROJECTION = 1,
+} loom_low_source_memory_view_expression_role_t;
+
+// Appends canonical terms for one analyzed view expression. When provided,
+// |inout_combined_byte_facts| accumulates independent term facts during the
+// append so aggregate refinement requires no later term traversal.
 static bool loom_low_source_memory_access_add_view_region_expression_terms(
     const loom_value_fact_table_t* fact_table,
     const loom_vector_memory_access_t* vector_access,
+    loom_low_source_memory_view_expression_role_t expression_role,
     const loom_symbolic_expr_t* expression,
     loom_low_source_memory_access_plan_t* plan,
     loom_low_source_memory_access_diagnostic_t* diagnostic,
-    iree_host_size_t* inout_dynamic_term_count) {
-  if (!expression || !loom_symbolic_expr_is_linear(expression)) {
+    loom_value_facts_t* inout_combined_byte_facts) {
+  if (!loom_symbolic_expr_is_linear(expression)) {
     diagnostic->rejection_bits |=
         LOOM_LOW_SOURCE_MEMORY_ACCESS_REJECTION_VIEW_BASE;
     return false;
@@ -959,10 +818,14 @@ static bool loom_low_source_memory_access_add_view_region_expression_terms(
     loom_value_id_t materialized_value =
         loom_low_source_memory_symbolic_term_materialized_value(
             fact_table, expression_term);
+    const uint8_t dynamic_axis =
+        expression_role == LOOM_LOW_SOURCE_MEMORY_VIEW_EXPRESSION_PROJECTION
+            ? loom_low_source_memory_access_axis_from_byte_stride(
+                  vector_access, expression_term->coefficient)
+            : LOOM_LOW_SOURCE_MEMORY_DYNAMIC_TERM_AXIS_NONE;
     loom_low_source_memory_dynamic_term_t term = {
         .index = materialized_value,
-        .axis = loom_low_source_memory_access_axis_from_byte_stride(
-            vector_access, expression_term->coefficient),
+        .axis = dynamic_axis,
         .byte_stride = expression_term->coefficient,
         .byte_shift = LOOM_LOW_SOURCE_MEMORY_ACCESS_BYTE_SHIFT_NONE,
     };
@@ -971,12 +834,22 @@ static bool loom_low_source_memory_access_add_view_region_expression_terms(
     (void)loom_low_source_memory_access_power_of_two_shift(term.byte_stride,
                                                            &term.byte_shift);
     loom_value_facts_t byte_facts = loom_value_facts_unknown();
-    if (!loom_low_source_memory_access_single_term_expression_byte_facts(
-            fact_table, vector_access, expression, expression_term, term.axis,
-            &byte_facts)) {
+    if (loom_low_source_memory_access_single_term_dynamic_facts(expression,
+                                                                &byte_facts)) {
+      if (expression_role ==
+          LOOM_LOW_SOURCE_MEMORY_VIEW_EXPRESSION_PROJECTION) {
+        loom_low_source_memory_access_refine_projection_term_byte_facts(
+            fact_table, vector_access, expression_term, term.axis, &byte_facts);
+      }
+    } else if (expression_role ==
+               LOOM_LOW_SOURCE_MEMORY_VIEW_EXPRESSION_PROJECTION) {
       loom_low_source_memory_dynamic_term_compute_byte_facts(
           fact_table, vector_access, materialized_value, term.axis,
           /*index_multiplier=*/1, /*index_offset=*/0, term.byte_stride,
+          /*stride_values=*/NULL, /*stride_value_count=*/0, &byte_facts);
+    } else {
+      loom_low_source_memory_dynamic_term_compute_scaled_byte_facts(
+          fact_table, materialized_value, term.byte_stride,
           /*stride_values=*/NULL, /*stride_value_count=*/0, &byte_facts);
     }
     term.byte_facts = byte_facts;
@@ -984,7 +857,10 @@ static bool loom_low_source_memory_access_add_view_region_expression_terms(
                                                            diagnostic)) {
       return false;
     }
-    *inout_dynamic_term_count += 1;
+    if (inout_combined_byte_facts != NULL) {
+      loom_value_facts_addi(inout_combined_byte_facts, &term.byte_facts,
+                            inout_combined_byte_facts);
+    }
   }
   return true;
 }
@@ -996,8 +872,7 @@ static bool loom_low_source_memory_access_add_view_region_byte_offset(
     loom_low_source_memory_access_plan_t* plan,
     loom_low_source_memory_access_diagnostic_t* diagnostic,
     int64_t* inout_static_byte_offset) {
-  if (!view_region ||
-      !loom_symbolic_expr_is_linear(&view_region->begin_byte_offset)) {
+  if (!loom_symbolic_expr_is_linear(&view_region->begin_byte_offset)) {
     diagnostic->rejection_bits |=
         LOOM_LOW_SOURCE_MEMORY_ACCESS_REJECTION_VIEW_BASE;
     return false;
@@ -1013,25 +888,57 @@ static bool loom_low_source_memory_access_add_view_region_byte_offset(
   plan->static_view_base_byte_offset = view_region->begin_byte_offset.constant;
   *inout_static_byte_offset = static_byte_offset;
 
-  const iree_host_size_t dynamic_view_base_begin = plan->dynamic_term_count;
-  iree_host_size_t dynamic_view_base_count = 0;
+  const uint8_t dynamic_view_base_begin = plan->dynamic_term_count;
+  // Multi-term bases can carry relational bounds in the analyzed complete
+  // expression that independent canonical terms cannot represent. Accumulate
+  // canonical facts during construction so taking the tighter range requires
+  // neither source rediscovery nor another term traversal.
+  const bool can_refine_dynamic_view_base_facts =
+      view_region->base_begin_byte_offset.term_count +
+              view_region->projection_byte_offset.term_count >=
+          2 &&
+      !loom_value_facts_is_unknown(view_region->begin_byte_offset.facts);
+  loom_value_facts_t canonical_view_base_byte_facts;
+  loom_value_facts_t* combined_view_base_byte_facts = NULL;
+  if (can_refine_dynamic_view_base_facts) {
+    canonical_view_base_byte_facts = loom_value_facts_exact_i64(0);
+    combined_view_base_byte_facts = &canonical_view_base_byte_facts;
+  }
   if (!loom_low_source_memory_access_add_view_region_expression_terms(
-          fact_table, /*vector_access=*/NULL,
+          fact_table, vector_access,
+          LOOM_LOW_SOURCE_MEMORY_VIEW_EXPRESSION_ROOT_BASE,
           &view_region->base_begin_byte_offset, plan, diagnostic,
-          &dynamic_view_base_count) ||
+          combined_view_base_byte_facts) ||
       !loom_low_source_memory_access_add_view_region_expression_terms(
-          fact_table, vector_access, &view_region->projection_byte_offset, plan,
-          diagnostic, &dynamic_view_base_count)) {
+          fact_table, vector_access,
+          LOOM_LOW_SOURCE_MEMORY_VIEW_EXPRESSION_PROJECTION,
+          &view_region->projection_byte_offset, plan, diagnostic,
+          combined_view_base_byte_facts)) {
     return false;
   }
-  if (dynamic_view_base_count > UINT8_MAX) {
-    diagnostic->rejection_bits |=
-        LOOM_LOW_SOURCE_MEMORY_ACCESS_REJECTION_DYNAMIC_INDEX_COUNT;
-    return false;
-  }
-  plan->dynamic_view_base_term_count = (uint8_t)dynamic_view_base_count;
+  const uint8_t dynamic_view_base_count =
+      (uint8_t)(plan->dynamic_term_count - dynamic_view_base_begin);
+  plan->dynamic_view_base_term_count = dynamic_view_base_count;
   if (view_region->base_view_value_id != LOOM_VALUE_ID_INVALID) {
     plan->base_view_value_id = view_region->base_view_value_id;
+  }
+  if (can_refine_dynamic_view_base_facts) {
+    // The canonical static contribution is already represented separately in
+    // the access plan, so retain only the analyzed dynamic contribution.
+    loom_value_facts_t analyzed_view_base_byte_facts =
+        view_region->begin_byte_offset.facts;
+    const loom_value_facts_t static_view_base_byte_facts =
+        loom_value_facts_exact_i64(plan->static_view_base_byte_offset);
+    loom_value_facts_subi(&analyzed_view_base_byte_facts,
+                          &static_view_base_byte_facts,
+                          &analyzed_view_base_byte_facts);
+    const loom_value_facts_t refined_view_base_byte_facts =
+        loom_low_source_memory_access_intersect_index_facts(
+            canonical_view_base_byte_facts, analyzed_view_base_byte_facts);
+    if (loom_low_source_memory_facts_are_stronger(
+            refined_view_base_byte_facts, canonical_view_base_byte_facts)) {
+      plan->dynamic_view_base_byte_facts = refined_view_base_byte_facts;
+    }
   }
   if (dynamic_view_base_count != 0 &&
       view_region->begin_value_id != LOOM_VALUE_ID_INVALID) {
@@ -1047,68 +954,47 @@ static bool loom_low_source_memory_access_add_view_region_byte_offset(
 }
 
 static bool loom_low_source_memory_access_add_view_base_byte_offset(
-    const loom_module_t* module, const loom_value_fact_table_t* fact_table,
     const loom_view_region_table_t* view_regions,
     const loom_vector_memory_access_t* vector_access,
     loom_value_id_t view_value_id, loom_low_source_memory_access_plan_t* plan,
     loom_low_source_memory_access_diagnostic_t* diagnostic,
     int64_t* inout_static_byte_offset) {
-  loom_value_fact_view_reference_t view_reference = {0};
-  if (!loom_value_facts_query_view_reference(
-          &fact_table->context,
-          loom_value_fact_table_lookup(fact_table, view_value_id),
-          &view_reference)) {
+  const loom_module_t* module = view_regions->expression_context->module;
+  const loom_value_fact_table_t* fact_table =
+      view_regions->expression_context->fact_table;
+  const loom_view_region_t* view_region = NULL;
+  if (!loom_view_region_table_try_lookup(view_regions, view_value_id,
+                                         &view_region)) {
     diagnostic->rejection_bits |=
         LOOM_LOW_SOURCE_MEMORY_ACCESS_REJECTION_VIEW_SOURCE;
     return false;
   }
 
-  const loom_view_region_t* view_region = NULL;
-  if (view_regions && loom_view_region_table_try_lookup(
-                          view_regions, view_value_id, &view_region)) {
-    loom_vector_memory_access_t base_vector_access = {0};
-    const loom_vector_memory_access_t* view_base_access = vector_access;
-    if (view_region->base_view_value_id != LOOM_VALUE_ID_INVALID &&
-        view_region->base_view_value_id < module->values.count) {
-      const loom_type_t base_view_type =
-          loom_module_value_type(module, view_region->base_view_value_id);
-      if (loom_type_is_view(base_view_type) &&
-          loom_vector_memory_access_describe(
-              &fact_table->context, module, base_view_type,
-              vector_access->vector_type, &base_vector_access)) {
-        view_base_access = &base_vector_access;
-      }
-    }
-    if (!loom_low_source_memory_access_add_view_region_byte_offset(
-            fact_table, view_base_access, view_region, plan, diagnostic,
-            inout_static_byte_offset)) {
-      return false;
-    }
-  } else {
-    int64_t view_base_byte_offset = 0;
-    if (loom_low_source_memory_access_exact_i64(view_reference.base_byte_offset,
-                                                &view_base_byte_offset)) {
-      int64_t static_byte_offset = 0;
-      if (!iree_checked_add_i64(*inout_static_byte_offset,
-                                view_base_byte_offset, &static_byte_offset)) {
-        diagnostic->rejection_bits |=
-            LOOM_LOW_SOURCE_MEMORY_ACCESS_REJECTION_VIEW_BASE_OVERFLOW;
-        return false;
-      }
-      plan->static_view_base_byte_offset = view_base_byte_offset;
-      *inout_static_byte_offset = static_byte_offset;
-    } else {
+  loom_vector_memory_access_t base_vector_access = {0};
+  const loom_vector_memory_access_t* view_base_access = vector_access;
+  if (view_region->base_view_value_id != LOOM_VALUE_ID_INVALID) {
+    const loom_type_t base_view_type =
+        loom_module_value_type(module, view_region->base_view_value_id);
+    if (!loom_vector_memory_access_describe(
+            &fact_table->context, module, base_view_type,
+            vector_access->vector_type, &base_vector_access)) {
       diagnostic->rejection_bits |=
           LOOM_LOW_SOURCE_MEMORY_ACCESS_REJECTION_VIEW_BASE;
       return false;
     }
+    view_base_access = &base_vector_access;
+  }
+  if (!loom_low_source_memory_access_add_view_region_byte_offset(
+          fact_table, view_base_access, view_region, plan, diagnostic,
+          inout_static_byte_offset)) {
+    return false;
   }
 
-  plan->memory_space = view_reference.memory_space;
-  plan->root_value_id = view_reference.root_value_id;
+  plan->memory_space = view_region->memory_space;
+  plan->root_value_id = view_region->root_value_id;
   plan->root_minimum_alignment = loom_low_source_memory_clamp_alignment(
-      view_reference.root_minimum_alignment);
-  plan->alias_scope_id = view_reference.alias_scope_id;
+      view_region->root_minimum_alignment);
+  plan->alias_scope_id = view_region->alias_scope_id;
   return true;
 }
 
@@ -1345,7 +1231,6 @@ loom_low_source_memory_classify_address_layout(
 }
 
 static bool loom_low_source_memory_access_plan_from_components(
-    const loom_module_t* module, const loom_value_fact_table_t* fact_table,
     const loom_view_region_table_t* view_regions,
     loom_low_source_memory_operation_kind_t operation_kind,
     loom_value_id_t view_value_id, loom_value_slice_t dynamic_indices,
@@ -1353,25 +1238,24 @@ static bool loom_low_source_memory_access_plan_from_components(
     loom_type_t vector_type, loom_vector_memory_cache_policy_t cache_policy,
     loom_low_source_memory_access_plan_t* out_plan,
     loom_low_source_memory_access_diagnostic_t* out_diagnostic) {
-  *out_plan = (loom_low_source_memory_access_plan_t){
-      .operation_kind = operation_kind,
-      .view_value_id = view_value_id,
-      .base_view_value_id = view_value_id,
-      .memory_space = LOOM_VALUE_FACT_MEMORY_SPACE_UNKNOWN,
-      .root_value_id = LOOM_VALUE_ID_INVALID,
-      .root_minimum_alignment = 1,
-      .alias_scope_id = LOOM_VALUE_FACT_ALIAS_SCOPE_ID_NONE,
-      .dynamic_view_base_value_id = LOOM_VALUE_ID_INVALID,
-      .minimum_alignment = 1,
-      .cache_policy = cache_policy,
-  };
-  *out_diagnostic = (loom_low_source_memory_access_diagnostic_t){0};
+  out_plan->operation_kind = operation_kind;
+  out_plan->view_value_id = view_value_id;
+  out_plan->base_view_value_id = view_value_id;
+  out_plan->root_value_id = LOOM_VALUE_ID_INVALID;
+  out_plan->root_minimum_alignment = 1;
+  out_plan->alias_scope_id = LOOM_VALUE_FACT_ALIAS_SCOPE_ID_NONE;
+  out_plan->dynamic_view_base_value_id = LOOM_VALUE_ID_INVALID;
+  out_plan->dynamic_view_base_byte_facts = loom_value_facts_unknown();
+  out_plan->minimum_alignment = 1;
+  out_plan->cache_policy = cache_policy;
+  const loom_module_t* module = view_regions->expression_context->module;
+  const loom_value_fact_table_t* fact_table =
+      view_regions->expression_context->fact_table;
 
   loom_vector_memory_access_t vector_access;
-  const loom_fact_context_t* fact_context =
-      fact_table ? &fact_table->context : NULL;
-  if (!loom_vector_memory_access_describe(fact_context, module, view_type,
-                                          vector_type, &vector_access)) {
+  if (!loom_vector_memory_access_describe(&fact_table->context, module,
+                                          view_type, vector_type,
+                                          &vector_access)) {
     out_diagnostic->rejection_bits |=
         LOOM_LOW_SOURCE_MEMORY_ACCESS_REJECTION_DESCRIBE_FAILED;
     return false;
@@ -1446,8 +1330,8 @@ static bool loom_low_source_memory_access_plan_from_components(
     return false;
   }
   if (!loom_low_source_memory_access_add_view_base_byte_offset(
-          module, fact_table, view_regions, &vector_access, view_value_id,
-          out_plan, out_diagnostic, &static_byte_offset)) {
+          view_regions, &vector_access, view_value_id, out_plan, out_diagnostic,
+          &static_byte_offset)) {
     return false;
   }
 
@@ -1471,75 +1355,104 @@ static bool loom_low_source_memory_access_plan_from_components(
       return false;
     }
 
-    loom_value_id_t dynamic_index = dynamic_index_values[i];
+    const loom_value_id_t source_index = dynamic_index_values[i];
+    loom_symbolic_term_t source_term = {
+        .coefficient = 1,
+        .value_id = source_index,
+        .relation_value_id = source_index,
+    };
+    loom_symbolic_expr_summary_t index_summary = {
+        .expression =
+            {
+                .constant = 0,
+                .terms = &source_term,
+                .term_count = 1,
+                .facts = loom_value_fact_table_lookup(fact_table, source_index),
+                .flags = LOOM_SYMBOLIC_EXPR_FLAG_LINEAR,
+            },
+        .materialized_dynamic_value_id = source_index,
+    };
+    loom_symbolic_expr_summary_t analyzed_summary = {0};
+    if (loom_symbolic_expr_context_try_lookup_summary(
+            view_regions->expression_context, source_index,
+            &analyzed_summary)) {
+      index_summary = analyzed_summary;
+    }
+
+    const loom_symbolic_expr_t* index_expression = &index_summary.expression;
+    loom_value_id_t dynamic_index = source_index;
     int64_t dynamic_index_multiplier = 1;
     int64_t dynamic_index_offset = 0;
     const int64_t expression_byte_stride = byte_stride;
-    loom_value_facts_t expression_facts = loom_value_facts_unknown();
-    // Peel a simple scale/static suffix before canonicalizing the remaining
-    // affine expression. This retains any reusable dynamic prefix while
-    // keeping the final canonical terms independent of source spelling.
-    const int64_t unscaled_static_byte_offset = static_byte_offset;
-    loom_low_source_memory_scaled_index_t scaled_index = {0};
-    const bool has_scaled_index =
-        loom_low_source_memory_access_scaled_index_from_value(
-            module, fact_table, dynamic_index, &scaled_index) &&
-        (scaled_index.index != dynamic_index || scaled_index.multiplier != 1 ||
-         scaled_index.offset != 0);
+    loom_value_facts_t expression_facts =
+        loom_value_fact_table_lookup(fact_table, source_index);
+
     // A coordinate suffix cannot become a static byte offset when its axis
     // stride contains a dynamic extent: the suffix is multiplied by that
     // extent and remains part of the dynamic address. A multiplier-only
     // decomposition remains safe because every dynamic stride value stays on
     // the term.
-    if (has_scaled_index &&
-        (scaled_index.offset == 0 || stride_value_count == 0) &&
-        loom_low_source_memory_access_apply_scaled_index(
-            &scaled_index, byte_stride, static_byte_offset, &byte_stride,
-            &static_byte_offset)) {
-      dynamic_index = scaled_index.index;
-      dynamic_index_multiplier = scaled_index.multiplier;
-      dynamic_index_offset = scaled_index.offset;
-      expression_facts = scaled_index.expression_facts;
+    const int64_t unscaled_static_byte_offset = static_byte_offset;
+    if (loom_symbolic_expr_is_linear(index_expression) &&
+        index_expression->term_count == 1 &&
+        index_expression->terms[0].coefficient > 0 &&
+        (index_expression->constant != 0 ||
+         index_expression->terms[0].coefficient != 1) &&
+        loom_low_source_memory_access_can_extract_static_index_offset(
+            index_expression->constant) &&
+        (index_expression->constant == 0 || stride_value_count == 0)) {
+      int64_t scaled_byte_stride = 0;
+      int64_t scaled_static_byte_offset = static_byte_offset;
+      if (iree_checked_mul_i64(byte_stride,
+                               index_expression->terms[0].coefficient,
+                               &scaled_byte_stride) &&
+          loom_low_source_memory_access_apply_static_index_offset(
+              index_expression->constant, byte_stride, static_byte_offset,
+              &scaled_static_byte_offset)) {
+        dynamic_index = loom_low_source_memory_symbolic_term_materialized_value(
+            fact_table, &index_expression->terms[0]);
+        dynamic_index_multiplier = index_expression->terms[0].coefficient;
+        dynamic_index_offset = index_expression->constant;
+        expression_facts = index_expression->facts;
+        byte_stride = scaled_byte_stride;
+        static_byte_offset = scaled_static_byte_offset;
+      }
       if (static_byte_offset != unscaled_static_byte_offset) {
         out_plan->source_index_static_offset_extracted = true;
       }
     }
 
-    loom_low_source_memory_affine_index_term_t
-        affine_terms[LOOM_LOW_SOURCE_MEMORY_DYNAMIC_TERM_CAPACITY] = {0};
-    uint8_t affine_term_count = 0;
-    int64_t affine_index_offset = 0;
-    bool affine_expanded =
-        loom_low_source_memory_access_affine_index_terms_from_value(
-            module, fact_table, dynamic_index, affine_terms, &affine_term_count,
-            &affine_index_offset) &&
-        affine_term_count > 1 &&
-        (affine_index_offset == 0 || stride_value_count == 0) &&
-        loom_low_source_memory_access_can_extract_static_index_offset(
-            affine_index_offset);
-    int64_t affine_static_byte_offset = static_byte_offset;
-    if (affine_expanded) {
-      int64_t static_offset_delta = 0;
-      if (!iree_checked_mul_i64(byte_stride, affine_index_offset,
-                                &static_offset_delta) ||
-          !iree_checked_add_i64(static_byte_offset, static_offset_delta,
-                                &affine_static_byte_offset) ||
-          (static_byte_offset >= 0 && affine_static_byte_offset < 0)) {
-        affine_expanded = false;
+    const iree_host_size_t available_term_count =
+        LOOM_LOW_SOURCE_MEMORY_DYNAMIC_TERM_CAPACITY -
+        out_plan->dynamic_term_count;
+    bool expression_expanded =
+        loom_low_source_memory_access_can_expand_index_expression(
+            index_expression, available_term_count) &&
+        (index_expression->constant == 0 || stride_value_count == 0);
+    int64_t expanded_static_byte_offset = unscaled_static_byte_offset;
+    if (expression_expanded) {
+      if (!loom_low_source_memory_access_apply_static_index_offset(
+              index_expression->constant, expression_byte_stride,
+              unscaled_static_byte_offset, &expanded_static_byte_offset)) {
+        expression_expanded = false;
       }
     }
-    if (affine_expanded) {
-      const uint8_t first_affine_term = out_plan->dynamic_term_count;
-      if (affine_static_byte_offset != static_byte_offset) {
+    if (expression_expanded) {
+      const uint8_t first_expression_term = out_plan->dynamic_term_count;
+      if (expanded_static_byte_offset != unscaled_static_byte_offset) {
         out_plan->source_index_static_offset_extracted = true;
       }
-      static_byte_offset = affine_static_byte_offset;
-      for (uint8_t term_ordinal = 0; term_ordinal < affine_term_count;
-           ++term_ordinal) {
-        const loom_low_source_memory_affine_index_term_t* affine_term =
-            &affine_terms[term_ordinal];
+      static_byte_offset = expanded_static_byte_offset;
+      for (iree_host_size_t term_ordinal = 0;
+           term_ordinal < index_expression->term_count; ++term_ordinal) {
+        const loom_symbolic_term_t* expression_term =
+            &index_expression->terms[term_ordinal];
+        const loom_value_id_t materialized_value =
+            loom_low_source_memory_symbolic_term_materialized_value(
+                fact_table, expression_term);
         int64_t term_byte_stride = 0;
-        if (!iree_checked_mul_i64(byte_stride, affine_term->multiplier,
+        if (!iree_checked_mul_i64(expression_byte_stride,
+                                  expression_term->coefficient,
                                   &term_byte_stride)) {
           out_diagnostic->rejection_bits |=
               LOOM_LOW_SOURCE_MEMORY_ACCESS_REJECTION_DYNAMIC_STRIDE;
@@ -1550,10 +1463,10 @@ static bool loom_low_source_memory_access_plan_from_components(
                                                                &byte_shift);
         loom_value_facts_t byte_facts = loom_value_facts_unknown();
         loom_low_source_memory_dynamic_term_compute_scaled_byte_facts(
-            fact_table, affine_term->index, term_byte_stride, stride_values,
+            fact_table, materialized_value, term_byte_stride, stride_values,
             stride_value_count, &byte_facts);
         loom_low_source_memory_dynamic_term_t term = {
-            .index = affine_term->index,
+            .index = materialized_value,
             .axis = LOOM_LOW_SOURCE_MEMORY_DYNAMIC_TERM_AXIS_NONE,
             .byte_stride = term_byte_stride,
             .byte_facts = byte_facts,
@@ -1561,7 +1474,7 @@ static bool loom_low_source_memory_access_plan_from_components(
             .stride_value_count = stride_value_count,
         };
         loom_low_source_memory_access_dynamic_index_source(
-            fact_table, affine_term->index, &term.source, &term.dimension);
+            fact_table, materialized_value, &term.source, &term.dimension);
         for (uint8_t stride_ordinal = 0; stride_ordinal < stride_value_count;
              ++stride_ordinal) {
           term.stride_values[stride_ordinal] = stride_values[stride_ordinal];
@@ -1571,16 +1484,19 @@ static bool loom_low_source_memory_access_plan_from_components(
           return false;
         }
       }
-      // Preserve an exact source expression only when the canonical form did
-      // not peel a constant from it. Targets may reuse this term if another
-      // source operation independently requires the SSA value, while
-      // memory-only uses continue to consume the canonical affine terms.
-      if (affine_index_offset == 0) {
+      // Preserve the analyzed SSA value that exactly materializes the
+      // canonical dynamic terms. This may be the source index itself or a
+      // constant-free prefix retained while symbolic analysis folded a static
+      // suffix.
+      if (index_summary.materialized_dynamic_value_id !=
+          LOOM_VALUE_ID_INVALID) {
+        const loom_value_id_t realization_value =
+            index_summary.materialized_dynamic_value_id;
         uint32_t byte_shift = LOOM_LOW_SOURCE_MEMORY_ACCESS_BYTE_SHIFT_NONE;
-        (void)loom_low_source_memory_access_power_of_two_shift(byte_stride,
-                                                               &byte_shift);
+        (void)loom_low_source_memory_access_power_of_two_shift(
+            expression_byte_stride, &byte_shift);
         loom_value_facts_t canonical_byte_facts = loom_value_facts_exact_i64(0);
-        for (uint8_t term_ordinal = first_affine_term;
+        for (uint8_t term_ordinal = first_expression_term;
              term_ordinal < out_plan->dynamic_term_count; ++term_ordinal) {
           loom_value_facts_addi(
               &canonical_byte_facts,
@@ -1588,22 +1504,29 @@ static bool loom_low_source_memory_access_plan_from_components(
               &canonical_byte_facts);
         }
         loom_value_facts_t expression_byte_facts = loom_value_facts_unknown();
-        loom_low_source_memory_dynamic_term_compute_scaled_byte_facts(
-            fact_table, dynamic_index, byte_stride, stride_values,
+        loom_low_source_memory_dynamic_term_compute_expression_byte_facts(
+            fact_table, &vector_access, index_expression->facts, dynamic_axis,
+            index_expression->constant, expression_byte_stride, stride_values,
             stride_value_count, &expression_byte_facts);
-        const loom_value_facts_t byte_facts =
+        loom_value_facts_t byte_facts =
             loom_low_source_memory_access_intersect_index_facts(
                 canonical_byte_facts, expression_byte_facts);
+        loom_value_facts_t realization_byte_facts = loom_value_facts_unknown();
+        loom_low_source_memory_dynamic_term_compute_scaled_byte_facts(
+            fact_table, realization_value, expression_byte_stride,
+            stride_values, stride_value_count, &realization_byte_facts);
+        byte_facts = loom_low_source_memory_access_intersect_index_facts(
+            byte_facts, realization_byte_facts);
         loom_low_source_memory_dynamic_term_t realization_term = {
-            .index = dynamic_index,
+            .index = realization_value,
             .axis = dynamic_axis,
-            .byte_stride = byte_stride,
+            .byte_stride = expression_byte_stride,
             .byte_facts = byte_facts,
             .byte_shift = byte_shift,
             .stride_value_count = stride_value_count,
         };
         loom_low_source_memory_access_dynamic_index_source(
-            fact_table, dynamic_index, &realization_term.source,
+            fact_table, realization_value, &realization_term.source,
             &realization_term.dimension);
         for (uint8_t stride_ordinal = 0; stride_ordinal < stride_value_count;
              ++stride_ordinal) {
@@ -1611,8 +1534,8 @@ static bool loom_low_source_memory_access_plan_from_components(
               stride_values[stride_ordinal];
         }
         loom_low_source_memory_access_append_dynamic_realization(
-            out_plan, &realization_term, first_affine_term,
-            (uint8_t)(out_plan->dynamic_term_count - first_affine_term));
+            out_plan, &realization_term, first_expression_term,
+            (uint8_t)(out_plan->dynamic_term_count - first_expression_term));
       }
       continue;
     }
@@ -1661,13 +1584,36 @@ static bool loom_low_source_memory_access_plan_from_components(
   return true;
 }
 
-bool loom_low_source_memory_access_plan_build_with_view_regions(
-    const loom_module_t* module, const loom_value_fact_table_t* fact_table,
+static bool loom_low_source_memory_access_plan_build_indexed_impl(
+    const loom_view_region_table_t* view_regions,
+    loom_low_source_memory_operation_kind_t operation_kind,
+    loom_value_id_t view_value_id, loom_value_slice_t dynamic_indices,
+    loom_attribute_t static_indices, loom_type_t vector_type,
+    loom_vector_memory_cache_policy_t cache_policy,
+    loom_low_source_memory_access_plan_t* out_plan,
+    loom_low_source_memory_access_diagnostic_t* out_diagnostic) {
+  const loom_module_t* module = view_regions->expression_context->module;
+  if (view_value_id >= module->values.count) {
+    out_diagnostic->rejection_bits |=
+        LOOM_LOW_SOURCE_MEMORY_ACCESS_REJECTION_VIEW_SOURCE;
+    return false;
+  }
+  const loom_type_t view_type = loom_module_value_type(module, view_value_id);
+  return loom_low_source_memory_access_plan_from_components(
+      view_regions, operation_kind, view_value_id, dynamic_indices,
+      static_indices, view_type, vector_type, cache_policy, out_plan,
+      out_diagnostic);
+}
+
+bool loom_low_source_memory_access_plan_build(
     const loom_view_region_table_t* view_regions, const loom_op_t* source_op,
     loom_low_source_memory_access_plan_t* out_plan,
     loom_low_source_memory_access_diagnostic_t* out_diagnostic) {
   *out_plan = (loom_low_source_memory_access_plan_t){0};
   *out_diagnostic = (loom_low_source_memory_access_diagnostic_t){0};
+  const loom_module_t* module = view_regions->expression_context->module;
+  const loom_value_fact_table_t* fact_table =
+      view_regions->expression_context->fact_table;
 
   loom_memory_access_t access = loom_memory_access_cast(module, source_op);
   if (!loom_memory_access_isa(access)) {
@@ -1704,12 +1650,11 @@ bool loom_low_source_memory_access_plan_build_with_view_regions(
   const loom_type_t vector_type =
       loom_low_source_memory_access_payload_vector_type(module, source_op,
                                                         access, view_type);
-  const bool built =
-      loom_low_source_memory_access_plan_build_indexed_with_view_regions(
-          module, fact_table, view_regions, operation_kind, view_value_id,
-          loom_memory_access_dynamic_indices(access),
-          loom_memory_access_static_indices(access), vector_type, cache_policy,
-          out_plan, out_diagnostic);
+  const bool built = loom_low_source_memory_access_plan_build_indexed_impl(
+      view_regions, operation_kind, view_value_id,
+      loom_memory_access_dynamic_indices(access),
+      loom_memory_access_static_indices(access), vector_type, cache_policy,
+      out_plan, out_diagnostic);
   if (built) {
     out_plan->vector_offset_kind =
         loom_low_source_memory_access_vector_offset_kind(
@@ -1718,8 +1663,7 @@ bool loom_low_source_memory_access_plan_build_with_view_regions(
   return built;
 }
 
-bool loom_low_source_memory_access_plan_build_indexed_with_view_regions(
-    const loom_module_t* module, const loom_value_fact_table_t* fact_table,
+bool loom_low_source_memory_access_plan_build_indexed(
     const loom_view_region_table_t* view_regions,
     loom_low_source_memory_operation_kind_t operation_kind,
     loom_value_id_t view_value_id, loom_value_slice_t dynamic_indices,
@@ -1729,20 +1673,12 @@ bool loom_low_source_memory_access_plan_build_indexed_with_view_regions(
     loom_low_source_memory_access_diagnostic_t* out_diagnostic) {
   *out_plan = (loom_low_source_memory_access_plan_t){0};
   *out_diagnostic = (loom_low_source_memory_access_diagnostic_t){0};
-  if (view_value_id >= module->values.count) {
-    out_diagnostic->rejection_bits |=
-        LOOM_LOW_SOURCE_MEMORY_ACCESS_REJECTION_VIEW_SOURCE;
-    return false;
-  }
-  const loom_type_t view_type = loom_module_value_type(module, view_value_id);
-  return loom_low_source_memory_access_plan_from_components(
-      module, fact_table, view_regions, operation_kind, view_value_id,
-      dynamic_indices, static_indices, view_type, vector_type, cache_policy,
-      out_plan, out_diagnostic);
+  return loom_low_source_memory_access_plan_build_indexed_impl(
+      view_regions, operation_kind, view_value_id, dynamic_indices,
+      static_indices, vector_type, cache_policy, out_plan, out_diagnostic);
 }
 
-bool loom_low_source_memory_access_plan_build_view_with_view_regions(
-    const loom_module_t* module, const loom_value_fact_table_t* fact_table,
+bool loom_low_source_memory_access_plan_build_view(
     const loom_view_region_table_t* view_regions,
     loom_low_source_memory_operation_kind_t operation_kind,
     loom_value_id_t view_value_id,
@@ -1751,6 +1687,7 @@ bool loom_low_source_memory_access_plan_build_view_with_view_regions(
     loom_low_source_memory_access_diagnostic_t* out_diagnostic) {
   *out_plan = (loom_low_source_memory_access_plan_t){0};
   *out_diagnostic = (loom_low_source_memory_access_diagnostic_t){0};
+  const loom_module_t* module = view_regions->expression_context->module;
   if (view_value_id >= module->values.count) {
     out_diagnostic->rejection_bits |=
         LOOM_LOW_SOURCE_MEMORY_ACCESS_REJECTION_VIEW_SOURCE;
@@ -1771,10 +1708,9 @@ bool loom_low_source_memory_access_plan_build_view_with_view_regions(
   loom_attribute_t static_indices =
       loom_attr_i64_array(zero_indices, loom_type_rank(result_view_type));
 
-  return loom_low_source_memory_access_plan_build_indexed_with_view_regions(
-      module, fact_table, view_regions, operation_kind, access_view_id,
-      dynamic_indices, static_indices, vector_type, cache_policy, out_plan,
-      out_diagnostic);
+  return loom_low_source_memory_access_plan_build_indexed_impl(
+      view_regions, operation_kind, access_view_id, dynamic_indices,
+      static_indices, vector_type, cache_policy, out_plan, out_diagnostic);
 }
 
 iree_string_view_t loom_low_source_memory_access_rejection_key(

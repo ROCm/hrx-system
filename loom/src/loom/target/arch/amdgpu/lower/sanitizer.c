@@ -699,10 +699,9 @@ static bool loom_amdgpu_sanitizer_assert_access_plan_build(
 
   loom_low_source_memory_access_plan_t source = {0};
   loom_vector_memory_cache_policy_t cache_policy = {0};
-  if (!loom_low_source_memory_access_plan_build_indexed_with_view_regions(
-          module, fact_table, view_regions, source_kind, view_value_id, indices,
-          static_indices, base_vector_type, cache_policy, &source,
-          &out_diagnostic->source)) {
+  if (!loom_low_source_memory_access_plan_build_indexed(
+          view_regions, source_kind, view_value_id, indices, static_indices,
+          base_vector_type, cache_policy, &source, &out_diagnostic->source)) {
     return false;
   }
 
@@ -798,9 +797,8 @@ iree_status_t loom_amdgpu_low_legality_verify_sanitizer_assert_access(
 
   loom_amdgpu_sanitizer_access_plan_t plan = {0};
   loom_amdgpu_sanitizer_access_diagnostic_t diagnostic = {0};
-  const loom_view_region_table_t* view_regions = NULL;
-  IREE_RETURN_IF_ERROR(
-      loom_target_low_legality_view_regions(context, &view_regions));
+  const loom_view_region_table_t* view_regions =
+      loom_target_low_legality_view_regions(context);
   if (!loom_amdgpu_sanitizer_assert_access_plan_build(
           loom_target_low_legality_module(context),
           loom_target_low_legality_fact_table(context), view_regions, op, &plan,
