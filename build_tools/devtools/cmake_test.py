@@ -98,10 +98,21 @@ class CMakeTest(unittest.TestCase):
             )
 
     def test_build_args_translate_target_shorthand(self):
-        self.assertEqual(
-            cmake_dev.build_args(["hrx", "iree-run-module", "--parallel", "8"]),
-            ["--target", "hrx", "--target", "iree-run-module", "--parallel", "8"],
-        )
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            self.assertEqual(
+                cmake_dev.build_args(
+                    ["hrx", "iree-run-module", "--parallel", "8"],
+                    configured_build_dir=Path(temporary_dir),
+                ),
+                [
+                    "--target",
+                    "hrx",
+                    "--target",
+                    "iree-run-module",
+                    "--parallel",
+                    "8",
+                ],
+            )
 
     def test_default_fuzz_cache_dir_uses_platform_cache_roots(self):
         self.assertEqual(

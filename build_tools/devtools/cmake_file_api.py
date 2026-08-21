@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 
 class FileApiError(RuntimeError):
@@ -33,13 +33,83 @@ def target_aliases_path(build_dir: Path) -> Path:
 
 
 def resolve_target_name(build_dir: Path, target_name: str) -> str:
+    return resolve_target_names(build_dir, [target_name])[0]
+
+
+def resolve_target_names(build_dir: Path, target_names: list[str]) -> list[str]:
+    return _resolve_target_names(build_dir, target_names)
+
+
+def _resolve_target_names(
+    build_dir: Path,
+    target_names: list[str],
+    *,
+    targets: list[CMakeExecutableTarget] | None = None,
+) -> list[str]:
     aliases = load_target_aliases(build_dir)
-    return aliases.get(target_name, target_name)
+    resolved_target_names = [aliases.get(target_name) for target_name in target_names]
+    unresolved_indices = [
+        index
+        for index, resolved_target_name in enumerate(resolved_target_names)
+        if resolved_target_name is None
+    ]
+    if not unresolved_indices:
+        return cast(list[str], resolved_target_names)
+
+    # Preserve raw CMake target names before configuration has produced a File
+    # API reply. This keeps `cmake build` useful for unmanaged build trees while
+    # letting configured trees resolve the user-facing executable filename.
+    if targets is None and not _latest_index_paths(build_dir):
+        return [
+            resolved_target_name or target_names[index]
+            for index, resolved_target_name in enumerate(resolved_target_names)
+        ]
+
+    exact_target_names = (
+        configured_target_names(build_dir)
+        if targets is None
+        else {target.name for target in targets}
+    )
+    artifact_indices = []
+    for index in unresolved_indices:
+        target_name = target_names[index]
+        if target_name in exact_target_names:
+            resolved_target_names[index] = target_name
+        else:
+            artifact_indices.append(index)
+
+    if not artifact_indices:
+        return cast(list[str], resolved_target_names)
+    if targets is None:
+        targets = executable_targets(build_dir)
+
+    for index in artifact_indices:
+        target_name = target_names[index]
+        matching_target_names = {
+            target.name
+            for target in targets
+            if _artifact_has_executable_name(target.path, target_name)
+        }
+        if len(matching_target_names) == 1:
+            resolved_target_names[index] = matching_target_names.pop()
+        elif len(matching_target_names) > 1:
+            formatted_names = ", ".join(sorted(matching_target_names))
+            raise FileApiError(
+                f"CMake executable name {target_name!r} is ambiguous; matching "
+                f"targets: {formatted_names}"
+            )
+        else:
+            resolved_target_names[index] = target_name
+
+    return cast(list[str], resolved_target_names)
 
 
 def resolve_executable(build_dir: Path, target_name: str) -> CMakeExecutableTarget:
-    resolved_target_name = resolve_target_name(build_dir, target_name)
-    for target in executable_targets(build_dir):
+    targets = executable_targets(build_dir)
+    resolved_target_name = _resolve_target_names(
+        build_dir, [target_name], targets=targets
+    )[0]
+    for target in targets:
         if target.name == resolved_target_name:
             return target
     raise FileApiError(
@@ -86,6 +156,15 @@ def executable_targets(build_dir: Path) -> list[CMakeExecutableTarget]:
     return targets
 
 
+def configured_target_names(build_dir: Path) -> set[str]:
+    codemodel = _load_reply_object(build_dir, _codemodel_json_file(build_dir))
+    return {
+        target_ref["name"]
+        for configuration in codemodel.get("configurations", [])
+        for target_ref in configuration.get("targets", [])
+    }
+
+
 def _codemodel_json_file(build_dir: Path) -> str:
     index = _load_reply_object(build_dir, _latest_index_path(build_dir).name)
     for obj in index.get("objects", []):
@@ -95,13 +174,17 @@ def _codemodel_json_file(build_dir: Path) -> str:
 
 
 def _latest_index_path(build_dir: Path) -> Path:
-    reply_dir = build_dir / ".cmake/api/v1/reply"
-    index_paths = sorted(reply_dir.glob("index-*.json"), key=lambda path: path.name)
+    index_paths = _latest_index_paths(build_dir)
     if not index_paths:
         raise FileApiError(
             "CMake File API reply is missing; run iree-cmake-configure first"
         )
     return index_paths[-1]
+
+
+def _latest_index_paths(build_dir: Path) -> list[Path]:
+    reply_dir = build_dir / ".cmake/api/v1/reply"
+    return sorted(reply_dir.glob("index-*.json"), key=lambda path: path.name)
 
 
 def _load_reply_object(build_dir: Path, json_file: str) -> dict[str, Any]:
@@ -127,3 +210,9 @@ def _target_artifact_path(build_dir: Path, target: dict[str, Any]) -> Path:
     if artifact_path.is_absolute():
         return artifact_path
     return build_dir / artifact_path
+
+
+def _artifact_has_executable_name(artifact_path: Path, name: str) -> bool:
+    if artifact_path.name == name:
+        return True
+    return artifact_path.suffix.casefold() == ".exe" and artifact_path.stem == name

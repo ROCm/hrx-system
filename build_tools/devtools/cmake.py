@@ -222,11 +222,11 @@ def build_args(
         raw_args = []
 
     cmake_args = []
-    for target_name in target_names:
-        target_name = cmake_file_api.resolve_target_name(
-            requested_build_dir,
-            target_name,
-        )
+    resolved_target_names = cmake_file_api.resolve_target_names(
+        requested_build_dir,
+        target_names,
+    )
+    for target_name in resolved_target_names:
         cmake_args.extend(["--target", target_name])
     cmake_args.extend(raw_args)
     return cmake_args
