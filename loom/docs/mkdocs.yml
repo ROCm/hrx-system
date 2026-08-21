@@ -91,6 +91,7 @@ nav:
           - GGML and llama.cpp: workflows/oracles/ggml-llama-cpp.md
   - Integration:
       - Integration map: integration/index.md
+      - Compose modules in memory: integration/module-composition.md
       - Embed kernel JIT compilation: integration/jit-kernel.md
   - Reference:
       - Reference map: reference/index.md
