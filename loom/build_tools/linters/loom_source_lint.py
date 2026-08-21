@@ -38,6 +38,7 @@ from __future__ import annotations
 
 import re
 import sys
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
@@ -222,11 +223,15 @@ def _strip_line_comments(statement: str) -> str:
     return "\n".join(line.split("//", 1)[0] for line in statement.splitlines())
 
 
+def _read_source_text(path: Path) -> str:
+    return path.read_text(encoding="utf-8")
+
+
 def _iter_statements(path: Path) -> list[tuple[int, str]]:
     statements: list[tuple[int, str]] = []
     start_line = 0
     pending: list[str] = []
-    for line_number, line in enumerate(path.read_text().splitlines(), start=1):
+    for line_number, line in enumerate(_read_source_text(path).splitlines(), start=1):
         if not pending:
             start_line = line_number
         pending.append(line.rstrip())
@@ -493,7 +498,7 @@ def _scan_authoring_text(path: Path, text: str) -> list[Finding]:
 
 
 def _scan_authoring_corpus(path: Path) -> list[Finding]:
-    return _scan_authoring_text(path, path.read_text())
+    return _scan_authoring_text(path, _read_source_text(path))
 
 
 def _scan_target_execution_text(
@@ -584,7 +589,7 @@ def _scan_target_execution_text(
 def _scan_target_execution_guardrails(path: Path) -> list[Finding]:
     findings: list[Finding] = []
     for line, message, context in _scan_target_execution_text(
-        _relative_path(path), path.read_text()
+        _relative_path(path), _read_source_text(path)
     ):
         findings.append(
             Finding(
@@ -601,7 +606,7 @@ def _scan_spirv_backend_guardrails(path: Path) -> list[Finding]:
     relative_path = _relative_path(path)
     findings: list[Finding] = []
     for line, message, context in _scan_spirv_backend_text(
-        relative_path, path.read_text()
+        relative_path, _read_source_text(path)
     ):
         findings.append(
             Finding(
@@ -618,7 +623,7 @@ def _scan_core_tooling_flags_guardrails(path: Path) -> list[Finding]:
     relative_path = _relative_path(path)
     findings: list[Finding] = []
     for line, message, context in _scan_core_tooling_flags_text(
-        relative_path, path.read_text()
+        relative_path, _read_source_text(path)
     ):
         findings.append(
             Finding(
@@ -688,9 +693,25 @@ def _expect_authoring_self_test(
     return False
 
 
+def _expect_utf8_source_read_self_test() -> bool:
+    expected_text = '// UTF-8 source: "λ".\n'
+    with tempfile.TemporaryDirectory() as temporary_directory:
+        source_path = Path(temporary_directory) / "utf8_source.c"
+        source_path.write_bytes(expected_text.encode("utf-8"))
+        actual_text = _read_source_text(source_path)
+    if actual_text == expected_text:
+        print("  PASS  UTF-8 source reading is host-locale independent")
+        return True
+    print("  FAIL  UTF-8 source reading is host-locale independent")
+    print(f"        expected: {expected_text!r}")
+    print(f"        actual:   {actual_text!r}")
+    return False
+
+
 def _run_self_tests() -> int:
     ok = True
     print("loom-source-lint: self-test")
+    ok &= _expect_utf8_source_read_self_test()
     ok &= _expect_spirv_self_test(
         "SPIR-V small source passes",
         "loom/src/loom/target/emit/spirv/packet_rows.c",

@@ -6,7 +6,9 @@
 
 from __future__ import annotations
 
+import contextlib
 import importlib.util
+import io
 import subprocess
 import sys
 import types
@@ -248,6 +250,128 @@ class LoomPresubmitTest(unittest.TestCase):
             encoding="utf-8",
         )
 
+    def test_path_commands_are_batched_below_portable_command_line_limit(self):
+        command_prefix = ["loom-format", "--check"]
+        paths = ["loom/a.loom", "loom/b.loom", "loom/c.loom"]
+        single_path_limit = self.presubmit.command_line_utf16_units(
+            [*command_prefix, paths[0]]
+        )
+
+        commands = self.presubmit.batch_path_commands(
+            command_prefix,
+            paths,
+            max_command_line_utf16_units=single_path_limit,
+        )
+
+        self.assertEqual(
+            commands,
+            [[*command_prefix, path] for path in paths],
+        )
+        for command in commands:
+            self.assertLessEqual(
+                self.presubmit.command_line_utf16_units(command),
+                single_path_limit,
+            )
+
+    def test_path_command_batching_rejects_one_oversized_path(self):
+        command_prefix = ["loom-format", "--check"]
+        prefix_limit = self.presubmit.command_line_utf16_units(command_prefix)
+
+        with self.assertRaisesRegex(
+            ValueError, "path exceeds the portable command-line limit"
+        ):
+            self.presubmit.batch_path_commands(
+                command_prefix,
+                ["loom/a.loom"],
+                max_command_line_utf16_units=prefix_limit,
+            )
+
+    def test_batched_path_command_runs_every_batch_after_failure(self):
+        commands = [
+            ["loom-format", "--check", "loom/a.loom"],
+            ["loom-format", "--check", "loom/b.loom"],
+        ]
+        with (
+            mock.patch.object(
+                self.presubmit, "batch_path_commands", return_value=commands
+            ),
+            mock.patch.object(
+                self.presubmit, "run_command", side_effect=[False, True]
+            ) as run_command,
+        ):
+            self.assertFalse(
+                self.presubmit.run_batched_path_command(
+                    ["loom-format", "--check"],
+                    ["loom/a.loom", "loom/b.loom"],
+                    "Canonical Loom source",
+                )
+            )
+
+        self.assertEqual(
+            run_command.call_args_list,
+            [
+                mock.call(commands[0], "Canonical Loom source (1/2)"),
+                mock.call(commands[1], "Canonical Loom source (2/2)"),
+            ],
+        )
+
+    def test_cmake_source_format_reports_missing_target_providers(self):
+        cache_values = {
+            "LOOM_TARGET_AMDGPU": "OFF",
+            "LOOM_TARGET_IREE_VM": "ON",
+            "LOOM_TARGET_LLVMIR": "ON",
+            "LOOM_TARGET_SPIRV": "OFF",
+            "LOOM_TARGET_X86": "ON",
+        }
+        output = io.StringIO()
+        with (
+            mock.patch.object(
+                self.presubmit.project_presubmit,
+                "cmake_build_dir",
+                return_value=Path("/build"),
+            ),
+            mock.patch.object(
+                self.presubmit.project_presubmit,
+                "validate_cmake_build_tree",
+                return_value=True,
+            ),
+            mock.patch.object(
+                self.presubmit.project_presubmit,
+                "cmake_cache_value",
+                side_effect=lambda _build_dir, key: cache_values.get(key),
+            ),
+            contextlib.redirect_stdout(output),
+        ):
+            self.assertFalse(
+                self.presubmit.validate_cmake_source_format_configuration()
+            )
+
+        diagnostic = output.getvalue()
+        self.assertIn("missing: amdgpu, spirv", diagnostic)
+        self.assertIn("-DLOOM_TARGET_AMDGPU=ON", diagnostic)
+        self.assertIn("-DLOOM_TARGET_SPIRV=ON", diagnostic)
+        self.assertIn("IREE_CMAKE_BUILD_DIR", diagnostic)
+
+    def test_cmake_source_format_accepts_full_target_provider_set(self):
+        with (
+            mock.patch.object(
+                self.presubmit.project_presubmit,
+                "cmake_build_dir",
+                return_value=Path("/build"),
+            ),
+            mock.patch.object(
+                self.presubmit.project_presubmit,
+                "validate_cmake_build_tree",
+                return_value=True,
+            ),
+            mock.patch.object(
+                self.presubmit.project_presubmit,
+                "cmake_cache_value",
+                return_value="ON",
+            ),
+        ):
+            self.assertTrue(self.presubmit.validate_cmake_source_format_configuration())
+
     def test_source_format_check_covers_tracked_and_selected_sources(self):
         formatter_path = Path("/tools/loom-format")
         with (
@@ -372,6 +496,11 @@ class LoomPresubmitTest(unittest.TestCase):
                 return_value=["loom/b.loom"],
             ),
             mock.patch.object(
+                self.presubmit,
+                "validate_cmake_source_format_configuration",
+                return_value=True,
+            ) as validate_cmake_source_format_configuration,
+            mock.patch.object(
                 self.presubmit.project_presubmit,
                 "build_and_resolve_executable",
                 return_value=formatter_path,
@@ -416,6 +545,7 @@ class LoomPresubmitTest(unittest.TestCase):
             self.presubmit.REPO_ROOT,
             ["loom/b.loom"],
         )
+        validate_cmake_source_format_configuration.assert_called_once_with()
 
     def test_source_format_fix_failure_does_not_stage_partial_updates(self):
         with (
@@ -455,7 +585,7 @@ class LoomPresubmitTest(unittest.TestCase):
             )
 
         run_command.assert_called_once_with(
-            ["/tools/loom-format", "--in-place", "loom/a.loom"],
+            [str(Path("/tools/loom-format")), "--in-place", "loom/a.loom"],
             "Canonicalize selected Loom source",
         )
         stage_changed_paths.assert_not_called()
