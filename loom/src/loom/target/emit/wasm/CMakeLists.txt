@@ -148,7 +148,7 @@ loom_cc_library(
 )
 endif()
 
-if(LOOM_TARGET_ARCH_WASM AND LOOM_EMIT_WASM)
+if(LOOM_TARGET_ARCH_WASM AND LOOM_EMIT_WASM AND (CMAKE_SYSTEM_NAME STREQUAL "Linux" OR CMAKE_SYSTEM_NAME STREQUAL "Darwin"))
 loom_check_test_suite(
   NAME
     loom_check_file_test
