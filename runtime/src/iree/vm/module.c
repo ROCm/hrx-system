@@ -303,6 +303,7 @@ static iree_status_t iree_vm_module_validate_imports(
     }
 
     iree_string_view_t previous_export_name = iree_string_view_empty();
+    iree_host_size_t previous_callable_type_ordinal = 0;
     for (iree_host_size_t i = 0; i < group.import_count; ++i) {
       const iree_host_size_t import_ordinal = group.first_import_ordinal + i;
       iree_vm_module_import_declaration_t import_declaration = {0};
@@ -316,13 +317,6 @@ static iree_status_t iree_vm_module_validate_imports(
       }
       IREE_RETURN_IF_ERROR(iree_vm_module_validate_symbol(
           import_declaration.target_export_name, "import target export name"));
-      if (i != 0 && iree_string_view_compare(
-                        previous_export_name,
-                        import_declaration.target_export_name) >= 0) {
-        return iree_make_status(
-            IREE_STATUS_INVALID_ARGUMENT,
-            "imports must be strictly export-name-sorted within each group");
-      }
       if (import_declaration.callable_type_ordinal >=
           descriptor->counts.callable_type_count) {
         return iree_make_status(
@@ -337,6 +331,18 @@ static iree_status_t iree_vm_module_validate_imports(
                                 " has unsupported behavior flags",
                                 import_ordinal);
       }
+      if (i != 0) {
+        const int name_comparison = iree_string_view_compare(
+            previous_export_name, import_declaration.target_export_name);
+        if (name_comparison > 0 ||
+            (name_comparison == 0 && import_declaration.callable_type_ordinal <=
+                                         previous_callable_type_ordinal)) {
+          return iree_make_status(
+              IREE_STATUS_INVALID_ARGUMENT,
+              "imports must be strictly sorted by export name and callable "
+              "type within each group");
+        }
+      }
       const iree_vm_module_metadata_scope_t metadata_scope = {
           IREE_VM_MODULE_METADATA_SCOPE_KIND_IMPORT,
           import_ordinal,
@@ -344,6 +350,7 @@ static iree_status_t iree_vm_module_validate_imports(
       IREE_RETURN_IF_ERROR(iree_vm_module_validate_metadata_scope(
           module, metadata_scope, import_declaration.metadata_count));
       previous_export_name = import_declaration.target_export_name;
+      previous_callable_type_ordinal = import_declaration.callable_type_ordinal;
     }
 
     covered_import_count += group.import_count;

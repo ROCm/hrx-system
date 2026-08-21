@@ -10,8 +10,9 @@
 #include "iree/vm/invocation.h"
 #include "iree/vm/process_storage.h"
 
-// Private invocation representation shared with process construction. No
-// declaration in this file is part of the public ABI.
+// Private invocation representation shared with process construction and
+// built-in module providers. No declaration in this file is part of the public
+// ABI.
 
 typedef uint8_t iree_vm_invocation_state_t;
 enum iree_vm_invocation_state_e {
@@ -87,6 +88,46 @@ struct iree_vm_invocation_t {
   // True when root staging contains a nonnull external borrowed ref.
   bool has_external_borrowed_arguments;
 };
+
+// Aligns one invocation-storage address without truncation.
+static inline bool iree_vm_invocation_align_address(uintptr_t address,
+                                                    iree_host_size_t alignment,
+                                                    uintptr_t* out_address) {
+  iree_host_size_t aligned_address = 0;
+  if (!iree_host_size_checked_align((iree_host_size_t)address, alignment,
+                                    &aligned_address)) {
+    return false;
+  }
+  *out_address = (uintptr_t)aligned_address;
+  return true;
+}
+
+// Reserves transient callback-local storage above the durable frame stack.
+// The caller must rewind the returned checkpoint before leaving the callback
+// and must not suspend while the reservation is live.
+static inline iree_status_t iree_vm_invocation_stack_reserve(
+    iree_vm_invocation_t* invocation, iree_host_size_t storage_size,
+    iree_host_size_t storage_alignment, uint8_t** out_checkpoint,
+    uint8_t** out_storage) {
+  uintptr_t storage_address = 0;
+  if (!iree_vm_invocation_align_address((uintptr_t)invocation->stack_cursor,
+                                        storage_alignment, &storage_address) ||
+      storage_address > (uintptr_t)invocation->storage_end ||
+      storage_size > (uintptr_t)invocation->storage_end - storage_address) {
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "invocation transient storage exceeds capacity");
+  }
+  *out_checkpoint = invocation->stack_cursor;
+  *out_storage = (uint8_t*)storage_address;
+  invocation->stack_cursor = (uint8_t*)storage_address + storage_size;
+  return iree_ok_status();
+}
+
+// Rewinds one live transient reservation to its exact allocation checkpoint.
+static inline void iree_vm_invocation_stack_rewind(
+    iree_vm_invocation_t* invocation, uint8_t* checkpoint) {
+  invocation->stack_cursor = checkpoint;
+}
 
 // Private atomic sentinel distinguishing idle from active uncancelled state.
 #define IREE_VM_INVOCATION_CANCEL_REASON_IDLE INT32_MAX

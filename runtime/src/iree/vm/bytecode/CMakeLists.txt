@@ -9,4 +9,59 @@
 
 iree_add_all_subdirs()
 
+iree_cc_library(
+  NAME
+    bytecode
+  HDRS
+    "module.h"
+  SRCS
+    "interpreter.c"
+    "interpreter.h"
+    "module.c"
+    "module_reader.h"
+    "module_storage.h"
+    "verification.c"
+    "verification.h"
+    "verification_isa.c"
+  DEPS
+    iree::base
+    iree::base::internal
+    iree::base::internal::unicode
+    iree::vm
+    iree::vm::bytecode::wire
+  PUBLIC
+)
+
+iree_cc_test(
+  NAME
+    module_test
+  SRCS
+    "module_test.cc"
+    "module_test_data.cc"
+    "module_test_data.h"
+  DEPS
+    ::bytecode
+    iree::testing::gtest
+    iree::testing::gtest_main
+    iree::vm
+    iree::vm::bytecode::wire
+)
+
+iree_cc_binary_benchmark(
+  NAME
+    module_benchmark
+  SRCS
+    "module_benchmark.cc"
+    "module_test_data.cc"
+    "module_test_data.h"
+  DEPS
+    ::bytecode
+    iree::testing::benchmark
+    iree::testing::benchmark_main
+    iree::third_party::google_benchmark
+    iree::vm
+    iree::vm::bytecode::wire
+  TESTONLY
+)
+
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

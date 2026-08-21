@@ -23,12 +23,13 @@ iree_cc_library(
     "ref.h"
     "scalar.h"
     "variant.h"
+  TEXTUAL_HDRS
+    "buffer_provider.h"
+    "invocation_storage.h"
   SRCS
     "buffer.c"
-    "buffer_provider.h"
     "environment.c"
     "invocation.c"
-    "invocation_storage.h"
     "invocation_sync.c"
     "module.c"
     "module_reflection.c"

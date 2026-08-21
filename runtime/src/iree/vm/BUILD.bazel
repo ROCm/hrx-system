@@ -18,10 +18,8 @@ iree_runtime_cc_library(
     name = "vm",
     srcs = [
         "buffer.c",
-        "buffer_provider.h",
         "environment.c",
         "invocation.c",
-        "invocation_storage.h",
         "invocation_sync.c",
         "module.c",
         "module_reflection.c",
@@ -43,6 +41,10 @@ iree_runtime_cc_library(
         "ref.h",
         "scalar.h",
         "variant.h",
+    ],
+    textual_hdrs = [
+        "buffer_provider.h",
+        "invocation_storage.h",
     ],
     deps = [
         "//runtime/src/iree/base",

@@ -19,18 +19,6 @@ static const iree_fpu_state_flags_t iree_vm_invocation_fpu_state_flags =
 // Invocation Storage
 //===----------------------------------------------------------------------===//
 
-static bool iree_vm_invocation_align_address(uintptr_t address,
-                                             iree_host_size_t alignment,
-                                             uintptr_t* out_address) {
-  iree_host_size_t aligned_address = 0;
-  if (!iree_host_size_checked_align((iree_host_size_t)address, alignment,
-                                    &aligned_address)) {
-    return false;
-  }
-  *out_address = (uintptr_t)aligned_address;
-  return true;
-}
-
 bool iree_vm_invocation_is_idle(const iree_vm_invocation_t* invocation) {
   return invocation && invocation->state == IREE_VM_INVOCATION_STATE_IDLE;
 }

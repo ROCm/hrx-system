@@ -17,6 +17,8 @@ enum class DefinitionMode {
   kUnsortedExports,
   kRecursiveCallable,
   kImportsWithoutGroups,
+  kSortedOverloadedImports,
+  kUnsortedOverloadedImports,
   kUnsortedMetadata,
   kOversizedProcessStorage,
 };
@@ -67,6 +69,12 @@ struct ValidationModule {
         descriptor.counts.callable_type_count = 1;
         descriptor.counts.import_count = 1;
         break;
+      case DefinitionMode::kSortedOverloadedImports:
+      case DefinitionMode::kUnsortedOverloadedImports:
+        descriptor.counts.callable_type_count = 2;
+        descriptor.counts.import_group_count = 1;
+        descriptor.counts.import_count = 2;
+        break;
       case DefinitionMode::kUnsortedMetadata:
         descriptor.counts.metadata_count = 2;
         break;
@@ -108,17 +116,34 @@ struct ValidationModule {
   static void QueryImportGroup(const iree_vm_module_t* module,
                                iree_host_size_t ordinal,
                                iree_vm_module_import_group_t* out_group) {
-    (void)module;
     (void)ordinal;
-    *out_group = {};
+    const ValidationModule* validation_module = Cast(module);
+    if (validation_module->mode == DefinitionMode::kSortedOverloadedImports ||
+        validation_module->mode == DefinitionMode::kUnsortedOverloadedImports) {
+      *out_group = {IREE_SV("target.module"), 0, 2};
+    } else {
+      *out_group = {};
+    }
   }
 
   static void QueryImport(const iree_vm_module_t* module,
                           iree_host_size_t ordinal,
                           iree_vm_module_import_declaration_t* out_import) {
-    (void)module;
-    (void)ordinal;
-    *out_import = {};
+    const ValidationModule* validation_module = Cast(module);
+    if (validation_module->mode == DefinitionMode::kSortedOverloadedImports ||
+        validation_module->mode == DefinitionMode::kUnsortedOverloadedImports) {
+      const bool is_sorted =
+          validation_module->mode == DefinitionMode::kSortedOverloadedImports;
+      *out_import = {
+          IREE_SV("target.module"),
+          IREE_SV("overloaded"),
+          is_sorted ? ordinal : 1 - ordinal,
+          IREE_VM_MODULE_IMPORT_FLAG_NONE,
+          0,
+      };
+    } else {
+      *out_import = {};
+    }
   }
 
   static void QueryExport(const iree_vm_module_t* module,
@@ -207,6 +232,7 @@ TEST(VMModuleValidationTest, RejectsMalformedSemanticGraphs) {
   for (DefinitionMode mode :
        {DefinitionMode::kUnsortedExports, DefinitionMode::kRecursiveCallable,
         DefinitionMode::kImportsWithoutGroups,
+        DefinitionMode::kUnsortedOverloadedImports,
         DefinitionMode::kUnsortedMetadata}) {
     ValidationModule module(mode);
     IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT, module.Publish());
@@ -214,6 +240,13 @@ TEST(VMModuleValidationTest, RejectsMalformedSemanticGraphs) {
     EXPECT_EQ(module.base.descriptor, nullptr);
     EXPECT_FALSE(module.destroy_called);
   }
+}
+
+TEST(VMModuleValidationTest, AcceptsImportsSortedByNameAndCallableType) {
+  ValidationModule module(DefinitionMode::kSortedOverloadedImports);
+  IREE_ASSERT_OK(module.Publish());
+  iree_vm_module_release(&module.base);
+  EXPECT_TRUE(module.destroy_called);
 }
 
 #if UINTPTR_MAX > UINT32_MAX
