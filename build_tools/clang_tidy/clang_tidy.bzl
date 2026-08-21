@@ -6,7 +6,11 @@
 
 """Bazel actions for running IREE clang-tidy checks."""
 
-load("@iree_clang_tidy_llvm//:config.bzl", "CLANG_TIDY_LLVM_TARGET_COMPATIBLE_WITH")
+load(
+    "@iree_clang_tidy_llvm//:config.bzl",
+    "CLANG_TIDY_CLANG_RESOURCE_DIR",
+    "CLANG_TIDY_LLVM_TARGET_COMPATIBLE_WITH",
+)
 load("@rules_cc//cc:find_cc_toolchain.bzl", "CC_TOOLCHAIN_ATTRS", "find_cc_toolchain", "use_cc_toolchain")
 load("@rules_cc//cc/common:cc_info.bzl", "CcInfo")
 load(
@@ -23,6 +27,20 @@ load(
 _CLANG_TIDY_UNSUPPORTED_COMPILE_ARGS = {
     "-fno-canonical-system-headers": None,
 }
+
+def _clang_tidy_compile_args(compile_args):
+    filtered_args = [
+        arg
+        for arg in compile_args
+        if arg not in _CLANG_TIDY_UNSUPPORTED_COMPILE_ARGS
+    ]
+
+    # Preserve the resource directory named by Bazel's crosstool module map.
+    # The clang-tidy VFS overlay redirects this virtual path to the declared,
+    # relocated LLVM tree.
+    return filtered_args + [
+        "-resource-dir=%s" % CLANG_TIDY_CLANG_RESOURCE_DIR,
+    ]
 
 IreeClangTidyInfo = provider(
     doc = "clang-tidy artifacts collected from configured C/C++ targets.",
@@ -146,6 +164,7 @@ def _run_clang_tidy_action(ctx, target, cc_toolchain, feature_configuration, sou
     args.add("--source", source)
     args.add("--output", report)
     args.add("--config-file", ctx.file._config)
+    args.add("--vfsoverlay", ctx.file._clang_resource_overlay)
     if emit_fixes:
         fixes = ctx.actions.declare_file(_clang_tidy_fixes_path(target.label, source))
         outputs.append(fixes)
@@ -154,16 +173,14 @@ def _run_clang_tidy_action(ctx, target, cc_toolchain, feature_configuration, sou
     else:
         args.add("--warnings-as-errors=%s" % ctx.attr._warnings_as_errors)
     args.add("--")
-    args.add_all([
-        arg
-        for arg in compile_command.compile_args
-        if arg not in _CLANG_TIDY_UNSUPPORTED_COMPILE_ARGS
-    ])
+    args.add_all(_clang_tidy_compile_args(compile_command.compile_args))
 
     compilation_context = target[CcInfo].compilation_context
     inputs = depset(
-        direct = [source, ctx.file._config],
-        transitive = _compilation_input_depsets(compilation_context),
+        direct = [source, ctx.file._config, ctx.file._clang_resource_overlay],
+        transitive = _compilation_input_depsets(compilation_context) + [
+            depset(ctx.files._clang_resource_headers),
+        ],
     )
     ctx.actions.run(
         executable = ctx.executable._runner,
@@ -195,20 +212,19 @@ def _run_recursion_summary_action(ctx, target, cc_toolchain, feature_configurati
     args.add("--source", source)
     args.add("--output", report)
     args.add("--config-file", ctx.file._config)
+    args.add("--vfsoverlay", ctx.file._clang_resource_overlay)
     args.add("--checks=-*,iree-unbounded-recursion")
     args.add("--recursion-summary", summary)
     args.add("--suppress-recursion-diagnostics")
     args.add("--")
-    args.add_all([
-        arg
-        for arg in compile_command.compile_args
-        if arg not in _CLANG_TIDY_UNSUPPORTED_COMPILE_ARGS
-    ])
+    args.add_all(_clang_tidy_compile_args(compile_command.compile_args))
 
     compilation_context = target[CcInfo].compilation_context
     inputs = depset(
-        direct = [source, ctx.file._config],
-        transitive = _compilation_input_depsets(compilation_context),
+        direct = [source, ctx.file._config, ctx.file._clang_resource_overlay],
+        transitive = _compilation_input_depsets(compilation_context) + [
+            depset(ctx.files._clang_resource_headers),
+        ],
     )
     ctx.actions.run(
         executable = ctx.executable._runner,
@@ -292,6 +308,16 @@ collect_clang_tidy_aspect = aspect(
             default = "false",
             values = ["false", "true"],
             doc = "When true, emit clang-tidy replacement YAML files instead of failing on diagnostics.",
+        ),
+        "_clang_resource_headers": attr.label(
+            allow_files = True,
+            cfg = "exec",
+            default = Label("@iree_clang_tidy_llvm//:clang_resource_headers"),
+        ),
+        "_clang_resource_overlay": attr.label(
+            allow_single_file = True,
+            cfg = "exec",
+            default = Label("@iree_clang_tidy_llvm//:clang_resource_overlay"),
         ),
         "_clang_tidy": attr.label(
             cfg = "exec",
@@ -384,6 +410,16 @@ collect_recursion_aspect = aspect(
         "implementation_deps",
     ],
     attrs = dict(CC_TOOLCHAIN_ATTRS, **{
+        "_clang_resource_headers": attr.label(
+            allow_files = True,
+            cfg = "exec",
+            default = Label("@iree_clang_tidy_llvm//:clang_resource_headers"),
+        ),
+        "_clang_resource_overlay": attr.label(
+            allow_single_file = True,
+            cfg = "exec",
+            default = Label("@iree_clang_tidy_llvm//:clang_resource_overlay"),
+        ),
         "_clang_tidy": attr.label(
             cfg = "exec",
             default = Label("@iree_clang_tidy_llvm//:clang-tidy"),

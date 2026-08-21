@@ -25,6 +25,7 @@ def parse_arguments(argv: list[str]) -> tuple[argparse.Namespace, list[str]]:
     parser.add_argument("--source", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--config-file", required=True, type=Path)
+    parser.add_argument("--vfsoverlay", required=True, type=Path)
     parser.add_argument("--checks")
     parser.add_argument("--warnings-as-errors")
     parser.add_argument("--export-fixes", type=Path)
@@ -58,6 +59,7 @@ def main(argv: list[str]) -> int:
         str(args.clang_tidy),
         f"--load={args.plugin}",
         f"--config-file={args.config_file}",
+        f"--vfsoverlay={args.vfsoverlay}",
     ]
     if args.checks:
         command.append(f"--checks={args.checks}")

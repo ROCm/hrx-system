@@ -4,4 +4,6 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-int iree_clang_tidy_action_smoke_good(void) { return 0; }
+#include <stdbool.h>
+
+bool iree_clang_tidy_action_smoke_good(void) { return true; }
