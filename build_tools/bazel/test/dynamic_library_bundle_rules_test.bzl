@@ -115,6 +115,8 @@ def _test_aspect_collects_data_through_label_flag(name, **kwargs):
 
 def _test_aspect_collects_data_through_label_flag_impl(env, target):
     bindings = target[IreeDynamicLibraryBindingsInfo]
+    if not bindings.has_bundles:
+        env.fail("expected configured graph to contain a dynamic-library bundle")
     files = bindings.files.to_list()
     _expect_file_basename(env, files, "dynamic_library_root.so")
     _expect_file_basename(env, files, "dynamic_library_dependency.so")
@@ -172,6 +174,33 @@ def _test_aspect_deduplicates_identical_bindings_impl(env, target):
     env.expect.that_collection(bindings.files.to_list()).contains_exactly(
         [bindings.environment[_TEST_ENVIRONMENT_NAME]],
     )
+
+def _test_aspect_distinguishes_graph_without_bundles(name, **kwargs):
+    library = name + "_library"
+    cc_library(
+        name = library,
+        tags = ["manual"],
+    )
+    collector = name + "_subject"
+    _collect_bindings(
+        name = collector,
+        target = ":" + library,
+        tags = ["manual"],
+    )
+    analysis_test(
+        name = name,
+        attr_values = {"timeout": "short"},
+        impl = _test_aspect_distinguishes_graph_without_bundles_impl,
+        target = collector,
+        **kwargs
+    )
+
+def _test_aspect_distinguishes_graph_without_bundles_impl(env, target):
+    bindings = target[IreeDynamicLibraryBindingsInfo]
+    if bindings.has_bundles:
+        env.fail("expected configured graph to contain no dynamic-library bundle")
+    if bindings.environment or bindings.files.to_list():
+        env.fail("expected graph without bundles to have no runtime bindings")
 
 def _test_conflicting_bindings_fail(name, **kwargs):
     first_bundle = name + "_first_bundle"
@@ -236,6 +265,7 @@ def dynamic_library_bundle_rules_test_suite(name):
             _test_bundle_is_runtime_only,
             _test_aspect_collects_data_through_label_flag,
             _test_aspect_deduplicates_identical_bindings,
+            _test_aspect_distinguishes_graph_without_bundles,
             _test_conflicting_bindings_fail,
         ],
     )

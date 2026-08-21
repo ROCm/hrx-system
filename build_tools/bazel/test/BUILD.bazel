@@ -8,7 +8,11 @@
 # bazel-to-cmake: skip
 
 load("@rules_shell//shell:sh_binary.bzl", "sh_binary")
+load("//build_tools/bazel:cc.bzl", "iree_cc_binary", "iree_cc_library")
 load("//build_tools/bazel:cc_benchmark.bzl", "iree_cc_benchmark")
+load("//build_tools/bazel:cc_test.bzl", "iree_cc_test")
+load("//build_tools/bazel:dynamic_library_bundle.bzl", "iree_dynamic_library_bundle")
+load("//build_tools/bazel:executable.bzl", "iree_executable_test")
 load("//build_tools/bazel:glob.bzl", "iree_checked_glob")
 load(":cc_benchmark_rules_test.bzl", "cc_benchmark_rules_test_suite")
 load(":cc_fuzz_rules_test.bzl", "cc_fuzz_rules_test_suite")
@@ -29,6 +33,44 @@ load(":glob_rules_test.bzl", "glob_rules_test_suite")
 load(":query_rules_test.bzl", "query_rules_test_suite")
 
 package(default_visibility = ["//visibility:public"])
+
+iree_dynamic_library_bundle(
+    name = "dynamic_library_environment_bundle",
+    srcs = [
+        ":dynamic_library_dependency.so",
+        ":dynamic_library_root.so",
+    ],
+    environment = {
+        ":dynamic_library_root.so": "IREE_TEST_DYNAMIC_LIBRARY_PATH",
+    },
+)
+
+iree_cc_library(
+    name = "dynamic_library_environment_library",
+    data = [":dynamic_library_environment_bundle"],
+)
+
+iree_cc_binary(
+    name = "dynamic_library_environment_binary_fixture",
+    testonly = True,
+    srcs = ["dynamic_library_environment_test.c"],
+    env = {"IREE_TEST_SOURCE_ENV": "source"},
+    tags = ["manual"],
+    deps = [":dynamic_library_environment_library"],
+)
+
+iree_cc_test(
+    name = "dynamic_library_environment_execution_test",
+    srcs = ["dynamic_library_environment_test.c"],
+    env = {"IREE_TEST_SOURCE_ENV": "source"},
+    shard_count = 2,
+    deps = [":dynamic_library_environment_library"],
+)
+
+iree_executable_test(
+    name = "dynamic_library_environment_wrapper_test",
+    src = ":dynamic_library_environment_binary_fixture",
+)
 
 iree_cc_benchmark(
     name = "cc_benchmark_smoke_test_fixture",
