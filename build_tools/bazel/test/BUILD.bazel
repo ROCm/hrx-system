@@ -16,6 +16,10 @@ load(":cc_link_test.bzl", "cc_link_test_suite")
 load(":cc_rules_test.bzl", "cc_rules_test_suite")
 load(":compile_commands_rules_test.bzl", "compile_commands_rules_test_suite")
 load(
+    ":dynamic_library_bundle_rules_test.bzl",
+    "dynamic_library_bundle_rules_test_suite",
+)
+load(
     ":elf_dynamic_library_closure_test.bzl",
     "elf_dynamic_library_closure_test_suite",
 )
@@ -45,6 +49,8 @@ cc_rules_test_suite(name = "cc_tests")
 cc_link_test_suite(name = "cc_link_tests")
 
 compile_commands_rules_test_suite(name = "compile_commands_tests")
+
+dynamic_library_bundle_rules_test_suite(name = "dynamic_library_bundle_tests")
 
 executable_rules_test_suite(name = "executable_tests")
 
