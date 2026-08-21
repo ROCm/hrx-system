@@ -9,4 +9,44 @@
 
 iree_add_all_subdirs()
 
+iree_cc_library(
+  NAME
+    vm
+  HDRS
+    "function.h"
+    "ref.h"
+    "scalar.h"
+    "variant.h"
+  SRCS
+    "ref.c"
+    "variant.c"
+  DEPS
+    iree::base
+    iree::base::internal
+  PUBLIC
+)
+
+iree_cc_test(
+  NAME
+    ref_test
+  SRCS
+    "ref_test.cc"
+  DEPS
+    ::vm
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+iree_cc_test(
+  NAME
+    variant_test
+  SRCS
+    "variant_test.cc"
+  DEPS
+    ::vm
+    iree::testing::gtest
+    iree::testing::gtest_main
+    iree::vm::bytecode::wire
+)
+
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###
