@@ -8,20 +8,25 @@
 
 from __future__ import annotations
 
+import json
 import os
 import re
+import secrets
+import shlex
 import shutil
 import signal
 import subprocess
 import sys
+import tempfile
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from build_tools.bazel import compile_commands_merge
-from build_tools.devtools import fuzz
+from build_tools.devtools import bazel_launcher, fuzz
 from build_tools.devtools.command_plan import quote_command
 from build_tools.devtools.environment import (
+    BAZEL_SH_ENV,
     LOCAL_TMP_ROOT,
     REPO_ROOT,
 )
@@ -30,6 +35,7 @@ LOCAL_STATE_ROOT = REPO_ROOT / ".iree"
 BAZEL_TRY_ROOT = LOCAL_STATE_ROOT / "bazel-try"
 BAZEL_TRY_LABEL_ROOT = "//.iree/bazel-try"
 BAZEL_TRY_COMMON_ARGS = ("--check_visibility=false",)
+BAZEL_LAUNCH_ROOT = LOCAL_TMP_ROOT / "iree-bazel-launch"
 BAZEL_COMPILE_COMMANDS_ROOT = LOCAL_TMP_ROOT / "iree-bazel-compile-commands"
 DEFAULT_TRY_BINARY_NAME = "snippet"
 DEFAULT_COMPILE_COMMANDS_OUTPUT = REPO_ROOT / "compile_commands.json"
@@ -40,6 +46,32 @@ COMPILE_COMMANDS_ASPECT = (
 CLANG_TIDY_ASPECT = "//build_tools/clang_tidy:clang_tidy.bzl%collect_clang_tidy_aspect"
 CLANG_TIDY_OUTPUT_GROUP = "iree_clang_tidy_reports"
 CLANG_TIDY_REPO_ENV = "--repo_env=IREE_CLANG_TIDY_LLVM=auto"
+RUNFILES_ENVIRONMENT_PROVIDER_SUFFIX = "%IreeRunfilesEnvironmentInfo"
+RUNFILES_ARGUMENTS_PROVIDER_SUFFIX = "%IreeRunfilesArgumentsInfo"
+BAZEL_LAUNCH_METADATA_QUERY_EXPRESSION = (
+    'json.encode({"label": str(target.label), '
+    '"argument_provider_count": len(['
+    "key for key in providers(target).keys() "
+    f'if key.endswith("{RUNFILES_ARGUMENTS_PROVIDER_SUFFIX}")]), '
+    '"arguments": ['
+    "argument for key, value in providers(target).items() "
+    f'if key.endswith("{RUNFILES_ARGUMENTS_PROVIDER_SUFFIX}") '
+    "for argument in value.arguments], "
+    '"marked_arguments": ['
+    "argument for key, value in providers(target).items() "
+    f'if key.endswith("{RUNFILES_ARGUMENTS_PROVIDER_SUFFIX}") '
+    "for argument in value.marked_arguments], "
+    '"environment_names": sorted(['
+    "name for key, value in providers(target).items() "
+    f'if key.endswith("{RUNFILES_ENVIRONMENT_PROVIDER_SUFFIX}") '
+    "for name in value.environment"
+    ']), "inherited_environment_names": sorted('
+    'providers(target)["RunEnvironmentInfo"].inherited_environment '
+    'if "RunEnvironmentInfo" in providers(target) else []), '
+    '"run_environment_names": sorted('
+    'providers(target)["RunEnvironmentInfo"].environment.keys() '
+    'if "RunEnvironmentInfo" in providers(target) else [])})'
+)
 HEADER_ROOTS: tuple[tuple[str, Path], ...] = (
     ("iree/", REPO_ROOT / "runtime/src"),
     ("loom/", REPO_ROOT / "loom/src"),
@@ -88,6 +120,59 @@ class BazelCompileCommandsCommand:
     output: Path = DEFAULT_COMPILE_COMMANDS_OUTPUT
     keep: bool = False
     run_cwd: Path = field(default_factory=Path.cwd)
+
+
+@dataclass(frozen=True)
+class BazelLaunchMetadata:
+    runfiles_arguments: list[str] = field(default_factory=list)
+    marked_runfiles_arguments: list[str] = field(default_factory=list)
+    runfiles_environment_names: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class BazelLaunch:
+    target: str
+    script_path: Path
+    run_cwd: Path
+    argument_separator: str
+    runfiles_arguments: list[str] = field(default_factory=list)
+    marked_runfiles_arguments: list[str] = field(default_factory=list)
+    runfiles_environment_names: list[str] = field(default_factory=list)
+
+    def argv(self, env: dict[str, str] | None) -> list[str]:
+        if os.name != "nt":
+            return [str(self.script_path)]
+        environment = os.environ if env is None else env
+        command_interpreter = bazel_launcher.environment_value(environment, "COMSPEC")
+        if not command_interpreter:
+            raise ValueError("COMSPEC is required to execute Bazel launch scripts")
+        return [command_interpreter, "/d", "/c", str(self.script_path)]
+
+    def environment(
+        self,
+        base_env: dict[str, str] | None,
+        *,
+        materialize: bool = False,
+    ) -> dict[str, str]:
+        return bazel_launcher.configured_environment(
+            base_env,
+            caller_cwd=self.run_cwd,
+            argument_separator=self.argument_separator,
+            runfiles_arguments=self.runfiles_arguments,
+            marked_runfiles_arguments=self.marked_runfiles_arguments,
+            runfiles_environment_names=self.runfiles_environment_names,
+            script_path=self.script_path,
+            materialize=materialize,
+        )
+
+
+@dataclass(frozen=True)
+class BazelProcess:
+    target: str
+    argv: list[str]
+    cwd: Path
+    env: dict[str, str]
+    script_path: Path | None = None
 
 
 def split_program_args(arguments: list[str]) -> tuple[list[str], list[str]]:
@@ -339,6 +424,430 @@ def run_captured(
     )
 
 
+def validate_bazel_launch_args(bazel_args: list[str]) -> None:
+    """Rejects Bazel launch options owned by the lock-free wrapper."""
+    managed_options = {"run_under", "script_path"}
+    for arg in bazel_args:
+        if not arg.startswith("--"):
+            continue
+        option_name = arg[2:].split("=", 1)[0].replace("-", "_")
+        if option_name in managed_options:
+            raise ValueError(
+                f"{arg.split('=', 1)[0]} is managed by the IREE Bazel launcher"
+            )
+
+
+def validate_bazel_launch_environment(env: dict[str, str] | None) -> None:
+    """Rejects shell paths Bazel cannot quote in Windows launch scripts."""
+    if os.name != "nt":
+        return
+    environment = os.environ if env is None else env
+    bazel_shell = bazel_launcher.environment_value(environment, BAZEL_SH_ENV)
+    if bazel_shell and any(character.isspace() for character in bazel_shell):
+        raise ValueError(
+            "BAZEL_SH contains whitespace that Bazel cannot quote in generated "
+            "Windows launch scripts; configure a space-free shell path or enable "
+            "Win32 short path names"
+        )
+
+
+def bazel_label_path_key(label: str) -> str:
+    """Returns the repository-independent package and target portion of a label."""
+    package_start = label.find("//")
+    return label[package_start:] if package_start != -1 else label
+
+
+def parse_bazel_launch_metadata(
+    payload: object,
+    *,
+    target: str,
+) -> BazelLaunchMetadata | None:
+    """Validates one configured target's host-handoff metadata."""
+    if not isinstance(payload, dict):
+        print(f"dev.py: invalid Bazel launch metadata for {target}", file=sys.stderr)
+        return None
+
+    argument_fields = ("arguments", "marked_arguments")
+    for field_name in argument_fields:
+        value = payload.get(field_name)
+        if not isinstance(value, list) or any(
+            not isinstance(argument, str) for argument in value
+        ):
+            print(
+                f"dev.py: invalid {field_name} in Bazel launch metadata for {target}",
+                file=sys.stderr,
+            )
+            return None
+
+    environment_fields = (
+        "environment_names",
+        "inherited_environment_names",
+        "run_environment_names",
+    )
+    for field_name in environment_fields:
+        value = payload.get(field_name)
+        if not isinstance(value, list) or any(
+            not isinstance(name, str) or not name for name in value
+        ):
+            print(
+                f"dev.py: invalid {field_name} in Bazel launch metadata for {target}",
+                file=sys.stderr,
+            )
+            return None
+
+    argument_provider_count = payload.get("argument_provider_count")
+    if argument_provider_count not in (0, 1):
+        print(
+            f"dev.py: invalid argument provider count in Bazel launch metadata "
+            f"for {target}",
+            file=sys.stderr,
+        )
+        return None
+    arguments = payload["arguments"]
+    marked_arguments = payload["marked_arguments"]
+    if len(arguments) != len(marked_arguments) or (
+        argument_provider_count == 0 and arguments
+    ):
+        print(
+            f"dev.py: inconsistent runfiles arguments in Bazel launch metadata "
+            f"for {target}",
+            file=sys.stderr,
+        )
+        return None
+
+    environment_names = payload["environment_names"]
+    environment_name_keys = [
+        bazel_launcher.environment_name_key(name) for name in environment_names
+    ]
+    if len(environment_name_keys) != len(set(environment_name_keys)):
+        print(
+            f"dev.py: duplicate runfiles environment metadata for {target}",
+            file=sys.stderr,
+        )
+        return None
+    target_environment_names = set(payload["run_environment_names"])
+    target_environment_names.update(payload["inherited_environment_names"])
+    control_name_keys = {
+        bazel_launcher.environment_name_key(name)
+        for name in bazel_launcher.CONTROL_ENVIRONMENT_NAMES
+    }
+    control_collisions = {
+        name
+        for name in target_environment_names
+        if bazel_launcher.environment_name_key(name) in control_name_keys
+    }
+    if control_collisions:
+        print(
+            f"dev.py: {target} uses reserved Bazel launcher environment "
+            f"{', '.join(sorted(control_collisions))}",
+            file=sys.stderr,
+        )
+        return None
+    return BazelLaunchMetadata(
+        runfiles_arguments=arguments,
+        marked_runfiles_arguments=marked_arguments,
+        runfiles_environment_names=environment_names,
+    )
+
+
+def resolve_bazel_launch_metadata_for_targets(
+    *,
+    bazel: str,
+    targets: list[str],
+    bazel_args: list[str],
+    cwd: Path,
+    env: dict[str, str] | None,
+) -> tuple[int, dict[str, BazelLaunchMetadata] | None]:
+    """Queries host-handoff metadata for configured executable targets."""
+    if not targets:
+        return 0, {}
+    target_expression = targets[0] if len(targets) == 1 else f"set({' '.join(targets)})"
+    cquery = run_captured(
+        [
+            bazel,
+            "cquery",
+            "--output=starlark",
+            f"--starlark:expr={BAZEL_LAUNCH_METADATA_QUERY_EXPRESSION}",
+            *bazel_args,
+            target_expression,
+        ],
+        cwd=cwd,
+        env=env,
+    )
+    if cquery.returncode != 0:
+        print_process_failure(cquery)
+        return cquery.returncode, None
+    records = [line for line in cquery.stdout.splitlines() if line.strip()]
+    if len(records) != len(targets):
+        if len(targets) > 1:
+            metadata_by_target = {}
+            for target in targets:
+                result, metadata = resolve_bazel_launch_metadata(
+                    bazel=bazel,
+                    target=target,
+                    bazel_args=bazel_args,
+                    cwd=cwd,
+                    env=env,
+                )
+                if result != 0 or metadata is None:
+                    return result, None
+                metadata_by_target[target] = metadata
+            return 0, metadata_by_target
+        print(
+            f"dev.py: expected {len(targets)} configured launch targets, got "
+            f"{len(records)}",
+            file=sys.stderr,
+        )
+        return 1, None
+
+    decoded_payloads = []
+    for record in records:
+        try:
+            payload = json.loads(record)
+        except json.JSONDecodeError as exc:
+            print(f"dev.py: invalid Bazel launch metadata: {exc}", file=sys.stderr)
+            return 1, None
+        if not isinstance(payload, dict):
+            print("dev.py: invalid Bazel launch metadata", file=sys.stderr)
+            return 1, None
+        label = payload.get("label")
+        if not isinstance(label, str) or not label:
+            print("dev.py: Bazel launch metadata has no target label", file=sys.stderr)
+            return 1, None
+        decoded_payloads.append(payload)
+
+    if len(targets) == 1:
+        metadata = parse_bazel_launch_metadata(decoded_payloads[0], target=targets[0])
+        if metadata is None:
+            return 1, None
+        return 0, {targets[0]: metadata}
+
+    payloads_by_key = {}
+    for payload in decoded_payloads:
+        label = payload["label"]
+        label_key = bazel_label_path_key(label)
+        if label_key in payloads_by_key:
+            payloads_by_key = {}
+            break
+        payloads_by_key[label_key] = payload
+
+    metadata_by_target = {}
+    unmatched_targets = []
+    for target in targets:
+        target_key = bazel_label_path_key(target)
+        payload = payloads_by_key.get(target_key)
+        if payload is None:
+            unmatched_targets.append(target)
+            continue
+        metadata = parse_bazel_launch_metadata(payload, target=target)
+        if metadata is None:
+            return 1, None
+        metadata_by_target[target] = metadata
+    for target in unmatched_targets:
+        result, metadata = resolve_bazel_launch_metadata(
+            bazel=bazel,
+            target=target,
+            bazel_args=bazel_args,
+            cwd=cwd,
+            env=env,
+        )
+        if result != 0 or metadata is None:
+            return result, None
+        metadata_by_target[target] = metadata
+    return 0, metadata_by_target
+
+
+def resolve_bazel_launch_metadata(
+    *,
+    bazel: str,
+    target: str,
+    bazel_args: list[str],
+    cwd: Path,
+    env: dict[str, str] | None,
+) -> tuple[int, BazelLaunchMetadata | None]:
+    """Queries host-handoff metadata carried by one configured target."""
+    result, metadata_by_target = resolve_bazel_launch_metadata_for_targets(
+        bazel=bazel,
+        targets=[target],
+        bazel_args=bazel_args,
+        cwd=cwd,
+        env=env,
+    )
+    if result != 0 or metadata_by_target is None:
+        return result, None
+    return 0, metadata_by_target[target]
+
+
+def create_bazel_launch_script_path() -> Path:
+    BAZEL_LAUNCH_ROOT.mkdir(parents=True, exist_ok=True)
+    descriptor, path = tempfile.mkstemp(
+        dir=BAZEL_LAUNCH_ROOT,
+        prefix=f"run-{os.getpid()}-",
+        suffix=".bat" if os.name == "nt" else ".sh",
+    )
+    os.close(descriptor)
+    return Path(path)
+
+
+def create_bazel_argument_separator() -> str:
+    return f"__IREE_BAZEL_ARGUMENT_SEPARATOR_{secrets.token_hex(16)}__"
+
+
+def bazel_run_under_command() -> str:
+    launcher_path = Path(bazel_launcher.__file__).resolve()
+    return shlex.join([Path(sys.executable).as_posix(), launcher_path.as_posix()])
+
+
+def generate_bazel_launch(
+    *,
+    bazel: str,
+    target: str,
+    bazel_args: list[str],
+    program_args: list[str],
+    run_cwd: Path,
+    env: dict[str, str] | None,
+    verbose: bool,
+    metadata: BazelLaunchMetadata | None = None,
+) -> tuple[int, BazelLaunch | None]:
+    """Builds a target and writes its canonical launcher without running it."""
+    try:
+        validate_bazel_launch_args(bazel_args)
+        validate_bazel_launch_environment(env)
+    except ValueError as exc:
+        print(f"dev.py: {exc}", file=sys.stderr)
+        return 2, None
+
+    if metadata is None:
+        query_result, metadata = resolve_bazel_launch_metadata(
+            bazel=bazel,
+            target=target,
+            bazel_args=bazel_args,
+            cwd=REPO_ROOT,
+            env=env,
+        )
+        if query_result != 0 or metadata is None:
+            return query_result, None
+
+    script_path = create_bazel_launch_script_path()
+    argument_separator = create_bazel_argument_separator()
+    run_argv = [
+        bazel,
+        "run",
+        *bazel_args,
+        f"--script_path={script_path}",
+        "--norun_in_cwd",
+        f"--run_under={bazel_run_under_command()}",
+        target,
+        "--",
+        argument_separator,
+    ]
+    if program_args:
+        run_argv.extend(program_args)
+    run_result = run_quietly(
+        run_argv,
+        cwd=REPO_ROOT,
+        env=env,
+        verbose=verbose,
+    )
+    if run_result != 0:
+        bazel_launcher.remove_launch_script(script_path)
+        return run_result, None
+    if not script_path.is_file() or script_path.stat().st_size == 0:
+        print(
+            f"dev.py: Bazel did not write launch script {script_path}", file=sys.stderr
+        )
+        bazel_launcher.remove_launch_script(script_path)
+        return 1, None
+    return 0, BazelLaunch(
+        target=target,
+        script_path=script_path,
+        run_cwd=run_cwd,
+        argument_separator=argument_separator,
+        runfiles_arguments=metadata.runfiles_arguments,
+        marked_runfiles_arguments=metadata.marked_runfiles_arguments,
+        runfiles_environment_names=metadata.runfiles_environment_names,
+    )
+
+
+def prepare_bazel_process(
+    launch: BazelLaunch,
+    *,
+    env: dict[str, str] | None,
+) -> tuple[int, BazelProcess | None]:
+    """Prepares a lock-free process while preserving native host execution."""
+    try:
+        launch_argv = launch.argv(env)
+    except ValueError as exc:
+        print(f"dev.py: {exc}", file=sys.stderr)
+        bazel_launcher.remove_launch_script(launch.script_path)
+        return 1, None
+
+    if os.name != "nt":
+        return 0, BazelProcess(
+            target=launch.target,
+            argv=launch_argv,
+            cwd=REPO_ROOT,
+            env=launch.environment(env),
+            script_path=launch.script_path,
+        )
+
+    # Bazel emits a batch file on Windows. Executing it as the final process
+    # would leave cmd.exe between PID/signal-based tools and the target. Run
+    # the batch file only long enough for the helper to emit Bazel's resolved
+    # process contract, then execute that target directly below.
+    try:
+        completed = subprocess.run(
+            launch_argv,
+            cwd=REPO_ROOT,
+            env=launch.environment(env, materialize=True),
+            stdout=subprocess.PIPE,
+            text=True,
+        )
+    except OSError as exc:
+        print(
+            f"dev.py: failed to materialize Bazel launch for {launch.target}: {exc}",
+            file=sys.stderr,
+        )
+        return 127, None
+    finally:
+        bazel_launcher.remove_launch_script(launch.script_path)
+    if completed.returncode != 0:
+        return process_exit_code(completed.returncode), None
+    try:
+        process_launch = bazel_launcher.decode_process_launch(completed.stdout)
+    except ValueError as exc:
+        print(
+            f"dev.py: failed to materialize Bazel launch for {launch.target}: {exc}",
+            file=sys.stderr,
+        )
+        return 1, None
+    return 0, BazelProcess(
+        target=launch.target,
+        argv=process_launch.argv,
+        cwd=process_launch.cwd,
+        env=process_launch.env,
+    )
+
+
+def execute_bazel_launch(
+    launch: BazelLaunch,
+    *,
+    env: dict[str, str] | None,
+) -> int:
+    """Executes one prepared Bazel target with direct-process semantics."""
+    process_result, process_launch = prepare_bazel_process(launch, env=env)
+    if process_result != 0 or process_launch is None:
+        return process_result
+    result = exec_path(
+        process_launch.argv,
+        cwd=process_launch.cwd,
+        env=process_launch.env,
+    )
+    if process_launch.script_path is not None:
+        bazel_launcher.remove_launch_script(process_launch.script_path)
+    return result
+
+
 def resolve_bazel_output_path(
     *,
     bazel: str,
@@ -406,7 +915,7 @@ def exec_path(
 ) -> int:
     try:
         os.chdir(cwd)
-        os.execvpe(argv[0], argv, env or os.environ)
+        bazel_launcher.exec_process(argv, env or os.environ)
     except OSError as exc:
         print(f"dev.py: failed to exec {quote_command(argv)}: {exc}", file=sys.stderr)
         return 127
@@ -434,25 +943,45 @@ def cleanup_compile_commands_scratch(scratch_dir: Path) -> None:
 
 
 def run_fuzzers(
-    fuzzer_commands: list[tuple[str, list[str]]],
-    *,
-    env: dict[str, str] | None,
+    fuzzer_processes: list[BazelProcess],
 ) -> int:
-    processes = [
-        (target, subprocess.Popen(argv, cwd=REPO_ROOT, env=env))
-        for target, argv in fuzzer_commands
-    ]
+    processes: list[tuple[BazelProcess, subprocess.Popen]] = []
+    try:
+        for process_launch in fuzzer_processes:
+            processes.append(
+                (
+                    process_launch,
+                    subprocess.Popen(
+                        process_launch.argv,
+                        cwd=process_launch.cwd,
+                        env=process_launch.env,
+                    ),
+                )
+            )
+    except (OSError, ValueError) as exc:
+        print(f"dev.py: failed to start fuzzer: {exc}", file=sys.stderr)
+        stop_fuzzers(processes)
+        for _, process in processes:
+            process.wait()
+        for process_launch in fuzzer_processes:
+            if process_launch.script_path is not None:
+                bazel_launcher.remove_launch_script(process_launch.script_path)
+        return 127
+
     result = 0
     try:
         while processes:
-            for target, process in list(processes):
+            for process_launch, process in list(processes):
                 process_result = process.poll()
                 if process_result is None:
                     continue
-                processes.remove((target, process))
+                processes.remove((process_launch, process))
+                if process_launch.script_path is not None:
+                    bazel_launcher.remove_launch_script(process_launch.script_path)
                 if process_result != 0 and result == 0:
                     print(
-                        f"dev.py: fuzzer failed: {target} exited {process_result}",
+                        f"dev.py: fuzzer failed: {process_launch.target} exited "
+                        f"{process_result}",
                         file=sys.stderr,
                     )
                     result = process_exit_code(process_result)
@@ -463,8 +992,10 @@ def run_fuzzers(
     except KeyboardInterrupt:
         stop_fuzzers(processes)
         result = 130
-    for _, process in processes:
+    for process_launch, process in processes:
         process.wait()
+        if process_launch.script_path is not None:
+            bazel_launcher.remove_launch_script(process_launch.script_path)
     return result
 
 
@@ -474,7 +1005,7 @@ def process_exit_code(process_result: int) -> int:
     return process_result
 
 
-def stop_fuzzers(processes: list[tuple[str, subprocess.Popen]]) -> None:
+def stop_fuzzers(processes: list[tuple[BazelProcess, subprocess.Popen]]) -> None:
     for _, process in processes:
         if process.poll() is None:
             process.send_signal(signal.SIGINT)
@@ -487,36 +1018,72 @@ class BazelRunStep:
     env: dict[str, str] | None = None
 
     def describe(self) -> str:
-        lines = [
-            f"# bazel run {self.command.target}",
-            quote_command(
-                [
-                    self.bazel,
-                    "build",
-                    *self.command.bazel_args,
-                    self.command.target,
-                ]
-            ),
-            quote_command(
-                [
-                    self.bazel,
-                    "cquery",
-                    "--output=files",
-                    *self.command.bazel_args,
-                    self.command.target,
-                ]
-            ),
-        ]
+        lines = [f"# bazel run {self.command.target}"]
         if self.command.print_path:
+            lines.extend(
+                [
+                    quote_command(
+                        [
+                            self.bazel,
+                            "build",
+                            *self.command.bazel_args,
+                            self.command.target,
+                        ]
+                    ),
+                    quote_command(
+                        [
+                            self.bazel,
+                            "cquery",
+                            "--output=files",
+                            *self.command.bazel_args,
+                            self.command.target,
+                        ]
+                    ),
+                ]
+            )
             lines.append("# print built executable path")
         else:
             lines.append(
-                "exec "
-                + quote_command(["<built executable>", *self.command.program_args])
+                quote_command(
+                    [
+                        self.bazel,
+                        "cquery",
+                        "--output=starlark",
+                        *self.command.bazel_args,
+                        self.command.target,
+                    ]
+                )
             )
+            run_argv = [
+                self.bazel,
+                "run",
+                *self.command.bazel_args,
+                "--script_path=<launch script>",
+                "--norun_in_cwd",
+                "--run_under=<host Python launcher>",
+                self.command.target,
+            ]
+            if self.command.program_args:
+                run_argv.extend(["--", *self.command.program_args])
+            lines.append(quote_command(run_argv))
+            lines.append("exec " + quote_command(["<Bazel launch script>"]))
         return "\n".join(lines)
 
     def run(self, verbose: bool = False) -> int:
+        if not self.command.print_path:
+            launch_result, launch = generate_bazel_launch(
+                bazel=self.bazel,
+                target=self.command.target,
+                bazel_args=self.command.bazel_args,
+                program_args=self.command.program_args,
+                run_cwd=self.command.run_cwd,
+                env=self.env,
+                verbose=verbose,
+            )
+            if launch_result != 0 or launch is None:
+                return launch_result
+            return execute_bazel_launch(launch, env=self.env)
+
         build_argv = [
             self.bazel,
             "build",
@@ -547,17 +1114,7 @@ class BazelRunStep:
         if self.command.print_path:
             print(binary_path)
             return 0
-        if not os.access(binary_path, os.X_OK):
-            print(
-                f"dev.py: built output is not executable: {binary_path}",
-                file=sys.stderr,
-            )
-            return 1
-        return exec_path(
-            [str(binary_path), *self.command.program_args],
-            cwd=self.command.run_cwd,
-            env=self.env,
-        )
+        raise AssertionError("non-print Bazel run returned to output-path execution")
 
 
 @dataclass(frozen=True)
@@ -577,22 +1134,34 @@ class BazelFuzzStep:
             lines.append(
                 quote_command([self.bazel, "build", *self.bazel_args, "<fuzz targets>"])
             )
-            lines.append("run each built fuzzer without holding the Bazel lock")
+            lines.append("# generate one canonical Bazel launch script per fuzzer")
+            lines.append("run launch scripts concurrently without the Bazel lock")
         else:
+            lines.append("# build and generate canonical Bazel launch script")
             lines.append(
                 quote_command(
-                    [self.bazel, "build", *self.bazel_args, self.command.target]
+                    [
+                        self.bazel,
+                        "run",
+                        *self.bazel_args,
+                        "--script_path=<launch script>",
+                        "--norun_in_cwd",
+                        "--run_under=<host Python launcher>",
+                        self.command.target,
+                        "--",
+                        "<corpus>",
+                        "-artifact_prefix=<artifacts>/",
+                        *self.command.program_args,
+                    ]
                 )
             )
-            lines.append("exec " + quote_command(["<built fuzzer>", "<corpus>"]))
+            lines.append("exec " + quote_command(["<Bazel launch script>"]))
         return "\n".join(lines)
 
     def run(self, verbose: bool = False) -> int:
         if "..." in self.command.target:
             return self.run_target_pattern(verbose=verbose)
-        return self.build_and_run_target(
-            self.command.target, exec_single=True, verbose=verbose
-        )
+        return self.run_target(self.command.target, verbose=verbose)
 
     def run_target_pattern(self, *, verbose: bool) -> int:
         discovered = run_captured(
@@ -622,64 +1191,74 @@ class BazelFuzzStep:
         )
         if build_result != 0:
             return build_result
-        fuzzer_commands = []
-        for target in targets:
-            fuzzer_argv = self.fuzzer_argv_for_target(target)
-            if fuzzer_argv is None:
-                return 1
-            fuzzer_commands.append((target, fuzzer_argv))
-        return run_fuzzers(fuzzer_commands, env=self.env)
-
-    def build_and_run_target(
-        self, target: str, *, exec_single: bool, verbose: bool
-    ) -> int:
-        build_result = run_quietly(
-            [self.bazel, "build", *self.bazel_args, target],
+        metadata_result, metadata_by_target = resolve_bazel_launch_metadata_for_targets(
+            bazel=self.bazel,
+            targets=targets,
+            bazel_args=self.bazel_args,
             cwd=REPO_ROOT,
             env=self.env,
+        )
+        if metadata_result != 0 or metadata_by_target is None:
+            return metadata_result
+        fuzzer_launches = []
+        for target in targets:
+            launch_result, launch = self.generate_fuzzer_launch(
+                target,
+                verbose=verbose,
+                metadata=metadata_by_target[target],
+            )
+            if launch_result != 0 or launch is None:
+                for pending_launch in fuzzer_launches:
+                    bazel_launcher.remove_launch_script(pending_launch.script_path)
+                return launch_result
+            fuzzer_launches.append(launch)
+        fuzzer_processes = []
+        for launch in fuzzer_launches:
+            process_result, process_launch = prepare_bazel_process(
+                launch,
+                env=self.env,
+            )
+            if process_result != 0 or process_launch is None:
+                for pending_launch in fuzzer_launches:
+                    bazel_launcher.remove_launch_script(pending_launch.script_path)
+                return process_result
+            fuzzer_processes.append(process_launch)
+        return run_fuzzers(fuzzer_processes)
+
+    def run_target(self, target: str, *, verbose: bool) -> int:
+        launch_result, launch = self.generate_fuzzer_launch(
+            target,
             verbose=verbose,
         )
-        if build_result != 0:
-            return build_result
-        return self.run_built_target(target, exec_single=exec_single)
+        if launch_result != 0 or launch is None:
+            return launch_result
+        return execute_bazel_launch(launch, env=self.env)
 
-    def run_built_target(self, target: str, *, exec_single: bool) -> int:
-        binary_path = resolve_bazel_output_path(
+    def generate_fuzzer_launch(
+        self,
+        target: str,
+        *,
+        verbose: bool,
+        metadata: BazelLaunchMetadata | None = None,
+    ) -> tuple[int, BazelLaunch | None]:
+        return generate_bazel_launch(
             bazel=self.bazel,
             target=target,
             bazel_args=self.bazel_args,
-            cwd=REPO_ROOT,
+            program_args=self.fuzzer_program_args(target),
+            run_cwd=REPO_ROOT,
             env=self.env,
+            verbose=verbose,
+            metadata=metadata,
         )
-        if binary_path is None or not binary_path.is_file():
-            print(f"dev.py: could not find built fuzzer for {target}", file=sys.stderr)
-            return 1
-        argv = self.fuzzer_argv(target, binary_path)
-        if exec_single:
-            return exec_path(argv, cwd=REPO_ROOT, env=self.env)
-        return subprocess.run(argv, cwd=REPO_ROOT, env=self.env).returncode
 
-    def fuzzer_argv_for_target(self, target: str) -> list[str] | None:
-        binary_path = resolve_bazel_output_path(
-            bazel=self.bazel,
-            target=target,
-            bazel_args=self.bazel_args,
-            cwd=REPO_ROOT,
-            env=self.env,
-        )
-        if binary_path is None or not binary_path.is_file():
-            print(f"dev.py: could not find built fuzzer for {target}", file=sys.stderr)
-            return None
-        return self.fuzzer_argv(target, binary_path)
-
-    def fuzzer_argv(self, target: str, binary_path: Path) -> list[str]:
+    def fuzzer_program_args(self, target: str) -> list[str]:
         target_dir = fuzz.bazel_fuzz_target_dir(target)
         corpus_dir = target_dir / "corpus"
         artifact_dir = target_dir / "artifacts"
         corpus_dir.mkdir(parents=True, exist_ok=True)
         artifact_dir.mkdir(parents=True, exist_ok=True)
         return [
-            str(binary_path),
             str(corpus_dir),
             f"-artifact_prefix={artifact_dir}/",
             *self.command.program_args,
@@ -778,16 +1357,13 @@ class BazelTryStep:
     def describe(self) -> str:
         scratch = BAZEL_TRY_ROOT / "run-<pid>"
         label = f"{BAZEL_TRY_LABEL_ROOT}/run-<pid>:snippet"
-        lines = [
-            f"# write {scratch}/BUILD.bazel",
-            quote_command(self._build_command(label)),
-        ]
+        lines = [f"# write {scratch}/BUILD.bazel"]
         if self.command.compile_only:
+            lines.append(quote_command(self._build_command(label)))
             lines.append("# compile only")
         else:
-            lines.append(
-                "exec " + quote_command(["<built snippet>", *self.command.program_args])
-            )
+            lines.append("# build and generate canonical Bazel launch script")
+            lines.append("exec " + quote_command(["<Bazel launch script>"]))
         return "\n".join(lines)
 
     def run(self, verbose: bool = False) -> int:
@@ -795,6 +1371,7 @@ class BazelTryStep:
         if scratch_dir.exists():
             shutil.rmtree(scratch_dir)
         scratch_dir.mkdir(parents=True)
+        launch = None
         try:
             try:
                 source_names, source_texts = self.materialize_sources(scratch_dir)
@@ -813,43 +1390,61 @@ class BazelTryStep:
             label = (
                 f"{BAZEL_TRY_LABEL_ROOT}/{scratch_dir.name}:{DEFAULT_TRY_BINARY_NAME}"
             )
-            build_result = run_quietly(
-                self._build_command(label),
-                cwd=REPO_ROOT,
-                env=self.env,
-                verbose=verbose,
-            )
-            if build_result != 0:
-                return build_result
-            binary_path = resolve_bazel_output_path(
-                bazel=self.bazel,
-                target=label,
-                bazel_args=self._bazel_args(),
-                cwd=REPO_ROOT,
-                env=self.env,
-            )
-            if binary_path is None or not binary_path.is_file():
-                print("dev.py: could not find built snippet binary", file=sys.stderr)
-                return 1
+            if self.command.compile_only:
+                build_result = run_quietly(
+                    self._build_command(label),
+                    cwd=REPO_ROOT,
+                    env=self.env,
+                    verbose=verbose,
+                )
+                if build_result != 0:
+                    return build_result
+            else:
+                launch_result, launch = generate_bazel_launch(
+                    bazel=self.bazel,
+                    target=label,
+                    bazel_args=self._bazel_args(),
+                    program_args=self.command.program_args,
+                    run_cwd=self.command.run_cwd,
+                    env=self.env,
+                    verbose=verbose,
+                )
+                if launch_result != 0 or launch is None:
+                    return launch_result
+
             if self.command.output is not None:
-                output_path = self.command.output
-                if not output_path.is_absolute():
-                    output_path = self.command.run_cwd / output_path
-                output_path.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(binary_path, output_path)
-                output_path.chmod(output_path.stat().st_mode | 0o755)
+                copy_result = self.copy_output(label, self.command.output)
+                if copy_result != 0:
+                    return copy_result
             if self.command.compile_only:
                 return 0
             if not self.command.keep:
                 cleanup_try_scratch(scratch_dir)
-            return exec_path(
-                [str(binary_path), *self.command.program_args],
-                cwd=self.command.run_cwd,
-                env=self.env,
-            )
+            return execute_bazel_launch(launch, env=self.env)
         finally:
+            if launch is not None:
+                bazel_launcher.remove_launch_script(launch.script_path)
             if not self.command.keep:
                 cleanup_try_scratch(scratch_dir)
+
+    def copy_output(self, label: str, output_path: Path) -> int:
+        """Copies a built try executable to the caller-selected path."""
+        binary_path = resolve_bazel_output_path(
+            bazel=self.bazel,
+            target=label,
+            bazel_args=self._bazel_args(),
+            cwd=REPO_ROOT,
+            env=self.env,
+        )
+        if binary_path is None or not binary_path.is_file():
+            print("dev.py: could not find built snippet binary", file=sys.stderr)
+            return 1
+        if not output_path.is_absolute():
+            output_path = self.command.run_cwd / output_path
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(binary_path, output_path)
+        output_path.chmod(output_path.stat().st_mode | 0o755)
+        return 0
 
     def materialize_sources(self, scratch_dir: Path) -> tuple[list[str], list[str]]:
         source_names = []

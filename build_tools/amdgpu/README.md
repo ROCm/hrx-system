@@ -140,19 +140,37 @@ repository. It is inert by default. A real producer is selected with:
 
 Useful path overrides include `IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN_ROCM_PATH`,
 `IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN_LLVM_TOOLS_DIR`, `IREE_ROCM_PATH`, and
-per-tool overrides such as `IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN_CLANG_BINARY`.
-ROCm distributions may expose `clang`/`amdclang` launcher shims that exec a
-versioned driver next to their observed `argv[0]` path. The repository resolves
-those shims to the matching versioned driver before exposing a Bazel executable
-target, because Bazel wraps local tools through generated symlinks and must not
-change the driver's sibling lookup behavior.
+`IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN_CLANG_BINARY`. `auto` retains the same search
+surface and additionally checks `PATH` after configured tool and ROCm roots. If
+that search does not find one complete coherent toolchain, source-built targets
+remain incompatible while unrelated targets continue to configure. Explicit
+`rocm` and `llvm-tools` modes reject incomplete configurations.
+
+The selected Clang is the toolchain anchor. The repository canonicalizes it,
+verifies AMDGPU target support, and asks that executable for `llvm-ar`,
+`llvm-link`, `ld.lld`, `llvm-objcopy`, the Clang resource directory, and the
+optional offload bundler. Compatibility paths may participate in discovery,
+but only Clang-reported canonical files are exposed to Bazel; tools from
+different LLVM installations are never mixed.
+
+On ELF hosts, local tools run with their exact non-glibc dynamic-library
+closure. The repository inspects only the selected executables and does not
+import an LLVM or ROCm library tree. Ambient loader variables are replaced
+during discovery and execution, so the closure does not depend on the shell
+that configured the worktree. Windows tools retain their native `.exe` names
+and execute directly from the selected installation; no POSIX launcher or ELF
+inspection participates in Windows repository setup.
+
 When the toolchain repository is inert, selected source-built binaries are
 incompatible instead of referencing missing tool labels.
 
 `iree_amdgpu_binary_variants[_embed_data]` accepts `source_format = "hip"` for
 device-only HIP fixtures that need ROCm device libraries such as `ocml.bc` and
-`ockl.bc`. This changes only the AMDGPU device compilation pipeline: host C and
-C++ compilation continues to use the configured host compiler.
+`ockl.bc`. HIP fixture generation is an optional extension of the base AMDGPU
+toolchain and is enabled only when both those device libraries and the matching
+Clang offload bundler are available. Missing HIP pieces do not disable base
+AMDGPU device compilation. Host C and C++ compilation continues to use the
+configured host compiler.
 
 ## CMake Integration
 

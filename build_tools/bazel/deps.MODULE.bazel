@@ -20,7 +20,7 @@ python.toolchain(python_version = "3.12")
 use_repo(python, "python_3_12")
 
 amdgpu_device_toolchain_repo = use_repo_rule(
-    "//build_tools/bazel:amdgpu_device_toolchain_repo.bzl",
+    "//build_tools/amdgpu:device_toolchain_repository.bzl",
     "amdgpu_device_toolchain_repo",
 )
 

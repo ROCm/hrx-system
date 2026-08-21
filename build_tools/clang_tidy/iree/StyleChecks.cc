@@ -26,6 +26,7 @@
 #include "clang/Lex/PPCallbacks.h"
 #include "clang/Lex/Preprocessor.h"
 #include "llvm/ADT/StringRef.h"
+#include "llvm/Support/Path.h"
 
 namespace clang::tidy::iree {
 namespace {
@@ -59,9 +60,10 @@ bool IsTestFilename(StringRef Filename) {
   if (Filename.empty()) {
     return false;
   }
+  StringRef Basename = llvm::sys::path::filename(Filename);
   return Filename.contains("/test/") || Filename.contains("/testing/") ||
-         Filename.contains("/cts/") || Filename.contains("_test.") ||
-         Filename.contains("_test_") || Filename.ends_with("test_base.h");
+         Filename.contains("/cts/") || Basename.contains("_test.") ||
+         Basename.contains("_test_") || Basename == "test_base.h";
 }
 
 bool FirstMacroArgumentContainsIdentifier(const MacroArgs* Args,

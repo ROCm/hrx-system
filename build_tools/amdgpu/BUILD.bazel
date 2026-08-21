@@ -8,14 +8,23 @@
 
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
 load("//build_tools/bazel:python.bzl", "iree_py_library", "iree_py_test")
+load(
+    ":device_toolchain_repository_test.bzl",
+    "device_toolchain_repository_test_suite",
+)
 
 package(
     default_visibility = ["//visibility:public"],
     licenses = ["notice"],
 )
 
+device_toolchain_repository_test_suite(
+    name = "device_toolchain_repository_test",
+)
+
 exports_files([
     "binary.cmake",
+    "device_toolchain_repository.bzl",
     "elf_machine_map.inl",
     "selectors.cmake",
     "target_map.cmake",

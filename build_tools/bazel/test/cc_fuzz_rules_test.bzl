@@ -10,11 +10,14 @@ load("@rules_testing//lib:analysis_test.bzl", "analysis_test", "test_suite")
 load("@rules_testing//lib:util.bzl", "TestingAspectInfo", "util")
 load("//build_tools/bazel:cc_fuzz.bzl", "iree_cc_fuzz")
 
+_TEST_DYNAMIC_LIBRARY_ENVIRONMENT = "IREE_TEST_DYNAMIC_LIBRARY_PATH"
+
 def _test_cc_fuzz_adds_fuzzer_contract(name, **kwargs):
     util.helper_target(
         iree_cc_fuzz,
         name = name + "_subject",
         defines = ["USER_DEFINE"],
+        deps = [":dynamic_library_environment_library"],
         linkopts = ["-Wl,--user-linkopt"],
         srcs = [name + "_subject.cc"],
         tags = ["requires-gpu-vulkan"],
@@ -52,6 +55,9 @@ def _test_cc_fuzz_adds_fuzzer_contract_impl(env, target):
             env.fail("expected %r in fuzz tags %r" % (expected_tag, attrs.tags))
     if not attrs.testonly:
         env.fail("expected fuzz target to be testonly")
+    library_path = target[RunEnvironmentInfo].environment[_TEST_DYNAMIC_LIBRARY_ENVIRONMENT]
+    if not library_path.endswith("dynamic_library_root.so"):
+        env.fail("unexpected fuzz dynamic-library path %r" % library_path)
 
 def cc_fuzz_rules_test_suite(name):
     test_suite(

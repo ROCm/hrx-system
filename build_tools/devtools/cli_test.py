@@ -83,7 +83,7 @@ class CliTest(unittest.TestCase):
                 str(cli.REPO_ROOT / "loom/docs/build.py"),
                 "build",
                 "--site-dir",
-                "build/loom-docs-preview",
+                str(Path("build/loom-docs-preview")),
             ],
         )
 
@@ -409,7 +409,7 @@ class CliTest(unittest.TestCase):
         plan = args.handler(args)
         self.assertIn("bazel shutdown", normalized_plan_description(plan))
 
-    def test_bazel_run_builds_and_resolves_binary_before_exec(self):
+    def test_bazel_run_generates_canonical_launcher_before_exec(self):
         args = cli.parse_arguments(
             [
                 "bazel",
@@ -424,9 +424,12 @@ class CliTest(unittest.TestCase):
         plan = args.handler(args)
         description = normalized_plan_description(plan)
 
-        self.assertIn("bazel build --config=asan", description)
-        self.assertIn("bazel cquery --output=files --config=asan", description)
-        self.assertIn("<built executable>", description)
+        self.assertIn("bazel cquery --output=starlark --config=asan", description)
+        self.assertIn("bazel run --config=asan", description)
+        self.assertIn("--script_path=<launch script>", description)
+        self.assertIn("--norun_in_cwd", description)
+        self.assertIn("--run_under=<host Python launcher>", description)
+        self.assertIn("<Bazel launch script>", description)
         self.assertIn("--benchmark_filter=Alloc", description)
 
     def test_bazel_run_importer_environment_adds_config_and_pythonpath(self):
@@ -461,7 +464,10 @@ class CliTest(unittest.TestCase):
         )
 
         plan = args.handler(args)
-        self.assertIn("# print built executable path", plan.describe())
+        description = normalized_plan_description(plan)
+        self.assertIn("bazel build", description)
+        self.assertIn("bazel cquery --output=files", description)
+        self.assertIn("# print built executable path", description)
 
     def test_bazel_try_generates_scratch_package(self):
         args = cli.parse_arguments(
@@ -623,9 +629,10 @@ class CliTest(unittest.TestCase):
         plan = args.handler(args)
         description = normalized_plan_description(plan)
 
-        self.assertIn("bazel build --config=fuzzer", description)
-        self.assertIn("<built fuzzer>", description)
+        self.assertIn("bazel run --config=fuzzer", description)
+        self.assertIn("<Bazel launch script>", description)
         self.assertIn("<corpus>", description)
+        self.assertIn("-artifact_prefix=<artifacts>/", description)
 
     def test_bazel_compile_commands_defaults_to_repo_roots(self):
         args = cli.parse_arguments(["bazel", "compile-commands"])
@@ -1008,7 +1015,8 @@ class CliTest(unittest.TestCase):
         self.assertIn(
             "iree-bazel-run //runtime/src/tools:iree-run-module -- --help", output
         )
-        self.assertIn("execs the binary from the current directory", output)
+        self.assertIn("execs the binary from the current", output)
+        self.assertIn("graph-declared runfile paths", output)
         self.assertIn("Bazel server lock is not", output)
         self.assertNotIn("python dev.py", output)
 

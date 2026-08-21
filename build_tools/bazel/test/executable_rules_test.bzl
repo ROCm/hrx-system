@@ -14,6 +14,12 @@ load(
     "iree_executable_alias",
     "iree_executable_test",
 )
+load(
+    "//build_tools/bazel:runfiles.bzl",
+    "IreeRunfilesArgumentsInfo",
+    "RUNFILES_PATH_BEGIN",
+    "RUNFILES_PATH_END",
+)
 
 def _expect_basename(env, files, expected_basename):
     for file in files:
@@ -49,7 +55,10 @@ def _test_executable_alias_wraps_source(name, **kwargs):
 def _test_executable_test_wraps_source(name, **kwargs):
     iree_executable_test(
         name = name + "_subject",
-        args = ["--smoke"],
+        args = [
+            "--smoke",
+            "--fixture=$(rootpath :generate_rule_fixture.data)",
+        ],
         data = [":generate_rule_fixture.data"],
         env = {
             "IREE_FIXTURE": "$(location :generate_rule_fixture.data)",
@@ -75,6 +84,18 @@ def _test_executable_wrapper_contract_impl(env, target):
     _expect_basename(env, info.data.to_list(), "generate_rule_fixture.data")
     if target.label.name.endswith("_test_wraps_source_subject"):
         env.expect.that_str(info.env["IREE_FIXTURE"]).contains("generate_rule_fixture.data")
+        runfiles_arguments = target[IreeRunfilesArgumentsInfo]
+        env.expect.that_collection(runfiles_arguments.arguments).contains_exactly([
+            "--smoke",
+            "--fixture=build_tools/bazel/test/generate_rule_fixture.data",
+        ]).in_order()
+        env.expect.that_collection(runfiles_arguments.marked_arguments).contains_exactly([
+            "--smoke",
+            "--fixture=" +
+            RUNFILES_PATH_BEGIN +
+            "build_tools/bazel/test/generate_rule_fixture.data" +
+            RUNFILES_PATH_END,
+        ]).in_order()
     elif info.env:
         env.fail("expected no binary alias environment, got %r" % info.env)
 

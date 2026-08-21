@@ -12,9 +12,33 @@ macros and add only the dependencies, flags, or validation that belong to that
 project.
 """
 
-load("@rules_cc//cc:cc_binary.bzl", "cc_binary")
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
+
+# rules_cc currently exposes only its macro publicly. Rule inheritance needs
+# the underlying rule object so ctx.super() can preserve its full behavior.
+# buildifier: disable=bzl-visibility
+load(
+    "@rules_cc//cc/private/rules_impl:cc_binary.bzl",
+    rules_cc_binary = "cc_binary",
+)
 load(":cc_attrs.bzl", "cc_attrs")
+load(
+    ":cc_execution.bzl",
+    "cc_execution_attrs",
+    "cc_execution_impl",
+    "cc_execution_initializer",
+)
+
+# Extending the rules_cc implementation keeps the public target as the actual
+# C/C++ rule: compilation actions, implicit outputs, aspects, and every parent
+# provider remain attached to the same label. The surrounding symbolic macro
+# continues to own IREE's user-facing defaults.
+cc_binary = rule(
+    implementation = cc_execution_impl,
+    attrs = cc_execution_attrs,
+    initializer = cc_execution_initializer,
+    parent = rules_cc_binary,
+)
 
 def _iree_cc_library_impl(
         name,
@@ -134,7 +158,7 @@ iree_cc_binary = macro(
     default inherited from rules_cc.
     """,
     implementation = _iree_cc_binary_impl,
-    inherit_attrs = "common",
+    inherit_attrs = cc_binary,
     attrs = cc_attrs.merge_dicts(
         cc_attrs.compilation,
         cc_attrs.dependency,
@@ -148,6 +172,8 @@ iree_cc_binary = macro(
             "args": attr.string_list(
                 doc = "Command-line arguments used when this binary is run by Bazel.",
             ),
+            "dynamic_library_data": None,
+            "dynamic_library_deps": None,
             "linkshared": attr.bool(
                 doc = "Whether to create a shared library.",
             ),

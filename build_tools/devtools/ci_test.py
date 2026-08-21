@@ -81,6 +81,7 @@ class CiTest(unittest.TestCase):
 
     def test_bazel_profiles_are_named_for_each_build_and_test_phase(self):
         profile_dir = Path("/tmp/iree-bazel-profiles")
+        resolved_profile_dir = profile_dir.resolve()
         args = ci.parse_arguments(
             [
                 "iree-bazel-cpu",
@@ -101,8 +102,8 @@ class CiTest(unittest.TestCase):
                 if arg.startswith("--profile=")
             ],
             [
-                f"--profile={profile_dir}/build-iree.profile.gz",
-                f"--profile={profile_dir}/test-iree.profile.gz",
+                f"--profile={resolved_profile_dir / 'build-iree.profile.gz'}",
+                f"--profile={resolved_profile_dir / 'test-iree.profile.gz'}",
             ],
         )
 
@@ -199,6 +200,82 @@ class CiTest(unittest.TestCase):
     def test_bazel_repository_build_rejects_partial_target_scope(self):
         args = ci.parse_arguments(
             ["iree-bazel-repository-build", "--target", "//runtime/..."]
+        )
+
+        with self.assertRaisesRegex(ValueError, "repository-wide"):
+            ci.steps_from_args(args)
+
+    def test_bazel_repository_integration_exercises_portable_runtime_contracts(self):
+        args = ci.parse_arguments(
+            [
+                "iree-bazel-repository-integration",
+                "--amdgpu-target",
+                "gfx11-generic",
+            ]
+        )
+
+        with mock.patch.dict(
+            ci.os.environ,
+            {"HRX_ROCM_ROOT": "/tmp/rocm-root"},
+            clear=True,
+        ):
+            steps = ci.steps_from_args(args)
+
+        self.assertEqual(
+            [step.name for step in steps],
+            [
+                "Configure Bazel",
+                "Build repository",
+                "Build AMDGPU device toolchain smoke",
+                "Test Bazel repository integration",
+                "Test lock-free Bazel launch",
+                "Run dynamic library environment smoke",
+                "Run executable alias smoke",
+            ],
+        )
+        configure_step = steps[0]
+        self.assertIn("-DIREE_ROCM_PATH=/tmp/rocm-root", configure_step.argv)
+        device_build_step = steps[2]
+        for target in ci_config.BAZEL_REPOSITORY_INTEGRATION_DEVICE_TARGETS:
+            self.assertIn(target, device_build_step.argv)
+        self.assertIn(
+            "--//runtime/src/iree/hal/drivers/amdgpu:targets=gfx11-generic",
+            device_build_step.argv,
+        )
+        integration_test_step = steps[3]
+        for target in ci_config.BAZEL_REPOSITORY_INTEGRATION_TEST_TARGETS:
+            self.assertIn(target, integration_test_step.argv)
+        self.assertEqual(
+            steps[5].argv[-1],
+            ci_config.BAZEL_REPOSITORY_INTEGRATION_DYNAMIC_LIBRARY_TARGET,
+        )
+        self.assertEqual(
+            steps[6].argv[-3:],
+            (
+                ci_config.BAZEL_REPOSITORY_INTEGRATION_ALIAS_TARGET,
+                "--",
+                "--help",
+            ),
+        )
+        self.assertEqual(
+            steps[4].argv[-1],
+            "build_tools/devtools/bazel_launcher_integration_test.py",
+        )
+
+    def test_bazel_repository_integration_requires_rocm_device_tools(self):
+        args = ci.parse_arguments(["iree-bazel-repository-integration"])
+
+        with mock.patch.dict(ci.os.environ, {}, clear=True):
+            with self.assertRaisesRegex(ValueError, "requires HRX_ROCM_ROOT"):
+                ci.steps_from_args(args)
+
+    def test_bazel_repository_integration_rejects_partial_target_scope(self):
+        args = ci.parse_arguments(
+            [
+                "iree-bazel-repository-integration",
+                "--target",
+                "//runtime/...",
+            ]
         )
 
         with self.assertRaisesRegex(ValueError, "repository-wide"):
@@ -1093,6 +1170,30 @@ class CiTest(unittest.TestCase):
         self.assertIn("VsDevCmd.bat", block)
         self.assertIn('if "${{ matrix.host_toolchain }}"=="msvc"', block)
         self.assertIn("build_tools/devtools/ci.py ${{ matrix.command }}", block)
+
+    def test_iree_bazel_windows_workflow_separates_host_and_device_toolchains(self):
+        block = self.workflow_job_block(
+            ".github/workflows/ci_iree_bazel.yml", "windows_bazel"
+        )
+
+        self.assertIn("name: Windows / Repository / MSVC + ROCm", block)
+        self.assertIn("if: ${{ false }}", block)
+        self.assertIn("runs-on: azure-windows-scale-rocm", block)
+        self.assertIn("python build_tools/ci_core_windows.py fetch-rocm", block)
+        self.assertIn("python dev.py bazel setup --venv", block)
+        self.assertIn("$env:RUNNER_TEMP", block)
+        self.assertIn("startup --output_user_root=$bazelOutputRoot", block)
+        self.assertNotIn("output_user_root=C:", block)
+        self.assertIn("VsDevCmd.bat", block)
+        self.assertIn('set "CC=cl.exe"', block)
+        self.assertIn('set "CXX=cl.exe"', block)
+        self.assertIn('set "AR=lib.exe"', block)
+        self.assertIn(
+            "build_tools/devtools/ci.py iree-bazel-repository-integration",
+            block,
+        )
+        self.assertIn("--amdgpu-target gfx11-generic", block)
+        self.assertNotIn('set "CC=%HRX_ROCM_ROOT%', block)
 
     def test_iree_workflows_do_not_trigger_on_libhrx_only_paths(self):
         for path in (

@@ -12,6 +12,12 @@ load(
     "collect_wasm_js",
     "discover_wasm_entry",
 )
+load(
+    ":dynamic_library_bundle.bzl",
+    "collect_dynamic_library_bundles",
+    "inject_dynamic_library_bindings",
+)
+load(":runfiles.bzl", "create_runfiles_arguments_info")
 
 IreeExecutableInfo = provider(
     doc = "Metadata for an executable alias or test wrapper.",
@@ -116,7 +122,7 @@ def _iree_executable_alias_impl(ctx):
     else:
         output = _native_executable_output(ctx)
         runfiles = _merge_runfiles(ctx)
-    return [
+    providers = [
         DefaultInfo(
             executable = output,
             files = depset([output]),
@@ -129,6 +135,24 @@ def _iree_executable_alias_impl(ctx):
             src = ctx.attr.src.label,
         ),
     ]
+    if RunEnvironmentInfo in ctx.attr.src:
+        source_environment = ctx.attr.src[RunEnvironmentInfo]
+        providers.append(RunEnvironmentInfo(
+            environment = source_environment.environment,
+            inherited_environment = source_environment.inherited_environment,
+        ))
+    runfiles_arguments = create_runfiles_arguments_info(
+        ctx,
+        ctx.attr.data + [ctx.attr.src],
+    )
+    if runfiles_arguments != None:
+        providers.append(runfiles_arguments)
+    return inject_dynamic_library_bindings(
+        ctx,
+        providers,
+        ctx.attr.data + [ctx.attr.src],
+        output,
+    )
 
 def _iree_executable_test_impl(ctx):
     if _is_wasm_target(ctx):
@@ -138,8 +162,14 @@ def _iree_executable_test_impl(ctx):
     else:
         output = _native_executable_output(ctx)
         runfiles = _merge_runfiles(ctx)
-    expanded_env = _expand_env(ctx)
-    return [
+    expanded_env = {}
+    inherited_environment = list(ctx.attr.env_inherit)
+    if RunEnvironmentInfo in ctx.attr.src:
+        source_environment = ctx.attr.src[RunEnvironmentInfo]
+        expanded_env.update(source_environment.environment)
+        inherited_environment.extend(source_environment.inherited_environment)
+    expanded_env.update(_expand_env(ctx))
+    providers = [
         DefaultInfo(
             executable = output,
             files = depset([output]),
@@ -151,12 +181,28 @@ def _iree_executable_test_impl(ctx):
             output = output,
             src = ctx.attr.src.label,
         ),
-        testing.TestEnvironment(expanded_env),
+        testing.TestEnvironment(
+            environment = expanded_env,
+            inherited_environment = depset(inherited_environment).to_list(),
+        ),
     ]
+    runfiles_arguments = create_runfiles_arguments_info(
+        ctx,
+        ctx.attr.data + [ctx.attr.src],
+    )
+    if runfiles_arguments != None:
+        providers.append(runfiles_arguments)
+    return inject_dynamic_library_bindings(
+        ctx,
+        providers,
+        ctx.attr.data + [ctx.attr.src],
+        output,
+    )
 
 _SHARED_ATTRS = {
     "data": attr.label_list(
         allow_files = True,
+        aspects = [collect_dynamic_library_bundles],
         doc = "Runtime data dependencies available to the wrapped executable.",
     ),
     "out": attr.string(
@@ -164,7 +210,7 @@ _SHARED_ATTRS = {
     ),
     "src": attr.label(
         allow_files = True,
-        aspects = [collect_wasm_js],
+        aspects = [collect_wasm_js, collect_dynamic_library_bundles],
         cfg = "target",
         doc = "Executable target or file to expose.",
         executable = True,
@@ -191,6 +237,9 @@ _SHARED_ATTRS = {
 _TEST_ATTRS = dict(_SHARED_ATTRS)
 _TEST_ATTRS["env"] = attr.string_dict(
     doc = "Environment variables passed to the wrapped executable. Values may use $(location) for src or data labels.",
+)
+_TEST_ATTRS["env_inherit"] = attr.string_list(
+    doc = "Host environment variable names inherited by the wrapped test.",
 )
 
 iree_executable_alias = rule(

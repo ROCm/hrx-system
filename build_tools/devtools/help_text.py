@@ -446,9 +446,11 @@ Presubmit stays non-mutating.""",
   python dev.py bazel run --config=asan //runtime/src/iree/base:allocator_test
   python dev.py bazel run -p //runtime/src/tools:iree-run-module
 
-This builds first, resolves the configured executable path with cquery, then
-execs the binary from the current directory. The Bazel server lock is not held
-while the binary runs.""",
+This asks Bazel to write its canonical target launcher, then hands off to it
+after Bazel releases the server lock. The target observes the caller's current
+directory while Bazel's configured environment and argument ordering are
+retained. Graph-declared runfile paths are made absolute before the directory
+changes.""",
         )
     if command == "try" and lane == "bazel":
         return CommandHelp(
@@ -794,9 +796,10 @@ through Bazel, applies them outside Bazel, then re-runs the normal check."""
         return """## iree-bazel-run
 
 Use `iree-bazel-run` instead of raw `bazel run` when executing repository
-binaries. It builds the target, resolves the configured executable with cquery,
-then execs the binary from the current directory. The Bazel server lock is not
-held while the program runs, and signals/PID-based tools see the final process.
+binaries. It asks Bazel to write the configured target launcher, resolves
+graph-declared runfile paths in target arguments and environment bindings, then
+execs the binary from the current directory. The Bazel server lock is not held
+while the program runs, and signals/PID-based tools see the final process.
 
 ```bash
 iree-bazel-run //runtime/src/iree/base:allocator_benchmark

@@ -26,8 +26,16 @@ enabled. `dev.py bazel clang-tidy` enables it with
 
 Discovery checks `IREE_CLANG_TIDY_LLVM_CONFIG`, `LLVM_CONFIG`,
 `IREE_CLANG_TIDY_LLVM_ROOT`, `IREE_LLVM_ROOT`, `LLVM_ROOT`, and then `PATH`.
-Use `IREE_CLANG_TIDY_BINARY` or `IREE_CLANG_TIDY_CLANGXX_BINARY` only when the
-tools are not next to the discovered `llvm-config`.
+The selected `llvm-config --bindir` must contain the matching `clang-tidy` and
+`clang++`; discovery never mixes tools from different LLVM installations.
+
+The external repository imports the selected tools, Clang resource headers,
+and their exact non-glibc ELF dynamic-library closure. It does not import the
+LLVM installation's entire library directory or Clang's target runtime
+libraries. The imported resource headers are exposed through a stable virtual
+resource directory, so the source LLVM prefix does not enter clang-tidy action
+keys. Selected tools must have usable rpaths rather than depending on ambient
+loader configuration.
 
 The Bazel action runner uses the same configured C/C++ compile arguments that
 feed `dev.py bazel compile-commands`, builds one cacheable action per source
