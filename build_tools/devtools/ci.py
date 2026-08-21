@@ -86,6 +86,7 @@ AMDGPU_DEVICE_BINARY_PREBUILT_OPTIONS = (
 BAZEL_COMMANDS = {
     "iree-bazel-cpu": ("cpu", None),
     "iree-bazel-repository-build": ("repository-build", None),
+    "iree-bazel-repository-integration": ("repository-integration", None),
     "iree-bazel-cpu-asan": ("cpu", "asan"),
     "iree-bazel-cpu-msan": ("cpu", "msan"),
     "iree-bazel-cpu-tsan": ("cpu", "tsan"),
@@ -167,6 +168,10 @@ def command_targets(explicit_targets: list[str] | None = None) -> tuple[str, ...
 
 def dev_command(*args: str) -> tuple[str, ...]:
     return (os.environ.get("IREE_CI_PYTHON", "python3"), "dev.py", *args)
+
+
+def python_command(path: str, *args: str) -> tuple[str, ...]:
+    return (os.environ.get("IREE_CI_PYTHON", "python3"), path, *args)
 
 
 def sanitizer_env(config: str | None) -> tuple[tuple[str, str], ...]:
@@ -290,6 +295,18 @@ def bazel_test_step(
     if any(target.startswith("-") for target in targets):
         command.append("--")
     command.extend(targets)
+    return CiStep(name, dev_command(*command))
+
+
+def bazel_run_step(
+    name: str,
+    target: str,
+    program_args: tuple[str, ...] = (),
+    bazel_options: tuple[str, ...] = (),
+) -> CiStep:
+    command = ["bazel", "run", *bazel_options, target]
+    if program_args:
+        command.extend(("--", *program_args))
     return CiStep(name, dev_command(*command))
 
 
@@ -421,6 +438,40 @@ def repository_build_steps() -> list[CiStep]:
             enabled_loom_importers=REPOSITORY_BUILD_LOOM_IMPORTERS,
         ),
         bazel_build_step("Build repository", ("//...",)),
+    ]
+
+
+def repository_integration_steps(amdgpu_target_selector: str) -> list[CiStep]:
+    if not os.environ.get("HRX_ROCM_ROOT"):
+        raise ValueError(
+            "iree-bazel-repository-integration requires HRX_ROCM_ROOT so the "
+            "AMDGPU device compiler is exercised"
+        )
+    amdgpu_options = amdgpu_bazel_options(amdgpu_target_selector)
+    return [
+        *repository_build_steps(),
+        bazel_build_step(
+            "Build AMDGPU device toolchain smoke",
+            ci_config.BAZEL_REPOSITORY_INTEGRATION_DEVICE_TARGETS,
+            bazel_options=amdgpu_options,
+        ),
+        bazel_test_step(
+            "Test Bazel repository integration",
+            ci_config.BAZEL_REPOSITORY_INTEGRATION_TEST_TARGETS,
+        ),
+        CiStep(
+            "Test lock-free Bazel launch",
+            python_command("build_tools/devtools/bazel_launcher_integration_test.py"),
+        ),
+        bazel_run_step(
+            "Run dynamic library environment smoke",
+            ci_config.BAZEL_REPOSITORY_INTEGRATION_DYNAMIC_LIBRARY_TARGET,
+        ),
+        bazel_run_step(
+            "Run executable alias smoke",
+            ci_config.BAZEL_REPOSITORY_INTEGRATION_ALIAS_TARGET,
+            program_args=("--help",),
+        ),
     ]
 
 
@@ -885,13 +936,21 @@ def tilelang_importer_steps(command_name: str) -> list[CiStep]:
 
 
 def _steps_from_args(args: argparse.Namespace) -> list[CiStep]:
-    is_amdgpu_command = (
-        args.command in BAZEL_COMMANDS and BAZEL_COMMANDS[args.command][0] == "amdgpu"
-    ) or (
-        args.command in CMAKE_COMMANDS and CMAKE_COMMANDS[args.command][0] == "amdgpu"
+    bazel_target_group = BAZEL_COMMANDS.get(args.command, (None, None))[0]
+    cmake_target_group = CMAKE_COMMANDS.get(args.command, (None, None))[0]
+    amdgpu_target_bazel_groups = (
+        "amdgpu",
+        "repository-integration",
     )
-    if args.amdgpu_target is not None and not is_amdgpu_command:
-        raise ValueError("--amdgpu-target is only supported for AMDGPU CI commands")
+    accepts_amdgpu_target = (
+        bazel_target_group in amdgpu_target_bazel_groups
+        or cmake_target_group == "amdgpu"
+    )
+    if args.amdgpu_target is not None and not accepts_amdgpu_target:
+        raise ValueError(
+            "--amdgpu-target is only supported for AMDGPU and "
+            "repository-integration CI commands"
+        )
     amdgpu_target_selector = (
         args.amdgpu_target or ci_config.DEFAULT_AMDGPU_TARGET_SELECTOR
     )
@@ -930,6 +989,12 @@ def _steps_from_args(args: argparse.Namespace) -> list[CiStep]:
                 "--target is not supported by the repository-wide build command"
             )
         return repository_build_steps()
+    if bazel_target == "repository-integration":
+        if args.target:
+            raise ValueError(
+                "--target is not supported by the repository-wide integration command"
+            )
+        return repository_integration_steps(amdgpu_target_selector)
     targets = command_targets(args.target)
     if bazel_target == "cpu":
         if sanitizer == "all":
@@ -955,6 +1020,7 @@ def add_bazel_profiles(steps: list[CiStep], profile_dir: Path) -> list[CiStep]:
     for step in steps:
         if step.argv[1:4] not in (
             ("dev.py", "bazel", "build"),
+            ("dev.py", "bazel", "run"),
             ("dev.py", "bazel", "test"),
         ):
             profiled_steps.append(step)
@@ -1131,7 +1197,8 @@ def parse_arguments(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--amdgpu-target",
         help=(
-            "Exact AMDGPU target or family selector for AMDGPU CI commands. "
+            "Exact AMDGPU target or family selector for AMDGPU and "
+            "repository-integration CI commands. "
             f"Defaults to {ci_config.DEFAULT_AMDGPU_TARGET_SELECTOR}."
         ),
     )
@@ -1139,7 +1206,7 @@ def parse_arguments(argv: list[str] | None = None) -> argparse.Namespace:
         "--bazel-profile-dir",
         type=Path,
         help=(
-            "Write one compressed Bazel execution profile per build/test phase "
+            "Write one compressed Bazel execution profile per build/test/run phase "
             "to this directory. Only supported for Bazel CI commands."
         ),
     )

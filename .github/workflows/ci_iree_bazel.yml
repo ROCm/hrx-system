@@ -180,6 +180,66 @@ jobs:
           if-no-files-found: error
           compression-level: 0
 
+  windows_bazel:
+    name: Windows / Repository / MSVC + ROCm
+    # The Wasm disassembly test has no cost-appropriate hermetic Windows
+    # llvm-objdump representation yet, so retain this job definition inert.
+    if: ${{ false }}
+    runs-on: azure-windows-scale-rocm
+    timeout-minutes: 60
+    env:
+      HRX_ARTIFACT_SET: core
+      HRX_DOWNLOAD_CACHE_DIR: ${{ github.workspace }}\build\iree-bazel-windows\downloads
+      HRX_OUTPUT_DIR: ${{ github.workspace }}\build\iree-bazel-windows
+      HRX_RELEASE_TYPE: nightly
+      HRX_ROCM_ROOT: ${{ github.workspace }}\build\iree-bazel-windows\rocm-root
+      IREE_CI_PYTHON: python
+      PIP_CACHE_DIR: ${{ github.workspace }}\build\iree-bazel-windows\caches\pip
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.12"
+
+      - name: Fetch ROCm toolchain
+        run: |
+          python -m pip install --upgrade boto3 zstandard
+          python build_tools/ci_core_windows.py fetch-rocm
+
+      - name: Install developer tools
+        shell: pwsh
+        run: |
+          $bazelOutputRoot = (Join-Path $env:RUNNER_TEMP "bazel").Replace('\', '/')
+          "startup --output_user_root=$bazelOutputRoot" |
+            Out-File -FilePath .bazelrc.local -Encoding ascii -Append
+          python --version
+          python dev.py bazel setup --venv
+          "$PWD\.venv\Scripts" | Out-File -FilePath $env:GITHUB_PATH -Append
+
+      - name: Run IREE Bazel CI
+        id: iree_bazel_ci
+        shell: cmd
+        run: |
+          for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do set "VS_INSTALL=%%i"
+          if not defined VS_INSTALL exit /b 1
+          call "%VS_INSTALL%\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64
+          set "CC=cl.exe"
+          set "CXX=cl.exe"
+          set "AR=lib.exe"
+          python build_tools/devtools/ci.py iree-bazel-repository-integration --amdgpu-target gfx11-generic --bazel-profile-dir "%RUNNER_TEMP%\bazel-profiles" --keep-going
+
+      - name: Upload Bazel profiles
+        if: ${{ always() && steps.iree_bazel_ci.outcome != 'skipped' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: bazel-profiles-iree-bazel-repository-integration-attempt-${{ github.run_attempt }}
+          path: ${{ runner.temp }}\bazel-profiles\*.profile.gz
+          if-no-files-found: error
+          compression-level: 0
+
   linux_bazel_vulkan:
     name: Linux / Vulkan
     runs-on: [self-hosted, Linux, X64, gpu_navi4x]

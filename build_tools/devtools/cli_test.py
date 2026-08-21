@@ -83,7 +83,7 @@ class CliTest(unittest.TestCase):
                 str(cli.REPO_ROOT / "loom/docs/build.py"),
                 "build",
                 "--site-dir",
-                "build/loom-docs-preview",
+                str(Path("build/loom-docs-preview")),
             ],
         )
 
