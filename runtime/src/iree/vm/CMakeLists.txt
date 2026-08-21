@@ -16,6 +16,7 @@ iree_cc_library(
     "buffer.h"
     "environment.h"
     "function.h"
+    "module.h"
     "ref.h"
     "scalar.h"
     "variant.h"
@@ -23,11 +24,14 @@ iree_cc_library(
     "buffer.c"
     "buffer_provider.h"
     "environment.c"
+    "module.c"
+    "module_reflection.c"
     "ref.c"
     "variant.c"
   DEPS
     iree::base
     iree::base::internal
+    iree::base::internal::unicode
     iree::base::threading
   PUBLIC
 )
@@ -48,6 +52,30 @@ iree_cc_test(
     environment_test
   SRCS
     "environment_test.cc"
+  DEPS
+    ::vm
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+iree_cc_test(
+  NAME
+    module_test
+  SRCS
+    "module_test.cc"
+    "module_test_provider.c"
+    "module_test_provider.h"
+  DEPS
+    ::vm
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+iree_cc_test(
+  NAME
+    module_validation_test
+  SRCS
+    "module_validation_test.cc"
   DEPS
     ::vm
     iree::testing::gtest

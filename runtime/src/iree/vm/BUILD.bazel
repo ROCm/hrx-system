@@ -19,6 +19,8 @@ iree_runtime_cc_library(
         "buffer.c",
         "buffer_provider.h",
         "environment.c",
+        "module.c",
+        "module_reflection.c",
         "ref.c",
         "variant.c",
     ],
@@ -26,6 +28,7 @@ iree_runtime_cc_library(
         "buffer.h",
         "environment.h",
         "function.h",
+        "module.h",
         "ref.h",
         "scalar.h",
         "variant.h",
@@ -33,6 +36,7 @@ iree_runtime_cc_library(
     deps = [
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal",
+        "//runtime/src/iree/base/internal:unicode",
         "//runtime/src/iree/base/threading",
     ],
 )
@@ -50,6 +54,30 @@ iree_runtime_cc_test(
 iree_runtime_cc_test(
     name = "environment_test",
     srcs = ["environment_test.cc"],
+    deps = [
+        ":vm",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "module_test",
+    srcs = [
+        "module_test.cc",
+        "module_test_provider.c",
+        "module_test_provider.h",
+    ],
+    deps = [
+        ":vm",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "module_validation_test",
+    srcs = ["module_validation_test.cc"],
     deps = [
         ":vm",
         "//runtime/src/iree/testing:gtest",
