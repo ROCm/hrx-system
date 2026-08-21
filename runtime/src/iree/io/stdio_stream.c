@@ -55,6 +55,84 @@ IREE_API_EXPORT iree_status_t iree_io_stdio_stream_wrap(
 
 #if IREE_FILE_IO_ENABLE
 
+IREE_API_EXPORT iree_status_t
+iree_io_stdio_file_open(iree_string_view_t path, const char* mode,
+                        iree_allocator_t host_allocator, FILE** out_file) {
+  IREE_ASSERT_ARGUMENT(mode);
+  IREE_ASSERT_ARGUMENT(out_file);
+  *out_file = NULL;
+  IREE_TRACE_ZONE_BEGIN(z0);
+  IREE_TRACE_ZONE_APPEND_TEXT(z0, path.data, path.size);
+
+  if (iree_string_view_is_empty(path)) {
+    IREE_TRACE_ZONE_END(z0);
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "file path must not be empty");
+  }
+  if (!path.data) {
+    IREE_TRACE_ZONE_END(z0);
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "file path storage must not be NULL");
+  }
+  if (memchr(path.data, 0, path.size) != NULL) {
+    IREE_TRACE_ZONE_END(z0);
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "file path contains an embedded NUL character");
+  }
+
+  iree_status_t status = iree_ok_status();
+  FILE* file = NULL;
+  int open_error = 0;
+#if defined(IREE_PLATFORM_WINDOWS)
+  wchar_t* win32_path = NULL;
+  status = iree_file_path_to_win32(path, host_allocator, &win32_path);
+  if (iree_status_is_ok(status)) {
+    const iree_host_size_t mode_length = strlen(mode);
+    wchar_t mode_wide[16] = {0};
+    if (mode_length >= IREE_ARRAYSIZE(mode_wide)) {
+      status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "stdio mode is too long");
+    } else {
+      for (iree_host_size_t i = 0; i < mode_length; ++i) {
+        mode_wide[i] = (wchar_t)mode[i];
+      }
+      file = _wfopen(win32_path, mode_wide);
+      if (file == NULL) open_error = errno;
+    }
+  }
+  iree_allocator_free(host_allocator, win32_path);
+#else
+  char* path_cstring = NULL;
+  status = iree_allocator_malloc(host_allocator, path.size + 1,
+                                 (void**)&path_cstring);
+  if (iree_status_is_ok(status)) {
+    iree_string_view_to_cstring(path, path_cstring, path.size + 1);
+    file = fopen(path_cstring, mode);
+    if (file == NULL) open_error = errno;
+  }
+  iree_allocator_free(host_allocator, path_cstring);
+#endif  // IREE_PLATFORM_WINDOWS
+
+  if (iree_status_is_ok(status) && file == NULL) {
+    if (open_error == 0) {
+      status = iree_make_status(IREE_STATUS_UNKNOWN,
+                                "unable to open file `%.*s` with mode `%s`",
+                                (int)path.size, path.data, mode);
+    } else {
+      status = iree_make_status(
+          iree_status_code_from_errno(open_error),
+          "unable to open file `%.*s` with mode `%s` (%d: %s)", (int)path.size,
+          path.data, mode, open_error, strerror(open_error));
+    }
+  }
+
+  if (iree_status_is_ok(status)) {
+    *out_file = file;
+  }
+  IREE_TRACE_ZONE_END(z0);
+  return status;
+}
+
 // Populates the |out_fopen_mode| string for use with fopen-like calls based on
 // the iree_io_stdio_stream_mode_t bitmap.
 //
@@ -119,50 +197,9 @@ IREE_API_EXPORT iree_status_t iree_io_stdio_stream_open(
   char fopen_mode[16] = {0};
   iree_io_map_stdio_fopen_mode(mode, fopen_mode);
 
-  iree_status_t status = iree_ok_status();
   FILE* handle = NULL;
-#if defined(IREE_PLATFORM_WINDOWS)
-  // Convert from the runtime's UTF-8 representation only at the Win32 API
-  // boundary. _wfopen preserves the same stdio behavior without falling back
-  // through the active ANSI code page.
-  wchar_t* win32_path = NULL;
-  status = iree_file_path_to_win32(path, host_allocator, &win32_path);
-  if (iree_status_is_ok(status)) {
-    wchar_t fopen_mode_wide[IREE_ARRAYSIZE(fopen_mode)] = {0};
-    for (iree_host_size_t i = 0; fopen_mode[i] != 0; ++i) {
-      fopen_mode_wide[i] = (wchar_t)fopen_mode[i];
-    }
-    handle = _wfopen(win32_path, fopen_mode_wide);
-    if (handle == NULL) {
-      status =
-          iree_make_stdio_statusf("unable to open file `%.*s` with mode %d",
-                                  (int)path.size, path.data, mode);
-    }
-  }
-  iree_allocator_free(host_allocator, win32_path);
-#else
-  // Since we stack allocate the path, keep it bounded to the runtime's common
-  // path limit.
-  if (path.size >= IREE_MAX_PATH) {
-    IREE_TRACE_ZONE_END(z0);
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "path length %" PRIhsz
-                            " exceeds maximum character length of %d",
-                            path.size, IREE_MAX_PATH);
-  }
-  char* fopen_path = (char*)iree_alloca(path.size + 1);
-  memcpy(fopen_path, path.data, path.size);
-  fopen_path[path.size] = 0;  // NUL
-
-  handle = fopen(fopen_path, fopen_mode);
-  if (handle == NULL) {
-    // NOTE: for some crazy reason errno isn't set by all implementations. We
-    // know it is on Windows but currently leave all others to :shrug:. We could
-    // check C library implementations and versions to make this better.
-    status = iree_make_stdio_statusf("unable to open file `%.*s` with mode %d",
-                                     (int)path.size, path.data, mode);
-  }
-#endif  // IREE_PLATFORM_WINDOWS
+  iree_status_t status =
+      iree_io_stdio_file_open(path, fopen_mode, host_allocator, &handle);
 
   iree_io_stream_t* stream = NULL;
   if (iree_status_is_ok(status)) {
@@ -244,6 +281,19 @@ IREE_API_EXPORT iree_status_t iree_io_stdio_stream_open_fd(
 }
 
 #else
+
+IREE_API_EXPORT iree_status_t
+iree_io_stdio_file_open(iree_string_view_t path, const char* mode,
+                        iree_allocator_t host_allocator, FILE** out_file) {
+  IREE_ASSERT_ARGUMENT(mode);
+  IREE_ASSERT_ARGUMENT(out_file);
+  (void)path;
+  (void)host_allocator;
+  *out_file = NULL;
+  return iree_make_status(IREE_STATUS_UNAVAILABLE,
+                          "file support has been compiled out of this binary; "
+                          "set IREE_FILE_IO_ENABLE=1 to include it");
+}
 
 IREE_API_EXPORT iree_status_t iree_io_stdio_stream_open(
     iree_io_stdio_stream_mode_t mode, iree_string_view_t path,

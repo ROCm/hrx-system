@@ -6,7 +6,6 @@
 
 // loom-compile: compiles a Loom module to a runtime artifact.
 
-#include <errno.h>
 #include <stdio.h>
 
 #include "iree/base/api.h"
@@ -722,25 +721,12 @@ static iree_status_t loom_compile_write_report(
                                   "failed to flush compile report stdout");
   }
 
-  FILE* file = fopen(FLAG_compile_report_output, "wb");
-  if (file == NULL) {
-    const int open_error = errno;
-    return iree_make_status(iree_status_code_from_errno(open_error),
-                            "failed to open compile report output '%.*s' (%d)",
-                            (int)path.size, path.data, open_error);
-  }
-  loom_output_stream_t stream;
-  loom_output_stream_for_file(file, &stream);
+  loom_tooling_output_stream_t output;
+  IREE_RETURN_IF_ERROR(
+      loom_tooling_output_stream_open(path, allocator, &output));
   iree_status_t status = loom_run_compile_report_capture_write_output(
-      compile_report_capture, &stream, allocator);
-  if (fclose(file) != 0 && iree_status_is_ok(status)) {
-    const int close_error = errno;
-    status = iree_make_status(iree_status_code_from_errno(close_error),
-                              "failed to close compile report output '%.*s' "
-                              "(%d)",
-                              (int)path.size, path.data, close_error);
-  }
-  return status;
+      compile_report_capture, &output.stream, allocator);
+  return iree_status_join(status, loom_tooling_output_stream_close(&output));
 }
 
 static void loom_compile_record_terminal_report_status(

@@ -112,6 +112,27 @@ TEST(FileContents, ReadWriteContentsMmap) {
   iree_io_file_contents_free(read_contents);
 }
 
+TEST(FileContents, StdioFileReadWrite) {
+  iree::testing::TempFilePath path("iree_stdio_file_test");
+  auto write_contents = GetUniqueContents("StdioFileReadWrite", 32);
+
+  FILE* write_file = NULL;
+  IREE_ASSERT_OK(iree_io_stdio_file_open(path.path_view(), "wb",
+                                         iree_allocator_system(), &write_file));
+  ASSERT_EQ(fwrite(write_contents.data(), 1, write_contents.size(), write_file),
+            write_contents.size());
+  ASSERT_EQ(fclose(write_file), 0);
+
+  iree_io_file_contents_t* read_contents = NULL;
+  IREE_ASSERT_OK(iree_io_file_contents_read(
+      path.path_view(), iree_allocator_system(), &read_contents));
+  ASSERT_EQ(write_contents.size(), read_contents->const_buffer.data_length);
+  EXPECT_EQ(memcmp(write_contents.data(), read_contents->const_buffer.data,
+                   read_contents->const_buffer.data_length),
+            0);
+  iree_io_file_contents_free(read_contents);
+}
+
 TEST(FileContents, StdioStreamFillMultiBytePattern) {
   iree::testing::TempFilePath path("iree_file_contents_test");
 
@@ -277,10 +298,12 @@ TEST(FileContents, ReadWriteLongUtf8Path) {
       iree_make_string_view(file_path.data(), file_path.size());
   auto write_contents = GetUniqueContents("ReadWriteLongUtf8Path", 32);
 
-  IREE_ASSERT_OK(iree_io_file_contents_write(
-      file_path_view,
-      iree_make_const_byte_span(write_contents.data(), write_contents.size()),
-      iree_allocator_system()));
+  FILE* write_file = NULL;
+  IREE_ASSERT_OK(iree_io_stdio_file_open(file_path_view, "wb",
+                                         iree_allocator_system(), &write_file));
+  ASSERT_EQ(fwrite(write_contents.data(), 1, write_contents.size(), write_file),
+            write_contents.size());
+  ASSERT_EQ(fclose(write_file), 0);
 
   iree_io_file_contents_t* read_contents = NULL;
   IREE_ASSERT_OK(iree_io_file_contents_read(

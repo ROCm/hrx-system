@@ -20,6 +20,7 @@ loom_cc_library(
     iree::base
     iree::base::internal::path
     iree::io::file_handle
+    iree::io::stream
     loom::util::stream
   PUBLIC
 )
