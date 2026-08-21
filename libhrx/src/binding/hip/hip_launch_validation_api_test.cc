@@ -6,8 +6,10 @@
 
 #include <dlfcn.h>
 
+#include <atomic>
 #include <cstdint>
 #include <cstdlib>
+#include <thread>
 
 #include "binding/hip/api.h"
 #include "common/internal.h"
@@ -23,13 +25,15 @@ const char* CandidateLibPath() {
 #ifdef HRX_TEST_LIBAMDHIP64_PATH
   return HRX_TEST_LIBAMDHIP64_PATH;
 #else
-  return "libamdhip64.so";
+  return nullptr;
 #endif
 }
 
 using HipInitFn = hipError_t (*)(unsigned int flags);
 using HipStreamCreateFn = hipError_t (*)(hipStream_t* stream);
 using HipStreamDestroyFn = hipError_t (*)(hipStream_t stream);
+using HipStreamGetIdFn = hipError_t (*)(hipStream_t stream,
+                                        unsigned long long* stream_id);
 using HipLaunchKernelFn = hipError_t (*)(const void* function, dim3 grid_dim,
                                          dim3 block_dim, void** arguments,
                                          size_t shared_memory_bytes,
@@ -72,6 +76,8 @@ struct HipRuntimeApi {
   HipStreamCreateFn stream_create = nullptr;
   // Destroys the stream used by immediate launch entry points.
   HipStreamDestroyFn stream_destroy = nullptr;
+  // Queries a stream without dereferencing a stale public handle.
+  HipStreamGetIdFn stream_get_id = nullptr;
   // Launches a registered runtime kernel.
   HipLaunchKernelFn launch_kernel = nullptr;
   // Launches a registered runtime kernel with extended launch arguments.
@@ -103,17 +109,20 @@ class HipLaunchValidationApiTest : public testing::Test {
  protected:
   void SetUp() override {
     if (!api_.library) {
-      api_.library = dlopen(CandidateLibPath(), RTLD_LAZY | RTLD_LOCAL);
-      if (!api_.library) {
-        GTEST_SKIP() << "cannot dlopen " << CandidateLibPath() << ": "
-                     << dlerror();
-      }
+      const char* library_path = CandidateLibPath();
+      ASSERT_NE(library_path, nullptr)
+          << "the build must provide the libamdhip64 artifact under test";
+      api_.library = dlopen(library_path, RTLD_LAZY | RTLD_LOCAL);
+      ASSERT_NE(api_.library, nullptr)
+          << "cannot dlopen " << library_path << ": " << dlerror();
 
       api_.init = ResolveHipSymbol<HipInitFn>(api_.library, "hipInit");
       api_.stream_create =
           ResolveHipSymbol<HipStreamCreateFn>(api_.library, "hipStreamCreate");
       api_.stream_destroy = ResolveHipSymbol<HipStreamDestroyFn>(
           api_.library, "hipStreamDestroy");
+      api_.stream_get_id =
+          ResolveHipSymbol<HipStreamGetIdFn>(api_.library, "hipStreamGetId");
       api_.launch_kernel =
           ResolveHipSymbol<HipLaunchKernelFn>(api_.library, "hipLaunchKernel");
       api_.ext_launch_kernel = ResolveHipSymbol<HipExtLaunchKernelFn>(
@@ -141,6 +150,7 @@ class HipLaunchValidationApiTest : public testing::Test {
     ASSERT_NE(nullptr, api_.init);
     ASSERT_NE(nullptr, api_.stream_create);
     ASSERT_NE(nullptr, api_.stream_destroy);
+    ASSERT_NE(nullptr, api_.stream_get_id);
     ASSERT_NE(nullptr, api_.launch_kernel);
     ASSERT_NE(nullptr, api_.ext_launch_kernel);
     ASSERT_NE(nullptr, api_.module_launch_kernel);
@@ -269,6 +279,70 @@ TEST_F(HipLaunchValidationApiTest,
                                  /*dependency_count=*/0, &invalid_params));
   EXPECT_EQ(reinterpret_cast<hipGraphNode_t>(uintptr_t{1}), rejected_node);
   EXPECT_EQ(hipSuccess, api_.graph_destroy(graph));
+}
+
+TEST_F(HipLaunchValidationApiTest, LaunchEntryPointsRejectDestroyedStreams) {
+  iree_hal_streaming_symbol_t symbol = {};
+  symbol.type = IREE_HAL_STREAMING_SYMBOL_TYPE_FUNCTION;
+  const void* function = iree_hal_streaming_symbol_tag(&symbol);
+  const dim3 valid_dimension = {1, 1, 1};
+  hipStream_t stale_stream = stream_;
+  ASSERT_EQ(hipSuccess, api_.stream_destroy(stream_));
+  stream_ = nullptr;
+
+  EXPECT_EQ(hipErrorInvalidResourceHandle,
+            api_.launch_kernel(function, valid_dimension, valid_dimension,
+                               /*arguments=*/nullptr,
+                               /*shared_memory_bytes=*/0, stale_stream));
+  EXPECT_EQ(hipErrorInvalidResourceHandle,
+            api_.ext_launch_kernel(function, valid_dimension, valid_dimension,
+                                   /*arguments=*/nullptr,
+                                   /*shared_memory_bytes=*/0, stale_stream,
+                                   nullptr, nullptr, /*flags=*/0));
+  EXPECT_EQ(hipErrorInvalidResourceHandle,
+            api_.module_launch_kernel(
+                (hipFunction_t)function, /*grid_dim_x=*/1, /*grid_dim_y=*/1,
+                /*grid_dim_z=*/1, /*block_dim_x=*/1, /*block_dim_y=*/1,
+                /*block_dim_z=*/1, /*shared_memory_bytes=*/0, stale_stream,
+                /*arguments=*/nullptr, /*extra=*/nullptr));
+}
+
+TEST_F(HipLaunchValidationApiTest,
+       ConcurrentQueriesObserveStreamDestructionWithoutDereferencingIt) {
+  hipStream_t stream = stream_;
+  std::atomic<bool> start{false};
+  std::atomic<bool> stop{false};
+  std::atomic<bool> observed_zero_id{false};
+  std::atomic<hipError_t> final_result{hipSuccess};
+  std::thread query_thread([&] {
+    while (!start.load(std::memory_order_acquire)) {
+      std::this_thread::yield();
+    }
+    while (!stop.load(std::memory_order_acquire)) {
+      unsigned long long stream_id = 0;
+      const hipError_t result = api_.stream_get_id(stream, &stream_id);
+      if (result != hipSuccess) {
+        final_result.store(result, std::memory_order_release);
+        return;
+      }
+      if (stream_id == 0) {
+        observed_zero_id.store(true, std::memory_order_release);
+      }
+    }
+  });
+
+  start.store(true, std::memory_order_release);
+  const hipError_t destroy_result = api_.stream_destroy(stream_);
+  if (destroy_result == hipSuccess) {
+    stream_ = nullptr;
+  } else {
+    stop.store(true, std::memory_order_release);
+  }
+  query_thread.join();
+  EXPECT_EQ(hipSuccess, destroy_result);
+  EXPECT_FALSE(observed_zero_id.load(std::memory_order_acquire));
+  EXPECT_EQ(hipErrorInvalidResourceHandle,
+            final_result.load(std::memory_order_acquire));
 }
 
 TEST_F(HipLaunchValidationApiTest,

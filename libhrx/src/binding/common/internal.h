@@ -210,8 +210,6 @@ struct iree_hal_streaming_context_t {
   // initialization).
   iree_hal_streaming_stream_t* default_stream;
 
-  // Next non-zero stream identifier assigned under |stream_list_mutex|.
-  unsigned long long next_stream_id;
   // Next non-zero stream capture identifier assigned under |stream_list_mutex|.
   unsigned long long next_capture_id;
 
@@ -249,11 +247,12 @@ struct iree_hal_streaming_context_t {
   // Host allocator.
   iree_allocator_t host_allocator;
 
-  // Stream tracking (non-owning references - streams are not retained).
-  // NOTE: Streams are NOT retained by this list to avoid reference cycles.
-  // Streams must unregister themselves before destruction.
-  iree_hal_streaming_stream_t** streams;  // Non-owning pointers.
+  // Streams retained by the context until explicitly unregistered. Streams
+  // retain no context reference, so this ownership is acyclic.
+  iree_hal_streaming_stream_t** streams;
+  // Number of retained streams in |streams|.
   iree_host_size_t stream_count;
+  // Number of allocated entries in |streams|.
   iree_host_size_t stream_capacity;
 
   // Dedicated mutex for stream list access.
@@ -440,13 +439,6 @@ typedef enum iree_hal_streaming_stream_flag_bits_e {
   IREE_HAL_STREAMING_STREAM_FLAG_NON_BLOCKING = 1ull << 0,
 } iree_hal_streaming_stream_flags_t;
 
-typedef enum iree_hal_streaming_synchronization_policy_e {
-  IREE_HAL_STREAMING_SYNCHRONIZATION_POLICY_AUTO = 1,
-  IREE_HAL_STREAMING_SYNCHRONIZATION_POLICY_SPIN = 2,
-  IREE_HAL_STREAMING_SYNCHRONIZATION_POLICY_YIELD = 3,
-  IREE_HAL_STREAMING_SYNCHRONIZATION_POLICY_BLOCKING_SYNC = 4,
-} iree_hal_streaming_synchronization_policy_t;
-
 // Stream capture status enum.
 typedef enum iree_hal_streaming_capture_status_e {
   IREE_HAL_STREAMING_CAPTURE_STATUS_NONE = 0,
@@ -482,23 +474,16 @@ typedef struct iree_hal_streaming_stream_t {
   // Reference counting.
   iree_atomic_ref_count_t ref_count;
 
-  // Parent context, unowned (to avoid cycles).
+  // Parent context, unowned to keep stream/context ownership acyclic. Access is
+  // serialized by |mutex| and operations retain it with
+  // iree_hal_streaming_stream_retain_context before dereferencing it.
   iree_hal_streaming_context_t* context;
 
   // HIP stream creation flags.
   iree_hal_streaming_stream_flags_t flags;
-  // HIP synchronization policy value for stream attribute queries.
-  iree_hal_streaming_synchronization_policy_t synchronization_policy;
   // HIP stream scheduling priority hint.
   int priority;
-  // Number of 32-bit entries in |cu_mask|; zero until CU-mask APIs attach
-  // state.
-  iree_host_size_t cu_mask_count;
-  // Optional HIP CU mask owned by this stream; NULL means default device mask.
-  // The stream CU-mask API follow-up will populate/query this value; command
-  // scheduling in this layer does not consume it.
-  uint32_t* cu_mask;
-  // Stable HIP stream identifier, unique within this context.
+  // Stable process-wide stream identifier used by timeline dependencies.
   unsigned long long stream_id;
 
   // Command buffer for batching operations.
@@ -1493,6 +1478,11 @@ iree_status_t iree_hal_streaming_context_create(
 void iree_hal_streaming_context_retain(iree_hal_streaming_context_t* context);
 void iree_hal_streaming_context_release(iree_hal_streaming_context_t* context);
 
+// Attempts to form a reference without resurrecting a context whose final
+// release has begun. Returns false when the reference count has reached zero.
+bool iree_hal_streaming_context_try_retain(
+    iree_hal_streaming_context_t* context);
+
 // Synchronization: none (queries flags).
 iree_hal_streaming_context_flags_t iree_hal_streaming_context_flags(
     iree_hal_streaming_context_t* context);
@@ -1546,15 +1536,17 @@ iree_status_t iree_hal_streaming_context_disable_peer_access(
     iree_hal_streaming_context_t* context,
     iree_hal_streaming_context_t* peer_context);
 
-// Registers a stream with the context (non-owning).
-// Called during stream creation. Does NOT retain the stream.
-// Synchronization: none (thread-safe internal locking).
+// Registers a stream and retains it for the context's stream list.
+// Synchronization: thread-safe internal locking.
 iree_status_t iree_hal_streaming_context_register_stream(
     iree_hal_streaming_context_t* context, iree_hal_streaming_stream_t* stream);
 
-// Unregisters a stream from the context.
-// Called during stream destruction.
-// Synchronization: none (thread-safe internal locking).
+// Removes a registered stream and releases the stream-list reference. The
+// stream's context pointer remains valid until its final release because every
+// operation that can outlive removal retains the context independently. A
+// missing stream is a no-op; public handle validity is owned by the binding's
+// handle registry rather than this ownership list.
+// Synchronization: thread-safe internal locking.
 void iree_hal_streaming_context_unregister_stream(
     iree_hal_streaming_context_t* context, iree_hal_streaming_stream_t* stream);
 
@@ -1594,13 +1586,14 @@ iree_status_t iree_hal_streaming_context_synchronize_legacy_default(
 // This flushes and waits for every context registered in the process.
 iree_status_t iree_hal_streaming_context_synchronize_all(void);
 
-// Synchronizes blocking streams that implicitly serialize with the legacy
-// default stream.
-iree_status_t iree_hal_streaming_context_synchronize_blocking_streams(
-    iree_hal_streaming_context_t* context,
-    iree_hal_streaming_stream_t* except_stream);
+// Orders future work on |stream| after work already enqueued on each blocking,
+// non-capturing stream in the context. Null entries, the legacy default stream,
+// |stream| itself, and non-blocking or capturing streams are excluded.
+iree_status_t iree_hal_streaming_context_wait_blocking_streams(
+    iree_hal_streaming_context_t* context, iree_hal_streaming_stream_t* stream);
 
-// Queries whether any stream in the context still has queued work.
+// Queries whether any stream participating in legacy default-stream ordering
+// still has queued work. Non-blocking streams are excluded.
 iree_status_t iree_hal_streaming_context_query(
     iree_hal_streaming_context_t* context, int* status);
 
@@ -1712,7 +1705,8 @@ iree_status_t iree_hal_streaming_stream_wait_submitted(
 // Waits for an event on a stream.
 // Synchronization: none (enqueues wait operation, non-blocking).
 iree_status_t iree_hal_streaming_stream_wait_event(
-    iree_hal_streaming_stream_t* stream, iree_hal_streaming_event_t* event);
+    iree_hal_streaming_stream_t* stream, iree_hal_streaming_event_t* event,
+    bool capture_external_wait);
 
 // Returns whether work on |stream| is ordered after |source_timeline_value|
 // from the stream identified by |source_stream_id|.

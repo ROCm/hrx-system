@@ -14,6 +14,30 @@ extern "C" {
 #endif
 
 typedef struct iree_hal_streaming_stream_t iree_hal_streaming_stream_t;
+typedef struct iree_hal_streaming_context_t iree_hal_streaming_context_t;
+
+// Retains the stream's context for one operation. Returns false after context
+// teardown has detached the stream. The caller releases |*out_context|.
+bool iree_hal_streaming_stream_retain_context(
+    iree_hal_streaming_stream_t* stream,
+    iree_hal_streaming_context_t** out_context);
+
+// Orders future work on |stream| after work already enqueued on
+// |source_stream|. Both streams are flushed on the calling thread, but the
+// dependency itself is submitted to the device queue without waiting for
+// completion. Both streams must belong to one context and must not be
+// capturing.
+iree_status_t iree_hal_streaming_stream_wait_stream(
+    iree_hal_streaming_stream_t* stream,
+    iree_hal_streaming_stream_t* source_stream);
+
+// Orders future work on |stream| after all work already enqueued on |sources|
+// with one queue barrier. Source streams are flushed before their timeline
+// points are captured; |stream| is flushed before the barrier is appended. All
+// streams must belong to one context and must not be capturing.
+iree_status_t iree_hal_streaming_stream_wait_streams(
+    iree_hal_streaming_stream_t* stream,
+    iree_hal_streaming_stream_t* const* sources, iree_host_size_t source_count);
 
 // Enqueues a HAL host call at the current stream timeline point.
 // Synchronization: flushes pending stream commands before enqueueing.

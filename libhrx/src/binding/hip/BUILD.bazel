@@ -106,11 +106,23 @@ hrx_cc_library(
     ],
 )
 
+hrx_cc_library(
+    name = "handle_registry",
+    srcs = ["handle_registry.c"],
+    hdrs = ["handle_registry.h"],
+    includes = ["../.."],
+    deps = [
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/threading",
+    ],
+)
+
 hrx_cc_shared_library(
     name = "amdhip64",
     srcs = [
         "abi_stubs.c",
         "api.c",
+        "api_metadata.c",
     ],
     hdrs = [
         "api.h",
@@ -133,11 +145,23 @@ hrx_cc_shared_library(
     target_compatible_with = _LINUX_COMPATIBILITY,
     deps = [
         ":blocking_printf_provider",
+        ":handle_registry",
         ":launch_params",
         "//libhrx/src/binding/common",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/threading",
         "//runtime/src/iree/hal",
+    ],
+)
+
+hrx_cc_test(
+    name = "handle_registry_test",
+    srcs = ["handle_registry_test.cc"],
+    deps = [
+        ":handle_registry",
+        "//build_tools:pthreads",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
     ],
 )
 
@@ -157,6 +181,21 @@ set_target_properties(libhrx_src_binding_hip_amdhip64 PROPERTIES
 endif()
 """,
     inline = True,
+)
+
+hrx_cc_test(
+    name = "hip_api_name_test",
+    srcs = ["hip_api_name_test.cc"],
+    data = [":amdhip64"],
+    env = {
+        "HRX_TEST_LIBAMDHIP64": "$(location :amdhip64)",
+    },
+    target_compatible_with = _LINUX_COMPATIBILITY,
+    deps = [
+        "//build_tools:dl",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
 )
 
 hrx_cc_test(
@@ -193,6 +232,7 @@ hrx_cc_test(
     deps = [
         ":launch_params",
         "//build_tools:dl",
+        "//build_tools:pthreads",
         "//libhrx/src/binding/common",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
