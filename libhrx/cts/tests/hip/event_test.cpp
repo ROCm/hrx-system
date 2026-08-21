@@ -62,6 +62,10 @@ using HipGraphAddEventRecordNodeFn = hipError_t (*)(
 using HipGraphAddEventWaitNodeFn = hipError_t (*)(
     hipGraphNode_t* node, hipGraph_t graph, const hipGraphNode_t* dependencies,
     size_t dependency_count, hipEvent_t event);
+using HipGraphEventRecordNodeSetEventFn = hipError_t (*)(hipGraphNode_t node,
+                                                         hipEvent_t event);
+using HipGraphEventWaitNodeSetEventFn = hipError_t (*)(hipGraphNode_t node,
+                                                       hipEvent_t event);
 using HipGraphAddHostNodeFn = hipError_t (*)(hipGraphNode_t* node,
                                              hipGraph_t graph,
                                              const hipGraphNode_t* dependencies,
@@ -75,6 +79,10 @@ using HipGraphInstantiateFn = hipError_t (*)(hipGraphExec_t* graph_exec,
 using HipGraphLaunchFn = hipError_t (*)(hipGraphExec_t graph_exec,
                                         hipStream_t stream);
 using HipGraphExecDestroyFn = hipError_t (*)(hipGraphExec_t graph_exec);
+using HipGraphExecEventRecordNodeSetEventFn = hipError_t (*)(
+    hipGraphExec_t graph_exec, hipGraphNode_t node, hipEvent_t event);
+using HipGraphExecEventWaitNodeSetEventFn = hipError_t (*)(
+    hipGraphExec_t graph_exec, hipGraphNode_t node, hipEvent_t event);
 
 // Host callback that parks a stream timeline until the test thread releases it.
 struct StreamGate {
@@ -217,6 +225,12 @@ class HipEventTest : public ::testing::Test {
     hip_.graph_add_event_wait_node =
         ResolveHipSymbol<HipGraphAddEventWaitNodeFn>(
             library_, "hipGraphAddEventWaitNode");
+    hip_.graph_event_record_node_set_event =
+        ResolveHipSymbol<HipGraphEventRecordNodeSetEventFn>(
+            library_, "hipGraphEventRecordNodeSetEvent");
+    hip_.graph_event_wait_node_set_event =
+        ResolveHipSymbol<HipGraphEventWaitNodeSetEventFn>(
+            library_, "hipGraphEventWaitNodeSetEvent");
     hip_.graph_add_host_node = ResolveHipSymbol<HipGraphAddHostNodeFn>(
         library_, "hipGraphAddHostNode");
     hip_.graph_instantiate = ResolveHipSymbol<HipGraphInstantiateFn>(
@@ -225,6 +239,12 @@ class HipEventTest : public ::testing::Test {
         ResolveHipSymbol<HipGraphLaunchFn>(library_, "hipGraphLaunch");
     hip_.graph_exec_destroy = ResolveHipSymbol<HipGraphExecDestroyFn>(
         library_, "hipGraphExecDestroy");
+    hip_.graph_exec_event_record_node_set_event =
+        ResolveHipSymbol<HipGraphExecEventRecordNodeSetEventFn>(
+            library_, "hipGraphExecEventRecordNodeSetEvent");
+    hip_.graph_exec_event_wait_node_set_event =
+        ResolveHipSymbol<HipGraphExecEventWaitNodeSetEventFn>(
+            library_, "hipGraphExecEventWaitNodeSetEvent");
 
     ASSERT_NE(nullptr, hip_.init);
     ASSERT_NE(nullptr, hip_.stream_create);
@@ -247,10 +267,14 @@ class HipEventTest : public ::testing::Test {
     ASSERT_NE(nullptr, hip_.graph_destroy);
     ASSERT_NE(nullptr, hip_.graph_add_event_record_node);
     ASSERT_NE(nullptr, hip_.graph_add_event_wait_node);
+    ASSERT_NE(nullptr, hip_.graph_event_record_node_set_event);
+    ASSERT_NE(nullptr, hip_.graph_event_wait_node_set_event);
     ASSERT_NE(nullptr, hip_.graph_add_host_node);
     ASSERT_NE(nullptr, hip_.graph_instantiate);
     ASSERT_NE(nullptr, hip_.graph_launch);
     ASSERT_NE(nullptr, hip_.graph_exec_destroy);
+    ASSERT_NE(nullptr, hip_.graph_exec_event_record_node_set_event);
+    ASSERT_NE(nullptr, hip_.graph_exec_event_wait_node_set_event);
 
     const hipError_t init_result = hip_.init(/*flags=*/0);
     if (init_result == hipErrorNoDevice) {
@@ -306,6 +330,13 @@ class HipEventTest : public ::testing::Test {
     EXPECT_EQ(hipSuccess, hip_.event_create_with_flags(&event, flags));
     if (event) events_.push_back(event);
     return event;
+  }
+
+  // Destroys an event the fixture owns ahead of TearDown.
+  void DestroyEvent(hipEvent_t event) {
+    events_.erase(std::remove(events_.begin(), events_.end(), event),
+                  events_.end());
+    EXPECT_EQ(hipSuccess, hip_.event_destroy(event));
   }
 
   // Creates an empty graph owned by the fixture.
@@ -440,10 +471,15 @@ class HipEventTest : public ::testing::Test {
     HipGraphDestroyFn graph_destroy;
     HipGraphAddEventRecordNodeFn graph_add_event_record_node;
     HipGraphAddEventWaitNodeFn graph_add_event_wait_node;
+    HipGraphEventRecordNodeSetEventFn graph_event_record_node_set_event;
+    HipGraphEventWaitNodeSetEventFn graph_event_wait_node_set_event;
     HipGraphAddHostNodeFn graph_add_host_node;
     HipGraphInstantiateFn graph_instantiate;
     HipGraphLaunchFn graph_launch;
     HipGraphExecDestroyFn graph_exec_destroy;
+    HipGraphExecEventRecordNodeSetEventFn
+        graph_exec_event_record_node_set_event;
+    HipGraphExecEventWaitNodeSetEventFn graph_exec_event_wait_node_set_event;
   } hip_ = {};
 
  private:
@@ -694,6 +730,50 @@ TEST_F(HipEventTest, GraphEventWaitNodeOnANeverRecordedEventDropsTheWait) {
   EXPECT_EQ(hipSuccess, hip_.stream_synchronize(stream));
   EXPECT_TRUE(host_node_ran.load(std::memory_order_acquire))
       << "the node behind a dropped event wait never ran";
+}
+
+TEST_F(HipEventTest, GraphApisRejectDestroyedEventHandles) {
+  hipEvent_t event = CreateEvent();
+  ASSERT_NE(nullptr, event);
+  hipGraph_t graph = CreateGraph();
+  ASSERT_NE(nullptr, graph);
+
+  hipGraphNode_t record_node = nullptr;
+  ASSERT_EQ(hipSuccess, hip_.graph_add_event_record_node(
+                            &record_node, graph, /*dependencies=*/nullptr,
+                            /*dependency_count=*/0, event));
+  hipGraphNode_t wait_node = nullptr;
+  ASSERT_EQ(hipSuccess, hip_.graph_add_event_wait_node(
+                            &wait_node, graph, /*dependencies=*/nullptr,
+                            /*dependency_count=*/0, event));
+  hipGraphExec_t graph_exec = InstantiateGraph(graph);
+  ASSERT_NE(nullptr, graph_exec);
+
+  // Graph ownership keeps the event storage alive after public destruction.
+  // The stale public handle must still be rejected by every graph entry point.
+  DestroyEvent(event);
+
+  hipGraphNode_t added_node = nullptr;
+  EXPECT_EQ(hipErrorInvalidResourceHandle,
+            hip_.graph_add_event_record_node(&added_node, graph,
+                                             /*dependencies=*/nullptr,
+                                             /*dependency_count=*/0, event));
+  EXPECT_EQ(nullptr, added_node);
+  EXPECT_EQ(hipErrorInvalidResourceHandle,
+            hip_.graph_add_event_wait_node(&added_node, graph,
+                                           /*dependencies=*/nullptr,
+                                           /*dependency_count=*/0, event));
+  EXPECT_EQ(nullptr, added_node);
+  EXPECT_EQ(hipErrorInvalidResourceHandle,
+            hip_.graph_event_record_node_set_event(record_node, event));
+  EXPECT_EQ(hipErrorInvalidResourceHandle,
+            hip_.graph_event_wait_node_set_event(wait_node, event));
+  EXPECT_EQ(hipErrorInvalidResourceHandle,
+            hip_.graph_exec_event_record_node_set_event(graph_exec, record_node,
+                                                        event));
+  EXPECT_EQ(
+      hipErrorInvalidResourceHandle,
+      hip_.graph_exec_event_wait_node_set_event(graph_exec, wait_node, event));
 }
 
 TEST_F(HipEventTest, GraphRecordNodeAtTheEndOfAGraphMarksTheLaunchPoint) {

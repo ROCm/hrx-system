@@ -18077,15 +18077,20 @@ hipGraphAddEventRecordNode(hipGraphNode_t* pGraphNode, hipGraph_t graph,
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
 
+  iree_hal_streaming_event_t* streaming_event = NULL;
+  hipError_t event_result =
+      iree_hip_event_lookup_retain(event, &streaming_event);
+  if (event_result != hipSuccess) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(event_result);
+  }
   iree_hal_streaming_graph_node_t* node = NULL;
-  HIP_RETURN_STATUS_AND_END_ZONE_IF_ERROR(
-      z0,
-      iree_hal_streaming_graph_add_event_node(
-          (iree_hal_streaming_graph_t*)graph,
-          (iree_hal_streaming_graph_node_t**)pDependencies, numDependencies,
-          IREE_HAL_STREAMING_GRAPH_NODE_TYPE_EVENT_RECORD,
-          (iree_hal_streaming_event_t*)event, &node),
-      hipErrorInvalidValue);
+  iree_status_t status = iree_hal_streaming_graph_add_event_node(
+      (iree_hal_streaming_graph_t*)graph,
+      (iree_hal_streaming_graph_node_t**)pDependencies, numDependencies,
+      IREE_HAL_STREAMING_GRAPH_NODE_TYPE_EVENT_RECORD, streaming_event, &node);
+  iree_hal_streaming_event_release(streaming_event);
+  HIP_RETURN_STATUS_AND_END_ZONE_IF_ERROR(z0, status, hipErrorInvalidValue);
   *pGraphNode = (hipGraphNode_t)node;
   IREE_TRACE_ZONE_END(z0);
   return hipSuccess;
@@ -18111,15 +18116,20 @@ HIPAPI hipError_t hipGraphAddEventWaitNode(hipGraphNode_t* pGraphNode,
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
 
+  iree_hal_streaming_event_t* streaming_event = NULL;
+  hipError_t event_result =
+      iree_hip_event_lookup_retain(event, &streaming_event);
+  if (event_result != hipSuccess) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(event_result);
+  }
   iree_hal_streaming_graph_node_t* node = NULL;
-  HIP_RETURN_STATUS_AND_END_ZONE_IF_ERROR(
-      z0,
-      iree_hal_streaming_graph_add_event_node(
-          (iree_hal_streaming_graph_t*)graph,
-          (iree_hal_streaming_graph_node_t**)pDependencies, numDependencies,
-          IREE_HAL_STREAMING_GRAPH_NODE_TYPE_EVENT_WAIT,
-          (iree_hal_streaming_event_t*)event, &node),
-      hipErrorInvalidValue);
+  iree_status_t status = iree_hal_streaming_graph_add_event_node(
+      (iree_hal_streaming_graph_t*)graph,
+      (iree_hal_streaming_graph_node_t**)pDependencies, numDependencies,
+      IREE_HAL_STREAMING_GRAPH_NODE_TYPE_EVENT_WAIT, streaming_event, &node);
+  iree_hal_streaming_event_release(streaming_event);
+  HIP_RETURN_STATUS_AND_END_ZONE_IF_ERROR(z0, status, hipErrorInvalidValue);
   *pGraphNode = (hipGraphNode_t)node;
   IREE_TRACE_ZONE_END(z0);
   return hipSuccess;
@@ -20171,16 +20181,22 @@ HIPAPI hipError_t hipGraphEventRecordNodeSetEvent(hipGraphNode_t node,
   }
   iree_hal_streaming_graph_node_t* stream_node =
       (iree_hal_streaming_graph_node_t*)node;
-  iree_hal_streaming_event_t* streaming_event =
-      (iree_hal_streaming_event_t*)event;
   if (!iree_hip_graph_node_is_active(stream_node) ||
-      stream_node->type != IREE_HAL_STREAMING_GRAPH_NODE_TYPE_EVENT_RECORD ||
-      streaming_event->context != stream_node->graph->context) {
+      stream_node->type != IREE_HAL_STREAMING_GRAPH_NODE_TYPE_EVENT_RECORD) {
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
+
+  iree_hal_streaming_event_t* streaming_event = NULL;
+  hipError_t result = iree_hip_event_lookup_retain(event, &streaming_event);
+  if (result != hipSuccess) HIP_RETURN_ERROR(result);
+  if (streaming_event->context != stream_node->graph->context) {
+    iree_hal_streaming_event_release(streaming_event);
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
   iree_hal_streaming_event_retain(streaming_event);
   iree_hal_streaming_event_release(stream_node->attrs.event.event);
   stream_node->attrs.event.event = streaming_event;
+  iree_hal_streaming_event_release(streaming_event);
   return hipSuccess;
 }
 
@@ -20207,16 +20223,22 @@ HIPAPI hipError_t hipGraphEventWaitNodeSetEvent(hipGraphNode_t node,
   }
   iree_hal_streaming_graph_node_t* stream_node =
       (iree_hal_streaming_graph_node_t*)node;
-  iree_hal_streaming_event_t* streaming_event =
-      (iree_hal_streaming_event_t*)event;
   if (!iree_hip_graph_node_is_active(stream_node) ||
-      stream_node->type != IREE_HAL_STREAMING_GRAPH_NODE_TYPE_EVENT_WAIT ||
-      streaming_event->context != stream_node->graph->context) {
+      stream_node->type != IREE_HAL_STREAMING_GRAPH_NODE_TYPE_EVENT_WAIT) {
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
+
+  iree_hal_streaming_event_t* streaming_event = NULL;
+  hipError_t result = iree_hip_event_lookup_retain(event, &streaming_event);
+  if (result != hipSuccess) HIP_RETURN_ERROR(result);
+  if (streaming_event->context != stream_node->graph->context) {
+    iree_hal_streaming_event_release(streaming_event);
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
   iree_hal_streaming_event_retain(streaming_event);
   iree_hal_streaming_event_release(stream_node->attrs.event.event);
   stream_node->attrs.event.event = streaming_event;
+  iree_hal_streaming_event_release(streaming_event);
   return hipSuccess;
 }
 
@@ -20278,9 +20300,17 @@ HIPAPI hipError_t hipGraphExecEventRecordNodeSetEvent(hipGraphExec_t graphExec,
     iree_hal_streaming_graph_exec_release(exec);
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
+
+  iree_hal_streaming_event_t* streaming_event = NULL;
+  result = iree_hip_event_lookup_retain(event, &streaming_event);
+  if (result != hipSuccess) {
+    iree_hal_streaming_graph_exec_release(exec);
+    HIP_RETURN_ERROR(result);
+  }
   iree_status_t status = iree_hal_streaming_graph_exec_set_event_node_event(
       exec, stream_node, IREE_HAL_STREAMING_GRAPH_NODE_TYPE_EVENT_RECORD,
-      (iree_hal_streaming_event_t*)event);
+      streaming_event);
+  iree_hal_streaming_event_release(streaming_event);
   iree_hal_streaming_graph_exec_release(exec);
   HIP_RETURN_STATUS(status, hipErrorInvalidValue);
   return hipSuccess;
@@ -20304,9 +20334,17 @@ HIPAPI hipError_t hipGraphExecEventWaitNodeSetEvent(hipGraphExec_t graphExec,
     iree_hal_streaming_graph_exec_release(exec);
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
+
+  iree_hal_streaming_event_t* streaming_event = NULL;
+  result = iree_hip_event_lookup_retain(event, &streaming_event);
+  if (result != hipSuccess) {
+    iree_hal_streaming_graph_exec_release(exec);
+    HIP_RETURN_ERROR(result);
+  }
   iree_status_t status = iree_hal_streaming_graph_exec_set_event_node_event(
       exec, stream_node, IREE_HAL_STREAMING_GRAPH_NODE_TYPE_EVENT_WAIT,
-      (iree_hal_streaming_event_t*)event);
+      streaming_event);
+  iree_hal_streaming_event_release(streaming_event);
   iree_hal_streaming_graph_exec_release(exec);
   HIP_RETURN_STATUS(status, hipErrorInvalidValue);
   return hipSuccess;
