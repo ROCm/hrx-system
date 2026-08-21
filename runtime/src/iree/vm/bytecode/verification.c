@@ -10,6 +10,7 @@
 
 #include "iree/base/internal/unicode.h"
 #include "iree/vm/bytecode/module_reader.h"
+#include "iree/vm/bytecode/wire/hal/opcodes.h"
 
 #if !defined(IREE_ENDIANNESS_LITTLE)
 #error "IREE VM bytecode version zero requires a little-endian host"
@@ -114,10 +115,16 @@ typedef struct iree_vm_bytecode_cursor_t {
 } iree_vm_bytecode_cursor_t;
 
 typedef struct iree_vm_bytecode_section_map_t {
+  // Fixed image header at byte zero.
+  const iree_vm_bytecode_v0_image_header_t* header;
+  // Number of section directory rows.
+  uint16_t section_count;
+  // Strictly type-sorted section directory rows.
+  const iree_vm_bytecode_v0_section_directory_row_t* rows;
   // Known section payloads indexed by their architectural type ID.
   iree_const_byte_span_t spans[IREE_VM_BYTECODE_SECTION_METADATA + 1];
-  // True when an unknown extension-owned section was observed.
-  bool has_extension_section;
+  // Architectural extension pages owning at least one section.
+  uint16_t extension_section_pages;
 } iree_vm_bytecode_section_map_t;
 
 static bool iree_vm_bytecode_bytes_are_zero(const uint8_t* data,
@@ -246,6 +253,9 @@ static iree_status_t iree_vm_bytecode_verify_envelope(
       (const void**)&rows));
 
   memset(out_sections, 0, sizeof(*out_sections));
+  out_sections->header = header;
+  out_sections->section_count = header->section_count_u16;
+  out_sections->rows = rows;
   uint16_t previous_type = 0;
   for (uint16_t i = 0; i < header->section_count_u16; ++i) {
     const iree_vm_bytecode_v0_section_directory_row_t* row = &rows[i];
@@ -284,7 +294,10 @@ static iree_status_t iree_vm_bytecode_verify_envelope(
                               " has an invalid authority",
                               row->section_type_u16);
     }
-    out_sections->has_extension_section |= authority != 0;
+    if (authority != 0) {
+      out_sections->extension_section_pages |=
+          (uint16_t)(1u << (authority - 0xF0));
+    }
 
     IREE_RETURN_IF_ERROR(iree_vm_bytecode_cursor_align(
         &cursor, IREE_VM_BYTECODE_SECTION_ALIGNMENT));
@@ -307,11 +320,12 @@ static iree_status_t iree_vm_bytecode_verify_envelope(
 }
 
 static iree_status_t iree_vm_bytecode_verify_requirements(
-    const iree_vm_bytecode_section_map_t* sections) {
+    const iree_vm_bytecode_section_map_t* sections,
+    iree_vm_bytecode_module_layout_t* layout) {
   const iree_const_byte_span_t span =
       sections->spans[IREE_VM_BYTECODE_SECTION_REQUIREMENTS];
   if (iree_const_byte_span_is_empty(span)) {
-    if (sections->has_extension_section) {
+    if (sections->extension_section_pages != 0) {
       return iree_make_status(
           IREE_STATUS_INVALID_ARGUMENT,
           "extension-owned sections require a Requirements declaration");
@@ -327,6 +341,7 @@ static iree_status_t iree_vm_bytecode_verify_requirements(
   const iree_vm_bytecode_v0_requirement_row_t* rows =
       (const iree_vm_bytecode_v0_requirement_row_t*)span.data;
   uint16_t previous_page = 0;
+  uint16_t declared_pages = 0;
   for (iree_host_size_t i = 0; i < count; ++i) {
     if (rows[i].page_id_u16 < 0xF0 || rows[i].page_id_u16 > 0xFD ||
         (i != 0 && rows[i].page_id_u16 <= previous_page)) {
@@ -334,12 +349,17 @@ static iree_status_t iree_vm_bytecode_verify_requirements(
           IREE_STATUS_INVALID_ARGUMENT,
           "Requirements page IDs must be unique sorted extension pages");
     }
+    declared_pages |= (uint16_t)(1u << (rows[i].page_id_u16 - 0xF0));
     previous_page = rows[i].page_id_u16;
   }
-  return iree_make_status(IREE_STATUS_INCOMPATIBLE,
-                          "extension page 0x%02" PRIx16
-                          " is unavailable in this runtime",
-                          rows[0].page_id_u16);
+  if ((sections->extension_section_pages & ~declared_pages) != 0) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "extension-owned section has no exact Requirements declaration");
+  }
+  layout->requirements.count = (uint16_t)count;
+  layout->requirements.rows = rows;
+  return iree_ok_status();
 }
 
 static iree_status_t iree_vm_bytecode_verify_string_ordinal(
@@ -778,7 +798,7 @@ static iree_status_t iree_vm_bytecode_verify_exports(
   return iree_ok_status();
 }
 
-static iree_status_t iree_vm_bytecode_verify_function_signature(
+static iree_status_t iree_vm_bytecode_verify_function_signature_structure(
     const iree_vm_bytecode_module_layout_t* layout,
     const iree_vm_bytecode_v0_function_row_t* row) {
   if (row->signature_ordinal_u16 >= layout->signatures.count) {
@@ -787,23 +807,18 @@ static iree_status_t iree_vm_bytecode_verify_function_signature(
   }
   const iree_vm_bytecode_v0_signature_row_t* signature =
       &layout->signatures.rows[row->signature_ordinal_u16];
-  if (signature->argument_value_count_u16 > 16 ||
-      signature->result_value_count_u16 > 16 ||
-      signature->argument_ref_count_u16 > 16 ||
-      signature->result_ref_count_u16 > 16 ||
-      signature->argument_function_count_u16 != 0 ||
-      signature->result_function_count_u16 != 0) {
-    return iree_make_status(
-        IREE_STATUS_UNIMPLEMENTED,
-        "B0 bytecode functions support only direct value/ref banks");
-  }
-  const uint16_t required_value_registers = iree_max(
-      signature->argument_value_count_u16, signature->result_value_count_u16);
-  const uint16_t required_ref_registers = iree_max(
-      signature->argument_ref_count_u16, signature->result_ref_count_u16);
+  const uint16_t required_value_registers =
+      iree_min(16u, iree_max(signature->argument_value_count_u16,
+                             signature->result_value_count_u16));
+  const uint16_t required_ref_registers =
+      iree_min(16u, iree_max(signature->argument_ref_count_u16,
+                             signature->result_ref_count_u16));
+  const uint16_t required_function_registers =
+      iree_min(16u, iree_max(signature->argument_function_count_u16,
+                             signature->result_function_count_u16));
   if (row->value_register_count_u16 < required_value_registers ||
       row->ref_register_count_u16 < required_ref_registers ||
-      row->function_register_count_u16 != 0) {
+      row->function_register_count_u16 < required_function_registers) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
         "function register banks do not cover their direct signature prefixes");
@@ -843,15 +858,8 @@ static iree_status_t iree_vm_bytecode_verify_functions(
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "function row %" PRIu32 " is invalid", i);
     }
-    if (row->switch_target_entry_count_u32 != 0 ||
-        row->local_byte_length_u16 != 0 || row->local_ref_count_u32 != 0 ||
-        row->local_function_count_u32 != 0) {
-      return iree_make_status(
-          IREE_STATUS_UNIMPLEMENTED,
-          "B0 bytecode functions do not support targets or local packets");
-    }
     IREE_RETURN_IF_ERROR(
-        iree_vm_bytecode_verify_function_signature(layout, row));
+        iree_vm_bytecode_verify_function_signature_structure(layout, row));
     switch_target_count += row->switch_target_entry_count_u32;
     bytecode_length += row->bytecode_length_u32;
   }
@@ -1346,13 +1354,17 @@ static iree_status_t iree_vm_bytecode_verify_exports_against_functions(
   return iree_ok_status();
 }
 
-iree_status_t iree_vm_bytecode_module_verify(
+iree_status_t iree_vm_bytecode_module_verify_structure(
     iree_const_byte_span_t contents, iree_vm_bytecode_module_plan_t* out_plan) {
   memset(out_plan, 0, sizeof(*out_plan));
   iree_vm_bytecode_section_map_t sections = {0};
   iree_vm_bytecode_module_plan_t plan = {0};
   IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_envelope(contents, &sections));
-  IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_requirements(&sections));
+  plan.layout.image.header = sections.header;
+  plan.layout.image.section_count = sections.section_count;
+  plan.layout.image.sections = sections.rows;
+  IREE_RETURN_IF_ERROR(
+      iree_vm_bytecode_verify_requirements(&sections, &plan.layout));
   IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_strings(
       sections.spans[IREE_VM_BYTECODE_SECTION_STRINGS], &plan.layout));
   IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_ref_types(
@@ -1380,10 +1392,30 @@ iree_status_t iree_vm_bytecode_module_verify(
       sections.spans[IREE_VM_BYTECODE_SECTION_METADATA], &plan.layout));
   IREE_RETURN_IF_ERROR(
       iree_vm_bytecode_verify_exports_against_functions(&plan.layout));
-  for (uint32_t i = 0; i < plan.layout.functions.count; ++i) {
-    IREE_RETURN_IF_ERROR(iree_vm_bytecode_function_verify(
-        &plan.layout, &plan.layout.functions.rows[i], i));
-  }
   *out_plan = plan;
+  return iree_ok_status();
+}
+
+iree_status_t iree_vm_bytecode_module_verify_inspectable(
+    const iree_vm_bytecode_module_plan_t* plan) {
+  for (uint16_t i = 0; i < plan->layout.requirements.count; ++i) {
+    const iree_vm_bytecode_v0_requirement_row_t* requirement =
+        &plan->layout.requirements.rows[i];
+    if (requirement->page_id_u16 != IREE_VM_ISA_PAGE_HAL) {
+      return iree_make_status(IREE_STATUS_INCOMPATIBLE,
+                              "extension page 0x%02" PRIx16
+                              " is unknown to inspection tooling",
+                              requirement->page_id_u16);
+    }
+    if (requirement->major_u16 != IREE_VM_ISA_HAL_MAJOR ||
+        requirement->required_minor_u16 > IREE_VM_ISA_HAL_MINOR) {
+      return iree_make_status(IREE_STATUS_INCOMPATIBLE,
+                              "bytecode HAL version %" PRIu16 ".%" PRIu16
+                              " is not supported by inspection version %d.%d",
+                              requirement->major_u16,
+                              requirement->required_minor_u16,
+                              IREE_VM_ISA_HAL_MAJOR, IREE_VM_ISA_HAL_MINOR);
+    }
+  }
   return iree_ok_status();
 }

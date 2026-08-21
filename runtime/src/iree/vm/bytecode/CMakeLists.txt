@@ -9,6 +9,41 @@
 
 iree_add_all_subdirs()
 
+iree_py_generated_files(
+  NAME tooling_tables_gen
+  GENERATOR iree::vm::bytecode::spec::generate
+  OUTPUTS
+    tooling/isa_tables.c.inc
+    tooling/module_tables.c.inc
+  OUTPUT_FLAGS
+    --output-file=isa_tables.c.inc
+    --output-file=module_tables.c.inc
+  ARGS --output-kind=tooling
+)
+
+iree_cc_library(
+  NAME
+    module
+  HDRS
+    "image.h"
+    "module_reader.h"
+    "module_reflection.h"
+    "module_storage.h"
+    "storage.h"
+    "verification.h"
+  SRCS
+    "image.c"
+    "module_reflection.c"
+    "verification.c"
+  DEPS
+    iree::base
+    iree::base::internal
+    iree::base::internal::unicode
+    iree::vm
+    iree::vm::bytecode::wire
+  PUBLIC
+)
+
 iree_cc_library(
   NAME
     bytecode
@@ -18,15 +53,50 @@ iree_cc_library(
     "interpreter.c"
     "interpreter.h"
     "module.c"
-    "module_reader.h"
-    "module_storage.h"
-    "verification.c"
-    "verification.h"
     "verification_isa.c"
   DEPS
+    ::module
     iree::base
     iree::base::internal
     iree::base::internal::unicode
+    iree::vm
+    iree::vm::bytecode::wire
+  PUBLIC
+)
+
+iree_cc_library(
+  NAME
+    inspection
+  HDRS
+    "inspection.h"
+  SRCS
+    "inspection.c"
+  DEPS
+    ::module
+    iree::base
+    iree::base::internal
+    iree::base::internal::unicode
+    iree::vm
+  PUBLIC
+)
+
+iree_cc_library(
+  NAME
+    dump
+  HDRS
+    "tooling/dump.h"
+  TEXTUAL_HDRS
+    "tooling/isa_tables.c.inc"
+    "tooling/module_tables.c.inc"
+  SRCS
+    "tooling/disassembler.c"
+    "tooling/disassembler.h"
+    "tooling/dump.c"
+  DEPS
+    ::inspection
+    ::module
+    iree::base
+    iree::base::internal
     iree::vm
     iree::vm::bytecode::wire
   PUBLIC
@@ -41,9 +111,24 @@ iree_cc_test(
     "module_test_data.h"
   DEPS
     ::bytecode
+    ::inspection
     iree::testing::gtest
     iree::testing::gtest_main
     iree::vm
+    iree::vm::bytecode::wire
+)
+
+iree_cc_test(
+  NAME
+    dump_test
+  SRCS
+    "module_test_data.cc"
+    "module_test_data.h"
+    "tooling/dump_test.cc"
+  DEPS
+    ::dump
+    iree::testing::gtest
+    iree::testing::gtest_main
     iree::vm::bytecode::wire
 )
 

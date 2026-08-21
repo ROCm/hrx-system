@@ -217,3 +217,40 @@ iree_status_t iree_vm_bytecode_function_verify(
   }
   return iree_ok_status();
 }
+
+iree_status_t iree_vm_bytecode_module_verify_executable(
+    const iree_vm_bytecode_module_plan_t* plan) {
+  if (plan->layout.requirements.count != 0) {
+    return iree_make_status(IREE_STATUS_INCOMPATIBLE,
+                            "extension page 0x%02" PRIx16
+                            " is unavailable in this runtime",
+                            plan->layout.requirements.rows[0].page_id_u16);
+  }
+  for (uint32_t i = 0; i < plan->layout.functions.count; ++i) {
+    const iree_vm_bytecode_v0_function_row_t* function =
+        &plan->layout.functions.rows[i];
+    const iree_vm_bytecode_v0_signature_row_t* signature =
+        &plan->layout.signatures.rows[function->signature_ordinal_u16];
+    if (signature->argument_value_count_u16 > 16 ||
+        signature->result_value_count_u16 > 16 ||
+        signature->argument_ref_count_u16 > 16 ||
+        signature->result_ref_count_u16 > 16 ||
+        signature->argument_function_count_u16 != 0 ||
+        signature->result_function_count_u16 != 0) {
+      return iree_make_status(
+          IREE_STATUS_UNIMPLEMENTED,
+          "B0 bytecode functions support only direct value/ref banks");
+    }
+    if (function->switch_target_entry_count_u32 != 0 ||
+        function->local_byte_length_u16 != 0 ||
+        function->local_ref_count_u32 != 0 ||
+        function->local_function_count_u32 != 0) {
+      return iree_make_status(
+          IREE_STATUS_UNIMPLEMENTED,
+          "B0 bytecode functions do not support targets or local packets");
+    }
+    IREE_RETURN_IF_ERROR(
+        iree_vm_bytecode_function_verify(&plan->layout, function, i));
+  }
+  return iree_ok_status();
+}

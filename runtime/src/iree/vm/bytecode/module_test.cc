@@ -16,6 +16,7 @@
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 #include "iree/vm/buffer.h"
+#include "iree/vm/bytecode/inspection.h"
 #include "iree/vm/bytecode/module_test_data.h"
 #include "iree/vm/bytecode/wire/core/opcodes.h"
 #include "iree/vm/bytecode/wire/module_format.h"
@@ -243,6 +244,113 @@ TEST(VMBytecodeModuleTest,
   iree_vm_buffer_release(escaped_buffer);
   EXPECT_EQ(module_allocator.free_count, 1u);
   EXPECT_EQ(image_allocator.free_count, 1u);
+}
+
+TEST(VMBytecodeModuleTest,
+     InspectionReflectsTypesWithoutProvidersAndCannotLink) {
+  std::vector<uint8_t> image = BuildHALInspectionModuleImage();
+  CountingAllocator image_allocator = {iree_allocator_system(), 0, 0};
+  void* owned_image = nullptr;
+  IREE_ASSERT_OK(iree_allocator_clone(
+      MakeCountingAllocator(&image_allocator),
+      iree_make_const_byte_span(image.data(), image.size()), &owned_image));
+
+  CountingAllocator module_allocator = {iree_allocator_system(), 0, 0};
+  iree_vm_module_t* module = nullptr;
+  IREE_ASSERT_OK(iree_vm_bytecode_module_create_for_inspection(
+      IREE_SV("hal_inspection"),
+      {iree_make_const_byte_span(owned_image, image.size()),
+       MakeCountingAllocator(&image_allocator)},
+      MakeCountingAllocator(&module_allocator), &module));
+  ASSERT_NE(module, nullptr);
+  EXPECT_EQ(module_allocator.allocation_count, 1u);
+  EXPECT_EQ(image_allocator.free_count, 0u);
+
+  EXPECT_EQ(ToStringView(iree_vm_module_name(module)), "hal_inspection");
+  EXPECT_EQ(iree_vm_module_ref_type_count(module), 1u);
+  EXPECT_EQ(iree_vm_module_export_count(module), 1u);
+  EXPECT_EQ(iree_vm_module_function_count(module), 1u);
+
+  iree_vm_ref_type_t device_group_type = nullptr;
+  IREE_ASSERT_OK(
+      iree_vm_module_ref_type_by_ordinal(module, 0, &device_group_type));
+  ASSERT_NE(device_group_type, nullptr);
+  const iree_vm_ref_type_key_t type_key =
+      iree_vm_ref_type_key(device_group_type);
+  EXPECT_EQ(ToStringView(type_key.namespace_name), "hal");
+  EXPECT_EQ(ToStringView(type_key.type_name), "device_group");
+
+  iree_vm_export_t device_count_export = {};
+  IREE_ASSERT_OK(iree_vm_module_lookup_export(module, IREE_SV("device_count"),
+                                              &device_count_export));
+  iree_host_size_t description_size = 0;
+  IREE_ASSERT_OK(iree_vm_export_query_description(
+      device_count_export, iree_byte_span_empty(), &description_size, NULL));
+  alignas(max_align_t) std::array<uint8_t, 256> description_storage = {};
+  ASSERT_LE(description_size, description_storage.size());
+  iree_vm_export_description_t description = {};
+  IREE_ASSERT_OK(iree_vm_export_query_description(
+      device_count_export,
+      iree_make_byte_span(description_storage.data(), description_size),
+      &description_size, &description));
+  ASSERT_EQ(description.arguments.count, 1u);
+  ASSERT_EQ(description.results.count, 1u);
+  EXPECT_EQ(description.arguments.data[0].type.kind,
+            IREE_VM_SIGNATURE_TYPE_KIND_REF);
+  EXPECT_EQ(description.arguments.data[0].type.value.ref, device_group_type);
+  EXPECT_EQ(description.results.data[0].type.kind,
+            IREE_VM_SIGNATURE_TYPE_KIND_SCALAR);
+  EXPECT_EQ(description.results.data[0].type.value.scalar,
+            IREE_VM_SCALAR_TYPE_I64);
+  EXPECT_TRUE(ToStringView(description.documentation).empty());
+  EXPECT_TRUE(ToStringView(description.authored_type).empty());
+
+  iree_vm_program_t* program =
+      reinterpret_cast<iree_vm_program_t*>(uintptr_t{1});
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      iree_vm_program_create({module, iree_vm_module_span_empty()},
+                             iree_allocator_system(), &program));
+  EXPECT_EQ(program, nullptr);
+
+  iree_vm_module_release(module);
+  EXPECT_EQ(module_allocator.free_count, 1u);
+  EXPECT_EQ(image_allocator.free_count, 1u);
+}
+
+TEST(VMBytecodeModuleTest, InspectionAndExecutionShareStructuralDiagnostics) {
+  std::vector<uint8_t> image = BuildOwnershipModuleImage();
+  image[0] ^= 0xFF;
+
+  iree_vm_environment_t* environment = nullptr;
+  IREE_ASSERT_OK(
+      iree_vm_environment_allocate(iree_allocator_system(), &environment));
+  iree_vm_module_t* executable_module =
+      reinterpret_cast<iree_vm_module_t*>(uintptr_t{1});
+  iree_status_t executable_status = iree_vm_bytecode_module_create(
+      environment, IREE_SV("malformed"),
+      {iree_make_const_byte_span(image.data(), image.size()),
+       iree_allocator_null()},
+      iree_allocator_system(), &executable_module);
+  EXPECT_EQ(executable_module, nullptr);
+
+  iree_vm_module_t* inspection_module =
+      reinterpret_cast<iree_vm_module_t*>(uintptr_t{1});
+  iree_status_t inspection_status =
+      iree_vm_bytecode_module_create_for_inspection(
+          IREE_SV("malformed"),
+          {iree_make_const_byte_span(image.data(), image.size()),
+           iree_allocator_null()},
+          iree_allocator_system(), &inspection_module);
+  EXPECT_EQ(inspection_module, nullptr);
+
+  EXPECT_EQ(iree_status_code(executable_status),
+            iree_status_code(inspection_status));
+  EXPECT_EQ(ToStringView(iree_status_message(executable_status)),
+            ToStringView(iree_status_message(inspection_status)));
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT, executable_status);
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT, inspection_status);
+  iree_vm_environment_free(environment);
 }
 
 TEST(VMBytecodeModuleTest, ExecutesCompleteLaunchConfiguration) {

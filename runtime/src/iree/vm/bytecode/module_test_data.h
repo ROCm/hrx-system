@@ -19,6 +19,12 @@ std::vector<uint8_t> BuildOwnershipModuleImage();
 // full-signature no-op decomposition functions.
 std::vector<uint8_t> BuildLaunchConfigModuleImage();
 
+// Builds one structurally valid HAL-page inspection fixture.
+std::vector<uint8_t> BuildHALInspectionModuleImage();
+
+// Builds one structurally valid switch-target inspection fixture.
+std::vector<uint8_t> BuildSwitchInspectionModuleImage();
+
 }  // namespace iree::vm::bytecode::testing
 
 #endif  // IREE_VM_BYTECODE_MODULE_TEST_DATA_H_

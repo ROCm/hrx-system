@@ -16,6 +16,7 @@ iree_py_library(
     srcs = [
         "__init__.py",
         "c_header.py",
+        "c_tooling.py",
         "json_projection.py",
         "manifest.py",
         "markdown.py",

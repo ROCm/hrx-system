@@ -19,6 +19,8 @@
 #include "iree/vm/bytecode/wire/core/integer.h"
 #include "iree/vm/bytecode/wire/core/opcodes.h"
 #include "iree/vm/bytecode/wire/core/value.h"
+#include "iree/vm/bytecode/wire/hal/device.h"
+#include "iree/vm/bytecode/wire/hal/opcodes.h"
 #include "iree/vm/bytecode/wire/module_format.h"
 
 namespace iree::vm::bytecode::testing {
@@ -330,6 +332,118 @@ std::vector<uint8_t> BuildLaunchConfigFunctions() {
   return section.Take();
 }
 
+std::vector<uint8_t> BuildHALInspectionRefTypes() {
+  ByteBuffer section;
+  section.Append(iree_vm_bytecode_v0_ref_types_header_t{1});
+  section.Append(iree_vm_bytecode_v0_ref_type_group_row_t{0, 0, 1});
+  section.Append(iree_vm_bytecode_v0_ref_type_entry_row_t{1, 0});
+  return section.Take();
+}
+
+std::vector<uint8_t> BuildHALInspectionSignatures() {
+  ByteBuffer section;
+  section.Append(iree_vm_bytecode_v0_signatures_header_t{1});
+  section.Append(iree_vm_bytecode_v0_signature_row_t{
+      0,
+      0,
+      1,
+      1,
+      0,
+      0,
+      0,
+  });
+  section.Append(iree_vm_bytecode_v0_signature_descriptor_row_t{
+      IREE_VM_BYTECODE_SIGNATURE_KIND_REF, 0});
+  section.Append(iree_vm_bytecode_v0_signature_descriptor_row_t{
+      IREE_VM_BYTECODE_SIGNATURE_KIND_I64, 0});
+  return section.Take();
+}
+
+std::vector<uint8_t> BuildHALInspectionCallableTypes() {
+  ByteBuffer section;
+  section.Append(iree_vm_bytecode_v0_callable_types_header_t{1});
+  section.Append(iree_vm_bytecode_v0_callable_type_row_t{0, 0});
+  return section.Take();
+}
+
+std::vector<uint8_t> BuildHALInspectionImports() {
+  ByteBuffer section;
+  section.Append(iree_vm_bytecode_v0_imports_header_t{1});
+  section.Append(iree_vm_bytecode_v0_import_group_row_t{3, 0, 1});
+  section.Append(iree_vm_bytecode_v0_import_entry_row_t{
+      4, 0, IREE_VM_BYTECODE_IMPORT_FLAG_OPTIONAL, 0});
+  return section.Take();
+}
+
+std::vector<uint8_t> BuildHALInspectionExports() {
+  ByteBuffer section;
+  section.Append(iree_vm_bytecode_v0_exports_header_t{1});
+  section.Append(iree_vm_bytecode_v0_export_row_t{2, 0, 0, 0});
+  return section.Take();
+}
+
+std::vector<uint8_t> BuildHALInspectionFunctions() {
+  ByteBuffer bytecode;
+  bytecode.Append(iree_vm_isa_control_block_record_t{
+      IREE_VM_ISA_CORE_OPCODE_CONTROL_BLOCK, {0, 0, 0}});
+  bytecode.Append(iree_vm_isa_hal_device_group_count_record_t{
+      IREE_VM_ISA_PAGE_HAL, IREE_VM_ISA_HAL_OPCODE_DEVICE_GROUP_COUNT, 0, 0});
+  bytecode.Append(iree_vm_isa_control_return_record_t{
+      IREE_VM_ISA_CORE_OPCODE_CONTROL_RETURN, {0, 0, 0}});
+
+  std::vector<uint8_t> bytecode_data = bytecode.Take();
+  ByteBuffer section;
+  section.Append(iree_vm_bytecode_v0_functions_header_t{1});
+  section.Append(iree_vm_bytecode_v0_function_row_t{
+      0, 0, 0, 12, 0, 0, 0, 1, 1, 0, 0, 0, {0, 0, 0}});
+  section.AppendBytes(bytecode_data.data(), bytecode_data.size());
+  return section.Take();
+}
+
+std::vector<uint8_t> BuildSwitchInspectionSignatures() {
+  ByteBuffer section;
+  section.Append(iree_vm_bytecode_v0_signatures_header_t{1});
+  section.Append(iree_vm_bytecode_v0_signature_row_t{0, 1, 0, 0, 0, 0, 0});
+  section.Append(iree_vm_bytecode_v0_signature_descriptor_row_t{
+      IREE_VM_BYTECODE_SIGNATURE_KIND_I32, 0});
+  return section.Take();
+}
+
+std::vector<uint8_t> BuildSwitchInspectionCallableTypes() {
+  ByteBuffer section;
+  section.Append(iree_vm_bytecode_v0_callable_types_header_t{1});
+  section.Append(iree_vm_bytecode_v0_callable_type_row_t{0, 0});
+  return section.Take();
+}
+
+std::vector<uint8_t> BuildSwitchInspectionExports() {
+  ByteBuffer section;
+  section.Append(iree_vm_bytecode_v0_exports_header_t{1});
+  section.Append(iree_vm_bytecode_v0_export_row_t{0, 0, 0, 0});
+  return section.Take();
+}
+
+std::vector<uint8_t> BuildSwitchInspectionFunctions() {
+  ByteBuffer bytecode;
+  bytecode.Append(iree_vm_isa_control_block_record_t{
+      IREE_VM_ISA_CORE_OPCODE_CONTROL_BLOCK, {0, 0, 0}});
+  bytecode.Append(iree_vm_isa_control_switch_record_t{
+      IREE_VM_ISA_CORE_OPCODE_CONTROL_SWITCH, 0, 1, 0});
+  bytecode.Append(iree_vm_isa_control_block_record_t{
+      IREE_VM_ISA_CORE_OPCODE_CONTROL_BLOCK, {0, 0, 0}});
+  bytecode.Append(iree_vm_isa_control_return_record_t{
+      IREE_VM_ISA_CORE_OPCODE_CONTROL_RETURN, {0, 0, 0}});
+  std::vector<uint8_t> bytecode_data = bytecode.Take();
+
+  ByteBuffer section;
+  section.Append(iree_vm_bytecode_v0_functions_header_t{1});
+  section.Append(iree_vm_bytecode_v0_function_row_t{
+      0, 0, 0, 20, 0, 1, 0, 1, 0, 0, 0, 0, {0, 0, 0}});
+  section.Append(static_cast<iree_vm_bytecode_v0_switch_target_entry_t>(3));
+  section.AppendBytes(bytecode_data.data(), bytecode_data.size());
+  return section.Take();
+}
+
 }  // namespace
 
 std::vector<uint8_t> BuildOwnershipModuleImage() {
@@ -364,6 +478,37 @@ std::vector<uint8_t> BuildLaunchConfigModuleImage() {
        BuildLaunchConfigCallableTypes()},
       {IREE_VM_BYTECODE_SECTION_EXPORTS, 0, BuildLaunchConfigExports()},
       {IREE_VM_BYTECODE_SECTION_FUNCTIONS, 0, BuildLaunchConfigFunctions()},
+  });
+}
+
+std::vector<uint8_t> BuildHALInspectionModuleImage() {
+  ByteBuffer requirements;
+  requirements.Append(iree_vm_bytecode_v0_requirement_row_t{
+      IREE_VM_ISA_PAGE_HAL, IREE_VM_ISA_HAL_MAJOR, IREE_VM_ISA_HAL_MINOR});
+  return BuildImage({
+      {IREE_VM_BYTECODE_SECTION_REQUIREMENTS, 0, requirements.Take()},
+      {IREE_VM_BYTECODE_SECTION_STRINGS, 0,
+       BuildStrings({"hal", "device_group", "device_count", "runtime.support",
+                     "query_device_count"})},
+      {IREE_VM_BYTECODE_SECTION_REF_TYPES, 0, BuildHALInspectionRefTypes()},
+      {IREE_VM_BYTECODE_SECTION_SIGNATURES, 0, BuildHALInspectionSignatures()},
+      {IREE_VM_BYTECODE_SECTION_CALLABLE_TYPES, 0,
+       BuildHALInspectionCallableTypes()},
+      {IREE_VM_BYTECODE_SECTION_IMPORTS, 0, BuildHALInspectionImports()},
+      {IREE_VM_BYTECODE_SECTION_EXPORTS, 0, BuildHALInspectionExports()},
+      {IREE_VM_BYTECODE_SECTION_FUNCTIONS, 0, BuildHALInspectionFunctions()},
+  });
+}
+
+std::vector<uint8_t> BuildSwitchInspectionModuleImage() {
+  return BuildImage({
+      {IREE_VM_BYTECODE_SECTION_STRINGS, 0, BuildStrings({"select"})},
+      {IREE_VM_BYTECODE_SECTION_SIGNATURES, 0,
+       BuildSwitchInspectionSignatures()},
+      {IREE_VM_BYTECODE_SECTION_CALLABLE_TYPES, 0,
+       BuildSwitchInspectionCallableTypes()},
+      {IREE_VM_BYTECODE_SECTION_EXPORTS, 0, BuildSwitchInspectionExports()},
+      {IREE_VM_BYTECODE_SECTION_FUNCTIONS, 0, BuildSwitchInspectionFunctions()},
   });
 }
 

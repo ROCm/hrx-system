@@ -4,14 +4,73 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+load("//build_tools/bazel:cmake.bzl", "iree_cmake_extra_content")
+load("//build_tools/bazel:generate.bzl", "iree_generated_files")
 load("//runtime/build_tools/bazel:cc.bzl", "iree_runtime_cc_library")
 load("//runtime/build_tools/bazel:cc_benchmark.bzl", "iree_runtime_cc_benchmark")
 load("//runtime/build_tools/bazel:cc_test.bzl", "iree_runtime_cc_test")
 
 package(
-    default_visibility = ["//visibility:public"],
+    default_visibility = ["//visibility:private"],
     features = ["layering_check"],
     licenses = ["notice"],
+)
+
+iree_generated_files(
+    name = "tooling_tables_gen",
+    outs = [
+        "tooling/isa_tables.c.inc",
+        "tooling/module_tables.c.inc",
+    ],
+    args = ["--output-kind=tooling"],
+    output_args = {
+        "isa_tables.c.inc": "--output-file=isa_tables.c.inc={path}",
+        "module_tables.c.inc": "--output-file=module_tables.c.inc={path}",
+    },
+    tags = ["skip-bazel_to_cmake"],
+    tool = "//runtime/src/iree/vm/bytecode/spec:generate",
+)
+
+iree_cmake_extra_content(
+    content = """
+iree_py_generated_files(
+  NAME tooling_tables_gen
+  GENERATOR iree::vm::bytecode::spec::generate
+  OUTPUTS
+    tooling/isa_tables.c.inc
+    tooling/module_tables.c.inc
+  OUTPUT_FLAGS
+    --output-file=isa_tables.c.inc
+    --output-file=module_tables.c.inc
+  ARGS --output-kind=tooling
+)
+""",
+    inline = True,
+)
+
+iree_runtime_cc_library(
+    name = "module",
+    srcs = [
+        "image.c",
+        "module_reflection.c",
+        "verification.c",
+    ],
+    hdrs = [
+        "image.h",
+        "module_reader.h",
+        "module_reflection.h",
+        "module_storage.h",
+        "storage.h",
+        "verification.h",
+    ],
+    visibility = ["//visibility:private"],
+    deps = [
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
+        "//runtime/src/iree/base/internal:unicode",
+        "//runtime/src/iree/vm",
+        "//runtime/src/iree/vm/bytecode/wire",
+    ],
 )
 
 iree_runtime_cc_library(
@@ -20,17 +79,52 @@ iree_runtime_cc_library(
         "interpreter.c",
         "interpreter.h",
         "module.c",
-        "module_reader.h",
-        "module_storage.h",
-        "verification.c",
-        "verification.h",
         "verification_isa.c",
     ],
     hdrs = ["module.h"],
+    visibility = ["//visibility:public"],
     deps = [
+        ":module",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal",
         "//runtime/src/iree/base/internal:unicode",
+        "//runtime/src/iree/vm",
+        "//runtime/src/iree/vm/bytecode/wire",
+    ],
+)
+
+iree_runtime_cc_library(
+    name = "inspection",
+    srcs = ["inspection.c"],
+    hdrs = ["inspection.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":module",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
+        "//runtime/src/iree/base/internal:unicode",
+        "//runtime/src/iree/vm",
+    ],
+)
+
+iree_runtime_cc_library(
+    name = "dump",
+    srcs = [
+        "tooling/disassembler.c",
+        "tooling/disassembler.h",
+        "tooling/dump.c",
+    ],
+    hdrs = ["tooling/dump.h"],
+    textual_hdrs = [
+        "tooling/isa_tables.c.inc",
+        "tooling/module_tables.c.inc",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":inspection",
+        ":module",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
         "//runtime/src/iree/vm",
         "//runtime/src/iree/vm/bytecode/wire",
     ],
@@ -45,9 +139,25 @@ iree_runtime_cc_test(
     ],
     deps = [
         ":bytecode",
+        ":inspection",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
         "//runtime/src/iree/vm",
+        "//runtime/src/iree/vm/bytecode/wire",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "dump_test",
+    srcs = [
+        "module_test_data.cc",
+        "module_test_data.h",
+        "tooling/dump_test.cc",
+    ],
+    deps = [
+        ":dump",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
         "//runtime/src/iree/vm/bytecode/wire",
     ],
 )

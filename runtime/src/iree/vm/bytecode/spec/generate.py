@@ -4,7 +4,7 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-"""Generates build-only wire and documentation projections."""
+"""Generates build-only wire, tooling, and documentation projections."""
 
 from __future__ import annotations
 
@@ -30,6 +30,8 @@ from render import (
     render_module_header,
     render_module_markdown,
     render_specification_index_markdown,
+    render_tooling_isa_tables,
+    render_tooling_module_tables,
     shared_selector_table_ids,
 )
 
@@ -182,6 +184,19 @@ def generated_documentation_outputs() -> dict[str, str]:
     return outputs
 
 
+def generated_tooling_outputs() -> dict[str, str]:
+    """Returns the complete deterministic build-only C tooling projection."""
+
+    return {
+        "isa_tables.c.inc": render_tooling_isa_tables(
+            _latest_projection(ISA_SPECIFICATION)
+        ),
+        "module_tables.c.inc": render_tooling_module_tables(
+            _latest_projection(MODULE_SPECIFICATION)
+        ),
+    }
+
+
 def _existing_documentation_paths(output_directory: pathlib.Path) -> set[str]:
     if not output_directory.is_dir():
         return set()
@@ -298,7 +313,7 @@ def main() -> int:
     )
     parser.add_argument(
         "--output-kind",
-        choices=("wire", "documentation"),
+        choices=("wire", "tooling", "documentation"),
         default="wire",
         help="Projection product to generate. Defaults to wire headers.",
     )
@@ -306,8 +321,8 @@ def main() -> int:
         "--output-directory",
         type=pathlib.Path,
         help=(
-            "Projection root for documentation output. Wire outputs are "
-            "declared individually by the build system."
+            "Projection root for documentation output. Wire and tooling "
+            "outputs are declared individually by the build system."
         ),
     )
     parser.add_argument(
@@ -316,18 +331,24 @@ def main() -> int:
         default=[],
         metavar="NAME=PATH",
         help=(
-            "Named build-tree output. Wire generation requires one entry for "
-            "every declared projection."
+            "Named build-tree output. Wire and tooling generation require one "
+            "entry for every declared projection."
         ),
     )
     parser.add_argument("--check", action="store_true")
     arguments = parser.parse_args()
-    if arguments.output_kind == "wire":
+    if arguments.output_kind in ("wire", "tooling"):
         if arguments.output_directory is not None:
-            parser.error("--output-directory cannot be used for wire output")
+            parser.error(
+                "--output-directory cannot be used for wire or tooling output"
+            )
         if arguments.check:
             parser.error("--check cannot be used for named build outputs")
-        outputs = generated_wire_outputs()
+        outputs = (
+            generated_wire_outputs()
+            if arguments.output_kind == "wire"
+            else generated_tooling_outputs()
+        )
         output_files = _parse_named_output_files(
             parser, arguments.output_file, set(outputs)
         )

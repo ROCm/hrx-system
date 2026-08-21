@@ -15,6 +15,7 @@ from .c_header import (
     render_module_header,
     shared_selector_table_ids,
 )
+from .c_tooling import render_tooling_isa_tables, render_tooling_module_tables
 from .json_projection import render_projection_json
 from .manifest import render_completeness_manifest, render_release_manifest
 from .markdown import (
@@ -34,6 +35,8 @@ __all__ = (
     "render_isa_index_markdown",
     "render_isa_opcodes_header",
     "render_isa_shared_selectors_header",
+    "render_tooling_isa_tables",
+    "render_tooling_module_tables",
     "render_module_assertions",
     "render_module_header",
     "render_module_markdown",

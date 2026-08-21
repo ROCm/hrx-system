@@ -8,20 +8,13 @@
 #define IREE_VM_BYTECODE_MODULE_H_
 
 #include "iree/base/api.h"
+#include "iree/vm/bytecode/storage.h"
 #include "iree/vm/environment.h"
 #include "iree/vm/module.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif  // __cplusplus
-
-// Immutable bytecode image storage paired with its optional owner.
-typedef struct iree_vm_bytecode_module_storage_t {
-  // Exact immutable image bytes with an eight-byte-aligned base address.
-  iree_const_byte_span_t contents;
-  // Optional deallocator for |contents.data|; null denotes borrowed storage.
-  iree_allocator_t deallocator;
-} iree_vm_bytecode_module_storage_t;
 
 // Verifies and creates one executable bytecode module.
 //

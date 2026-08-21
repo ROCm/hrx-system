@@ -10,8 +10,27 @@
 #include "iree/base/api.h"
 #include "iree/base/internal/atomics.h"
 #include "iree/vm/buffer_provider.h"
-#include "iree/vm/bytecode/module.h"
+#include "iree/vm/bytecode/storage.h"
 #include "iree/vm/bytecode/wire/module_format.h"
+#include "iree/vm/module.h"
+
+// Mapped canonical image envelope.
+typedef struct iree_vm_bytecode_image_layout_t {
+  // Fixed image header at byte zero.
+  const iree_vm_bytecode_v0_image_header_t* header;
+  // Number of section directory rows.
+  uint16_t section_count;
+  // Strictly type-sorted section directory rows.
+  const iree_vm_bytecode_v0_section_directory_row_t* sections;
+} iree_vm_bytecode_image_layout_t;
+
+// Mapped architectural extension requirements.
+typedef struct iree_vm_bytecode_requirement_table_t {
+  // Number of declared extension pages.
+  uint16_t count;
+  // Strictly page-sorted requirement rows.
+  const iree_vm_bytecode_v0_requirement_row_t* rows;
+} iree_vm_bytecode_requirement_table_t;
 
 // Mapped canonical string table.
 typedef struct iree_vm_bytecode_string_table_t {
@@ -155,6 +174,10 @@ typedef struct iree_vm_bytecode_metadata_table_t {
 
 // Complete fixed mapped view of one verified module image.
 typedef struct iree_vm_bytecode_module_layout_t {
+  // Canonical image envelope.
+  iree_vm_bytecode_image_layout_t image;
+  // Architectural extension requirements.
+  iree_vm_bytecode_requirement_table_t requirements;
   // Canonical string table.
   iree_vm_bytecode_string_table_t strings;
   // Canonical ref-type table.
@@ -209,7 +232,7 @@ typedef struct iree_vm_bytecode_module_plan_t {
 
 typedef struct iree_vm_bytecode_image_t iree_vm_bytecode_image_t;
 
-// Executable bytecode module embedded in its private image slab.
+// Mapped bytecode module embedded in its private image slab.
 typedef struct iree_vm_bytecode_module_t {
   // Generic module provider base.
   iree_vm_module_t base;
@@ -219,13 +242,13 @@ typedef struct iree_vm_bytecode_module_t {
   iree_vm_bytecode_image_t* image;
   // Verified mapped image layout.
   iree_vm_bytecode_module_layout_t layout;
-  // Exact process storage layout.
+  // Exact executable process storage layout, or zero for inspection.
   iree_vm_bytecode_process_layout_t process_layout;
-  // Flat canonical resolved ref-type handles.
+  // Flat canonical resolved or reflection-only ref-type handles.
   iree_vm_ref_type_t* resolved_ref_types;
-  // Canonical core vm.buffer descriptor used by rodata roots.
+  // Canonical core vm.buffer descriptor used by executable rodata roots.
   iree_vm_ref_type_t buffer_type;
-  // Embedded module-owned read-only rodata roots.
+  // Embedded module-owned read-only executable rodata roots.
   iree_vm_buffer_t* rodata_roots;
 } iree_vm_bytecode_module_t;
 
@@ -237,7 +260,7 @@ struct iree_vm_bytecode_image_t {
   iree_allocator_t host_allocator;
   // Transferred immutable image storage.
   iree_vm_bytecode_module_storage_t storage;
-  // Embedded executable module.
+  // Embedded mapped module.
   iree_vm_bytecode_module_t module;
 };
 
