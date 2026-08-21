@@ -190,9 +190,12 @@ having ROCm tools available.
 
 The `IREE_HAL_AMDGPU_DEVICE_BINARY_BUILD_MODE` CMake variable controls the
 producer. `prebuilt` is the default. `source` rebuilds the code objects from the
-device C sources and requires an AMDGPU-capable clang plus `llvm-link`, `lld`,
-and `llvm-objcopy`. Source mode can use an in-tree LLVM build, an out-of-tree
-host tools build, or a ROCm/TheRock SDK. Important CMake knobs are
+device C sources and requires an AMDGPU-capable clang plus `llvm-ar`,
+`llvm-link`, `lld`, and `llvm-objcopy`. These device tools are selected
+independently from the C and C++ host compilers, so an MSVC host build can use
+the clang shipped in a ROCm/TheRock SDK. Source mode can use an explicitly
+composed installed LLVM tool set or a ROCm/TheRock SDK. Important CMake knobs
+are
 `IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN`,
 `IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN_ROCM_PATH`,
 `IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN_LLVM_TOOLS_DIR`, and the per-tool overrides

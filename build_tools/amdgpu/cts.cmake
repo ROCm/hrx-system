@@ -79,6 +79,19 @@ function(iree_amdgpu_hal_cts_testdata)
     set(_RULE_TARGET_FAMILY "amdgpu")
   endif()
 
+  if(NOT IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN_AVAILABLE)
+    set(_TESTONLY_ARG)
+    if(_RULE_TESTONLY)
+      set(_TESTONLY_ARG TESTONLY)
+    endif()
+    iree_cc_library(
+      NAME
+        "${_RULE_NAME}"
+      ${_TESTONLY_ARG}
+    )
+    return()
+  endif()
+
   iree_amdgpu_expand_target_selectors(
     _CODE_OBJECT_TARGETS
     "${IREE_AMDGPU_TARGET_EXPANSION_CODE_OBJECT}"

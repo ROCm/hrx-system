@@ -108,21 +108,25 @@ CMake uses the matching cache variables:
   `prebuilt`.
 - `IREE_HAL_AMDGPU_TARGETS`, default
   `gfx9-generic;gfx90a;gfx9-4-generic;gfx10-1-generic;gfx10-3-generic;gfx11-generic;gfx12-generic`.
-- `IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN=auto|rocm|llvm-tools|llvm-project`, default
-  `auto` for source mode.
+- `IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN=none|auto|rocm|llvm-tools`, default
+  `auto`.
 - `IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN_ROCM_PATH` for a ROCm or TheRock SDK root.
 - `IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN_LLVM_TOOLS_DIR` for a directory containing
-  `clang`, `llvm-link`, `lld`, and `llvm-objcopy`.
+  `clang`, `llvm-ar`, `llvm-link`, `lld`, and `llvm-objcopy`.
 - `IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN_CLANG_BINARY`,
+  `IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN_LLVM_AR_BINARY`,
   `IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN_LLVM_LINK_BINARY`,
   `IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN_LLD_BINARY`,
   `IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN_LLVM_OBJCOPY_BINARY`, and
   `IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN_CLANG_RESOURCE_INCLUDE` for exact per-tool
   overrides.
 
-In source mode CMake invokes `build_tools/scripts/amdgpu_device_binaries.py`.
-The `rocm` and `auto` modes search standard ROCm installs, ask `clang` or
-`amdclang` for companion tool locations, check `hipcc` on `PATH`, and check
-`/opt/rocm`. The `llvm-tools` mode searches explicit LLVM/IREE tool directories
-and per-tool overrides. The `llvm-project` mode uses tools already configured by
-the containing IREE build.
+`auto` selects a configured `IREE_ROCM_PATH`, a dedicated ROCm root, or an
+explicit installed LLVM tools directory. It does not inspect
+`CMAKE_C_COMPILER` or select an arbitrary compiler from `PATH`. `rocm` and
+`llvm-tools` make the provider requirement explicit; `none` disables
+source-built device artifacts. When
+`IREE_HAL_AMDGPU_DEVICE_BINARY_BUILD_MODE=source`, an incomplete provider is a
+configuration error. CMake passes the resolved tools directly to
+`build_tools/scripts/amdgpu_device_binaries.py`, bypassing the standalone
+script's broader discovery fallbacks.
