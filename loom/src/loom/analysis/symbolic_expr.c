@@ -37,6 +37,15 @@ struct loom_symbolic_expr_memo_entry_t {
   loom_symbolic_expr_t expression;
 };
 
+static const loom_symbolic_expr_memo_entry_t*
+loom_symbolic_expr_ready_memo_entry(const loom_symbolic_expr_context_t* context,
+                                    loom_value_id_t value_id) {
+  if (value_id >= context->memo_capacity) return NULL;
+  const loom_symbolic_expr_memo_entry_t* entry =
+      &context->memo_entries[value_id];
+  return entry->state == LOOM_SYMBOLIC_EXPR_MEMO_READY ? entry : NULL;
+}
+
 static loom_value_facts_t loom_symbolic_expr_intersect_integer_facts(
     loom_value_facts_t lhs, loom_value_facts_t rhs) {
   if (loom_value_facts_is_unknown(lhs) || loom_value_facts_is_float(lhs)) {
@@ -89,10 +98,9 @@ void loom_symbolic_expr_context_reset(loom_symbolic_expr_context_t* context) {
 bool loom_symbolic_expr_context_try_lookup_summary(
     const loom_symbolic_expr_context_t* context, loom_value_id_t value_id,
     loom_symbolic_expr_summary_t* out_summary) {
-  if (value_id >= context->memo_capacity) return false;
   const loom_symbolic_expr_memo_entry_t* entry =
-      &context->memo_entries[value_id];
-  if (entry->state != LOOM_SYMBOLIC_EXPR_MEMO_READY) return false;
+      loom_symbolic_expr_ready_memo_entry(context, value_id);
+  if (entry == NULL) return false;
   *out_summary = (loom_symbolic_expr_summary_t){
       .expression = entry->expression,
       .materialized_dynamic_value_id = entry->materialized_dynamic_value_id,
@@ -581,15 +589,6 @@ typedef struct loom_symbolic_expr_expansion_frame_t {
 } loom_symbolic_expr_expansion_frame_t;
 
 #define LOOM_SYMBOLIC_EXPR_EXPANSION_INLINE_FRAME_CAPACITY 8
-
-static const loom_symbolic_expr_memo_entry_t*
-loom_symbolic_expr_ready_memo_entry(const loom_symbolic_expr_context_t* context,
-                                    loom_value_id_t value_id) {
-  if (value_id >= context->memo_capacity) return NULL;
-  const loom_symbolic_expr_memo_entry_t* entry =
-      &context->memo_entries[value_id];
-  return entry->state == LOOM_SYMBOLIC_EXPR_MEMO_READY ? entry : NULL;
-}
 
 static bool loom_symbolic_expr_memo_entry_is_constant(
     const loom_symbolic_expr_memo_entry_t* entry) {

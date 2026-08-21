@@ -959,8 +959,9 @@ static bool loom_low_source_memory_access_add_view_base_byte_offset(
     loom_value_id_t view_value_id, loom_low_source_memory_access_plan_t* plan,
     loom_low_source_memory_access_diagnostic_t* diagnostic,
     int64_t* inout_static_byte_offset) {
-  const loom_module_t* module = view_regions->module;
-  const loom_value_fact_table_t* fact_table = view_regions->fact_table;
+  const loom_module_t* module = view_regions->expression_context->module;
+  const loom_value_fact_table_t* fact_table =
+      view_regions->expression_context->fact_table;
   const loom_view_region_t* view_region = NULL;
   if (!loom_view_region_table_try_lookup(view_regions, view_value_id,
                                          &view_region)) {
@@ -1247,8 +1248,9 @@ static bool loom_low_source_memory_access_plan_from_components(
   out_plan->dynamic_view_base_byte_facts = loom_value_facts_unknown();
   out_plan->minimum_alignment = 1;
   out_plan->cache_policy = cache_policy;
-  const loom_module_t* module = view_regions->module;
-  const loom_value_fact_table_t* fact_table = view_regions->fact_table;
+  const loom_module_t* module = view_regions->expression_context->module;
+  const loom_value_fact_table_t* fact_table =
+      view_regions->expression_context->fact_table;
 
   loom_vector_memory_access_t vector_access;
   if (!loom_vector_memory_access_describe(&fact_table->context, module,
@@ -1590,7 +1592,7 @@ static bool loom_low_source_memory_access_plan_build_indexed_impl(
     loom_vector_memory_cache_policy_t cache_policy,
     loom_low_source_memory_access_plan_t* out_plan,
     loom_low_source_memory_access_diagnostic_t* out_diagnostic) {
-  const loom_module_t* module = view_regions->module;
+  const loom_module_t* module = view_regions->expression_context->module;
   if (view_value_id >= module->values.count) {
     out_diagnostic->rejection_bits |=
         LOOM_LOW_SOURCE_MEMORY_ACCESS_REJECTION_VIEW_SOURCE;
@@ -1609,8 +1611,9 @@ bool loom_low_source_memory_access_plan_build(
     loom_low_source_memory_access_diagnostic_t* out_diagnostic) {
   *out_plan = (loom_low_source_memory_access_plan_t){0};
   *out_diagnostic = (loom_low_source_memory_access_diagnostic_t){0};
-  const loom_module_t* module = view_regions->module;
-  const loom_value_fact_table_t* fact_table = view_regions->fact_table;
+  const loom_module_t* module = view_regions->expression_context->module;
+  const loom_value_fact_table_t* fact_table =
+      view_regions->expression_context->fact_table;
 
   loom_memory_access_t access = loom_memory_access_cast(module, source_op);
   if (!loom_memory_access_isa(access)) {
@@ -1684,7 +1687,7 @@ bool loom_low_source_memory_access_plan_build_view(
     loom_low_source_memory_access_diagnostic_t* out_diagnostic) {
   *out_plan = (loom_low_source_memory_access_plan_t){0};
   *out_diagnostic = (loom_low_source_memory_access_diagnostic_t){0};
-  const loom_module_t* module = view_regions->module;
+  const loom_module_t* module = view_regions->expression_context->module;
   if (view_value_id >= module->values.count) {
     out_diagnostic->rejection_bits |=
         LOOM_LOW_SOURCE_MEMORY_ACCESS_REJECTION_VIEW_SOURCE;

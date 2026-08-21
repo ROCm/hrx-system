@@ -33,8 +33,9 @@ static iree_status_t loom_view_region_table_append_region(
   if (table->region_count >= table->region_capacity) {
     void* regions = table->regions;
     IREE_RETURN_IF_ERROR(iree_arena_grow_array(
-        table->arena, table->region_count, table->region_count + 1,
-        sizeof(*table->regions), &table->region_capacity, &regions));
+        table->expression_context->arena, table->region_count,
+        table->region_count + 1, sizeof(*table->regions),
+        &table->region_capacity, &regions));
     table->regions = (loom_view_region_t*)regions;
   }
   loom_view_region_t* stored_region = &table->regions[table->region_count];
@@ -51,9 +52,6 @@ iree_status_t loom_view_region_table_initialize(
     loom_view_region_table_t* out_table) {
   IREE_ASSERT(loom_local_value_domain_is_acquired(value_domain));
   memset(out_table, 0, sizeof(*out_table));
-  out_table->module = value_domain->module;
-  out_table->fact_table = expression_context->fact_table;
-  out_table->arena = expression_context->arena;
   out_table->expression_context = expression_context;
   out_table->value_domain = value_domain;
   const iree_host_size_t value_count = value_domain->value_count;
@@ -61,11 +59,11 @@ iree_status_t loom_view_region_table_initialize(
     return iree_ok_status();
   }
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      out_table->arena, value_count,
+      expression_context->arena, value_count,
       sizeof(*out_table->region_ids_by_value_ordinal),
       (void**)&out_table->region_ids_by_value_ordinal));
   IREE_RETURN_IF_ERROR(
-      iree_arena_allocate_array(out_table->arena, value_count,
+      iree_arena_allocate_array(expression_context->arena, value_count,
                                 sizeof(*out_table->states_by_value_ordinal),
                                 (void**)&out_table->states_by_value_ordinal));
   for (iree_host_size_t i = 0; i < value_count; ++i) {
@@ -82,7 +80,8 @@ iree_status_t loom_view_region_table_initialize(
 
 static loom_value_facts_t loom_view_region_lookup_facts(
     const loom_view_region_table_t* table, loom_value_id_t value_id) {
-  return loom_value_fact_table_lookup(table->fact_table, value_id);
+  return loom_value_fact_table_lookup(table->expression_context->fact_table,
+                                      value_id);
 }
 
 static bool loom_view_region_facts_exact_i64(loom_value_facts_t facts,
@@ -199,9 +198,9 @@ static bool loom_view_region_address_layout(
     loom_view_region_address_layout_t* out_layout) {
   *out_layout = (loom_view_region_address_layout_t){0};
   return loom_encoding_query_type_address_layout(
-      &table->fact_table->context, table->module, view_type,
-      out_layout->static_strides, IREE_ARRAYSIZE(out_layout->static_strides),
-      &out_layout->summary);
+      &table->expression_context->fact_table->context,
+      table->expression_context->module, view_type, out_layout->static_strides,
+      IREE_ARRAYSIZE(out_layout->static_strides), &out_layout->summary);
 }
 
 static iree_status_t loom_view_region_static_or_dynamic_expr(
@@ -244,9 +243,9 @@ static iree_status_t loom_view_region_direct_strided_stride_expr(
   if (!loom_type_has_ssa_encoding(view_type)) return iree_ok_status();
   loom_value_id_t layout_value_id =
       (loom_value_id_t)loom_type_encoding_value_id(view_type);
-  if (layout_value_id >= table->module->values.count) return iree_ok_status();
-  const loom_value_t* layout_value =
-      loom_module_value(table->module, layout_value_id);
+  const loom_module_t* module = table->expression_context->module;
+  if (layout_value_id >= module->values.count) return iree_ok_status();
+  const loom_value_t* layout_value = loom_module_value(module, layout_value_id);
   if (loom_value_is_block_arg(layout_value)) return iree_ok_status();
   const loom_op_t* op = loom_value_def_op(layout_value);
   if (!op || !loom_encoding_layout_strided_isa(op)) return iree_ok_status();
@@ -628,8 +627,8 @@ static iree_status_t loom_view_region_build_subview(
       table, value_id, view_type, reference, out_region));
   if (!source_region) return iree_ok_status();
 
-  loom_type_t source_type =
-      loom_module_value_type(table->module, loom_view_subview_source(op));
+  loom_type_t source_type = loom_module_value_type(
+      table->expression_context->module, loom_view_subview_source(op));
   loom_symbolic_expr_t additional_offset = {0};
   IREE_RETURN_IF_ERROR(loom_view_region_additional_byte_offset_expr(
       table, source_type, loom_view_subview_static_offsets(op),
@@ -691,14 +690,15 @@ static iree_status_t loom_view_region_build_refine(
 static iree_status_t loom_view_region_build_for_value(
     loom_view_region_table_t* table, loom_value_id_t value_id,
     loom_view_region_t* out_region) {
-  loom_type_t view_type = loom_module_value_type(table->module, value_id);
+  const loom_module_t* module = table->expression_context->module;
+  loom_type_t view_type = loom_module_value_type(module, value_id);
   loom_value_fact_view_reference_t reference =
       loom_view_region_default_reference(value_id, view_type);
   loom_value_facts_t facts = loom_view_region_lookup_facts(table, value_id);
-  (void)loom_value_facts_query_view_reference(&table->fact_table->context,
-                                              facts, &reference);
+  (void)loom_value_facts_query_view_reference(
+      &table->expression_context->fact_table->context, facts, &reference);
 
-  const loom_value_t* value = loom_module_value(table->module, value_id);
+  const loom_value_t* value = loom_module_value(module, value_id);
   if (loom_value_is_block_arg(value)) {
     return loom_view_region_build_default(table, value_id, view_type, reference,
                                           out_region);
@@ -727,11 +727,12 @@ static iree_status_t loom_view_region_build_for_value(
 iree_status_t loom_view_region_table_get(
     loom_view_region_table_t* table, loom_value_id_t value_id,
     const loom_view_region_t** out_region) {
-  IREE_ASSERT(value_id < table->module->values.count);
+  const loom_module_t* module = table->expression_context->module;
+  IREE_ASSERT(value_id < module->values.count);
   *out_region = NULL;
   const loom_value_ordinal_t value_ordinal =
       loom_local_value_domain_ordinal(table->value_domain, value_id);
-  loom_type_t type = loom_module_value_type(table->module, value_id);
+  loom_type_t type = loom_module_value_type(module, value_id);
   if (!loom_type_is_view(type)) return iree_ok_status();
 
   uint8_t state = table->states_by_value_ordinal[value_ordinal];
@@ -775,7 +776,9 @@ bool loom_view_region_table_try_lookup(const loom_view_region_table_t* table,
                                        loom_value_id_t value_id,
                                        const loom_view_region_t** out_region) {
   *out_region = NULL;
-  if (!table || value_id >= table->module->values.count) return false;
+  if (value_id >= table->expression_context->module->values.count) {
+    return false;
+  }
   const loom_value_ordinal_t value_ordinal =
       loom_local_value_domain_try_ordinal(table->value_domain, value_id);
   if (value_ordinal == LOOM_VALUE_ORDINAL_INVALID) return false;
@@ -799,7 +802,7 @@ iree_status_t loom_view_region_table_derive_element_region(
     loom_view_region_t* out_region, bool* out_derived) {
   *out_region = (loom_view_region_t){0};
   *out_derived = false;
-  if (!table || view_value_id >= table->module->values.count) {
+  if (view_value_id >= table->expression_context->module->values.count) {
     return iree_ok_status();
   }
 
@@ -810,7 +813,7 @@ iree_status_t loom_view_region_table_derive_element_region(
     return iree_ok_status();
   }
   const loom_type_t view_type =
-      loom_module_value_type(table->module, view_value_id);
+      loom_module_value_type(table->expression_context->module, view_value_id);
   if (static_indices.kind != LOOM_ATTR_I64_ARRAY ||
       static_indices.count != loom_type_rank(view_type)) {
     return iree_ok_status();
@@ -873,7 +876,8 @@ static void loom_view_region_add_access(loom_view_region_t* region,
 
 static iree_status_t loom_view_region_table_analyze_op_memory(
     loom_view_region_table_t* table, const loom_op_t* op) {
-  const loom_op_vtable_t* vtable = loom_op_vtable(table->module, op);
+  const loom_op_vtable_t* vtable =
+      loom_op_vtable(table->expression_context->module, op);
   if (!vtable) return iree_ok_status();
 
   if (vtable->memory_access) {

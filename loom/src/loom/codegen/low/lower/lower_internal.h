@@ -150,8 +150,7 @@ struct loom_low_lower_module_state_t {
 typedef enum loom_low_lower_function_analysis_phase_e {
   LOOM_LOW_LOWER_FUNCTION_ANALYSIS_EMPTY = 0,
   LOOM_LOW_LOWER_FUNCTION_ANALYSIS_EXPRESSIONS = 1,
-  LOOM_LOW_LOWER_FUNCTION_ANALYSIS_VIEW_TABLE = 2,
-  LOOM_LOW_LOWER_FUNCTION_ANALYSIS_VIEW_REGIONS = 3,
+  LOOM_LOW_LOWER_FUNCTION_ANALYSIS_VIEW_REGIONS = 2,
 } loom_low_lower_function_analysis_phase_t;
 
 typedef struct loom_low_lower_function_analysis_t {

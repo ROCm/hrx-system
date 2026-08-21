@@ -150,8 +150,8 @@ typedef struct loom_target_low_legality_options_t {
   // type semantics.
   loom_target_low_legality_type_supported_callback_t type_supported;
   // Caller-owned function analysis shared with contract queries and lowering.
-  // The table carries the matching facts, value domain, and stable symbolic
-  // expression context.
+  // The table carries the matching value domain and stable symbolic expression
+  // context, which owns the current facts.
   const loom_view_region_table_t* view_regions;
   // Structural source forms permitted by the caller's current phase.
   loom_target_low_structural_legality_flags_t structural_legality_flags;

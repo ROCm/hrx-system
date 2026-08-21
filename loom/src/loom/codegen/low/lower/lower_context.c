@@ -321,15 +321,12 @@ iree_status_t loom_low_lower_context_view_regions(
   *out_view_regions = NULL;
   loom_low_lower_function_analysis_t* analysis =
       &context->lowering.function_analysis;
-  if (analysis->phase < LOOM_LOW_LOWER_FUNCTION_ANALYSIS_VIEW_TABLE) {
+  if (analysis->phase < LOOM_LOW_LOWER_FUNCTION_ANALYSIS_VIEW_REGIONS) {
     loom_symbolic_expr_context_t* expression_context =
         loom_low_lower_context_symbolic_expr_context(context);
     IREE_RETURN_IF_ERROR(loom_view_region_table_initialize(
         &context->lowering.value_domain, expression_context,
         &analysis->view_regions));
-    analysis->phase = LOOM_LOW_LOWER_FUNCTION_ANALYSIS_VIEW_TABLE;
-  }
-  if (analysis->phase < LOOM_LOW_LOWER_FUNCTION_ANALYSIS_VIEW_REGIONS) {
     IREE_RETURN_IF_ERROR(
         loom_view_region_table_analyze(&analysis->view_regions));
     analysis->phase = LOOM_LOW_LOWER_FUNCTION_ANALYSIS_VIEW_REGIONS;

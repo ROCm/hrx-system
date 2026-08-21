@@ -122,15 +122,6 @@ typedef struct loom_view_region_t {
 
 // Dense analysis table for one function-local value domain.
 typedef struct loom_view_region_table_t {
-  // Module whose SSA values are summarized.
-  const loom_module_t* module;
-
-  // Current fact table consumed by expression and view-reference queries.
-  const loom_value_fact_table_t* fact_table;
-
-  // Arena used for all table, region, and symbolic expression storage.
-  iree_arena_allocator_t* arena;
-
   // Borrowed symbolic expression context shared by all region construction.
   loom_symbolic_expr_context_t* expression_context;
 

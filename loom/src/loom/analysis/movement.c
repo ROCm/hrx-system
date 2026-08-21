@@ -304,7 +304,8 @@ static iree_status_t loom_movement_endpoint_for_view(
     loom_movement_endpoint_flags_t access_flags,
     loom_movement_endpoint_t* out_endpoint) {
   loom_movement_endpoint_initialize_none(out_endpoint);
-  if (view_value_id >= analysis->module->values.count) {
+  const loom_module_t* module = analysis->expression_context.module;
+  if (view_value_id >= module->values.count) {
     return iree_ok_status();
   }
 
@@ -315,8 +316,8 @@ static iree_status_t loom_movement_endpoint_for_view(
     return iree_ok_status();
   }
 
-  loom_movement_endpoint_from_view_region(analysis->module, view_value_id,
-                                          access_flags, region, out_endpoint);
+  loom_movement_endpoint_from_view_region(module, view_value_id, access_flags,
+                                          region, out_endpoint);
   return iree_ok_status();
 }
 
@@ -332,9 +333,9 @@ static iree_status_t loom_movement_endpoint_for_element_view(
       &analysis->view_regions, view_value_id, static_indices, dynamic_indices,
       &element_region, &derived));
   if (!derived) return iree_ok_status();
-  loom_movement_endpoint_from_view_region(analysis->module, view_value_id,
-                                          access_flags, &element_region,
-                                          out_endpoint);
+  loom_movement_endpoint_from_view_region(analysis->expression_context.module,
+                                          view_value_id, access_flags,
+                                          &element_region, out_endpoint);
   return iree_ok_status();
 }
 
@@ -362,10 +363,10 @@ static iree_status_t loom_movement_apply_vector_access(
     loom_movement_request_t* request, loom_movement_diagnostic_t* diagnostic,
     bool* out_applied) {
   *out_applied = false;
-  const loom_type_t view_type =
-      loom_module_value_type(analysis->module, view_value_id);
+  const loom_module_t* module = analysis->expression_context.module;
+  const loom_type_t view_type = loom_module_value_type(module, view_value_id);
   if (!loom_vector_memory_access_describe(
-          &analysis->fact_table->context, analysis->module, view_type,
+          &analysis->expression_context.fact_table->context, module, view_type,
           vector_type, &request->vector_access)) {
     diagnostic->rejection_bits |= LOOM_MOVEMENT_REJECTION_VECTOR_ACCESS;
     return iree_ok_status();
@@ -446,6 +447,7 @@ static iree_status_t loom_movement_describe_scalar(
     loom_movement_analysis_t* analysis, const loom_op_t* op,
     loom_memory_access_t access, loom_movement_request_t* request,
     loom_movement_diagnostic_t* diagnostic, bool* out_described) {
+  const loom_module_t* module = analysis->expression_context.module;
   const loom_memory_access_operation_kind_t operation_kind =
       loom_memory_access_operation_kind(access);
   if (operation_kind != LOOM_MEMORY_ACCESS_OPERATION_LOAD &&
@@ -475,8 +477,7 @@ static iree_status_t loom_movement_describe_scalar(
   }
   if (view_value_id == LOOM_VALUE_ID_INVALID ||
       register_value_id == LOOM_VALUE_ID_INVALID ||
-      !loom_type_is_scalar(
-          loom_module_value_type(analysis->module, register_value_id))) {
+      !loom_type_is_scalar(loom_module_value_type(module, register_value_id))) {
     diagnostic->rejection_bits |= LOOM_MOVEMENT_REJECTION_ENDPOINT;
     return loom_movement_describe_result(false, out_described);
   }
@@ -499,12 +500,12 @@ static iree_status_t loom_movement_describe_scalar(
     IREE_RETURN_IF_ERROR(loom_movement_endpoint_for_element_view(
         analysis, view_value_id, static_indices, dynamic_indices,
         LOOM_MOVEMENT_ENDPOINT_READ, &request->source));
-    loom_movement_endpoint_for_register(analysis->module, register_value_id,
+    loom_movement_endpoint_for_register(module, register_value_id,
                                         LOOM_MOVEMENT_ENDPOINT_WRITE,
                                         &request->dest);
     view_endpoint = &request->source;
   } else {
-    loom_movement_endpoint_for_register(analysis->module, register_value_id,
+    loom_movement_endpoint_for_register(module, register_value_id,
                                         LOOM_MOVEMENT_ENDPOINT_READ,
                                         &request->source);
     IREE_RETURN_IF_ERROR(loom_movement_endpoint_for_element_view(
@@ -656,6 +657,7 @@ static iree_status_t loom_movement_describe_vector(
     const loom_movement_vector_descriptor_t* descriptor,
     loom_movement_request_t* request, loom_movement_diagnostic_t* diagnostic,
     bool* out_described) {
+  const loom_module_t* module = analysis->expression_context.module;
   request->kind = descriptor->movement_kind;
   request->flags |= descriptor->request_flags;
   request->layout_kind = descriptor->layout_kind;
@@ -677,13 +679,13 @@ static iree_status_t loom_movement_describe_vector(
     request->offsets_value_id = operands[descriptor->offsets_operand_index];
   }
 
-  if (!loom_vector_memory_cache_policy_from_op(analysis->module, op,
+  if (!loom_vector_memory_cache_policy_from_op(module, op,
                                                &request->cache_policy)) {
     diagnostic->rejection_bits |= LOOM_MOVEMENT_REJECTION_CACHE_POLICY;
     return loom_movement_describe_result(false, out_described);
   }
   if (descriptor->writes_view) {
-    loom_movement_endpoint_for_register(analysis->module, register_value_id,
+    loom_movement_endpoint_for_register(module, register_value_id,
                                         LOOM_MOVEMENT_ENDPOINT_READ,
                                         &request->source);
     IREE_RETURN_IF_ERROR(loom_movement_endpoint_for_view(
@@ -700,16 +702,16 @@ static iree_status_t loom_movement_describe_vector(
       diagnostic->rejection_bits |= LOOM_MOVEMENT_REJECTION_ENDPOINT;
       return loom_movement_describe_result(false, out_described);
     }
-    loom_movement_endpoint_for_register(analysis->module, register_value_id,
+    loom_movement_endpoint_for_register(module, register_value_id,
                                         LOOM_MOVEMENT_ENDPOINT_WRITE,
                                         &request->dest);
   }
 
-  loom_memory_access_t access = loom_memory_access_cast(analysis->module, op);
+  loom_memory_access_t access = loom_memory_access_cast(module, op);
   bool applied = false;
   IREE_RETURN_IF_ERROR(loom_movement_apply_vector_access(
       analysis, view_value_id,
-      loom_module_value_type(analysis->module, register_value_id),
+      loom_module_value_type(module, register_value_id),
       loom_memory_access_static_indices(access),
       loom_memory_access_dynamic_indices(access), descriptor->layout_kind,
       request, diagnostic, &applied));
@@ -964,12 +966,10 @@ static iree_status_t loom_movement_describe_async(
 //===----------------------------------------------------------------------===//
 
 iree_status_t loom_movement_analysis_initialize(
-    loom_value_fact_table_t* fact_table,
+    const loom_value_fact_table_t* fact_table,
     const loom_local_value_domain_t* value_domain,
     iree_arena_allocator_t* arena, loom_movement_analysis_t* out_analysis) {
   *out_analysis = (loom_movement_analysis_t){0};
-  out_analysis->module = value_domain->module;
-  out_analysis->fact_table = fact_table;
   loom_symbolic_expr_context_initialize(value_domain->module, fact_table, arena,
                                         &out_analysis->expression_context);
   return loom_view_region_table_initialize(value_domain,
@@ -1062,7 +1062,8 @@ iree_status_t loom_movement_request_describe_op(
                                         out_described);
   }
 
-  loom_memory_access_t access = loom_memory_access_cast(analysis->module, op);
+  loom_memory_access_t access =
+      loom_memory_access_cast(analysis->expression_context.module, op);
   if (loom_memory_access_isa(access)) {
     return loom_movement_describe_scalar(analysis, op, access, out_request,
                                          out_diagnostic, out_described);

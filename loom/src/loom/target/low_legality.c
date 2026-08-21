@@ -351,7 +351,7 @@ const loom_low_descriptor_set_t* loom_target_low_legality_descriptor_set(
 
 const loom_value_fact_table_t* loom_target_low_legality_fact_table(
     const loom_target_low_legality_context_t* context) {
-  return context->options->view_regions->fact_table;
+  return context->options->view_regions->expression_context->fact_table;
 }
 
 const loom_local_value_domain_t* loom_target_low_legality_value_domain(

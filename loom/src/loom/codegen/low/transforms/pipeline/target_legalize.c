@@ -293,8 +293,6 @@ typedef struct loom_low_target_legalize_function_state_t {
   const loom_low_descriptor_set_t* descriptor_set;
   // Active source-to-low contract query scope, rebuilt after IR mutation.
   loom_low_lower_source_query_scope_t* query_scope;
-  // Fact table used to initialize query_scope.
-  const loom_value_fact_table_t* query_scope_fact_table;
   // Arena receiving query_scope storage for this function run.
   iree_arena_allocator_t* query_scope_arena;
   // Target legalizer registry shared across functions in this pass run.
@@ -1215,7 +1213,6 @@ static void loom_low_target_legalize_destroy_query_scope(
   state->legalization_context.view_regions = NULL;
   loom_low_lower_source_query_scope_destroy(state->query_scope);
   state->query_scope = NULL;
-  state->query_scope_fact_table = NULL;
 }
 
 static iree_status_t loom_low_target_legalize_refresh_query_scope(
@@ -1230,7 +1227,6 @@ static iree_status_t loom_low_target_legalize_refresh_query_scope(
       loom_low_lower_source_query_scope_value_domain(state->query_scope);
   IREE_RETURN_IF_ERROR(loom_low_lower_source_query_scope_view_regions(
       state->query_scope, &state->legalization_context.view_regions));
-  state->query_scope_fact_table = fact_table;
   return iree_ok_status();
 }
 
@@ -1238,7 +1234,7 @@ static iree_status_t loom_low_target_legalize_ensure_query_scope(
     loom_low_target_legalize_function_state_t* state,
     const loom_value_fact_table_t* fact_table) {
   if (state->query_scope != NULL &&
-      state->query_scope_fact_table == fact_table) {
+      state->lower_options.fact_table == fact_table) {
     return iree_ok_status();
   }
   return loom_low_target_legalize_refresh_query_scope(state, fact_table);
