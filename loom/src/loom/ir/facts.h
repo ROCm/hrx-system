@@ -45,7 +45,10 @@ extern "C" {
 // Flags
 //===----------------------------------------------------------------------===//
 
-// Cached predicate flags derived from range, divisor, floating-point
+// Storage for cached predicate flags.
+typedef uint32_t loom_value_fact_flags_t;
+
+// Cached predicate flag bits derived from range, divisor, floating-point
 // predicates, or target-independent execution distribution. Range flags are
 // always consistent with the scalar range/divisor fields. Distribution flags
 // describe the widest execution scope over which invocations observe the same
@@ -140,12 +143,13 @@ enum loom_value_fact_flag_bits_e {
   LOOM_VALUE_FACT_TOPOLOGY_CLUSTER_WORKGROUP_Y = 1u << 29,
   // The value is the full z-dimension within-cluster workgroup id domain.
   LOOM_VALUE_FACT_TOPOLOGY_CLUSTER_WORKGROUP_Z = 1u << 30,
-  // The value is known to be identical for every invocation in every
-  // workgroup of a workgroup cluster. This implies WORKGROUP_UNIFORM and
-  // SUBGROUP_UNIFORM, and all three bits are set together.
-  LOOM_VALUE_FACT_CLUSTER_UNIFORM = 1u << 31,
 };
-typedef uint32_t loom_value_fact_flags_t;
+
+// The value is known to be identical for every invocation in every workgroup
+// of a workgroup cluster. This implies WORKGROUP_UNIFORM and SUBGROUP_UNIFORM,
+// and all three bits are set together. Bit 31 is an unsigned integer constant
+// instead of an enumerator because C requires enumerator values to fit in int.
+#define LOOM_VALUE_FACT_CLUSTER_UNIFORM UINT32_C(0x80000000)
 
 #define LOOM_VALUE_FACT_UNIFORM_SCOPE_MASK                                \
   (LOOM_VALUE_FACT_SUBGROUP_UNIFORM | LOOM_VALUE_FACT_WORKGROUP_UNIFORM | \
