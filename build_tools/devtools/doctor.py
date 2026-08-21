@@ -103,7 +103,7 @@ def doctor_plan(lane: str | None, tool_env: ToolEnvironment) -> CommandPlan:
                     ],
                     cwd=REPO_ROOT,
                     env=env,
-                    label="check Windows long-path policy",
+                    label="check Windows Bazel host capabilities",
                 )
             )
             plan.add(

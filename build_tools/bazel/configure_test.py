@@ -56,32 +56,56 @@ class ConfigureBazelTest(unittest.TestCase):
             "C:/home/runner/rocm-root",
         )
 
-    def test_non_windows_host_does_not_require_long_path_policy(self):
-        enabled_reader = mock.Mock(return_value=False)
+    def test_non_windows_host_does_not_probe_windows_capabilities(self):
+        long_paths_reader = mock.Mock(return_value=False)
+        symbolic_link_probe = mock.Mock(return_value=False)
 
-        self.configure_bazel.require_windows_long_paths(
-            platform_name="linux", enabled_reader=enabled_reader
+        self.configure_bazel.require_windows_bazel_host(
+            platform_name="linux",
+            long_paths_reader=long_paths_reader,
+            symbolic_link_probe=symbolic_link_probe,
         )
 
-        enabled_reader.assert_not_called()
+        long_paths_reader.assert_not_called()
+        symbolic_link_probe.assert_not_called()
 
-    def test_windows_host_accepts_enabled_long_path_policy(self):
-        self.configure_bazel.require_windows_long_paths(
-            platform_name="win32", enabled_reader=lambda: True
+    def test_windows_host_accepts_required_capabilities(self):
+        self.configure_bazel.require_windows_bazel_host(
+            platform_name="win32",
+            long_paths_reader=lambda: True,
+            symbolic_link_probe=lambda: True,
         )
 
     def test_windows_host_reports_exact_long_path_setup(self):
         with self.assertRaisesRegex(
             SystemExit, "Open PowerShell as Administrator"
         ) as context:
-            self.configure_bazel.require_windows_long_paths(
-                platform_name="win32", enabled_reader=lambda: False
+            self.configure_bazel.require_windows_bazel_host(
+                platform_name="win32",
+                long_paths_reader=lambda: False,
+                symbolic_link_probe=lambda: False,
             )
 
         message = str(context.exception)
         self.assertIn("LongPathsEnabled", message)
         self.assertIn("-Value 1", message)
+        self.assertIn("Symbolic-link creation", message)
+        self.assertIn("base image", message)
         self.assertIn("python dev.py bazel shutdown", message)
+
+    def test_windows_host_reports_missing_symbolic_link_capability(self):
+        with self.assertRaisesRegex(SystemExit, "Symbolic-link creation") as context:
+            self.configure_bazel.require_windows_bazel_host(
+                platform_name="win32",
+                long_paths_reader=lambda: True,
+                symbolic_link_probe=lambda: False,
+            )
+
+        message = str(context.exception)
+        self.assertIn("Developer Mode", message)
+        self.assertIn("Create symbolic links", message)
+        self.assertIn("base image", message)
+        self.assertNotIn("LongPathsEnabled", message)
 
     def test_portable_project_options_configure_amdgpu(self):
         with tempfile.TemporaryDirectory() as temporary_directory:

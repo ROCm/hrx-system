@@ -67,9 +67,17 @@ python dev.py cmake setup --venv
 python dev.py cmake doctor
 ```
 
-Keep Windows build trees short and keep one tree per compiler. The following is
-the host-only Loom baseline: it builds the VM and x86 target paths without
-requiring ROCm, Vulkan, WebGPU, or libHRX.
+Keep Windows build trees short and keep one tree per compiler. The `C:\b` CMake
+trees below remain within the legacy Win32 path limit and do not require the
+machine-wide `LongPathsEnabled` policy. Bazel has a different host contract:
+its managed Python runfiles exceed the legacy limit and use symbolic links, so
+Windows Bazel hosts require `LongPathsEnabled` plus Developer Mode or an
+equivalent symbolic-link policy. Provision both policies in the base image for
+CI runners that cannot elevate during a job. `python dev.py bazel configure`
+and `python dev.py bazel doctor` diagnose those capabilities.
+
+The following is the host-only Loom baseline: it builds the VM and x86 target
+paths without requiring ROCm, Vulkan, WebGPU, or libHRX.
 
 ```powershell
 $baseOptions = @(
