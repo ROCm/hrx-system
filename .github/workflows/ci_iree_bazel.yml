@@ -182,9 +182,6 @@ jobs:
 
   windows_bazel:
     name: Windows / Repository / MSVC + ROCm
-    # The Wasm disassembly test has no cost-appropriate hermetic Windows
-    # llvm-objdump representation yet, so retain this job definition inert.
-    if: ${{ false }}
     runs-on: azure-windows-scale-rocm
     timeout-minutes: 60
     env:

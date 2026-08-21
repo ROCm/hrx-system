@@ -45,6 +45,7 @@ BAZEL_REPOSITORY_INTEGRATION_DEVICE_TARGETS = (
 BAZEL_REPOSITORY_INTEGRATION_TEST_TARGETS = (
     "//build_tools/bazel/test:dynamic_library_environment_execution_test",
     "//build_tools/bazel/test:dynamic_library_environment_wrapper_test",
+    "//build_tools/bazel_to_cmake:bazel_to_cmake_test",
     "//build_tools/devtools:bazel_launcher_test",
     "//build_tools/devtools:bazel_test",
     "//build_tools/devtools:ci_test",
