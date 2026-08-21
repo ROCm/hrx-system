@@ -21,8 +21,9 @@ typedef struct iree_vm_process_t iree_vm_process_t;
 typedef struct iree_vm_program_t iree_vm_program_t;
 
 // Non-owning reference to a function linked into a program. Non-null values are
-// produced by the VM or trusted module implementations. The referenced program
-// must remain live for every use of the value.
+// produced by the VM or trusted module implementations and may only be copied
+// as complete values; callers must not modify or combine their lanes. The
+// referenced program must remain live for every use of the value.
 typedef struct iree_vm_function_ref_t {
   // Borrowed iree_vm_program_t* represented as integer bits.
   uint64_t program_bits;
@@ -39,8 +40,9 @@ static_assert(offsetof(iree_vm_function_ref_t, target_bits) == 8,
               "VM function ref target lane must be second");
 
 // Non-owning host invocation target bound to a process. Non-null values are
-// produced by the VM. The referenced process must remain live for every use,
-// including asynchronous invocation.
+// produced by the VM and may only be copied as complete values; callers must
+// not modify or combine their lanes. The referenced process must remain live
+// for every use, including asynchronous invocation.
 typedef struct iree_vm_function_t {
   // Borrowed iree_vm_process_t* represented as integer bits.
   uint64_t process_bits;

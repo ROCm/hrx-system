@@ -52,6 +52,8 @@ typedef struct iree_vm_program_callable_t {
   iree_vm_program_bank_counts_t argument_counts;
   // Exact physical result bank counts.
   iree_vm_program_bank_counts_t result_counts;
+  // Shared scalar result type, or INVALID for empty or heterogeneous results.
+  iree_vm_scalar_type_t uniform_result_scalar_type;
 } iree_vm_program_callable_t;
 
 // Cached executable initializer plan.
@@ -100,8 +102,8 @@ static_assert(sizeof(void*) != 8 || sizeof(iree_vm_linked_module_t) == 24,
               "64-bit linked modules must remain 24 bytes");
 static_assert(sizeof(void*) != 4 || sizeof(iree_vm_linked_module_t) == 16,
               "32-bit linked modules must remain 16 bytes");
-static_assert(sizeof(void*) != 8 || sizeof(iree_vm_program_callable_t) == 40,
-              "64-bit callable plans must remain 40 bytes");
+static_assert(sizeof(void*) != 8 || sizeof(iree_vm_program_callable_t) == 48,
+              "64-bit callable plans must remain 48 bytes");
 static_assert(sizeof(void*) != 8 || sizeof(iree_vm_program_initializer_t) == 16,
               "64-bit initializer plans must remain 16 bytes");
 
@@ -167,6 +169,15 @@ static inline iree_vm_module_signature_t iree_vm_program_callable_signature(
            callable->result_counts.function_count},
   };
   return signature;
+}
+
+// Returns true when both signature sides use only value cells.
+static inline bool iree_vm_program_callable_is_scalar_only(
+    const iree_vm_program_callable_t* callable) {
+  return callable->argument_counts.ref_count == 0 &&
+         callable->argument_counts.function_count == 0 &&
+         callable->result_counts.ref_count == 0 &&
+         callable->result_counts.function_count == 0;
 }
 
 // Resolves one nonzero canonical token with a direct indexed load.

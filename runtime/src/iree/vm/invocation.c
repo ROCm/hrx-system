@@ -590,26 +590,90 @@ static void iree_vm_invocation_stage_arguments(
   }
 }
 
-iree_status_t iree_vm_invocation_prepare_root(
+static void iree_vm_invocation_commit_root(
+    iree_vm_invocation_t* invocation, iree_vm_invocation_operation_t operation,
+    iree_vm_process_t* process, uint64_t target_bits,
+    const iree_vm_program_callable_t* callable, iree_vm_call_packet_t packet,
+    uint8_t* stack_cursor, iree_vm_invocation_wake_callback_t wake_callback,
+    bool has_external_borrowed_arguments) {
+  invocation->process = process;
+  invocation->root_target_bits = target_bits;
+  invocation->root_call.callable = callable;
+  invocation->root_call.packet = packet;
+  invocation->root_call.allocation_begin = invocation->stack_base;
+  invocation->stack_cursor = stack_cursor;
+  invocation->wake_callback = wake_callback;
+  invocation->operation = operation;
+  invocation->has_external_borrowed_arguments = has_external_borrowed_arguments;
+  invocation->state = IREE_VM_INVOCATION_STATE_RUNNING;
+  iree_atomic_store(&invocation->cancel_reason, IREE_VM_CANCEL_REASON_NONE,
+                    iree_memory_order_release);
+}
+
+static iree_status_t iree_vm_invocation_prepare_scalar_root(
     iree_vm_invocation_t* invocation, iree_vm_invocation_operation_t operation,
     iree_vm_process_t* process, uint64_t target_bits,
     const iree_vm_program_callable_t* callable,
-    iree_vm_variant_span_t arguments, iree_vm_variant_span_t results,
+    iree_vm_module_signature_t signature, iree_vm_variant_span_t arguments,
     iree_vm_invocation_wake_callback_t wake_callback) {
-  if (!iree_vm_invocation_is_idle(invocation) || !process ||
-      operation == IREE_VM_INVOCATION_OPERATION_NONE || target_bits == 0 ||
-      !callable) {
+  if (IREE_UNLIKELY(arguments.count != signature.arguments.count)) {
     iree_vm_invocation_consume_arguments(arguments);
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "invalid invocation root boundary");
+                            "invocation argument count mismatch");
   }
-  const iree_vm_module_signature_t signature =
-      iree_vm_program_callable_signature(callable);
-  if (results.count != signature.results.count) {
+  for (iree_host_size_t i = 0; i < signature.arguments.count; ++i) {
+    const iree_vm_scalar_type_t scalar_type =
+        (iree_vm_scalar_type_t)signature.arguments.data[i].kind;
+    const iree_vm_variant_t argument = arguments.data[i];
+    const uint64_t expected_metadata =
+        ((uint64_t)scalar_type << 2) | IREE_VM_VARIANT_TAG_SCALAR;
+    const uint32_t bit_width = iree_vm_invocation_scalar_bit_width(scalar_type);
+    if (IREE_UNLIKELY(
+            argument.metadata != expected_metadata ||
+            (bit_width < 64 && (argument.payload >> bit_width) != 0))) {
+      iree_vm_invocation_consume_arguments(arguments);
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "invocation scalar argument is not canonical");
+    }
+  }
+
+  const iree_host_size_t argument_count = signature.arguments.count;
+  const iree_host_size_t result_count = signature.results.count;
+  const iree_host_size_t total_size =
+      (argument_count + result_count) * sizeof(uint64_t);
+  if (IREE_UNLIKELY(total_size > (iree_host_size_t)(invocation->storage_end -
+                                                    invocation->stack_base))) {
     iree_vm_invocation_consume_arguments(arguments);
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "invocation result count mismatch");
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "root call staging exceeds invocation capacity");
   }
+
+  uint64_t* value_arguments = (uint64_t*)invocation->stack_base;
+  uint64_t* value_results = value_arguments + argument_count;
+  iree_vm_call_packet_t packet = {0};
+  packet.value_arguments.direct = value_arguments;
+  packet.value_arguments.overflow =
+      argument_count > 16 ? value_arguments + 16 : NULL;
+  packet.value_results.direct = value_results;
+  packet.value_results.overflow = result_count > 16 ? value_results + 16 : NULL;
+  for (iree_host_size_t i = 0; i < argument_count; ++i) {
+    value_arguments[i] = arguments.data[i].payload;
+    arguments.data[i] = iree_vm_variant_empty();
+  }
+  iree_vm_invocation_commit_root(
+      invocation, operation, process, target_bits, callable, packet,
+      invocation->stack_base + total_size, wake_callback,
+      /*has_external_borrowed_arguments=*/false);
+  return iree_ok_status();
+}
+
+static IREE_ATTRIBUTE_NOINLINE iree_status_t
+iree_vm_invocation_prepare_mixed_root(
+    iree_vm_invocation_t* invocation, iree_vm_invocation_operation_t operation,
+    iree_vm_process_t* process, uint64_t target_bits,
+    const iree_vm_program_callable_t* callable,
+    iree_vm_module_signature_t signature, iree_vm_variant_span_t arguments,
+    iree_vm_invocation_wake_callback_t wake_callback) {
   bool has_external_borrowed_arguments = false;
   iree_status_t status = iree_vm_invocation_validate_arguments(
       process, target_bits, callable->signature_module, signature.arguments,
@@ -631,19 +695,40 @@ iree_status_t iree_vm_invocation_prepare_root(
 
   iree_vm_invocation_stage_arguments(
       signature.arguments, callable->argument_counts, arguments, &packet);
-  invocation->process = process;
-  invocation->root_target_bits = target_bits;
-  invocation->root_call.callable = callable;
-  invocation->root_call.packet = packet;
-  invocation->root_call.allocation_begin = invocation->stack_base;
-  invocation->stack_cursor = stack_cursor;
-  invocation->wake_callback = wake_callback;
-  invocation->operation = operation;
-  invocation->has_external_borrowed_arguments = has_external_borrowed_arguments;
-  invocation->state = IREE_VM_INVOCATION_STATE_RUNNING;
-  iree_atomic_store(&invocation->cancel_reason, IREE_VM_CANCEL_REASON_NONE,
-                    iree_memory_order_release);
+  iree_vm_invocation_commit_root(invocation, operation, process, target_bits,
+                                 callable, packet, stack_cursor, wake_callback,
+                                 has_external_borrowed_arguments);
   return iree_ok_status();
+}
+
+iree_status_t iree_vm_invocation_prepare_root(
+    iree_vm_invocation_t* invocation, iree_vm_invocation_operation_t operation,
+    iree_vm_process_t* process, uint64_t target_bits,
+    const iree_vm_program_callable_t* callable,
+    iree_vm_variant_span_t arguments, iree_vm_variant_span_t results,
+    iree_vm_invocation_wake_callback_t wake_callback) {
+  if (!iree_vm_invocation_is_idle(invocation) || !process ||
+      operation == IREE_VM_INVOCATION_OPERATION_NONE || target_bits == 0 ||
+      !callable) {
+    iree_vm_invocation_consume_arguments(arguments);
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "invalid invocation root boundary");
+  }
+  const iree_vm_module_signature_t signature =
+      iree_vm_program_callable_signature(callable);
+  if (results.count != signature.results.count) {
+    iree_vm_invocation_consume_arguments(arguments);
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "invocation result count mismatch");
+  }
+  if (iree_vm_program_callable_is_scalar_only(callable)) {
+    return iree_vm_invocation_prepare_scalar_root(
+        invocation, operation, process, target_bits, callable, signature,
+        arguments, wake_callback);
+  }
+  return iree_vm_invocation_prepare_mixed_root(invocation, operation, process,
+                                               target_bits, callable, signature,
+                                               arguments, wake_callback);
 }
 
 //===----------------------------------------------------------------------===//
@@ -1113,8 +1198,23 @@ static iree_vm_variant_t iree_vm_invocation_scalar_result(
   return variant;
 }
 
-void iree_vm_invocation_publish_root_results(iree_vm_invocation_t* invocation,
-                                             iree_vm_variant_span_t results) {
+static IREE_ATTRIBUTE_NOINLINE void
+iree_vm_invocation_publish_uniform_scalar_results(
+    const uint64_t* IREE_RESTRICT value_results, iree_host_size_t result_count,
+    iree_vm_scalar_type_t scalar_type,
+    iree_vm_variant_t* IREE_RESTRICT results) {
+  const uint64_t metadata =
+      ((uint64_t)scalar_type << 2) | IREE_VM_VARIANT_TAG_SCALAR;
+  const uint32_t bit_width = iree_vm_invocation_scalar_bit_width(scalar_type);
+  const uint64_t bit_mask =
+      bit_width < 64 ? (UINT64_C(1) << bit_width) - 1 : UINT64_MAX;
+  for (iree_host_size_t i = 0; i < result_count; ++i) {
+    results[i] = (iree_vm_variant_t){value_results[i] & bit_mask, metadata};
+  }
+}
+
+static IREE_ATTRIBUTE_NOINLINE void iree_vm_invocation_publish_root_results(
+    iree_vm_invocation_t* invocation, iree_vm_variant_span_t results) {
   const iree_vm_module_signature_t signature =
       iree_vm_program_callable_signature(invocation->root_call.callable);
   if (invocation->root_call.callable->result_counts.value_count ==
@@ -1222,26 +1322,40 @@ static iree_status_t iree_vm_invocation_resolve_root_function(
   }
   iree_vm_process_t* process =
       (iree_vm_process_t*)(uintptr_t)function.process_bits;
-  const uint16_t module_ordinal =
-      iree_vm_program_target_module_ordinal(function.target_bits);
-  const uint16_t function_ordinal =
-      iree_vm_program_target_function_ordinal(function.target_bits);
-  if (module_ordinal >= process->program->linked_module_count ||
-      function_ordinal >= process->program->linked_modules[module_ordinal]
-                              .module->descriptor->counts.function_count) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "invocation function target is out of range");
-  }
+  // Binding validated the VM-produced target against this process. Repeating
+  // those table bounds and token checks cannot make a forged process pointer
+  // safe and would turn cold binding work into a tax on every call.
   const uint32_t callable_token =
       iree_vm_program_target_callable_token(function.target_bits);
   const iree_vm_program_callable_t* callable =
-      iree_vm_program_resolve_callable(process->program, callable_token);
-  if (!callable) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "invocation callable token is invalid");
-  }
+      &process->program->callables[callable_token - 1];
   *out_process = process;
   *out_callable = callable;
+  return iree_ok_status();
+}
+
+static iree_status_t iree_vm_invocation_complete_scalar_call(
+    iree_vm_invocation_t* invocation, iree_vm_variant_span_t results,
+    iree_vm_execution_outcome_t* out_outcome) {
+  iree_vm_cancel_reason_t cancel_reason = IREE_VM_CANCEL_REASON_NONE;
+  if (!iree_vm_invocation_try_claim_completion(invocation, &cancel_reason)) {
+    invocation->state = IREE_VM_INVOCATION_STATE_IDLE;
+    invocation->operation = IREE_VM_INVOCATION_OPERATION_NONE;
+    return iree_vm_invocation_cancel_status(cancel_reason);
+  }
+
+  const iree_vm_program_callable_t* callable = invocation->root_call.callable;
+  if (callable->uniform_result_scalar_type != IREE_VM_SCALAR_TYPE_INVALID) {
+    iree_vm_invocation_publish_uniform_scalar_results(
+        invocation->root_call.packet.value_results.direct,
+        callable->result_counts.value_count,
+        callable->uniform_result_scalar_type, results.data);
+  } else {
+    iree_vm_invocation_publish_root_results(invocation, results);
+  }
+  invocation->state = IREE_VM_INVOCATION_STATE_IDLE;
+  invocation->operation = IREE_VM_INVOCATION_OPERATION_NONE;
+  *out_outcome = IREE_VM_EXECUTION_OUTCOME_COMPLETED;
   return iree_ok_status();
 }
 
@@ -1255,7 +1369,15 @@ static iree_status_t iree_vm_invocation_complete_call(
     status = iree_vm_invocation_cancel_status(cancel_reason);
   }
   if (iree_status_is_ok(status)) {
-    iree_vm_invocation_publish_root_results(invocation, results);
+    const iree_vm_program_callable_t* callable = invocation->root_call.callable;
+    if (callable->uniform_result_scalar_type != IREE_VM_SCALAR_TYPE_INVALID) {
+      iree_vm_invocation_publish_uniform_scalar_results(
+          invocation->root_call.packet.value_results.direct,
+          callable->result_counts.value_count,
+          callable->uniform_result_scalar_type, results.data);
+    } else {
+      iree_vm_invocation_publish_root_results(invocation, results);
+    }
     iree_vm_invocation_finish(invocation);
     *out_outcome = IREE_VM_EXECUTION_OUTCOME_COMPLETED;
   } else {
@@ -1294,6 +1416,10 @@ IREE_API_EXPORT iree_status_t iree_vm_invocation_start(
   if (outcome == IREE_VM_EXECUTION_OUTCOME_SUSPENDED) {
     *out_outcome = outcome;
     return iree_ok_status();
+  }
+  if (iree_vm_program_callable_is_scalar_only(callable)) {
+    return iree_vm_invocation_complete_scalar_call(invocation, results,
+                                                   out_outcome);
   }
   return iree_vm_invocation_complete_call(invocation, results, out_outcome);
 }

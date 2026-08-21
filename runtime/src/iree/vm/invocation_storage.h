@@ -166,10 +166,6 @@ bool iree_vm_invocation_try_claim_completion(
     iree_vm_invocation_t* invocation,
     iree_vm_cancel_reason_t* out_cancel_reason);
 
-// Publishes already validated root results with no fallible operations.
-void iree_vm_invocation_publish_root_results(iree_vm_invocation_t* invocation,
-                                             iree_vm_variant_span_t results);
-
 // Releases root ownership and marks an atomically closed operation idle after
 // every frame has been removed. Other private fields are dead while idle and
 // are overwritten before the next provider entry.

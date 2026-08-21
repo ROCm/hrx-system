@@ -207,6 +207,21 @@ static void iree_vm_program_intern_callable_types(iree_vm_program_t* program) {
           callable_type.signature.arguments);
       callable->result_counts = iree_vm_program_count_signature_banks(
           callable_type.signature.results);
+      if (callable_type.signature.results.count != 0 &&
+          callable->result_counts.value_count ==
+              callable_type.signature.results.count) {
+        const iree_vm_scalar_type_t result_scalar_type =
+            callable_type.signature.results.data[0].kind;
+        callable->uniform_result_scalar_type = result_scalar_type;
+        for (iree_host_size_t result_i = 1;
+             result_i < callable_type.signature.results.count; ++result_i) {
+          if (callable_type.signature.results.data[result_i].kind !=
+              result_scalar_type) {
+            callable->uniform_result_scalar_type = IREE_VM_SCALAR_TYPE_INVALID;
+            break;
+          }
+        }
+      }
 
       uint32_t token = 0;
       for (iree_host_size_t representative_i = 0;
