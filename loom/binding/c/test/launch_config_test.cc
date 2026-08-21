@@ -95,10 +95,10 @@ LaunchArtifact CompileLaunchArtifact(const char* text) {
       module.get(), &options, loomc_allocator_system(), &source));
   SourcePtr source_ptr(source);
   const loomc_artifact_t artifact = {
-      .kind = LOOMC_ARTIFACT_KIND_LAUNCH_CONFIG,
-      .format = loomc_make_cstring_view(LOOMC_ARTIFACT_FORMAT_LOOM_BYTECODE),
-      .identifier = loomc_make_cstring_view("launch_config.loombc"),
-      .contents = loomc_source_contents(source_ptr.get()),
+      /*.kind=*/LOOMC_ARTIFACT_KIND_LAUNCH_CONFIG,
+      /*.format=*/loomc_make_cstring_view(LOOMC_ARTIFACT_FORMAT_LOOM_BYTECODE),
+      /*.identifier=*/loomc_make_cstring_view("launch_config.loombc"),
+      /*.contents=*/loomc_source_contents(source_ptr.get()),
   };
   return LaunchArtifact{std::move(source_ptr), artifact};
 }
@@ -113,8 +113,8 @@ ProgramPtr LoadProgram(const LaunchArtifact& artifact) {
 
 loomc_launch_config_t EmptyConfig() {
   return loomc_launch_config_t{
-      .type = LOOMC_STRUCTURE_TYPE_LAUNCH_CONFIG,
-      .structure_size = sizeof(loomc_launch_config_t),
+      /*.type=*/LOOMC_STRUCTURE_TYPE_LAUNCH_CONFIG,
+      /*.structure_size=*/sizeof(loomc_launch_config_t),
   };
 }
 
@@ -281,7 +281,7 @@ TEST(LaunchConfigProgramTest, ClearsOutputsOnInvalidArguments) {
           /*release_user_data=*/nullptr, loomc_allocator_system(), &program));
   EXPECT_EQ(program, nullptr);
 
-  loomc_launch_config_function_t function = {.value = 0};
+  loomc_launch_config_function_t function = {/*.value=*/0};
   LOOMC_EXPECT_STATUS_IS(
       LOOMC_STATUS_INVALID_ARGUMENT,
       loomc_launch_config_program_lookup_function(
