@@ -88,4 +88,19 @@ loom_cc_benchmark(
   TESTONLY
 )
 
+loom_cc_benchmark(
+  NAME
+    link_throughput_benchmark
+  SRCS
+    "link_throughput_benchmark.cc"
+  DEPS
+    ::benchmark_support
+    iree::base
+    iree::testing::benchmark_main
+    loom::binding::c::loomc
+  ARGS
+    "--benchmark_filter=Smoke"
+  TESTONLY
+)
+
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###
