@@ -209,11 +209,29 @@ hrx_status_t hrx_buffer_get_device_ptr(hrx_buffer_t buffer, void** device_ptr) {
                                             "buffer or device_ptr is NULL"));
   }
   // For local-task (CPU) devices, the device pointer is available via mapping.
-  // For real GPU devices, this would use iree_hal_buffer_export.
-  // For now, map the buffer to get a usable pointer.
   if (buffer->mapped_ptr) {
     *device_ptr = buffer->mapped_ptr;
     HRX_RETURN_AND_END_ZONE(z0, hrx_ok_status());
+  }
+
+  // A device-local allocation has no host mapping, and asking for one fails.
+  // Export it instead: the allocator hands back the device address, which is
+  // what a peer copy, a DMA descriptor or an access grant all need. Without
+  // this the caller cannot address the memory at all.
+  iree_hal_allocator_t* allocator =
+      buffer->device ? buffer->device->allocator.hal_allocator : NULL;
+  if (allocator) {
+    iree_hal_external_buffer_t external;
+    memset(&external, 0, sizeof(external));
+    iree_status_t exported = iree_hal_allocator_export_buffer(
+        allocator, buffer->hal_buffer,
+        IREE_HAL_EXTERNAL_BUFFER_TYPE_DEVICE_ALLOCATION,
+        IREE_HAL_EXTERNAL_BUFFER_FLAG_NONE, &external);
+    if (iree_status_is_ok(exported)) {
+      *device_ptr = (void*)(uintptr_t)external.handle.device_allocation.ptr;
+      HRX_RETURN_AND_END_ZONE(z0, hrx_ok_status());
+    }
+    iree_status_ignore(exported);
   }
 
   // Try to get a native allocation pointer.
