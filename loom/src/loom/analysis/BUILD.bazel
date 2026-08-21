@@ -792,23 +792,6 @@ loom_cc_library(
 )
 
 loom_cc_library(
-    name = "symbolic_expr_bounded",
-    srcs = ["symbolic_expr_bounded.c"],
-    hdrs = ["symbolic_expr_bounded.h"],
-    deps = [
-        ":symbolic_expr",
-        "//loom/src/loom/ir",
-        "//loom/src/loom/ops/index",
-        "//loom/src/loom/ops/scalar",
-        "//loom/src/loom/ops/scf",
-        "//loom/src/loom/util:adaptive_sort",
-        "//loom/src/loom/util:fact_table",
-        "//runtime/src/iree/base",
-        "//runtime/src/iree/base/internal",
-    ],
-)
-
-loom_cc_library(
     name = "symbolic_expr_test_fixture",
     testonly = True,
     hdrs = ["symbolic_expr_test_fixture.h"],
@@ -920,18 +903,6 @@ loom_cc_test(
         "//loom/src/loom/ops/scf",
         "//loom/src/loom/util:fact_table",
         "//runtime/src/iree/base/internal:arena",
-        "//runtime/src/iree/testing:gtest",
-        "//runtime/src/iree/testing:gtest_main",
-    ],
-)
-
-loom_cc_test(
-    name = "symbolic_expr_bounded_test",
-    srcs = ["symbolic_expr_bounded_test.cc"],
-    deps = [
-        ":symbolic_expr_bounded",
-        ":symbolic_expr_test_fixture",
-        "//loom/src/loom/ops/index",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],
