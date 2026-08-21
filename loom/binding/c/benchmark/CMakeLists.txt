@@ -27,6 +27,20 @@ iree_c_embed_data(
 
 loom_cc_library(
   NAME
+    benchmark_support
+  HDRS
+    "util/benchmark_support.h"
+  SRCS
+    "util/benchmark_support.cc"
+  DEPS
+    iree::base
+    loom::binding::c::loomc
+  TESTONLY
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
     compile_pool_prototype
   HDRS
     "util/compile_pool_prototype.h"
@@ -50,6 +64,7 @@ loom_cc_library(
     "compile_throughput_benchmark.cc"
   DEPS
     ::benchmark_kernels
+    ::benchmark_support
     ::compile_pool_prototype
     iree::base
     iree::third_party::google_benchmark
