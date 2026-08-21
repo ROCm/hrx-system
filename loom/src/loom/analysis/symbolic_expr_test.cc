@@ -19,6 +19,10 @@ namespace {
 TEST_F(SymbolicExprTest, UnknownValueIsMemoizedLinearTerm) {
   loom_value_id_t value_id = DefineIndexValue();
 
+  loom_symbolic_expr_t ready_expression = {0};
+  EXPECT_FALSE(loom_symbolic_expr_context_try_lookup(
+      &expression_context_, value_id, &ready_expression));
+
   loom_symbolic_expr_t first_expression = {0};
   IREE_ASSERT_OK(loom_symbolic_expr_from_value(&expression_context_, value_id,
                                                &first_expression));
@@ -31,6 +35,14 @@ TEST_F(SymbolicExprTest, UnknownValueIsMemoizedLinearTerm) {
   IREE_ASSERT_OK(loom_symbolic_expr_from_value(&expression_context_, value_id,
                                                &second_expression));
   EXPECT_EQ(second_expression.terms, first_expression.terms);
+
+  EXPECT_TRUE(loom_symbolic_expr_context_try_lookup(
+      &expression_context_, value_id, &ready_expression));
+  EXPECT_EQ(ready_expression.terms, first_expression.terms);
+
+  loom_symbolic_expr_context_reset(&expression_context_);
+  EXPECT_FALSE(loom_symbolic_expr_context_try_lookup(
+      &expression_context_, value_id, &ready_expression));
 }
 
 TEST_F(SymbolicExprTest, ExactIntegerFactsFoldToConstant) {

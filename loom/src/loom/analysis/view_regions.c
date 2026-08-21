@@ -872,10 +872,32 @@ static void loom_view_region_add_access(loom_view_region_t* region,
   }
 }
 
-static iree_status_t loom_view_region_table_record_op_accesses(
+static iree_status_t loom_view_region_table_analyze_op_memory(
     loom_view_region_table_t* table, const loom_op_t* op) {
   const loom_op_vtable_t* vtable = loom_op_vtable(table->module, op);
-  if (!vtable || !vtable->operand_descriptors) return iree_ok_status();
+  if (!vtable) return iree_ok_status();
+
+  if (vtable->memory_access) {
+    const loom_memory_access_t access = {
+        .op = op,
+        .op_vtable = vtable,
+    };
+    const loom_value_slice_t dynamic_indices =
+        loom_memory_access_dynamic_indices(access);
+    for (uint16_t i = 0; i < dynamic_indices.count; ++i) {
+      const loom_value_id_t value_id = dynamic_indices.values[i];
+      int64_t exact_value = 0;
+      if (loom_view_region_facts_exact_i64(
+              loom_view_region_lookup_facts(table, value_id), &exact_value)) {
+        continue;
+      }
+      loom_symbolic_expr_t expression = {0};
+      IREE_RETURN_IF_ERROR(loom_symbolic_expr_from_value(
+          &table->expression_context, value_id, &expression));
+    }
+  }
+
+  if (!vtable->operand_descriptors) return iree_ok_status();
   uint16_t descriptor_count = op->operand_count < vtable->fixed_operand_count
                                   ? op->operand_count
                                   : vtable->fixed_operand_count;
@@ -900,7 +922,7 @@ static iree_status_t loom_view_region_table_analyze_region(
 
 static iree_status_t loom_view_region_table_analyze_op_tree(
     loom_view_region_table_t* table, const loom_op_t* op) {
-  IREE_RETURN_IF_ERROR(loom_view_region_table_record_op_accesses(table, op));
+  IREE_RETURN_IF_ERROR(loom_view_region_table_analyze_op_memory(table, op));
   const loom_value_id_t* results = loom_op_const_results(op);
   for (uint16_t i = 0; i < op->result_count; ++i) {
     const loom_view_region_t* region = NULL;

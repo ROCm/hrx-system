@@ -83,6 +83,17 @@ void loom_symbolic_expr_context_reset(loom_symbolic_expr_context_t* context) {
   }
 }
 
+bool loom_symbolic_expr_context_try_lookup(
+    const loom_symbolic_expr_context_t* context, loom_value_id_t value_id,
+    loom_symbolic_expr_t* out_expression) {
+  if (value_id >= context->memo_capacity) return false;
+  const loom_symbolic_expr_memo_entry_t* entry =
+      &context->memo_entries[value_id];
+  if (entry->state != LOOM_SYMBOLIC_EXPR_MEMO_READY) return false;
+  *out_expression = entry->expression;
+  return true;
+}
+
 static iree_status_t loom_symbolic_expr_ensure_memo_capacity(
     loom_symbolic_expr_context_t* context, iree_host_size_t minimum_capacity) {
   if (minimum_capacity <= context->memo_capacity) return iree_ok_status();

@@ -128,6 +128,14 @@ class ViewRegionsTest : public ::testing::Test {
     return op;
   }
 
+  loom_op_t* BuildIndexConstant(int64_t value) {
+    loom_op_t* op = nullptr;
+    IREE_CHECK_OK(loom_index_constant_build(
+        &builder_, loom_attr_i64(value),
+        loom_type_scalar(LOOM_SCALAR_TYPE_INDEX), LOOM_LOCATION_UNKNOWN, &op));
+    return op;
+  }
+
   loom_value_id_t BuildDenseLayout() {
     loom_op_t* op = nullptr;
     IREE_CHECK_OK(loom_encoding_layout_dense_build(
@@ -306,6 +314,64 @@ TEST_F(ViewRegionsTest, ProvesDisjointReadAndWriteViewsInOneSlab) {
   EXPECT_EQ(write_region->access_flags, LOOM_VIEW_ACCESS_WRITE);
   EXPECT_EQ(loom_view_region_table_root_access_flags(&table, buffer),
             LOOM_VIEW_ACCESS_READ | LOOM_VIEW_ACCESS_WRITE);
+}
+
+TEST_F(ViewRegionsTest, PrecomputesReusedMemoryIndexExpression) {
+  loom_value_id_t buffer = DefineBufferArg();
+  loom_value_id_t source_index = DefineIndexArg();
+  loom_value_id_t unrelated_index = DefineIndexArg();
+  loom_value_id_t layout = BuildDenseLayout();
+  loom_value_id_t zero = loom_index_constant_result(BuildOffsetConstant(0));
+  loom_value_id_t one = loom_index_constant_result(BuildIndexConstant(1));
+
+  loom_op_t* view_op = nullptr;
+  IREE_ASSERT_OK(loom_buffer_view_build(&builder_, buffer, zero,
+                                        ViewType1D(4096, layout),
+                                        LOOM_LOCATION_UNKNOWN, &view_op));
+
+  loom_value_id_t deep_index = source_index;
+  for (int i = 0; i < 40; ++i) {
+    loom_op_t* add_op = nullptr;
+    IREE_ASSERT_OK(loom_index_add_build(
+        &builder_, deep_index, one, loom_type_scalar(LOOM_SCALAR_TYPE_INDEX),
+        LOOM_LOCATION_UNKNOWN, &add_op));
+    deep_index = loom_index_add_result(add_op);
+  }
+
+  const loom_value_id_t dynamic_indices[] = {deep_index};
+  const int64_t static_indices[] = {INT64_MIN};
+  loom_op_t* load_op = nullptr;
+  IREE_ASSERT_OK(loom_vector_load_build(
+      &builder_, 0, loom_buffer_view_result(view_op), dynamic_indices,
+      IREE_ARRAYSIZE(dynamic_indices), static_indices,
+      IREE_ARRAYSIZE(static_indices), 0, 0, VectorType1D(1),
+      LOOM_LOCATION_UNKNOWN, &load_op));
+  loom_op_t* store_op = nullptr;
+  IREE_ASSERT_OK(loom_vector_store_build(
+      &builder_, 0, loom_vector_load_result(load_op),
+      loom_buffer_view_result(view_op), dynamic_indices,
+      IREE_ARRAYSIZE(dynamic_indices), static_indices,
+      IREE_ARRAYSIZE(static_indices), 0, 0, LOOM_LOCATION_UNKNOWN, &store_op));
+
+  loom_value_fact_table_t facts = {0};
+  ComputeFacts(&facts);
+  loom_view_region_table_t table = {0};
+  Analyze(&facts, &table);
+
+  loom_symbolic_expr_t expression = {0};
+  ASSERT_TRUE(loom_symbolic_expr_context_try_lookup(&table.expression_context,
+                                                    deep_index, &expression));
+  ASSERT_TRUE(loom_symbolic_expr_is_linear(&expression));
+  EXPECT_EQ(expression.constant, 40);
+  ASSERT_EQ(expression.term_count, 1u);
+  EXPECT_EQ(expression.terms[0].value_id, source_index);
+  loom_symbolic_expr_t repeated_expression = {0};
+  EXPECT_TRUE(loom_symbolic_expr_context_try_lookup(
+      &table.expression_context, deep_index, &repeated_expression));
+  EXPECT_EQ(repeated_expression.terms, expression.terms);
+  loom_symbolic_expr_t unrelated_expression = {0};
+  EXPECT_FALSE(loom_symbolic_expr_context_try_lookup(
+      &table.expression_context, unrelated_index, &unrelated_expression));
 }
 
 TEST_F(ViewRegionsTest, ProvesSymbolicOffsetCancellation) {

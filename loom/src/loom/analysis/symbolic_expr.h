@@ -154,6 +154,13 @@ void loom_symbolic_expr_context_initialize(
 // scratch and memo capacity.
 void loom_symbolic_expr_context_reset(loom_symbolic_expr_context_t* context);
 
+// Copies a previously computed expression without expanding |value_id| or
+// mutating the context. Returns false when the value has not been computed
+// since the last reset.
+bool loom_symbolic_expr_context_try_lookup(
+    const loom_symbolic_expr_context_t* context, loom_value_id_t value_id,
+    loom_symbolic_expr_t* out_expression);
+
 // Constructs a facts-only expression. This is the conservative result for
 // unsupported nonlinear arithmetic when no precise SSA variable is available.
 void loom_symbolic_expr_unknown(loom_value_facts_t facts,
