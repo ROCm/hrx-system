@@ -49,7 +49,11 @@ CLANG_TIDY_REPO_ENV = "--repo_env=IREE_CLANG_TIDY_LLVM=auto"
 RUNFILES_ENVIRONMENT_PROVIDER_SUFFIX = "%IreeRunfilesEnvironmentInfo"
 RUNFILES_ARGUMENTS_PROVIDER_SUFFIX = "%IreeRunfilesArgumentsInfo"
 BAZEL_LAUNCH_METADATA_QUERY_EXPRESSION = (
-    'json.encode({"label": str(target.label), '
+    'json.encode({"label": str(target.label), "executable": ('
+    'providers(target)["DefaultInfo"].files_to_run.executable.path '
+    'if providers(target)["DefaultInfo"].files_to_run != None '
+    'and providers(target)["DefaultInfo"].files_to_run.executable != None '
+    "else None), "
     '"argument_provider_count": len(['
     "key for key in providers(target).keys() "
     f'if key.endswith("{RUNFILES_ARGUMENTS_PROVIDER_SUFFIX}")]), '
@@ -124,6 +128,7 @@ class BazelCompileCommandsCommand:
 
 @dataclass(frozen=True)
 class BazelLaunchMetadata:
+    executable_path: Path
     runfiles_arguments: list[str] = field(default_factory=list)
     marked_runfiles_arguments: list[str] = field(default_factory=list)
     runfiles_environment_names: list[str] = field(default_factory=list)
@@ -461,6 +466,7 @@ def parse_bazel_launch_metadata(
     payload: object,
     *,
     target: str,
+    execution_root: Path,
 ) -> BazelLaunchMetadata | None:
     """Validates one configured target's host-handoff metadata."""
     if not isinstance(payload, dict):
@@ -543,7 +549,18 @@ def parse_bazel_launch_metadata(
             file=sys.stderr,
         )
         return None
+    executable_value = payload.get("executable")
+    if not isinstance(executable_value, str) or not executable_value:
+        print(
+            f"dev.py: Bazel launch metadata for {target} has no executable",
+            file=sys.stderr,
+        )
+        return None
+    executable_path = Path(executable_value)
+    if not executable_path.is_absolute():
+        executable_path = execution_root / executable_path
     return BazelLaunchMetadata(
+        executable_path=executable_path,
         runfiles_arguments=arguments,
         marked_runfiles_arguments=marked_arguments,
         runfiles_environment_names=environment_names,
@@ -600,6 +617,11 @@ def resolve_bazel_launch_metadata_for_targets(
         )
         return 1, None
 
+    execution_root = bazel_execution_root(bazel=bazel, cwd=cwd, env=env)
+    if execution_root is None or not execution_root.is_absolute():
+        print("dev.py: failed to resolve the Bazel execution root", file=sys.stderr)
+        return 1, None
+
     decoded_payloads = []
     for record in records:
         try:
@@ -617,7 +639,11 @@ def resolve_bazel_launch_metadata_for_targets(
         decoded_payloads.append(payload)
 
     if len(targets) == 1:
-        metadata = parse_bazel_launch_metadata(decoded_payloads[0], target=targets[0])
+        metadata = parse_bazel_launch_metadata(
+            decoded_payloads[0],
+            target=targets[0],
+            execution_root=execution_root,
+        )
         if metadata is None:
             return 1, None
         return 0, {targets[0]: metadata}
@@ -639,7 +665,11 @@ def resolve_bazel_launch_metadata_for_targets(
         if payload is None:
             unmatched_targets.append(target)
             continue
-        metadata = parse_bazel_launch_metadata(payload, target=target)
+        metadata = parse_bazel_launch_metadata(
+            payload,
+            target=target,
+            execution_root=execution_root,
+        )
         if metadata is None:
             return 1, None
         metadata_by_target[target] = metadata
@@ -693,9 +723,16 @@ def create_bazel_argument_separator() -> str:
     return f"__IREE_BAZEL_ARGUMENT_SEPARATOR_{secrets.token_hex(16)}__"
 
 
-def bazel_run_under_command() -> str:
+def bazel_run_under_command(target_executable: Path) -> str:
     launcher_path = Path(bazel_launcher.__file__).resolve()
-    return shlex.join([Path(sys.executable).as_posix(), launcher_path.as_posix()])
+    return shlex.join(
+        [
+            Path(sys.executable).as_posix(),
+            launcher_path.as_posix(),
+            bazel_launcher.TARGET_EXECUTABLE_OPTION,
+            target_executable.as_posix(),
+        ]
+    )
 
 
 def generate_bazel_launch(
@@ -736,7 +773,7 @@ def generate_bazel_launch(
         *bazel_args,
         f"--script_path={script_path}",
         "--norun_in_cwd",
-        f"--run_under={bazel_run_under_command()}",
+        f"--run_under={bazel_run_under_command(metadata.executable_path)}",
         target,
         "--",
         argument_separator,

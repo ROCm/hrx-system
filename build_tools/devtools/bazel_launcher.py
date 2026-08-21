@@ -32,6 +32,7 @@ CONTROL_ENVIRONMENT_NAMES = (
 )
 RUNFILES_PATH_BEGIN = "__IREE_BAZEL_RUNFILE_PATH_BEGIN__"
 RUNFILES_PATH_END = "__IREE_BAZEL_RUNFILE_PATH_END__"
+TARGET_EXECUTABLE_OPTION = "--target-executable"
 
 
 @dataclass(frozen=True)
@@ -157,9 +158,15 @@ def prepare_launch(
     environ: Mapping[str, str] | None = None,
     initial_cwd: Path | None = None,
 ) -> PreparedLaunch:
-    """Resolves graph-declared runfile paths before leaving Bazel's cwd."""
-    if not argv:
-        raise ValueError("Bazel launcher did not provide a target executable")
+    """Resolves graph-declared target and runfile paths before leaving Bazel's cwd."""
+    if len(argv) < 3 or argv[0] != TARGET_EXECUTABLE_OPTION:
+        raise ValueError("Bazel launcher did not provide the configured executable")
+    executable_path = Path(argv[1])
+    if not executable_path.is_absolute():
+        raise ValueError(
+            f"configured Bazel target executable is not absolute: {executable_path}"
+        )
+    bazel_argv = argv[2:]
 
     environment = dict(os.environ if environ is None else environ)
     try:
@@ -207,13 +214,15 @@ def prepare_launch(
         raise ValueError("runfiles argument metadata does not match its path markers")
 
     separator_positions = [
-        index for index, argument in enumerate(argv) if argument == argument_separator
+        index
+        for index, argument in enumerate(bazel_argv)
+        if argument == argument_separator
     ]
     if len(separator_positions) != 1:
         raise ValueError("Bazel launcher argument separator is missing or duplicated")
     separator_position = separator_positions[0]
-    default_arguments = argv[1:separator_position]
-    caller_arguments = argv[separator_position + 1 :]
+    default_arguments = bazel_argv[1:separator_position]
+    caller_arguments = bazel_argv[separator_position + 1 :]
 
     try:
         runfiles_environment_names = json.loads(encoded_names)
@@ -251,15 +260,14 @@ def prepare_launch(
             *rewritten_arguments,
             *default_arguments[position + len(expected_arguments) :],
         ]
-    target_argv = [argv[0], *default_arguments, *caller_arguments]
-    executable_path = Path(target_argv[0])
-    if not executable_path.is_absolute():
-        executable_path = bazel_cwd / executable_path
-        if not executable_path.is_file():
-            raise FileNotFoundError(
-                f"Bazel launcher target executable does not exist: {executable_path}"
-            )
-        target_argv[0] = str(executable_path)
+    # Bazel formats Windows --run_under commands through Bash and supplies the
+    # target as an unquoted native path, making that argv token lossy. The
+    # configured graph path travels in the run-under prefix and is authoritative.
+    if not executable_path.is_file():
+        raise FileNotFoundError(
+            f"configured Bazel target executable does not exist: {executable_path}"
+        )
+    target_argv = [str(executable_path), *default_arguments, *caller_arguments]
     for name in runfiles_environment_names:
         value = environment_value(environment, name)
         if value is None:

@@ -26,6 +26,19 @@ class BazelLauncherTest(unittest.TestCase):
         executable_path.write_text("fixture", encoding="utf-8")
         return executable_path
 
+    def launcher_argv(
+        self,
+        executable_path: Path,
+        *arguments: str,
+        bazel_executable: str | None = None,
+    ) -> list[str]:
+        return [
+            bazel_launcher.TARGET_EXECUTABLE_OPTION,
+            str(executable_path),
+            str(executable_path) if bazel_executable is None else bazel_executable,
+            *arguments,
+        ]
+
     def test_configured_environment_replaces_windows_controls_case_insensitively(
         self,
     ):
@@ -88,12 +101,13 @@ class BazelLauncherTest(unittest.TestCase):
             }
 
             launch = bazel_launcher.prepare_launch(
-                [
-                    "runtime/example",
+                self.launcher_argv(
+                    executable_path,
                     "--library=runtime/libexample.so",
                     "separator",
                     "runtime/libexample.so",
-                ],
+                    bazel_executable="runtime/example",
+                ),
                 environ=environment,
                 initial_cwd=runfiles_cwd,
             )
@@ -112,6 +126,35 @@ class BazelLauncherTest(unittest.TestCase):
             self.assertEqual(launch.env["IREE_EXPLICIT_ENV"], "preserved")
             for name in bazel_launcher.CONTROL_ENVIRONMENT_NAMES:
                 self.assertNotIn(name, launch.env)
+
+    def test_prepare_launch_uses_graph_executable_when_bazel_token_is_lossy(self):
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            temporary_path = Path(temporary_dir)
+            executable_path = self.create_executable_fixture(temporary_path)
+            environment = bazel_launcher.configured_environment(
+                {},
+                caller_cwd=temporary_path,
+                argument_separator="separator",
+                runfiles_arguments=[],
+                marked_runfiles_arguments=[],
+                runfiles_environment_names=[],
+                script_path=temporary_path / "launch.bat",
+            )
+
+            launch = bazel_launcher.prepare_launch(
+                self.launcher_argv(
+                    executable_path,
+                    "separator",
+                    bazel_executable=(
+                        "C:homerunner_work_tempbazel"
+                        "execroot_mainbazel-outbinexample.exe"
+                    ),
+                ),
+                environ=environment,
+                initial_cwd=temporary_path,
+            )
+
+            self.assertEqual(launch.argv, [str(executable_path)])
 
     def test_resolve_marked_runfiles_arguments_handles_plural_expansion(self):
         with tempfile.TemporaryDirectory() as temporary_dir:
@@ -150,7 +193,7 @@ class BazelLauncherTest(unittest.TestCase):
 
             with self.assertRaisesRegex(FileNotFoundError, "IREE_EXAMPLE_LIBRARY"):
                 bazel_launcher.prepare_launch(
-                    [str(executable_path), "separator"],
+                    self.launcher_argv(executable_path, "separator"),
                     environ=environment,
                     initial_cwd=temporary_path,
                 )
@@ -176,7 +219,7 @@ class BazelLauncherTest(unittest.TestCase):
                 side_effect=str.upper,
             ):
                 launch = bazel_launcher.prepare_launch(
-                    [str(library_path), "separator"],
+                    self.launcher_argv(library_path, "separator"),
                     environ=environment,
                     initial_cwd=temporary_path,
                 )
@@ -206,7 +249,7 @@ class BazelLauncherTest(unittest.TestCase):
             )
 
             prepared_launch = bazel_launcher.prepare_launch(
-                [str(executable_path), "separator", "two words"],
+                self.launcher_argv(executable_path, "separator", "two words"),
                 environ=environment,
                 initial_cwd=temporary_path,
             )
@@ -247,7 +290,7 @@ class BazelLauncherTest(unittest.TestCase):
                 contextlib.redirect_stdout(output),
             ):
                 result = bazel_launcher.main(
-                    [str(executable_path), "separator", "two words"]
+                    self.launcher_argv(executable_path, "separator", "two words")
                 )
 
             self.assertEqual(result, 0)
@@ -280,7 +323,9 @@ class BazelLauncherTest(unittest.TestCase):
                 mock.patch.dict(bazel_launcher.os.environ, environment, clear=True),
                 contextlib.redirect_stderr(io.StringIO()) as error_output,
             ):
-                result = bazel_launcher.main([str(executable_path), "separator"])
+                result = bazel_launcher.main(
+                    self.launcher_argv(executable_path, "separator")
+                )
 
             self.assertEqual(result, 127)
             self.assertIn("points to missing file", error_output.getvalue())
@@ -353,6 +398,8 @@ pathlib.Path(sys.argv[1]).write_text(json.dumps({
                 [
                     sys.executable,
                     str(Path(bazel_launcher.__file__).resolve()),
+                    bazel_launcher.TARGET_EXECUTABLE_OPTION,
+                    sys.executable,
                     sys.executable,
                     "-c",
                     child_source,
