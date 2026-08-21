@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Mapping
 
 ARGUMENT_SEPARATOR_ENV = "IREE_BAZEL_LAUNCH_ARGUMENT_SEPARATOR"
+CALLER_ARGUMENTS_ENV = "IREE_BAZEL_LAUNCH_CALLER_ARGUMENTS"
 CALLER_CWD_ENV = "IREE_BAZEL_LAUNCH_CALLER_CWD"
 MATERIALIZE_ENV = "IREE_BAZEL_LAUNCH_MATERIALIZE"
 RUNFILES_ARGUMENTS_ENV = "IREE_BAZEL_LAUNCH_RUNFILES_ARGUMENTS"
@@ -24,6 +25,7 @@ RUNFILES_ENVIRONMENT_NAMES_ENV = "IREE_BAZEL_LAUNCH_RUNFILES_ENVIRONMENT_NAMES"
 SCRIPT_PATH_ENV = "IREE_BAZEL_LAUNCH_SCRIPT_PATH"
 CONTROL_ENVIRONMENT_NAMES = (
     ARGUMENT_SEPARATOR_ENV,
+    CALLER_ARGUMENTS_ENV,
     CALLER_CWD_ENV,
     MATERIALIZE_ENV,
     RUNFILES_ARGUMENTS_ENV,
@@ -32,6 +34,7 @@ CONTROL_ENVIRONMENT_NAMES = (
 )
 RUNFILES_PATH_BEGIN = "__IREE_BAZEL_RUNFILE_PATH_BEGIN__"
 RUNFILES_PATH_END = "__IREE_BAZEL_RUNFILE_PATH_END__"
+TARGET_EXECUTABLE_OPTION = "--target-executable"
 
 
 @dataclass(frozen=True)
@@ -69,6 +72,7 @@ def configured_environment(
     *,
     caller_cwd: Path,
     argument_separator: str,
+    caller_arguments: list[str],
     runfiles_arguments: list[str],
     marked_runfiles_arguments: list[str],
     runfiles_environment_names: list[str],
@@ -85,6 +89,10 @@ def configured_environment(
         if environment_name_key(name) not in control_name_keys
     }
     environment[ARGUMENT_SEPARATOR_ENV] = argument_separator
+    environment[CALLER_ARGUMENTS_ENV] = json.dumps(
+        caller_arguments,
+        separators=(",", ":"),
+    )
     environment[CALLER_CWD_ENV] = str(caller_cwd)
     environment[RUNFILES_ARGUMENTS_ENV] = json.dumps(
         {
@@ -157,13 +165,20 @@ def prepare_launch(
     environ: Mapping[str, str] | None = None,
     initial_cwd: Path | None = None,
 ) -> PreparedLaunch:
-    """Resolves graph-declared runfile paths before leaving Bazel's cwd."""
-    if not argv:
-        raise ValueError("Bazel launcher did not provide a target executable")
+    """Resolves graph-declared target and runfile paths before leaving Bazel's cwd."""
+    if len(argv) < 3 or argv[0] != TARGET_EXECUTABLE_OPTION:
+        raise ValueError("Bazel launcher did not provide the configured executable")
+    executable_path = Path(argv[1])
+    if not executable_path.is_absolute():
+        raise ValueError(
+            f"configured Bazel target executable is not absolute: {executable_path}"
+        )
+    bazel_argv = argv[2:]
 
     environment = dict(os.environ if environ is None else environ)
     try:
         argument_separator = environment.pop(ARGUMENT_SEPARATOR_ENV)
+        encoded_caller_arguments = environment.pop(CALLER_ARGUMENTS_ENV)
         caller_cwd = Path(environment.pop(CALLER_CWD_ENV))
         encoded_arguments = environment.pop(RUNFILES_ARGUMENTS_ENV)
         encoded_names = environment.pop(RUNFILES_ENVIRONMENT_NAMES_ENV)
@@ -177,6 +192,15 @@ def prepare_launch(
         raise ValueError(f"invalid {MATERIALIZE_ENV} value")
     if not argument_separator:
         raise ValueError("Bazel launcher argument separator is empty")
+
+    try:
+        caller_arguments = json.loads(encoded_caller_arguments)
+    except json.JSONDecodeError as exc:
+        raise ValueError("invalid caller argument list") from exc
+    if not isinstance(caller_arguments, list) or any(
+        not isinstance(argument, str) for argument in caller_arguments
+    ):
+        raise ValueError("caller arguments must contain strings")
 
     try:
         runfiles_arguments = json.loads(encoded_arguments)
@@ -207,13 +231,14 @@ def prepare_launch(
         raise ValueError("runfiles argument metadata does not match its path markers")
 
     separator_positions = [
-        index for index, argument in enumerate(argv) if argument == argument_separator
+        index
+        for index, argument in enumerate(bazel_argv)
+        if argument == argument_separator
     ]
     if len(separator_positions) != 1:
         raise ValueError("Bazel launcher argument separator is missing or duplicated")
     separator_position = separator_positions[0]
-    default_arguments = argv[1:separator_position]
-    caller_arguments = argv[separator_position + 1 :]
+    default_arguments = bazel_argv[1:separator_position]
 
     try:
         runfiles_environment_names = json.loads(encoded_names)
@@ -251,15 +276,14 @@ def prepare_launch(
             *rewritten_arguments,
             *default_arguments[position + len(expected_arguments) :],
         ]
-    target_argv = [argv[0], *default_arguments, *caller_arguments]
-    executable_path = Path(target_argv[0])
-    if not executable_path.is_absolute():
-        executable_path = bazel_cwd / executable_path
-        if not executable_path.is_file():
-            raise FileNotFoundError(
-                f"Bazel launcher target executable does not exist: {executable_path}"
-            )
-        target_argv[0] = str(executable_path)
+    # Bazel formats --run_under commands through a host shell, making native
+    # Windows paths in both the target token and caller arguments lossy. The
+    # configured graph path and original caller arguments are authoritative.
+    if not executable_path.is_file():
+        raise FileNotFoundError(
+            f"configured Bazel target executable does not exist: {executable_path}"
+        )
+    target_argv = [str(executable_path), *default_arguments, *caller_arguments]
     for name in runfiles_environment_names:
         value = environment_value(environment, name)
         if value is None:
@@ -355,15 +379,17 @@ def remove_launch_script(script_path: Path) -> None:
         )
 
 
-def exec_process(argv: list[str], environment: Mapping[str, str]) -> None:
-    """Overlays the current process while preserving native argument parsing."""
-    exec_argv = argv
+def handoff_process(argv: list[str], environment: Mapping[str, str]) -> int:
+    """Overlays on POSIX or waits for a direct child on Windows."""
     if os.name == "nt":
-        # The Windows CRT exec family joins argv without quoting embedded
-        # whitespace. Quote each token using the same encoding Python's
-        # subprocess module uses for CreateProcess command lines.
-        exec_argv = [subprocess.list2cmdline([argument]) for argument in argv]
-    os.execvpe(argv[0], exec_argv, environment)
+        # Windows cannot replace the current process image. The CRT exec family
+        # starts a child and terminates the caller, which signals the launcher's
+        # process handle while the target is still running. Remain as the
+        # target's direct parent so callers retain a valid lifetime and exit-code
+        # contract without introducing a command interpreter.
+        return subprocess.run(argv, env=environment).returncode
+    os.execvpe(argv[0], argv, environment)
+    raise AssertionError("os.execvpe returned unexpectedly")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -378,13 +404,12 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         remove_launch_script(launch.script_path)
         os.chdir(launch.cwd)
-        exec_process(launch.argv, launch.env)
+        return handoff_process(launch.argv, launch.env)
     except (OSError, ValueError) as exc:
         if script_path_value is not None and not parent_owns_script:
             remove_launch_script(Path(script_path_value))
         print(f"iree-bazel-launcher: {exc}", file=sys.stderr)
         return 127
-    raise AssertionError("os.execvpe returned unexpectedly")
 
 
 if __name__ == "__main__":

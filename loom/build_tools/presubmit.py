@@ -40,7 +40,16 @@ RESOURCE_TEST_TAG_FILTERS = (
     "-iree-run-requirement=runtime.resource.webgpu_device",
 )
 CTEST_RESOURCE_LABEL_EXCLUDE_REGEX = "runtime-resource="
-CI_LOOM_TARGETS = "amdgpu,iree_vm,llvmir,spirv,x86"
+CMAKE_SOURCE_FORMAT_TARGET_DEFINES = (
+    ("amdgpu", "LOOM_TARGET_AMDGPU"),
+    ("iree_vm", "LOOM_TARGET_IREE_VM"),
+    ("llvmir", "LOOM_TARGET_LLVMIR"),
+    ("spirv", "LOOM_TARGET_SPIRV"),
+    ("x86", "LOOM_TARGET_X86"),
+)
+CI_LOOM_TARGETS = ",".join(
+    target for target, _define in CMAKE_SOURCE_FORMAT_TARGET_DEFINES
+)
 LOOM_FORMAT_BAZEL_TARGET = "//loom/src/loom/tools/loom-format:loom-format"
 LOOM_FORMAT_CMAKE_TARGET = "loom::tools::loom-format"
 LOOM_LINT_BAZEL_TARGET = "//loom/py/loom/tools:loom-lint"
@@ -59,6 +68,11 @@ LOOM_FORMAT_EXCLUDED_PATHS = frozenset(
     }
 )
 
+# CreateProcess limits its command line to 32,767 UTF-16 code units including
+# the terminator. Keep one portable bound below that ceiling so repository-wide
+# file checks have the same batching behavior on every host.
+MAX_PORTABLE_COMMAND_LINE_UTF16_UNITS = 30_000
+
 
 def parse_arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run Loom project presubmit.")
@@ -70,6 +84,62 @@ def run_command(command: list[str], description: str) -> bool:
     return project_presubmit.run_command(
         PROJECT_NAME, command, description, cwd=REPO_ROOT
     )
+
+
+def command_line_utf16_units(command: list[str]) -> int:
+    rendered_command = subprocess.list2cmdline(command)
+    return len(rendered_command.encode("utf-16-le")) // 2 + 1
+
+
+def batch_path_commands(
+    command_prefix: list[str],
+    paths: list[str],
+    *,
+    max_command_line_utf16_units: int = MAX_PORTABLE_COMMAND_LINE_UTF16_UNITS,
+) -> list[list[str]]:
+    if not command_prefix:
+        raise ValueError("command prefix must not be empty")
+    if max_command_line_utf16_units <= 0:
+        raise ValueError("command-line limit must be positive")
+    if command_line_utf16_units(command_prefix) > max_command_line_utf16_units:
+        raise ValueError("command prefix exceeds the portable command-line limit")
+
+    commands: list[list[str]] = []
+    command = list(command_prefix)
+    prefix_length = len(command_prefix)
+    for path in paths:
+        candidate = [*command, path]
+        if command_line_utf16_units(candidate) <= max_command_line_utf16_units:
+            command.append(path)
+            continue
+        if len(command) > prefix_length:
+            commands.append(command)
+        command = [*command_prefix, path]
+        if command_line_utf16_units(command) > max_command_line_utf16_units:
+            raise ValueError(f"path exceeds the portable command-line limit: {path}")
+    if len(command) > prefix_length:
+        commands.append(command)
+    return commands
+
+
+def run_batched_path_command(
+    command_prefix: list[str], paths: list[str], description: str
+) -> bool:
+    try:
+        commands = batch_path_commands(command_prefix, paths)
+    except ValueError as exc:
+        print(f"loom presubmit: {exc}", file=sys.stderr)
+        return False
+
+    ok = True
+    for index, command in enumerate(commands, start=1):
+        batch_description = (
+            description
+            if len(commands) == 1
+            else f"{description} ({index}/{len(commands)})"
+        )
+        ok = run_command(command, batch_description) and ok
+    return ok
 
 
 def is_global_trigger(path: str) -> bool:
@@ -195,6 +265,35 @@ def tracked_lint_source_paths() -> list[str] | None:
     return None if paths is None else existing_lint_source_paths(paths)
 
 
+def validate_cmake_source_format_configuration() -> bool:
+    build_dir = project_presubmit.cmake_build_dir(REPO_ROOT)
+    if not project_presubmit.validate_cmake_build_tree(PROJECT_NAME, build_dir):
+        return False
+
+    cmake_true_values = frozenset({"1", "ON", "TRUE", "YES", "Y"})
+    missing_targets = [
+        (target, define)
+        for target, define in CMAKE_SOURCE_FORMAT_TARGET_DEFINES
+        if (project_presubmit.cmake_cache_value(build_dir, define) or "").upper()
+        not in cmake_true_values
+    ]
+    if not missing_targets:
+        return True
+
+    missing_names = ", ".join(target for target, _define in missing_targets)
+    missing_options = " ".join(f"-D{define}=ON" for _target, define in missing_targets)
+    print(
+        "loom presubmit: canonical source formatting requires the CMake "
+        f"build tree to enable {CI_LOOM_TARGETS}; missing: {missing_names}"
+    )
+    print(
+        "loom presubmit: reconfigure that tree with "
+        f"`{missing_options}` or select a full-target tree with "
+        f"{project_presubmit.CMAKE_BUILD_DIR_ENV}"
+    )
+    return False
+
+
 def run_source_format_maintenance(
     *, lane: str, files_from: str | None, fix: bool
 ) -> bool:
@@ -208,6 +307,8 @@ def run_source_format_maintenance(
     check_paths = sorted(set(tracked_paths).union(selected_paths))
     if not check_paths:
         return True
+    if lane == "cmake" and not validate_cmake_source_format_configuration():
+        return False
 
     formatter_path = project_presubmit.build_and_resolve_executable(
         PROJECT_NAME,
@@ -224,8 +325,9 @@ def run_source_format_maintenance(
         return False
 
     if fix and selected_paths:
-        if not run_command(
-            [str(formatter_path), "--in-place", *selected_paths],
+        if not run_batched_path_command(
+            [str(formatter_path), "--in-place"],
+            selected_paths,
             "Canonicalize selected Loom source",
         ):
             return False
@@ -236,8 +338,9 @@ def run_source_format_maintenance(
         ):
             return False
 
-    return run_command(
-        [str(formatter_path), "--check", *check_paths],
+    return run_batched_path_command(
+        [str(formatter_path), "--check"],
+        check_paths,
         "Canonical Loom source",
     )
 
@@ -272,8 +375,8 @@ def run_source_lint(*, lane: str, files_from: str | None) -> bool:
             linter_command = [sys.executable, LOOM_LINT_PYTHON_SOURCE]
         else:
             raise ValueError(f"unknown lane: {lane}")
-        public_lint_ok = bool(linter_command) and run_command(
-            [*linter_command, *check_paths], "Loom authoring policy"
+        public_lint_ok = bool(linter_command) and run_batched_path_command(
+            linter_command, check_paths, "Loom authoring policy"
         )
 
     repository_lint_ok = run_command(

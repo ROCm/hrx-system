@@ -22,7 +22,15 @@ FIXTURE_TARGET = "//build_tools/devtools:bazel_launcher_integration_fixture"
 
 
 def dev_command(*args: str) -> list[str]:
-    return [sys.executable, str(DEV_PY), *args]
+    executable = Path(sys.executable)
+    if os.name == "nt" and sys.prefix != sys.base_prefix:
+        # A Windows venv executable is a redirector that waits on the real
+        # interpreter. Bypass it so process.pid below identifies the dev.py
+        # process whose direct-child contract the fixture verifies.
+        executable = Path(sys.base_prefix) / executable.name
+        if not executable.is_file():
+            raise RuntimeError(f"base Python executable does not exist: {executable}")
+    return [str(executable), str(DEV_PY), *args]
 
 
 def process_output(process: subprocess.Popen[bytes], output_path: Path) -> str:
@@ -46,8 +54,9 @@ def wait_until_ready(
 def verify_lock_free_launch(temporary_root: Path) -> None:
     caller_cwd = temporary_root / "caller directory"
     caller_cwd.mkdir()
-    ready_file = temporary_root / "ready"
-    result_file = temporary_root / "result.txt"
+    ready_file = caller_cwd / "ready"
+    result_file = caller_cwd / "result.txt"
+    absolute_argument = temporary_root / "absolute argument"
     output_path = temporary_root / "launch.log"
     with output_path.open("wb") as output_file:
         process = subprocess.Popen(
@@ -57,11 +66,12 @@ def verify_lock_free_launch(temporary_root: Path) -> None:
                 FIXTURE_TARGET,
                 "--",
                 "--ready-file",
-                str(ready_file),
+                ready_file.name,
                 "--result-file",
-                str(result_file),
+                result_file.name,
                 "two words",
                 "--literal=three words",
+                str(absolute_argument),
             ),
             cwd=caller_cwd,
             stdin=subprocess.PIPE,
@@ -114,7 +124,11 @@ def verify_lock_free_launch(temporary_root: Path) -> None:
         raise RuntimeError(
             f"launcher cwd mismatch: {process_cwd!r} != {str(caller_cwd)!r}"
         )
-    expected_arguments = ["two words", "--literal=three words"]
+    expected_arguments = [
+        "two words",
+        "--literal=three words",
+        str(absolute_argument),
+    ]
     if arguments != expected_arguments:
         raise RuntimeError(
             f"launcher arguments mismatch: {arguments!r} != {expected_arguments!r}"

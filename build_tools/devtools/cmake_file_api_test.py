@@ -10,6 +10,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from build_tools.devtools import cmake_file_api
 
@@ -79,6 +80,147 @@ class CMakeFileApiTest(unittest.TestCase):
             )
 
             self.assertEqual(alias_target.path, build_dir / "tools/iree-run-module")
+
+    def test_resolve_executable_uses_unique_artifact_name(self):
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            build_dir = Path(temporary_dir)
+            reply_dir = build_dir / ".cmake/api/v1/reply"
+            reply_dir.mkdir(parents=True)
+            self.write_json(
+                reply_dir / "index-1.json",
+                {"objects": [{"kind": "codemodel", "jsonFile": "codemodel-v2.json"}]},
+            )
+            self.write_json(
+                reply_dir / "codemodel-v2.json",
+                {
+                    "configurations": [
+                        {
+                            "targets": [
+                                {
+                                    "name": "loom_tools_loom-compile_loom-compile",
+                                    "jsonFile": "target-loom-compile.json",
+                                }
+                            ]
+                        }
+                    ]
+                },
+            )
+            self.write_json(
+                reply_dir / "target-loom-compile.json",
+                {
+                    "name": "loom_tools_loom-compile_loom-compile",
+                    "type": "EXECUTABLE",
+                    "artifacts": [
+                        {"path": "loom/src/loom/tools/loom-compile/loom-compile.exe"}
+                    ],
+                },
+            )
+
+            with mock.patch.object(
+                cmake_file_api,
+                "executable_targets",
+                wraps=cmake_file_api.executable_targets,
+            ) as executable_targets:
+                resolved_names = cmake_file_api.resolve_target_names(
+                    build_dir, ["loom-compile", "loom-compile"]
+                )
+
+            self.assertEqual(
+                resolved_names,
+                [
+                    "loom_tools_loom-compile_loom-compile",
+                    "loom_tools_loom-compile_loom-compile",
+                ],
+            )
+            executable_targets.assert_called_once_with(build_dir)
+
+            target = cmake_file_api.resolve_executable(build_dir, "loom-compile")
+
+            self.assertEqual(target.name, "loom_tools_loom-compile_loom-compile")
+            self.assertEqual(
+                target.path,
+                build_dir / "loom/src/loom/tools/loom-compile/loom-compile.exe",
+            )
+
+    def test_resolve_target_name_rejects_ambiguous_artifact_name(self):
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            build_dir = Path(temporary_dir)
+            reply_dir = build_dir / ".cmake/api/v1/reply"
+            reply_dir.mkdir(parents=True)
+            self.write_json(
+                reply_dir / "index-1.json",
+                {"objects": [{"kind": "codemodel", "jsonFile": "codemodel-v2.json"}]},
+            )
+            self.write_json(
+                reply_dir / "codemodel-v2.json",
+                {
+                    "configurations": [
+                        {
+                            "targets": [
+                                {"name": "first_tool", "jsonFile": "first.json"},
+                                {"name": "second_tool", "jsonFile": "second.json"},
+                            ]
+                        }
+                    ]
+                },
+            )
+            for target_name, json_file, artifact_path in (
+                ("first_tool", "first.json", "first/tool.exe"),
+                ("second_tool", "second.json", "second/tool.exe"),
+            ):
+                self.write_json(
+                    reply_dir / json_file,
+                    {
+                        "name": target_name,
+                        "type": "EXECUTABLE",
+                        "artifacts": [{"path": artifact_path}],
+                    },
+                )
+
+            with self.assertRaisesRegex(
+                cmake_file_api.FileApiError,
+                "matching targets: first_tool, second_tool",
+            ):
+                cmake_file_api.resolve_target_name(build_dir, "tool")
+
+    def test_resolve_target_name_prefers_exact_non_executable_target(self):
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            build_dir = Path(temporary_dir)
+            reply_dir = build_dir / ".cmake/api/v1/reply"
+            reply_dir.mkdir(parents=True)
+            self.write_json(
+                reply_dir / "index-1.json",
+                {"objects": [{"kind": "codemodel", "jsonFile": "codemodel-v2.json"}]},
+            )
+            self.write_json(
+                reply_dir / "codemodel-v2.json",
+                {
+                    "configurations": [
+                        {
+                            "targets": [
+                                {"name": "tool", "jsonFile": "library.json"},
+                                {
+                                    "name": "package_tool",
+                                    "jsonFile": "executable.json",
+                                },
+                            ]
+                        }
+                    ]
+                },
+            )
+            self.write_json(
+                reply_dir / "executable.json",
+                {
+                    "name": "package_tool",
+                    "type": "EXECUTABLE",
+                    "artifacts": [{"path": "package/tool.exe"}],
+                },
+            )
+
+            self.assertEqual(
+                cmake_file_api.resolve_target_name(build_dir, "tool"),
+                "tool",
+            )
 
     def test_resolve_executable_reports_missing_reply(self):
         with tempfile.TemporaryDirectory() as temporary_dir:

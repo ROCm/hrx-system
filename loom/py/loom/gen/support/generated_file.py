@@ -107,6 +107,11 @@ def _validate_repo_relative_path(path: str) -> str:
     return normalized
 
 
+def _is_filesystem_link(path: Path) -> bool:
+    """Returns whether a path redirects to another filesystem location."""
+    return path.is_symlink() or path.is_junction()
+
+
 def inspect_generated_file_set(
     repo_root: Path,
     generated_file_set: GeneratedFileSet,
@@ -115,8 +120,8 @@ def inspect_generated_file_set(
     issues: list[GeneratedFileIssue] = []
     for generated_file in generated_file_set.files:
         path = repo_root / generated_file.path
-        if path.is_symlink():
-            issues.append(GeneratedFileIssue(generated_file.path, "generated file must not be a symlink"))
+        if _is_filesystem_link(path):
+            issues.append(GeneratedFileIssue(generated_file.path, "generated file must not be a filesystem link"))
         elif not path.is_file():
             issues.append(GeneratedFileIssue(generated_file.path, "missing generated file"))
         elif path.read_text(encoding="utf-8") != generated_file.contents:
@@ -124,7 +129,7 @@ def inspect_generated_file_set(
     issues.extend(
         GeneratedFileIssue(relative_path, "obsolete generated file")
         for relative_path in generated_file_set.obsolete_paths
-        if (repo_root / relative_path).exists() or (repo_root / relative_path).is_symlink()
+        if (repo_root / relative_path).exists() or _is_filesystem_link(repo_root / relative_path)
     )
     return tuple(issues)
 
@@ -137,7 +142,7 @@ def update_generated_file_set(
     changed_paths: list[str] = []
     for generated_file in generated_file_set.files:
         path = repo_root / generated_file.path
-        if path.is_symlink():
+        if _is_filesystem_link(path):
             path.unlink()
         if path.is_file() and path.read_text(encoding="utf-8") == generated_file.contents:
             continue
@@ -146,7 +151,7 @@ def update_generated_file_set(
         changed_paths.append(generated_file.path)
     for relative_path in generated_file_set.obsolete_paths:
         path = repo_root / relative_path
-        if not path.exists() and not path.is_symlink():
+        if not path.exists() and not _is_filesystem_link(path):
             continue
         path.unlink()
         changed_paths.append(relative_path)

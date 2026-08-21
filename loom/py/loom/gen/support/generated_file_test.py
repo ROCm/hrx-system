@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+import os
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -111,17 +113,38 @@ def test_inspect_and_update_generated_file_set(tmp_path: Path) -> None:
     assert update_generated_file_set(tmp_path, generated_file_set) == ()
 
 
-def test_update_generated_file_set_replaces_output_symlink(tmp_path: Path) -> None:
-    outside_path = tmp_path / "outside.txt"
+def test_update_generated_file_set_replaces_output_link(tmp_path: Path) -> None:
+    outside_directory = tmp_path / "outside"
+    outside_directory.mkdir()
+    outside_path = outside_directory / "outside.txt"
     outside_path.write_text("outside\n", encoding="utf-8")
     generated_path = tmp_path / "generated/file.txt"
     generated_path.parent.mkdir(parents=True)
-    generated_path.symlink_to(outside_path)
+    if os.name == "nt":
+        completed = subprocess.run(
+            [
+                os.environ.get("COMSPEC", "cmd.exe"),
+                "/d",
+                "/c",
+                "mklink",
+                "/J",
+                str(generated_path),
+                str(outside_directory),
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+        )
+        assert completed.returncode == 0, completed.stdout
+        assert generated_path.is_junction()
+    else:
+        generated_path.symlink_to(outside_path)
     generated_file_set = GeneratedFileSet.from_mapping({"generated/file.txt": "generated\n"})
 
-    assert inspect_generated_file_set(tmp_path, generated_file_set)[0].reason == ("generated file must not be a symlink")
+    assert inspect_generated_file_set(tmp_path, generated_file_set)[0].reason == ("generated file must not be a filesystem link")
     assert update_generated_file_set(tmp_path, generated_file_set) == ("generated/file.txt",)
     assert not generated_path.is_symlink()
+    assert not generated_path.is_junction()
     assert generated_path.read_text(encoding="utf-8") == "generated\n"
     assert outside_path.read_text(encoding="utf-8") == "outside\n"
 

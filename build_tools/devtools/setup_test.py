@@ -116,7 +116,8 @@ class SetupPlanTest(unittest.TestCase):
             )
 
             description = plan.describe()
-            self.assertIn("loom/docs/requirements.lock.txt", description)
+            docs_requirements = REPO_ROOT / "loom" / "docs" / "requirements.lock.txt"
+            self.assertIn(str(docs_requirements), description)
             self.assertEqual(description.count("--group docs"), 2)
             self.assertIn("--check", description)
             python_requirements_step = next(
@@ -130,7 +131,7 @@ class SetupPlanTest(unittest.TestCase):
             )
             self.assertTrue(
                 any(
-                    argument.endswith("loom/docs/requirements.lock.txt")
+                    argument == str(docs_requirements)
                     for argument in python_requirements_step.argv
                 )
             )
@@ -145,7 +146,8 @@ class SetupPlanTest(unittest.TestCase):
             )
 
             description = plan.describe()
-            self.assertIn("loom/docs/requirements.lock.txt", description)
+            docs_requirements = REPO_ROOT / "loom" / "docs" / "requirements.lock.txt"
+            self.assertIn(str(docs_requirements), description)
             self.assertNotIn("requirements-analysis.lock.txt", description)
             self.assertIn("--group docs", description)
 

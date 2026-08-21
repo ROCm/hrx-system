@@ -444,7 +444,7 @@ def main() -> int:
             return 1
         return 0
 
-    output_path.write_text(contents, encoding="utf-8")
+    output_path.write_text(contents, encoding="utf-8", newline="\n")
     return 0
 
 

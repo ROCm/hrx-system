@@ -8,6 +8,7 @@ load(
     "//loom/build_tools/bazel:build_defs.bzl",
     "loom_cc_library",
     "loom_cc_test",
+    "loom_config_compatible_with",
 )
 load(
     "//loom/build_tools/bazel:loom_check.bzl",
@@ -31,6 +32,15 @@ _LLVMIR_TARGET_VISIBILITY = [
     "//loom/src/loom/target/emit/llvmir/amdgpu:__pkg__",
     "//loom/src/loom/target/emit/llvmir/x86:__pkg__",
 ]
+
+_LLVMIR_TARGET_SCENARIOS_COMPATIBLE_WITH = loom_config_compatible_with([
+    "//loom/config/target/arch:amdgpu",
+    "//loom/config/target/arch:x86",
+])
+
+_LLVMIR_X86_TARGET_ENV_COMPATIBLE_WITH = loom_config_compatible_with([
+    "//loom/config/target/arch:x86",
+])
 
 #===------------------------------------------------------------------------===#
 # Target-neutral LLVMIR core
@@ -160,6 +170,7 @@ loom_cc_library(
     testonly = True,
     srcs = ["test_modules.c"],
     hdrs = ["test_modules.h"],
+    target_compatible_with = _LLVMIR_TARGET_SCENARIOS_COMPATIBLE_WITH,
     deps = [
         ":core",
         ":target_env",
@@ -245,6 +256,7 @@ loom_cc_test(
     name = "bitcode_writer_target_test",
     srcs = ["bitcode_writer_test.cc"],
     defines = ["LOOM_LLVMIR_BITCODE_WRITER_TEST_TARGET_SCENARIOS=1"],
+    target_compatible_with = _LLVMIR_TARGET_SCENARIOS_COMPATIBLE_WITH,
     deps = [
         ":core",
         ":target_env",
@@ -270,6 +282,7 @@ loom_cc_test(
     name = "text_writer_target_test",
     srcs = ["text_writer_test.cc"],
     defines = ["LOOM_LLVMIR_TEXT_WRITER_TEST_TARGET_SCENARIOS=1"],
+    target_compatible_with = _LLVMIR_TARGET_SCENARIOS_COMPATIBLE_WITH,
     deps = [
         ":core",
         ":test_modules_target_scenarios",
@@ -311,6 +324,7 @@ loom_cc_test(
 loom_cc_test(
     name = "target_env_test",
     srcs = ["target_env_test.cc"],
+    target_compatible_with = _LLVMIR_X86_TARGET_ENV_COMPATIBLE_WITH,
     deps = [
         ":core",
         ":target_env",
@@ -325,6 +339,7 @@ loom_cc_test(
     name = "tool_test",
     srcs = ["tool_test.cc"],
     tags = ["requires-filesystem"],
+    target_compatible_with = _LLVMIR_TARGET_SCENARIOS_COMPATIBLE_WITH,
     deps = [
         ":core",
         ":test_modules_target_scenarios",

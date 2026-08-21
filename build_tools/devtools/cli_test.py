@@ -111,7 +111,9 @@ class CliTest(unittest.TestCase):
         with (
             mock.patch(
                 "build_tools.devtools.importers._interpreter_version",
-                side_effect=("3.13", "3.13", "3.12"),
+                side_effect=lambda command: (
+                    "3.12" if command == ("/tools/python3.12",) else "3.13"
+                ),
             ),
             mock.patch(
                 "build_tools.devtools.importers.shutil.which",
@@ -535,9 +537,20 @@ class CliTest(unittest.TestCase):
         self.assertIn("-R tilelang", description)
 
     def test_cmake_build_importer_environment_adds_pythonpath(self):
-        with self.importer_manifest_patch():
+        with (
+            self.importer_manifest_patch(),
+            tempfile.TemporaryDirectory() as temporary_dir,
+        ):
             args = cli.parse_arguments(
-                ["cmake", "build", "--importer-env", "tilelang", "loom-opt"]
+                [
+                    "--cmake-build-dir",
+                    temporary_dir,
+                    "cmake",
+                    "build",
+                    "--importer-env",
+                    "tilelang",
+                    "loom-opt",
+                ]
             )
             plan = args.handler(args)
 

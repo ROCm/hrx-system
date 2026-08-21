@@ -1171,17 +1171,18 @@ class CiTest(unittest.TestCase):
         self.assertIn('if "${{ matrix.host_toolchain }}"=="msvc"', block)
         self.assertIn("build_tools/devtools/ci.py ${{ matrix.command }}", block)
 
-    def test_iree_bazel_windows_workflow_separates_host_and_device_toolchains(self):
+    def test_iree_bazel_windows_workflow_is_enabled_and_separates_toolchains(self):
         block = self.workflow_job_block(
             ".github/workflows/ci_iree_bazel.yml", "windows_bazel"
         )
 
         self.assertIn("name: Windows / Repository / MSVC + ROCm", block)
-        self.assertIn("if: ${{ false }}", block)
+        self.assertNotIn("if: ${{ false }}", block)
         self.assertIn("runs-on: azure-windows-scale-rocm", block)
         self.assertIn("python build_tools/ci_core_windows.py fetch-rocm", block)
         self.assertIn("python dev.py bazel setup --venv", block)
-        self.assertIn("$env:RUNNER_TEMP", block)
+        self.assertIn('Join-Path $env:SystemDrive "b"', block)
+        self.assertNotIn('Join-Path $env:RUNNER_TEMP "bazel"', block)
         self.assertIn("startup --output_user_root=$bazelOutputRoot", block)
         self.assertNotIn("output_user_root=C:", block)
         self.assertIn("VsDevCmd.bat", block)

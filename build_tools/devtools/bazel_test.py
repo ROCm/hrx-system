@@ -20,12 +20,14 @@ from build_tools.devtools import bazel as bazel_dev
 
 class BazelTest(unittest.TestCase):
     def test_bazel_launch_metadata_queries_graph_providers(self):
+        execution_root = bazel_dev.REPO_ROOT / ".tmp/test-execution-root"
         completed = subprocess.CompletedProcess(
             args=[],
             returncode=0,
             stdout=json.dumps(
                 {
                     "label": "@@//pkg:configured_tool",
+                    "executable": "bazel-out/bin/pkg/configured_tool.exe",
                     "argument_provider_count": 1,
                     "arguments": ["", "--input=path/to/input"],
                     "environment_names": ["IREE_EXAMPLE_LIBRARY"],
@@ -43,11 +45,18 @@ class BazelTest(unittest.TestCase):
             + "\n",
             stderr="",
         )
-        with mock.patch.object(
-            bazel_dev,
-            "run_captured",
-            return_value=completed,
-        ) as run_captured:
+        with (
+            mock.patch.object(
+                bazel_dev,
+                "run_captured",
+                return_value=completed,
+            ) as run_captured,
+            mock.patch.object(
+                bazel_dev,
+                "bazel_execution_root",
+                return_value=execution_root,
+            ),
+        ):
             result, metadata = bazel_dev.resolve_bazel_launch_metadata(
                 bazel="bazel",
                 target="//pkg:tool",
@@ -60,6 +69,9 @@ class BazelTest(unittest.TestCase):
         self.assertEqual(
             metadata,
             bazel_dev.BazelLaunchMetadata(
+                executable_path=(
+                    execution_root / "bazel-out/bin/pkg/configured_tool.exe"
+                ),
                 runfiles_arguments=["", "--input=path/to/input"],
                 marked_runfiles_arguments=[
                     "",
@@ -76,12 +88,15 @@ class BazelTest(unittest.TestCase):
         self.assertIn("--output=starlark", query_argv)
         self.assertIn("%IreeRunfilesArgumentsInfo", " ".join(query_argv))
         self.assertIn("%IreeRunfilesEnvironmentInfo", " ".join(query_argv))
+        self.assertIn("DefaultInfo", " ".join(query_argv))
         self.assertEqual(query_argv[-2:], ["--config=asan", "//pkg:tool"])
 
     def test_bazel_launch_metadata_batches_configured_targets(self):
+        execution_root = bazel_dev.REPO_ROOT / ".tmp/test-execution-root"
         payloads = [
             {
                 "label": label,
+                "executable": f"bazel-out/bin/{label.rsplit(':', 1)[1]}.exe",
                 "argument_provider_count": 0,
                 "arguments": [],
                 "environment_names": [],
@@ -98,11 +113,18 @@ class BazelTest(unittest.TestCase):
             stderr="",
         )
         targets = ["//a:a_fuzz", "//z:z_fuzz"]
-        with mock.patch.object(
-            bazel_dev,
-            "run_captured",
-            return_value=completed,
-        ) as run_captured:
+        with (
+            mock.patch.object(
+                bazel_dev,
+                "run_captured",
+                return_value=completed,
+            ) as run_captured,
+            mock.patch.object(
+                bazel_dev,
+                "bazel_execution_root",
+                return_value=execution_root,
+            ),
+        ):
             result, metadata_by_target = (
                 bazel_dev.resolve_bazel_launch_metadata_for_targets(
                     bazel="bazel",
@@ -116,7 +138,14 @@ class BazelTest(unittest.TestCase):
         self.assertEqual(result, 0)
         self.assertEqual(
             metadata_by_target,
-            {target: bazel_dev.BazelLaunchMetadata() for target in targets},
+            {
+                target: bazel_dev.BazelLaunchMetadata(
+                    executable_path=(
+                        execution_root / f"bazel-out/bin/{target.rsplit(':', 1)[1]}.exe"
+                    )
+                )
+                for target in targets
+            },
         )
         self.assertEqual(
             run_captured.call_args.args[0][-2:],
@@ -130,6 +159,7 @@ class BazelTest(unittest.TestCase):
             stdout=json.dumps(
                 {
                     "label": "@@//pkg:tool",
+                    "executable": "bazel-out/bin/pkg/tool.exe",
                     "argument_provider_count": 0,
                     "arguments": [],
                     "environment_names": [],
@@ -146,6 +176,11 @@ class BazelTest(unittest.TestCase):
                 bazel_dev,
                 "run_captured",
                 return_value=completed,
+            ),
+            mock.patch.object(
+                bazel_dev,
+                "bazel_execution_root",
+                return_value=bazel_dev.REPO_ROOT / ".tmp/test-execution-root",
             ),
             contextlib.redirect_stderr(io.StringIO()) as error_output,
         ):
@@ -165,6 +200,7 @@ class BazelTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary_dir:
             temporary_path = Path(temporary_dir)
             script_path = temporary_path / "launch.sh"
+            executable_path = temporary_path / "tool"
 
             def write_launch_script(argv, **_kwargs):
                 script_path.write_text("#!/bin/bash\n", encoding="utf-8")
@@ -184,6 +220,7 @@ class BazelTest(unittest.TestCase):
                     return_value=(
                         0,
                         bazel_dev.BazelLaunchMetadata(
+                            executable_path=executable_path,
                             runfiles_arguments=["--input=path/to/input"],
                             marked_runfiles_arguments=["--input=path/to/input"],
                             runfiles_environment_names=["IREE_EXAMPLE_LIBRARY"],
@@ -204,7 +241,7 @@ class BazelTest(unittest.TestCase):
                     bazel_dev,
                     "bazel_run_under_command",
                     return_value="python launcher.py",
-                ),
+                ) as run_under_command,
                 mock.patch.object(
                     bazel_dev,
                     "run_quietly",
@@ -226,11 +263,13 @@ class BazelTest(unittest.TestCase):
             self.assertEqual(launch.target, "//pkg:tool")
             self.assertEqual(launch.run_cwd, temporary_path)
             self.assertEqual(launch.argument_separator, "separator")
+            self.assertEqual(launch.program_args, ["--flag", "two words"])
             self.assertEqual(launch.runfiles_arguments, ["--input=path/to/input"])
             self.assertEqual(
                 launch.runfiles_environment_names,
                 ["IREE_EXAMPLE_LIBRARY"],
             )
+            run_under_command.assert_called_once_with(executable_path)
 
     def test_bazel_launch_rejects_caller_owned_run_under(self):
         with self.assertRaisesRegex(ValueError, "managed by the IREE Bazel launcher"):
@@ -495,7 +534,8 @@ class BazelTest(unittest.TestCase):
             }
             metadata_by_target = {
                 target: bazel_dev.BazelLaunchMetadata(
-                    runfiles_environment_names=[f"FUZZER_{index}"]
+                    executable_path=temporary_path / f"fuzzer-{index}",
+                    runfiles_environment_names=[f"FUZZER_{index}"],
                 )
                 for index, target in enumerate(targets)
             }
