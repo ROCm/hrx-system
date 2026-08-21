@@ -8,36 +8,128 @@
 # Main user rules
 ###############################################################################
 
+function(_iree_finalize_windows_python_sources)
+  get_property(
+    _SOURCE_FILES GLOBAL PROPERTY IREE_WINDOWS_PYTHON_SOURCE_FILES
+  )
+  get_property(
+    _DESTINATION_FILES GLOBAL PROPERTY IREE_WINDOWS_PYTHON_DESTINATION_FILES
+  )
+  list(LENGTH _SOURCE_FILES _SOURCE_FILE_COUNT)
+  list(LENGTH _DESTINATION_FILES _DESTINATION_FILE_COUNT)
+  if(_SOURCE_FILE_COUNT EQUAL 0 OR
+     NOT _SOURCE_FILE_COUNT EQUAL _DESTINATION_FILE_COUNT)
+    message(FATAL_ERROR
+      "invalid Windows Python source materialization registration"
+    )
+  endif()
+
+  set(_MANIFEST_CONTENT "")
+  math(EXPR _LAST_SOURCE_FILE_INDEX "${_SOURCE_FILE_COUNT} - 1")
+  foreach(_FILE_INDEX RANGE ${_LAST_SOURCE_FILE_INDEX})
+    list(GET _SOURCE_FILES ${_FILE_INDEX} _SOURCE_FILE)
+    list(GET _DESTINATION_FILES ${_FILE_INDEX} _DESTINATION_FILE)
+    string(APPEND _MANIFEST_CONTENT
+      "${_SOURCE_FILE}|${_DESTINATION_FILE}\n"
+    )
+  endforeach()
+
+  set(_MATERIALIZATION_MANIFEST
+    "${CMAKE_BINARY_DIR}/CMakeFiles/iree_windows_python_sources.txt"
+  )
+  set(_MATERIALIZATION_STAMP
+    "${CMAKE_BINARY_DIR}/CMakeFiles/iree_windows_python_sources.stamp"
+  )
+  set(_MATERIALIZE_FILES_SCRIPT
+    "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/iree_materialize_files.cmake"
+  )
+  file(CONFIGURE
+    OUTPUT "${_MATERIALIZATION_MANIFEST}"
+    CONTENT "${_MANIFEST_CONTENT}"
+    @ONLY
+    NEWLINE_STYLE UNIX
+  )
+
+  add_custom_command(
+    OUTPUT
+      "${_MATERIALIZATION_STAMP}"
+    BYPRODUCTS
+      ${_DESTINATION_FILES}
+    COMMAND
+      ${CMAKE_COMMAND}
+        "-DIREE_MATERIALIZATION_MANIFEST=${_MATERIALIZATION_MANIFEST}"
+        "-DIREE_MATERIALIZATION_STAMP=${_MATERIALIZATION_STAMP}"
+        -P "${_MATERIALIZE_FILES_SCRIPT}"
+    DEPENDS
+      ${_SOURCE_FILES}
+      "${_MATERIALIZATION_MANIFEST}"
+      "${_MATERIALIZE_FILES_SCRIPT}"
+    COMMENT
+      "Materializing Windows Python sources"
+    VERBATIM
+  )
+  add_custom_target(iree_windows_python_sources
+    DEPENDS
+      "${_MATERIALIZATION_STAMP}"
+  )
+endfunction()
+
+function(_iree_register_windows_python_source SOURCE_PATH DESTINATION_PATH)
+  set_property(GLOBAL APPEND PROPERTY
+    IREE_WINDOWS_PYTHON_SOURCE_FILES "${SOURCE_PATH}"
+  )
+  set_property(GLOBAL APPEND PROPERTY
+    IREE_WINDOWS_PYTHON_DESTINATION_FILES "${DESTINATION_PATH}"
+  )
+  get_property(_FINALIZATION_SCHEDULED GLOBAL PROPERTY
+    IREE_WINDOWS_PYTHON_FINALIZATION_SCHEDULED
+  )
+  if(NOT _FINALIZATION_SCHEDULED)
+    set_property(GLOBAL PROPERTY
+      IREE_WINDOWS_PYTHON_FINALIZATION_SCHEDULED TRUE
+    )
+    cmake_language(DEFER DIRECTORY "${CMAKE_SOURCE_DIR}"
+      CALL _iree_finalize_windows_python_sources
+    )
+  endif()
+endfunction()
+
 function(_iree_py_library_source_target OUTPUT_TARGET SOURCE_FILE)
   iree_package_name(_PACKAGE_NAME)
   string(REGEX REPLACE "[^A-Za-z0-9_]" "_" _SOURCE_TARGET_SUFFIX "${SOURCE_FILE}")
   set(_SOURCE_TARGET "${_PACKAGE_NAME}_${_SOURCE_TARGET_SUFFIX}_py_source")
   if(NOT TARGET "${_SOURCE_TARGET}")
+    set(_SOURCE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/${SOURCE_FILE}")
     set(_SOURCE_BIN_PATH "${CMAKE_CURRENT_BINARY_DIR}/${SOURCE_FILE}")
     get_filename_component(_SOURCE_BIN_DIR "${_SOURCE_BIN_PATH}" DIRECTORY)
-    # Windows file symlinks require Developer Mode or elevated privileges.
     if(WIN32)
-      set(_SOURCE_MATERIALIZATION_COMMAND copy_if_different)
+      # Windows file symlinks require Developer Mode or elevated privileges.
+      # Materialize all Python sources through one batch edge so a clean build
+      # launches one process while retaining tracked outputs and repair.
+      _iree_register_windows_python_source(
+        "${_SOURCE_PATH}" "${_SOURCE_BIN_PATH}"
+      )
+      add_custom_target("${_SOURCE_TARGET}")
+      add_dependencies("${_SOURCE_TARGET}" iree_windows_python_sources)
     else()
-      set(_SOURCE_MATERIALIZATION_COMMAND create_symlink)
-    endif()
-    add_custom_command(
-      OUTPUT
-        "${_SOURCE_BIN_PATH}"
-      COMMAND
-        ${CMAKE_COMMAND} -E make_directory "${_SOURCE_BIN_DIR}"
-      COMMAND
-        ${CMAKE_COMMAND} -E ${_SOURCE_MATERIALIZATION_COMMAND}
-          "${CMAKE_CURRENT_SOURCE_DIR}/${SOURCE_FILE}"
+      add_custom_command(
+        OUTPUT
           "${_SOURCE_BIN_PATH}"
-      DEPENDS
-        "${CMAKE_CURRENT_SOURCE_DIR}/${SOURCE_FILE}"
-      VERBATIM
-    )
-    add_custom_target("${_SOURCE_TARGET}"
-      DEPENDS
-        "${_SOURCE_BIN_PATH}"
-    )
+        COMMAND
+          ${CMAKE_COMMAND} -E make_directory "${_SOURCE_BIN_DIR}"
+        COMMAND
+          ${CMAKE_COMMAND} -E create_symlink
+            "${_SOURCE_PATH}"
+            "${_SOURCE_BIN_PATH}"
+        DEPENDS
+          "${_SOURCE_PATH}"
+        VERBATIM
+      )
+      add_custom_target("${_SOURCE_TARGET}"
+        DEPENDS
+          "${_SOURCE_BIN_PATH}"
+      )
+    endif()
   endif()
   set(${OUTPUT_TARGET} "${_SOURCE_TARGET}" PARENT_SCOPE)
 endfunction()
