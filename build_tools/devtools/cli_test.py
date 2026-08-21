@@ -537,15 +537,26 @@ class CliTest(unittest.TestCase):
         self.assertIn("-R tilelang", description)
 
     def test_cmake_build_importer_environment_adds_pythonpath(self):
-        with self.importer_manifest_patch():
+        with (
+            self.importer_manifest_patch(),
+            tempfile.TemporaryDirectory() as temporary_dir,
+        ):
             args = cli.parse_arguments(
-                ["cmake", "build", "--importer-env", "tilelang", "loom-opt"]
+                [
+                    "--cmake-build-dir",
+                    temporary_dir,
+                    "cmake",
+                    "build",
+                    "--importer-env",
+                    "tilelang",
+                    "loom-opt",
+                ]
             )
             plan = args.handler(args)
 
         description = plan.describe()
         self.assertIn("PYTHONPATH=/tmp/loom-tilelang-site", description)
-        self.assertIn("--target loom_tools_loom-opt_loom-opt", description)
+        self.assertIn("--target loom-opt", description)
 
     def test_bazel_try_preserves_local_input_paths(self):
         with tempfile.TemporaryDirectory() as temporary_dir:
