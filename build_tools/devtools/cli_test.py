@@ -111,7 +111,9 @@ class CliTest(unittest.TestCase):
         with (
             mock.patch(
                 "build_tools.devtools.importers._interpreter_version",
-                side_effect=("3.13", "3.13", "3.12"),
+                side_effect=lambda command: (
+                    "3.12" if command == ("/tools/python3.12",) else "3.13"
+                ),
             ),
             mock.patch(
                 "build_tools.devtools.importers.shutil.which",
@@ -543,7 +545,7 @@ class CliTest(unittest.TestCase):
 
         description = plan.describe()
         self.assertIn("PYTHONPATH=/tmp/loom-tilelang-site", description)
-        self.assertIn("--target loom-opt", description)
+        self.assertIn("--target loom_tools_loom-opt_loom-opt", description)
 
     def test_bazel_try_preserves_local_input_paths(self):
         with tempfile.TemporaryDirectory() as temporary_dir:

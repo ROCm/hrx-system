@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import io
+import os
 import tarfile
 import tempfile
 import unittest
@@ -86,7 +87,8 @@ class InstallTest(unittest.TestCase):
 
             self.assertEqual((root / "tool").read_bytes(), executable_contents)
             self.assertEqual((root / "companion").read_bytes(), companion_contents)
-            self.assertTrue((root / "tool").stat().st_mode & 0o100)
+            if os.name != "nt":
+                self.assertTrue((root / "tool").stat().st_mode & 0o100)
 
     def test_extracts_tar_archive_file_with_recorded_hash(self):
         with tempfile.TemporaryDirectory() as temporary_directory:
@@ -114,7 +116,8 @@ class InstallTest(unittest.TestCase):
             install.extract_archive(asset, archive_path, root)
 
             self.assertEqual((root / "tool").read_bytes(), contents)
-            self.assertTrue((root / "tool").stat().st_mode & 0o100)
+            if os.name != "nt":
+                self.assertTrue((root / "tool").stat().st_mode & 0o100)
 
     def test_archive_install_names_cannot_escape_bin_directory(self):
         with tempfile.TemporaryDirectory() as temporary_directory:

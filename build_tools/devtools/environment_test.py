@@ -69,7 +69,10 @@ class EnvironmentTest(unittest.TestCase):
 
             def create_test_junction(link: Path, target: Path) -> None:
                 created_junctions.append((link, target))
-                link.symlink_to(target, target_is_directory=True)
+                if environment.os.name == "nt":
+                    environment._create_windows_directory_junction(link, target)
+                else:
+                    link.symlink_to(target, target_is_directory=True)
 
             result = environment.bazel_compatible_windows_shell_path(
                 str(bash_executable),
