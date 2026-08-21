@@ -1386,8 +1386,8 @@ static iree_status_t loom_low_lower_query_target_contract_from_context(
   context->lowering.fact_table =
       (loom_value_fact_table_t*)environment->fact_table;
   if (fact_table_changed) {
-    context->lowering.view_regions_initialized = false;
-    context->lowering.view_regions_analyzed = false;
+    context->lowering.function_analysis =
+        (loom_low_lower_function_analysis_t){0};
   }
   iree_status_t status = iree_ok_status();
   loom_target_contract_query_environment_t query_environment = *environment;
@@ -1442,8 +1442,8 @@ static iree_status_t loom_low_lower_query_target_contract_from_context(
   context->descriptor_set = saved_descriptor_set;
   context->lowering.fact_table = saved_fact_table;
   if (fact_table_changed) {
-    context->lowering.view_regions_initialized = false;
-    context->lowering.view_regions_analyzed = false;
+    context->lowering.function_analysis =
+        (loom_low_lower_function_analysis_t){0};
   }
   return status;
 }
@@ -1537,6 +1537,13 @@ const loom_local_value_domain_t* loom_low_lower_source_query_scope_value_domain(
   IREE_ASSERT_ARGUMENT(scope);
   return scope->value_domain_initialized ? &scope->context.lowering.value_domain
                                          : NULL;
+}
+
+iree_status_t loom_low_lower_source_query_scope_view_regions(
+    loom_low_lower_source_query_scope_t* scope,
+    const loom_view_region_table_t** out_view_regions) {
+  IREE_ASSERT_ARGUMENT(scope);
+  return loom_low_lower_context_view_regions(&scope->context, out_view_regions);
 }
 
 static void loom_low_lower_report_row_list_deinitialize(
@@ -3584,6 +3591,11 @@ iree_status_t loom_low_lower_function(loom_module_t* module,
     return iree_ok_status();
   }
 
+  const loom_view_region_table_t* legality_view_regions = NULL;
+  if (iree_status_is_ok(status)) {
+    status =
+        loom_low_lower_context_view_regions(&context, &legality_view_regions);
+  }
   loom_target_low_legality_result_t legality_result = {};
   if (iree_status_is_ok(status)) {
     loom_target_low_legality_options_t legality_options = {
@@ -3597,8 +3609,7 @@ iree_status_t loom_low_lower_function(loom_module_t* module,
                 .user_data = &context,
             },
         .type_supported = context.policy->source_type_supported,
-        .fact_table = context.lowering.fact_table,
-        .value_domain = &context.lowering.value_domain,
+        .view_regions = legality_view_regions,
         .structural_legality_flags =
             loom_low_lower_structured_low_enabled(&context)
                 ? LOOM_TARGET_LOW_STRUCTURAL_LEGALITY_ALLOW_SOURCE_SCF

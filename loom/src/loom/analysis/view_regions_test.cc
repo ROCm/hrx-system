@@ -239,8 +239,11 @@ class ViewRegionsTest : public ::testing::Test {
     IREE_ASSERT_OK(loom_local_value_domain_acquire_for_region(
         module_, loom_func_like_body(function_), &analysis_arena_,
         &value_domain_));
+    loom_symbolic_expr_context_initialize(module_, facts, &analysis_arena_,
+                                          &expression_context_);
     IREE_ASSERT_OK(loom_view_region_table_initialize(
-        facts, &value_domain_, &analysis_arena_, out_table));
+        facts, &value_domain_, &expression_context_, &analysis_arena_,
+        out_table));
     IREE_ASSERT_OK(loom_view_region_table_analyze(out_table));
   }
 
@@ -250,6 +253,7 @@ class ViewRegionsTest : public ::testing::Test {
   loom_module_t* module_ = nullptr;
   loom_func_like_t function_;
   loom_local_value_domain_t value_domain_ = {};
+  loom_symbolic_expr_context_t expression_context_ = {};
   loom_builder_t builder_;
 };
 
@@ -359,7 +363,7 @@ TEST_F(ViewRegionsTest, PrecomputesReusedMemoryIndexExpression) {
   Analyze(&facts, &table);
 
   loom_symbolic_expr_t expression = {0};
-  ASSERT_TRUE(loom_symbolic_expr_context_try_lookup(&table.expression_context,
+  ASSERT_TRUE(loom_symbolic_expr_context_try_lookup(table.expression_context,
                                                     deep_index, &expression));
   ASSERT_TRUE(loom_symbolic_expr_is_linear(&expression));
   EXPECT_EQ(expression.constant, 40);
@@ -367,11 +371,11 @@ TEST_F(ViewRegionsTest, PrecomputesReusedMemoryIndexExpression) {
   EXPECT_EQ(expression.terms[0].value_id, source_index);
   loom_symbolic_expr_t repeated_expression = {0};
   EXPECT_TRUE(loom_symbolic_expr_context_try_lookup(
-      &table.expression_context, deep_index, &repeated_expression));
+      table.expression_context, deep_index, &repeated_expression));
   EXPECT_EQ(repeated_expression.terms, expression.terms);
   loom_symbolic_expr_t unrelated_expression = {0};
   EXPECT_FALSE(loom_symbolic_expr_context_try_lookup(
-      &table.expression_context, unrelated_index, &unrelated_expression));
+      table.expression_context, unrelated_index, &unrelated_expression));
 }
 
 TEST_F(ViewRegionsTest, ProvesSymbolicOffsetCancellation) {

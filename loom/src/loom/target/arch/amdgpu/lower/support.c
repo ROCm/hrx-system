@@ -394,9 +394,6 @@ static iree_status_t loom_amdgpu_source_value_analysis_for_target_low_legality(
     loom_target_low_legality_context_t* context,
     loom_amdgpu_source_value_analysis_t** out_analysis) {
   *out_analysis = NULL;
-  if (loom_target_low_legality_value_domain(context) == NULL) {
-    return iree_ok_status();
-  }
   loom_amdgpu_source_value_analysis_t* analysis = NULL;
   IREE_RETURN_IF_ERROR(loom_target_low_legality_get_or_allocate_target_state(
       context, &loom_amdgpu_source_value_analysis_state_key, sizeof(*analysis),
@@ -2810,9 +2807,8 @@ iree_status_t loom_amdgpu_context_value_prefers_vgpr(
 iree_status_t loom_amdgpu_target_low_legality_value_prefers_vgpr(
     loom_target_low_legality_context_t* context,
     loom_value_id_t source_value_id, bool* out_prefers_vgpr) {
-  const loom_view_region_table_t* view_regions = NULL;
-  IREE_RETURN_IF_ERROR(
-      loom_target_low_legality_view_regions(context, &view_regions));
+  const loom_view_region_table_t* view_regions =
+      loom_target_low_legality_view_regions(context);
   loom_amdgpu_source_value_analysis_t* analysis = NULL;
   IREE_RETURN_IF_ERROR(
       loom_amdgpu_source_value_analysis_for_target_low_legality(context,
@@ -2843,9 +2839,8 @@ iree_status_t loom_amdgpu_context_value_is_native_i1_mask(
 iree_status_t loom_amdgpu_target_low_legality_value_is_native_i1_mask(
     loom_target_low_legality_context_t* context,
     loom_value_id_t source_value_id, bool* out_is_native_mask) {
-  const loom_view_region_table_t* view_regions = NULL;
-  IREE_RETURN_IF_ERROR(
-      loom_target_low_legality_view_regions(context, &view_regions));
+  const loom_view_region_table_t* view_regions =
+      loom_target_low_legality_view_regions(context);
   loom_amdgpu_source_value_analysis_t* analysis = NULL;
   IREE_RETURN_IF_ERROR(
       loom_amdgpu_source_value_analysis_for_target_low_legality(context,

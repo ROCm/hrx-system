@@ -54,16 +54,6 @@ struct loom_target_low_legality_context_t {
   const loom_target_low_legality_options_t* options;
   // Descriptor set selected by options.target_facts.
   const loom_low_descriptor_set_t* descriptor_set;
-  // Source facts visible to target-specific legality providers.
-  loom_value_fact_table_t* fact_table;
-  // Optional active value domain supplied by the source-to-low frame.
-  const loom_local_value_domain_t* value_domain;
-  // View-region table for providers that need read/write summaries.
-  loom_view_region_table_t view_regions;
-  // True after view_regions has been initialized against value_domain.
-  bool view_regions_initialized;
-  // True after view_regions has recorded per-view read/write flags.
-  bool view_regions_analyzed;
   // Function-local target state records populated by legality providers.
   loom_target_low_legality_target_state_record_t* target_state_records;
   // Number of populated target_state_records entries.
@@ -361,34 +351,17 @@ const loom_low_descriptor_set_t* loom_target_low_legality_descriptor_set(
 
 const loom_value_fact_table_t* loom_target_low_legality_fact_table(
     const loom_target_low_legality_context_t* context) {
-  return context->fact_table;
+  return context->options->view_regions->fact_table;
 }
 
 const loom_local_value_domain_t* loom_target_low_legality_value_domain(
     const loom_target_low_legality_context_t* context) {
-  return context->value_domain;
+  return context->options->view_regions->value_domain;
 }
 
-iree_status_t loom_target_low_legality_view_regions(
-    loom_target_low_legality_context_t* context,
-    const loom_view_region_table_t** out_view_regions) {
-  *out_view_regions = NULL;
-  if (context->value_domain == NULL) {
-    return iree_ok_status();
-  }
-  if (!context->view_regions_initialized) {
-    IREE_RETURN_IF_ERROR(loom_view_region_table_initialize(
-        context->fact_table, context->value_domain, &context->arena,
-        &context->view_regions));
-    context->view_regions_initialized = true;
-  }
-  if (!context->view_regions_analyzed) {
-    IREE_RETURN_IF_ERROR(
-        loom_view_region_table_analyze(&context->view_regions));
-    context->view_regions_analyzed = true;
-  }
-  *out_view_regions = &context->view_regions;
-  return iree_ok_status();
+const loom_view_region_table_t* loom_target_low_legality_view_regions(
+    const loom_target_low_legality_context_t* context) {
+  return context->options->view_regions;
 }
 
 iree_arena_allocator_t* loom_target_low_legality_scratch_arena(
@@ -482,6 +455,10 @@ static iree_status_t loom_target_low_legality_validate_options(
     const loom_target_low_legality_options_t* options,
     const loom_low_descriptor_set_t** out_descriptor_set) {
   *out_descriptor_set = NULL;
+  if (options->view_regions == NULL) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "target-low legality requires function analysis");
+  }
   const loom_target_bundle_t* bundle =
       loom_target_low_legality_options_bundle(options);
   if (!loom_target_low_legality_codegen_format_is_low(
@@ -726,17 +703,14 @@ static iree_status_t loom_target_low_legality_try_contract_query_op(
     return iree_ok_status();
   }
 
-  const loom_view_region_table_t* view_regions = NULL;
-  IREE_RETURN_IF_ERROR(
-      loom_target_low_legality_view_regions(context, &view_regions));
   const loom_target_contract_query_environment_t environment = {
       .module = context->module,
       .function = context->function,
       .target_facts = context->options->target_facts,
       .descriptor_set = context->descriptor_set,
-      .fact_table = context->fact_table,
-      .value_domain = context->value_domain,
-      .view_regions = view_regions,
+      .fact_table = loom_target_low_legality_fact_table(context),
+      .value_domain = loom_target_low_legality_value_domain(context),
+      .view_regions = loom_target_low_legality_view_regions(context),
       .arena = &context->arena,
       .target_state_allocator =
           {
@@ -1009,8 +983,6 @@ iree_status_t loom_target_low_verify_function_legality(
       .result = out_result,
   };
   iree_arena_initialize(module->arena.block_pool, &context.arena);
-  context.fact_table = options->fact_table;
-  context.value_domain = options->value_domain;
 
   iree_status_t status = iree_ok_status();
   if (iree_status_is_ok(status)) {

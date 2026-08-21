@@ -261,9 +261,8 @@ iree_status_t loom_amdgpu_record_view_prefetch_diagnostic(
     return iree_ok_status();
   }
 
-  const loom_view_region_table_t* view_regions = NULL;
-  IREE_RETURN_IF_ERROR(
-      loom_target_low_legality_view_regions(context, &view_regions));
+  const loom_view_region_table_t* view_regions =
+      loom_target_low_legality_view_regions(context);
   loom_amdgpu_prefetch_plan_t plan = {0};
   const loom_low_descriptor_t* descriptor = NULL;
   iree_string_view_t decision_key = iree_string_view_empty();

@@ -1464,6 +1464,9 @@ static iree_status_t loom_low_target_legalize_verify_final(
   *out_error_count = 0;
   IREE_RETURN_IF_ERROR(
       loom_low_target_legalize_refresh_query_scope(state, fact_table));
+  const loom_view_region_table_t* view_regions = NULL;
+  IREE_RETURN_IF_ERROR(loom_low_lower_source_query_scope_view_regions(
+      state->query_scope, &view_regions));
   const loom_target_contract_query_callback_t contract_query = {
       .fn = loom_low_target_legalize_query_contract,
       .user_data = state,
@@ -1476,9 +1479,7 @@ static iree_status_t loom_low_target_legalize_verify_final(
       .provider_list = state->legality_provider_list,
       .contract_query = contract_query,
       .type_supported = state->selection->policy->source_type_supported,
-      .fact_table = (loom_value_fact_table_t*)fact_table,
-      .value_domain =
-          loom_low_lower_source_query_scope_value_domain(state->query_scope),
+      .view_regions = view_regions,
       .structural_legality_flags =
           LOOM_TARGET_LOW_STRUCTURAL_LEGALITY_ALLOW_SOURCE_SCF,
       .emitter = state->pass->diagnostic_emitter,

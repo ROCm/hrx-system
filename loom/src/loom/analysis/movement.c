@@ -169,7 +169,7 @@ static iree_status_t loom_movement_origin_index_expr(
         return iree_ok_status();
       }
       IREE_RETURN_IF_ERROR(loom_symbolic_expr_from_value(
-          &analysis->view_regions.expression_context,
+          &analysis->expression_context,
           dynamic_indices.values[dynamic_ordinal], out_expression));
       *out_known = true;
       return iree_ok_status();
@@ -209,16 +209,15 @@ static iree_status_t loom_movement_vector_origin_byte_offset_expr(
     if (!origin_known) return iree_ok_status();
 
     loom_symbolic_expr_t contribution = {0};
-    IREE_RETURN_IF_ERROR(
-        loom_symbolic_expr_mul_i64(&analysis->view_regions.expression_context,
-                                   &origin, stride, &contribution));
-    IREE_RETURN_IF_ERROR(loom_symbolic_expr_add(
-        &analysis->view_regions.expression_context, &element_offset,
-        &contribution, &element_offset));
+    IREE_RETURN_IF_ERROR(loom_symbolic_expr_mul_i64(
+        &analysis->expression_context, &origin, stride, &contribution));
+    IREE_RETURN_IF_ERROR(loom_symbolic_expr_add(&analysis->expression_context,
+                                                &element_offset, &contribution,
+                                                &element_offset));
   }
 
   IREE_RETURN_IF_ERROR(loom_symbolic_expr_mul_i64(
-      &analysis->view_regions.expression_context, &element_offset,
+      &analysis->expression_context, &element_offset,
       access->static_element_byte_count, out_expression));
   *out_known = true;
   return iree_ok_status();
@@ -271,14 +270,14 @@ static iree_status_t loom_movement_endpoint_apply_vector_footprint(
   }
 
   loom_symbolic_expr_t begin = {0};
-  IREE_RETURN_IF_ERROR(
-      loom_symbolic_expr_add(&analysis->view_regions.expression_context,
-                             &endpoint->begin_byte_offset, origin, &begin));
+  IREE_RETURN_IF_ERROR(loom_symbolic_expr_add(&analysis->expression_context,
+                                              &endpoint->begin_byte_offset,
+                                              origin, &begin));
   loom_symbolic_expr_t length = {0};
   loom_symbolic_expr_constant(byte_length, &length);
   loom_symbolic_expr_t end = {0};
-  IREE_RETURN_IF_ERROR(loom_symbolic_expr_add(
-      &analysis->view_regions.expression_context, &begin, &length, &end));
+  IREE_RETURN_IF_ERROR(loom_symbolic_expr_add(&analysis->expression_context,
+                                              &begin, &length, &end));
 
   endpoint->begin_byte_offset = begin;
   endpoint->byte_length = length;
@@ -974,8 +973,11 @@ iree_status_t loom_movement_analysis_initialize(
   out_analysis->module = value_domain->module;
   out_analysis->fact_table = fact_table;
   out_analysis->arena = arena;
-  return loom_view_region_table_initialize(fact_table, value_domain, arena,
-                                           &out_analysis->view_regions);
+  loom_symbolic_expr_context_initialize(value_domain->module, fact_table, arena,
+                                        &out_analysis->expression_context);
+  return loom_view_region_table_initialize(fact_table, value_domain,
+                                           &out_analysis->expression_context,
+                                           arena, &out_analysis->view_regions);
 }
 
 iree_status_t loom_movement_analysis_analyze(

@@ -2011,9 +2011,8 @@ iree_status_t loom_amdgpu_low_legality_verify_atomic(
   loom_low_source_memory_access_diagnostic_t source_diagnostic = {0};
   loom_amdgpu_memory_access_diagnostic_t memory_diagnostic = {0};
   loom_amdgpu_atomic_diagnostic_t diagnostic = {0};
-  const loom_view_region_table_t* view_regions = NULL;
-  IREE_RETURN_IF_ERROR(
-      loom_target_low_legality_view_regions(context, &view_regions));
+  const loom_view_region_table_t* view_regions =
+      loom_target_low_legality_view_regions(context);
   atomic_source.payload_placement_flags =
       loom_amdgpu_atomic_payload_placement_from_source_facts(
           module, loom_target_low_legality_fact_table(context), view_regions,

@@ -253,6 +253,9 @@ typedef struct loom_movement_analysis_t {
   // Arena backing view-region and symbolic-expression storage.
   iree_arena_allocator_t* arena;
 
+  // Function-local symbolic expressions shared with view-region analysis.
+  loom_symbolic_expr_context_t expression_context;
+
   // View-region analysis reused for endpoint roots and byte intervals.
   loom_view_region_table_t view_regions;
 } loom_movement_analysis_t;

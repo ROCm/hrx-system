@@ -798,9 +798,8 @@ iree_status_t loom_amdgpu_low_legality_verify_sanitizer_assert_access(
 
   loom_amdgpu_sanitizer_access_plan_t plan = {0};
   loom_amdgpu_sanitizer_access_diagnostic_t diagnostic = {0};
-  const loom_view_region_table_t* view_regions = NULL;
-  IREE_RETURN_IF_ERROR(
-      loom_target_low_legality_view_regions(context, &view_regions));
+  const loom_view_region_table_t* view_regions =
+      loom_target_low_legality_view_regions(context);
   if (!loom_amdgpu_sanitizer_assert_access_plan_build(
           loom_target_low_legality_module(context),
           loom_target_low_legality_fact_table(context), view_regions, op, &plan,

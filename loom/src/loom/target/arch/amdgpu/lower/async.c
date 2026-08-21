@@ -1413,9 +1413,8 @@ static iree_status_t loom_amdgpu_low_legality_verify_kernel_async_gather(
     loom_target_low_legality_context_t* context, const loom_op_t* op) {
   loom_amdgpu_async_gather_selection_t selection = {0};
   loom_amdgpu_async_gather_diagnostic_t diagnostic = {0};
-  const loom_view_region_table_t* view_regions = NULL;
-  IREE_RETURN_IF_ERROR(
-      loom_target_low_legality_view_regions(context, &view_regions));
+  const loom_view_region_table_t* view_regions =
+      loom_target_low_legality_view_regions(context);
   const loom_amdgpu_source_alloca_layout_t* alloca_layout = NULL;
   IREE_RETURN_IF_ERROR(loom_amdgpu_source_alloca_layout_for_low_legality(
       context, &alloca_layout));
@@ -1434,9 +1433,8 @@ static iree_status_t loom_amdgpu_low_legality_verify_kernel_async_gather(
 static iree_status_t
 loom_amdgpu_low_legality_verify_kernel_async_cluster_gather(
     loom_target_low_legality_context_t* context, const loom_op_t* op) {
-  const loom_view_region_table_t* view_regions = NULL;
-  IREE_RETURN_IF_ERROR(
-      loom_target_low_legality_view_regions(context, &view_regions));
+  const loom_view_region_table_t* view_regions =
+      loom_target_low_legality_view_regions(context);
   const loom_amdgpu_source_alloca_layout_t* alloca_layout = NULL;
   IREE_RETURN_IF_ERROR(loom_amdgpu_source_alloca_layout_for_low_legality(
       context, &alloca_layout));

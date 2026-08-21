@@ -48,6 +48,7 @@ static iree_status_t loom_view_region_table_append_region(
 iree_status_t loom_view_region_table_initialize(
     loom_value_fact_table_t* fact_table,
     const loom_local_value_domain_t* value_domain,
+    loom_symbolic_expr_context_t* expression_context,
     iree_arena_allocator_t* arena, loom_view_region_table_t* out_table) {
   IREE_ASSERT(loom_local_value_domain_is_acquired(value_domain));
   memset(out_table, 0, sizeof(*out_table));
@@ -55,9 +56,8 @@ iree_status_t loom_view_region_table_initialize(
   out_table->fact_table = fact_table;
   out_table->fact_context.table = fact_table;
   out_table->arena = arena;
+  out_table->expression_context = expression_context;
   out_table->value_domain = value_domain;
-  loom_symbolic_expr_context_initialize(value_domain->module, fact_table, arena,
-                                        &out_table->expression_context);
   const iree_host_size_t value_count = value_domain->value_count;
   if (value_count == 0) {
     return iree_ok_status();
@@ -134,14 +134,14 @@ static bool loom_view_region_expr_is_constant(
 static iree_status_t loom_view_region_expr_add(
     loom_view_region_table_t* table, const loom_symbolic_expr_t* left,
     const loom_symbolic_expr_t* right, loom_symbolic_expr_t* out_expression) {
-  return loom_symbolic_expr_add(&table->expression_context, left, right,
+  return loom_symbolic_expr_add(table->expression_context, left, right,
                                 out_expression);
 }
 
 static iree_status_t loom_view_region_expr_sub(
     loom_view_region_table_t* table, const loom_symbolic_expr_t* left,
     const loom_symbolic_expr_t* right, loom_symbolic_expr_t* out_expression) {
-  return loom_symbolic_expr_sub(&table->expression_context, left, right,
+  return loom_symbolic_expr_sub(table->expression_context, left, right,
                                 out_expression);
 }
 
@@ -151,11 +151,11 @@ static iree_status_t loom_view_region_expr_mul(
   int64_t left_constant = 0;
   int64_t right_constant = 0;
   if (loom_view_region_expr_is_constant(left, &left_constant)) {
-    return loom_symbolic_expr_mul_i64(&table->expression_context, right,
+    return loom_symbolic_expr_mul_i64(table->expression_context, right,
                                       left_constant, out_expression);
   }
   if (loom_view_region_expr_is_constant(right, &right_constant)) {
-    return loom_symbolic_expr_mul_i64(&table->expression_context, left,
+    return loom_symbolic_expr_mul_i64(table->expression_context, left,
                                       right_constant, out_expression);
   }
   loom_value_facts_t facts = loom_value_facts_unknown();
@@ -172,7 +172,7 @@ static iree_status_t loom_view_region_dim_expr(
                                 out_expression);
     return iree_ok_status();
   }
-  return loom_symbolic_expr_from_value(&table->expression_context,
+  return loom_symbolic_expr_from_value(table->expression_context,
                                        loom_type_dim_value_id_at(type, axis),
                                        out_expression);
 }
@@ -228,7 +228,7 @@ static iree_status_t loom_view_region_static_or_dynamic_expr(
     if (i == axis) {
       if (dynamic_ordinal >= dynamic_values.count) return iree_ok_status();
       IREE_RETURN_IF_ERROR(loom_symbolic_expr_from_value(
-          &table->expression_context, dynamic_values.values[dynamic_ordinal],
+          table->expression_context, dynamic_values.values[dynamic_ordinal],
           out_expression));
       *out_known = true;
       return iree_ok_status();
@@ -605,7 +605,7 @@ static iree_status_t loom_view_region_build_buffer_view(
   out_region->base_view_value_id = value_id;
   out_region->begin_value_id = loom_buffer_view_byte_offset(op);
   IREE_RETURN_IF_ERROR(loom_symbolic_expr_from_value(
-      &table->expression_context, loom_buffer_view_byte_offset(op),
+      table->expression_context, loom_buffer_view_byte_offset(op),
       &out_region->begin_byte_offset));
   loom_view_region_expression_refine_facts(&out_region->begin_byte_offset,
                                            reference.base_byte_offset);
@@ -893,7 +893,7 @@ static iree_status_t loom_view_region_table_analyze_op_memory(
       }
       loom_symbolic_expr_t expression = {0};
       IREE_RETURN_IF_ERROR(loom_symbolic_expr_from_value(
-          &table->expression_context, value_id, &expression));
+          table->expression_context, value_id, &expression));
     }
   }
 
@@ -1010,14 +1010,14 @@ iree_status_t loom_view_regions_prove_no_overlap(
 
   loom_symbolic_proof_result_t proof = LOOM_SYMBOLIC_PROOF_UNKNOWN;
   IREE_RETURN_IF_ERROR(loom_symbolic_expr_prove_le(
-      &table->expression_context, &left_region->end_byte_offset,
+      table->expression_context, &left_region->end_byte_offset,
       &right_region->begin_byte_offset, &proof));
   if (proof == LOOM_SYMBOLIC_PROOF_TRUE) {
     *out_no_overlap = true;
     return iree_ok_status();
   }
   IREE_RETURN_IF_ERROR(loom_symbolic_expr_prove_le(
-      &table->expression_context, &right_region->end_byte_offset,
+      table->expression_context, &right_region->end_byte_offset,
       &left_region->begin_byte_offset, &proof));
   if (proof == LOOM_SYMBOLIC_PROOF_TRUE) {
     *out_no_overlap = true;
