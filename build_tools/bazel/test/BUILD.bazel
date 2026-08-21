@@ -4,6 +4,9 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+# Bazel rule analysis tests have no CMake target surface.
+# bazel-to-cmake: skip
+
 load("@rules_shell//shell:sh_binary.bzl", "sh_binary")
 load("//build_tools/bazel:cc_benchmark.bzl", "iree_cc_benchmark")
 load("//build_tools/bazel:glob.bzl", "iree_checked_glob")
@@ -12,6 +15,10 @@ load(":cc_fuzz_rules_test.bzl", "cc_fuzz_rules_test_suite")
 load(":cc_link_test.bzl", "cc_link_test_suite")
 load(":cc_rules_test.bzl", "cc_rules_test_suite")
 load(":compile_commands_rules_test.bzl", "compile_commands_rules_test_suite")
+load(
+    ":elf_dynamic_library_closure_test.bzl",
+    "elf_dynamic_library_closure_test_suite",
+)
 load(":executable_rules_test.bzl", "executable_rules_test_suite")
 load(":generate_rules_test.bzl", "generate_rules_test_suite")
 load(":glob_rules_test.bzl", "glob_rules_test_suite")
@@ -40,6 +47,8 @@ cc_link_test_suite(name = "cc_link_tests")
 compile_commands_rules_test_suite(name = "compile_commands_tests")
 
 executable_rules_test_suite(name = "executable_tests")
+
+elf_dynamic_library_closure_test_suite(name = "elf_dynamic_library_closure_tests")
 
 sh_binary(
     name = "generate_rule_fixture_tool",
