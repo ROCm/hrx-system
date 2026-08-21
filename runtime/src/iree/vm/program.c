@@ -77,7 +77,7 @@ static void iree_vm_program_sort_linked_modules(
   }
 }
 
-static const iree_vm_linked_module_t* iree_vm_program_find_linked_module(
+const iree_vm_linked_module_t* iree_vm_program_find_linked_module(
     const iree_vm_program_t* program, const iree_vm_module_t* module,
     iree_host_size_t* out_ordinal) {
   iree_host_size_t low = 0;
@@ -95,6 +95,30 @@ static const iree_vm_linked_module_t* iree_vm_program_find_linked_module(
   }
   if (low >= program->linked_module_count ||
       program->linked_modules[low].module != module) {
+    return NULL;
+  }
+  *out_ordinal = low;
+  return &program->linked_modules[low];
+}
+
+const iree_vm_linked_module_t* iree_vm_program_lookup_linked_module(
+    const iree_vm_program_t* program, iree_string_view_t name,
+    iree_host_size_t* out_ordinal) {
+  iree_host_size_t low = 0;
+  iree_host_size_t high = program->linked_module_count;
+  while (low < high) {
+    const iree_host_size_t middle = low + (high - low) / 2;
+    const int comparison = iree_string_view_compare(
+        program->linked_modules[middle].module->descriptor->name, name);
+    if (comparison < 0) {
+      low = middle + 1;
+    } else {
+      high = middle;
+    }
+  }
+  if (low >= program->linked_module_count ||
+      !iree_string_view_equal(
+          program->linked_modules[low].module->descriptor->name, name)) {
     return NULL;
   }
   *out_ordinal = low;
@@ -123,11 +147,11 @@ static bool iree_vm_program_signature_types_equal(
       if (lhs_ref_type != rhs_ref_type) return false;
     } else if (lhs_type.kind == IREE_VM_MODULE_SIGNATURE_TYPE_KIND_FUNCTION) {
       const uint32_t lhs_mapping =
-          program->callable_mappings[lhs_module->callable_mapping_base +
-                                     lhs_type.type_ordinal];
+          program->callables[lhs_module->callable_base + lhs_type.type_ordinal]
+              .mapping;
       const uint32_t rhs_mapping =
-          program->callable_mappings[rhs_module->callable_mapping_base +
-                                     rhs_type.type_ordinal];
+          program->callables[rhs_module->callable_base + rhs_type.type_ordinal]
+              .mapping;
       if (lhs_mapping != rhs_mapping) return false;
     }
   }
@@ -144,6 +168,23 @@ static bool iree_vm_program_signatures_equal(
                                                rhs_module, rhs.results);
 }
 
+static iree_vm_program_bank_counts_t iree_vm_program_count_signature_banks(
+    iree_vm_module_signature_type_span_t types) {
+  iree_vm_program_bank_counts_t counts = {0};
+  for (iree_host_size_t i = 0; i < types.count; ++i) {
+    const iree_vm_module_signature_type_t type = types.data[i];
+    if (type.kind > IREE_VM_SCALAR_TYPE_INVALID &&
+        type.kind <= IREE_VM_SCALAR_TYPE_F64) {
+      ++counts.value_count;
+    } else if (type.kind == IREE_VM_MODULE_SIGNATURE_TYPE_KIND_REF) {
+      ++counts.ref_count;
+    } else {
+      ++counts.function_count;
+    }
+  }
+  return counts;
+}
+
 static void iree_vm_program_intern_callable_types(iree_vm_program_t* program) {
   iree_host_size_t flat_ordinal = 0;
   for (iree_host_size_t module_i = 0; module_i < program->linked_module_count;
@@ -158,41 +199,33 @@ static void iree_vm_program_intern_callable_types(iree_vm_program_t* program) {
       linked_module->module->vtable->query_callable_type(
           linked_module->module, callable_i, &callable_type);
 
+      iree_vm_program_callable_t* callable = &program->callables[flat_ordinal];
+      callable->argument_types = callable_type.signature.arguments.data;
+      callable->result_types = callable_type.signature.results.data;
+      callable->signature_module = linked_module;
+      callable->argument_counts = iree_vm_program_count_signature_banks(
+          callable_type.signature.arguments);
+      callable->result_counts = iree_vm_program_count_signature_banks(
+          callable_type.signature.results);
+
       uint32_t token = 0;
-      iree_host_size_t representative_flat_ordinal = 0;
-      for (iree_host_size_t representative_module_i = 0;
-           representative_module_i <= module_i && token == 0;
-           ++representative_module_i) {
-        const iree_vm_linked_module_t* representative_module =
-            &program->linked_modules[representative_module_i];
-        iree_host_size_t representative_count =
-            representative_module->module->descriptor->counts
-                .callable_type_count;
-        if (representative_module_i == module_i) {
-          representative_count = callable_i;
+      for (iree_host_size_t representative_i = 0;
+           representative_i < flat_ordinal && token == 0; ++representative_i) {
+        const iree_vm_program_callable_t* representative =
+            &program->callables[representative_i];
+        if (iree_vm_program_callable_token(representative->mapping) !=
+            representative_i + 1) {
+          continue;
         }
-        for (iree_host_size_t representative_i = 0;
-             representative_i < representative_count;
-             ++representative_i, ++representative_flat_ordinal) {
-          const uint32_t representative_mapping =
-              program->callable_mappings[representative_flat_ordinal];
-          if (iree_vm_program_callable_token(representative_mapping) !=
-              representative_flat_ordinal + 1) {
-            continue;
-          }
-          iree_vm_module_callable_type_declaration_t representative = {0};
-          representative_module->module->vtable->query_callable_type(
-              representative_module->module, representative_i, &representative);
-          if (iree_vm_program_signatures_equal(
-                  program, linked_module, callable_type.signature,
-                  representative_module, representative.signature)) {
-            token = iree_vm_program_callable_token(representative_mapping);
-            break;
-          }
+        if (iree_vm_program_signatures_equal(
+                program, linked_module, callable_type.signature,
+                representative->signature_module,
+                iree_vm_program_callable_signature(representative))) {
+          token = iree_vm_program_callable_token(representative->mapping);
         }
       }
       if (token == 0) token = (uint32_t)flat_ordinal + 1;
-      program->callable_mappings[flat_ordinal] =
+      callable->mapping =
           token | (iree_any_bit_set(callable_type.flags,
                                     IREE_VM_CALLABLE_TYPE_FLAG_MAY_YIELD)
                        ? IREE_VM_PROGRAM_CALLABLE_MAY_YIELD
@@ -328,11 +361,14 @@ static iree_status_t iree_vm_program_resolve_imports(
 
         const uint32_t source_mapping =
             program
-                ->callable_mappings[source_module->callable_mapping_base +
-                                    import_declaration.callable_type_ordinal];
+                ->callables[source_module->callable_base +
+                            import_declaration.callable_type_ordinal]
+                .mapping;
         const uint32_t target_mapping =
-            program->callable_mappings[target_module->callable_mapping_base +
-                                       target_export.callable_type_ordinal];
+            program
+                ->callables[target_module->callable_base +
+                            target_export.callable_type_ordinal]
+                .mapping;
         if (iree_vm_program_callable_token(source_mapping) !=
             iree_vm_program_callable_token(target_mapping)) {
           return iree_make_status(
@@ -411,30 +447,21 @@ static iree_status_t iree_vm_program_select_initializer(
         (int)iree_min(descriptor->name.size, 128), descriptor->name.data);
   }
 
-  iree_vm_program_argument_counts_t argument_counts = {0};
-  for (iree_host_size_t i = 0; i < callable_type.signature.arguments.count;
-       ++i) {
-    const iree_vm_module_signature_type_t type =
-        callable_type.signature.arguments.data[i];
-    if (type.kind > IREE_VM_SCALAR_TYPE_INVALID &&
-        type.kind <= IREE_VM_SCALAR_TYPE_F64) {
-      ++argument_counts.value_count;
-    } else if (type.kind == IREE_VM_MODULE_SIGNATURE_TYPE_KIND_REF) {
-      ++argument_counts.ref_count;
-    } else {
-      ++argument_counts.function_count;
-    }
+  const iree_vm_program_callable_t* local_callable =
+      &program->callables[executable->callable_base +
+                          initializer_export.callable_type_ordinal];
+  const uint32_t mapping = local_callable->mapping;
+  const iree_vm_program_callable_t* callable = iree_vm_program_resolve_callable(
+      program, iree_vm_program_callable_token(mapping));
+  if (!callable) {
+    return iree_make_status(IREE_STATUS_INTERNAL,
+                            "initializer callable token is invalid");
   }
-
-  const uint32_t mapping =
-      program->callable_mappings[executable->callable_mapping_base +
-                                 initializer_export.callable_type_ordinal];
   const iree_vm_program_initializer_t initializer = {
       iree_vm_program_pack_target_bits(
           program->executable_module_ordinal,
           (uint16_t)initializer_export.function_ordinal, mapping),
-      callable_type.signature.arguments,
-      argument_counts,
+      callable,
   };
   program->initializer = initializer;
   return iree_ok_status();
@@ -496,13 +523,14 @@ IREE_API_EXPORT iree_status_t iree_vm_program_create(
   iree_host_size_t total_size = 0;
   iree_host_size_t linked_modules_offset = 0;
   iree_host_size_t import_target_bits_offset = 0;
-  iree_host_size_t callable_mappings_offset = 0;
+  iree_host_size_t callables_offset = 0;
   IREE_RETURN_IF_ERROR(IREE_STRUCT_LAYOUT(
       iree_sizeof_struct(iree_vm_program_t), &total_size,
       IREE_STRUCT_FIELD(module_count, iree_vm_linked_module_t,
                         &linked_modules_offset),
       IREE_STRUCT_FIELD(import_count, uint64_t, &import_target_bits_offset),
-      IREE_STRUCT_FIELD(callable_count, uint32_t, &callable_mappings_offset)));
+      IREE_STRUCT_FIELD(callable_count, iree_vm_program_callable_t,
+                        &callables_offset)));
 
   iree_vm_program_t* program = NULL;
   IREE_RETURN_IF_ERROR(
@@ -516,10 +544,11 @@ IREE_API_EXPORT iree_status_t iree_vm_program_create(
       import_count != 0
           ? (uint64_t*)((uint8_t*)program + import_target_bits_offset)
           : NULL;
-  program->callable_mappings =
+  program->callables =
       callable_count != 0
-          ? (uint32_t*)((uint8_t*)program + callable_mappings_offset)
+          ? (iree_vm_program_callable_t*)((uint8_t*)program + callables_offset)
           : NULL;
+  program->callable_count = (uint32_t)callable_count;
 
   for (iree_host_size_t i = 0; i < module_count; ++i) {
     iree_vm_module_t* module =
@@ -555,7 +584,7 @@ IREE_API_EXPORT iree_status_t iree_vm_program_create(
         linked_module->module->descriptor->counts.import_count;
     linked_module->import_target_bits =
         local_import_count != 0 ? &import_target_bits[import_base] : NULL;
-    linked_module->callable_mapping_base = (uint32_t)callable_base;
+    linked_module->callable_base = (uint32_t)callable_base;
     import_base += local_import_count;
     callable_base +=
         linked_module->module->descriptor->counts.callable_type_count;
@@ -616,8 +645,10 @@ IREE_API_EXPORT iree_status_t iree_vm_function_ref_from_export(
   export_value.module->vtable->query_export(
       export_value.module, export_value.ordinal, &export_declaration);
   const uint32_t mapping =
-      program->callable_mappings[linked_module->callable_mapping_base +
-                                 export_declaration.callable_type_ordinal];
+      program
+          ->callables[linked_module->callable_base +
+                      export_declaration.callable_type_ordinal]
+          .mapping;
   const iree_vm_function_ref_t function_ref = {
       (uint64_t)(uintptr_t)program,
       iree_vm_program_pack_target_bits(

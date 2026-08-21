@@ -273,14 +273,14 @@ TEST(VMProgramTest, LinksOneImmutableSlabAndPrecomputesTargets) {
   EXPECT_EQ(program->linked_modules[2].process_storage_offset, app_offset);
   EXPECT_EQ(program->process_storage_size, app_offset + 17);
 
-  const uint32_t alpha_callback_mapping = program->callable_mappings[0];
-  const uint32_t alpha_work_mapping = program->callable_mappings[1];
-  const uint32_t beta_callback_mapping = program->callable_mappings[2];
-  const uint32_t app_callback_mapping = program->callable_mappings[3];
-  const uint32_t app_work_mapping = program->callable_mappings[4];
-  const uint32_t app_initialize_mapping = program->callable_mappings[5];
+  const uint32_t alpha_callback_mapping = program->callables[0].mapping;
+  const uint32_t alpha_work_mapping = program->callables[1].mapping;
+  const uint32_t beta_callback_mapping = program->callables[2].mapping;
+  const uint32_t app_callback_mapping = program->callables[3].mapping;
+  const uint32_t app_work_mapping = program->callables[4].mapping;
+  const uint32_t app_initialize_mapping = program->callables[5].mapping;
   const uint32_t app_permissive_callback_mapping =
-      program->callable_mappings[6];
+      program->callables[6].mapping;
   EXPECT_EQ(iree_vm_program_callable_token(app_callback_mapping),
             iree_vm_program_callable_token(alpha_callback_mapping));
   EXPECT_EQ(iree_vm_program_callable_token(app_callback_mapping),
@@ -320,10 +320,13 @@ TEST(VMProgramTest, LinksOneImmutableSlabAndPrecomputesTargets) {
       0u);
   EXPECT_TRUE(
       iree_vm_program_target_may_yield(program->initializer.target_bits));
-  EXPECT_EQ(program->initializer.argument_types.count, 3u);
-  EXPECT_EQ(program->initializer.argument_counts.value_count, 1u);
-  EXPECT_EQ(program->initializer.argument_counts.ref_count, 1u);
-  EXPECT_EQ(program->initializer.argument_counts.function_count, 1u);
+  ASSERT_NE(program->initializer.callable, nullptr);
+  EXPECT_EQ(iree_vm_program_callable_signature(program->initializer.callable)
+                .arguments.count,
+            3u);
+  EXPECT_EQ(program->initializer.callable->argument_counts.value_count, 1u);
+  EXPECT_EQ(program->initializer.callable->argument_counts.ref_count, 1u);
+  EXPECT_EQ(program->initializer.callable->argument_counts.function_count, 1u);
 
   iree_vm_export_t run_export = {};
   iree_vm_export_t alias_export = {};

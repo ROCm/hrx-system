@@ -34,6 +34,13 @@ enum iree_fpu_state_flag_bits_t {
   // https://carlh.net/plugins/denormals.php
   // https://www.xspdf.com/resolution/50507310.html
   IREE_FPU_STATE_FLAG_FLUSH_DENORMALS_TO_ZERO = 1 << 0,
+
+  // Masks floating-point exception traps so exceptional arithmetic produces
+  // ordinary IEEE results instead of transferring control to the host.
+  IREE_FPU_STATE_FLAG_MASK_EXCEPTIONS = 1 << 1,
+
+  // Selects round-to-nearest with ties to even.
+  IREE_FPU_STATE_FLAG_ROUND_TO_NEAREST = 1 << 2,
 };
 typedef uint32_t iree_fpu_state_flags_t;
 

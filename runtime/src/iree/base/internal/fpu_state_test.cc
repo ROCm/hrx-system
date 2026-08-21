@@ -6,6 +6,10 @@
 
 #include "iree/base/internal/fpu_state.h"
 
+#if defined(IREE_ARCH_X86_32) || defined(IREE_ARCH_X86_64)
+#include <xmmintrin.h>
+#endif  // IREE_ARCH_X86_*
+
 #include "iree/testing/gtest.h"
 
 namespace {
@@ -24,5 +28,29 @@ TEST(FPUStateTest, FlushDenormalsToZero) {
 
   iree_fpu_state_pop(fpu_state);
 }
+
+#if defined(IREE_ARCH_X86_32) || defined(IREE_ARCH_X86_64)
+TEST(FPUStateTest, MasksExceptionsAndRoundsToNearest) {
+  constexpr uint32_t kExceptionMasks = UINT32_C(0x00001F80);
+  constexpr uint32_t kRoundingMode = UINT32_C(0x00006000);
+  constexpr uint32_t kFlushModes = UINT32_C(0x00008040);
+  const uint32_t original_state = _mm_getcsr();
+  const uint32_t hostile_state =
+      (original_state | kRoundingMode | kFlushModes) & ~kExceptionMasks;
+  _mm_setcsr(hostile_state);
+
+  const iree_fpu_state_t fpu_state =
+      iree_fpu_state_push(IREE_FPU_STATE_FLAG_MASK_EXCEPTIONS |
+                          IREE_FPU_STATE_FLAG_ROUND_TO_NEAREST);
+  const uint32_t canonical_state = _mm_getcsr();
+  EXPECT_EQ(canonical_state & kExceptionMasks, kExceptionMasks);
+  EXPECT_EQ(canonical_state & kRoundingMode, 0u);
+  EXPECT_EQ(canonical_state & kFlushModes, 0u);
+
+  iree_fpu_state_pop(fpu_state);
+  EXPECT_EQ(_mm_getcsr(), hostile_state);
+  _mm_setcsr(original_state);
+}
+#endif  // IREE_ARCH_X86_*
 
 }  // namespace

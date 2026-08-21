@@ -5,6 +5,7 @@
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 load("//runtime/build_tools/bazel:cc.bzl", "iree_runtime_cc_library")
+load("//runtime/build_tools/bazel:cc_benchmark.bzl", "iree_runtime_cc_benchmark")
 load("//runtime/build_tools/bazel:cc_test.bzl", "iree_runtime_cc_test")
 
 package(
@@ -19,8 +20,13 @@ iree_runtime_cc_library(
         "buffer.c",
         "buffer_provider.h",
         "environment.c",
+        "invocation.c",
+        "invocation_storage.h",
+        "invocation_sync.c",
         "module.c",
         "module_reflection.c",
+        "process.c",
+        "process_storage.h",
         "program.c",
         "program_storage.h",
         "ref.c",
@@ -30,7 +36,9 @@ iree_runtime_cc_library(
         "buffer.h",
         "environment.h",
         "function.h",
+        "invocation.h",
         "module.h",
+        "process.h",
         "program.h",
         "ref.h",
         "scalar.h",
@@ -39,6 +47,7 @@ iree_runtime_cc_library(
     deps = [
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal",
+        "//runtime/src/iree/base/internal:fpu_state",
         "//runtime/src/iree/base/internal:unicode",
         "//runtime/src/iree/base/threading",
     ],
@@ -61,6 +70,34 @@ iree_runtime_cc_test(
         ":vm",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "execution_test",
+    srcs = [
+        "execution_test.cc",
+        "execution_test_provider.c",
+        "execution_test_provider.h",
+    ],
+    deps = [
+        ":vm",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_benchmark(
+    name = "execution_benchmark",
+    srcs = [
+        "execution_benchmark.cc",
+        "execution_test_provider.c",
+        "execution_test_provider.h",
+    ],
+    deps = [
+        ":vm",
+        "//runtime/src/iree/testing:benchmark",
+        "//runtime/src/iree/testing:benchmark_main",
     ],
 )
 

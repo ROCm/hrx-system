@@ -16,7 +16,9 @@ iree_cc_library(
     "buffer.h"
     "environment.h"
     "function.h"
+    "invocation.h"
     "module.h"
+    "process.h"
     "program.h"
     "ref.h"
     "scalar.h"
@@ -25,8 +27,13 @@ iree_cc_library(
     "buffer.c"
     "buffer_provider.h"
     "environment.c"
+    "invocation.c"
+    "invocation_storage.h"
+    "invocation_sync.c"
     "module.c"
     "module_reflection.c"
+    "process.c"
+    "process_storage.h"
     "program.c"
     "program_storage.h"
     "ref.c"
@@ -34,6 +41,7 @@ iree_cc_library(
   DEPS
     iree::base
     iree::base::internal
+    iree::base::internal::fpu_state
     iree::base::internal::unicode
     iree::base::threading
   PUBLIC
@@ -59,6 +67,34 @@ iree_cc_test(
     ::vm
     iree::testing::gtest
     iree::testing::gtest_main
+)
+
+iree_cc_test(
+  NAME
+    execution_test
+  SRCS
+    "execution_test.cc"
+    "execution_test_provider.c"
+    "execution_test_provider.h"
+  DEPS
+    ::vm
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+iree_cc_binary_benchmark(
+  NAME
+    execution_benchmark
+  SRCS
+    "execution_benchmark.cc"
+    "execution_test_provider.c"
+    "execution_test_provider.h"
+  DEPS
+    ::vm
+    iree::testing::benchmark
+    iree::testing::benchmark_main
+    iree::third_party::google_benchmark
+  TESTONLY
 )
 
 iree_cc_test(

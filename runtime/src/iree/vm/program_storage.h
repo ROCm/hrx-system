@@ -26,24 +26,40 @@ enum iree_vm_program_target_layout_e {
 // Callable mapping bit permitting suspension.
 #define IREE_VM_PROGRAM_CALLABLE_MAY_YIELD (UINT32_C(1) << 29)
 
-// Exact physical bank counts for one source-ordered argument signature.
-typedef struct iree_vm_program_argument_counts_t {
-  // Number of value argument cells.
+// Exact physical bank counts for one source-ordered signature side.
+typedef struct iree_vm_program_bank_counts_t {
+  // Number of value cells.
   uint16_t value_count;
-  // Number of ref argument cells.
+  // Number of ref cells.
   uint16_t ref_count;
-  // Number of function argument cells.
+  // Number of function cells.
   uint16_t function_count;
-} iree_vm_program_argument_counts_t;
+} iree_vm_program_bank_counts_t;
+
+// Program-linked execution plan for one module-local callable declaration.
+// Structurally equal declarations carry the same token; that token directly
+// indexes the first equal entry without a module walk or provider query.
+typedef struct iree_vm_program_callable_t {
+  // Stable source-ordered argument types in the representative module.
+  const iree_vm_module_signature_type_t* argument_types;
+  // Stable source-ordered result types in the representative module.
+  const iree_vm_module_signature_type_t* result_types;
+  // Representative linked module resolving ref and nested callable ordinals.
+  const iree_vm_linked_module_t* signature_module;
+  // Nonzero canonical token and this declaration's suspension permission.
+  uint32_t mapping;
+  // Exact physical argument bank counts.
+  iree_vm_program_bank_counts_t argument_counts;
+  // Exact physical result bank counts.
+  iree_vm_program_bank_counts_t result_counts;
+} iree_vm_program_callable_t;
 
 // Cached executable initializer plan.
 typedef struct iree_vm_program_initializer_t {
   // Complete packed target bits, or zero when no initializer is exported.
   uint64_t target_bits;
-  // Stable module-owned source-ordered argument contract.
-  iree_vm_module_signature_type_span_t argument_types;
-  // Exact physical argument bank counts.
-  iree_vm_program_argument_counts_t argument_counts;
+  // Direct canonical callable plan, or null when no initializer is exported.
+  const iree_vm_program_callable_t* callable;
 } iree_vm_program_initializer_t;
 
 // Immutable program-local view of one retained generic module.
@@ -52,8 +68,8 @@ struct iree_vm_linked_module_t {
   iree_vm_module_t* module;
   // Immutable module-local resolved import target words.
   const uint64_t* import_target_bits;
-  // First entry in the program's flat callable mapping array.
-  uint32_t callable_mapping_base;
+  // First entry in the program's flat callable plan array.
+  uint32_t callable_base;
   // Max-aligned process-state offset, or UINT32_MAX for no state.
   uint32_t process_storage_offset;
 };
@@ -72,8 +88,10 @@ struct iree_vm_program_t {
   uint16_t executable_module_ordinal;
   // Selected executable initializer contract.
   iree_vm_program_initializer_t initializer;
-  // Flat module-local callable mapping words.
-  uint32_t* callable_mappings;
+  // Flat module-local callable plans.
+  iree_vm_program_callable_t* callables;
+  // Total number of callable plans in |callables|.
+  uint32_t callable_count;
   // Total max-aligned opaque process-state bytes.
   iree_host_size_t process_storage_size;
 };
@@ -82,8 +100,10 @@ static_assert(sizeof(void*) != 8 || sizeof(iree_vm_linked_module_t) == 24,
               "64-bit linked modules must remain 24 bytes");
 static_assert(sizeof(void*) != 4 || sizeof(iree_vm_linked_module_t) == 16,
               "32-bit linked modules must remain 16 bytes");
-static_assert(sizeof(void*) != 8 || sizeof(iree_vm_program_initializer_t) == 32,
-              "64-bit initializer plans must remain 32 bytes");
+static_assert(sizeof(void*) != 8 || sizeof(iree_vm_program_callable_t) == 40,
+              "64-bit callable plans must remain 40 bytes");
+static_assert(sizeof(void*) != 8 || sizeof(iree_vm_program_initializer_t) == 16,
+              "64-bit initializer plans must remain 16 bytes");
 
 // Returns the nonzero structural token from one callable mapping.
 static inline uint32_t iree_vm_program_callable_token(uint32_t mapping) {
@@ -132,5 +152,45 @@ static inline uint32_t iree_vm_program_target_callable_token(
 static inline bool iree_vm_program_target_may_yield(uint64_t target_bits) {
   return (target_bits >> 63) != 0;
 }
+
+// Returns the source-ordered signature of one callable plan.
+static inline iree_vm_module_signature_t iree_vm_program_callable_signature(
+    const iree_vm_program_callable_t* callable) {
+  const iree_vm_module_signature_t signature = {
+      {callable->argument_types,
+       (iree_host_size_t)callable->argument_counts.value_count +
+           callable->argument_counts.ref_count +
+           callable->argument_counts.function_count},
+      {callable->result_types,
+       (iree_host_size_t)callable->result_counts.value_count +
+           callable->result_counts.ref_count +
+           callable->result_counts.function_count},
+  };
+  return signature;
+}
+
+// Resolves one nonzero canonical token with a direct indexed load.
+static inline const iree_vm_program_callable_t*
+iree_vm_program_resolve_callable(const iree_vm_program_t* program,
+                                 uint32_t callable_token) {
+  if (callable_token == 0 || callable_token > program->callable_count) {
+    return NULL;
+  }
+  const iree_vm_program_callable_t* callable =
+      &program->callables[callable_token - 1];
+  return iree_vm_program_callable_token(callable->mapping) == callable_token
+             ? callable
+             : NULL;
+}
+
+// Finds one exact retained module by implementation identity.
+const iree_vm_linked_module_t* iree_vm_program_find_linked_module(
+    const iree_vm_program_t* program, const iree_vm_module_t* module,
+    iree_host_size_t* out_ordinal);
+
+// Finds one exact retained module by link name.
+const iree_vm_linked_module_t* iree_vm_program_lookup_linked_module(
+    const iree_vm_program_t* program, iree_string_view_t name,
+    iree_host_size_t* out_ordinal);
 
 #endif  // IREE_VM_PROGRAM_STORAGE_H_
