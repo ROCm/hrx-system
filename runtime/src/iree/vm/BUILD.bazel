@@ -21,6 +21,8 @@ iree_runtime_cc_library(
         "environment.c",
         "module.c",
         "module_reflection.c",
+        "program.c",
+        "program_storage.h",
         "ref.c",
         "variant.c",
     ],
@@ -29,6 +31,7 @@ iree_runtime_cc_library(
         "environment.h",
         "function.h",
         "module.h",
+        "program.h",
         "ref.h",
         "scalar.h",
         "variant.h",
@@ -78,6 +81,21 @@ iree_runtime_cc_test(
 iree_runtime_cc_test(
     name = "module_validation_test",
     srcs = ["module_validation_test.cc"],
+    deps = [
+        ":vm",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "program_test",
+    srcs = [
+        "program_storage.h",
+        "program_test.cc",
+        "program_test_provider.c",
+        "program_test_provider.h",
+    ],
     deps = [
         ":vm",
         "//runtime/src/iree/testing:gtest",
