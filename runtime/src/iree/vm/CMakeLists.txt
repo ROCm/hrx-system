@@ -13,17 +13,45 @@ iree_cc_library(
   NAME
     vm
   HDRS
+    "buffer.h"
+    "environment.h"
     "function.h"
     "ref.h"
     "scalar.h"
     "variant.h"
   SRCS
+    "buffer.c"
+    "buffer_provider.h"
+    "environment.c"
     "ref.c"
     "variant.c"
   DEPS
     iree::base
     iree::base::internal
+    iree::base::threading
   PUBLIC
+)
+
+iree_cc_test(
+  NAME
+    buffer_test
+  SRCS
+    "buffer_test.cc"
+  DEPS
+    ::vm
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+iree_cc_test(
+  NAME
+    environment_test
+  SRCS
+    "environment_test.cc"
+  DEPS
+    ::vm
+    iree::testing::gtest
+    iree::testing::gtest_main
 )
 
 iree_cc_test(
