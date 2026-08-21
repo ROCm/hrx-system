@@ -84,12 +84,27 @@ hrx_status_t hrx_allocator_import_buffer(hrx_allocator_t allocator,
       .queue_affinity = (iree_hal_queue_affinity_t)params.queue_affinity,
   };
 
+  // A device-local request is describing another allocation on this platform,
+  // not a host pointer: that is how a peer's memory is brought into this
+  // allocator so a queue may copy out of it. Importing it as a host allocation
+  // is rejected, and there is no other way to name it through this API.
+  const bool device_allocation =
+      iree_all_bits_set((iree_hal_memory_type_t)params.type,
+                        IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL) &&
+      !iree_any_bit_set((iree_hal_memory_type_t)params.type,
+                        IREE_HAL_MEMORY_TYPE_HOST_VISIBLE);
   iree_hal_external_buffer_t ext = {
-      .type = IREE_HAL_EXTERNAL_BUFFER_TYPE_HOST_ALLOCATION,
+      .type = device_allocation
+                  ? IREE_HAL_EXTERNAL_BUFFER_TYPE_DEVICE_ALLOCATION
+                  : IREE_HAL_EXTERNAL_BUFFER_TYPE_HOST_ALLOCATION,
       .flags = 0,
       .size = (iree_device_size_t)size,
-      .handle.host_allocation.ptr = host_ptr,
   };
+  if (device_allocation) {
+    ext.handle.device_allocation.ptr = (uint64_t)(uintptr_t)host_ptr;
+  } else {
+    ext.handle.host_allocation.ptr = host_ptr;
+  }
 
   iree_hal_buffer_t* hal_buffer = NULL;
   iree_status_t status = iree_hal_allocator_import_buffer(
