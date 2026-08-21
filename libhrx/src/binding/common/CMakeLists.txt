@@ -89,6 +89,27 @@ iree_cc_library(
   PUBLIC
 )
 
+iree_cc_library(
+  NAME
+    streaming_query_test_util
+  HDRS
+    "streaming_query_test_util.h"
+  DEPS
+    ::common
+    iree::async
+    iree::base
+    iree::base::internal
+    iree::base::threading
+    iree::hal
+    iree::testing::gtest
+    libhrx_defs
+  TESTONLY
+  INCLUDES
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/..>"
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/..>"
+  PUBLIC
+)
+
 iree_cc_test(
   NAME
     function_attributes_test
@@ -171,6 +192,48 @@ iree_cc_test(
     libhrx_defs
 )
 endif()
+
+iree_cc_test(
+  NAME
+    context_test
+  SRCS
+    "context_test.cc"
+  DEPS
+    ::common
+    ::streaming_query_test_util
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+    libhrx_defs
+)
+
+iree_cc_test(
+  NAME
+    event_test
+  SRCS
+    "event_test.cc"
+  DEPS
+    ::common
+    ::streaming_query_test_util
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+    libhrx_defs
+)
+
+iree_cc_test(
+  NAME
+    stream_test
+  SRCS
+    "stream_test.cc"
+  DEPS
+    ::common
+    ::streaming_query_test_util
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+    libhrx_defs
+)
 
 iree_cc_binary_benchmark(
   NAME

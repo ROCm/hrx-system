@@ -346,15 +346,13 @@ CUDAAPI CUresult cuCtxDestroy(CUcontext ctx) {
 
   // Check if this is the current context.
   // If so, clear it from TLS to avoid a dangling reference.
-  if (ctx && ctx == (CUcontext)iree_hal_streaming_context_current()) {
+  if (ctx == (CUcontext)iree_hal_streaming_context_current()) {
     // This will release the TLS reference.
     iree_hal_streaming_context_set_current(NULL);
   }
 
   // Release the context.
-  if (ctx) {
-    iree_hal_streaming_context_release((iree_hal_streaming_context_t*)ctx);
-  }
+  iree_hal_streaming_context_release((iree_hal_streaming_context_t*)ctx);
 
   IREE_TRACE_ZONE_END(z0);
   return CUDA_SUCCESS;
@@ -1073,9 +1071,6 @@ CUDAAPI CUresult cuEventCreateWithFlags(CUevent* event, unsigned flags) {
   }
 
   CUresult result = iree_status_to_cu_result(status);
-  if (!iree_status_is_ok(status)) {
-    iree_status_ignore(status);
-  }
   IREE_TRACE_ZONE_END(z0);
   return result;
 }
@@ -1120,9 +1115,10 @@ CUDAAPI CUresult cuEventQuery(CUevent hEvent) {
   int is_complete = 0;
   iree_status_t status = iree_hal_streaming_event_query(
       (iree_hal_streaming_event_t*)hEvent, &is_complete);
+  // is_complete == 0 means complete, is_complete == 1 means not complete.
   CUresult result =
       iree_status_is_ok(status)
-          ? (is_complete == 1 ? CUDA_SUCCESS : CUDA_ERROR_NOT_READY)
+          ? (is_complete == 0 ? CUDA_SUCCESS : CUDA_ERROR_NOT_READY)
           : iree_status_to_cu_result(status);
   return result;
 }
@@ -1750,9 +1746,6 @@ CUDAAPI CUresult cuMemset(void* dst, int value, size_t sizeBytes) {
       sizeof(pattern), context->default_stream);
 
   CUresult result = iree_status_to_cu_result(status);
-  if (!iree_status_is_ok(status)) {
-    iree_status_ignore(status);
-  }
   IREE_TRACE_ZONE_END(z0);
   return result;
 }
@@ -1779,9 +1772,6 @@ CUDAAPI CUresult cuMemsetAsync(void* dst, int value, size_t sizeBytes,
               : context->default_stream);
 
   CUresult result = iree_status_to_cu_result(status);
-  if (!iree_status_is_ok(status)) {
-    iree_status_ignore(status);
-  }
   IREE_TRACE_ZONE_END(z0);
   return result;
 }
@@ -1826,9 +1816,6 @@ CUDAAPI CUresult cuMemcpyWithStream(void* dst, const void* src,
   }
 
   CUresult result = iree_status_to_cu_result(status);
-  if (!iree_status_is_ok(status)) {
-    iree_status_ignore(status);
-  }
   IREE_TRACE_ZONE_END(z0);
   return result;
 }
@@ -2652,9 +2639,6 @@ CUDAAPI CUresult cuStreamCreateWithFlags(CUstream* phStream,
   }
 
   CUresult result = iree_status_to_cu_result(status);
-  if (!iree_status_is_ok(status)) {
-    iree_status_ignore(status);
-  }
   IREE_TRACE_ZONE_END(z0);
   return result;
 }
@@ -2792,9 +2776,10 @@ CUDAAPI CUresult cuStreamQuery(CUstream hStream) {
   int is_complete = 0;
   iree_status_t status = iree_hal_streaming_stream_query(
       (iree_hal_streaming_stream_t*)hStream, &is_complete);
+  // is_complete == 0 means complete, is_complete == 1 means not complete.
   CUresult result =
       iree_status_is_ok(status)
-          ? (is_complete == 1 ? CUDA_SUCCESS : CUDA_ERROR_NOT_READY)
+          ? (is_complete == 0 ? CUDA_SUCCESS : CUDA_ERROR_NOT_READY)
           : iree_status_to_cu_result(status);
   return result;
 }

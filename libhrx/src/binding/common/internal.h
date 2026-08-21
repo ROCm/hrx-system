@@ -249,11 +249,15 @@ struct iree_hal_streaming_context_t {
   // Host allocator.
   iree_allocator_t host_allocator;
 
-  // Stream tracking (non-owning references - streams are not retained).
-  // NOTE: Streams are NOT retained by this list to avoid reference cycles.
-  // Streams must unregister themselves before destruction.
-  iree_hal_streaming_stream_t** streams;  // Non-owning pointers.
+  // Streams registered with this context. The list holds a reference to each
+  // entry: iree_hal_streaming_context_register_stream retains on insert and
+  // iree_hal_streaming_context_unregister_stream releases once the entry is
+  // unlinked, so a registered stream stays alive for as long as the list names
+  // it.
+  iree_hal_streaming_stream_t** streams;
+  // Number of entries in |streams| currently valid.
   iree_host_size_t stream_count;
+  // Allocated capacity of |streams|.
   iree_host_size_t stream_capacity;
 
   // Dedicated mutex for stream list access.
@@ -1601,6 +1605,13 @@ iree_status_t iree_hal_streaming_context_synchronize_blocking_streams(
     iree_hal_streaming_stream_t* except_stream);
 
 // Queries whether any stream in the context still has queued work.
+// |status| is meaningful only on success, where 0 is complete and 1 is not
+// complete. Streams are walked in the order the context's stream list holds
+// them, which unregistering a stream permutes, and the walk ends at the first
+// stream that is not complete or whose query fails; the streams the list holds
+// after that one are neither flushed nor queried. Any failure is returned,
+// including one from snapshotting the stream list before any stream is walked.
+// Synchronization: stream flush (flushes each stream it queries).
 iree_status_t iree_hal_streaming_context_query(
     iree_hal_streaming_context_t* context, int* status);
 
@@ -1693,7 +1704,10 @@ iree_status_t iree_hal_streaming_stream_begin_locked(
 iree_status_t iree_hal_streaming_stream_flush(
     iree_hal_streaming_stream_t* stream);
 
-// Synchronization: none (queries stream status, non-blocking).
+// Queries whether the stream still has queued work.
+// |status| is meaningful only on success, where 0 is complete and 1 is not
+// complete. A timeline that reports a failure fails the query.
+// Synchronization: stream flush (flushes the stream before querying it).
 iree_status_t iree_hal_streaming_stream_query(
     iree_hal_streaming_stream_t* stream, int* status);
 
@@ -1778,6 +1792,10 @@ iree_status_t iree_hal_streaming_event_create(
 void iree_hal_streaming_event_retain(iree_hal_streaming_event_t* event);
 void iree_hal_streaming_event_release(iree_hal_streaming_event_t* event);
 
+// Queries whether the point the event's last submitted record names has been
+// reached. An event with no submitted record reports complete.
+// |status| is meaningful only on success, where 0 is complete and 1 is not
+// complete. A timeline that reports a failure fails the query.
 // Synchronization: none (queries event status, non-blocking).
 iree_status_t iree_hal_streaming_event_query(iree_hal_streaming_event_t* event,
                                              int* status);
