@@ -127,6 +127,24 @@ class CTestTest(unittest.TestCase):
                 ],
             )
 
+    def test_refresh_command_preserves_the_build_configuration(self):
+        self.assertEqual(
+            ctest_dev.cmake_refresh_command(
+                "cmake",
+                Path("build"),
+                build_config="RelWithDebInfo",
+            ),
+            [
+                "cmake",
+                "--build",
+                "build",
+                "--config",
+                "RelWithDebInfo",
+                "--target",
+                "iree-ctest-refresh",
+            ],
+        )
+
     def test_ctest_build_config_uses_the_last_explicit_value(self):
         self.assertEqual(
             ctest_dev.ctest_build_config(

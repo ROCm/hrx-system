@@ -22,6 +22,42 @@ CTEST_COMMAND = os.environ["IREE_TEST_CTEST_COMMAND"]
 
 
 class CTestIntegrationTest(unittest.TestCase):
+    def test_stale_graph_is_refreshed_before_ctest_selection(self):
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            temporary_path = Path(temporary_dir)
+            build_dir = temporary_path / "build"
+            extension_file = temporary_path / "extension.cmake"
+            extension_file.write_text("")
+            subprocess.run(
+                [
+                    CMAKE_COMMAND,
+                    "-S",
+                    str(FIXTURE_SOURCE_DIR),
+                    "-B",
+                    str(build_dir),
+                    *configured_cmake_arguments(),
+                    f"-DIREE_REPO_ROOT={REPO_ROOT}",
+                    f"-DIREE_TEST_METADATA_EXTENSION_FILE={extension_file}",
+                ],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+            )
+            extension_file.write_text("add_metadata_test(host-late host_late_root)\n")
+
+            step = ctest_dev.CTestBuildAndRunStep(
+                cmake=CMAKE_COMMAND,
+                ctest=CTEST_COMMAND,
+                build_dir=build_dir,
+                arguments=["-R", "^host"],
+                cwd=REPO_ROOT,
+            )
+
+            self.assertEqual(step.run(), 0)
+            self.assertTrue((build_dir / "host.built").is_file())
+            self.assertTrue((build_dir / "host-late.built").is_file())
+
     def test_selected_runner_builds_only_the_selected_closure(self):
         with tempfile.TemporaryDirectory() as temporary_dir:
             build_dir = Path(temporary_dir) / "build"
