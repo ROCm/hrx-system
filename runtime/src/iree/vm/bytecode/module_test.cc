@@ -18,6 +18,9 @@
 #include "iree/vm/buffer.h"
 #include "iree/vm/bytecode/inspection.h"
 #include "iree/vm/bytecode/module_test_data.h"
+#include "iree/vm/bytecode/wire/core/constant.h"
+#include "iree/vm/bytecode/wire/core/control.h"
+#include "iree/vm/bytecode/wire/core/global.h"
 #include "iree/vm/bytecode/wire/core/opcodes.h"
 #include "iree/vm/bytecode/wire/module_format.h"
 #include "iree/vm/process.h"
@@ -80,6 +83,28 @@ uint8_t* FindSectionPayload(std::vector<uint8_t>* image,
     offset += static_cast<size_t>(rows[i].byte_length_u64);
   }
   return nullptr;
+}
+
+struct FunctionImageView {
+  // Mutable function row in the Functions section.
+  iree_vm_bytecode_v0_function_row_t* row;
+  // First instruction byte for |row|.
+  uint8_t* bytecode;
+};
+
+FunctionImageView FindFunctionImage(std::vector<uint8_t>* image,
+                                    uint32_t ordinal) {
+  uint8_t* section =
+      FindSectionPayload(image, IREE_VM_BYTECODE_SECTION_FUNCTIONS);
+  if (section == nullptr) return {};
+  auto* header =
+      reinterpret_cast<iree_vm_bytecode_v0_functions_header_t*>(section);
+  if (ordinal >= header->function_count_u32) return {};
+  auto* rows = reinterpret_cast<iree_vm_bytecode_v0_function_row_t*>(
+      section + sizeof(*header));
+  uint8_t* bytecode_data =
+      reinterpret_cast<uint8_t*>(rows + header->function_count_u32);
+  return {&rows[ordinal], bytecode_data + rows[ordinal].bytecode_offset_u32};
 }
 
 TEST(VMBytecodeModuleTest, RejectsBeforeTakingImageStorageOwnership) {
@@ -350,6 +375,136 @@ TEST(VMBytecodeModuleTest, InspectionAndExecutionShareStructuralDiagnostics) {
             ToStringView(iree_status_message(inspection_status)));
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT, executable_status);
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT, inspection_status);
+  iree_vm_environment_free(environment);
+}
+
+TEST(VMBytecodeModuleTest, ExecutesScalarStateInstructions) {
+  std::vector<uint8_t> image = BuildScalarStateModuleImage();
+  iree_vm_environment_t* environment = nullptr;
+  IREE_ASSERT_OK(
+      iree_vm_environment_allocate(iree_allocator_system(), &environment));
+  iree_vm_module_t* module = nullptr;
+  IREE_ASSERT_OK(iree_vm_bytecode_module_create(
+      environment, IREE_SV("scalar_state"),
+      {iree_make_const_byte_span(image.data(), image.size()),
+       iree_allocator_null()},
+      iree_allocator_system(), &module));
+  iree_vm_environment_free(environment);
+
+  iree_vm_program_t* program = nullptr;
+  IREE_ASSERT_OK(iree_vm_program_create({module, iree_vm_module_span_empty()},
+                                        iree_allocator_system(), &program));
+  iree_vm_invocation_t* invocation = nullptr;
+  IREE_ASSERT_OK(iree_vm_invocation_allocate(
+      kInvocationStorageSize, iree_allocator_system(), &invocation));
+  iree_vm_process_t* process = nullptr;
+  IREE_ASSERT_OK(iree_vm_process_create(program, invocation,
+                                        iree_vm_variant_span_empty(),
+                                        iree_allocator_system(), &process));
+  iree_vm_function_t run = iree_vm_function_null();
+  IREE_ASSERT_OK(iree_vm_process_lookup_function(
+      process, IREE_SV("scalar_state"), IREE_SV("run"), &run));
+
+  iree_vm_variant_t results[5] = {};
+  IREE_ASSERT_OK(iree_vm_invoke(invocation, run, iree_vm_variant_span_empty(),
+                                iree_vm_variant_span_from_array(results)));
+  const int64_t expected[] = {
+      0,
+      INT64_C(2309737967),
+      INT64_C(81985529216486895),
+      INT64_C(-81985529216486896),
+      INT64_C(3735928559),
+  };
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(results); ++i) {
+    int64_t value = 0;
+    IREE_ASSERT_OK(iree_vm_i64_from_variant(results[i], &value));
+    EXPECT_EQ(value, expected[i]);
+  }
+  iree_vm_variant_span_reset(iree_vm_variant_span_from_array(results));
+
+  iree_vm_invocation_free(invocation);
+  iree_vm_process_release(process);
+  iree_vm_program_release(program);
+  iree_vm_module_release(module);
+}
+
+TEST(VMBytecodeModuleTest, RejectsMalformedScalarStateInstructions) {
+  iree_vm_environment_t* environment = nullptr;
+  IREE_ASSERT_OK(
+      iree_vm_environment_allocate(iree_allocator_system(), &environment));
+  auto expect_rejected = [&](std::vector<uint8_t>& image) {
+    iree_vm_module_t* module = nullptr;
+    IREE_EXPECT_STATUS_IS(
+        IREE_STATUS_INVALID_ARGUMENT,
+        iree_vm_bytecode_module_create(
+            environment, IREE_SV("malformed_scalar_state"),
+            {iree_make_const_byte_span(image.data(), image.size()),
+             iree_allocator_null()},
+            iree_allocator_system(), &module));
+    EXPECT_EQ(module, nullptr);
+    iree_vm_module_release(module);
+  };
+
+  struct ByteMutation {
+    // Function-table ordinal containing the byte to replace.
+    uint32_t function_ordinal;
+    // Byte offset from the function's first instruction.
+    uint32_t byte_offset;
+    // Replacement byte value.
+    uint8_t value;
+  };
+  const ByteMutation mutations[] = {
+      // An 8- or 12-byte record cannot begin in the final four-byte slot.
+      {1, 64, IREE_VM_ISA_CORE_OPCODE_CONSTANT_I32},
+      {1, 64, IREE_VM_ISA_CORE_OPCODE_CONSTANT_I64},
+      {1, 64, IREE_VM_ISA_CORE_OPCODE_VALUE_SELECT},
+      // Every reserved byte and register operand is verified at module load.
+      {1, 6, 1},
+      {1, 10, 1},
+      {1, 18, 1},
+      {1, 45, 1},
+      {1, 5, 6},
+      {1, 9, 6},
+      {1, 17, 6},
+      {1, 29, 6},
+      {1, 33, 6},
+      {1, 37, 6},
+      {1, 41, 6},
+      {1, 42, 6},
+      {1, 43, 6},
+      {1, 44, 6},
+      {1, 57, 6},
+      {1, 61, 6},
+      // Pool and global ordinals are checked against their exact partitions.
+      {1, 30, 2},
+      {1, 34, 2},
+      {1, 38, 2},
+      {1, 58, 2},
+      {1, 62, 2},
+      {1, 36, IREE_VM_ISA_CORE_OPCODE_GLOBAL_VALUE_IMMUTABLE_LOAD},
+      {1, 56, IREE_VM_ISA_CORE_OPCODE_GLOBAL_VALUE_IMMUTABLE_STORE},
+      // A canonical return is legal only as the final instruction.
+      {1, 4, IREE_VM_ISA_CORE_OPCODE_CONTROL_RETURN},
+      // A valid non-return final record is diagnosed as fallthrough.
+      {1, 64, IREE_VM_ISA_CORE_OPCODE_CONSTANT_S16},
+  };
+  for (const ByteMutation& mutation : mutations) {
+    std::vector<uint8_t> image = BuildScalarStateModuleImage();
+    const FunctionImageView function =
+        FindFunctionImage(&image, mutation.function_ordinal);
+    ASSERT_NE(function.row, nullptr);
+    ASSERT_LT(mutation.byte_offset, function.row->bytecode_length_u32);
+    function.bytecode[mutation.byte_offset] = mutation.value;
+    expect_rejected(image);
+  }
+
+  std::vector<uint8_t> partitioned_image = BuildScalarStateModuleImage();
+  auto* globals = reinterpret_cast<iree_vm_bytecode_v0_globals_header_t*>(
+      FindSectionPayload(&partitioned_image, IREE_VM_BYTECODE_SECTION_GLOBALS));
+  ASSERT_NE(globals, nullptr);
+  globals->immutable_value_count_u32 = 1;
+  expect_rejected(partitioned_image);
+
   iree_vm_environment_free(environment);
 }
 

@@ -32,12 +32,22 @@ static iree_status_t iree_vm_bytecode_verify_ref_register(
   return iree_ok_status();
 }
 
+static iree_status_t iree_vm_bytecode_verify_record_available(
+    uint32_t remaining_length, iree_host_size_t required_length,
+    uint8_t opcode) {
+  if (required_length > remaining_length) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "opcode 0x%02" PRIx8 " record is truncated",
+                            opcode);
+  }
+  return iree_ok_status();
+}
+
 iree_status_t iree_vm_bytecode_function_verify(
     const iree_vm_bytecode_module_layout_t* layout,
     const iree_vm_bytecode_v0_function_row_t* function, uint32_t ordinal) {
   const uint8_t* bytecode =
       layout->functions.bytecode_data + function->bytecode_offset_u32;
-  const uint32_t record_count = function->bytecode_length_u32 / 4;
   if (bytecode[0] != IREE_VM_ISA_CORE_OPCODE_CONTROL_BLOCK) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
@@ -45,15 +55,22 @@ iree_status_t iree_vm_bytecode_function_verify(
   }
 
   uint8_t final_opcode = 0;
-  for (uint32_t record_i = 0; record_i < record_count; ++record_i) {
-    const uint8_t* record_data = bytecode + record_i * 4;
+  uint32_t byte_offset = 0;
+  while (byte_offset < function->bytecode_length_u32) {
+    const uint8_t* record_data = bytecode + byte_offset;
     const uint8_t opcode = record_data[0];
     final_opcode = opcode;
+    const uint32_t remaining_length =
+        function->bytecode_length_u32 - byte_offset;
+    iree_host_size_t record_length = 0;
     switch (opcode) {
       case IREE_VM_ISA_CORE_OPCODE_CONTROL_BLOCK: {
+        record_length = sizeof(iree_vm_isa_control_block_record_t);
+        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_record_available(
+            remaining_length, record_length, opcode));
         const iree_vm_isa_control_block_record_t* record =
             (const iree_vm_isa_control_block_record_t*)record_data;
-        if (record_i != 0 || record->zero_padding_u8[0] != 0 ||
+        if (byte_offset != 0 || record->zero_padding_u8[0] != 0 ||
             record->zero_padding_u8[1] != 0 ||
             record->zero_padding_u8[2] != 0) {
           return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -63,9 +80,13 @@ iree_status_t iree_vm_bytecode_function_verify(
         break;
       }
       case IREE_VM_ISA_CORE_OPCODE_CONTROL_RETURN: {
+        record_length = sizeof(iree_vm_isa_control_return_record_t);
+        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_record_available(
+            remaining_length, record_length, opcode));
         const iree_vm_isa_control_return_record_t* record =
             (const iree_vm_isa_control_return_record_t*)record_data;
-        if (record_i + 1 != record_count || record->zero_padding_u8[0] != 0 ||
+        if (record_length != remaining_length ||
+            record->zero_padding_u8[0] != 0 ||
             record->zero_padding_u8[1] != 0 ||
             record->zero_padding_u8[2] != 0) {
           return iree_make_status(
@@ -75,14 +96,90 @@ iree_status_t iree_vm_bytecode_function_verify(
         }
         break;
       }
+      case IREE_VM_ISA_CORE_OPCODE_CONSTANT_ZERO: {
+        record_length = sizeof(iree_vm_isa_constant_zero_record_t);
+        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_record_available(
+            remaining_length, record_length, opcode));
+        const iree_vm_isa_constant_zero_record_t* record =
+            (const iree_vm_isa_constant_zero_record_t*)record_data;
+        if (record->zero_padding_u16 != 0) {
+          return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                  "constant.zero padding is nonzero");
+        }
+        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_value_register(
+            record->dst_v8, function->value_register_count_u16));
+        break;
+      }
       case IREE_VM_ISA_CORE_OPCODE_CONSTANT_S16: {
+        record_length = sizeof(iree_vm_isa_constant_s16_record_t);
+        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_record_available(
+            remaining_length, record_length, opcode));
         const iree_vm_isa_constant_s16_record_t* record =
             (const iree_vm_isa_constant_s16_record_t*)record_data;
         IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_value_register(
             record->dst_v8, function->value_register_count_u16));
         break;
       }
+      case IREE_VM_ISA_CORE_OPCODE_CONSTANT_I32: {
+        record_length = sizeof(iree_vm_isa_constant_i32_record_t);
+        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_record_available(
+            remaining_length, record_length, opcode));
+        const iree_vm_isa_constant_i32_record_t* record =
+            (const iree_vm_isa_constant_i32_record_t*)record_data;
+        if (record->zero_padding_u16 != 0) {
+          return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                  "constant.i32 padding is nonzero");
+        }
+        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_value_register(
+            record->dst_v8, function->value_register_count_u16));
+        break;
+      }
+      case IREE_VM_ISA_CORE_OPCODE_CONSTANT_I64: {
+        record_length = sizeof(iree_vm_isa_constant_i64_record_t);
+        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_record_available(
+            remaining_length, record_length, opcode));
+        const iree_vm_isa_constant_i64_record_t* record =
+            (const iree_vm_isa_constant_i64_record_t*)record_data;
+        if (record->zero_padding_u16 != 0) {
+          return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                  "constant.i64 padding is nonzero");
+        }
+        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_value_register(
+            record->dst_v8, function->value_register_count_u16));
+        break;
+      }
+      case IREE_VM_ISA_CORE_OPCODE_CONSTANT_POOL_LOAD_I32: {
+        record_length = sizeof(iree_vm_isa_constant_pool_load_i32_record_t);
+        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_record_available(
+            remaining_length, record_length, opcode));
+        const iree_vm_isa_constant_pool_load_i32_record_t* record =
+            (const iree_vm_isa_constant_pool_load_i32_record_t*)record_data;
+        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_value_register(
+            record->dst_v8, function->value_register_count_u16));
+        if (record->pool_u16 >= layout->constants.count) {
+          return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                  "constant-pool ordinal is out of range");
+        }
+        break;
+      }
+      case IREE_VM_ISA_CORE_OPCODE_CONSTANT_POOL_LOAD_I64: {
+        record_length = sizeof(iree_vm_isa_constant_pool_load_i64_record_t);
+        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_record_available(
+            remaining_length, record_length, opcode));
+        const iree_vm_isa_constant_pool_load_i64_record_t* record =
+            (const iree_vm_isa_constant_pool_load_i64_record_t*)record_data;
+        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_value_register(
+            record->dst_v8, function->value_register_count_u16));
+        if (record->pool_u16 >= layout->constants.count) {
+          return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                  "constant-pool ordinal is out of range");
+        }
+        break;
+      }
       case IREE_VM_ISA_CORE_OPCODE_VALUE_COPY: {
+        record_length = sizeof(iree_vm_isa_value_copy_record_t);
+        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_record_available(
+            remaining_length, record_length, opcode));
         const iree_vm_isa_value_copy_record_t* record =
             (const iree_vm_isa_value_copy_record_t*)record_data;
         if (record->zero_padding_u8 != 0) {
@@ -95,7 +192,33 @@ iree_status_t iree_vm_bytecode_function_verify(
             record->src_v8, function->value_register_count_u16));
         break;
       }
+      case IREE_VM_ISA_CORE_OPCODE_VALUE_SELECT: {
+        record_length = sizeof(iree_vm_isa_value_select_record_t);
+        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_record_available(
+            remaining_length, record_length, opcode));
+        const iree_vm_isa_value_select_record_t* record =
+            (const iree_vm_isa_value_select_record_t*)record_data;
+        if (record->zero_padding_u8[0] != 0 ||
+            record->zero_padding_u8[1] != 0 ||
+            record->zero_padding_u8[2] != 0) {
+          return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                  "value.select padding is nonzero");
+        }
+        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_value_register(
+            record->dst_v8, function->value_register_count_u16));
+        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_value_register(
+            record->condition_v8, function->value_register_count_u16));
+        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_value_register(
+            record->true_v8, function->value_register_count_u16));
+        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_value_register(
+            record->false_v8, function->value_register_count_u16));
+        break;
+      }
       case IREE_VM_ISA_CORE_OPCODE_GLOBAL_VALUE_IMMUTABLE_LOAD: {
+        record_length =
+            sizeof(iree_vm_isa_global_value_immutable_load_record_t);
+        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_record_available(
+            remaining_length, record_length, opcode));
         const iree_vm_isa_global_value_immutable_load_record_t* record =
             (const iree_vm_isa_global_value_immutable_load_record_t*)
                 record_data;
@@ -111,6 +234,10 @@ iree_status_t iree_vm_bytecode_function_verify(
         break;
       }
       case IREE_VM_ISA_CORE_OPCODE_GLOBAL_VALUE_IMMUTABLE_STORE: {
+        record_length =
+            sizeof(iree_vm_isa_global_value_immutable_store_record_t);
+        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_record_available(
+            remaining_length, record_length, opcode));
         const iree_vm_isa_global_value_immutable_store_record_t* record =
             (const iree_vm_isa_global_value_immutable_store_record_t*)
                 record_data;
@@ -125,7 +252,46 @@ iree_status_t iree_vm_bytecode_function_verify(
         }
         break;
       }
+      case IREE_VM_ISA_CORE_OPCODE_GLOBAL_VALUE_MUTABLE_LOAD: {
+        record_length = sizeof(iree_vm_isa_global_value_mutable_load_record_t);
+        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_record_available(
+            remaining_length, record_length, opcode));
+        const iree_vm_isa_global_value_mutable_load_record_t* record =
+            (const iree_vm_isa_global_value_mutable_load_record_t*)record_data;
+        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_value_register(
+            record->dst_v8, function->value_register_count_u16));
+        if (!layout->globals.header ||
+            record->global_u16 <
+                layout->globals.header->immutable_value_count_u32 ||
+            record->global_u16 >= layout->globals.header->value_count_u32) {
+          return iree_make_status(
+              IREE_STATUS_INVALID_ARGUMENT,
+              "mutable value-global ordinal is out of range");
+        }
+        break;
+      }
+      case IREE_VM_ISA_CORE_OPCODE_GLOBAL_VALUE_MUTABLE_STORE: {
+        record_length = sizeof(iree_vm_isa_global_value_mutable_store_record_t);
+        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_record_available(
+            remaining_length, record_length, opcode));
+        const iree_vm_isa_global_value_mutable_store_record_t* record =
+            (const iree_vm_isa_global_value_mutable_store_record_t*)record_data;
+        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_value_register(
+            record->src_v8, function->value_register_count_u16));
+        if (!layout->globals.header ||
+            record->global_u16 <
+                layout->globals.header->immutable_value_count_u32 ||
+            record->global_u16 >= layout->globals.header->value_count_u32) {
+          return iree_make_status(
+              IREE_STATUS_INVALID_ARGUMENT,
+              "mutable value-global ordinal is out of range");
+        }
+        break;
+      }
       case IREE_VM_ISA_CORE_OPCODE_INTEGER_ADD_I32: {
+        record_length = sizeof(iree_vm_isa_integer_add_i32_record_t);
+        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_record_available(
+            remaining_length, record_length, opcode));
         const iree_vm_isa_integer_add_i32_record_t* record =
             (const iree_vm_isa_integer_add_i32_record_t*)record_data;
         IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_value_register(
@@ -137,6 +303,9 @@ iree_status_t iree_vm_bytecode_function_verify(
         break;
       }
       case IREE_VM_ISA_CORE_OPCODE_INTEGER_MUL_I64: {
+        record_length = sizeof(iree_vm_isa_integer_mul_i64_record_t);
+        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_record_available(
+            remaining_length, record_length, opcode));
         const iree_vm_isa_integer_mul_i64_record_t* record =
             (const iree_vm_isa_integer_mul_i64_record_t*)record_data;
         IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_value_register(
@@ -148,6 +317,9 @@ iree_status_t iree_vm_bytecode_function_verify(
         break;
       }
       case IREE_VM_ISA_CORE_OPCODE_BUFFER_RODATA_LOAD: {
+        record_length = sizeof(iree_vm_isa_buffer_rodata_load_record_t);
+        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_record_available(
+            remaining_length, record_length, opcode));
         const iree_vm_isa_buffer_rodata_load_record_t* record =
             (const iree_vm_isa_buffer_rodata_load_record_t*)record_data;
         IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_ref_register(
@@ -159,6 +331,9 @@ iree_status_t iree_vm_bytecode_function_verify(
         break;
       }
       case IREE_VM_ISA_CORE_OPCODE_CONVERSION_INTEGER: {
+        record_length = sizeof(iree_vm_isa_conversion_integer_record_t);
+        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_record_available(
+            remaining_length, record_length, opcode));
         const iree_vm_isa_conversion_integer_record_t* record =
             (const iree_vm_isa_conversion_integer_record_t*)record_data;
         IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_value_register(
@@ -174,6 +349,9 @@ iree_status_t iree_vm_bytecode_function_verify(
         break;
       }
       case IREE_VM_ISA_CORE_OPCODE_CONVERSION_FLOAT_EXTEND: {
+        record_length = sizeof(iree_vm_isa_conversion_float_extend_record_t);
+        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_record_available(
+            remaining_length, record_length, opcode));
         const iree_vm_isa_conversion_float_extend_record_t* record =
             (const iree_vm_isa_conversion_float_extend_record_t*)record_data;
         IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_value_register(
@@ -188,6 +366,10 @@ iree_status_t iree_vm_bytecode_function_verify(
         break;
       }
       case IREE_VM_ISA_CORE_OPCODE_CONVERSION_FLOAT_TO_INTEGER: {
+        record_length =
+            sizeof(iree_vm_isa_conversion_float_to_integer_record_t);
+        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_record_available(
+            remaining_length, record_length, opcode));
         const iree_vm_isa_conversion_float_to_integer_record_t* record =
             (const iree_vm_isa_conversion_float_to_integer_record_t*)
                 record_data;
@@ -208,6 +390,7 @@ iree_status_t iree_vm_bytecode_function_verify(
                                 " is outside the B0 execution closure",
                                 opcode);
     }
+    byte_offset += (uint32_t)record_length;
   }
 
   if (final_opcode != IREE_VM_ISA_CORE_OPCODE_CONTROL_RETURN) {

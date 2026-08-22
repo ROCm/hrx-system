@@ -22,10 +22,18 @@
 #define IREE_VM_BYTECODE_B0_OPCODE_LIST(OP)                      \
   OP(CONTROL_BLOCK, control_block)                               \
   OP(CONTROL_RETURN, control_return)                             \
+  OP(CONSTANT_ZERO, constant_zero)                               \
   OP(CONSTANT_S16, constant_s16)                                 \
+  OP(CONSTANT_I32, constant_i32)                                 \
+  OP(CONSTANT_I64, constant_i64)                                 \
+  OP(CONSTANT_POOL_LOAD_I32, constant_pool_load_i32)             \
+  OP(CONSTANT_POOL_LOAD_I64, constant_pool_load_i64)             \
   OP(VALUE_COPY, value_copy)                                     \
+  OP(VALUE_SELECT, value_select)                                 \
   OP(GLOBAL_VALUE_IMMUTABLE_LOAD, global_value_immutable_load)   \
   OP(GLOBAL_VALUE_IMMUTABLE_STORE, global_value_immutable_store) \
+  OP(GLOBAL_VALUE_MUTABLE_LOAD, global_value_mutable_load)       \
+  OP(GLOBAL_VALUE_MUTABLE_STORE, global_value_mutable_store)     \
   OP(INTEGER_ADD_I32, integer_add_i32)                           \
   OP(INTEGER_MUL_I64, integer_mul_i64)                           \
   OP(BUFFER_RODATA_LOAD, buffer_rodata_load)                     \
@@ -264,6 +272,8 @@ iree_status_t iree_vm_bytecode_function_start(
       module->layout.globals.header
           ? iree_vm_bytecode_process_state(process_storage)
           : NULL;
+  const iree_vm_bytecode_v0_constant_cell_t* constant_cells =
+      module->layout.constants.cells;
   const uint8_t* bytecode = module->layout.functions.bytecode_data +
                             function->bytecode_offset_u32 +
                             sizeof(iree_vm_isa_control_block_record_t);
@@ -281,6 +291,15 @@ iree_status_t iree_vm_bytecode_function_start(
     }
     IREE_VM_BYTECODE_DISPATCH_TERMINATE();
   }
+  IREE_VM_BYTECODE_DISPATCH_CASE(CONSTANT_ZERO, constant_zero) {
+    do {
+      const iree_vm_isa_constant_zero_record_t* record =
+          (const iree_vm_isa_constant_zero_record_t*)record_data;
+      values[record->dst_v8] = 0;
+      record_data += sizeof(*record);
+    } while (IREE_VM_BYTECODE_DISPATCH_IS_SAME(CONSTANT_ZERO));
+    IREE_VM_BYTECODE_DISPATCH_CONTINUE();
+  }
   IREE_VM_BYTECODE_DISPATCH_CASE(CONSTANT_S16, constant_s16) {
     do {
       const iree_vm_isa_constant_s16_record_t* record =
@@ -290,6 +309,33 @@ iree_status_t iree_vm_bytecode_function_start(
     } while (IREE_VM_BYTECODE_DISPATCH_IS_SAME(CONSTANT_S16));
     IREE_VM_BYTECODE_DISPATCH_CONTINUE();
   }
+  IREE_VM_BYTECODE_DISPATCH_CASE(CONSTANT_I32, constant_i32) {
+    const iree_vm_isa_constant_i32_record_t* record =
+        (const iree_vm_isa_constant_i32_record_t*)record_data;
+    values[record->dst_v8] = record->bits_u32le;
+    IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_isa_constant_i32_record_t);
+  }
+  IREE_VM_BYTECODE_DISPATCH_CASE(CONSTANT_I64, constant_i64) {
+    const iree_vm_isa_constant_i64_record_t* record =
+        (const iree_vm_isa_constant_i64_record_t*)record_data;
+    values[record->dst_v8] = (uint64_t)record->bits_low_u32le |
+                             ((uint64_t)record->bits_high_u32le << 32);
+    IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_isa_constant_i64_record_t);
+  }
+  IREE_VM_BYTECODE_DISPATCH_CASE(CONSTANT_POOL_LOAD_I32,
+                                 constant_pool_load_i32) {
+    const iree_vm_isa_constant_pool_load_i32_record_t* record =
+        (const iree_vm_isa_constant_pool_load_i32_record_t*)record_data;
+    values[record->dst_v8] = (uint32_t)constant_cells[record->pool_u16];
+    IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_isa_constant_pool_load_i32_record_t);
+  }
+  IREE_VM_BYTECODE_DISPATCH_CASE(CONSTANT_POOL_LOAD_I64,
+                                 constant_pool_load_i64) {
+    const iree_vm_isa_constant_pool_load_i64_record_t* record =
+        (const iree_vm_isa_constant_pool_load_i64_record_t*)record_data;
+    values[record->dst_v8] = constant_cells[record->pool_u16];
+    IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_isa_constant_pool_load_i64_record_t);
+  }
   IREE_VM_BYTECODE_DISPATCH_CASE(VALUE_COPY, value_copy) {
     do {
       const iree_vm_isa_value_copy_record_t* record =
@@ -297,6 +343,18 @@ iree_status_t iree_vm_bytecode_function_start(
       values[record->dst_v8] = values[record->src_v8];
       record_data += sizeof(*record);
     } while (IREE_VM_BYTECODE_DISPATCH_IS_SAME(VALUE_COPY));
+    IREE_VM_BYTECODE_DISPATCH_CONTINUE();
+  }
+  IREE_VM_BYTECODE_DISPATCH_CASE(VALUE_SELECT, value_select) {
+    do {
+      const iree_vm_isa_value_select_record_t* record =
+          (const iree_vm_isa_value_select_record_t*)record_data;
+      const uint64_t condition = values[record->condition_v8];
+      const uint64_t selected_value =
+          condition ? values[record->true_v8] : values[record->false_v8];
+      values[record->dst_v8] = selected_value;
+      record_data += sizeof(*record);
+    } while (IREE_VM_BYTECODE_DISPATCH_IS_SAME(VALUE_SELECT));
     IREE_VM_BYTECODE_DISPATCH_CONTINUE();
   }
   IREE_VM_BYTECODE_DISPATCH_CASE(GLOBAL_VALUE_IMMUTABLE_LOAD,
@@ -330,6 +388,22 @@ iree_status_t iree_vm_bytecode_function_start(
     iree_vm_bytecode_bit_set(global_value_set_bits, record->global_u16);
     IREE_VM_BYTECODE_DISPATCH_NEXT(
         iree_vm_isa_global_value_immutable_store_record_t);
+  }
+  IREE_VM_BYTECODE_DISPATCH_CASE(GLOBAL_VALUE_MUTABLE_LOAD,
+                                 global_value_mutable_load) {
+    const iree_vm_isa_global_value_mutable_load_record_t* record =
+        (const iree_vm_isa_global_value_mutable_load_record_t*)record_data;
+    values[record->dst_v8] = global_values[record->global_u16];
+    IREE_VM_BYTECODE_DISPATCH_NEXT(
+        iree_vm_isa_global_value_mutable_load_record_t);
+  }
+  IREE_VM_BYTECODE_DISPATCH_CASE(GLOBAL_VALUE_MUTABLE_STORE,
+                                 global_value_mutable_store) {
+    const iree_vm_isa_global_value_mutable_store_record_t* record =
+        (const iree_vm_isa_global_value_mutable_store_record_t*)record_data;
+    global_values[record->global_u16] = values[record->src_v8];
+    IREE_VM_BYTECODE_DISPATCH_NEXT(
+        iree_vm_isa_global_value_mutable_store_record_t);
   }
   IREE_VM_BYTECODE_DISPATCH_CASE(INTEGER_ADD_I32, integer_add_i32) {
     const iree_vm_isa_integer_add_i32_record_t* record =
