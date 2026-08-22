@@ -80,11 +80,11 @@ typedef struct iree_hal_amdgpu_aql_ring_t {
   // How the doorbell gets rung; both fields represent the queue's doorbell
   // signal.
   struct {
-    // Cached hardware doorbell MMIO pointer, or NULL when the queue's doorbell
-    // signal is not DOORBELL-kind (then ring via |signal| below). When
-    // non-NULL, writing a packet ID here wakes the CP to process new packets
-    // via a direct atomic store to MMIO — no libhsa indirection. Resolved at
-    // init from the doorbell signal's iree_amd_signal_t.hardware_doorbell_ptr.
+    // Cached hardware doorbell MMIO pointer, or NULL when the queue must be
+    // rung through |signal| below. When non-NULL, writing a packet ID here
+    // wakes the CP to process new packets via a direct atomic store to MMIO.
+    // Windows always uses the signal path because ROCr must notify its DXG
+    // queue worker in addition to updating the exposed doorbell value.
     volatile int64_t* ptr;
     // Doorbell signal handle, used when |ptr| is NULL (non-DOORBELL-kind
     // doorbell signals, e.g. interrupt-backed USER-kind): ring through the HSA
@@ -119,14 +119,16 @@ static inline void iree_hal_amdgpu_aql_ring_initialize(
   //
   // Only DOORBELL-kind signals expose a directly-writable hardware_doorbell_ptr
   // (a memory-mapped doorbell register); writing a packet ID there wakes the CP
-  // with zero libhsa indirection. Other signal kinds — e.g. the
-  // interrupt-backed USER-kind doorbells some ROCm builds hand back for AQL
-  // queues — store a signal value in that same union slot rather than an MMIO
-  // pointer, so the raw write would fault. For those we leave |doorbell.ptr|
-  // NULL and ring via the HSA signal-store API using the cached handle +
-  // libhsa.
+  // with zero libhsa indirection. Other signal kinds store a signal value in
+  // that same union slot rather than an MMIO pointer, so the raw write would
+  // fault. Windows ROCr also uses a DOORBELL-kind signal, but its pointer names
+  // a software value and the HSA signal store must additionally notify the DXG
+  // queue worker. Those cases ring through the public HSA signal API.
   out_ring->libhsa = libhsa;
   out_ring->doorbell.signal = hardware_queue->hsa_queue.doorbell_signal;
+#if defined(IREE_PLATFORM_WINDOWS)
+  out_ring->doorbell.ptr = NULL;
+#else
   iree_amd_signal_t* doorbell_signal =
       (iree_amd_signal_t*)hardware_queue->hsa_queue.doorbell_signal.handle;
   if (doorbell_signal &&
@@ -136,6 +138,7 @@ static inline void iree_hal_amdgpu_aql_ring_initialize(
   } else {
     out_ring->doorbell.ptr = NULL;
   }
+#endif  // IREE_PLATFORM_WINDOWS
 
   out_ring->write_dispatch_id =
       (iree_atomic_int64_t*)&hardware_queue->write_dispatch_id;

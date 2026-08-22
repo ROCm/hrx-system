@@ -938,6 +938,23 @@ TEST_F(PhysicalDeviceCapabilitiesTest, SelectsPrepublishedKernargStorage) {
                                     IREE_HAL_MEMORY_TYPE_HOST_COHERENT));
 }
 
+TEST_F(PhysicalDeviceCapabilitiesTest,
+       SelectsProfilingCompletionSignalMemoryPool) {
+  const hsa_amd_memory_pool_t device_memory_pool = MemoryPool(42);
+  const hsa_amd_memory_pool_t host_memory_pool = MemoryPool(43);
+
+  EXPECT_EQ(iree_hal_amdgpu_select_profiling_completion_signal_memory_pool(
+                device_memory_pool, host_memory_pool,
+                /*host_access_required=*/false)
+                .handle,
+            device_memory_pool.handle);
+  EXPECT_EQ(iree_hal_amdgpu_select_profiling_completion_signal_memory_pool(
+                device_memory_pool, host_memory_pool,
+                /*host_access_required=*/true)
+                .handle,
+            host_memory_pool.handle);
+}
+
 TEST_F(PhysicalDeviceCapabilitiesTest, SelectsCdnaPm4FamilyCapabilities) {
   constexpr iree_hal_amdgpu_vendor_packet_capability_flags_t
       kExpectedCapabilities =
@@ -955,7 +972,7 @@ TEST_F(PhysicalDeviceCapabilitiesTest, SelectsCdnaPm4FamilyCapabilities) {
     SCOPED_TRACE(processor);
     const iree_hal_amdgpu_vendor_packet_capability_flags_t capabilities =
         iree_hal_amdgpu_select_vendor_packet_capabilities(
-            GfxIpFromProcessor(processor));
+            GfxIpFromProcessor(processor), /*platform_available=*/true);
     EXPECT_TRUE(iree_all_bits_set(capabilities, kExpectedCapabilities));
     EXPECT_FALSE(iree_any_bit_set(
         capabilities,
@@ -979,7 +996,8 @@ TEST_F(PhysicalDeviceCapabilitiesTest, SelectsCdnaBarrierValueIndependently) {
   };
   for (const auto version : supported_versions) {
     const iree_hal_amdgpu_vendor_packet_capability_flags_t capabilities =
-        iree_hal_amdgpu_select_vendor_packet_capabilities(version);
+        iree_hal_amdgpu_select_vendor_packet_capabilities(
+            version, /*platform_available=*/true);
     EXPECT_TRUE(iree_any_bit_set(
         capabilities,
         IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_AQL_BARRIER_VALUE));
@@ -995,7 +1013,8 @@ TEST_F(PhysicalDeviceCapabilitiesTest, SelectsCdnaBarrierValueIndependently) {
   };
   for (const auto version : unsupported_versions) {
     const iree_hal_amdgpu_vendor_packet_capability_flags_t capabilities =
-        iree_hal_amdgpu_select_vendor_packet_capabilities(version);
+        iree_hal_amdgpu_select_vendor_packet_capabilities(
+            version, /*platform_available=*/true);
     EXPECT_FALSE(iree_any_bit_set(
         capabilities,
         IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_AQL_BARRIER_VALUE));
@@ -1036,7 +1055,8 @@ TEST_F(PhysicalDeviceCapabilitiesTest, SelectsRdnaPm4FamilyCapabilities) {
     const iree_hal_amdgpu_gfxip_version_t version =
         GfxIpFromProcessor(processor);
     const iree_hal_amdgpu_vendor_packet_capability_flags_t capabilities =
-        iree_hal_amdgpu_select_vendor_packet_capabilities(version);
+        iree_hal_amdgpu_select_vendor_packet_capabilities(
+            version, /*platform_available=*/true);
     const iree_hal_amdgpu_vendor_packet_capability_flags_t expected_capabilities =
         kExpectedCapabilities |
         (version.major == 12
@@ -1056,45 +1076,74 @@ TEST_F(PhysicalDeviceCapabilitiesTest, SelectsRdnaPm4FamilyCapabilities) {
 }
 
 TEST_F(PhysicalDeviceCapabilitiesTest, RejectsUnsupportedPm4Families) {
-  EXPECT_EQ(iree_hal_amdgpu_select_vendor_packet_capabilities(GfxIp(8, 0, 0)),
+  EXPECT_EQ(iree_hal_amdgpu_select_vendor_packet_capabilities(
+                GfxIp(8, 0, 0), /*platform_available=*/true),
             0u);
 
   const iree_hal_amdgpu_vendor_packet_capability_flags_t gfx906_capabilities =
-      iree_hal_amdgpu_select_vendor_packet_capabilities(GfxIp(9, 0, 6));
+      iree_hal_amdgpu_select_vendor_packet_capabilities(
+          GfxIp(9, 0, 6), /*platform_available=*/true);
   EXPECT_EQ(gfx906_capabilities,
             IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_AQL_PM4_IB);
   EXPECT_FALSE(
       iree_hal_amdgpu_vendor_packet_capabilities_support_pm4_dispatch_command_buffers(
           gfx906_capabilities));
 
-  EXPECT_EQ(iree_hal_amdgpu_select_vendor_packet_capabilities(GfxIp(13, 0, 0)),
+  EXPECT_EQ(iree_hal_amdgpu_select_vendor_packet_capabilities(
+                GfxIp(13, 0, 0), /*platform_available=*/true),
+            0u);
+}
+
+TEST_F(PhysicalDeviceCapabilitiesTest,
+       RejectsVendorPacketsUnavailableFromPlatform) {
+  EXPECT_EQ(iree_hal_amdgpu_select_vendor_packet_capabilities(
+                GfxIp(11, 5, 1), /*platform_available=*/false),
             0u);
 }
 
 TEST_F(PhysicalDeviceCapabilitiesTest, SelectsPm4TimestampStrategy) {
-  EXPECT_EQ(iree_hal_amdgpu_select_pm4_timestamp_strategy(GfxIp(8, 0, 0)),
+  EXPECT_EQ(iree_hal_amdgpu_select_pm4_timestamp_strategy(
+                GfxIp(8, 0, 0), /*platform_available=*/true),
             IREE_HAL_AMDGPU_PM4_TIMESTAMP_STRATEGY_NONE);
-  EXPECT_EQ(iree_hal_amdgpu_select_pm4_timestamp_strategy(GfxIp(9, 0, 0)),
+  EXPECT_EQ(iree_hal_amdgpu_select_pm4_timestamp_strategy(
+                GfxIp(9, 0, 0), /*platform_available=*/true),
             IREE_HAL_AMDGPU_PM4_TIMESTAMP_STRATEGY_COPY_CLOCK_MEMORY_STREAM);
-  EXPECT_EQ(iree_hal_amdgpu_select_pm4_timestamp_strategy(GfxIp(9, 5, 0)),
+  EXPECT_EQ(iree_hal_amdgpu_select_pm4_timestamp_strategy(
+                GfxIp(9, 5, 0), /*platform_available=*/true),
             IREE_HAL_AMDGPU_PM4_TIMESTAMP_STRATEGY_COPY_CLOCK_MEMORY_STREAM);
-  EXPECT_EQ(iree_hal_amdgpu_select_pm4_timestamp_strategy(GfxIp(10, 3, 0)),
+  EXPECT_EQ(iree_hal_amdgpu_select_pm4_timestamp_strategy(
+                GfxIp(10, 3, 0), /*platform_available=*/true),
             IREE_HAL_AMDGPU_PM4_TIMESTAMP_STRATEGY_COPY_CLOCK_TC_L2_LRU);
-  EXPECT_EQ(iree_hal_amdgpu_select_pm4_timestamp_strategy(GfxIp(11, 0, 0)),
+  EXPECT_EQ(iree_hal_amdgpu_select_pm4_timestamp_strategy(
+                GfxIp(11, 0, 0), /*platform_available=*/true),
             IREE_HAL_AMDGPU_PM4_TIMESTAMP_STRATEGY_COPY_CLOCK_TC_L2_LRU);
-  EXPECT_EQ(iree_hal_amdgpu_select_pm4_timestamp_strategy(GfxIp(11, 5, 0)),
+  EXPECT_EQ(iree_hal_amdgpu_select_pm4_timestamp_strategy(
+                GfxIp(11, 5, 0), /*platform_available=*/true),
             IREE_HAL_AMDGPU_PM4_TIMESTAMP_STRATEGY_COPY_CLOCK_TC_L2_LRU);
-  EXPECT_EQ(iree_hal_amdgpu_select_pm4_timestamp_strategy(GfxIp(11, 7, 0)),
+  EXPECT_EQ(iree_hal_amdgpu_select_pm4_timestamp_strategy(
+                GfxIp(11, 7, 0), /*platform_available=*/true),
             IREE_HAL_AMDGPU_PM4_TIMESTAMP_STRATEGY_COPY_CLOCK_TC_L2_LRU);
-  EXPECT_EQ(iree_hal_amdgpu_select_pm4_timestamp_strategy(GfxIp(12, 0, 0)),
+  EXPECT_EQ(iree_hal_amdgpu_select_pm4_timestamp_strategy(
+                GfxIp(12, 0, 0), /*platform_available=*/true),
             IREE_HAL_AMDGPU_PM4_TIMESTAMP_STRATEGY_COPY_CLOCK_TC_L2_LU);
-  EXPECT_EQ(iree_hal_amdgpu_select_pm4_timestamp_strategy(GfxIp(12, 0, 1)),
+  EXPECT_EQ(iree_hal_amdgpu_select_pm4_timestamp_strategy(
+                GfxIp(12, 0, 1), /*platform_available=*/true),
             IREE_HAL_AMDGPU_PM4_TIMESTAMP_STRATEGY_COPY_CLOCK_TC_L2_LU);
-  EXPECT_EQ(iree_hal_amdgpu_select_pm4_timestamp_strategy(GfxIp(12, 5, 0)),
+  EXPECT_EQ(iree_hal_amdgpu_select_pm4_timestamp_strategy(
+                GfxIp(12, 5, 0), /*platform_available=*/true),
             IREE_HAL_AMDGPU_PM4_TIMESTAMP_STRATEGY_COPY_CLOCK_TC_L2_LU);
-  EXPECT_EQ(iree_hal_amdgpu_select_pm4_timestamp_strategy(GfxIp(12, 5, 1)),
+  EXPECT_EQ(iree_hal_amdgpu_select_pm4_timestamp_strategy(
+                GfxIp(12, 5, 1), /*platform_available=*/true),
             IREE_HAL_AMDGPU_PM4_TIMESTAMP_STRATEGY_COPY_CLOCK_TC_L2_LU);
-  EXPECT_EQ(iree_hal_amdgpu_select_pm4_timestamp_strategy(GfxIp(13, 0, 0)),
+  EXPECT_EQ(iree_hal_amdgpu_select_pm4_timestamp_strategy(
+                GfxIp(13, 0, 0), /*platform_available=*/true),
+            IREE_HAL_AMDGPU_PM4_TIMESTAMP_STRATEGY_NONE);
+}
+
+TEST_F(PhysicalDeviceCapabilitiesTest,
+       RejectsPm4TimestampsUnavailableFromPlatform) {
+  EXPECT_EQ(iree_hal_amdgpu_select_pm4_timestamp_strategy(
+                GfxIp(11, 5, 1), /*platform_available=*/false),
             IREE_HAL_AMDGPU_PM4_TIMESTAMP_STRATEGY_NONE);
 }
 

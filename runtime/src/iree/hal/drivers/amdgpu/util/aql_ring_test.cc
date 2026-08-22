@@ -64,9 +64,9 @@ TEST(AqlRingTest, CommitsExtendedDispatchFormatAndSetupAtomically) {
   EXPECT_EQ(packet.extended_dispatch.setup, 3u);
 }
 
-// A DOORBELL-kind signal exposes an MMIO register pointer in the union, so
-// initialize caches it for the inline fast path and records all hot pointers.
-TEST(AqlRingTest, InitializeResolvesMmioPointerForDoorbellKind) {
+// A DOORBELL-kind signal uses the platform's correct notification path while
+// initialization records the remaining hot pointers.
+TEST(AqlRingTest, InitializeResolvesPathForDoorbellKind) {
   volatile int64_t doorbell_mmio = 0;
   iree_amd_signal_t signal = {};
   signal.kind = IREE_AMD_SIGNAL_KIND_DOORBELL;
@@ -80,8 +80,13 @@ TEST(AqlRingTest, InitializeResolvesMmioPointerForDoorbellKind) {
   iree_hal_amdgpu_aql_ring_t ring = {};
   iree_hal_amdgpu_aql_ring_initialize(&libhsa, &queue, &ring);
 
-  // DOORBELL kind resolves to the MMIO pointer.
+// Windows ROCr must notify its DXG queue worker through the HSA signal API;
+// other platforms can write a DOORBELL-kind signal's MMIO pointer directly.
+#if defined(IREE_PLATFORM_WINDOWS)
+  EXPECT_EQ((void*)ring.doorbell.ptr, nullptr);
+#else
   EXPECT_EQ((void*)ring.doorbell.ptr, (void*)&doorbell_mmio);
+#endif  // IREE_PLATFORM_WINDOWS
   // The signal handle and libhsa are cached regardless of kind.
   EXPECT_EQ(ring.doorbell.signal.handle, (uint64_t)&signal);
   EXPECT_EQ(ring.libhsa, &libhsa);

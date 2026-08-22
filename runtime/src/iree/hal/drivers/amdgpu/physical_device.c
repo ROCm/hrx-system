@@ -909,9 +909,11 @@ iree_hal_amdgpu_physical_device_initialize_vendor_packet_strategy(
       agent_target->primary_isa.identity.version;
 
   iree_hal_amdgpu_vendor_packet_capability_flags_t vendor_packet_capabilities =
-      iree_hal_amdgpu_select_vendor_packet_capabilities(gfxip_version);
+      iree_hal_amdgpu_select_vendor_packet_capabilities(
+          gfxip_version, system->info.aql.vendor_packets_supported);
   iree_hal_amdgpu_pm4_timestamp_strategy_t pm4_timestamp_strategy =
-      iree_hal_amdgpu_select_pm4_timestamp_strategy(gfxip_version);
+      iree_hal_amdgpu_select_pm4_timestamp_strategy(
+          gfxip_version, system->info.aql.pm4_timestamps_supported);
   iree_hal_amdgpu_wait_barrier_strategy_t wait_barrier_strategy =
       IREE_HAL_AMDGPU_WAIT_BARRIER_STRATEGY_DEFER;
   if (!options->force_wait_barrier_defer) {
@@ -1220,13 +1222,19 @@ iree_status_t iree_hal_amdgpu_physical_device_assign_frontier(
   iree_hal_amdgpu_physical_device_select_kernarg_ring_memory(
       physical_device, host_memory_pools, &kernarg_ring_memory);
   iree_hal_amdgpu_host_queue_profiling_memory_t profiling_memory = {0};
-  // Raw profiling completion signals are user-signal-shaped CP timestamp
-  // targets initialized by a device dispatch, so they can live in coarse
-  // device memory.
+  hsa_amd_memory_pool_t device_signal_memory_pool = {0};
   if (physical_device->coarse_block_pools.small.is_initialized) {
-    profiling_memory.signal_memory_pool =
+    device_signal_memory_pool =
         physical_device->coarse_block_pools.small.memory_pool;
   }
+  // Raw profiling completion signals are user-signal-shaped CP timestamp
+  // targets. Hardware queue retirement can keep them device-local, while a
+  // runtime that retires completion signals on the CPU requires shared fine
+  // memory.
+  profiling_memory.signal_memory_pool =
+      iree_hal_amdgpu_select_profiling_completion_signal_memory_pool(
+          device_signal_memory_pool, host_memory_pools->fine_pool,
+          system->info.aql.completion_signal_host_access_required);
   // Event records are serialized by the CPU after the GPU writes timestamp
   // fields. Prefer CPU-visible device-coarse memory when available so devices
   // without fine-grained memory can still profile. Otherwise fall back to

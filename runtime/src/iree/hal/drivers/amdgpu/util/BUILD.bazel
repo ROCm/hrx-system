@@ -677,7 +677,9 @@ iree_runtime_cc_test(
     name = "pm4_dispatch_live_test",
     srcs = ["pm4_dispatch_live_test.cc"],
     deps = [
+        ":info",
         ":libhsa",
+        ":loaded_code_object",
         ":packet",
         ":pm4_atomic",
         ":pm4_dispatch",

@@ -80,6 +80,11 @@ TEST_F(SystemTest, Lifetime) {
   // check that they match anything but we do know the timestamp frequency will
   // always != 0.
   EXPECT_NE(system->info.timestamp_frequency, 0);
+#if defined(IREE_PLATFORM_WINDOWS)
+  EXPECT_TRUE(system->info.aql.completion_signal_host_access_required);
+#else
+  EXPECT_FALSE(system->info.aql.completion_signal_host_access_required);
+#endif  // IREE_PLATFORM_WINDOWS
 
   // Device library gets loaded/initialized for the topology.
   // Assert that it is referencing the system libhsa clone instead of the

@@ -36,6 +36,16 @@ typedef struct iree_hal_amdgpu_system_info_t {
     // Query of HSA_AMD_SYSTEM_INFO_XNACK_ENABLED.
     uint32_t xnack_enabled : 1;
   } svm;
+  // HSA queue packet families supported by the platform runtime.
+  struct {
+    // Whether queues execute AMD vendor-specific AQL packets.
+    uint32_t vendor_packets_supported : 1;
+    // Whether PM4 device-timestamp packet sequences are available.
+    uint32_t pm4_timestamps_supported : 1;
+    // Whether queue retirement may access completion-signal records from the
+    // host CPU and therefore requires host-addressable signal storage.
+    uint32_t completion_signal_host_access_required : 1;
+  } aql;
   // Whether the dmabuf APIs are supported by the driver.
   // Query of HSA_AMD_SYSTEM_INFO_DMABUF_SUPPORTED.
   uint32_t dmabuf_supported : 1;

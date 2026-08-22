@@ -997,7 +997,9 @@ iree_cc_test(
   SRCS
     "pm4_dispatch_live_test.cc"
   DEPS
+    ::info
     ::libhsa
+    ::loaded_code_object
     ::packet
     ::pm4_atomic
     ::pm4_dispatch

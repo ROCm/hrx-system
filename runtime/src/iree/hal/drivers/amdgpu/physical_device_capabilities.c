@@ -775,9 +775,18 @@ iree_hal_amdgpu_select_prepublished_kernarg_storage(
   return iree_hal_amdgpu_aql_prepublished_kernarg_storage_device_fine_host_coherent();
 }
 
+hsa_amd_memory_pool_t
+iree_hal_amdgpu_select_profiling_completion_signal_memory_pool(
+    hsa_amd_memory_pool_t device_memory_pool,
+    hsa_amd_memory_pool_t host_memory_pool, bool host_access_required) {
+  return host_access_required ? host_memory_pool : device_memory_pool;
+}
+
 iree_hal_amdgpu_vendor_packet_capability_flags_t
 iree_hal_amdgpu_select_vendor_packet_capabilities(
-    iree_hal_amdgpu_gfxip_version_t version) {
+    iree_hal_amdgpu_gfxip_version_t version, bool platform_available) {
+  if (!platform_available) return 0;
+
   // AQL PM4-IB is available across the known gfx9-gfx12 HSA families. The
   // packet streams carried by those IBs follow architecture-family layouts,
   // not exact processor revision allowlists.
@@ -807,7 +816,11 @@ iree_hal_amdgpu_select_vendor_packet_capabilities(
 
 iree_hal_amdgpu_pm4_timestamp_strategy_t
 iree_hal_amdgpu_select_pm4_timestamp_strategy(
-    iree_hal_amdgpu_gfxip_version_t version) {
+    iree_hal_amdgpu_gfxip_version_t version, bool platform_available) {
+  if (!platform_available) {
+    return IREE_HAL_AMDGPU_PM4_TIMESTAMP_STRATEGY_NONE;
+  }
+
   // COPY_DATA GPU-clock readback is the queue-device timestamp path selected on
   // PM4-IB queues. The destination and cache-policy fields mirror the
   // aqlprofile command builder families: gfx9 including gfx94/gfx95 uses

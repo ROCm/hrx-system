@@ -19,6 +19,23 @@ iree_status_t iree_hal_amdgpu_system_info_query(
 
   memset(out_info, 0, sizeof(*out_info));
 
+  // ROCr does not currently expose queries for these platform-owned packet
+  // capabilities. The Windows DXG queue path silently retires vendor packets
+  // without executing them unless a private runtime override is enabled, and
+  // does not expose the PM4 timestamp path as a supported contract.
+#if defined(IREE_PLATFORM_WINDOWS)
+  out_info->aql.vendor_packets_supported = 0;
+  out_info->aql.pm4_timestamps_supported = 0;
+  // ROCr's Windows DXG queue translates AQL to PM4 in a host thread. On
+  // devices without platform atomics that thread retires completion signals
+  // with a CPU atomic after the GPU fence completes.
+  out_info->aql.completion_signal_host_access_required = 1;
+#else
+  out_info->aql.vendor_packets_supported = 1;
+  out_info->aql.pm4_timestamps_supported = 1;
+  out_info->aql.completion_signal_host_access_required = 0;
+#endif  // IREE_PLATFORM_WINDOWS
+
   uint16_t version_major = 0;
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
       z0,
@@ -61,6 +78,10 @@ iree_status_t iree_hal_amdgpu_system_info_query(
                 "(HSA_SYSTEM_INFO_MACHINE_MODEL == HSA_MACHINE_MODEL_LARGE)"));
   }
 
+  // SVM controls GPU access to ordinary system allocations through the
+  // hsa_amd_svm_* APIs. It is independent of the explicit HSA virtual-memory
+  // API required below, so devices without SVM remain usable with VMM-backed
+  // device allocations and sparse sanitizer shadows.
   bool svm_supported = false;
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
       z0,
@@ -68,13 +89,7 @@ iree_status_t iree_hal_amdgpu_system_info_query(
                                HSA_AMD_SYSTEM_INFO_SVM_SUPPORTED,
                                &svm_supported),
       "querying HSA_AMD_SYSTEM_INFO_SVM_SUPPORTED");
-  if (!svm_supported) {
-    IREE_RETURN_AND_END_ZONE_IF_ERROR(
-        z0, iree_make_status(IREE_STATUS_INCOMPATIBLE,
-                             "only systems with SVM are supported "
-                             "(HSA_AMD_SYSTEM_INFO_SVM_SUPPORTED == true)"));
-  }
-  out_info->svm.supported = 1;
+  out_info->svm.supported = svm_supported ? 1 : 0;
 
   bool svm_accessible_by_default = false;
   IREE_RETURN_AND_END_ZONE_IF_ERROR(

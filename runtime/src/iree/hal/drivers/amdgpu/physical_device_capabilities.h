@@ -269,10 +269,11 @@ iree_status_t iree_hal_amdgpu_select_cpu_visible_device_coarse_memory(
         selection,
     iree_hal_amdgpu_cpu_visible_device_coarse_memory_t* out_memory);
 
-// Selects the queue-local PM4 timestamp packet strategy for |version|.
+// Selects the queue-local PM4 timestamp packet strategy by intersecting the
+// platform runtime's availability with |version|.
 iree_hal_amdgpu_pm4_timestamp_strategy_t
 iree_hal_amdgpu_select_pm4_timestamp_strategy(
-    iree_hal_amdgpu_gfxip_version_t version);
+    iree_hal_amdgpu_gfxip_version_t version, bool platform_available);
 
 // AMDGPU memory-system facts used to derive conservative HAL topology flags.
 typedef struct iree_hal_amdgpu_memory_system_capabilities_t {
@@ -341,11 +342,20 @@ iree_hal_amdgpu_aql_prepublished_kernarg_storage_t
 iree_hal_amdgpu_select_prepublished_kernarg_storage(
     hsa_amd_memory_pool_t fine_block_memory_pool, bool direct_host_access);
 
-// Selects AMD vendor AQL packet and PM4 packet-family capabilities from the
-// parsed gfx IP version.
+// Selects storage for raw dispatch-profiling completion signals. Runtimes that
+// retire AQL completion signals on the CPU require the shared host pool;
+// hardware-only retirement uses the device-local pool.
+hsa_amd_memory_pool_t
+iree_hal_amdgpu_select_profiling_completion_signal_memory_pool(
+    hsa_amd_memory_pool_t device_memory_pool,
+    hsa_amd_memory_pool_t host_memory_pool, bool host_access_required);
+
+// Selects AMD vendor AQL packet and PM4 packet-family capabilities by
+// intersecting the platform runtime's availability with the parsed gfx IP
+// version.
 iree_hal_amdgpu_vendor_packet_capability_flags_t
 iree_hal_amdgpu_select_vendor_packet_capabilities(
-    iree_hal_amdgpu_gfxip_version_t version);
+    iree_hal_amdgpu_gfxip_version_t version, bool platform_available);
 
 // Selects the cross-queue wait strategy from already-selected vendor packet
 // capabilities.

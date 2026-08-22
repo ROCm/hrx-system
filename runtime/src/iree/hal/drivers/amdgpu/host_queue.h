@@ -84,7 +84,7 @@ typedef struct iree_hal_amdgpu_host_queue_post_drain_action_t
 
 // Memory policy used for queue profiling records.
 typedef struct iree_hal_amdgpu_host_queue_profiling_memory_t {
-  // HSA memory pool used for device-owned raw completion-signal records.
+  // HSA memory pool used for raw completion-signal timestamp records.
   hsa_amd_memory_pool_t signal_memory_pool;
   // HSA memory pool used for host-readable, device-writable event records.
   hsa_amd_memory_pool_t event_memory_pool;

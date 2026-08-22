@@ -17,7 +17,9 @@
 #include "iree/base/threading/processor.h"
 #include "iree/hal/drivers/amdgpu/abi/kernel_descriptor.h"
 #include "iree/hal/drivers/amdgpu/util/aql_ring.h"
+#include "iree/hal/drivers/amdgpu/util/info.h"
 #include "iree/hal/drivers/amdgpu/util/libhsa.h"
+#include "iree/hal/drivers/amdgpu/util/loaded_code_object.h"
 #include "iree/hal/drivers/amdgpu/util/pm4_atomic.h"
 #include "iree/hal/drivers/amdgpu/util/pm4_barrier.h"
 #include "iree/hal/drivers/amdgpu/util/pm4_dispatch.h"
@@ -75,6 +77,7 @@ struct alignas(64) LiveMemory {
 struct KernelInfo {
   hsa_executable_symbol_t symbol = {0};
   uint64_t kernel_object = 0;
+  const iree_hal_amdgpu_kernel_descriptor_t* descriptor = nullptr;
   uint32_t kernarg_size = 0;
   uint32_t kernarg_alignment = 0;
   uint32_t private_segment_size = 0;
@@ -218,6 +221,9 @@ static iree_status_t LookupKernel(const iree_hal_amdgpu_libhsa_t* libhsa,
   IREE_RETURN_IF_ERROR(iree_hsa_executable_symbol_get_info(
       IREE_LIBHSA(libhsa), out_info->symbol,
       HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_OBJECT, &out_info->kernel_object));
+  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_loaded_code_object_query_host_address(
+      libhsa, out_info->kernel_object,
+      reinterpret_cast<const void**>(&out_info->descriptor)));
   IREE_RETURN_IF_ERROR(iree_hsa_executable_symbol_get_info(
       IREE_LIBHSA(libhsa), out_info->symbol,
       HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_KERNARG_SEGMENT_SIZE,
@@ -485,6 +491,12 @@ class PM4DispatchLiveTest : public ::testing::Test {
       GTEST_SKIP() << "CPU and GPU agents are required, skipping tests";
     }
 
+    iree_hal_amdgpu_system_info_t system_info = {};
+    IREE_ASSERT_OK(iree_hal_amdgpu_system_info_query(&libhsa, &system_info));
+    if (!system_info.aql.vendor_packets_supported) {
+      GTEST_SKIP() << "vendor-specific AQL packets are not supported";
+    }
+
     if (!QueryAgentCodeObjectTarget(&libhsa, topology.gpu_agents[0],
                                     &agent_gfxip_version, &agent_exact_target,
                                     &agent_code_object_target)) {
@@ -645,11 +657,8 @@ TEST_F(PM4DispatchLiveTest, AqlAndAqlPm4IbLaunchMixedKernels) {
 
   iree_hal_amdgpu_pm4_dispatch_launch_state_t launch_states[5];
   for (uint32_t i = 0; i < IREE_ARRAYSIZE(launch_states); ++i) {
-    const iree_hal_amdgpu_kernel_descriptor_t* descriptor =
-        reinterpret_cast<const iree_hal_amdgpu_kernel_descriptor_t*>(
-            static_cast<uintptr_t>(kernels[i].kernel_object));
     IREE_ASSERT_OK(iree_hal_amdgpu_pm4_dispatch_launch_state_initialize(
-        agent_gfxip_version, descriptor, kernels[i].kernel_object,
+        agent_gfxip_version, kernels[i].descriptor, kernels[i].kernel_object,
         kWorkgroupSize, IREE_HAL_AMDGPU_PM4_DISPATCH_LAUNCH_FLAG_ORDER_MODE,
         &launch_states[i]));
   }
