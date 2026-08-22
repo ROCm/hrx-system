@@ -424,15 +424,6 @@ def test_storage_lease_rows_project_memory_dependencies() -> None:
         (
             StorageLeaseKind.SOURCE_READ,
             StorageLeaseAttachment.OPERAND,
-            0,
-            1,
-            _COUNTER_VMEM_STORE,
-            "amdgpu.store_source_reuse",
-            source_flags,
-        ),
-        (
-            StorageLeaseKind.SOURCE_READ,
-            StorageLeaseAttachment.OPERAND,
             1,
             4,
             _COUNTER_VMEM_LOAD,

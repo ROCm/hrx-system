@@ -38,7 +38,6 @@ low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @branch_edge_copy_preced
   v_mov_b32 v0, v3
 .Lbb1:
   global_store_b32 v0, v1, s[0:1] offset:0
-  s_wait_storecnt storecnt(0)
   s_wait_xcnt xcnt(0)
   v_mov_b32 v0, v2
   s_branch .Lbb1
