@@ -896,35 +896,17 @@ def resolve_bazel_output_path(
     cwd: Path,
     env: dict[str, str] | None,
 ) -> Path | None:
-    cquery = run_captured(
-        [bazel, "cquery", "--output=files", *bazel_args, target],
+    """Resolves the configured target's executable artifact."""
+    result, metadata = resolve_bazel_launch_metadata(
+        bazel=bazel,
+        target=target,
+        bazel_args=bazel_args,
         cwd=cwd,
         env=env,
     )
-    if cquery.returncode != 0:
-        print_process_failure(cquery)
+    if result != 0 or metadata is None:
         return None
-    output_paths = [
-        line.strip()
-        for line in cquery.stdout.splitlines()
-        if line.strip() and not line.startswith("INFO:")
-    ]
-    if not output_paths:
-        return None
-
-    execution_root = bazel_execution_root(bazel=bazel, cwd=cwd, env=env)
-    candidates = []
-    for output_path in output_paths:
-        path = Path(output_path)
-        if not path.is_absolute() and execution_root is not None:
-            path = execution_root / path
-        elif not path.is_absolute():
-            path = cwd / path
-        candidates.append(path)
-    for candidate in candidates:
-        if candidate.is_file() and os.access(candidate, os.X_OK):
-            return candidate
-    return candidates[0]
+    return metadata.executable_path
 
 
 def bazel_execution_root(
