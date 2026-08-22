@@ -35,6 +35,17 @@ typedef struct iree_hal_amdgpu_access_agent_list_t {
       values[IREE_HAL_AMDGPU_MAX_CPU_AGENT + IREE_HAL_AMDGPU_MAX_GPU_AGENT];
 } iree_hal_amdgpu_access_agent_list_t;
 
+// Resolves the GPU agents selected by |queue_affinity|.
+//
+// The resulting list contains each selected GPU agent and no CPU agents. This
+// is used for operations whose contract grants access to device queues rather
+// than to every host and device participant in a memory placement.
+iree_status_t iree_hal_amdgpu_access_agent_list_resolve_queue_agents(
+    const iree_hal_amdgpu_topology_t* topology,
+    iree_hal_amdgpu_queue_affinity_domain_t queue_affinity_domain,
+    iree_hal_queue_affinity_t queue_affinity,
+    iree_hal_amdgpu_access_agent_list_t* out_agent_list);
+
 // Resolves the HSA agents that may access memory placed for |queue_affinity|.
 //
 // The resulting list contains each selected GPU agent and its nearest CPU agent
@@ -43,7 +54,7 @@ typedef struct iree_hal_amdgpu_access_agent_list_t {
 // to that physical device. Sharing usage bits define how queues may share the
 // buffer within the requested placement; they do not expand the placement past
 // |queue_affinity|.
-iree_status_t iree_hal_amdgpu_access_agent_list_resolve(
+iree_status_t iree_hal_amdgpu_access_agent_list_resolve_memory_agents(
     const iree_hal_amdgpu_topology_t* topology,
     iree_hal_amdgpu_queue_affinity_domain_t queue_affinity_domain,
     iree_hal_queue_affinity_t queue_affinity,
