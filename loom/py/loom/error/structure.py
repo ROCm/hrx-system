@@ -847,6 +847,45 @@ ERR_STRUCTURE_051 = ErrorDef(
     fix_hint="Merge the duplicate records or give each record a unique key",
 )
 
+# ERR_STRUCTURE_052: Launch configuration has observable effects.
+ERR_STRUCTURE_052 = ErrorDef(
+    domain=ErrorDomain.STRUCTURE,
+    code=52,
+    severity=Severity.ERROR,
+    summary="Launch configuration has observable effects.",
+    message=(
+        "'{op_name}' launch configuration has {read_count} read-like, "
+        "{write_count} write-like, and {convergent_count} convergent effect(s)"
+    ),
+    params=(
+        ErrorParam("op_name", ParamKind.STRING),
+        ErrorParam("read_count", ParamKind.U32),
+        ErrorParam("write_count", ParamKind.U32),
+        ErrorParam("convergent_count", ParamKind.U32),
+    ),
+    fix_hint=(
+        "Express launch configuration as a pure function of workload arguments "
+        "and immutable compilation inputs"
+    ),
+)
+
+# ERR_STRUCTURE_053: Non-command effect in a command program.
+ERR_STRUCTURE_053 = ErrorDef(
+    domain=ErrorDomain.STRUCTURE,
+    code=53,
+    severity=Severity.ERROR,
+    summary="Non-command effect in a command program.",
+    message=(
+        "'{op_name}' has observable effects in a command-program body but "
+        "does not represent an explicit command"
+    ),
+    params=(ErrorParam("op_name", ParamKind.STRING),),
+    fix_hint=(
+        "Use an explicit command operation or declare the computation pure "
+        "when it has no observable effects"
+    ),
+)
+
 ALL_STRUCTURE_ERRORS: tuple[ErrorDef, ...] = (
     ERR_STRUCTURE_001,
     ERR_STRUCTURE_002,
@@ -898,4 +937,6 @@ ALL_STRUCTURE_ERRORS: tuple[ErrorDef, ...] = (
     ERR_STRUCTURE_049,
     ERR_STRUCTURE_050,
     ERR_STRUCTURE_051,
+    ERR_STRUCTURE_052,
+    ERR_STRUCTURE_053,
 )

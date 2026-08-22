@@ -68,6 +68,18 @@ typedef struct loom_verify_type_summary_t {
   bool may_reference_values;
 } loom_verify_type_summary_t;
 
+// State inherited while recursively verifying one region tree.
+typedef struct loom_verify_region_scope_t {
+  // Region currently being verified.
+  const loom_region_t* current;
+
+  // Reusable consumed-value query for current.
+  loom_consumption_region_query_t* consumption_query;
+
+  // True when observable effects must be explicit command effects.
+  bool command_effects_only;
+} loom_verify_region_scope_t;
+
 typedef struct loom_verify_state_t {
   // Module being verified.
   const loom_module_t* module;
@@ -127,11 +139,8 @@ typedef struct loom_verify_state_t {
   // Reusable per-op scratch for tied-result uniqueness checks.
   loom_verify_tied_table_t tied_table;
 
-  // Region currently being verified while walking nested IR.
-  const loom_region_t* current_region;
-
-  // Reusable consumed-value query for current_region.
-  loom_consumption_region_query_t* current_consumption_query;
+  // State inherited through the current nested region traversal.
+  loom_verify_region_scope_t region_scope;
 
   // Stack of value IDs defined during the current scoped walk.
   uint32_t* defined_stack;

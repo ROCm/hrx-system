@@ -33,6 +33,7 @@ from loom.dsl import (
     ATTR_TYPE_I64,
     ATTR_TYPE_STRING,
     BUFFER,
+    COMMAND_EFFECT,
     INDEX,
     ISOLATED_FROM_ABOVE,
     PURE,
@@ -138,7 +139,9 @@ command_program_def = Op(
     doc=(
         "Reusable command-program definition. Leading specialization arguments "
         "participate in staged specialization and launch-count evaluation; buffer "
-        "bindings are provided when the materialized program is issued."
+        "bindings are provided when the materialized program is issued. Observable "
+        "effects in the body must be explicit command operations; ordinary SSA "
+        "preparation is effect-free."
     ),
     traits=[SYMBOL_DEFINE, ISOLATED_FROM_ABOVE],
     attrs=list(_PROGRAM_ATTRS),
@@ -151,6 +154,7 @@ command_program_def = Op(
             "body",
             doc="Commands and source-level control flow forming the program.",
             terminator="command.return",
+            command_effects_only=True,
         ),
     ],
     interfaces=[FuncLikeInterface(**_PROGRAM_FUNC_LIKE, body="body")],
@@ -209,7 +213,7 @@ command_program_launch = Op(
             symbol_ref=SymbolReference("command program", ["command_program"]),
         ),
     ],
-    traits=[UNKNOWN_EFFECTS],
+    traits=[UNKNOWN_EFFECTS, COMMAND_EFFECT],
     interfaces=[
         CallLikeInterface(
             callee="callee",
@@ -327,7 +331,11 @@ def _schedule(name: str, doc: str) -> Op:
                 terminator="command.yield",
             ),
         ],
-        traits=[UNKNOWN_EFFECTS, ImplicitTerminator("command.yield")],
+        traits=[
+            UNKNOWN_EFFECTS,
+            COMMAND_EFFECT,
+            ImplicitTerminator("command.yield"),
+        ],
         format=[Region("body")],
         examples=[f"{name} {{\n  command.yield\n}}"],
     )

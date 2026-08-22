@@ -102,6 +102,25 @@ static iree_status_t loom_kernel_verify_export_contract(
   return iree_ok_status();
 }
 
+static iree_status_t loom_kernel_verify_launch_config_purity(
+    const loom_module_t* module, const loom_op_t* op,
+    iree_diagnostic_emitter_t emitter) {
+  const loom_region_t* config = loom_kernel_def_config(op);
+  if (!loom_region_has_read_effects(config) &&
+      !loom_region_has_write_effects(config) &&
+      !loom_region_has_convergent_effects(config)) {
+    return iree_ok_status();
+  }
+  const loom_diagnostic_param_t params[] = {
+      loom_param_string(loom_op_name(module, op)),
+      loom_param_u32(config->read_effect_count),
+      loom_param_u32(config->write_effect_count),
+      loom_param_u32(config->convergent_effect_count),
+  };
+  return loom_kernel_emit(emitter, op, LOOM_ERR_STRUCTURE_052, params,
+                          IREE_ARRAYSIZE(params));
+}
+
 static iree_status_t loom_kernel_emit_launch_related(
     iree_diagnostic_emitter_t emitter, const loom_op_t* launch_op,
     const loom_op_t* definition_op, const loom_error_def_t* error,
@@ -1198,6 +1217,8 @@ iree_status_t loom_kernel_def_verify(const loom_module_t* module,
   IREE_RETURN_IF_ERROR(loom_kernel_verify_export_contract(
       emitter, op, loom_kernel_def_export_symbol_ATTR_INDEX,
       loom_kernel_def_export_linkage_ATTR_INDEX));
+  IREE_RETURN_IF_ERROR(
+      loom_kernel_verify_launch_config_purity(module, op, emitter));
   return loom_kernel_verify_barrier_controls(module, op, emitter);
 }
 

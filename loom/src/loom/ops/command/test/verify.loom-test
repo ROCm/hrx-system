@@ -75,3 +75,52 @@ command.program.def @invalid_parameter_patterns(%layer: index) launch(%parameter
   %mismatch = command.parameter %parameters, "blk.{}.{}.weight"[%layer] : view<16xi8>
   command.return
 }
+
+// ====
+
+func.decl pure @pure_command_extent(%value: index) -> (index)
+
+kernel.decl @command_effect_kernel(%element_count: index) launch(%scratch: buffer)
+
+command.program.def @pure_preparation_and_explicit_commands(%element_count: index) launch() {
+  %byte_length = index.constant 64 : offset
+  %scratch = buffer.alloca<global> align(64) %byte_length : buffer
+  %launch_count = func.call pure @pure_command_extent(%element_count) : (index) -> (index)
+  command.serial {
+    kernel.launch @command_effect_kernel[%launch_count](%scratch) : [index](buffer)
+  }
+  command.return
+}
+
+// ====
+
+func.decl @unknown_command_extent(%value: index) -> (index)
+
+command.program.def @nested_unknown_effect(%condition: i1, %value: index) launch() {
+  scf.if %condition {
+    // ERROR@+1: STRUCTURE/053 {op_name="func.call"}
+    %unused = func.call @unknown_command_extent(%value) : (index) -> (index)
+  }
+  command.return
+}
+
+// ====
+
+command.program.def @convergent_preparation(%value: index) launch() {
+  // ERROR@+1: STRUCTURE/053 {op_name="test.convergent"}
+  %unused = test.convergent %value : index
+  command.return
+}
+
+// ====
+
+command.program.def @memory_effects_are_not_preparation() launch(%storage: buffer) {
+  %base = index.constant 0 : offset
+  %element = index.constant 0 : index
+  %view = buffer.view %storage[%base] : buffer -> view<1xi32>
+  // ERROR@+1: STRUCTURE/053 {op_name="view.load"}
+  %value = view.load %view[%element] : view<1xi32> -> i32
+  // ERROR@+1: STRUCTURE/053 {op_name="view.store"}
+  view.store %value, %view[%element] : i32, view<1xi32>
+  command.return
+}

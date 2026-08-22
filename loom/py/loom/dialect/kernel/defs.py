@@ -45,6 +45,7 @@ from loom.dsl import (
     ATTR_TYPE_ENUM,
     ATTR_TYPE_I64,
     ATTR_TYPE_STRING,
+    COMMAND_EFFECT,
     CONVERGENT,
     I1,
     INDEX,
@@ -307,7 +308,7 @@ kernel_def = Op(
     regions=[
         RegionDef(
             "config",
-            doc=("Launch configuration region. The region owns host launch inputs and must terminate with kernel.launch.config."),
+            doc=("Pure launch configuration region. The region computes launch parameters from its workload arguments and immutable compilation inputs and must terminate with kernel.launch.config."),
             single_block=True,
             terminator="kernel.launch.config",
             buffer_arg_memory_space="global",
@@ -1887,7 +1888,7 @@ kernel_launch = Op(
             symbol_ref=SymbolReference("kernel", ["kernel"]),
         ),
     ],
-    traits=[UNKNOWN_EFFECTS, NoAncestor("kernel.def")],
+    traits=[UNKNOWN_EFFECTS, COMMAND_EFFECT, NoAncestor("kernel.def")],
     interfaces=[
         CallLikeInterface(
             callee="callee",
@@ -1951,6 +1952,7 @@ def _launch_schedule(name: str, doc: str) -> Op:
         ],
         traits=[
             UNKNOWN_EFFECTS,
+            COMMAND_EFFECT,
             ImplicitTerminator("kernel.launch.yield"),
             NoAncestor("kernel.def"),
         ],

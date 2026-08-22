@@ -46,6 +46,26 @@ root. An exact `%layer` can disappear into parameter placement and selected
 branches. A residual `%element_count` can remain as an input to the generated
 host launch-count function without entering the command or device ABI.
 
+## Effects are explicit commands
+
+A command program is not a pure function: launching a kernel and ordering work
+are its purpose. Those observable effects must nevertheless be represented by
+explicit command operations such as `kernel.launch`, `command.program.launch`,
+`command.serial`, and `command.concurrent`. Ordinary SSA computation around
+them is effect-free. Calls used to derive launch workloads therefore carry a
+`pure` contract, just as calls in a kernel launch-configuration region do.
+
+The distinction keeps preparation movable. The compiler can evaluate pure
+shape arithmetic in the host VM, preserve it as residual launch computation,
+or lower it to a device-side producer for indirect dispatch without silently
+moving a memory observation or mutation. A `buffer.alloca` remains valid: it
+declares a fresh command-program storage identity for later scheduling rather
+than reading, writing, or synchronizing external state.
+
+The verifier enforces this at the source operation that violates the contract.
+An opaque ordinary call is rejected inside nested control flow instead of
+surviving until command outlining or schedule materialization.
+
 Schedule topology and parameter identity must be closed after preparation.
 Residual specialization values may feed pure launch-count expressions, but
 they cannot leave an unresolved source branch or a dynamic parameter key in the

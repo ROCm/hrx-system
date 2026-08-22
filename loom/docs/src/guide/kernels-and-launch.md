@@ -53,6 +53,20 @@ guard the tail. A value needed only for launch arithmetic does not consume a
 device argument; a buffer needed only by the device does not become a workload
 argument.
 
+## Launch configuration is pure executable logic
+
+The launch-configuration region is a pure function of its workload arguments
+and immutable compilation inputs such as configuration and target facts. It
+cannot read or write memory, call an opaque effectful function, observe
+non-deterministic state, or perform a convergent operation. Kernel verification
+rejects such effects at the `kernel.def` that owns the contract.
+
+Purity keeps execution placement separate from meaning. The same residual
+calculation may run in a host VM companion, remain as ordinary pure calls in a
+command program, or execute on a device to produce an indirect dispatch tuple.
+None of those products needs a different source representation or permission
+to observe additional state.
+
 ## Workload is not workgroup count
 
 [`kernel.launch.config`](../reference/dialects/kernel/ops/launch-config.md)

@@ -137,6 +137,7 @@ TRAIT_MAP: dict[str, str] = {
     "IsolatedFromAbove": "LOOM_TRAIT_ISOLATED_FROM_ABOVE",
     "NonDeterministic": "LOOM_TRAIT_NON_DETERMINISTIC",
     "UnknownEffects": "LOOM_TRAIT_UNKNOWN_EFFECTS",
+    "CommandEffect": "LOOM_TRAIT_COMMAND_EFFECT",
     "MemoryFence": "LOOM_TRAIT_MEMORY_FENCE",
     "CompileTimeOnly": "LOOM_TRAIT_COMPILE_TIME_ONLY",
     "Convergent": "LOOM_TRAIT_CONVERGENT",

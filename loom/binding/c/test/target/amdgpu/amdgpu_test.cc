@@ -612,7 +612,7 @@ template.def<@test.experts_per_wave> priority(1) @four_experts_per_wave(%expert_
 kernel.def target(@gfx11_wave64) @target_specialized_launch(%expert_count: index) {
   %c1 = index.constant 1 : index
   %wave_size = target.subgroup.size : index
-  %experts_per_wave = template.apply<@test.experts_per_wave>(%expert_count) : (index) -> (index)
+  %experts_per_wave = template.apply<@test.experts_per_wave>(%expert_count) pure : (index) -> (index)
   %workgroup_count = index.div %expert_count, %experts_per_wave : index
   kernel.launch.config workgroups(%workgroup_count, %c1, %c1) workgroup_size(%wave_size, %c1, %c1) : index
 } launch(%output: buffer) {

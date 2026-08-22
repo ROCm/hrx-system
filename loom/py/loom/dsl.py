@@ -990,6 +990,10 @@ class RegionDef:
         "cluster") over which scalar entry block arguments are identical.
         This is a region boundary contract rather than a property inferred
         from argument types.
+    command_effects_only: If True, every directly observable effect executed
+        in this region or a nested region must be carried by an operation with
+        the CommandEffect trait. Pure computation and identity-producing
+        operations remain valid.
     """
 
     name: str
@@ -1002,6 +1006,7 @@ class RegionDef:
     arg_source: str | None = None
     buffer_arg_memory_space: str | None = None
     arg_uniform_scope: str | None = None
+    command_effects_only: bool = False
 
 
 # ============================================================================
@@ -1159,6 +1164,10 @@ NON_DETERMINISTIC = Trait("NonDeterministic")
 # Effects depend on runtime state (e.g., func.call depends on the callee).
 # Passes treat this conservatively as both READS_MEMORY and WRITES_MEMORY.
 UNKNOWN_EFFECTS = Trait("UnknownEffects")
+# Op represents an explicit command-program effect such as dispatch or schedule
+# composition. The op must independently declare its exact or unknown effects;
+# this trait classifies those effects instead of replacing them.
+COMMAND_EFFECT = Trait("CommandEffect")
 # Op orders memory accesses without directly reading or writing a resource.
 # Fences are observable side effects but do not alias every memory operand;
 # analyses preserve their ordering contract independently from footprint
@@ -4714,6 +4723,14 @@ def _validate_no_effect_conflicts(
 ) -> None:
     """Validate trait-only ops for effect-related conflicts."""
     trait_names = {t.name for t in traits}
+    if "CommandEffect" in trait_names and not trait_names.intersection(
+        {"UnknownEffects", "MemoryFence", "NonDeterministic", "Convergent"}
+    ):
+        raise ValueError(
+            f"Op '{op_name}': COMMAND_EFFECT requires explicit or unknown "
+            "observable effects. The trait classifies effects but does not "
+            "declare them."
+        )
     if "CompileTimeOnly" in trait_names:
         if "Hint" in trait_names:
             raise ValueError(

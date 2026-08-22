@@ -42,7 +42,7 @@ typedef enum loom_command_retain_e {
   LOOM_COMMAND_RETAIN_COUNT_ = 2,
 } loom_command_retain_t;
 
-// LOOM_OP_COMMAND_PROGRAM_DEF: Reusable command-program definition. Leading specialization arguments participate in staged specialization and launch-count evaluation; buffer bindings are provided when the materialized program is issued.
+// LOOM_OP_COMMAND_PROGRAM_DEF: Reusable command-program definition. Leading specialization arguments participate in staged specialization and launch-count evaluation; buffer bindings are provided when the materialized program is issued. Observable effects in the body must be explicit command operations; ordinary SSA preparation is effect-free.
 // command.program.def @decode(%token_count: index) launch(%parameters: buffer, %transient: buffer) {
 //   command.return
 // }

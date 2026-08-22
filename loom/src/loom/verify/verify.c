@@ -120,6 +120,31 @@ loom_verify_emit_wrong_terminator(loom_verify_state_t* state,
   return loom_verify_pending_diagnostic_status(state);
 }
 
+IREE_ATTRIBUTE_NOINLINE IREE_ATTRIBUTE_COLD static void
+loom_verify_emit_non_command_effect(loom_verify_state_t* state,
+                                    const loom_op_t* op,
+                                    const loom_op_vtable_t* vtable) {
+  loom_diagnostic_param_t params[] = {
+      loom_param_string(loom_op_vtable_name(vtable)),
+  };
+  loom_verify_emit_structured(state, op, LOOM_ERR_STRUCTURE_053, params,
+                              IREE_ARRAYSIZE(params));
+}
+
+IREE_ATTRIBUTE_ALWAYS_INLINE static inline void
+loom_verify_command_effect_scope(loom_verify_state_t* state,
+                                 const loom_op_t* op,
+                                 const loom_op_vtable_t* vtable,
+                                 loom_trait_flags_t traits) {
+  if (!state->region_scope.command_effects_only) return;
+  if (!loom_traits_may_read(traits) && !loom_traits_may_write(traits) &&
+      !loom_traits_are_convergent(traits)) {
+    return;
+  }
+  if (iree_any_bit_set(vtable->traits, LOOM_TRAIT_COMMAND_EFFECT)) return;
+  loom_verify_emit_non_command_effect(state, op, vtable);
+}
+
 static iree_status_t loom_verify_region(
     loom_verify_state_t* state, loom_region_t* region,
     const loom_verify_region_contract_t* contract) {
@@ -136,14 +161,20 @@ static iree_status_t loom_verify_region(
     IREE_RETURN_IF_ERROR(loom_verify_emit_single_block_region(
         state, contract, region->block_count));
   }
-  const loom_region_t* saved_region = state->current_region;
+  const loom_region_t* saved_region = state->region_scope.current;
   loom_consumption_region_query_t* saved_consumption_query =
-      state->current_consumption_query;
+      state->region_scope.consumption_query;
+  const bool saved_command_effects_only =
+      state->region_scope.command_effects_only;
   loom_consumption_region_query_t consumption_query;
-  state->current_region = region;
+  state->region_scope.current = region;
   loom_consumption_region_query_initialize(state->module, region, &state->arena,
                                            &consumption_query);
-  state->current_consumption_query = &consumption_query;
+  state->region_scope.consumption_query = &consumption_query;
+  if (contract && iree_any_bit_set(contract->descriptor->flags,
+                                   LOOM_REGION_COMMAND_EFFECTS_ONLY)) {
+    state->region_scope.command_effects_only = true;
+  }
 
   bool scope_pushed = false;
   iree_status_t status = loom_verify_push_scope(state);
@@ -211,8 +242,9 @@ static iree_status_t loom_verify_region(
   if (scope_pushed) {
     loom_verify_pop_scope(state);
   }
-  state->current_region = saved_region;
-  state->current_consumption_query = saved_consumption_query;
+  state->region_scope.current = saved_region;
+  state->region_scope.consumption_query = saved_consumption_query;
+  state->region_scope.command_effects_only = saved_command_effects_only;
   return status;
 }
 
@@ -283,7 +315,14 @@ IREE_ATTRIBUTE_ALWAYS_INLINE static inline iree_status_t loom_verify_op(
   // must preserve the same effect and optimization invariants as declared
   // traits. Run this after structural checks so callbacks can safely inspect
   // attributes.
-  loom_verify_op_effective_trait_consistency(state, op, vtable);
+  const loom_trait_flags_t effective_traits =
+      loom_verify_op_effective_trait_consistency(state, op, vtable);
+  IREE_RETURN_IF_ERROR(loom_verify_pending_diagnostic_status(state));
+
+  // Command programs may perform observable work only through explicit
+  // command operations. This consumes the effective trait word already cached
+  // on the op while the ordinary verifier traversal is visiting it.
+  loom_verify_command_effect_scope(state, op, vtable, effective_traits);
   IREE_RETURN_IF_ERROR(loom_verify_pending_diagnostic_status(state));
 
   // Operand and result type payloads must satisfy core representation
