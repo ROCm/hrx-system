@@ -219,4 +219,17 @@ loom_cc_benchmark(
   TESTONLY
 )
 
+loom_cc_benchmark(
+  NAME
+    type_intern_benchmark
+  SRCS
+    "type_intern_benchmark.cc"
+  DEPS
+    ::ir
+    iree::base
+    iree::base::internal::arena
+    iree::testing::benchmark_main
+  TESTONLY
+)
+
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###
