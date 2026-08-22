@@ -540,7 +540,7 @@ iree_status_t iree_hal_amdgpu_virtual_memory_protect(
       .queue_count_per_physical_device = state->topology->gpu_agent_queue_count,
   };
   iree_hal_amdgpu_access_agent_list_t agent_list;
-  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_access_agent_list_resolve(
+  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_access_agent_list_resolve_queue_agents(
       state->topology, domain, queue_affinity, &agent_list));
 
   hsa_amd_memory_access_desc_t access_descs[IREE_HAL_AMDGPU_MAX_CPU_AGENT +
