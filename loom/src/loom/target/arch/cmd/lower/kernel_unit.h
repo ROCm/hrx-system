@@ -51,17 +51,20 @@ typedef struct loom_cmd_kernel_unit_t {
   const uint16_t* source_argument_ordinals;
 } loom_cmd_kernel_unit_t;
 
-// Returns true when two source launches have the same kernel-unit identity.
+// Returns true when two launches of the same resolved kernel definition have
+// equivalent kernel-unit boundaries.
 //
-// Launches match when they reference the same linked kernel symbol and carry
-// equal boundary-projected scalar facts for every workload and device-ABI
-// operand. Non-scalar operand identity does not affect the derived unit.
-bool loom_cmd_kernel_unit_launches_equivalent(
+// The caller owns resolved kernel-definition identity. Launch boundaries match
+// when they carry equal boundary-projected scalar facts for every workload and
+// device-ABI operand. Non-scalar operand identity does not affect the derived
+// unit.
+bool loom_cmd_kernel_unit_boundaries_equivalent(
     const loom_module_t* source_module, const loom_op_t* lhs_launch_op,
     const loom_op_t* rhs_launch_op,
     const loom_value_fact_table_t* source_facts);
 
-// Materializes one compiler-owned kernel unit from |source_launch_op|.
+// Materializes one compiler-owned kernel unit from |source_kernel_op| and
+// |source_launch_op|.
 //
 // |source_facts| must describe the function containing the launch and remain
 // valid for the duration of this call. Workload operands map to the kernel
@@ -73,7 +76,8 @@ bool loom_cmd_kernel_unit_launches_equivalent(
 // On success |out_unit| owns its module and must be deinitialized. On failure
 // |out_unit| is empty and the source module is unchanged.
 iree_status_t loom_cmd_kernel_unit_materialize(
-    const loom_module_t* source_module, const loom_op_t* source_launch_op,
+    const loom_module_t* source_module, loom_op_t* source_kernel_op,
+    const loom_op_t* source_launch_op,
     const loom_value_fact_table_t* source_facts,
     iree_arena_block_pool_t* block_pool, iree_allocator_t allocator,
     loom_cmd_kernel_unit_t* out_unit);

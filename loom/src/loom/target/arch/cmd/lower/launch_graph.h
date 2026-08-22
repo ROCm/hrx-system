@@ -43,6 +43,27 @@ typedef struct loom_cmd_launch_count_t {
   } payload;
 } loom_cmd_launch_count_t;
 
+// Kernel definitions resolved across every root in one command program plan.
+typedef struct loom_cmd_launch_definition_table_t {
+  // Unique kernel definitions in first scheduled occurrence order.
+  loom_op_t* const* entries;
+  // Number of entries in |entries|.
+  uint32_t count;
+} loom_cmd_launch_definition_table_t;
+
+// Definition assignments for one command root's scheduled launches.
+//
+// |definition_ordinals| is aligned with the corresponding root schedule's
+// command table. The owning program plan establishes both tables while
+// validating scheduled launch symbols, so launch consumers never repeat symbol
+// resolution.
+typedef struct loom_cmd_launch_resolution_t {
+  // Plan-wide kernel definition table.
+  const loom_cmd_launch_definition_table_t* definitions;
+  // Definition ordinal for each command in the corresponding root schedule.
+  const uint32_t* definition_ordinals;
+} loom_cmd_launch_resolution_t;
+
 // Factored launch graph for one source command program.
 //
 // The owned module contains one pure host func.def whose arguments correspond
@@ -87,6 +108,7 @@ typedef struct loom_cmd_launch_graph_t {
 iree_status_t loom_cmd_launch_graph_materialize(
     const loom_module_t* source_module, loom_op_t* source_program_op,
     const loom_cmd_schedule_plan_t* schedule,
+    const loom_cmd_launch_resolution_t* launch_resolution,
     const loom_value_fact_table_t* source_facts,
     iree_arena_block_pool_t* block_pool, iree_allocator_t allocator,
     loom_cmd_launch_graph_t* out_graph);

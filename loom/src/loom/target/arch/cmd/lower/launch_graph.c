@@ -41,6 +41,8 @@ typedef struct loom_cmd_launch_graph_build_t {
   loom_func_like_t source_program;
   // Existing command schedule defining launch order.
   const loom_cmd_schedule_plan_t* schedule;
+  // Kernel definitions resolved for scheduled launches.
+  const loom_cmd_launch_resolution_t* launch_resolution;
   // Borrowed source facts populated by the owning program plan.
   const loom_value_fact_table_t* source_facts;
   // Owned aggregate host module under construction.
@@ -77,15 +79,14 @@ static iree_string_view_t loom_cmd_launch_graph_symbol_name(
   return module->strings.entries[symbol->name_id];
 }
 
-static loom_op_t* loom_cmd_launch_graph_resolve_kernel(
-    const loom_module_t* module, const loom_op_t* launch_op) {
-  IREE_ASSERT(loom_kernel_launch_isa(launch_op));
-  const loom_symbol_ref_t callee = loom_kernel_launch_callee(launch_op);
-  IREE_ASSERT(loom_symbol_ref_is_valid(callee));
-  IREE_ASSERT_EQ(callee.module_id, 0u);
-  IREE_ASSERT_LT(callee.symbol_id, module->symbols.count);
-  loom_op_t* kernel_op = module->symbols.entries[callee.symbol_id].defining_op;
-  IREE_ASSERT(kernel_op != NULL);
+static loom_op_t* loom_cmd_launch_graph_kernel(
+    const loom_cmd_launch_graph_build_t* build, iree_host_size_t launch_index) {
+  const uint32_t definition_ordinal =
+      build->launch_resolution->definition_ordinals[launch_index];
+  IREE_ASSERT_LT(definition_ordinal,
+                 build->launch_resolution->definitions->count);
+  loom_op_t* kernel_op =
+      build->launch_resolution->definitions->entries[definition_ordinal];
   IREE_ASSERT(loom_kernel_def_isa(kernel_op));
   return kernel_op;
 }
@@ -368,8 +369,7 @@ static iree_status_t loom_cmd_launch_graph_build_host_function(
 static iree_status_t loom_cmd_launch_graph_clone_config(
     loom_cmd_launch_graph_build_t* build, iree_host_size_t launch_index) {
   const loom_op_t* launch_op = build->schedule->commands[launch_index];
-  loom_op_t* kernel_op =
-      loom_cmd_launch_graph_resolve_kernel(build->source_module, launch_op);
+  loom_op_t* kernel_op = loom_cmd_launch_graph_kernel(build, launch_index);
   loom_region_t* config_region = loom_kernel_def_config(kernel_op);
   loom_block_t* config_block = loom_region_entry_block(config_region);
   const loom_op_t* launch_config = loom_kernel_def_launch_config_op(kernel_op);
@@ -658,6 +658,7 @@ static iree_status_t loom_cmd_launch_graph_compact_results(
 iree_status_t loom_cmd_launch_graph_materialize(
     const loom_module_t* source_module, loom_op_t* source_program_op,
     const loom_cmd_schedule_plan_t* schedule,
+    const loom_cmd_launch_resolution_t* launch_resolution,
     const loom_value_fact_table_t* source_facts,
     iree_arena_block_pool_t* block_pool, iree_allocator_t allocator,
     loom_cmd_launch_graph_t* out_graph) {
@@ -684,6 +685,7 @@ iree_status_t loom_cmd_launch_graph_materialize(
       .source_module = source_module,
       .source_program = loom_func_like_cast(source_module, source_program_op),
       .schedule = schedule,
+      .launch_resolution = launch_resolution,
       .source_facts = source_facts,
       .module = graph_module,
   };

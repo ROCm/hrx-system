@@ -51,7 +51,7 @@ static bool loom_cmd_kernel_unit_value_groups_equivalent(
   return true;
 }
 
-bool loom_cmd_kernel_unit_launches_equivalent(
+bool loom_cmd_kernel_unit_boundaries_equivalent(
     const loom_module_t* source_module, const loom_op_t* lhs_launch_op,
     const loom_op_t* rhs_launch_op,
     const loom_value_fact_table_t* source_facts) {
@@ -62,12 +62,6 @@ bool loom_cmd_kernel_unit_launches_equivalent(
   IREE_ASSERT(loom_kernel_launch_isa(lhs_launch_op));
   IREE_ASSERT(loom_kernel_launch_isa(rhs_launch_op));
 
-  const loom_symbol_ref_t lhs_callee = loom_kernel_launch_callee(lhs_launch_op);
-  const loom_symbol_ref_t rhs_callee = loom_kernel_launch_callee(rhs_launch_op);
-  if (lhs_callee.module_id != rhs_callee.module_id ||
-      lhs_callee.symbol_id != rhs_callee.symbol_id) {
-    return false;
-  }
   return loom_cmd_kernel_unit_value_groups_equivalent(
              source_module, loom_kernel_launch_workloads(lhs_launch_op),
              loom_kernel_launch_workloads(rhs_launch_op), source_facts) &&
@@ -510,7 +504,8 @@ static iree_status_t loom_cmd_kernel_unit_materialize_view_arguments(
 }
 
 iree_status_t loom_cmd_kernel_unit_materialize(
-    const loom_module_t* source_module, const loom_op_t* source_launch_op,
+    const loom_module_t* source_module, loom_op_t* source_kernel_op,
+    const loom_op_t* source_launch_op,
     const loom_value_fact_table_t* source_facts,
     iree_arena_block_pool_t* block_pool, iree_allocator_t allocator,
     loom_cmd_kernel_unit_t* out_unit) {
@@ -521,9 +516,10 @@ iree_status_t loom_cmd_kernel_unit_materialize(
   IREE_ASSERT_ARGUMENT(out_unit);
   memset(out_unit, 0, sizeof(*out_unit));
   IREE_ASSERT(loom_kernel_launch_isa(source_launch_op));
+  IREE_ASSERT(loom_kernel_def_isa(source_kernel_op));
 
-  const loom_symbol_ref_t source_kernel_ref =
-      loom_kernel_launch_callee(source_launch_op);
+  const loom_symbol_ref_t source_kernel_ref = loom_func_like_callee(
+      loom_func_like_cast(source_module, source_kernel_op));
   const iree_string_view_t source_kernel_name =
       loom_cmd_kernel_unit_symbol_name(source_module, source_kernel_ref);
   const iree_string_view_t root_names[] = {source_kernel_name};
