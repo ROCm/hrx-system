@@ -85,7 +85,8 @@ typedef struct IREE_AMDGPU_ALIGNAS(8) iree_hal_amdgpu_feedback_config_t {
   uint32_t reserved0;
   // Device-visible pointer to |iree_hal_amdgpu_feedback_channel_header_t|.
   uint64_t channel_base;
-  // Host interrupt signal used by device producers after publishing packets.
+  // Host notification signal incremented after device producers publish.
+  // May use host polling or an interrupt mailbox, depending on the runtime.
   iree_hsa_signal_t notify_signal;
   // Opaque host source-context value copied into feedback packets.
   //
@@ -93,8 +94,10 @@ typedef struct IREE_AMDGPU_ALIGNAS(8) iree_hal_amdgpu_feedback_config_t {
   // handling resolves it back to executable-owned source metadata while the
   // submitting executable is still retained by the retiring work.
   uint64_t source_context;
+  // Device-visible base pointer of the packet storage ring.
+  uint64_t ring_base;
   // Reserved for future feedback configuration state. Must be zero.
-  uint64_t reserved[3];
+  uint64_t reserved[2];
 } iree_hal_amdgpu_feedback_config_t;
 IREE_AMDGPU_STATIC_ASSERT(sizeof(iree_hal_amdgpu_feedback_config_t) == 64,
                           "feedback config size is part of the device ABI");
@@ -114,8 +117,6 @@ typedef struct IREE_AMDGPU_ALIGNAS(64)
   iree_hal_amdgpu_feedback_config_flags_t flags;
   // Reserved padding for 8-byte alignment. Must be zero.
   uint32_t reserved0;
-  // Device-visible base pointer of the packet storage ring.
-  uint64_t ring_base;
   // Packet storage ring capacity in bytes. Must be a power of two.
   uint64_t ring_capacity;
   // Monotonic byte position of the first unconsumed packet.
@@ -125,7 +126,7 @@ typedef struct IREE_AMDGPU_ALIGNAS(64)
   // Number of packets dropped by device producers due to reservation failure.
   volatile uint64_t dropped_packet_count;
   // Reserved for future channel state. Must be zero.
-  uint64_t reserved[1];
+  uint64_t reserved[2];
 } iree_hal_amdgpu_feedback_channel_header_t;
 IREE_AMDGPU_STATIC_ASSERT(
     sizeof(iree_hal_amdgpu_feedback_channel_header_t) == 64,

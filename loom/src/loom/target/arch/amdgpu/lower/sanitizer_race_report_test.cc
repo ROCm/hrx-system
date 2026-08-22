@@ -388,7 +388,7 @@ class AmdgpuSanitizerRaceReportTest : public ::testing::Test {
         &builder_, descriptor_set_, out_config_values->channel_base,
         LOOM_LOCATION_UNKNOWN, out_channel_values));
     return loom_amdgpu_build_feedback_uniform_packet_address(
-        &builder_, descriptor_set_, out_channel_values->ring_base,
+        &builder_, descriptor_set_, out_config_values->ring_base,
         LOOM_LOCATION_UNKNOWN, out_packet_address);
   }
 
@@ -592,15 +592,17 @@ TEST_F(AmdgpuSanitizerRaceReportTest, EmitsFatalRaceReportProducerCfg) {
   VerifyLowModuleOk();
 
   loom_region_t* body = body_block_->parent_region;
-  ASSERT_EQ(body->block_count, 8u);
+  ASSERT_EQ(body->block_count, 10u);
   loom_block_t* config_block = body_block_;
   loom_block_t* feedback_block = loom_region_block(body, 1);
   loom_block_t* attempt_block = loom_region_block(body, 2);
   loom_block_t* reserved_block = loom_region_block(body, 3);
   loom_block_t* continuation_block = loom_region_block(body, 4);
   loom_block_t* report_block = loom_region_block(body, 5);
-  loom_block_t* dropped_block = loom_region_block(body, 6);
-  loom_block_t* terminal_block = loom_region_block(body, 7);
+  loom_block_t* mailbox_block = loom_region_block(body, 6);
+  loom_block_t* notification_continuation_block = loom_region_block(body, 7);
+  loom_block_t* dropped_block = loom_region_block(body, 8);
+  loom_block_t* terminal_block = loom_region_block(body, 9);
 
   const loom_op_t* config_terminator = loom_block_const_last_op(config_block);
   ASSERT_TRUE(loom_low_cond_br_isa(config_terminator));
@@ -619,8 +621,23 @@ TEST_F(AmdgpuSanitizerRaceReportTest, EmitsFatalRaceReportProducerCfg) {
                      LOOM_AMDGPU_REG_CLASS_ID_SCC, 1);
 
   const loom_op_t* report_terminator = loom_block_const_last_op(report_block);
-  ASSERT_TRUE(loom_low_br_isa(report_terminator));
-  EXPECT_EQ(loom_low_br_dest(report_terminator), terminal_block);
+  ASSERT_TRUE(loom_low_cond_br_isa(report_terminator));
+  EXPECT_EQ(loom_low_cond_br_true_dest(report_terminator), mailbox_block);
+  EXPECT_EQ(loom_low_cond_br_false_dest(report_terminator),
+            notification_continuation_block);
+  ExpectRegisterType(loom_low_cond_br_condition(report_terminator),
+                     LOOM_AMDGPU_REG_CLASS_ID_SCC, 1);
+
+  const loom_op_t* mailbox_terminator = loom_block_const_last_op(mailbox_block);
+  ASSERT_TRUE(loom_low_br_isa(mailbox_terminator));
+  EXPECT_EQ(loom_low_br_dest(mailbox_terminator),
+            notification_continuation_block);
+
+  const loom_op_t* notification_continuation_terminator =
+      loom_block_const_last_op(notification_continuation_block);
+  ASSERT_TRUE(loom_low_br_isa(notification_continuation_terminator));
+  EXPECT_EQ(loom_low_br_dest(notification_continuation_terminator),
+            terminal_block);
 
   const loom_op_t* terminal_terminator =
       loom_block_const_last_op(terminal_block);
@@ -639,7 +656,10 @@ TEST_F(AmdgpuSanitizerRaceReportTest, EmitsFatalRaceReportProducerCfg) {
   ASSERT_EQ(report_b32_stores.size(), 27u);
   std::vector<loom_op_t*> report_b64_stores = OpsForDescriptorRefInBlock(
       report_block, LOOM_AMDGPU_DESCRIPTOR_REF_GLOBAL_STORE_B64_SADDR);
-  ASSERT_EQ(report_b64_stores.size(), 11u);
+  ASSERT_EQ(report_b64_stores.size(), 10u);
+  std::vector<loom_op_t*> mailbox_b64_stores = OpsForDescriptorRefInBlock(
+      mailbox_block, LOOM_AMDGPU_DESCRIPTOR_REF_GLOBAL_STORE_B64_SADDR);
+  ASSERT_EQ(mailbox_b64_stores.size(), 1u);
 }
 
 TEST_F(AmdgpuSanitizerRaceReportTest, BranchesColdSitesToSharedReportIsland) {

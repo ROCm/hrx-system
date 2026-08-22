@@ -2,12 +2,11 @@
   "version": 1,
   "cases": [
     {
-      "name": "reports loom-authored amdgpu tsan race",
+      "name": "isolates sequential loom-authored amdgpu tsan dispatches",
       "run": {
         "tool": "iree-test-loom",
         "args": [
           "{srcdir}/../../../../test/corpus/sanitizer/amdgpu_tsan_actual.loom",
-          "--case=@tsan_workgroup_write_race_case",
           "--device=amdgpu",
           "--sanitizer=tsan",
           "--sanitizer-reporting=report-only",
@@ -22,29 +21,6 @@
             {
               "regex": "\"case\":\"tsan_workgroup_write_race_case\"[^}]*\"passed\":true"
             },
-            "\"failed_sample_count\":0"
-          ]
-        }
-      }
-    },
-    {
-      "name": "keeps barrier-safe loom-authored amdgpu tsan access silent",
-      "run": {
-        "tool": "iree-test-loom",
-        "args": [
-          "{srcdir}/../../../../test/corpus/sanitizer/amdgpu_tsan_actual.loom",
-          "--case=@tsan_workgroup_barrier_safe_write_case",
-          "--device=amdgpu",
-          "--sanitizer=tsan",
-          "--sanitizer-reporting=report-only",
-          "--amdgpu_tsan=true",
-          "--amdgpu_tsan_report_policy=report-only"
-        ]
-      },
-      "stdout": {
-        "contains": {
-          "unordered": [
-            "\"format\":\"loom.test.v0\"",
             {
               "regex": "\"case\":\"tsan_workgroup_barrier_safe_write_case\"[^}]*\"passed\":true"
             },

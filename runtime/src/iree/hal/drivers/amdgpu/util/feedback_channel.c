@@ -111,8 +111,6 @@ iree_status_t iree_hal_amdgpu_feedback_channel_initialize(
     out_channel->control->abi_version =
         IREE_HAL_AMDGPU_FEEDBACK_CHANNEL_ABI_VERSION_0;
     out_channel->control->flags = IREE_HAL_AMDGPU_FEEDBACK_CONFIG_FLAG_ENABLED;
-    out_channel->control->ring_base =
-        (uint64_t)(uintptr_t)out_channel->ringbuffer.ring_base_ptr;
     out_channel->control->ring_capacity = out_channel->ringbuffer.capacity;
 
     out_channel->config = (iree_hal_amdgpu_feedback_config_t){
@@ -123,6 +121,8 @@ iree_status_t iree_hal_amdgpu_feedback_channel_initialize(
         .channel_base = (uint64_t)(uintptr_t)out_channel->control,
         .notify_signal = out_channel->notify_signal,
         .source_context = 0,
+        .ring_base =
+            (uint64_t)(uintptr_t)out_channel->ringbuffer.device_base_ptr,
         .reserved = {0},
     };
   } else {
@@ -171,11 +171,12 @@ iree_status_t iree_hal_amdgpu_feedback_channel_drain(
 
   const uint64_t ring_capacity = control->ring_capacity;
   const uint64_t ring_mask = ring_capacity - 1u;
-  if (IREE_UNLIKELY(ring_capacity == 0 ||
+  if (IREE_UNLIKELY(!channel->ringbuffer.ring_base_ptr || ring_capacity == 0 ||
+                    ring_capacity != channel->ringbuffer.capacity ||
                     !iree_device_size_is_power_of_two(ring_capacity))) {
     return iree_make_status(
         IREE_STATUS_FAILED_PRECONDITION,
-        "AMDGPU feedback ring capacity must be a non-zero power of two");
+        "AMDGPU feedback ring host mapping and capacity are inconsistent");
   }
 
   iree_amdgpu_scoped_atomic_uint64_t* reservation_head =
@@ -193,9 +194,9 @@ iree_status_t iree_hal_amdgpu_feedback_channel_drain(
   while (iree_status_is_ok(status) && *out_packet_count < max_packet_count &&
          read_position < reserved_position) {
     iree_hal_amdgpu_feedback_packet_t* packet =
-        (iree_hal_amdgpu_feedback_packet_t*)(uintptr_t)(control->ring_base +
-                                                        (read_position &
-                                                         ring_mask));
+        (iree_hal_amdgpu_feedback_packet_t*)((uint8_t*)channel->ringbuffer
+                                                 .ring_base_ptr +
+                                             (read_position & ring_mask));
     const iree_hal_amdgpu_feedback_packet_state_t state =
         iree_amdgpu_scoped_atomic_load(
             (iree_amdgpu_scoped_atomic_uint32_t*)&packet->state,

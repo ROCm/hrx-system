@@ -117,6 +117,10 @@ class FeedbackChannelTest : public ::testing::Test {
     params.minimum_capacity = 4 * 1024;
     IREE_ASSERT_OK(
         iree_hal_amdgpu_feedback_channel_initialize(&params, &channel_));
+    host_config_ = channel_.config;
+    host_config_.channel_base = reinterpret_cast<uint64_t>(channel_.control);
+    host_config_.ring_base =
+        reinterpret_cast<uint64_t>(channel_.ringbuffer.ring_base_ptr);
   }
 
   void TearDown() override {
@@ -132,6 +136,8 @@ class FeedbackChannelTest : public ::testing::Test {
   hsa_amd_memory_pool_t ring_memory_pool_ = {};
   // Feedback channel under test.
   iree_hal_amdgpu_feedback_channel_t channel_ = {};
+  // Host-addressable ABI view used to execute device helpers on the CPU.
+  iree_hal_amdgpu_feedback_config_t host_config_ = {};
 };
 
 iree_allocator_t FeedbackChannelTest::host_allocator;
@@ -143,7 +149,7 @@ TEST_F(FeedbackChannelTest, HostProducerDrain) {
   for (uint32_t i = 0; i < kPacketCount; ++i) {
     iree_hal_amdgpu_feedback_packet_t* packet = nullptr;
     ASSERT_TRUE(iree_hal_amdgpu_feedback_try_reserve(
-        &channel_.config, IREE_HAL_AMDGPU_FEEDBACK_PACKET_KIND_USER,
+        &host_config_, IREE_HAL_AMDGPU_FEEDBACK_PACKET_KIND_USER,
         IREE_HAL_AMDGPU_FEEDBACK_PACKET_FLAG_ASYNC, sizeof(TestPayload),
         &packet));
     TestPayload* payload = reinterpret_cast<TestPayload*>(
@@ -151,7 +157,7 @@ TEST_F(FeedbackChannelTest, HostProducerDrain) {
     payload->value = 0xABCDEF0000000000ull + i;
     payload->ordinal = i;
     payload->reserved = 0;
-    iree_hal_amdgpu_feedback_publish(&channel_.config, packet);
+    iree_hal_amdgpu_feedback_publish(&host_config_, packet);
   }
 
   DrainState state;
@@ -178,7 +184,7 @@ TEST_F(FeedbackChannelTest, WrapsPacketStorage) {
 
   iree_hal_amdgpu_feedback_packet_t* packet = nullptr;
   ASSERT_TRUE(iree_hal_amdgpu_feedback_try_reserve(
-      &channel_.config, IREE_HAL_AMDGPU_FEEDBACK_PACKET_KIND_USER,
+      &host_config_, IREE_HAL_AMDGPU_FEEDBACK_PACKET_KIND_USER,
       IREE_HAL_AMDGPU_FEEDBACK_PACKET_FLAG_ASYNC, sizeof(TestPayload),
       &packet));
   EXPECT_EQ(packet->sequence, start_position);
@@ -188,7 +194,7 @@ TEST_F(FeedbackChannelTest, WrapsPacketStorage) {
   payload->value = 0xFEEDFACECAFEBEEFull;
   payload->ordinal = 42;
   payload->reserved = 0;
-  iree_hal_amdgpu_feedback_publish(&channel_.config, packet);
+  iree_hal_amdgpu_feedback_publish(&host_config_, packet);
 
   DrainState state;
   iree_host_size_t packet_count = 0;
@@ -204,7 +210,7 @@ TEST_F(FeedbackChannelTest, WrapsPacketStorage) {
 
 TEST_F(FeedbackChannelTest, HostTsanProducerDrain) {
   ASSERT_TRUE(iree_hal_amdgpu_tsan_report_data_race(
-      &channel_.config, IREE_HAL_AMDGPU_TSAN_REPORT_FLAG_NONE,
+      &host_config_, IREE_HAL_AMDGPU_TSAN_REPORT_FLAG_NONE,
       IREE_HAL_AMDGPU_TSAN_MEMORY_SPACE_WORKGROUP,
       IREE_HAL_AMDGPU_TSAN_ACCESS_KIND_WRITE,
       IREE_HAL_AMDGPU_TSAN_ACCESS_KIND_READ,
@@ -263,7 +269,7 @@ TEST_F(FeedbackChannelTest, DropWhenFull) {
 
   iree_hal_amdgpu_feedback_packet_t* packet = nullptr;
   EXPECT_FALSE(iree_hal_amdgpu_feedback_try_reserve(
-      &channel_.config, IREE_HAL_AMDGPU_FEEDBACK_PACKET_KIND_USER,
+      &host_config_, IREE_HAL_AMDGPU_FEEDBACK_PACKET_KIND_USER,
       IREE_HAL_AMDGPU_FEEDBACK_PACKET_FLAG_ASYNC, sizeof(TestPayload),
       &packet));
   EXPECT_EQ(packet, nullptr);

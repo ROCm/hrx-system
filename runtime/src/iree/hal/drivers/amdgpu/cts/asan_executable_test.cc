@@ -181,6 +181,7 @@ TEST_P(AsanExecutableTest, PublishesFeedbackConfigGlobal) {
   EXPECT_EQ(config.abi_version, IREE_HAL_AMDGPU_FEEDBACK_CONFIG_ABI_VERSION_0);
   EXPECT_NE(config.flags & IREE_HAL_AMDGPU_FEEDBACK_CONFIG_FLAG_ENABLED, 0u);
   EXPECT_NE(config.channel_base, 0u);
+  EXPECT_NE(config.ring_base, 0u);
   EXPECT_NE(config.notify_signal.handle, 0u);
   EXPECT_NE(config.source_context, 0u);
 

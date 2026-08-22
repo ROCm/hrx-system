@@ -40,7 +40,8 @@ typedef struct iree_hal_amdgpu_feedback_channel_t {
   const iree_hal_amdgpu_libhsa_t* libhsa;
   // Device-visible configuration assigned to executable globals.
   iree_hal_amdgpu_feedback_config_t config;
-  // Host interrupt signal used by device producers after publishing packets.
+  // Host notification signal incremented after device producers publish.
+  // May use host polling or an interrupt mailbox, depending on the runtime.
   hsa_signal_t notify_signal;
   // Device-visible control block allocated from host fine-grained memory.
   iree_hal_amdgpu_feedback_channel_header_t* control;

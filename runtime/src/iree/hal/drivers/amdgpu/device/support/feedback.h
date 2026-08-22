@@ -13,11 +13,16 @@
 #include "iree/hal/drivers/amdgpu/device/support/kernel.h"
 #include "iree/hal/drivers/amdgpu/device/support/signal.h"
 
-// Returns the payload storage following |packet|.
+// Returns the payload storage following the current producer packet header.
+//
+// Producers use the compile-time header size instead of reloading
+// |packet->header_length| from device-visible memory they just initialized.
+// Host consumers use |iree_hal_amdgpu_feedback_packet_const_payload| to honor
+// the recorded header length when parsing packets from other ABI versions.
 static inline IREE_AMDGPU_ATTRIBUTE_ALWAYS_INLINE void*
 iree_hal_amdgpu_feedback_packet_payload(
     iree_hal_amdgpu_feedback_packet_t* packet) {
-  return (uint8_t*)packet + packet->header_length;
+  return (uint8_t*)packet + sizeof(*packet);
 }
 
 // Returns the immutable payload storage following |packet|.
@@ -50,7 +55,8 @@ iree_hal_amdgpu_feedback_try_reserve(
   iree_hal_amdgpu_feedback_channel_header_t* channel =
       (iree_hal_amdgpu_feedback_channel_header_t*)(uintptr_t)
           config->channel_base;
-  if (!channel || channel->record_length < sizeof(*channel) ||
+  if (!channel || !config->ring_base ||
+      channel->record_length < sizeof(*channel) ||
       channel->abi_version != IREE_HAL_AMDGPU_FEEDBACK_CHANNEL_ABI_VERSION_0) {
     return false;
   }
@@ -102,7 +108,7 @@ iree_hal_amdgpu_feedback_try_reserve(
 
     const uint64_t ring_offset = head & (ring_capacity - 1u);
     iree_hal_amdgpu_feedback_packet_t* packet =
-        (iree_hal_amdgpu_feedback_packet_t*)(uintptr_t)(channel->ring_base +
+        (iree_hal_amdgpu_feedback_packet_t*)(uintptr_t)(config->ring_base +
                                                         ring_offset);
     iree_amdgpu_scoped_atomic_store(
         (iree_amdgpu_scoped_atomic_uint32_t*)&packet->state,

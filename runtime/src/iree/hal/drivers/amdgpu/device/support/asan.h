@@ -35,9 +35,9 @@ iree_hal_amdgpu_asan_report_access(
   feedback_config_snapshot.notify_signal.handle =
       feedback_config->notify_signal.handle;
   feedback_config_snapshot.source_context = feedback_config->source_context;
+  feedback_config_snapshot.ring_base = feedback_config->ring_base;
   feedback_config_snapshot.reserved[0] = feedback_config->reserved[0];
   feedback_config_snapshot.reserved[1] = feedback_config->reserved[1];
-  feedback_config_snapshot.reserved[2] = feedback_config->reserved[2];
 
   iree_hal_amdgpu_feedback_packet_t* packet = NULL;
   if (!iree_hal_amdgpu_feedback_try_reserve(

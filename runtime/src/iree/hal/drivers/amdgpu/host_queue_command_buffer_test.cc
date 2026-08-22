@@ -311,7 +311,13 @@ TEST_F(HostQueueCommandBufferTest,
   iree_hal_amdgpu_logical_device_options_t options;
   iree_hal_amdgpu_logical_device_options_initialize(&options);
   options.preallocate_pools = 0;
+  options.tsan.enabled = 1;
   options.tsan.shadow_slot_count = 1;
+  if (iree_hal_amdgpu_logical_device_options_query_host_compatibility(
+          &options) !=
+      IREE_HAL_AMDGPU_LOGICAL_DEVICE_HOST_COMPATIBILITY_COMPATIBLE) {
+    GTEST_SKIP() << "AMDGPU TSAN is not compatible with this host";
+  }
 
   TestLogicalDevice test_device;
   IREE_ASSERT_OK(test_device.InitializeWithRuntimeFeatures(

@@ -343,7 +343,7 @@ class AmdgpuSanitizerReportTest : public ::testing::Test {
         &builder_, descriptor_set_, out_config_values->channel_base,
         LOOM_LOCATION_UNKNOWN, out_channel_values));
     return loom_amdgpu_build_feedback_uniform_packet_address(
-        &builder_, descriptor_set_, out_channel_values->ring_base,
+        &builder_, descriptor_set_, out_config_values->ring_base,
         LOOM_LOCATION_UNKNOWN, out_packet_address);
   }
 
@@ -381,7 +381,7 @@ TEST_F(AmdgpuSanitizerReportTest, EmitsAccessReportPayloadStores) {
   const loom_amdgpu_sanitizer_access_report_t report = {
       /*.access_kind=*/LOOM_AMDGPU_SANITIZER_ACCESS_KIND_WRITE,
       /*.flags=*/LOOM_AMDGPU_SANITIZER_REPORT_FLAG_NONE,
-      /*.fault_address=*/channel_values.ring_base,
+      /*.fault_address=*/config_values.ring_base,
       /*.access_size=*/channel_values.ring_capacity,
       /*.site_id=*/config_values.notify_signal,
       /*.shadow_address=*/config_values.channel_base,
@@ -489,15 +489,17 @@ TEST_F(AmdgpuSanitizerReportTest, EmitsFatalAccessReportProducerCfg) {
   VerifyLowModuleOk();
 
   loom_region_t* body = body_block_->parent_region;
-  ASSERT_EQ(body->block_count, 8u);
+  ASSERT_EQ(body->block_count, 10u);
   loom_block_t* config_block = body_block_;
   loom_block_t* feedback_block = loom_region_block(body, 1);
   loom_block_t* attempt_block = loom_region_block(body, 2);
   loom_block_t* reserved_block = loom_region_block(body, 3);
   loom_block_t* continuation_block = loom_region_block(body, 4);
   loom_block_t* report_block = loom_region_block(body, 5);
-  loom_block_t* dropped_block = loom_region_block(body, 6);
-  loom_block_t* terminal_block = loom_region_block(body, 7);
+  loom_block_t* mailbox_block = loom_region_block(body, 6);
+  loom_block_t* notification_continuation_block = loom_region_block(body, 7);
+  loom_block_t* dropped_block = loom_region_block(body, 8);
+  loom_block_t* terminal_block = loom_region_block(body, 9);
 
   const loom_op_t* config_terminator = loom_block_const_last_op(config_block);
   ASSERT_TRUE(loom_low_cond_br_isa(config_terminator));
@@ -516,8 +518,23 @@ TEST_F(AmdgpuSanitizerReportTest, EmitsFatalAccessReportProducerCfg) {
                      LOOM_AMDGPU_REG_CLASS_ID_SCC, 1);
 
   const loom_op_t* report_terminator = loom_block_const_last_op(report_block);
-  ASSERT_TRUE(loom_low_br_isa(report_terminator));
-  EXPECT_EQ(loom_low_br_dest(report_terminator), terminal_block);
+  ASSERT_TRUE(loom_low_cond_br_isa(report_terminator));
+  EXPECT_EQ(loom_low_cond_br_true_dest(report_terminator), mailbox_block);
+  EXPECT_EQ(loom_low_cond_br_false_dest(report_terminator),
+            notification_continuation_block);
+  ExpectRegisterType(loom_low_cond_br_condition(report_terminator),
+                     LOOM_AMDGPU_REG_CLASS_ID_SCC, 1);
+
+  const loom_op_t* mailbox_terminator = loom_block_const_last_op(mailbox_block);
+  ASSERT_TRUE(loom_low_br_isa(mailbox_terminator));
+  EXPECT_EQ(loom_low_br_dest(mailbox_terminator),
+            notification_continuation_block);
+
+  const loom_op_t* notification_continuation_terminator =
+      loom_block_const_last_op(notification_continuation_block);
+  ASSERT_TRUE(loom_low_br_isa(notification_continuation_terminator));
+  EXPECT_EQ(loom_low_br_dest(notification_continuation_terminator),
+            terminal_block);
 
   const loom_op_t* terminal_terminator =
       loom_block_const_last_op(terminal_block);
@@ -538,8 +555,9 @@ TEST_F(AmdgpuSanitizerReportTest, EmitsFatalAccessReportProducerCfg) {
   ASSERT_EQ(loom_low_op_results(saveexec_ops[0]).count, 2u);
   const loom_value_id_t saved_report_exec =
       loom_low_op_results(saveexec_ops[0]).values[0];
-  std::vector<loom_op_t*> restore_exec_ops = OpsForDescriptorRefInBlock(
-      report_block, LOOM_AMDGPU_DESCRIPTOR_REF_S_MOV_B64_EXEC);
+  std::vector<loom_op_t*> restore_exec_ops =
+      OpsForDescriptorRefInBlock(notification_continuation_block,
+                                 LOOM_AMDGPU_DESCRIPTOR_REF_S_MOV_B64_EXEC);
   ASSERT_EQ(restore_exec_ops.size(), 1u);
   ASSERT_EQ(loom_low_op_operands(restore_exec_ops[0]).count, 1u);
   EXPECT_EQ(loom_low_op_operands(restore_exec_ops[0]).values[0],
@@ -550,7 +568,10 @@ TEST_F(AmdgpuSanitizerReportTest, EmitsFatalAccessReportProducerCfg) {
   ASSERT_EQ(report_b32_stores.size(), 11u);
   std::vector<loom_op_t*> report_b64_stores = OpsForDescriptorRefInBlock(
       report_block, LOOM_AMDGPU_DESCRIPTOR_REF_GLOBAL_STORE_B64_SADDR);
-  ASSERT_EQ(report_b64_stores.size(), 12u);
+  ASSERT_EQ(report_b64_stores.size(), 11u);
+  std::vector<loom_op_t*> mailbox_b64_stores = OpsForDescriptorRefInBlock(
+      mailbox_block, LOOM_AMDGPU_DESCRIPTOR_REF_GLOBAL_STORE_B64_SADDR);
+  ASSERT_EQ(mailbox_b64_stores.size(), 1u);
   std::vector<loom_op_t*> ready_state_stores;
   for (loom_op_t* store_op : report_b32_stores) {
     loom_named_attr_slice_t attrs = loom_low_op_attrs(store_op);

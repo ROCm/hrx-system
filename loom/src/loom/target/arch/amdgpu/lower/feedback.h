@@ -41,6 +41,8 @@ typedef struct loom_amdgpu_feedback_config_values_t {
   loom_value_id_t notify_signal;
   // Runtime-published opaque host source context loaded from the config.
   loom_value_id_t source_context;
+  // Device-visible feedback packet ring pointer loaded from the config.
+  loom_value_id_t ring_base;
 } loom_amdgpu_feedback_config_values_t;
 
 typedef struct loom_amdgpu_feedback_channel_header_values_t {
@@ -53,8 +55,6 @@ typedef struct loom_amdgpu_feedback_channel_header_values_t {
   loom_value_id_t abi_version;
   // Channel flags loaded from loom_amdgpu_feedback_channel_layout_e.
   loom_value_id_t flags;
-  // Device-visible feedback packet ring pointer loaded from the channel.
-  loom_value_id_t ring_base;
   // Feedback packet ring capacity in bytes loaded from the channel.
   loom_value_id_t ring_capacity;
 } loom_amdgpu_feedback_channel_header_values_t;
@@ -263,9 +263,10 @@ iree_status_t loom_amdgpu_build_feedback_reservation_attempt(
 // Emits target-low CFG that reserves packet storage in the feedback ring.
 //
 // |channel_base| must be an SGPRx2 pointer to the device-visible feedback
-// channel header. |ring_base| and |ring_capacity| must be SGPRx2 fields loaded
-// from that channel. |packet_length| is the statically known total packet byte
-// length including header and padded payload.
+// channel header. |ring_base| must be the runtime-published SGPRx2 config
+// field, and |ring_capacity| must be the SGPRx2 field loaded from the channel
+// header. |packet_length| is the statically known total packet byte length
+// including header and padded payload.
 //
 // This helper emits from the current low block and leaves |builder| positioned
 // at a newly inserted continuation block. The returned values are block
@@ -389,10 +390,12 @@ iree_status_t loom_amdgpu_build_feedback_publish_packet_state(
 
 // Emits target-low IR that wakes the runtime feedback service.
 //
-// |notify_signal| must be the SGPRx2 host-interrupt signal loaded from an
-// enabled feedback config. This helper does not emit null checks for the signal
-// or its mailbox pointer; callers must only use it after branching onto a path
-// where the runtime feedback ABI guarantees an interrupt-capable signal.
+// |notify_signal| must be the SGPRx2 host-notification signal loaded from an
+// enabled feedback config. The signal value is always incremented. Signals
+// without an interrupt mailbox rely on host polling; signals with a mailbox
+// additionally publish the event ID and send an interrupt message. The builder
+// must be positioned at the end of a target-low block and is left in the
+// notification continuation block.
 iree_status_t loom_amdgpu_build_feedback_notify_host(
     loom_builder_t* builder, const loom_low_descriptor_set_t* descriptor_set,
     loom_value_id_t notify_signal, loom_location_id_t location);
@@ -402,7 +405,8 @@ iree_status_t loom_amdgpu_build_feedback_notify_host(
 //
 // |packet_address| must reference packet storage returned by reservation and
 // |notify_signal| must satisfy
-// loom_amdgpu_build_feedback_notify_host's preconditions.
+// loom_amdgpu_build_feedback_notify_host's preconditions. The builder is left
+// in the notification continuation block.
 iree_status_t loom_amdgpu_build_feedback_publish_packet(
     loom_builder_t* builder, const loom_low_descriptor_set_t* descriptor_set,
     const loom_amdgpu_feedback_packet_address_t* packet_address,

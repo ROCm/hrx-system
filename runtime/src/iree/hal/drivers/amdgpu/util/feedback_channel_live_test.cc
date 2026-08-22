@@ -291,7 +291,7 @@ std::string FeedbackChannelLiveTest::agent_exact_target;
 std::string FeedbackChannelLiveTest::agent_code_object_target;
 iree_const_byte_span_t FeedbackChannelLiveTest::test_code_object_data;
 
-TEST_F(FeedbackChannelLiveTest, DeviceProducerSignalsHost) {
+TEST_F(FeedbackChannelLiveTest, DeviceProducerSignalsHostAcrossRingBoundary) {
   hsa_agent_t cpu_agent = topology.cpu_agents[0];
   hsa_agent_t gpu_agent = topology.gpu_agents[0];
 
@@ -312,6 +312,10 @@ TEST_F(FeedbackChannelLiveTest, DeviceProducerSignalsHost) {
   channel_params.minimum_capacity = 4 * 1024;
   IREE_ASSERT_OK(
       iree_hal_amdgpu_feedback_channel_initialize(&channel_params, &channel));
+  const uint64_t start_position = channel.control->ring_capacity -
+                                  IREE_HAL_AMDGPU_FEEDBACK_PACKET_ALIGNMENT;
+  channel.control->read_tail = start_position;
+  channel.control->reservation_head = start_position;
 
   hsa_code_object_reader_t code_object_reader = {};
   IREE_ASSERT_OK(iree_hsa_code_object_reader_create_from_memory(
@@ -399,11 +403,17 @@ TEST_F(FeedbackChannelLiveTest, DeviceProducerSignalsHost) {
   ASSERT_EQ(packet_count, kWorkgroupSize[0]);
   ASSERT_EQ(drain_state.packets.size(), kWorkgroupSize[0]);
   ASSERT_EQ(drain_state.payloads.size(), kWorkgroupSize[0]);
+  const uint64_t packet_length =
+      iree_hal_amdgpu_feedback_packet_length(sizeof(FeedbackPayload));
+  EXPECT_EQ(drain_state.packets.front().sequence, start_position);
+  EXPECT_GT(start_position + packet_length, channel.control->ring_capacity);
 
   std::vector<bool> seen_workitems(kWorkgroupSize[0], false);
   for (iree_host_size_t i = 0; i < packet_count; ++i) {
     const iree_hal_amdgpu_feedback_packet_t& packet = drain_state.packets[i];
     const FeedbackPayload& payload = drain_state.payloads[i];
+    EXPECT_EQ(packet.record_length, packet_length);
+    EXPECT_EQ(packet.sequence, start_position + i * packet_length);
     EXPECT_EQ(packet.kind, IREE_HAL_AMDGPU_FEEDBACK_PACKET_KIND_USER);
     EXPECT_EQ(packet.flags, IREE_HAL_AMDGPU_FEEDBACK_PACKET_FLAG_ASYNC);
     EXPECT_EQ(packet.header_length, sizeof(iree_hal_amdgpu_feedback_packet_t));

@@ -198,6 +198,7 @@ TEST_P(TsanExecutableTest, EnablesFeedbackConfigGlobal) {
   EXPECT_EQ(config.abi_version, IREE_HAL_AMDGPU_FEEDBACK_CONFIG_ABI_VERSION_0);
   EXPECT_NE(config.flags & IREE_HAL_AMDGPU_FEEDBACK_CONFIG_FLAG_ENABLED, 0u);
   EXPECT_NE(config.channel_base, 0u);
+  EXPECT_NE(config.ring_base, 0u);
   EXPECT_NE(config.notify_signal.handle, 0u);
   EXPECT_NE(config.source_context, 0u);
 }
@@ -236,15 +237,15 @@ TEST_P(TsanExecutableTest, ReportsTsanPacketThroughFeedback) {
   IREE_ASSERT_OK(iree_hal_semaphore_list_wait(
       dispatch_signal, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
 
-  recorder()->WaitForTsanReportCount(1);
-  EXPECT_EQ(recorder()->asan_report_count(), 0u);
-  EXPECT_EQ(recorder()->tsan_report_count(), 1u);
-
   std::vector<uint64_t> output_data;
   IREE_ASSERT_OK(SanitizerReadBufferData(device(), allocator(), output_buffer,
                                          &output_data));
   ASSERT_EQ(output_data.size(), 1u);
-  EXPECT_EQ(output_data[0], 1u);
+  ASSERT_EQ(output_data[0], 1u);
+
+  recorder()->WaitForTsanReportCount(1);
+  EXPECT_EQ(recorder()->asan_report_count(), 0u);
+  EXPECT_EQ(recorder()->tsan_report_count(), 1u);
 
   iree_hal_device_tsan_report_t report = recorder()->last_tsan_report();
   EXPECT_EQ(report.record_length, sizeof(report));

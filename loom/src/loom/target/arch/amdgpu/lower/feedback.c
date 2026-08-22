@@ -27,6 +27,7 @@ loom_amdgpu_feedback_config_values_empty(void) {
       .channel_base = LOOM_VALUE_ID_INVALID,
       .notify_signal = LOOM_VALUE_ID_INVALID,
       .source_context = LOOM_VALUE_ID_INVALID,
+      .ring_base = LOOM_VALUE_ID_INVALID,
   };
 }
 
@@ -37,7 +38,6 @@ loom_amdgpu_feedback_channel_header_values_empty(void) {
       .record_length = LOOM_VALUE_ID_INVALID,
       .abi_version = LOOM_VALUE_ID_INVALID,
       .flags = LOOM_VALUE_ID_INVALID,
-      .ring_base = LOOM_VALUE_ID_INVALID,
       .ring_capacity = LOOM_VALUE_ID_INVALID,
   };
 }
@@ -1047,6 +1047,10 @@ iree_status_t loom_amdgpu_build_feedback_config_values(
       LOOM_AMDGPU_FEEDBACK_CONFIG_SOURCE_CONTEXT_OFFSET,
       LOOM_AMDGPU_SYSTEM_MEMORY_LOAD_FLAG_NONE, location,
       &values.source_context));
+  IREE_RETURN_IF_ERROR(loom_amdgpu_system_memory_build_uniform_load_b64(
+      builder, descriptor_set, values.address,
+      LOOM_AMDGPU_FEEDBACK_CONFIG_RING_BASE_OFFSET,
+      LOOM_AMDGPU_SYSTEM_MEMORY_LOAD_FLAG_NONE, location, &values.ring_base));
 
   *out_values = values;
   return iree_ok_status();
@@ -1622,14 +1626,48 @@ iree_status_t loom_amdgpu_build_feedback_publish_packet_state(
 iree_status_t loom_amdgpu_build_feedback_notify_host(
     loom_builder_t* builder, const loom_low_descriptor_set_t* descriptor_set,
     loom_value_id_t notify_signal, loom_location_id_t location) {
+  IREE_ASSERT(builder->ip.before_op == NULL,
+              "AMDGPU feedback notification must be built at the end of a "
+              "low block");
   loom_amdgpu_signal_values_t signal_values = {0};
   IREE_RETURN_IF_ERROR(loom_amdgpu_build_signal_values(
       builder, descriptor_set, notify_signal, location, &signal_values));
   IREE_RETURN_IF_ERROR(loom_amdgpu_build_signal_add_one_release(
       builder, descriptor_set, signal_values.address, location));
-  return loom_amdgpu_build_signal_poke_mailbox(
+
+  loom_value_id_t zero64 = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_feedback_build_sgpr_u64_const(
+      builder, descriptor_set, 0, location, &zero64));
+  loom_value_id_t has_mailbox_scc = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_feedback_build_sgpr64_nonzero_scc(
+      builder, descriptor_set, signal_values.event_mailbox_ptr, zero64,
+      location, &has_mailbox_scc));
+
+  loom_block_t* check_block = builder->ip.block;
+  loom_block_t* mailbox_block = NULL;
+  IREE_RETURN_IF_ERROR(loom_region_insert_block(
+      builder->module, check_block->parent_region,
+      (uint16_t)(check_block->region_index + 1), &mailbox_block));
+  loom_block_t* continuation_block = NULL;
+  IREE_RETURN_IF_ERROR(loom_region_insert_block(
+      builder->module, mailbox_block->parent_region,
+      (uint16_t)(mailbox_block->region_index + 1), &continuation_block));
+  loom_op_t* check_branch_op = NULL;
+  IREE_RETURN_IF_ERROR(loom_low_cond_br_build(builder, has_mailbox_scc,
+                                              mailbox_block, continuation_block,
+                                              location, &check_branch_op));
+
+  loom_builder_set_block(builder, mailbox_block);
+  IREE_RETURN_IF_ERROR(loom_amdgpu_build_signal_poke_mailbox(
       builder, descriptor_set, signal_values.event_mailbox_ptr,
-      signal_values.event_id, location);
+      signal_values.event_id, location));
+  loom_op_t* mailbox_branch_op = NULL;
+  IREE_RETURN_IF_ERROR(loom_low_br_build(builder, continuation_block,
+                                         /*args=*/NULL, /*args_count=*/0,
+                                         location, &mailbox_branch_op));
+
+  loom_builder_set_block(builder, continuation_block);
+  return iree_ok_status();
 }
 
 iree_status_t loom_amdgpu_build_feedback_publish_packet(
@@ -1665,10 +1703,6 @@ iree_status_t loom_amdgpu_build_feedback_channel_header_values(
       builder, descriptor_set, values.address,
       LOOM_AMDGPU_FEEDBACK_CHANNEL_FLAGS_OFFSET,
       LOOM_AMDGPU_SYSTEM_MEMORY_LOAD_FLAG_NONE, location, &values.flags));
-  IREE_RETURN_IF_ERROR(loom_amdgpu_system_memory_build_uniform_load_b64(
-      builder, descriptor_set, values.address,
-      LOOM_AMDGPU_FEEDBACK_CHANNEL_RING_BASE_OFFSET,
-      LOOM_AMDGPU_SYSTEM_MEMORY_LOAD_FLAG_NONE, location, &values.ring_base));
   IREE_RETURN_IF_ERROR(loom_amdgpu_system_memory_build_uniform_load_b64(
       builder, descriptor_set, values.address,
       LOOM_AMDGPU_FEEDBACK_CHANNEL_RING_CAPACITY_OFFSET,
@@ -1763,7 +1797,7 @@ iree_status_t loom_amdgpu_build_feedback_packet_producer_terminate(
       &channel_values));
   loom_amdgpu_feedback_reservation_t reservation = {};
   IREE_RETURN_IF_ERROR(loom_amdgpu_build_feedback_reservation(
-      builder, descriptor_set, channel_values.address, channel_values.ring_base,
+      builder, descriptor_set, channel_values.address, config_values.ring_base,
       channel_values.ring_capacity, packet_length, location, &reservation));
 
   loom_block_t* continuation_block = builder->ip.block;
