@@ -2656,6 +2656,36 @@ class TestEffects:
         with _raises(ValueError, match="COMMAND_EFFECT requires"):
             Op("test.bad", traits=[COMMAND_EFFECT])
 
+    def test_constant_like_requires_pure_source_shape(self) -> None:
+        with _raises(ValueError, match="CONSTANT_LIKE requires PURE"):
+            Op(
+                "test.bad",
+                results=[Result("result", INTEGER)],
+                traits=[CONSTANT_LIKE],
+            )
+        with _raises(ValueError, match="no operands or regions.*one result"):
+            Op(
+                "test.bad",
+                operands=[Operand("input", INTEGER)],
+                results=[Result("result", INTEGER)],
+                traits=[PURE, CONSTANT_LIKE],
+            )
+        with _raises(ValueError, match="no operands or regions.*one result"):
+            Op(
+                "test.bad",
+                results=[Result("result", INTEGER)],
+                regions=[RegionDef("body")],
+                traits=[PURE, CONSTANT_LIKE],
+            )
+        with _raises(ValueError, match="no operands or regions.*one result"):
+            Op("test.bad", traits=[PURE, CONSTANT_LIKE])
+        with _raises(ValueError, match="no operands or regions.*one result"):
+            Op(
+                "test.bad",
+                results=[Result("results", INTEGER, variadic=True)],
+                traits=[PURE, CONSTANT_LIKE],
+            )
+
     def test_allocating_result(self) -> None:
         op = Op(
             "test.alloc",
