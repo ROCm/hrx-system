@@ -305,6 +305,7 @@ iree_runtime_cc_library(
 iree_runtime_cc_library(
     name = "queue_primitives",
     srcs = [
+        "aql_ring.c",
         "kernarg_ring.c",
         "notification_ring.c",
         "queue_upload_ring.c",
@@ -326,6 +327,7 @@ iree_runtime_cc_library(
         "//runtime/src/iree/base/internal:arena",
         "//runtime/src/iree/base/threading",
         "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/drivers/amdgpu/abi",
         "//runtime/src/iree/hal/utils:resource_set",
     ],
 )

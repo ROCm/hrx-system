@@ -277,6 +277,9 @@ TEST_F(AtomicLiveTest, CompleteKernelMatrix) {
   hsa_queue_t* queues[2] = {};
   iree_hal_amdgpu_aql_ring_t rings[2] = {};
   iree_hsa_signal_t completion_signals[2] = {};
+  iree_hal_amdgpu_aql_queue_execution_mode_t aql_queue_execution_mode;
+  IREE_ASSERT_OK(iree_hal_amdgpu_query_aql_queue_execution_mode(
+      &libhsa, gpu_agent, &aql_queue_execution_mode));
   iree_hsa_signal_t copy_signal = {};
   IREE_ASSERT_OK(iree_hsa_amd_signal_create(
       IREE_LIBHSA(&libhsa), /*initial_value=*/1, /*num_consumers=*/0,
@@ -297,7 +300,8 @@ TEST_F(AtomicLiveTest, CompleteKernelMatrix) {
         HsaQueueErrorCallback, &queue_errors[i], UINT32_MAX, UINT32_MAX,
         &queues[i]));
     iree_hal_amdgpu_aql_ring_initialize(
-        &libhsa, reinterpret_cast<iree_amd_queue_t*>(queues[i]), &rings[i]);
+        &libhsa, reinterpret_cast<iree_amd_queue_t*>(queues[i]),
+        aql_queue_execution_mode, &rings[i]);
   }
 
   const iree_hal_atomic_width_t widths[] = {

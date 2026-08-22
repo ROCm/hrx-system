@@ -773,6 +773,7 @@ iree_status_t iree_hal_amdgpu_host_queue_initialize(
     iree_hal_queue_affinity_t queue_affinity, iree_host_size_t queue_ordinal,
     iree_host_size_t physical_queue_ordinal,
     iree_thread_affinity_t completion_thread_affinity,
+    iree_hal_amdgpu_aql_queue_execution_mode_t aql_queue_execution_mode,
     iree_hal_amdgpu_wait_barrier_strategy_t wait_barrier_strategy,
     iree_hal_amdgpu_vendor_packet_capability_flags_t vendor_packet_capabilities,
     iree_hal_amdgpu_pm4_timestamp_strategy_t pm4_timestamp_strategy,
@@ -897,7 +898,8 @@ iree_status_t iree_hal_amdgpu_host_queue_initialize(
   if (iree_status_is_ok(status)) {
     out_queue->hardware_queue = hardware_queue;
     iree_hal_amdgpu_aql_ring_initialize(
-        libhsa, (iree_amd_queue_t*)hardware_queue, &out_queue->aql_ring);
+        libhsa, (iree_amd_queue_t*)hardware_queue, aql_queue_execution_mode,
+        &out_queue->aql_ring);
   }
 
   // Initialize the kernarg ring from the selected HSA memory pool.

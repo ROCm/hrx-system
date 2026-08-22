@@ -358,9 +358,13 @@ TEST_F(FeedbackChannelLiveTest, DeviceProducerSignalsHost) {
   IREE_ASSERT_OK(iree_hsa_queue_create(
       IREE_LIBHSA(&libhsa), gpu_agent, /*size=*/64, HSA_QUEUE_TYPE_MULTI,
       HsaQueueErrorCallback, &queue_error, UINT32_MAX, UINT32_MAX, &queue));
+  iree_hal_amdgpu_aql_queue_execution_mode_t aql_queue_execution_mode;
+  IREE_ASSERT_OK(iree_hal_amdgpu_query_aql_queue_execution_mode(
+      &libhsa, gpu_agent, &aql_queue_execution_mode));
   iree_hal_amdgpu_aql_ring_t aql_ring;
   iree_hal_amdgpu_aql_ring_initialize(
-      &libhsa, reinterpret_cast<iree_amd_queue_t*>(queue), &aql_ring);
+      &libhsa, reinterpret_cast<iree_amd_queue_t*>(queue),
+      aql_queue_execution_mode, &aql_ring);
 
   hsa_signal_t completion_signal = iree_hsa_signal_null();
   IREE_ASSERT_OK(iree_hsa_amd_signal_create(

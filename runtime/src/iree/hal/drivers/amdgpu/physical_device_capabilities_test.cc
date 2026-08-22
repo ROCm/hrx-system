@@ -938,6 +938,23 @@ TEST_F(PhysicalDeviceCapabilitiesTest, SelectsPrepublishedKernargStorage) {
                                     IREE_HAL_MEMORY_TYPE_HOST_COHERENT));
 }
 
+TEST_F(PhysicalDeviceCapabilitiesTest,
+       SelectsProfilingCompletionSignalMemoryPool) {
+  const hsa_amd_memory_pool_t device_memory_pool = MemoryPool(42);
+  const hsa_amd_memory_pool_t host_memory_pool = MemoryPool(43);
+
+  EXPECT_EQ(iree_hal_amdgpu_select_profiling_completion_signal_memory_pool(
+                device_memory_pool, host_memory_pool,
+                IREE_HAL_AMDGPU_AQL_QUEUE_EXECUTION_MODE_NATIVE)
+                .handle,
+            device_memory_pool.handle);
+  EXPECT_EQ(iree_hal_amdgpu_select_profiling_completion_signal_memory_pool(
+                device_memory_pool, host_memory_pool,
+                IREE_HAL_AMDGPU_AQL_QUEUE_EXECUTION_MODE_PM4_EMULATED)
+                .handle,
+            host_memory_pool.handle);
+}
+
 TEST_F(PhysicalDeviceCapabilitiesTest, SelectsCdnaPm4FamilyCapabilities) {
   constexpr iree_hal_amdgpu_vendor_packet_capability_flags_t
       kExpectedCapabilities =

@@ -485,6 +485,14 @@ class PM4DispatchLiveTest : public ::testing::Test {
       GTEST_SKIP() << "CPU and GPU agents are required, skipping tests";
     }
 
+    IREE_ASSERT_OK(iree_hal_amdgpu_query_aql_queue_execution_mode(
+        &libhsa, topology.gpu_agents[0], &aql_queue_execution_mode));
+    if (aql_queue_execution_mode ==
+        IREE_HAL_AMDGPU_AQL_QUEUE_EXECUTION_MODE_PM4_EMULATED) {
+      GTEST_SKIP()
+          << "ROCr PM4-emulated queues do not execute vendor AQL packets";
+    }
+
     if (!QueryAgentCodeObjectTarget(&libhsa, topology.gpu_agents[0],
                                     &agent_gfxip_version, &agent_exact_target,
                                     &agent_code_object_target)) {
@@ -516,6 +524,7 @@ class PM4DispatchLiveTest : public ::testing::Test {
   static iree_hal_amdgpu_libhsa_t libhsa;
   static iree_hal_amdgpu_topology_t topology;
   static iree_hal_amdgpu_gfxip_version_t agent_gfxip_version;
+  static iree_hal_amdgpu_aql_queue_execution_mode_t aql_queue_execution_mode;
   static iree_hal_amdgpu_vendor_packet_capability_flags_t
       agent_pm4_barrier_capabilities;
   static std::string agent_exact_target;
@@ -527,6 +536,8 @@ iree_allocator_t PM4DispatchLiveTest::host_allocator;
 iree_hal_amdgpu_libhsa_t PM4DispatchLiveTest::libhsa;
 iree_hal_amdgpu_topology_t PM4DispatchLiveTest::topology;
 iree_hal_amdgpu_gfxip_version_t PM4DispatchLiveTest::agent_gfxip_version;
+iree_hal_amdgpu_aql_queue_execution_mode_t
+    PM4DispatchLiveTest::aql_queue_execution_mode;
 iree_hal_amdgpu_vendor_packet_capability_flags_t
     PM4DispatchLiveTest::agent_pm4_barrier_capabilities;
 std::string PM4DispatchLiveTest::agent_exact_target;
@@ -607,7 +618,8 @@ TEST_F(PM4DispatchLiveTest, AqlAndAqlPm4IbLaunchMixedKernels) {
       HsaQueueErrorCallback, &queue_error, UINT32_MAX, UINT32_MAX, &queue));
   iree_hal_amdgpu_aql_ring_t aql_ring;
   iree_hal_amdgpu_aql_ring_initialize(
-      &libhsa, reinterpret_cast<iree_amd_queue_t*>(queue), &aql_ring);
+      &libhsa, reinterpret_cast<iree_amd_queue_t*>(queue),
+      aql_queue_execution_mode, &aql_ring);
 
   hsa_signal_t completion_signal = iree_hsa_signal_null();
   IREE_ASSERT_OK(iree_hsa_amd_signal_create(
@@ -980,7 +992,8 @@ TEST_F(PM4DispatchLiveTest, NativeMemoryPacketMatrix) {
       HsaQueueErrorCallback, &queue_error, UINT32_MAX, UINT32_MAX, &queue));
   iree_hal_amdgpu_aql_ring_t aql_ring;
   iree_hal_amdgpu_aql_ring_initialize(
-      &libhsa, reinterpret_cast<iree_amd_queue_t*>(queue), &aql_ring);
+      &libhsa, reinterpret_cast<iree_amd_queue_t*>(queue),
+      aql_queue_execution_mode, &aql_ring);
   hsa_signal_t completion_signal = iree_hsa_signal_null();
   IREE_ASSERT_OK(iree_hsa_amd_signal_create(
       IREE_LIBHSA(&libhsa), /*initial_value=*/1, /*num_consumers=*/0,
