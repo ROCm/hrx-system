@@ -188,6 +188,85 @@ iree_io_file_handle_flush(iree_io_file_handle_t* handle) {
   return status;
 }
 
+static iree_status_t iree_io_platform_fd_resize(int fd, uint64_t new_size) {
+#if IREE_FILE_IO_ENABLE
+
+#if defined(IREE_PLATFORM_WINDOWS)
+  if (new_size > INT64_MAX) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "file size %" PRIu64
+                            " exceeds the Windows signed 64-bit limit",
+                            new_size);
+  }
+  intptr_t os_handle = _get_osfhandle(fd);
+  if (os_handle == -1) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "invalid file descriptor");
+  }
+  FILE_END_OF_FILE_INFO end_of_file_info = {0};
+  end_of_file_info.EndOfFile.QuadPart = (LONGLONG)new_size;
+  if (!SetFileInformationByHandle((HANDLE)os_handle, FileEndOfFileInfo,
+                                  &end_of_file_info,
+                                  sizeof(end_of_file_info))) {
+    return iree_make_status(iree_status_code_from_win32_error(GetLastError()),
+                            "unable to resize file to %" PRIu64 " bytes",
+                            new_size);
+  }
+#else
+  off_t platform_size = (off_t)new_size;
+  if (platform_size < 0 || (uint64_t)platform_size != new_size) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "file size %" PRIu64
+                            " exceeds the platform file offset limit",
+                            new_size);
+  }
+  if (ftruncate(fd, platform_size) == -1) {
+    return iree_make_status(iree_status_code_from_errno(errno),
+                            "unable to resize file to %" PRIu64 " bytes",
+                            new_size);
+  }
+#endif  // IREE_PLATFORM_WINDOWS
+  return iree_ok_status();
+
+#else
+  return iree_make_status(IREE_STATUS_UNAVAILABLE,
+                          "file support has been compiled out of this binary; "
+                          "set IREE_FILE_IO_ENABLE=1 to include it");
+#endif  // IREE_FILE_IO_ENABLE
+}
+
+IREE_API_EXPORT iree_status_t
+iree_io_file_handle_resize(iree_io_file_handle_t* handle, uint64_t new_size) {
+  IREE_ASSERT_ARGUMENT(handle);
+  if (!iree_all_bits_set(handle->access, IREE_IO_FILE_ACCESS_WRITE)) {
+    return iree_make_status(IREE_STATUS_PERMISSION_DENIED,
+                            "file handle does not allow writes");
+  }
+  IREE_TRACE_ZONE_BEGIN(z0);
+  IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, (int64_t)new_size);
+  iree_status_t status = iree_ok_status();
+  switch (handle->primitive.type) {
+    case IREE_IO_FILE_HANDLE_TYPE_HOST_ALLOCATION: {
+      status =
+          iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                           "host allocation file handles have fixed extents");
+      break;
+    }
+    case IREE_IO_FILE_HANDLE_TYPE_FD: {
+      status = iree_io_platform_fd_resize(handle->primitive.value.fd, new_size);
+      break;
+    }
+    default: {
+      status = iree_make_status(IREE_STATUS_UNIMPLEMENTED,
+                                "resize not supported on handle type %d",
+                                (int)handle->primitive.type);
+      break;
+    }
+  }
+  IREE_TRACE_ZONE_END(z0);
+  return status;
+}
+
 //===----------------------------------------------------------------------===//
 // iree_io_file_handle_t utilities
 //===----------------------------------------------------------------------===//

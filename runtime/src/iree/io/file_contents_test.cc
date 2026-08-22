@@ -272,6 +272,30 @@ TEST(FileContents, CreateOverwritesSharedAsyncFileAndResizes) {
   iree_io_file_contents_free(read_contents);
 }
 
+TEST(FileContents, ResizeOpenFilePreservesPrefixAcrossShrinkAndExtend) {
+  iree::testing::TempFilePath path("iree_file_contents_test");
+  const uint8_t initial_contents[] = {0x11, 0x22, 0x33, 0x44};
+  IREE_ASSERT_OK(iree_io_file_contents_write(
+      path.path_view(),
+      iree_make_const_byte_span(initial_contents, sizeof(initial_contents)),
+      iree_allocator_system()));
+
+  iree_io_file_handle_t* handle = NULL;
+  IREE_ASSERT_OK(iree_io_file_handle_open(
+      IREE_IO_FILE_MODE_READ | IREE_IO_FILE_MODE_WRITE, path.path_view(),
+      iree_allocator_system(), &handle));
+  IREE_EXPECT_OK(iree_io_file_handle_resize(handle, 2));
+  IREE_EXPECT_OK(iree_io_file_handle_resize(handle, 6));
+  iree_io_file_handle_release(handle);
+
+  iree_io_file_contents_t* read_contents = NULL;
+  IREE_ASSERT_OK(iree_io_file_contents_read(
+      path.path_view(), iree_allocator_system(), &read_contents));
+  ASSERT_EQ(read_contents->const_buffer.data_length, 6);
+  EXPECT_EQ(memcmp(read_contents->const_buffer.data, initial_contents, 2), 0);
+  iree_io_file_contents_free(read_contents);
+}
+
 #if defined(IREE_PLATFORM_WINDOWS)
 
 TEST(FileContents, ReadWriteLongUtf8Path) {
