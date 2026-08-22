@@ -310,6 +310,26 @@ set_target_properties(loomc_shared PROPERTIES
   POSITION_INDEPENDENT_CODE ON
   LINKER_LANGUAGE CXX
   INTERFACE_LINK_LIBRARIES "")
+if(WIN32 AND CMAKE_GENERATOR STREQUAL "Ninja" AND
+    CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
+  if(NOT Python3_EXECUTABLE)
+    message(FATAL_ERROR
+      "The loomc MSVC-compatible Ninja build requires a Python interpreter.")
+  endif()
+  # CMake appends the resolved library closure to one physical response-file
+  # line. Keep each argument on its own line so link.exe can consume large
+  # target configurations without exceeding its response-line limit.
+  set(_loomc_msvc_response_file_tool
+    "${IREE_ROOT_DIR}/build_tools/msvc_response_file.py")
+  add_custom_command(TARGET loomc_shared PRE_LINK
+    COMMAND "${Python3_EXECUTABLE}"
+      "${_loomc_msvc_response_file_tool}"
+      "${CMAKE_BINARY_DIR}/CMakeFiles/loomc_shared.rsp"
+    COMMENT "Rewrapping the loomc MSVC linker response file"
+    VERBATIM)
+  set_property(TARGET loomc_shared APPEND PROPERTY LINK_DEPENDS
+    "${_loomc_msvc_response_file_tool}")
+endif()
 if(NOT WIN32)
   set_target_properties(loomc_shared PROPERTIES
     C_VISIBILITY_PRESET hidden

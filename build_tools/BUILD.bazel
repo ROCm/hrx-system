@@ -4,6 +4,10 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+# bazel-to-cmake: skip
+# CMake consumers map these Bazel-only support labels directly in
+# build_tools/bazel_to_cmake/bazel_to_cmake_targets.py.
+
 load("@rules_python//python:defs.bzl", "py_test")
 load("//build_tools/bazel:cc.bzl", "iree_cc_library")
 load("//build_tools/bazel:cc_link.bzl", "cc_link")
@@ -69,6 +73,15 @@ py_test(
         "cmake/iree_macros.cmake",
         "cmake/testdata/test_metadata/CMakeLists.txt",
     ],
+)
+
+py_test(
+    name = "msvc_response_file_test",
+    srcs = [
+        "msvc_response_file.py",
+        "msvc_response_file_test.py",
+    ],
+    main = "msvc_response_file_test.py",
 )
 
 filegroup(
