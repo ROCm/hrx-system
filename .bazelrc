@@ -62,6 +62,11 @@ build:windows-msvc --extra_execution_platforms=
 # Keep successful test output quiet while preserving failure logs.
 test --test_output=errors
 
+# Keep Python test entry-point directories off sys.path. Bazel supplies the
+# declared runfiles roots explicitly; allowing the script directory to win can
+# shadow standard-library modules with package-local files such as types.py.
+test --test_env=PYTHONSAFEPATH=1
+
 # Local presubmit uses the configured Bazel graph. Build and runtime
 # requirements belong on targets and package policy rather than tag filters.
 test:presubmit --config=locked
