@@ -11,6 +11,31 @@ iree_add_all_subdirs()
 
 iree_cc_library(
   NAME
+    byte_sequence
+  HDRS
+    "byte_sequence.h"
+  SRCS
+    "byte_sequence.c"
+  DEPS
+    iree::base
+    iree::base::internal
+  PUBLIC
+)
+
+iree_cc_test(
+  NAME
+    byte_sequence_test
+  SRCS
+    "byte_sequence_test.cc"
+  DEPS
+    ::byte_sequence
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+iree_cc_library(
+  NAME
     file_handle
   HDRS
     "file_contents.h"

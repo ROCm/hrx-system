@@ -14,6 +14,27 @@ package(
 )
 
 iree_runtime_cc_library(
+    name = "byte_sequence",
+    srcs = ["byte_sequence.c"],
+    hdrs = ["byte_sequence.h"],
+    deps = [
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "byte_sequence_test",
+    srcs = ["byte_sequence_test.cc"],
+    deps = [
+        ":byte_sequence",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_library(
     name = "file_handle",
     srcs = [
         "file_contents.c",
