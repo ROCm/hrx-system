@@ -34,9 +34,9 @@ low.kernel.def target<amdgpu.rdna3_5.core>(@target) workgroup_size(64, 1, 1) wor
   %28 = s_lshl_b32_rhs_inline %20, 2
   %29 = v_add_u32 %28, %25
   global_store_b32_saddr %29, %15, %output_view
-  %31 = v_add_u32 %28, %29
+  %31 = v_add_u32_rhs_tied %28, %29
   global_store_b32_saddr %31, %15, %output_view
-  %33 = v_add_u32 %28, %31
+  %33 = v_add_u32_rhs_tied %28, %31
   global_store_b32_saddr %33, %15, %output_view
   return
 }
@@ -76,17 +76,67 @@ low.kernel.def target<amdgpu.rdna3.core>(@target) workgroup_size(32, 1, 1) workg
   %31 = s_lshl_b32_rhs_inline %23, 1
   %32 = v_add_u32 %31, %28
   global_store_b32_saddr %32, %14, %output_view
-  %34 = v_add_u32 %31, %32
+  %34 = v_add_u32_rhs_tied %31, %32
   global_store_b32_saddr %34, %14, %output_view
-  %36 = v_add_u32 %31, %34
+  %36 = v_add_u32_rhs_tied %31, %34
   global_store_b32_saddr %36, %14, %output_view
-  %38 = v_add_u32 %31, %36
+  %38 = v_add_u32_rhs_tied %31, %36
   global_store_b32_saddr %38, %14, %output_view
-  %40 = v_add_u32 %31, %38
+  %40 = v_add_u32_rhs_tied %31, %38
   global_store_b32_saddr %40, %14, %output_view
-  %42 = v_add_u32 %31, %40
+  %42 = v_add_u32_rhs_tied %31, %40
   global_store_b32_saddr %42, %14, %output_view
-  %44 = v_add_u32 %31, %42
+  %44 = v_add_u32_rhs_tied %31, %42
+  global_store_b32_saddr %44, %14, %output_view
+  return
+}
+
+// ====
+
+amdgpu.target<gfx1250> @target
+
+kernel.def target(@target) @gfx1250_dynamic_result_row_stride() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%row_size0: index, %output: buffer) {
+  %row_size = index.assume %row_size0 [range(%row_size0, 16, 32768)] : index
+  %base = index.constant 0 : offset
+  %m = index.constant 16 : index
+  %n = index.constant 16 : index
+  %output_view = buffer.view %output[%base] : buffer -> view<16x[%row_size]xf32>
+  %values = vector.constant 0.0 : vector<8xf32>
+  %result = vector.fragment<result> %values shape [%m, %n] : vector<8xf32>
+  vector.fragment.store<result> %result, %output_view[0, 0] shape [%m, %n] : vector<8xf32>, view<16x[%row_size]xf32>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<amdgpu.rdna4.gfx125x.core>(@target) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @gfx1250_dynamic_result_row_stride(%row_size: reg<amdgpu.sgpr>) asm {
+  %12 = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %output_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %14 = v_mov_b32 0
+  %23 = s_lshl_b32_rhs_inline %row_size, 2
+  %24 = v_and_b32_src0_inline %12, 15
+  %25 = v_lshlrev_b32_src0_inline %24, 2
+  %26 = v_lshrrev_b32_src0_inline %12, 4
+  %27 = v_lshlrev_b32_src0_inline %26, 3
+  %28 = v_mul_lo_u32 %23, %27
+  %29 = v_add_u32 %25, %28
+  global_store_b32_saddr %29, %14, %output_view
+  %32 = v_add_u32 %23, %29
+  global_store_b32_saddr %32, %14, %output_view
+  %34 = v_add_u32 %23, %32
+  global_store_b32_saddr %34, %14, %output_view
+  %36 = v_add_u32 %23, %34
+  global_store_b32_saddr %36, %14, %output_view
+  %38 = v_add_u32 %23, %36
+  global_store_b32_saddr %38, %14, %output_view
+  %40 = v_add_u32 %23, %38
+  global_store_b32_saddr %40, %14, %output_view
+  %42 = v_add_u32 %23, %40
+  global_store_b32_saddr %42, %14, %output_view
+  %44 = v_add_u32 %23, %42
   global_store_b32_saddr %44, %14, %output_view
   return
 }
@@ -293,17 +343,17 @@ low.kernel.def target<amdgpu.rdna3.core>(@target) workgroup_size(32, 1, 1) workg
   %36 = s_lshl_b32_rhs_inline %26, 1
   %37 = v_add_u32 %36, %33
   global_store_b32_saddr %37, %17, %output_view
-  %39 = v_add_u32 %36, %37
+  %39 = v_add_u32_rhs_tied %36, %37
   global_store_b32_saddr %39, %17, %output_view
-  %41 = v_add_u32 %36, %39
+  %41 = v_add_u32_rhs_tied %36, %39
   global_store_b32_saddr %41, %17, %output_view
-  %43 = v_add_u32 %36, %41
+  %43 = v_add_u32_rhs_tied %36, %41
   global_store_b32_saddr %43, %17, %output_view
-  %45 = v_add_u32 %36, %43
+  %45 = v_add_u32_rhs_tied %36, %43
   global_store_b32_saddr %45, %17, %output_view
-  %47 = v_add_u32 %36, %45
+  %47 = v_add_u32_rhs_tied %36, %45
   global_store_b32_saddr %47, %17, %output_view
-  %49 = v_add_u32 %36, %47
+  %49 = v_add_u32_rhs_tied %36, %47
   global_store_b32_saddr %49, %17, %output_view
   return
 }
@@ -347,33 +397,191 @@ low.kernel.def target<amdgpu.rdna3.core>(@target) workgroup_size(32, 1, 1) workg
   %42 = s_lshl_b32_rhs_inline %34, 1
   %43 = v_add_u32 %42, %39
   global_store_b32_saddr %43, %16, %output_view
-  %45 = v_add_u32 %42, %43
+  %45 = v_add_u32_rhs_tied %42, %43
   global_store_b32_saddr %45, %16, %output_view
-  %47 = v_add_u32 %42, %45
+  %47 = v_add_u32_rhs_tied %42, %45
   global_store_b32_saddr %47, %16, %output_view
-  %49 = v_add_u32 %42, %47
+  %49 = v_add_u32_rhs_tied %42, %47
   global_store_b32_saddr %49, %16, %output_view
-  %51 = v_add_u32 %42, %49
+  %51 = v_add_u32_rhs_tied %42, %49
   global_store_b32_saddr %51, %16, %output_view
-  %53 = v_add_u32 %42, %51
+  %53 = v_add_u32_rhs_tied %42, %51
   global_store_b32_saddr %53, %16, %output_view
-  %55 = v_add_u32 %42, %53
+  %55 = v_add_u32_rhs_tied %42, %53
   global_store_b32_saddr %55, %16, %output_view
   global_store_b32_saddr %39, %25, %output_view
   %58 = s_lshl_b32_rhs_inline %34, 1
   %59 = v_add_u32 %58, %39
   global_store_b32_saddr %59, %25, %output_view
-  %61 = v_add_u32 %58, %59
+  %61 = v_add_u32_rhs_tied %58, %59
   global_store_b32_saddr %61, %25, %output_view
-  %63 = v_add_u32 %58, %61
+  %63 = v_add_u32_rhs_tied %58, %61
   global_store_b32_saddr %63, %25, %output_view
-  %65 = v_add_u32 %58, %63
+  %65 = v_add_u32_rhs_tied %58, %63
   global_store_b32_saddr %65, %25, %output_view
-  %67 = v_add_u32 %58, %65
+  %67 = v_add_u32_rhs_tied %58, %65
   global_store_b32_saddr %67, %25, %output_view
-  %69 = v_add_u32 %58, %67
+  %69 = v_add_u32_rhs_tied %58, %67
   global_store_b32_saddr %69, %25, %output_view
-  %71 = v_add_u32 %58, %69
+  %71 = v_add_u32_rhs_tied %58, %69
   global_store_b32_saddr %71, %25, %output_view
+  return
+}
+
+// ====
+
+amdgpu.target<gfx942> @target
+
+kernel.def target(@target) @gfx942_blocked_dynamic_result_row_stride() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%row_stride0: index, %output: buffer) {
+  %row_stride = index.assume %row_stride0 [range(%row_stride0, 16, 64)] : index
+  %base = index.constant 0 : offset
+  %blocks = index.constant 4 : index
+  %m = index.constant 16 : index
+  %n = index.constant 16 : index
+  %layout = encoding.layout.strided [1024, %row_stride, 1] : encoding<layout>
+  %output_view = buffer.view %output[%base] : buffer -> view<4x16x16xf32, %layout>
+  %values = vector.constant 0.0 : vector<16xf32>
+  %result = vector.fragment<result> %values shape [blocks(%blocks), %m, %n] : vector<16xf32>
+  vector.fragment.store<result> %result, %output_view[0, 0, 0] shape [blocks(%blocks), %m, %n] : vector<16xf32>, view<4x16x16xf32, %layout>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<amdgpu.cdna3.core>(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @gfx942_blocked_dynamic_result_row_stride(%row_stride: reg<amdgpu.sgpr>) asm {
+  %14 = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %output_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %16 = v_mov_b32 0
+  %33 = s_lshl_b32_rhs_inline %row_stride, 2
+  %34 = v_and_b32_src0_inline %14, 15
+  %35 = v_lshlrev_b32_src0_inline %34, 2
+  %36 = v_lshrrev_b32_src0_inline %14, 4
+  %37 = v_lshlrev_b32_src0_inline %36, 2
+  %38 = v_mul_lo_u32 %33, %37
+  %39 = v_add_u32 %35, %38
+  %41 = s_mov_b32_m0_imm 0
+  global_store_dword_saddr %39, %16, %output_view, %41
+  %43 = v_add_u32 %33, %39
+  %44 = s_mov_b32_m0_imm 0
+  global_store_dword_saddr %43, %16, %output_view, %44
+  %46 = v_add_u32_rhs_tied %33, %43
+  %47 = s_mov_b32_m0_imm 0
+  global_store_dword_saddr %46, %16, %output_view, %47
+  %49 = v_add_u32_rhs_tied %33, %46
+  %50 = s_mov_b32_m0_imm 0
+  global_store_dword_saddr %49, %16, %output_view, %50
+  %52 = s_mul_i32_rhs_inline %33, 3
+  %53 = v_mov_b32_copy %52
+  %54 = v_sub_u32_lhs_tied %49, %53
+  %55 = v_add_u32_lit %54, 4096
+  %56 = s_mov_b32_m0_imm 0
+  global_store_dword_saddr %55, %16, %output_view, %56
+  %58 = v_add_u32_rhs_tied %33, %54
+  %59 = v_add_u32_lit %58, 4096
+  %60 = s_mov_b32_m0_imm 0
+  global_store_dword_saddr %59, %16, %output_view, %60
+  %62 = v_add_u32_rhs_tied %33, %58
+  %63 = v_add_u32_lit %62, 4096
+  %64 = s_mov_b32_m0_imm 0
+  global_store_dword_saddr %63, %16, %output_view, %64
+  %66 = v_add_u32_rhs_tied %33, %62
+  %67 = v_add_u32_lit %66, 4096
+  %68 = s_mov_b32_m0_imm 0
+  global_store_dword_saddr %67, %16, %output_view, %68
+  %71 = v_sub_u32_lhs_tied %66, %53
+  %72 = v_add_u32_lit %71, 8192
+  %73 = s_mov_b32_m0_imm 0
+  global_store_dword_saddr %72, %16, %output_view, %73
+  %75 = v_add_u32_rhs_tied %33, %71
+  %76 = v_add_u32_lit %75, 8192
+  %77 = s_mov_b32_m0_imm 0
+  global_store_dword_saddr %76, %16, %output_view, %77
+  %79 = v_add_u32_rhs_tied %33, %75
+  %80 = v_add_u32_lit %79, 8192
+  %81 = s_mov_b32_m0_imm 0
+  global_store_dword_saddr %80, %16, %output_view, %81
+  %83 = v_add_u32_rhs_tied %33, %79
+  %84 = v_add_u32_lit %83, 8192
+  %85 = s_mov_b32_m0_imm 0
+  global_store_dword_saddr %84, %16, %output_view, %85
+  %88 = v_sub_u32_lhs_tied %83, %53
+  %89 = v_add_u32_lit %88, 12288
+  %90 = s_mov_b32_m0_imm 0
+  global_store_dword_saddr %89, %16, %output_view, %90
+  %92 = v_add_u32_rhs_tied %33, %88
+  %93 = v_add_u32_lit %92, 12288
+  %94 = s_mov_b32_m0_imm 0
+  global_store_dword_saddr %93, %16, %output_view, %94
+  %96 = v_add_u32_rhs_tied %33, %92
+  %97 = v_add_u32_lit %96, 12288
+  %98 = s_mov_b32_m0_imm 0
+  global_store_dword_saddr %97, %16, %output_view, %98
+  %100 = v_add_u32_rhs_tied %33, %96
+  %101 = v_add_u32_lit %100, 12288
+  %102 = s_mov_b32_m0_imm 0
+  global_store_dword_saddr %101, %16, %output_view, %102
+  return
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+
+kernel.def target(@target) @gfx1100_dynamic_init_load_row_stride() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%row_size0: index, %input: buffer, %output: buffer) {
+  %row_size = index.assume %row_size0 [range(%row_size0, 16, 32768)] : index
+  %base = index.constant 0 : offset
+  %m = index.constant 16 : index
+  %n = index.constant 16 : index
+  %input_view = buffer.view %input[%base] : buffer -> view<16x[%row_size]xf32>
+  %output_view = buffer.view %output[%base] : buffer -> view<16x16xf32>
+  %loaded = vector.fragment.load<init> %input_view[0, 0] shape [%m, %n] : view<16x[%row_size]xf32> -> vector<8xf32>
+  %result = vector.fragment<result> %loaded shape [%m, %n] : vector<8xf32>
+  vector.fragment.store<result> %result, %output_view[0, 0] shape [%m, %n] : vector<8xf32>, view<16x16xf32>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<amdgpu.rdna3.core>(@target) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @gfx1100_dynamic_init_load_row_stride(%row_size: reg<amdgpu.sgpr>) asm {
+  %14 = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 1024} : reg<amdgpu.sgpr x2>
+  %17 = s_lshl_b32_rhs_inline %row_size, 2
+  %18 = v_and_b32_src0_inline %14, 15
+  %19 = v_lshlrev_b32_src0_inline %18, 2
+  %20 = v_lshrrev_b32_src0_inline %14, 4
+  %21 = v_mul_lo_u32 %17, %20
+  %22 = v_add_u32 %19, %21
+  %23 = global_load_b32_saddr %22, %input_view
+  %24 = s_lshl_b32_rhs_inline %17, 1
+  %25 = v_add_u32 %24, %22
+  %26 = global_load_b32_saddr %25, %input_view
+  %27 = v_add_u32_rhs_tied %24, %25
+  %28 = global_load_b32_saddr %27, %input_view
+  %29 = v_add_u32_rhs_tied %24, %27
+  %30 = global_load_b32_saddr %29, %input_view
+  %31 = v_add_u32_rhs_tied %24, %29
+  %32 = global_load_b32_saddr %31, %input_view
+  %33 = v_add_u32_rhs_tied %24, %31
+  %34 = global_load_b32_saddr %33, %input_view
+  %35 = v_add_u32_rhs_tied %24, %33
+  %36 = global_load_b32_saddr %35, %input_view
+  %37 = v_add_u32_rhs_tied %24, %35
+  %38 = global_load_b32_saddr %37, %input_view
+  %40 = v_lshlrev_b32_src0_inline %14, 2
+  global_store_b32_saddr %40, %23, %output_view
+  global_store_b32_saddr %40, %26, %output_view {offset = 128}
+  global_store_b32_saddr %40, %28, %output_view {offset = 256}
+  global_store_b32_saddr %40, %30, %output_view {offset = 384}
+  global_store_b32_saddr %40, %32, %output_view {offset = 512}
+  global_store_b32_saddr %40, %34, %output_view {offset = 640}
+  global_store_b32_saddr %40, %36, %output_view {offset = 768}
+  global_store_b32_saddr %40, %38, %output_view {offset = 896}
   return
 }

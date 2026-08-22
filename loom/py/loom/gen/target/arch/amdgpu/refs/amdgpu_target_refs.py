@@ -71,6 +71,8 @@ from loom.target.low_descriptors import (  # noqa: E402
     ResourceFlag,
     ResourceKind,
     ScheduleClass,
+    StorageLeaseAttachment,
+    StorageLeaseKind,
     target_relative_name,
 )
 
@@ -459,6 +461,24 @@ def _descriptor_trait_context(descriptor_set: DescriptorSet) -> _DescriptorTrait
     )
 
 
+def _descriptor_address_source_is_retained(descriptor: Descriptor) -> bool:
+    address_packet_indices: set[int] = set()
+    packet_operand_index = 0
+    for operand in descriptor.operands:
+        if operand.role not in (
+            OperandRole.OPERAND,
+            OperandRole.PREDICATE,
+            OperandRole.RESOURCE,
+        ):
+            continue
+        if operand.field_name in ("addr", "vaddr"):
+            address_packet_indices.add(packet_operand_index)
+        packet_operand_index += 1
+    return any(
+        lease.kind is StorageLeaseKind.SOURCE_READ and lease.attachment is StorageLeaseAttachment.OPERAND and lease.attachment_index in address_packet_indices for lease in descriptor.storage_leases
+    )
+
+
 def _descriptor_trait_names(
     context: _DescriptorTraitContext,
     descriptor: Descriptor,
@@ -509,6 +529,8 @@ def _descriptor_trait_names(
         trait_names.append("LOOM_AMDGPU_DESCRIPTOR_TRAIT_MATRIX_COEXECUTION_SOURCE")
     if uses_vector_alu and any(field.encoding_field_id in _DESTINATION_OP_SEL_ENCODING_FIELD_IDS and field.value & _DESTINATION_OP_SEL_MASK for field in descriptor.encoding_field_values):
         trait_names.append("LOOM_AMDGPU_DESCRIPTOR_TRAIT_DESTINATION_SELECTION_FORWARDING")
+    if _descriptor_address_source_is_retained(descriptor):
+        trait_names.append("LOOM_AMDGPU_DESCRIPTOR_TRAIT_ADDRESS_SOURCE_RETAINED")
     return tuple(trait_names)
 
 

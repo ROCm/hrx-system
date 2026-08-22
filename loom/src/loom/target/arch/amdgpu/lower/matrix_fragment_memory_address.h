@@ -32,8 +32,10 @@ typedef struct loom_amdgpu_fragment_memory_runtime_axis_address_state_t {
 } loom_amdgpu_fragment_memory_runtime_axis_address_state_t;
 
 typedef struct loom_amdgpu_fragment_memory_address_state_t {
-  // Shared source and lane base advanced across packet coordinates.
+  // Current dynamic source and lane base advanced across packet coordinates.
   loom_amdgpu_fragment_memory_address_accumulator_t cursor;
+  // Whether cursor storage is distinct from cached bases and stride products.
+  bool cursor_storage_is_distinct;
   // Runtime coordinate currently accumulated into cursor for each axis.
   uint32_t current_coordinates[LOOM_MATRIX_FRAGMENT_AXIS_COUNT];
   // Materialized stride and packet-step state for each runtime axis.

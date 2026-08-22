@@ -881,11 +881,17 @@ static bool loom_amdgpu_fragment_memory_select_narrowed_store_packet(
 }
 
 static void loom_amdgpu_fragment_memory_plan_push_packet(
+    const loom_low_descriptor_set_t* descriptor_set,
     loom_amdgpu_fragment_memory_plan_t* plan,
     const loom_amdgpu_fragment_memory_packet_plan_t* packet) {
   IREE_ASSERT_GT(packet->result_register_count, 0);
   IREE_ASSERT_LT(plan->packet_count, IREE_ARRAYSIZE(plan->packets));
   plan->packets[plan->packet_count++] = *packet;
+  const loom_low_descriptor_t* descriptor =
+      loom_amdgpu_lookup_descriptor_ref(descriptor_set, packet->descriptor_ref);
+  plan->packet_address_sources_consumed_at_issue &= !iree_any_bit_set(
+      loom_amdgpu_descriptor_traits(descriptor_set, descriptor),
+      LOOM_AMDGPU_DESCRIPTOR_TRAIT_ADDRESS_SOURCE_RETAINED);
   plan->packet_flags |= packet->flags;
   if (plan->payload_form ==
           LOOM_AMDGPU_FRAGMENT_MEMORY_PAYLOAD_FORM_STORE_NARROW_F32_TO_BF16 &&
@@ -944,6 +950,7 @@ bool loom_amdgpu_fragment_memory_plan_packets(
     *out_constraint_key = iree_string_view_empty();
   }
   plan->packet_count = 0;
+  plan->packet_address_sources_consumed_at_issue = true;
   plan->packet_flags = 0;
   plan->packed_b16_high_descriptor_ref = LOOM_AMDGPU_DESCRIPTOR_REF_NONE;
   const bool load_packed_16bit_result =
@@ -980,6 +987,11 @@ bool loom_amdgpu_fragment_memory_plan_packets(
       loom_amdgpu_descriptor_set_has_ref(descriptor_set,
                                          packed_b16_high_descriptor_ref)) {
     plan->packed_b16_high_descriptor_ref = packed_b16_high_descriptor_ref;
+    const loom_low_descriptor_t* descriptor = loom_amdgpu_lookup_descriptor_ref(
+        descriptor_set, packed_b16_high_descriptor_ref);
+    plan->packet_address_sources_consumed_at_issue &= !iree_any_bit_set(
+        loom_amdgpu_descriptor_traits(descriptor_set, descriptor),
+        LOOM_AMDGPU_DESCRIPTOR_TRAIT_ADDRESS_SOURCE_RETAINED);
   } else {
     packed_b16_low_descriptor_ref = LOOM_AMDGPU_DESCRIPTOR_REF_NONE;
   }
@@ -1011,7 +1023,7 @@ bool loom_amdgpu_fragment_memory_plan_packets(
       }
       return false;
     }
-    loom_amdgpu_fragment_memory_plan_push_packet(plan, &packet);
+    loom_amdgpu_fragment_memory_plan_push_packet(descriptor_set, plan, &packet);
     register_index += packet.result_register_count;
   }
   if (plan->packet_count == 0) {
