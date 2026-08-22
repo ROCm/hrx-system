@@ -354,17 +354,21 @@ bool loom_type_propagator_may_apply_op(const loom_type_propagator_t* propagator,
                                        const loom_op_t* op,
                                        const loom_op_vtable_t* vtable) {
   if (!propagator || !op) return false;
-  const bool facts_enabled = rewriter && rewriter->fact_table;
+  // Facts refine dynamic dimensions and SSA encoding attachments. Both are
+  // represented by the module's incrementally maintained type-use table.
+  const bool facts_can_refine =
+      rewriter && rewriter->fact_table &&
+      loom_module_has_active_type_uses(propagator->module);
   const bool vtable_can_refine =
       vtable && iree_any_bit_set(vtable->vtable_flags,
                                  LOOM_OP_VTABLE_TYPE_PROPAGATION_CANDIDATE);
 
   bool values_have_refinement_surface = false;
-  if (facts_enabled || vtable_can_refine) {
+  if (facts_can_refine || vtable_can_refine) {
     values_have_refinement_surface =
         loom_type_propagator_op_values_have_refinement_surface(propagator, op);
   }
-  if (facts_enabled && values_have_refinement_surface) return true;
+  if (facts_can_refine && values_have_refinement_surface) return true;
   if (!vtable_can_refine) return false;
 
   if (vtable->type_transfer || op->region_count > 0) return true;
