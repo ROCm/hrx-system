@@ -113,6 +113,10 @@ class CooperativeMatrixCase:
         )
 
     @property
+    def byte_pointer_scalar(self) -> StorageBufferScalar:
+        return _require_storage_buffer_scalar("u8")
+
+    @property
     def shape_key(self) -> int:
         return (self.m_size << 32) | (self.n_size << 16) | self.k_size
 
@@ -137,8 +141,11 @@ class CooperativeMatrixCase:
             operand_mode=self.operand_mode if include_operand_mode else None,
         )
 
-    def memory_feature_bits(self, scalar: StorageBufferScalar) -> int:
-        return self.feature_bits | scalar.feature_bits
+    @property
+    def memory_feature_bits(self) -> int:
+        # Matrix component capabilities come from the case while storage
+        # capabilities come from the pointer type used by the memory opcode.
+        return self.feature_bits | self.byte_pointer_scalar.feature_bits
 
 
 def _require_storage_buffer_scalar(suffix: str) -> StorageBufferScalar:

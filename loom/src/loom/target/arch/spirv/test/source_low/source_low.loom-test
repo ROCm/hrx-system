@@ -696,7 +696,7 @@ low.kernel.def target<spirv.logical.core>(@hal_target) workgroup_size(1, 1, 1) w
 
 // ====
 
-spirv.target<vulkan1_3> @hal_target_coop_f16 {abi = hal_kernel, contract_feature_bits = 2318}
+spirv.target<vulkan1_3> @hal_target_coop_f16 {abi = hal_kernel, contract_feature_bits = 2222}
 
 kernel.def target(@hal_target_coop_f16) @spirv_hal_cooperative_matrix_f16() {
   %unit = index.constant 1 : index
@@ -729,21 +729,21 @@ low.kernel.def target<spirv.logical.core>(@hal_target_coop_f16) workgroup_size(3
   %rhs_aligned = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
   %init_aligned = resource<hal_binding> {index = 2, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
   %out_aligned = resource<hal_binding> {index = 3, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
-  %28 = OpPtrAccessChain.storage_buffer.f16.byte_offset %lhs_aligned, %byte_offset_aligned
+  %28 = OpPtrAccessChain.storage_buffer.u8.byte_offset %lhs_aligned, %byte_offset_aligned
   %lhs = OpCooperativeMatrixLoadKHR.lhs.f16.16x16x16.f32.subgroup.row_major %28 : reg<spirv.id : spirv.cooperative_matrix<16x16xf16, subgroup, matrix_a>>
-  %30 = OpPtrAccessChain.storage_buffer.f16.byte_offset %rhs_aligned, %byte_offset_aligned
+  %30 = OpPtrAccessChain.storage_buffer.u8.byte_offset %rhs_aligned, %byte_offset_aligned
   %rhs = OpCooperativeMatrixLoadKHR.rhs.f16.16x16x16.f32.subgroup.row_major %30 : reg<spirv.id : spirv.cooperative_matrix<16x16xf16, subgroup, matrix_b>>
-  %32 = OpPtrAccessChain.storage_buffer.f32.byte_offset %init_aligned, %byte_offset_aligned
+  %32 = OpPtrAccessChain.storage_buffer.u8.byte_offset %init_aligned, %byte_offset_aligned
   %init = OpCooperativeMatrixLoadKHR.init.f16.16x16x16.f32.subgroup.row_major %32 : reg<spirv.id : spirv.cooperative_matrix<16x16xf32, subgroup, matrix_accumulator>>
   %result = OpCooperativeMatrixMulAddKHR.f16.16x16x16.f32.subgroup %lhs, %rhs, %init : reg<spirv.id : spirv.cooperative_matrix<16x16xf32, subgroup, matrix_accumulator>>
-  %35 = OpPtrAccessChain.storage_buffer.f32.byte_offset %out_aligned, %byte_offset_aligned
+  %35 = OpPtrAccessChain.storage_buffer.u8.byte_offset %out_aligned, %byte_offset_aligned
   OpCooperativeMatrixStoreKHR.result.f16.16x16x16.f32.subgroup.row_major %35, %result
   return
 }
 
 // ====
 
-spirv.target<vulkan1_3> @hal_target_coop_bf16 {abi = hal_kernel, contract_feature_bits = 22790}
+spirv.target<vulkan1_3> @hal_target_coop_bf16 {abi = hal_kernel, contract_feature_bits = 22694}
 
 kernel.def target(@hal_target_coop_bf16) @spirv_hal_cooperative_matrix_bf16() {
   %unit = index.constant 1 : index
@@ -776,14 +776,14 @@ low.kernel.def target<spirv.logical.core>(@hal_target_coop_bf16) workgroup_size(
   %rhs_aligned = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
   %init_aligned = resource<hal_binding> {index = 2, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
   %out_aligned = resource<hal_binding> {index = 3, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
-  %28 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %lhs_aligned, %byte_offset_aligned
+  %28 = OpPtrAccessChain.storage_buffer.u8.byte_offset %lhs_aligned, %byte_offset_aligned
   %lhs = OpCooperativeMatrixLoadKHR.lhs.bf16.16x16x16.f32.subgroup.row_major %28 : reg<spirv.id : spirv.cooperative_matrix<16x16xbf16, subgroup, matrix_a>>
-  %30 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %rhs_aligned, %byte_offset_aligned
+  %30 = OpPtrAccessChain.storage_buffer.u8.byte_offset %rhs_aligned, %byte_offset_aligned
   %rhs = OpCooperativeMatrixLoadKHR.rhs.bf16.16x16x16.f32.subgroup.row_major %30 : reg<spirv.id : spirv.cooperative_matrix<16x16xbf16, subgroup, matrix_b>>
-  %32 = OpPtrAccessChain.storage_buffer.f32.byte_offset %init_aligned, %byte_offset_aligned
+  %32 = OpPtrAccessChain.storage_buffer.u8.byte_offset %init_aligned, %byte_offset_aligned
   %init = OpCooperativeMatrixLoadKHR.init.bf16.16x16x16.f32.subgroup.row_major %32 : reg<spirv.id : spirv.cooperative_matrix<16x16xf32, subgroup, matrix_accumulator>>
   %result = OpCooperativeMatrixMulAddKHR.bf16.16x16x16.f32.subgroup %lhs, %rhs, %init : reg<spirv.id : spirv.cooperative_matrix<16x16xf32, subgroup, matrix_accumulator>>
-  %35 = OpPtrAccessChain.storage_buffer.f32.byte_offset %out_aligned, %byte_offset_aligned
+  %35 = OpPtrAccessChain.storage_buffer.u8.byte_offset %out_aligned, %byte_offset_aligned
   OpCooperativeMatrixStoreKHR.result.bf16.16x16x16.f32.subgroup.row_major %35, %result
   return
 }
@@ -830,10 +830,10 @@ low.kernel.def target<spirv.logical.core>(@hal_target_coop_u8) workgroup_size(32
   %lhs = OpCooperativeMatrixLoadKHR.lhs.u8.16x16x32.u32.subgroup.row_major %31 : reg<spirv.id : spirv.cooperative_matrix<16x32xu8, subgroup, matrix_a>>
   %33 = OpPtrAccessChain.storage_buffer.u8.byte_offset %rhs_aligned, %byte_offset_aligned
   %rhs = OpCooperativeMatrixLoadKHR.rhs.u8.16x16x32.u32.subgroup.row_major %33 : reg<spirv.id : spirv.cooperative_matrix<32x16xu8, subgroup, matrix_b>>
-  %35 = OpPtrAccessChain.storage_buffer.u32.byte_offset %init_aligned, %byte_offset_aligned
+  %35 = OpPtrAccessChain.storage_buffer.u8.byte_offset %init_aligned, %byte_offset_aligned
   %init = OpCooperativeMatrixLoadKHR.init.u8.16x16x32.u32.subgroup.row_major %35 : reg<spirv.id : spirv.cooperative_matrix<16x16xu32, subgroup, matrix_accumulator>>
   %result = OpCooperativeMatrixMulAddKHR.u8.16x16x32.u32.subgroup %lhs, %rhs, %init : reg<spirv.id : spirv.cooperative_matrix<16x16xu32, subgroup, matrix_accumulator>>
-  %38 = OpPtrAccessChain.storage_buffer.u32.byte_offset %out_aligned, %byte_offset_aligned
+  %38 = OpPtrAccessChain.storage_buffer.u8.byte_offset %out_aligned, %byte_offset_aligned
   OpCooperativeMatrixStoreKHR.result.u8.16x16x32.u32.subgroup.row_major %38, %result
   return
 }

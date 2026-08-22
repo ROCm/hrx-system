@@ -29,7 +29,7 @@ typedef enum loom_spirv_packet_form_e {
   LOOM_SPIRV_PACKET_FORM_UNSUPPORTED = 0,
   LOOM_SPIRV_PACKET_FORM_SCALAR_CONSTANT = 1,
   LOOM_SPIRV_PACKET_FORM_BINARY_SAME_TYPE = 2,
-  LOOM_SPIRV_PACKET_FORM_PTR_ACCESS_CHAIN = 3,
+  LOOM_SPIRV_PACKET_FORM_PHYSICAL_STORAGE_BUFFER_BYTE_OFFSET = 3,
   LOOM_SPIRV_PACKET_FORM_LOAD_ALIGNED = 4,
   LOOM_SPIRV_PACKET_FORM_STORE_ALIGNED = 5,
   LOOM_SPIRV_PACKET_FORM_INTEGER_MUL_ADD = 6,
@@ -81,8 +81,8 @@ typedef struct loom_spirv_packet_row_t {
   uint32_t memory_semantics;
   // Cooperative matrix layout literal for load/store rows.
   uint32_t cooperative_matrix_layout;
-  // Cooperative matrix stride literal for load/store rows.
-  uint32_t cooperative_matrix_stride;
+  // Cooperative matrix byte-pointer stride for load/store rows.
+  uint32_t cooperative_matrix_byte_stride;
   // Cooperative matrix operands mask literal for mul-add rows.
   uint32_t cooperative_matrix_operands;
 } loom_spirv_packet_row_t;

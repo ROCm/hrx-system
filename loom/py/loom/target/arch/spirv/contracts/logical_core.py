@@ -892,7 +892,12 @@ def _cooperative_matrix_load_rule(
             layout="row_major",
         )
     )
-    address_materializer = _storage_buffer_address_materializer(scalar)
+    # Cooperative matrix strides are measured in units of the SPIR-V pointer
+    # pointee type. Use a byte pointer so the packet's stride is unambiguously
+    # byte-addressed across implementations and matrix component types.
+    address_materializer = _storage_buffer_address_materializer(
+        case.byte_pointer_scalar
+    )
     return DescriptorRule(
         source_op=vector.vector_fragment_load,
         descriptor=descriptor,
@@ -943,7 +948,11 @@ def _cooperative_matrix_store_rule(
             layout="row_major",
         )
     )
-    address_materializer = _storage_buffer_address_materializer(scalar)
+    # Keep cooperative matrix store addressing in the same byte units as load
+    # addressing. The matrix component type remains encoded by the descriptor.
+    address_materializer = _storage_buffer_address_materializer(
+        case.byte_pointer_scalar
+    )
     return DescriptorRule(
         source_op=vector.vector_fragment_store,
         descriptor=descriptor,

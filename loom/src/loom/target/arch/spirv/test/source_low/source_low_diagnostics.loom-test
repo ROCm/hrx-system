@@ -110,7 +110,7 @@ func.def target(@target) @storage_buffer_i32_requires_known_root_alignment(%inpu
 
 // ====
 
-spirv.target<vulkan1_3> @target {contract_feature_bits = 2318}
+spirv.target<vulkan1_3> @target {contract_feature_bits = 2222}
 
 func.def target(@target) @cooperative_matrix_rejects_noncompact_storage_tile(%input: buffer, %byte_offset: offset) -> (vector<16xf16>) {
   %byte_offset_aligned = index.assume %byte_offset [mul(%byte_offset, 16)] : offset
@@ -125,7 +125,7 @@ func.def target(@target) @cooperative_matrix_rejects_noncompact_storage_tile(%in
 
 // ====
 
-spirv.target<vulkan1_3> @hal_target_compact_matrix {abi = hal_kernel, contract_feature_bits = 2318}
+spirv.target<vulkan1_3> @hal_target_compact_matrix {abi = hal_kernel, contract_feature_bits = 2222}
 
 kernel.def target(@hal_target_compact_matrix) @cooperative_matrix_accepts_explicit_compact_layout() {
   %unit = index.constant 1 : index
@@ -149,16 +149,16 @@ kernel.def target(@hal_target_compact_matrix) @cooperative_matrix_accepts_explic
 low.kernel.def target<spirv.logical.core>(@hal_target_compact_matrix) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @cooperative_matrix_accepts_explicit_compact_layout(%byte_offset_aligned: reg<spirv.offset64>) asm {
   %input_aligned = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
   %output_aligned = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
-  %17 = OpPtrAccessChain.storage_buffer.f32.byte_offset %input_aligned, %byte_offset_aligned
+  %17 = OpPtrAccessChain.storage_buffer.u8.byte_offset %input_aligned, %byte_offset_aligned
   %fragment = OpCooperativeMatrixLoadKHR.init.f16.16x16x16.f32.subgroup.row_major %17 : reg<spirv.id : spirv.cooperative_matrix<16x16xf32, subgroup, matrix_accumulator>>
-  %19 = OpPtrAccessChain.storage_buffer.f32.byte_offset %output_aligned, %byte_offset_aligned
+  %19 = OpPtrAccessChain.storage_buffer.u8.byte_offset %output_aligned, %byte_offset_aligned
   OpCooperativeMatrixStoreKHR.result.f16.16x16x16.f32.subgroup.row_major %19, %fragment
   return
 }
 
 // ====
 
-spirv.target<vulkan1_3> @target {contract_feature_bits = 2318}
+spirv.target<vulkan1_3> @target {contract_feature_bits = 2222}
 
 func.def target(@target) @cooperative_matrix_rejects_padded_storage_layout(%input: buffer, %byte_offset: offset) -> (vector<16xf16>) {
   %byte_offset_aligned = index.assume %byte_offset [mul(%byte_offset, 16)] : offset

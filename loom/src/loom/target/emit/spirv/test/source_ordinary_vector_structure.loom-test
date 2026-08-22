@@ -130,17 +130,17 @@ kernel.def target(@target) @ordinary_vector_structure_i32() {
          %27 = OpIAdd %uint %22 %uint_1
          %28 = OpAccessChain %_ptr_PhysicalStorageBuffer_ulong %20 %int_0 %27
 %output_aligned = OpLoad %ulong %28 Aligned 8
-         %32 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_int %input_aligned
-         %33 = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_int %32 %ulong_0
+         %31 = OpIAdd %ulong %input_aligned %ulong_0
+         %33 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_int %31
           %a = OpLoad %int %33 Aligned 4
-         %36 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_int %input_aligned
-         %37 = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_int %36 %ulong_4
+         %36 = OpIAdd %ulong %input_aligned %ulong_4
+         %37 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_int %36
           %b = OpLoad %int %37 Aligned 4
-         %40 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_int %input_aligned
-         %41 = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_int %40 %ulong_8
+         %40 = OpIAdd %ulong %input_aligned %ulong_8
+         %41 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_int %40
           %c = OpLoad %int %41 Aligned 4
-         %44 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_int %input_aligned
-         %45 = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_int %44 %ulong_12
+         %44 = OpIAdd %ulong %input_aligned %ulong_12
+         %45 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_int %44
           %d = OpLoad %int %45 Aligned 4
   %condition = OpSGreaterThan %bool %a %b
        %from = OpCompositeConstruct %v4int %a %b %c %d
@@ -151,13 +151,13 @@ kernel.def target(@target) @ordinary_vector_structure_i32() {
                OpSelectionMerge %58 None
                OpBranchConditional %condition %57 %59
          %57 = OpLabel
-         %60 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_int %output_aligned
-         %61 = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_int %60 %ulong_0
+         %60 = OpIAdd %ulong %output_aligned %ulong_0
+         %61 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_int %60
                OpStore %61 %a Aligned 4
                OpBranch %58
          %59 = OpLabel
-         %62 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_int %output_aligned
-         %63 = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_int %62 %ulong_0
+         %62 = OpIAdd %ulong %output_aligned %ulong_0
+         %63 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_int %62
                OpStore %63 %b Aligned 4
                OpBranch %58
          %58 = OpLabel
@@ -168,17 +168,17 @@ kernel.def target(@target) @ordinary_vector_structure_i32() {
     %result1 = OpCompositeExtract %int %final 1
     %result2 = OpCompositeExtract %int %final 2
     %result3 = OpCompositeExtract %int %final 3
-         %71 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_int %output_aligned
-         %72 = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_int %71 %ulong_0
+         %71 = OpIAdd %ulong %output_aligned %ulong_0
+         %72 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_int %71
                OpStore %72 %result0 Aligned 4
-         %73 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_int %output_aligned
-         %74 = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_int %73 %ulong_4
+         %73 = OpIAdd %ulong %output_aligned %ulong_4
+         %74 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_int %73
                OpStore %74 %result1 Aligned 4
-         %75 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_int %output_aligned
-         %76 = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_int %75 %ulong_8
+         %75 = OpIAdd %ulong %output_aligned %ulong_8
+         %76 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_int %75
                OpStore %76 %result2 Aligned 4
-         %77 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_int %output_aligned
-         %78 = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_int %77 %ulong_12
+         %77 = OpIAdd %ulong %output_aligned %ulong_12
+         %78 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_int %77
                OpStore %78 %result3 Aligned 4
                OpReturn
                OpFunctionEnd

@@ -255,12 +255,11 @@
       }
     },
     {
-      "name": "runs spirv vulkan cooperative f16 case",
+      "name": "runs all spirv vulkan cooperative f16 cases",
       "run": {
         "tool": "iree-test-loom",
         "args": [
           "{srcdir}/spirv_vulkan_coop_hal_actual.loom",
-          "--case=@dense_projection_tiled_f16_128_case",
           "--device=vulkan",
           "--vulkan_validation_layers=false"
         ]
@@ -268,8 +267,12 @@
       "stdout": {
         "contains": [
           "\"format\":\"loom.test.v0\"",
+          "\"sample_count\":4",
+          "\"failed_sample_count\":0",
+          "\"case\":\"cooperative_matrix_f16_two_tiles_case\"",
           "\"case\":\"dense_projection_tiled_f16_128_case\"",
-          "\"passed\":true"
+          "\"case\":\"narrow_score_tiled_f16_128x16_m1_case\"",
+          "\"case\":\"narrow_score_tiled_f16_128x16_m2_case\""
         ]
       }
     },

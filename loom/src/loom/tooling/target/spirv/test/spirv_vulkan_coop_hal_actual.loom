@@ -38,8 +38,9 @@ kernel.def target(@target) @cooperative_matrix_f16_two_tiles() {
 
 check.case @cooperative_matrix_f16_two_tiles_case {
   check.requires<hal.vulkan.feature> {feature = "cooperative_matrix_khr"}
+  check.requires<hal.vulkan.feature> {feature = "shader_int8"}
   check.requires<hal.vulkan.feature> {feature = "shader_float16"}
-  check.requires<hal.vulkan.feature> {feature = "storage_buffer_16bit_access"}
+  check.requires<hal.vulkan.feature> {feature = "storage_buffer_8bit_access"}
   check.requires<hal.spirv.cooperative_matrix> {row = "khr.cooperative_matrix.f16.16x16x16.f32.subgroup"}
   %lhs = check.generate.iota offset(1.0) step(1.0) : tensor<32x16xf16>
   %rhs = check.generate.iota offset(0.5) step(0.5) : tensor<16x16xf16>
@@ -103,8 +104,9 @@ kernel.def target(@target) @dense_projection_tiled_f16_128() {
 
 check.case @dense_projection_tiled_f16_128_case {
   check.requires<hal.vulkan.feature> {feature = "cooperative_matrix_khr"}
+  check.requires<hal.vulkan.feature> {feature = "shader_int8"}
   check.requires<hal.vulkan.feature> {feature = "shader_float16"}
-  check.requires<hal.vulkan.feature> {feature = "storage_buffer_16bit_access"}
+  check.requires<hal.vulkan.feature> {feature = "storage_buffer_8bit_access"}
   check.requires<hal.spirv.cooperative_matrix> {row = "khr.cooperative_matrix.f16.16x16x16.f32.subgroup"}
   %lhs = check.generate.iota offset(0.125) step(0.000244140625) : tensor<8x8x16x16xf16>
   %rhs = check.generate.iota offset(-0.25) step(0.0001220703125) : tensor<8x8x16x16xf16>
@@ -243,8 +245,9 @@ kernel.def target(@target) @narrow_score_tiled_f16_128x16_m2() {
 
 check.case @narrow_score_tiled_f16_128x16_m1_case {
   check.requires<hal.vulkan.feature> {feature = "cooperative_matrix_khr"}
+  check.requires<hal.vulkan.feature> {feature = "shader_int8"}
   check.requires<hal.vulkan.feature> {feature = "shader_float16"}
-  check.requires<hal.vulkan.feature> {feature = "storage_buffer_16bit_access"}
+  check.requires<hal.vulkan.feature> {feature = "storage_buffer_8bit_access"}
   check.requires<hal.spirv.cooperative_matrix> {row = "khr.cooperative_matrix.f16.16x16x16.f32.subgroup"}
   %lhs = check.generate.iota offset(-0.375) step(0.00018310546875) : tensor<8x8x16x16xf16>
   %rhs = check.generate.iota offset(0.0625) step(0.000244140625) : tensor<8x1x16x16xf16>
@@ -258,8 +261,9 @@ check.case @narrow_score_tiled_f16_128x16_m1_case {
 
 check.case @narrow_score_tiled_f16_128x16_m2_case {
   check.requires<hal.vulkan.feature> {feature = "cooperative_matrix_khr"}
+  check.requires<hal.vulkan.feature> {feature = "shader_int8"}
   check.requires<hal.vulkan.feature> {feature = "shader_float16"}
-  check.requires<hal.vulkan.feature> {feature = "storage_buffer_16bit_access"}
+  check.requires<hal.vulkan.feature> {feature = "storage_buffer_8bit_access"}
   check.requires<hal.spirv.cooperative_matrix> {row = "khr.cooperative_matrix.f16.16x16x16.f32.subgroup"}
   %lhs = check.generate.iota offset(-0.375) step(0.00018310546875) : tensor<8x8x16x16xf16>
   %rhs = check.generate.iota offset(0.0625) step(0.000244140625) : tensor<8x1x16x16xf16>

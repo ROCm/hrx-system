@@ -449,12 +449,12 @@ low.kernel.def target<spirv.logical.core>(@hal_target) workgroup_size(1, 1, 1) @
          %40 = OpIAdd %uint %35 %uint_1
          %41 = OpAccessChain %_ptr_PhysicalStorageBuffer_ulong %33 %int_0 %40
      %output = OpLoad %ulong %41 Aligned 8
-         %44 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_int %input
- %input_view = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_int %44 %byte_offset
+         %43 = OpIAdd %ulong %input %byte_offset
+ %input_view = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_int %43
      %loaded = OpLoad %int %input_view Aligned 4
 %incremented = OpIAdd %int %loaded %loaded
-         %48 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_int %output
-%output_view = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_int %48 %byte_offset
+         %48 = OpIAdd %ulong %output %byte_offset
+%output_view = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_int %48
                OpStore %output_view %incremented Aligned 4
                OpReturn
                OpFunctionEnd
@@ -580,11 +580,11 @@ low.kernel.def target<spirv.logical.core>(@hal_target) workgroup_size(1, 2, 1) @
  %byte_index = OpShiftLeftLogical %int %linear %shift
 %unsigned_byte_index = OpBitcast %uint %byte_index
 %byte_offset = OpUConvert %ulong %unsigned_byte_index
-         %51 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_int %input
- %input_view = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_int %51 %byte_offset
+         %50 = OpIAdd %ulong %input %byte_offset
+ %input_view = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_int %50
      %loaded = OpLoad %int %input_view Aligned 4
-         %54 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_int %output
-%output_view = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_int %54 %byte_offset
+         %54 = OpIAdd %ulong %output %byte_offset
+%output_view = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_int %54
                OpStore %output_view %loaded Aligned 4
                OpReturn
                OpFunctionEnd
@@ -716,15 +716,15 @@ low.kernel.def target<spirv.logical.core>(@hal_target) workgroup_size(1, 1, 1) @
      %output = OpLoad %ulong %50 Aligned 8
      %inside = OpULessThanEqual %bool %byte_offset %limit
 %selected_offset = OpSelect %ulong %inside %byte_offset %zero_offset
-         %57 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_int %input
- %input_view = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_int %57 %selected_offset
+         %56 = OpIAdd %ulong %input %selected_offset
+ %input_view = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_int %56
      %loaded = OpLoad %int %input_view Aligned 4
    %positive = OpSGreaterThan %bool %loaded %zero
    %selected = OpSelect %int %positive %loaded %zero
    %quotient = OpSDiv %int %selected %one
   %remainder = OpSRem %int %quotient %one
-         %66 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_int %output
-%output_view = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_int %66 %selected_offset
+         %66 = OpIAdd %ulong %output %selected_offset
+%output_view = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_int %66
                OpStore %output_view %remainder Aligned 4
                OpReturn
                OpFunctionEnd
@@ -844,12 +844,12 @@ low.kernel.def target<spirv.logical.core>(@hal_target) workgroup_size(1, 1, 1) @
                OpSelectionMerge %55 None
                OpBranchConditional %inside %54 %55
          %54 = OpLabel
-         %57 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_int %input
- %input_view = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_int %57 %byte_offset
+         %56 = OpIAdd %ulong %input %byte_offset
+ %input_view = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_int %56
      %loaded = OpLoad %int %input_view Aligned 4
 %incremented = OpIAdd %int %loaded %loaded
-         %61 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_int %output
-%output_view = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_int %61 %byte_offset
+         %61 = OpIAdd %ulong %output %byte_offset
+%output_view = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_int %61
                OpStore %output_view %incremented Aligned 4
                OpBranch %55
          %55 = OpLabel
@@ -1021,15 +1021,15 @@ low.kernel.def target<spirv.logical.core>(@hal_target) workgroup_size(1, 1, 1) @
          %40 = OpIAdd %uint %35 %uint_1
          %41 = OpAccessChain %_ptr_PhysicalStorageBuffer_ulong %33 %int_0 %40
      %output = OpLoad %ulong %41 Aligned 8
-         %45 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_float %input
- %input_view = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_float %45 %byte_offset
+         %43 = OpIAdd %ulong %input %byte_offset
+ %input_view = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_float %43
      %loaded = OpLoad %float %input_view Aligned 4
         %sum = OpFAdd %float %loaded %loaded
     %product = OpFMul %float %sum %loaded
    %quotient = OpFDiv %float %product %loaded
   %remainder = OpFRem %float %quotient %loaded
-         %52 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_float %output
-%output_view = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_float %52 %byte_offset
+         %52 = OpIAdd %ulong %output %byte_offset
+%output_view = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_float %52
                OpStore %output_view %remainder Aligned 4
                OpReturn
                OpFunctionEnd
@@ -1135,14 +1135,14 @@ low.kernel.def target<spirv.logical.core>(@hal_target) workgroup_size(1, 1, 1) @
          %40 = OpIAdd %uint %35 %uint_1
          %41 = OpAccessChain %_ptr_PhysicalStorageBuffer_ulong %33 %int_0 %40
      %output = OpLoad %ulong %41 Aligned 8
-         %45 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_long %input
- %input_view = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_long %45 %byte_offset
+         %43 = OpIAdd %ulong %input %byte_offset
+ %input_view = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_long %43
      %loaded = OpLoad %long %input_view Aligned 8
         %sum = OpIAdd %long %loaded %loaded
      %larger = OpSGreaterThan %bool %sum %loaded
    %selected = OpSelect %long %larger %sum %loaded
-         %52 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_long %output
-%output_view = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_long %52 %byte_offset
+         %52 = OpIAdd %ulong %output %byte_offset
+%output_view = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_long %52
                OpStore %output_view %selected Aligned 8
                OpReturn
                OpFunctionEnd
@@ -1347,39 +1347,39 @@ low.kernel.def target<spirv.logical.core>(@hal_target) workgroup_size(1, 1, 1) @
          %72 = OpIAdd %uint %35 %uint_9
          %73 = OpAccessChain %_ptr_PhysicalStorageBuffer_ulong %33 %int_0 %72
  %output_f64 = OpLoad %ulong %73 Aligned 8
-         %77 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_char %input_i8
-%input_i8_view = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_char %77 %byte_offset
+         %75 = OpIAdd %ulong %input_i8 %byte_offset
+%input_i8_view = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_char %75
   %loaded_i8 = OpLoad %char %input_i8_view Aligned 1
      %sum_i8 = OpIAdd %char %loaded_i8 %loaded_i8
-         %81 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_char %output_i8
-%output_i8_view = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_char %81 %byte_offset
+         %81 = OpIAdd %ulong %output_i8 %byte_offset
+%output_i8_view = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_char %81
                OpStore %output_i8_view %sum_i8 Aligned 1
-         %85 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_short %input_i16
-%input_i16_view = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_short %85 %byte_offset
+         %83 = OpIAdd %ulong %input_i16 %byte_offset
+%input_i16_view = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_short %83
  %loaded_i16 = OpLoad %short %input_i16_view Aligned 2
     %sum_i16 = OpIAdd %short %loaded_i16 %loaded_i16
-         %89 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_short %output_i16
-%output_i16_view = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_short %89 %byte_offset
+         %89 = OpIAdd %ulong %output_i16 %byte_offset
+%output_i16_view = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_short %89
                OpStore %output_i16_view %sum_i16 Aligned 2
-         %93 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_half %input_f16
-%input_f16_view = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_half %93 %byte_offset
+         %91 = OpIAdd %ulong %input_f16 %byte_offset
+%input_f16_view = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_half %91
  %loaded_f16 = OpLoad %half %input_f16_view Aligned 2
     %sum_f16 = OpFAdd %half %loaded_f16 %loaded_f16
-         %97 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_half %output_f16
-%output_f16_view = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_half %97 %byte_offset
+         %97 = OpIAdd %ulong %output_f16 %byte_offset
+%output_f16_view = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_half %97
                OpStore %output_f16_view %sum_f16 Aligned 2
-        %101 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_bfloat16 %input_bf16
-%input_bf16_view = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_bfloat16 %101 %byte_offset
+         %99 = OpIAdd %ulong %input_bf16 %byte_offset
+%input_bf16_view = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_bfloat16 %99
 %loaded_bf16 = OpLoad %bfloat16 %input_bf16_view Aligned 2
-        %104 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_bfloat16 %output_bf16
-%output_bf16_view = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_bfloat16 %104 %byte_offset
+        %104 = OpIAdd %ulong %output_bf16 %byte_offset
+%output_bf16_view = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_bfloat16 %104
                OpStore %output_bf16_view %loaded_bf16 Aligned 2
-        %108 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_double %input_f64
-%input_f64_view = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_double %108 %byte_offset
+        %106 = OpIAdd %ulong %input_f64 %byte_offset
+%input_f64_view = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_double %106
  %loaded_f64 = OpLoad %double %input_f64_view Aligned 8
     %sum_f64 = OpFAdd %double %loaded_f64 %loaded_f64
-        %112 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_double %output_f64
-%output_f64_view = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_double %112 %byte_offset
+        %112 = OpIAdd %ulong %output_f64 %byte_offset
+%output_f64_view = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_double %112
                OpStore %output_f64_view %sum_f64 Aligned 8
                OpReturn
                OpFunctionEnd
@@ -1741,12 +1741,12 @@ low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @spirv_
      %output = OpLoad %ulong %20 Aligned 8
          %22 = OpAccessChain %_ptr_StorageBuffer_ulong %10 %int_0
 %byte_offset = OpLoad %ulong %22 Aligned 8
-         %25 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_int %input
- %input_view = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_int %25 %byte_offset
+         %24 = OpIAdd %ulong %input %byte_offset
+ %input_view = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_int %24
      %loaded = OpLoad %int %input_view Aligned 4
 %incremented = OpIAdd %int %loaded %loaded
-         %29 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_int %output
-%output_view = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_int %29 %byte_offset
+         %29 = OpIAdd %ulong %output %byte_offset
+%output_view = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_int %29
                OpStore %output_view %incremented Aligned 4
          %31 = OpAccessChain %_ptr_StorageBuffer_int %11 %int_0
                OpStore %31 %loaded Aligned 4
@@ -2004,32 +2004,32 @@ low.kernel.def target<spirv.logical.core>(@hal_target_scalar_payloads) workgroup
         %123 = OpAccessChain %_ptr_PhysicalStorageBuffer_ulong %91 %int_0 %122
  %output_i64 = OpLoad %ulong %123 Aligned 8
    %flag_i32 = OpSelect %int %flag %one %zero
-        %129 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_int %output_flag
-  %flag_view = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_int %129 %byte_offset
+        %128 = OpIAdd %ulong %output_flag %byte_offset
+  %flag_view = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_int %128
                OpStore %flag_view %flag_i32 Aligned 4
-        %132 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_char %output_i8
-    %i8_view = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_char %132 %byte_offset
+        %131 = OpIAdd %ulong %output_i8 %byte_offset
+    %i8_view = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_char %131
                OpStore %i8_view %i8 Aligned 1
-        %135 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_short %output_i16
-   %i16_view = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_short %135 %byte_offset
+        %134 = OpIAdd %ulong %output_i16 %byte_offset
+   %i16_view = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_short %134
                OpStore %i16_view %i16 Aligned 2
-        %138 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_half %output_f16
-   %f16_view = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_half %138 %byte_offset
+        %137 = OpIAdd %ulong %output_f16 %byte_offset
+   %f16_view = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_half %137
                OpStore %f16_view %f16 Aligned 2
-        %141 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_bfloat16 %output_bf16
-  %bf16_view = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_bfloat16 %141 %byte_offset
+        %140 = OpIAdd %ulong %output_bf16 %byte_offset
+  %bf16_view = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_bfloat16 %140
                OpStore %bf16_view %bf16 Aligned 2
     %f32_sum = OpFAdd %float %f32 %f32
-        %145 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_float %output_f32
-   %f32_view = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_float %145 %byte_offset
+        %144 = OpIAdd %ulong %output_f32 %byte_offset
+   %f32_view = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_float %144
                OpStore %f32_view %f32_sum Aligned 4
     %f64_sum = OpFAdd %double %f64 %f64
-        %149 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_double %output_f64
-   %f64_view = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_double %149 %byte_offset
+        %148 = OpIAdd %ulong %output_f64 %byte_offset
+   %f64_view = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_double %148
                OpStore %f64_view %f64_sum Aligned 8
     %i64_sum = OpIAdd %long %i64 %i64
-        %153 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_long %output_i64
-   %i64_view = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_long %153 %byte_offset
+        %152 = OpIAdd %ulong %output_i64 %byte_offset
+   %i64_view = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_long %152
                OpStore %i64_view %i64_sum Aligned 8
                OpReturn
                OpFunctionEnd
@@ -2257,48 +2257,48 @@ low.kernel.def target<spirv.logical.core>(@hal_target) workgroup_size(1, 1, 1) @
          %80 = OpIAdd %uint %35 %uint_11
          %81 = OpAccessChain %_ptr_PhysicalStorageBuffer_ulong %33 %int_0 %80
 %output_bitcast_f32 = OpLoad %ulong %81 Aligned 8
-         %85 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_char %input_i8
-%input_i8_view = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_char %85 %byte_offset
+         %83 = OpIAdd %ulong %input_i8 %byte_offset
+%input_i8_view = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_char %83
   %loaded_i8 = OpLoad %char %input_i8_view Aligned 1
 %extended_i32 = OpSConvert %int %loaded_i8
-         %90 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_int %output_ext_i32
-%output_ext_i32_view = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_int %90 %byte_offset
+         %89 = OpIAdd %ulong %output_ext_i32 %byte_offset
+%output_ext_i32_view = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_int %89
                OpStore %output_ext_i32_view %extended_i32 Aligned 4
 %converted_f32 = OpConvertSToF %float %loaded_i8
-         %95 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_float %output_sitofp_f32
-%output_sitofp_f32_view = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_float %95 %byte_offset
+         %94 = OpIAdd %ulong %output_sitofp_f32 %byte_offset
+%output_sitofp_f32_view = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_float %94
                OpStore %output_sitofp_f32_view %converted_f32 Aligned 4
-         %99 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_long %input_i64
-%input_i64_view = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_long %99 %byte_offset
+         %97 = OpIAdd %ulong %input_i64 %byte_offset
+%input_i64_view = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_long %97
  %loaded_i64 = OpLoad %long %input_i64_view Aligned 8
 %truncated_i32 = OpSConvert %int %loaded_i64
-        %103 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_int %output_trunc_i32
-%output_trunc_i32_view = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_int %103 %byte_offset
+        %103 = OpIAdd %ulong %output_trunc_i32 %byte_offset
+%output_trunc_i32_view = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_int %103
                OpStore %output_trunc_i32_view %truncated_i32 Aligned 4
-        %107 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_half %input_f16
-%input_f16_view = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_half %107 %byte_offset
+        %105 = OpIAdd %ulong %input_f16 %byte_offset
+%input_f16_view = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_half %105
  %loaded_f16 = OpLoad %half %input_f16_view Aligned 2
 %extended_f32 = OpFConvert %float %loaded_f16
-        %111 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_float %output_extf_f32
-%output_extf_f32_view = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_float %111 %byte_offset
+        %111 = OpIAdd %ulong %output_extf_f32 %byte_offset
+%output_extf_f32_view = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_float %111
                OpStore %output_extf_f32_view %extended_f32 Aligned 4
-        %113 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_float %input_f32
-%input_f32_view = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_float %113 %byte_offset
+        %113 = OpIAdd %ulong %input_f32 %byte_offset
+%input_f32_view = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_float %113
  %loaded_f32 = OpLoad %float %input_f32_view Aligned 4
 %truncated_f16 = OpFConvert %half %loaded_f32
-        %117 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_half %output_fptrunc_f16
-%output_fptrunc_f16_view = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_half %117 %byte_offset
+        %117 = OpIAdd %ulong %output_fptrunc_f16 %byte_offset
+%output_fptrunc_f16_view = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_half %117
                OpStore %output_fptrunc_f16_view %truncated_f16 Aligned 2
 %converted_i16 = OpConvertFToS %short %loaded_f32
-        %122 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_short %output_fptosi_i16
-%output_fptosi_i16_view = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_short %122 %byte_offset
+        %121 = OpIAdd %ulong %output_fptosi_i16 %byte_offset
+%output_fptosi_i16_view = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_short %121
                OpStore %output_fptosi_i16_view %converted_i16 Aligned 2
-        %124 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_int %input_i32_bits
-%input_i32_bits_view = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_int %124 %byte_offset
+        %124 = OpIAdd %ulong %input_i32_bits %byte_offset
+%input_i32_bits_view = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_int %124
 %loaded_i32_bits = OpLoad %int %input_i32_bits_view Aligned 4
 %bitcast_f32 = OpBitcast %float %loaded_i32_bits
-        %128 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_float %output_bitcast_f32
-%output_bitcast_f32_view = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_float %128 %byte_offset
+        %128 = OpIAdd %ulong %output_bitcast_f32 %byte_offset
+%output_bitcast_f32_view = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_float %128
                OpStore %output_bitcast_f32_view %bitcast_f32 Aligned 4
                OpReturn
                OpFunctionEnd
@@ -2308,17 +2308,17 @@ low.kernel.def target<spirv.logical.core>(@hal_target) workgroup_size(1, 1, 1) @
 // RUN: emit spirv-dis validate
 // REQUIRES: spirv-dis, spirv-val
 
-spirv.target<vulkan1_3> @hal_target_coop_f16 {abi = hal_kernel, contract_feature_bits = 2318}
+spirv.target<vulkan1_3> @hal_target_coop_f16 {abi = hal_kernel, contract_feature_bits = 2222}
 
 low.kernel.def target<spirv.logical.core>(@hal_target_coop_f16) workgroup_size(32, 1, 1) @spirv_raw_bda_cooperative_matrix_f16(%byte_offset: reg<spirv.offset64>) asm {
   %lhs_buffer = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
   %rhs_buffer = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
   %init_buffer = resource<hal_binding> {index = 2, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
   %out_buffer = resource<hal_binding> {index = 3, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
-  %lhs_view = OpPtrAccessChain.storage_buffer.f16.byte_offset %lhs_buffer, %byte_offset
-  %rhs_view = OpPtrAccessChain.storage_buffer.f16.byte_offset %rhs_buffer, %byte_offset
-  %init_view = OpPtrAccessChain.storage_buffer.f32.byte_offset %init_buffer, %byte_offset
-  %out_view = OpPtrAccessChain.storage_buffer.f32.byte_offset %out_buffer, %byte_offset
+  %lhs_view = OpPtrAccessChain.storage_buffer.u8.byte_offset %lhs_buffer, %byte_offset
+  %rhs_view = OpPtrAccessChain.storage_buffer.u8.byte_offset %rhs_buffer, %byte_offset
+  %init_view = OpPtrAccessChain.storage_buffer.u8.byte_offset %init_buffer, %byte_offset
+  %out_view = OpPtrAccessChain.storage_buffer.u8.byte_offset %out_buffer, %byte_offset
   %lhs = OpCooperativeMatrixLoadKHR.lhs.f16.16x16x16.f32.subgroup.row_major %lhs_view
   %rhs = OpCooperativeMatrixLoadKHR.rhs.f16.16x16x16.f32.subgroup.row_major %rhs_view
   %init = OpCooperativeMatrixLoadKHR.init.f16.16x16x16.f32.subgroup.row_major %init_view
@@ -2333,11 +2333,12 @@ low.kernel.def target<spirv.logical.core>(@hal_target_coop_f16) workgroup_size(3
                OpCapability PhysicalStorageBufferAddresses
                OpCapability Int64
                OpCapability Float16
-               OpCapability StorageBuffer16BitAccess
+               OpCapability Int8
+               OpCapability StorageBuffer8BitAccess
                OpCapability CooperativeMatrixKHR
                OpExtension "SPV_KHR_vulkan_memory_model"
                OpExtension "SPV_KHR_physical_storage_buffer"
-               OpExtension "SPV_KHR_16bit_storage"
+               OpExtension "SPV_KHR_8bit_storage"
                OpExtension "SPV_KHR_cooperative_matrix"
                OpMemoryModel PhysicalStorageBuffer64 Vulkan
                OpEntryPoint GLCompute %spirv_raw_bda_cooperative_matrix_f16 "spirv_raw_bda_cooperative_matrix_f16"
@@ -2373,8 +2374,7 @@ low.kernel.def target<spirv.logical.core>(@hal_target_coop_f16) workgroup_size(3
                OpDecorate %_runtimearr_ulong ArrayStride 8
                OpDecorate %_struct_28 Block
                OpMemberDecorate %_struct_28 0 Offset 0
-               OpDecorate %_ptr_PhysicalStorageBuffer_half ArrayStride 1
-               OpDecorate %_ptr_PhysicalStorageBuffer_float ArrayStride 1
+               OpDecorate %_ptr_PhysicalStorageBuffer_uchar ArrayStride 1
       %ulong = OpTypeInt 64 0
        %uint = OpTypeInt 32 0
      %uint_2 = OpConstant %uint 2
@@ -2399,15 +2399,15 @@ low.kernel.def target<spirv.logical.core>(@hal_target_coop_f16) workgroup_size(3
      %uint_1 = OpConstant %uint 1
    %uint_2_0 = OpConstant %uint 2
      %uint_3 = OpConstant %uint 3
+      %uchar = OpTypeInt 8 0
+%_ptr_PhysicalStorageBuffer_uchar = OpTypePointer PhysicalStorageBuffer %uchar
        %half = OpTypeFloat 16
-%_ptr_PhysicalStorageBuffer_half = OpTypePointer PhysicalStorageBuffer %half
-      %float = OpTypeFloat 32
-%_ptr_PhysicalStorageBuffer_float = OpTypePointer PhysicalStorageBuffer %float
     %uint_16 = OpConstant %uint 16
      %uint_0 = OpConstant %uint 0
-         %65 = OpTypeCooperativeMatrixKHR %half %uint_3 %uint_16 %uint_16 %uint_0
+         %64 = OpTypeCooperativeMatrixKHR %half %uint_3 %uint_16 %uint_16 %uint_0
     %uint_32 = OpConstant %uint 32
-         %68 = OpTypeCooperativeMatrixKHR %half %uint_3 %uint_16 %uint_16 %uint_1
+         %67 = OpTypeCooperativeMatrixKHR %half %uint_3 %uint_16 %uint_16 %uint_1
+      %float = OpTypeFloat 32
          %70 = OpTypeCooperativeMatrixKHR %float %uint_3 %uint_16 %uint_16 %uint_2_0
     %uint_64 = OpConstant %uint 64
 %spirv_raw_bda_cooperative_matrix_f16 = OpFunction %void None %10
@@ -2436,16 +2436,16 @@ low.kernel.def target<spirv.logical.core>(@hal_target_coop_f16) workgroup_size(3
          %48 = OpIAdd %uint %35 %uint_3
          %49 = OpAccessChain %_ptr_PhysicalStorageBuffer_ulong %33 %int_0 %48
  %out_buffer = OpLoad %ulong %49 Aligned 8
-         %53 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_half %lhs_buffer
-   %lhs_view = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_half %53 %byte_offset
-         %55 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_half %rhs_buffer
-   %rhs_view = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_half %55 %byte_offset
-         %59 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_float %init_buffer
-  %init_view = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_float %59 %byte_offset
-         %61 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_float %out_buffer
-   %out_view = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_float %61 %byte_offset
-        %lhs = OpCooperativeMatrixLoadKHR %65 %lhs_view %uint_0 %uint_32 Aligned 16
-        %rhs = OpCooperativeMatrixLoadKHR %68 %rhs_view %uint_0 %uint_32 Aligned 16
+         %51 = OpIAdd %ulong %lhs_buffer %byte_offset
+   %lhs_view = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_uchar %51
+         %55 = OpIAdd %ulong %rhs_buffer %byte_offset
+   %rhs_view = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_uchar %55
+         %57 = OpIAdd %ulong %init_buffer %byte_offset
+  %init_view = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_uchar %57
+         %59 = OpIAdd %ulong %out_buffer %byte_offset
+   %out_view = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_uchar %59
+        %lhs = OpCooperativeMatrixLoadKHR %64 %lhs_view %uint_0 %uint_32 Aligned 16
+        %rhs = OpCooperativeMatrixLoadKHR %67 %rhs_view %uint_0 %uint_32 Aligned 16
        %init = OpCooperativeMatrixLoadKHR %70 %init_view %uint_0 %uint_64 Aligned 16
      %result = OpCooperativeMatrixMulAddKHR %70 %lhs %rhs %init
                OpCooperativeMatrixStoreKHR %out_view %result %uint_0 %uint_64 Aligned 16
@@ -2464,10 +2464,10 @@ low.kernel.def target<spirv.logical.core>(@hal_target_coop_s8) workgroup_size(32
   %rhs_buffer = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
   %init_buffer = resource<hal_binding> {index = 2, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
   %out_buffer = resource<hal_binding> {index = 3, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
-  %lhs_view = OpPtrAccessChain.storage_buffer.i8.byte_offset %lhs_buffer, %byte_offset
-  %rhs_view = OpPtrAccessChain.storage_buffer.i8.byte_offset %rhs_buffer, %byte_offset
-  %init_view = OpPtrAccessChain.storage_buffer.i32.byte_offset %init_buffer, %byte_offset
-  %out_view = OpPtrAccessChain.storage_buffer.i32.byte_offset %out_buffer, %byte_offset
+  %lhs_view = OpPtrAccessChain.storage_buffer.u8.byte_offset %lhs_buffer, %byte_offset
+  %rhs_view = OpPtrAccessChain.storage_buffer.u8.byte_offset %rhs_buffer, %byte_offset
+  %init_view = OpPtrAccessChain.storage_buffer.u8.byte_offset %init_buffer, %byte_offset
+  %out_view = OpPtrAccessChain.storage_buffer.u8.byte_offset %out_buffer, %byte_offset
   %lhs = OpCooperativeMatrixLoadKHR.lhs.s8.16x16x32.s32.subgroup.row_major %lhs_view
   %rhs = OpCooperativeMatrixLoadKHR.rhs.s8.16x16x32.s32.subgroup.row_major %rhs_view
   %init = OpCooperativeMatrixLoadKHR.init.s8.16x16x32.s32.subgroup.row_major %init_view
@@ -2522,8 +2522,7 @@ low.kernel.def target<spirv.logical.core>(@hal_target_coop_s8) workgroup_size(32
                OpDecorate %_runtimearr_ulong ArrayStride 8
                OpDecorate %_struct_28 Block
                OpMemberDecorate %_struct_28 0 Offset 0
-               OpDecorate %_ptr_PhysicalStorageBuffer_char ArrayStride 1
-               OpDecorate %_ptr_PhysicalStorageBuffer_int ArrayStride 1
+               OpDecorate %_ptr_PhysicalStorageBuffer_uchar ArrayStride 1
       %ulong = OpTypeInt 64 0
        %uint = OpTypeInt 32 0
      %uint_2 = OpConstant %uint 2
@@ -2548,9 +2547,9 @@ low.kernel.def target<spirv.logical.core>(@hal_target_coop_s8) workgroup_size(32
      %uint_1 = OpConstant %uint 1
    %uint_2_0 = OpConstant %uint 2
      %uint_3 = OpConstant %uint 3
+      %uchar = OpTypeInt 8 0
+%_ptr_PhysicalStorageBuffer_uchar = OpTypePointer PhysicalStorageBuffer %uchar
        %char = OpTypeInt 8 1
-%_ptr_PhysicalStorageBuffer_char = OpTypePointer PhysicalStorageBuffer %char
-%_ptr_PhysicalStorageBuffer_int = OpTypePointer PhysicalStorageBuffer %int
     %uint_16 = OpConstant %uint 16
     %uint_32 = OpConstant %uint 32
      %uint_0 = OpConstant %uint 0
@@ -2584,14 +2583,14 @@ low.kernel.def target<spirv.logical.core>(@hal_target_coop_s8) workgroup_size(32
          %48 = OpIAdd %uint %35 %uint_3
          %49 = OpAccessChain %_ptr_PhysicalStorageBuffer_ulong %33 %int_0 %48
  %out_buffer = OpLoad %ulong %49 Aligned 8
-         %53 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_char %lhs_buffer
-   %lhs_view = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_char %53 %byte_offset
-         %55 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_char %rhs_buffer
-   %rhs_view = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_char %55 %byte_offset
-         %58 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_int %init_buffer
-  %init_view = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_int %58 %byte_offset
-         %60 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_int %out_buffer
-   %out_view = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_int %60 %byte_offset
+         %51 = OpIAdd %ulong %lhs_buffer %byte_offset
+   %lhs_view = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_uchar %51
+         %55 = OpIAdd %ulong %rhs_buffer %byte_offset
+   %rhs_view = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_uchar %55
+         %57 = OpIAdd %ulong %init_buffer %byte_offset
+  %init_view = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_uchar %57
+         %59 = OpIAdd %ulong %out_buffer %byte_offset
+   %out_view = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_uchar %59
         %lhs = OpCooperativeMatrixLoadKHR %65 %lhs_view %uint_0 %uint_32 Aligned 16
         %rhs = OpCooperativeMatrixLoadKHR %67 %rhs_view %uint_0 %uint_16 Aligned 16
        %init = OpCooperativeMatrixLoadKHR %69 %init_view %uint_0 %uint_64 Aligned 16
@@ -2614,8 +2613,8 @@ low.kernel.def target<spirv.logical.core>(@hal_target_coop_u8) workgroup_size(32
   %out_buffer = resource<hal_binding> {index = 3, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
   %lhs_view = OpPtrAccessChain.storage_buffer.u8.byte_offset %lhs_buffer, %byte_offset
   %rhs_view = OpPtrAccessChain.storage_buffer.u8.byte_offset %rhs_buffer, %byte_offset
-  %init_view = OpPtrAccessChain.storage_buffer.u32.byte_offset %init_buffer, %byte_offset
-  %out_view = OpPtrAccessChain.storage_buffer.u32.byte_offset %out_buffer, %byte_offset
+  %init_view = OpPtrAccessChain.storage_buffer.u8.byte_offset %init_buffer, %byte_offset
+  %out_view = OpPtrAccessChain.storage_buffer.u8.byte_offset %out_buffer, %byte_offset
   %lhs = OpCooperativeMatrixLoadKHR.lhs.u8.16x16x32.u32.subgroup.row_major %lhs_view
   %rhs = OpCooperativeMatrixLoadKHR.rhs.u8.16x16x32.u32.subgroup.row_major %rhs_view
   %init = OpCooperativeMatrixLoadKHR.init.u8.16x16x32.u32.subgroup.row_major %init_view
@@ -2671,7 +2670,6 @@ low.kernel.def target<spirv.logical.core>(@hal_target_coop_u8) workgroup_size(32
                OpDecorate %_struct_28 Block
                OpMemberDecorate %_struct_28 0 Offset 0
                OpDecorate %_ptr_PhysicalStorageBuffer_uchar ArrayStride 1
-               OpDecorate %_ptr_PhysicalStorageBuffer_uint ArrayStride 1
       %ulong = OpTypeInt 64 0
        %uint = OpTypeInt 32 0
      %uint_2 = OpConstant %uint 2
@@ -2698,13 +2696,12 @@ low.kernel.def target<spirv.logical.core>(@hal_target_coop_u8) workgroup_size(32
      %uint_3 = OpConstant %uint 3
       %uchar = OpTypeInt 8 0
 %_ptr_PhysicalStorageBuffer_uchar = OpTypePointer PhysicalStorageBuffer %uchar
-%_ptr_PhysicalStorageBuffer_uint = OpTypePointer PhysicalStorageBuffer %uint
     %uint_16 = OpConstant %uint 16
     %uint_32 = OpConstant %uint 32
      %uint_0 = OpConstant %uint 0
-         %65 = OpTypeCooperativeMatrixKHR %uchar %uint_3 %uint_16 %uint_32 %uint_0
-         %67 = OpTypeCooperativeMatrixKHR %uchar %uint_3 %uint_32 %uint_16 %uint_1
-         %69 = OpTypeCooperativeMatrixKHR %uint %uint_3 %uint_16 %uint_16 %uint_2_0
+         %64 = OpTypeCooperativeMatrixKHR %uchar %uint_3 %uint_16 %uint_32 %uint_0
+         %66 = OpTypeCooperativeMatrixKHR %uchar %uint_3 %uint_32 %uint_16 %uint_1
+         %68 = OpTypeCooperativeMatrixKHR %uint %uint_3 %uint_16 %uint_16 %uint_2_0
     %uint_64 = OpConstant %uint 64
 %spirv_raw_bda_cooperative_matrix_u8 = OpFunction %void None %10
          %11 = OpLabel
@@ -2732,18 +2729,18 @@ low.kernel.def target<spirv.logical.core>(@hal_target_coop_u8) workgroup_size(32
          %48 = OpIAdd %uint %35 %uint_3
          %49 = OpAccessChain %_ptr_PhysicalStorageBuffer_ulong %33 %int_0 %48
  %out_buffer = OpLoad %ulong %49 Aligned 8
-         %53 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_uchar %lhs_buffer
-   %lhs_view = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_uchar %53 %byte_offset
-         %55 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_uchar %rhs_buffer
-   %rhs_view = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_uchar %55 %byte_offset
-         %58 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_uint %init_buffer
-  %init_view = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_uint %58 %byte_offset
-         %60 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_uint %out_buffer
-   %out_view = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_uint %60 %byte_offset
-        %lhs = OpCooperativeMatrixLoadKHR %65 %lhs_view %uint_0 %uint_32 Aligned 16
-        %rhs = OpCooperativeMatrixLoadKHR %67 %rhs_view %uint_0 %uint_16 Aligned 16
-       %init = OpCooperativeMatrixLoadKHR %69 %init_view %uint_0 %uint_64 Aligned 16
-     %result = OpCooperativeMatrixMulAddKHR %69 %lhs %rhs %init
+         %51 = OpIAdd %ulong %lhs_buffer %byte_offset
+   %lhs_view = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_uchar %51
+         %55 = OpIAdd %ulong %rhs_buffer %byte_offset
+   %rhs_view = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_uchar %55
+         %57 = OpIAdd %ulong %init_buffer %byte_offset
+  %init_view = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_uchar %57
+         %59 = OpIAdd %ulong %out_buffer %byte_offset
+   %out_view = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_uchar %59
+        %lhs = OpCooperativeMatrixLoadKHR %64 %lhs_view %uint_0 %uint_32 Aligned 16
+        %rhs = OpCooperativeMatrixLoadKHR %66 %rhs_view %uint_0 %uint_16 Aligned 16
+       %init = OpCooperativeMatrixLoadKHR %68 %init_view %uint_0 %uint_64 Aligned 16
+     %result = OpCooperativeMatrixMulAddKHR %68 %lhs %rhs %init
                OpCooperativeMatrixStoreKHR %out_view %result %uint_0 %uint_64 Aligned 16
                OpReturn
                OpFunctionEnd
@@ -2753,17 +2750,17 @@ low.kernel.def target<spirv.logical.core>(@hal_target_coop_u8) workgroup_size(32
 // RUN: emit spirv-dis validate
 // REQUIRES: spirv-dis, spirv-val
 
-spirv.target<vulkan1_3> @hal_target_coop_bf16 {abi = hal_kernel, contract_feature_bits = 22790}
+spirv.target<vulkan1_3> @hal_target_coop_bf16 {abi = hal_kernel, contract_feature_bits = 22694}
 
 low.kernel.def target<spirv.logical.core>(@hal_target_coop_bf16) workgroup_size(32, 1, 1) @spirv_raw_bda_cooperative_matrix_bf16(%byte_offset: reg<spirv.offset64>) asm {
   %lhs_buffer = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
   %rhs_buffer = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
   %init_buffer = resource<hal_binding> {index = 2, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
   %out_buffer = resource<hal_binding> {index = 3, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
-  %lhs_view = OpPtrAccessChain.storage_buffer.bf16.byte_offset %lhs_buffer, %byte_offset
-  %rhs_view = OpPtrAccessChain.storage_buffer.bf16.byte_offset %rhs_buffer, %byte_offset
-  %init_view = OpPtrAccessChain.storage_buffer.f32.byte_offset %init_buffer, %byte_offset
-  %out_view = OpPtrAccessChain.storage_buffer.f32.byte_offset %out_buffer, %byte_offset
+  %lhs_view = OpPtrAccessChain.storage_buffer.u8.byte_offset %lhs_buffer, %byte_offset
+  %rhs_view = OpPtrAccessChain.storage_buffer.u8.byte_offset %rhs_buffer, %byte_offset
+  %init_view = OpPtrAccessChain.storage_buffer.u8.byte_offset %init_buffer, %byte_offset
+  %out_view = OpPtrAccessChain.storage_buffer.u8.byte_offset %out_buffer, %byte_offset
   %lhs = OpCooperativeMatrixLoadKHR.lhs.bf16.16x16x16.f32.subgroup.row_major %lhs_view
   %rhs = OpCooperativeMatrixLoadKHR.rhs.bf16.16x16x16.f32.subgroup.row_major %rhs_view
   %init = OpCooperativeMatrixLoadKHR.init.bf16.16x16x16.f32.subgroup.row_major %init_view
@@ -2777,13 +2774,14 @@ low.kernel.def target<spirv.logical.core>(@hal_target_coop_bf16) workgroup_size(
                OpCapability VulkanMemoryModel
                OpCapability PhysicalStorageBufferAddresses
                OpCapability Int64
-               OpCapability StorageBuffer16BitAccess
+               OpCapability Int8
+               OpCapability StorageBuffer8BitAccess
                OpCapability CooperativeMatrixKHR
                OpCapability BFloat16TypeKHR
                OpCapability BFloat16CooperativeMatrixKHR
                OpExtension "SPV_KHR_vulkan_memory_model"
                OpExtension "SPV_KHR_physical_storage_buffer"
-               OpExtension "SPV_KHR_16bit_storage"
+               OpExtension "SPV_KHR_8bit_storage"
                OpExtension "SPV_KHR_cooperative_matrix"
                OpExtension "SPV_KHR_bfloat16"
                OpMemoryModel PhysicalStorageBuffer64 Vulkan
@@ -2820,8 +2818,7 @@ low.kernel.def target<spirv.logical.core>(@hal_target_coop_bf16) workgroup_size(
                OpDecorate %_runtimearr_ulong ArrayStride 8
                OpDecorate %_struct_28 Block
                OpMemberDecorate %_struct_28 0 Offset 0
-               OpDecorate %_ptr_PhysicalStorageBuffer_bfloat16 ArrayStride 1
-               OpDecorate %_ptr_PhysicalStorageBuffer_float ArrayStride 1
+               OpDecorate %_ptr_PhysicalStorageBuffer_uchar ArrayStride 1
       %ulong = OpTypeInt 64 0
        %uint = OpTypeInt 32 0
      %uint_2 = OpConstant %uint 2
@@ -2846,15 +2843,15 @@ low.kernel.def target<spirv.logical.core>(@hal_target_coop_bf16) workgroup_size(
      %uint_1 = OpConstant %uint 1
    %uint_2_0 = OpConstant %uint 2
      %uint_3 = OpConstant %uint 3
+      %uchar = OpTypeInt 8 0
+%_ptr_PhysicalStorageBuffer_uchar = OpTypePointer PhysicalStorageBuffer %uchar
    %bfloat16 = OpTypeFloat 16 BFloat16KHR
-%_ptr_PhysicalStorageBuffer_bfloat16 = OpTypePointer PhysicalStorageBuffer %bfloat16
-      %float = OpTypeFloat 32
-%_ptr_PhysicalStorageBuffer_float = OpTypePointer PhysicalStorageBuffer %float
     %uint_16 = OpConstant %uint 16
      %uint_0 = OpConstant %uint 0
-         %65 = OpTypeCooperativeMatrixKHR %bfloat16 %uint_3 %uint_16 %uint_16 %uint_0
+         %64 = OpTypeCooperativeMatrixKHR %bfloat16 %uint_3 %uint_16 %uint_16 %uint_0
     %uint_32 = OpConstant %uint 32
-         %68 = OpTypeCooperativeMatrixKHR %bfloat16 %uint_3 %uint_16 %uint_16 %uint_1
+         %67 = OpTypeCooperativeMatrixKHR %bfloat16 %uint_3 %uint_16 %uint_16 %uint_1
+      %float = OpTypeFloat 32
          %70 = OpTypeCooperativeMatrixKHR %float %uint_3 %uint_16 %uint_16 %uint_2_0
     %uint_64 = OpConstant %uint 64
 %spirv_raw_bda_cooperative_matrix_bf16 = OpFunction %void None %10
@@ -2883,16 +2880,16 @@ low.kernel.def target<spirv.logical.core>(@hal_target_coop_bf16) workgroup_size(
          %48 = OpIAdd %uint %35 %uint_3
          %49 = OpAccessChain %_ptr_PhysicalStorageBuffer_ulong %33 %int_0 %48
  %out_buffer = OpLoad %ulong %49 Aligned 8
-         %53 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_bfloat16 %lhs_buffer
-   %lhs_view = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_bfloat16 %53 %byte_offset
-         %55 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_bfloat16 %rhs_buffer
-   %rhs_view = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_bfloat16 %55 %byte_offset
-         %59 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_float %init_buffer
-  %init_view = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_float %59 %byte_offset
-         %61 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_float %out_buffer
-   %out_view = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_float %61 %byte_offset
-        %lhs = OpCooperativeMatrixLoadKHR %65 %lhs_view %uint_0 %uint_32 Aligned 16
-        %rhs = OpCooperativeMatrixLoadKHR %68 %rhs_view %uint_0 %uint_32 Aligned 16
+         %51 = OpIAdd %ulong %lhs_buffer %byte_offset
+   %lhs_view = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_uchar %51
+         %55 = OpIAdd %ulong %rhs_buffer %byte_offset
+   %rhs_view = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_uchar %55
+         %57 = OpIAdd %ulong %init_buffer %byte_offset
+  %init_view = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_uchar %57
+         %59 = OpIAdd %ulong %out_buffer %byte_offset
+   %out_view = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_uchar %59
+        %lhs = OpCooperativeMatrixLoadKHR %64 %lhs_view %uint_0 %uint_32 Aligned 16
+        %rhs = OpCooperativeMatrixLoadKHR %67 %rhs_view %uint_0 %uint_32 Aligned 16
        %init = OpCooperativeMatrixLoadKHR %70 %init_view %uint_0 %uint_64 Aligned 16
      %result = OpCooperativeMatrixMulAddKHR %70 %lhs %rhs %init
                OpCooperativeMatrixStoreKHR %out_view %result %uint_0 %uint_64 Aligned 16

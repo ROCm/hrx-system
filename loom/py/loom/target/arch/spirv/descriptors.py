@@ -951,7 +951,7 @@ def _cooperative_matrix_descriptors_for_case(
             scalar=case.lhs_scalar,
             rows=case.lhs_rows,
             columns=case.lhs_columns,
-            feature_bits=case.memory_feature_bits(case.lhs_scalar),
+            feature_bits=case.memory_feature_bits,
         ),
         _cooperative_matrix_load_descriptor(
             role="rhs",
@@ -959,7 +959,7 @@ def _cooperative_matrix_descriptors_for_case(
             scalar=case.rhs_scalar,
             rows=case.rhs_rows,
             columns=case.rhs_columns,
-            feature_bits=case.memory_feature_bits(case.rhs_scalar),
+            feature_bits=case.memory_feature_bits,
         ),
         _cooperative_matrix_load_descriptor(
             role="init",
@@ -967,7 +967,7 @@ def _cooperative_matrix_descriptors_for_case(
             scalar=case.accumulator_scalar,
             rows=case.accumulator_rows,
             columns=case.accumulator_columns,
-            feature_bits=case.memory_feature_bits(case.accumulator_scalar),
+            feature_bits=case.memory_feature_bits,
         ),
         _cooperative_matrix_mul_add_descriptor(case=case),
         _cooperative_matrix_store_descriptor(
@@ -975,7 +975,7 @@ def _cooperative_matrix_descriptors_for_case(
             scalar=case.result_scalar,
             rows=case.accumulator_rows,
             columns=case.accumulator_columns,
-            feature_bits=case.memory_feature_bits(case.result_scalar),
+            feature_bits=case.memory_feature_bits,
         ),
     )
 

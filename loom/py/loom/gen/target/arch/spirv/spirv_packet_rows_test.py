@@ -20,8 +20,12 @@ from loom.gen.target.arch.spirv.spirv_packet_rows import (
     generate_tables,
 )
 from loom.target.arch.spirv.builtins import BUILTIN_DIMENSIONS, BUILTIN_INDEX_QUERIES
-from loom.target.arch.spirv.cooperative_matrix import cooperative_matrix_descriptor_key
+from loom.target.arch.spirv.cooperative_matrix import (
+    COOPERATIVE_MATRIX_CASES,
+    cooperative_matrix_descriptor_key,
+)
 from loom.target.arch.spirv.descriptors import SPIRV_LOGICAL_CORE_DESCRIPTOR_SET
+from loom.target.arch.spirv.features import feature_bits_value
 from loom.target.arch.spirv.ordinary_vector import (
     ORDINARY_VECTOR_INSTRUCTIONS,
     ORDINARY_VECTOR_TYPES,
@@ -193,6 +197,7 @@ def test_generation_emits_scalar_memory_packet_rows() -> None:
 
     assert "LOOM_SPIRV_VALUE_CLASS_STORAGE_BUFFER_ADDRESS" in tables
     assert "LOOM_SPIRV_VALUE_CLASS_PTR_PHYSICAL_STORAGE_BUFFER" in tables
+    assert "LOOM_SPIRV_PACKET_FORM_PHYSICAL_STORAGE_BUFFER_BYTE_OFFSET" in tables
 
 
 def test_generation_emits_complete_float_constant_packet_rows() -> None:
@@ -208,8 +213,27 @@ def test_generation_emits_complete_float_constant_packet_rows() -> None:
         assert descriptor.feature_mask_words == ((scalar.feature_bits,) if scalar.feature_bits else ())
 
 
-def test_generation_uses_byte_strides_for_cooperative_matrix_rows() -> None:
+def test_generation_uses_byte_pointers_and_strides_for_cooperative_matrix_rows() -> None:
     tables = generate_tables()
+    cases_by_element = {case.element: case for case in COOPERATIVE_MATRIX_CASES}
+
+    assert cases_by_element["f16"].memory_feature_bits == feature_bits_value(
+        (
+            "cooperative_matrix_khr",
+            "float16",
+            "int8",
+            "storage_buffer_8bit_access",
+        )
+    )
+    assert cases_by_element["bf16"].memory_feature_bits == feature_bits_value(
+        (
+            "cooperative_matrix_khr",
+            "bfloat16_type_khr",
+            "bfloat16_cooperative_matrix_khr",
+            "int8",
+            "storage_buffer_8bit_access",
+        )
+    )
 
     f16_lhs = _generated_row(
         tables,
@@ -244,9 +268,20 @@ def test_generation_uses_byte_strides_for_cooperative_matrix_rows() -> None:
             layout="row_major",
         ),
     )
-    assert ".cooperative_matrix_stride = 32" in f16_lhs
-    assert ".cooperative_matrix_stride = 64" in f16_init
-    assert ".cooperative_matrix_stride = 64" in f16_store
+    assert "LOOM_SPIRV_SCALAR_TYPE_U8" in f16_lhs
+    assert ".cooperative_matrix_byte_stride = 32" in f16_lhs
+    assert ".cooperative_matrix_byte_stride = 64" in f16_init
+    assert ".cooperative_matrix_byte_stride = 64" in f16_store
+    assert _descriptor(
+        _cooperative_matrix_descriptor(
+            "op_cooperative_matrix_load_khr",
+            role="lhs",
+            element="f16",
+            k_size=16,
+            accumulator="f32",
+            layout="row_major",
+        )
+    ).feature_mask_words == (cases_by_element["f16"].memory_feature_bits,)
 
     bf16_rhs = _generated_row(
         tables,
@@ -259,7 +294,8 @@ def test_generation_uses_byte_strides_for_cooperative_matrix_rows() -> None:
             layout="row_major",
         ),
     )
-    assert ".cooperative_matrix_stride = 32" in bf16_rhs
+    assert "LOOM_SPIRV_SCALAR_TYPE_U8" in bf16_rhs
+    assert ".cooperative_matrix_byte_stride = 32" in bf16_rhs
 
     s8_lhs = _generated_row(
         tables,
@@ -294,9 +330,10 @@ def test_generation_uses_byte_strides_for_cooperative_matrix_rows() -> None:
             layout="row_major",
         ),
     )
-    assert ".cooperative_matrix_stride = 32" in s8_lhs
-    assert ".cooperative_matrix_stride = 16" in s8_rhs
-    assert ".cooperative_matrix_stride = 64" in s8_store
+    assert "LOOM_SPIRV_SCALAR_TYPE_U8" in s8_lhs
+    assert ".cooperative_matrix_byte_stride = 32" in s8_lhs
+    assert ".cooperative_matrix_byte_stride = 16" in s8_rhs
+    assert ".cooperative_matrix_byte_stride = 64" in s8_store
 
     u8_lhs = _generated_row(
         tables,
@@ -322,11 +359,11 @@ def test_generation_uses_byte_strides_for_cooperative_matrix_rows() -> None:
     )
     assert "LOOM_SPIRV_SCALAR_TYPE_U8" in u8_lhs
     assert "LOOM_SPIRV_SCALAR_TYPE_U32" in u8_store
-    assert ".cooperative_matrix_stride = 32" in u8_lhs
-    assert ".cooperative_matrix_stride = 64" in u8_store
+    assert ".cooperative_matrix_byte_stride = 32" in u8_lhs
+    assert ".cooperative_matrix_byte_stride = 64" in u8_store
 
 
-def test_generation_keeps_storage_buffer_address_untyped_until_access_chain() -> None:
+def test_generation_converts_storage_buffer_address_after_byte_offset() -> None:
     tables = generate_tables()
 
     access_row_start = tables.index("SPIRV_LOGICAL_CORE_DESCRIPTOR_REF_OP_PTR_ACCESS_CHAIN_STORAGE_BUFFER_F32_BYTE_OFFSET")
@@ -334,6 +371,7 @@ def test_generation_keeps_storage_buffer_address_untyped_until_access_chain() ->
     assert "LOOM_SPIRV_VALUE_CLASS_STORAGE_BUFFER_ADDRESS" in access_row
     assert "LOOM_SPIRV_VALUE_CLASS_PTR_PHYSICAL_STORAGE_BUFFER" in access_row
     assert "LOOM_SPIRV_SCALAR_TYPE_F32" in access_row
+    assert "LOOM_SPIRV_OP_CONVERT_U_TO_PTR" in access_row
 
 
 def test_generation_emits_coordinate_arithmetic_packet_rows() -> None:
