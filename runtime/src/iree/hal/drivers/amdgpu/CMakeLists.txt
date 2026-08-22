@@ -1019,7 +1019,7 @@ endif()
 if(IREE_HAL_DRIVER_AMDGPU)
 iree_amdgpu_hal_cts_testdata(
   NAME
-    testdata_amdgpu_pm4_command_buffer_benchmark
+    pm4_command_buffer_testdata
   TARGET
     amdgcn-amd-amdhsa
   TARGETS
@@ -1050,7 +1050,7 @@ iree_cc_binary_benchmark(
   DEPS
     ::amdgpu
     ::headers
-    ::testdata_amdgpu_pm4_command_buffer_benchmark
+    ::pm4_command_buffer_testdata
     iree::async
     iree::async::util::proactor_pool
     iree::base
