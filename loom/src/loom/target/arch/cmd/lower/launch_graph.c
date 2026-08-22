@@ -371,33 +371,8 @@ static iree_status_t loom_cmd_launch_graph_clone_config(
   loom_op_t* kernel_op =
       loom_cmd_launch_graph_resolve_kernel(build->source_module, launch_op);
   loom_region_t* config_region = loom_kernel_def_config(kernel_op);
-  if (!config_region || config_region->block_count != 1) {
-    return iree_make_status(
-        IREE_STATUS_UNIMPLEMENTED,
-        "aggregate launch extraction requires a single-block kernel launch "
-        "configuration");
-  }
   loom_block_t* config_block = loom_region_entry_block(config_region);
   const loom_op_t* launch_config = loom_kernel_def_launch_config_op(kernel_op);
-  if (!launch_config) {
-    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "kernel launch configuration has no terminator");
-  }
-  const loom_op_t* config_op = NULL;
-  loom_block_for_each_op(config_block, config_op) {
-    if (config_op == launch_config) continue;
-    const loom_trait_flags_t traits =
-        loom_op_effective_traits(build->source_module, config_op);
-    if (config_op->region_count != 0 ||
-        !iree_any_bit_set(traits, LOOM_TRAIT_PURE)) {
-      const iree_string_view_t op_name =
-          loom_op_name(build->source_module, config_op);
-      return iree_make_status(
-          IREE_STATUS_UNIMPLEMENTED,
-          "kernel launch configuration operation `%.*s` is not a pure leaf",
-          (int)op_name.size, op_name.data);
-    }
-  }
 
   const loom_value_slice_t source_workloads =
       loom_kernel_launch_workloads(launch_op);
@@ -417,9 +392,18 @@ static iree_status_t loom_cmd_launch_graph_clone_config(
         &config_remap, config_arguments.values[i], target_workload));
   }
 
-  config_op = NULL;
+  const loom_op_t* config_op = NULL;
   loom_block_for_each_op(config_block, config_op) {
     if (config_op == launch_config) continue;
+    if (config_op->region_count != 0) {
+      const iree_string_view_t op_name =
+          loom_op_name(build->source_module, config_op);
+      return iree_make_status(
+          IREE_STATUS_UNIMPLEMENTED,
+          "aggregate launch extraction does not support nested regions in "
+          "kernel launch configuration operation `%.*s`",
+          (int)op_name.size, op_name.data);
+    }
     bool materialize_results = config_op->result_count != 0;
     const loom_value_id_t* source_results = loom_op_const_results(config_op);
     for (uint16_t i = 0; i < config_op->result_count; ++i) {

@@ -307,7 +307,7 @@ kernel_def = Op(
     regions=[
         RegionDef(
             "config",
-            doc=("Launch configuration region. The region owns host launch inputs and must terminate with kernel.launch.config."),
+            doc=("Pure launch configuration region. The region computes launch parameters from its workload arguments and immutable compilation inputs and must terminate with kernel.launch.config."),
             single_block=True,
             terminator="kernel.launch.config",
             buffer_arg_memory_space="global",

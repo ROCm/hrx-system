@@ -146,37 +146,6 @@ static iree_status_t loom_kernel_launch_config_copy_workload_predicates(
   return status;
 }
 
-static iree_status_t loom_kernel_launch_config_validate_region(
-    const loom_module_t* source_module, const loom_op_t* source_kernel,
-    const loom_region_t* config_region) {
-  if (config_region == NULL || config_region->block_count != 1 ||
-      iree_any_bit_set(config_region->flags, LOOM_REGION_INSTANCE_FLAG_CFG)) {
-    return iree_make_status(
-        IREE_STATUS_UNIMPLEMENTED,
-        "kernel launch configuration requires one non-CFG block");
-  }
-  const loom_op_t* launch_config =
-      loom_kernel_def_launch_config_op(source_kernel);
-  if (launch_config == NULL) {
-    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "kernel launch configuration has no terminator");
-  }
-  const loom_op_t* op = NULL;
-  loom_block_for_each_op(loom_region_const_entry_block(config_region), op) {
-    if (op == launch_config) continue;
-    const loom_trait_flags_t traits =
-        loom_op_effective_traits(source_module, op);
-    if (!iree_any_bit_set(traits, LOOM_TRAIT_PURE)) {
-      const iree_string_view_t op_name = loom_op_name(source_module, op);
-      return iree_make_status(
-          IREE_STATUS_UNIMPLEMENTED,
-          "kernel launch configuration operation '%.*s' is not pure",
-          (int)op_name.size, op_name.data);
-    }
-  }
-  return iree_ok_status();
-}
-
 static iree_status_t loom_kernel_launch_config_build_constant(
     loom_builder_t* builder, int64_t value, loom_location_id_t location,
     loom_value_id_t* out_value) {
@@ -195,8 +164,6 @@ static iree_status_t loom_kernel_launch_config_program_build_function(
     iree_arena_allocator_t* scratch_arena) {
   loom_op_t* source_kernel = source_function.op;
   loom_region_t* source_config = loom_kernel_def_config(source_kernel);
-  IREE_RETURN_IF_ERROR(loom_kernel_launch_config_validate_region(
-      source_module, source_kernel, source_config));
   const loom_op_t* source_launch_config =
       loom_kernel_def_launch_config_op(source_kernel);
 
