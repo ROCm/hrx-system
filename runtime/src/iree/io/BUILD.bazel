@@ -158,6 +158,7 @@ iree_runtime_cc_library(
         "vec_stream.h",
     ],
     deps = [
+        ":byte_sequence",
         ":file_handle",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal",
@@ -169,6 +170,7 @@ iree_runtime_cc_test(
     name = "vec_stream_test",
     srcs = ["vec_stream_test.cc"],
     deps = [
+        ":byte_sequence",
         ":stream",
         "//runtime/src/iree/base",
         "//runtime/src/iree/testing:gtest",

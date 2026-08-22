@@ -172,6 +172,7 @@ iree_cc_library(
     "stream.c"
     "vec_stream.c"
   DEPS
+    ::byte_sequence
     ::file_handle
     iree::base
     iree::base::internal
@@ -185,6 +186,7 @@ iree_cc_test(
   SRCS
     "vec_stream_test.cc"
   DEPS
+    ::byte_sequence
     ::stream
     iree::base
     iree::testing::gtest

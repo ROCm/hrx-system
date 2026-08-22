@@ -8,6 +8,7 @@
 #define IREE_IO_VEC_STREAM_H_
 
 #include "iree/base/api.h"
+#include "iree/io/byte_sequence.h"
 #include "iree/io/stream.h"
 
 #ifdef __cplusplus
@@ -36,6 +37,22 @@ typedef iree_status_t(IREE_API_PTR* iree_io_vec_stream_callback_fn_t)(
 IREE_API_EXPORT iree_status_t iree_io_vec_stream_enumerate_blocks(
     iree_io_stream_t* stream, iree_io_vec_stream_callback_fn_t callback,
     void* user_data);
+
+// Moves all current stream contents into an immutable byte sequence.
+//
+// On success ownership of every allocated block transfers to |out_sequence|
+// without copying their contents. The stream retains its mode, allocator, and
+// block size but is reset to offset and length zero with no allocated blocks.
+// Retained aliases of the stream observe the same empty state and the stream
+// may immediately be reused as a builder. Moving an empty stream returns a
+// non-NULL empty sequence.
+//
+// The operation allocates the sequence owner before modifying the stream. If
+// allocation fails then |out_sequence| is NULL and the stream remains
+// unchanged. The caller must have exclusive access to the stream while the
+// contents are moved.
+IREE_API_EXPORT iree_status_t iree_io_vec_stream_move_contents(
+    iree_io_stream_t* stream, iree_io_byte_sequence_t** out_sequence);
 
 #ifdef __cplusplus
 }  // extern "C"
