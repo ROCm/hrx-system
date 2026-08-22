@@ -8,6 +8,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <stdlib.h>
 
 #include "iree/hal/drivers/amdgpu/access_policy.h"
 #include "iree/hal/drivers/amdgpu/buffer.h"
@@ -304,6 +305,50 @@ static bool iree_hal_amdgpu_allocator_find_gpu_agent_ordinal(
   return false;
 }
 
+// Allocation hook for the accessible-agent list ROCr fills in below. ROCr
+// hands back an array it expects the caller to own, so this is plain malloc
+// and the caller frees it.
+static void* iree_hal_amdgpu_allocator_pointer_info_alloc(size_t size) {
+  return malloc(size);
+}
+
+// Whether every GPU in this logical topology can reach `device_ptr`.
+//
+// An allocation owned by an agent outside the topology is not automatically
+// off limits: peer access may have been granted for it, and then the hardware
+// can follow the address from here. Asking ROCr which agents can reach it is
+// the difference between "not ours" and "not reachable" -- the first is a
+// topology fact, the second is the one that actually decides whether a
+// dispatch may bind it.
+static bool iree_hal_amdgpu_allocator_topology_can_access(
+    const iree_hal_amdgpu_allocator_t* allocator, const void* device_ptr) {
+  hsa_amd_pointer_info_t info;
+  memset(&info, 0, sizeof(info));
+  info.size = sizeof(info);
+  uint32_t accessible_count = 0;
+  hsa_agent_t* accessible = NULL;
+  iree_status_t status = iree_hsa_amd_pointer_info(
+      IREE_LIBHSA(allocator->libhsa), (void*)device_ptr, &info,
+      iree_hal_amdgpu_allocator_pointer_info_alloc, &accessible_count,
+      &accessible);
+  if (!iree_status_is_ok(status)) {
+    iree_status_ignore(status);
+    return false;
+  }
+  bool reachable = allocator->topology->gpu_agent_count > 0;
+  for (iree_host_size_t i = 0;
+       i < allocator->topology->gpu_agent_count && reachable; ++i) {
+    bool found = false;
+    for (uint32_t j = 0; j < accessible_count && !found; ++j) {
+      found =
+          accessible[j].handle == allocator->topology->gpu_agents[i].handle;
+    }
+    reachable = found;
+  }
+  free(accessible);
+  return reachable;
+}
+
 static bool iree_hal_amdgpu_hsa_pointer_info_has_field(
     const hsa_amd_pointer_info_t* info, iree_host_size_t field_offset,
     iree_host_size_t field_size) {
@@ -404,12 +449,24 @@ static iree_status_t iree_hal_amdgpu_allocator_query_device_pointer_range(
   }
 
   iree_host_size_t owner_ordinal = 0;
-  if (IREE_UNLIKELY(!iree_hal_amdgpu_allocator_find_gpu_agent_ordinal(
-          allocator, pointer_info.agentOwner, &owner_ordinal))) {
-    return iree_make_status(
-        IREE_STATUS_PERMISSION_DENIED,
-        "device allocation is owned by an HSA GPU agent outside the AMDGPU HAL "
-        "logical topology");
+  const bool owner_in_topology =
+      iree_hal_amdgpu_allocator_find_gpu_agent_ordinal(
+          allocator, pointer_info.agentOwner, &owner_ordinal);
+  if (IREE_UNLIKELY(!owner_in_topology)) {
+    // Owned elsewhere, but importable if this topology can actually reach it.
+    // Refusing on ownership alone makes peer memory unbindable even where the
+    // hardware has been told to allow it, which leaves copying through the
+    // host as the only way for one logical device to read another's buffer.
+    if (IREE_UNLIKELY(!iree_hal_amdgpu_allocator_topology_can_access(
+            allocator, device_ptr))) {
+      return iree_make_status(
+          IREE_STATUS_PERMISSION_DENIED,
+          "device allocation is owned by an HSA GPU agent outside the AMDGPU "
+          "HAL logical topology and is not accessible from it");
+    }
+    // The import belongs to the device doing the importing; the owner has its
+    // own. Placement below must name a physical device of THIS logical device.
+    owner_ordinal = 0;
   }
 
   const bool fine_grained = iree_any_bit_set(
@@ -428,8 +485,12 @@ static iree_status_t iree_hal_amdgpu_allocator_query_device_pointer_range(
 
   const iree_hal_amdgpu_physical_device_t* owner_device =
       allocator->logical_device->physical_devices[owner_ordinal];
+  // Only an allocation this logical device owns can be promoted to host
+  // visible on the strength of its own SVM configuration. A peer's memory is
+  // reachable by dispatch, which is not the same claim.
   const bool direct_host_access =
-      owner_device && owner_device->memory_system.svm.direct_host_access;
+      owner_in_topology && owner_device &&
+      owner_device->memory_system.svm.direct_host_access;
   iree_hal_memory_type_t actual_memory_type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
   if (fine_grained && direct_host_access) {
     actual_memory_type |=
