@@ -285,6 +285,10 @@ typedef struct controlled_allocator_t {
   iree_allocator_t delegate;
   // Whether allocation commands return resource exhausted.
   bool fail_allocations;
+  // Number of successful allocation commands forwarded to |delegate|.
+  int allocation_count;
+  // Total requested byte length across successful allocation commands.
+  iree_host_size_t allocation_bytes;
   // Number of successful free commands forwarded to |delegate|.
   int free_count;
 } controlled_allocator_t;
@@ -303,17 +307,56 @@ static iree_status_t controlled_allocator_ctl(void* self,
   }
   iree_status_t status = allocator->delegate.ctl(allocator->delegate.self,
                                                  command, params, inout_ptr);
-  if (iree_status_is_ok(status) && command == IREE_ALLOCATOR_COMMAND_FREE) {
-    ++allocator->free_count;
+  if (iree_status_is_ok(status)) {
+    if (command == IREE_ALLOCATOR_COMMAND_MALLOC ||
+        command == IREE_ALLOCATOR_COMMAND_CALLOC ||
+        command == IREE_ALLOCATOR_COMMAND_REALLOC) {
+      ++allocator->allocation_count;
+      allocator->allocation_bytes +=
+          ((const iree_allocator_alloc_params_t*)params)->byte_length;
+    } else if (command == IREE_ALLOCATOR_COMMAND_FREE) {
+      ++allocator->free_count;
+    }
   }
   return status;
 }
 
+TEST(ByteSequenceTest, CloneAllocatesOneExactLengthBuffer) {
+  const uint8_t segment0[] = {0, 1};
+  const uint8_t segment1[] = {2};
+  const uint8_t segment2[] = {3, 4, 5};
+  const iree_const_byte_span_t segments[] = {
+      iree_make_const_byte_span(segment0, sizeof(segment0)),
+      iree_make_const_byte_span(segment1, sizeof(segment1)),
+      iree_make_const_byte_span(segment2, sizeof(segment2)),
+  };
+  test_byte_sequence_t sequence;
+  test_byte_sequence_initialize(segments, IREE_ARRAYSIZE(segments), 6, NULL,
+                                &sequence);
+  controlled_allocator_t allocator_state = {
+      iree_allocator_system(), false, 0, 0, 0,
+  };
+  iree_allocator_t allocator = {
+      &allocator_state,
+      controlled_allocator_ctl,
+  };
+
+  iree_byte_span_t clone = iree_byte_span_empty();
+  IREE_ASSERT_OK(
+      iree_io_byte_sequence_clone(&sequence.base, allocator, &clone));
+  EXPECT_EQ(allocator_state.allocation_count, 1);
+  EXPECT_EQ(allocator_state.allocation_bytes, 6u);
+  EXPECT_THAT(std::vector<uint8_t>(clone.data, clone.data + clone.data_length),
+              ElementsAre(0, 1, 2, 3, 4, 5));
+
+  iree_allocator_free(allocator, clone.data);
+  EXPECT_EQ(allocator_state.free_count, 1);
+  iree_io_byte_sequence_release(&sequence.base);
+}
+
 TEST(ByteSequenceTest, MoveFailurePreservesSource) {
   controlled_allocator_t allocator_state = {
-      iree_allocator_system(),
-      false,
-      0,
+      iree_allocator_system(), false, 0, 0, 0,
   };
   iree_allocator_t allocator = {
       &allocator_state,
@@ -349,9 +392,7 @@ TEST(ByteSequenceTest, CloneAllocationFailureLeavesOutputEmpty) {
   test_byte_sequence_initialize(segments, IREE_ARRAYSIZE(segments), 2, NULL,
                                 &sequence);
   controlled_allocator_t allocator_state = {
-      iree_allocator_system(),
-      true,
-      0,
+      iree_allocator_system(), true, 0, 0, 0,
   };
   iree_allocator_t allocator = {
       &allocator_state,
