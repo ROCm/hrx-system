@@ -194,6 +194,7 @@ if(IREE_HAL_DRIVER_VULKAN)
   message(STATUS "  - vulkan")
 endif()
 
+add_subdirectory(build_tools)
 add_subdirectory(build_tools/embed_data)
 add_subdirectory(build_tools/spirv)
 add_subdirectory(runtime/src)

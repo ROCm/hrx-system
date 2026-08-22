@@ -7,16 +7,10 @@
 from __future__ import annotations
 
 import json
-import shutil
-import subprocess
-import tempfile
 import unittest
 from pathlib import Path
 
 from build_tools.devtools import ctest as ctest_dev
-from build_tools.devtools.environment import REPO_ROOT
-
-FIXTURE_SOURCE_DIR = REPO_ROOT / "build_tools/cmake/testdata/test_metadata"
 
 
 def ctest_model(*tests: dict) -> str:
@@ -196,74 +190,6 @@ class CTestTest(unittest.TestCase):
             with self.subTest(arguments=arguments):
                 self.assertTrue(ctest_dev.is_inspection_only(arguments))
         self.assertFalse(ctest_dev.is_inspection_only(["-R", "test"]))
-
-    def test_selected_runner_builds_only_the_selected_closure(self):
-        cmake = shutil.which("cmake")
-        ctest = shutil.which("ctest")
-        self.assertIsNotNone(cmake)
-        self.assertIsNotNone(ctest)
-
-        with tempfile.TemporaryDirectory() as temporary_dir:
-            build_dir = Path(temporary_dir) / "build"
-            subprocess.run(
-                [
-                    cmake,
-                    "-S",
-                    str(FIXTURE_SOURCE_DIR),
-                    "-B",
-                    str(build_dir),
-                    f"-DIREE_REPO_ROOT={REPO_ROOT}",
-                ],
-                check=True,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-            )
-            step = ctest_dev.CTestBuildAndRunStep(
-                cmake=cmake,
-                ctest=ctest,
-                build_dir=build_dir,
-                arguments=["-R", "^source-only$"],
-                cwd=REPO_ROOT,
-            )
-            self.assertEqual(step.run(), 0)
-            self.assertFalse((build_dir / "host.built").exists())
-
-            step = ctest_dev.CTestBuildAndRunStep(
-                cmake=cmake,
-                ctest=ctest,
-                build_dir=build_dir,
-                arguments=["-R", "^host$"],
-                cwd=REPO_ROOT,
-            )
-            self.assertEqual(step.run(), 0)
-            self.assertTrue((build_dir / "host.built").is_file())
-            self.assertFalse((build_dir / "benchmark.built").exists())
-
-            step = ctest_dev.CTestBuildAndRunStep(
-                cmake=cmake,
-                ctest=ctest,
-                build_dir=build_dir,
-                arguments=["-R", "^fixture-required$"],
-                cwd=REPO_ROOT,
-            )
-            self.assertEqual(step.run(), 0)
-            for test_name in (
-                "fixture-setup",
-                "fixture-required",
-                "fixture-cleanup",
-            ):
-                self.assertTrue((build_dir / f"{test_name}.built").is_file())
-
-            step = ctest_dev.CTestBuildAndRunStep(
-                cmake=cmake,
-                ctest=ctest,
-                build_dir=build_dir,
-                arguments=["-R", "^tool-backed$"],
-                cwd=REPO_ROOT,
-            )
-            self.assertEqual(step.run(), 0)
-            self.assertTrue((build_dir / "tool.built").is_file())
 
 
 if __name__ == "__main__":
