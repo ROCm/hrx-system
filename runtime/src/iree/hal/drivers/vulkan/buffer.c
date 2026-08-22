@@ -347,6 +347,38 @@ iree_status_t iree_hal_vulkan_buffer_resolve_backing_offset(
   return iree_ok_status();
 }
 
+bool iree_hal_vulkan_buffer_range_is_dword_aligned(
+    iree_hal_buffer_t* buffer, iree_device_size_t local_byte_offset,
+    iree_device_size_t local_byte_length) {
+  const iree_device_size_t dword_size = sizeof(uint32_t);
+  if (local_byte_length == 0) return true;
+  if (local_byte_length % dword_size != 0) return false;
+
+  iree_hal_buffer_t* backing_buffer = buffer;
+  iree_hal_buffer_t* allocated_buffer =
+      iree_hal_buffer_allocated_buffer(buffer);
+  if (iree_hal_local_transient_buffer_isa(allocated_buffer)) {
+    backing_buffer =
+        iree_hal_local_transient_buffer_backing_buffer(allocated_buffer);
+    if (!backing_buffer) return false;
+  }
+
+  iree_device_size_t offset_remainder = local_byte_offset % dword_size;
+  offset_remainder += iree_hal_buffer_byte_offset(backing_buffer) % dword_size;
+  allocated_buffer = iree_hal_buffer_allocated_buffer(backing_buffer);
+  if (iree_hal_vulkan_buffer_isa(allocated_buffer)) {
+    const iree_hal_vulkan_buffer_t* vulkan_buffer =
+        iree_hal_vulkan_buffer_cast(allocated_buffer);
+    offset_remainder += vulkan_buffer->handle_offset % dword_size;
+  } else if (!iree_hal_vulkan_sparse_buffer_isa(allocated_buffer)) {
+    return false;
+  }
+  if (backing_buffer != buffer) {
+    offset_remainder += iree_hal_buffer_byte_offset(buffer) % dword_size;
+  }
+  return offset_remainder % dword_size == 0;
+}
+
 iree_status_t iree_hal_vulkan_buffer_handle(iree_hal_buffer_t* buffer,
                                             VkDeviceMemory* out_memory,
                                             VkBuffer* out_handle) {

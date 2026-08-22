@@ -45,6 +45,13 @@ bool iree_hal_vulkan_command_buffer_is_empty(
 bool iree_hal_vulkan_command_buffer_has_native_commands(
     iree_hal_command_buffer_t* command_buffer);
 
+// Returns native Vulkan queue capabilities required to replay |command_buffer|
+// with |binding_table|.
+iree_status_t iree_hal_vulkan_command_buffer_required_queue_flags(
+    iree_hal_command_buffer_t* command_buffer,
+    iree_hal_buffer_binding_table_t binding_table,
+    VkQueueFlags* out_required_queue_flags);
+
 // Returns the number of dispatch commands recorded in |command_buffer|.
 iree_host_size_t iree_hal_vulkan_command_buffer_dispatch_count(
     iree_hal_command_buffer_t* command_buffer);

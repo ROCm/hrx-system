@@ -20,6 +20,7 @@
 #include "iree/async/frontier_tracker.h"
 #include "iree/async/util/proactor_pool.h"
 #include "iree/hal/drivers/vulkan/allocator.h"
+#include "iree/hal/drivers/vulkan/buffer.h"
 #include "iree/hal/drivers/vulkan/builtins.h"
 #include "iree/hal/drivers/vulkan/command_buffer.h"
 #include "iree/hal/drivers/vulkan/debug_utils.h"
@@ -963,17 +964,16 @@ iree_hal_vulkan_logical_device_preferred_queue_role_for_command_categories(
 static VkQueueFlags
 iree_hal_vulkan_logical_device_required_queue_flags_for_command_categories(
     iree_hal_command_category_t command_categories) {
-  VkQueueFlags queue_flags = 0;
   if (iree_any_bit_set(command_categories,
                        IREE_HAL_COMMAND_CATEGORY_DISPATCH |
                            IREE_HAL_COMMAND_CATEGORY_ATOMIC)) {
-    queue_flags |= VK_QUEUE_COMPUTE_BIT;
+    return VK_QUEUE_COMPUTE_BIT;
   }
   if (iree_any_bit_set(command_categories,
                        IREE_HAL_COMMAND_CATEGORY_TRANSFER)) {
-    queue_flags |= VK_QUEUE_TRANSFER_BIT;
+    return VK_QUEUE_TRANSFER_BIT;
   }
-  return queue_flags;
+  return 0;
 }
 
 static iree_status_t
@@ -1021,6 +1021,34 @@ static iree_status_t iree_hal_vulkan_logical_device_select_queue_lane(
       device, preferred_role, required_flags, queue_affinity, out_queue);
 }
 
+static bool iree_hal_vulkan_logical_device_buffer_range_requires_compute(
+    iree_hal_buffer_t* buffer, iree_device_size_t offset,
+    iree_device_size_t length) {
+  return !iree_hal_vulkan_buffer_range_is_dword_aligned(buffer, offset, length);
+}
+
+static bool iree_hal_vulkan_logical_device_file_range_requires_compute(
+    iree_hal_file_t* file, uint64_t offset, iree_device_size_t length) {
+  iree_hal_buffer_t* storage_buffer = iree_hal_file_storage_buffer(file);
+  if (!storage_buffer) return false;
+  if (offset > IREE_DEVICE_SIZE_MAX) return true;
+  return iree_hal_vulkan_logical_device_buffer_range_requires_compute(
+      storage_buffer, (iree_device_size_t)offset, length);
+}
+
+static iree_status_t iree_hal_vulkan_logical_device_select_transfer_queue_lane(
+    iree_hal_vulkan_logical_device_t* device,
+    iree_hal_queue_affinity_t queue_affinity, bool requires_compute,
+    iree_hal_vulkan_queue_t** out_queue) {
+  const iree_hal_vulkan_queue_role_t preferred_role =
+      requires_compute ? IREE_HAL_VULKAN_QUEUE_ROLE_COMPUTE
+                       : IREE_HAL_VULKAN_QUEUE_ROLE_TRANSFER;
+  const VkQueueFlags required_queue_flags =
+      requires_compute ? VK_QUEUE_COMPUTE_BIT : VK_QUEUE_TRANSFER_BIT;
+  return iree_hal_vulkan_logical_device_select_queue_lane(
+      device, preferred_role, required_queue_flags, queue_affinity, out_queue);
+}
+
 static iree_status_t
 iree_hal_vulkan_logical_device_resolve_command_buffer_queue_affinity(
     iree_hal_vulkan_logical_device_t* device,
@@ -1061,10 +1089,14 @@ static iree_status_t iree_hal_vulkan_logical_device_create_command_buffer(
   const VkQueueFlags required_queue_flags =
       iree_hal_vulkan_logical_device_required_queue_flags_for_command_categories(
           command_categories);
-  IREE_RETURN_IF_ERROR(iree_hal_vulkan_logical_device_select_queue_lane(
-      device, preferred_role, required_queue_flags, queue_affinity, &queue));
+  IREE_RETURN_IF_ERROR(iree_hal_vulkan_queue_affinity_normalize(
+      device->queues.affinity_mask, queue_affinity, &queue_affinity));
+  IREE_RETURN_IF_ERROR(
+      iree_hal_vulkan_logical_device_select_queue_lane_from_normalized_affinity(
+          device, preferred_role, required_queue_flags, queue_affinity,
+          &queue));
   return iree_hal_vulkan_command_buffer_create(
-      device->device_allocator, mode, command_categories, queue->queue_affinity,
+      device->device_allocator, mode, command_categories, queue_affinity,
       binding_capacity, &device->builtins.atomic_pipelines,
       &device->command_buffer_block_pool, device->host_allocator,
       out_command_buffer);
@@ -1249,10 +1281,13 @@ static iree_status_t iree_hal_vulkan_logical_device_queue_fill(
     iree_host_size_t pattern_length, iree_hal_fill_flags_t flags) {
   iree_hal_vulkan_logical_device_t* device =
       iree_hal_vulkan_logical_device_cast(base_device);
+  const bool requires_compute =
+      iree_hal_vulkan_logical_device_buffer_range_requires_compute(
+          target_buffer, target_offset, length);
   iree_hal_vulkan_queue_t* queue = NULL;
-  IREE_RETURN_IF_ERROR(iree_hal_vulkan_logical_device_select_queue_lane(
-      device, IREE_HAL_VULKAN_QUEUE_ROLE_TRANSFER, VK_QUEUE_TRANSFER_BIT,
-      queue_affinity, &queue));
+  IREE_RETURN_IF_ERROR(
+      iree_hal_vulkan_logical_device_select_transfer_queue_lane(
+          device, queue_affinity, requires_compute, &queue));
   return iree_hal_vulkan_queue_submit_fill(
       queue, wait_semaphore_list, signal_semaphore_list, target_buffer,
       target_offset, length, pattern, pattern_length, flags);
@@ -1267,10 +1302,13 @@ static iree_status_t iree_hal_vulkan_logical_device_queue_update(
     iree_device_size_t length, iree_hal_update_flags_t flags) {
   iree_hal_vulkan_logical_device_t* device =
       iree_hal_vulkan_logical_device_cast(base_device);
+  const bool requires_compute =
+      iree_hal_vulkan_logical_device_buffer_range_requires_compute(
+          target_buffer, target_offset, length);
   iree_hal_vulkan_queue_t* queue = NULL;
-  IREE_RETURN_IF_ERROR(iree_hal_vulkan_logical_device_select_queue_lane(
-      device, IREE_HAL_VULKAN_QUEUE_ROLE_TRANSFER, VK_QUEUE_TRANSFER_BIT,
-      queue_affinity, &queue));
+  IREE_RETURN_IF_ERROR(
+      iree_hal_vulkan_logical_device_select_transfer_queue_lane(
+          device, queue_affinity, requires_compute, &queue));
   return iree_hal_vulkan_queue_submit_update(
       queue, wait_semaphore_list, signal_semaphore_list, source_buffer,
       source_offset, target_buffer, target_offset, length, flags);
@@ -1285,10 +1323,17 @@ static iree_status_t iree_hal_vulkan_logical_device_queue_copy(
     iree_device_size_t length, iree_hal_copy_flags_t flags) {
   iree_hal_vulkan_logical_device_t* device =
       iree_hal_vulkan_logical_device_cast(base_device);
+  const bool source_requires_compute =
+      iree_hal_vulkan_logical_device_buffer_range_requires_compute(
+          source_buffer, source_offset, length);
+  const bool target_requires_compute =
+      iree_hal_vulkan_logical_device_buffer_range_requires_compute(
+          target_buffer, target_offset, length);
   iree_hal_vulkan_queue_t* queue = NULL;
-  IREE_RETURN_IF_ERROR(iree_hal_vulkan_logical_device_select_queue_lane(
-      device, IREE_HAL_VULKAN_QUEUE_ROLE_TRANSFER, VK_QUEUE_TRANSFER_BIT,
-      queue_affinity, &queue));
+  IREE_RETURN_IF_ERROR(
+      iree_hal_vulkan_logical_device_select_transfer_queue_lane(
+          device, queue_affinity,
+          source_requires_compute || target_requires_compute, &queue));
   return iree_hal_vulkan_queue_submit_copy(
       queue, wait_semaphore_list, signal_semaphore_list, source_buffer,
       source_offset, target_buffer, target_offset, length, flags);
@@ -1303,10 +1348,15 @@ static iree_status_t iree_hal_vulkan_logical_device_queue_read(
     iree_device_size_t length, iree_hal_read_flags_t flags) {
   iree_hal_vulkan_logical_device_t* device =
       iree_hal_vulkan_logical_device_cast(base_device);
+  const bool requires_compute =
+      iree_hal_vulkan_logical_device_buffer_range_requires_compute(
+          target_buffer, target_offset, length) ||
+      iree_hal_vulkan_logical_device_file_range_requires_compute(
+          source_file, source_offset, length);
   iree_hal_vulkan_queue_t* queue = NULL;
-  IREE_RETURN_IF_ERROR(iree_hal_vulkan_logical_device_select_queue_lane(
-      device, IREE_HAL_VULKAN_QUEUE_ROLE_TRANSFER, VK_QUEUE_TRANSFER_BIT,
-      queue_affinity, &queue));
+  IREE_RETURN_IF_ERROR(
+      iree_hal_vulkan_logical_device_select_transfer_queue_lane(
+          device, queue_affinity, requires_compute, &queue));
   return iree_hal_vulkan_queue_submit_read(
       queue, wait_semaphore_list, signal_semaphore_list, source_file,
       source_offset, target_buffer, target_offset, length, flags);
@@ -1321,10 +1371,15 @@ static iree_status_t iree_hal_vulkan_logical_device_queue_write(
     iree_device_size_t length, iree_hal_write_flags_t flags) {
   iree_hal_vulkan_logical_device_t* device =
       iree_hal_vulkan_logical_device_cast(base_device);
+  const bool requires_compute =
+      iree_hal_vulkan_logical_device_buffer_range_requires_compute(
+          source_buffer, source_offset, length) ||
+      iree_hal_vulkan_logical_device_file_range_requires_compute(
+          target_file, target_offset, length);
   iree_hal_vulkan_queue_t* queue = NULL;
-  IREE_RETURN_IF_ERROR(iree_hal_vulkan_logical_device_select_queue_lane(
-      device, IREE_HAL_VULKAN_QUEUE_ROLE_TRANSFER, VK_QUEUE_TRANSFER_BIT,
-      queue_affinity, &queue));
+  IREE_RETURN_IF_ERROR(
+      iree_hal_vulkan_logical_device_select_transfer_queue_lane(
+          device, queue_affinity, requires_compute, &queue));
   return iree_hal_vulkan_queue_submit_write(
       queue, wait_semaphore_list, signal_semaphore_list, source_buffer,
       source_offset, target_file, target_offset, length, flags);
@@ -1420,16 +1475,25 @@ static iree_status_t iree_hal_vulkan_logical_device_queue_execute(
         binding_table.count);
   }
   iree_hal_vulkan_queue_t* queue = NULL;
-  const iree_hal_vulkan_queue_role_t preferred_role =
+  iree_hal_vulkan_queue_role_t preferred_role =
       is_empty_command_buffer
           ? IREE_HAL_VULKAN_QUEUE_ROLE_COMPUTE
           : iree_hal_vulkan_logical_device_preferred_queue_role_for_command_categories(
                 iree_hal_command_buffer_allowed_categories(command_buffer));
-  const VkQueueFlags required_queue_flags =
+  VkQueueFlags required_queue_flags =
       is_empty_command_buffer
           ? 0
           : iree_hal_vulkan_logical_device_required_queue_flags_for_command_categories(
                 iree_hal_command_buffer_allowed_categories(command_buffer));
+  if (!is_empty_command_buffer) {
+    VkQueueFlags native_required_queue_flags = 0;
+    IREE_RETURN_IF_ERROR(iree_hal_vulkan_command_buffer_required_queue_flags(
+        command_buffer, binding_table, &native_required_queue_flags));
+    if (iree_any_bit_set(native_required_queue_flags, VK_QUEUE_COMPUTE_BIT)) {
+      preferred_role = IREE_HAL_VULKAN_QUEUE_ROLE_COMPUTE;
+      required_queue_flags = VK_QUEUE_COMPUTE_BIT;
+    }
+  }
   if (is_empty_command_buffer) {
     IREE_RETURN_IF_ERROR(iree_hal_vulkan_logical_device_select_queue_lane(
         device, preferred_role, required_queue_flags, queue_affinity, &queue));
@@ -1780,10 +1844,21 @@ static iree_status_t iree_hal_vulkan_logical_device_initialize_proactor(
 static iree_status_t iree_hal_vulkan_logical_device_initialize_allocator(
     iree_hal_vulkan_logical_device_t* device) {
   IREE_ASSERT_ARGUMENT(device);
+  const iree_hal_vulkan_allocator_queue_family_t queue_families[] = {
+      {
+          .queue_affinity = device->queues.compute.selection.affinity,
+          .family_index = device->queues.compute.selection.family_index,
+      },
+      {
+          .queue_affinity = device->queues.transfer.selection.affinity,
+          .family_index = device->queues.transfer.selection.family_index,
+      },
+  };
   return iree_hal_vulkan_allocator_create(
       (iree_hal_device_t*)device, &device->syms, device->logical_device,
       &device->physical_device, device->enabled_features,
       device->enabled_extensions, device->queues.affinity_mask,
+      IREE_ARRAYSIZE(queue_families), queue_families,
       device->queues.sparse_binding_lane, device->proactor,
       device->host_allocator, &device->device_allocator);
 }

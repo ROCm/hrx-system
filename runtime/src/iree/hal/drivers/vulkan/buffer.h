@@ -80,6 +80,16 @@ iree_status_t iree_hal_vulkan_buffer_resolve_backing_offset(
     iree_device_size_t local_byte_offset,
     iree_device_size_t* out_backing_byte_offset);
 
+// Returns true when |buffer|'s resolved Vulkan range has dword-aligned offset
+// and length.
+//
+// Buffers without a currently recordable Vulkan backing return false. This is
+// a conservative routing query only; queue submission remains responsible for
+// validating the buffer and reporting lifecycle or compatibility failures.
+bool iree_hal_vulkan_buffer_range_is_dword_aligned(
+    iree_hal_buffer_t* buffer, iree_device_size_t local_byte_offset,
+    iree_device_size_t local_byte_length);
+
 // Returns the Vulkan memory and buffer handles backing |buffer|.
 iree_status_t iree_hal_vulkan_buffer_handle(iree_hal_buffer_t* buffer,
                                             VkDeviceMemory* out_memory,
