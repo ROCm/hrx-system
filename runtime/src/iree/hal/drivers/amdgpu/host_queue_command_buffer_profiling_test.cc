@@ -302,7 +302,7 @@ TEST_F(HostQueueCommandBufferProfilingTest,
     EXPECT_EQ(1u, event.workgroup_count[2]);
     EXPECT_NE(0u, event.workgroup_size[0]);
   }
-  ExpectDispatchEventsHaveClockCorrelations(sink);
+  ExpectDispatchEventsWithinClockCorrelationRange(sink);
 }
 
 TEST_F(HostQueueCommandBufferProfilingTest,
@@ -1229,7 +1229,7 @@ TEST_F(HostQueueCommandBufferProfilingTest,
     EXPECT_EQ(1u, event.workgroup_count[2]);
     EXPECT_NE(0u, event.workgroup_size[0]);
   }
-  ExpectDispatchEventsHaveClockCorrelations(sink);
+  ExpectDispatchEventsWithinClockCorrelationRange(sink);
 }
 
 TEST_F(HostQueueCommandBufferProfilingTest,
@@ -1343,7 +1343,7 @@ TEST_F(HostQueueCommandBufferProfilingTest,
           device_event.submission_id,
           IREE_HAL_PROFILE_EVENT_ENDPOINT_TYPE_QUEUE_DEVICE_EVENT,
           device_event.event_id));
-  ExpectDispatchEventsHaveClockCorrelations(sink);
+  ExpectDispatchEventsWithinClockCorrelationRange(sink);
 }
 
 TEST_F(HostQueueCommandBufferProfilingTest,

@@ -146,10 +146,10 @@ void iree_hal_amdgpu_device_timestamp_emplace_queue_capture(
 IREE_AMDGPU_ATTRIBUTE_KERNEL void
 iree_hal_amdgpu_device_timestamp_capture_queue_tick(
     iree_amdgpu_device_tick_t* IREE_AMDGPU_RESTRICT target) {
-  // iree_amdgpu_device_timestamp samples the agent domain, so this tick is
-  // interchangeable with a PM4-captured tick on the same agent and comparable
-  // with a tick from no other agent. The store is published by the dispatch
-  // packet's release fence.
+  // The shader steady counter shares the queue-timestamp domain with PM4
+  // captures on this agent. It need not share an epoch with HSA signal
+  // profiling timestamps or host-side KFD clock samples. The dispatch packet's
+  // release fence publishes the store.
   *target = iree_amdgpu_device_timestamp();
 }
 

@@ -95,9 +95,11 @@ typedef uint64_t uintptr_t;
 #define IREE_AMDGPU_OFFSETOF(type, field) offsetof(type, field)
 #endif  // IREE_AMDGPU_TARGET_DEVICE
 
-// Tick in the agent domain.
-// This can be converted to the system domain for correlation across agents and
-// the host with hsa_amd_profiling_convert_tick_to_system_domain.
+// Fixed-frequency tick native to one agent. HSA signal timestamps can be
+// converted to the system domain with
+// hsa_amd_profiling_convert_tick_to_system_domain. Other timestamp mechanisms,
+// such as PM4 COPY_DATA and the shader steady counter, may have a different
+// epoch and must not be correlated through HSA without calibration.
 typedef uint64_t iree_amdgpu_device_tick_t;
 
 #endif  // IREE_HAL_DRIVERS_AMDGPU_ABI_COMMON_H_

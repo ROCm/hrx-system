@@ -362,7 +362,9 @@ iree_cc_library(
     "device_clock.c"
   DEPS
     ::kfd
+    ::libhsa
     iree::base
+    iree::base::core_headers
   PUBLIC
 )
 endif()
@@ -811,6 +813,8 @@ iree_cc_test(
     "device_clock_test.cc"
   DEPS
     ::device_clock
+    ::libhsa
+    ::topology
     iree::base
     iree::testing::gtest
     iree::testing::gtest_main

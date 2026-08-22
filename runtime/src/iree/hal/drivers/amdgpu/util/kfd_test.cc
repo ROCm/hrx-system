@@ -158,6 +158,7 @@ TEST_F(KFDTest, GetClockCounters) {
   IREE_ASSERT_OK(iree_hal_amdgpu_kfd_open(&kfd));
 
   iree_hal_amdgpu_kfd_clock_counters_t counters = {0};
+#if defined(IREE_PLATFORM_LINUX)
   IREE_ASSERT_OK(
       iree_hal_amdgpu_kfd_get_clock_counters(kfd, *gpu_uid, &counters));
 
@@ -166,6 +167,15 @@ TEST_F(KFDTest, GetClockCounters) {
   ASSERT_NE(counters.cpu_clock_counter, 0);
   ASSERT_NE(counters.system_clock_counter, 0);
   ASSERT_NE(counters.system_clock_freq, 0);
+#else
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_UNIMPLEMENTED,
+      iree_hal_amdgpu_kfd_get_clock_counters(kfd, *gpu_uid, &counters));
+  EXPECT_EQ(counters.gpu_clock_counter, 0);
+  EXPECT_EQ(counters.cpu_clock_counter, 0);
+  EXPECT_EQ(counters.system_clock_counter, 0);
+  EXPECT_EQ(counters.system_clock_freq, 0);
+#endif  // IREE_PLATFORM_LINUX
 
   iree_hal_amdgpu_kfd_close(kfd);
 }

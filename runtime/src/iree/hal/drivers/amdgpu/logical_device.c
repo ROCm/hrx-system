@@ -885,8 +885,9 @@ iree_hal_amdgpu_logical_device_sample_profile_clock_correlation(
   iree_hal_amdgpu_device_clock_counters_t counters = {0};
   const iree_time_t host_time_begin_ns = iree_time_now();
   iree_status_t status = iree_hal_amdgpu_device_clock_source_sample(
-      &logical_device->system->device_clock_source, physical_device->driver_uid,
-      &counters);
+      &logical_device->system->device_clock_source,
+      &logical_device->system->libhsa, physical_device->device_agent,
+      physical_device->driver_uid, &counters);
   const iree_time_t host_time_end_ns = iree_time_now();
 
   if (iree_status_is_ok(status)) {

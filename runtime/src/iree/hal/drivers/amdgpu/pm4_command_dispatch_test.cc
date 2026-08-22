@@ -489,7 +489,7 @@ TEST_F(PM4CommandDispatchTest,
   EXPECT_EQ(0u, event.workgroup_count[0]);
   EXPECT_EQ(0u, event.workgroup_count[1]);
   EXPECT_EQ(0u, event.workgroup_count[2]);
-  ExpectDispatchEventsHaveClockCorrelations(sink);
+  ExpectDispatchEventsWithinClockCorrelationRange(sink);
 }
 
 TEST_F(PM4CommandDispatchTest, RejectsImplicitBlockCountKernargs) {

@@ -1161,6 +1161,7 @@ iree_cc_test(
     iree::base
     iree::hal
     iree::hal::cts::util::test_base
+    iree::hal::drivers::amdgpu::util::device_clock
     iree::hal::drivers::amdgpu::util::libhsa
     iree::hal::drivers::amdgpu::util::packet
     iree::hal::drivers::amdgpu::util::topology

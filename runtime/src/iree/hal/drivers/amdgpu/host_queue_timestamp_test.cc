@@ -19,7 +19,6 @@
 #include "iree/hal/drivers/amdgpu/host_queue_policy.h"
 #include "iree/hal/drivers/amdgpu/logical_device.h"
 #include "iree/hal/drivers/amdgpu/physical_device.h"
-#include "iree/hal/drivers/amdgpu/physical_device_capabilities.h"
 #include "iree/hal/drivers/amdgpu/transient_buffer.h"
 #include "iree/hal/drivers/amdgpu/util/libhsa.h"
 #include "iree/hal/drivers/amdgpu/util/pm4_capabilities.h"
@@ -172,13 +171,12 @@ INSTANTIATE_TEST_SUITE_P(
                                                        : "CaptureDispatch";
     });
 
-// True when the GPU agent's ISA has a PM4 timestamp packet at all. Derived from
-// the reported ISA rather than from the queue strategy under test, so a queue
-// that fails to select PM4 on an ISA that has one fails instead of skipping.
-static bool IsaProvidesPm4Timestamps(
+// True when device initialization selected a platform-supported PM4 timestamp
+// packet for this GPU agent. This is the production capability copied into
+// each host queue unless a test explicitly forces the capture dispatch.
+static bool PhysicalDeviceProvidesPm4Timestamps(
     const iree_hal_amdgpu_physical_device_t* physical_device) {
-  return iree_hal_amdgpu_select_pm4_timestamp_strategy(
-             physical_device->agent_target->primary_isa.identity.version) !=
+  return physical_device->pm4_timestamp_strategy !=
          IREE_HAL_AMDGPU_PM4_TIMESTAMP_STRATEGY_NONE;
 }
 
@@ -389,11 +387,8 @@ TEST_P(HostQueueTimestampTest, CapturesThroughTheParameterizedStrategy) {
       test_device.first_physical_device();
   ASSERT_NE(physical_device, nullptr);
 
-  const bool expect_pm4 = GetParam() == CaptureStrategy::kPm4Packet;
-  if (expect_pm4 && !IsaProvidesPm4Timestamps(physical_device)) {
-    GTEST_SKIP() << "this GPU ISA has no PM4 timestamp packet, so both "
-                    "parameterizations capture through the dispatch";
-  }
+  const bool expect_pm4 = GetParam() == CaptureStrategy::kPm4Packet &&
+                          PhysicalDeviceProvidesPm4Timestamps(physical_device);
 
   EXPECT_EQ(iree_hal_amdgpu_host_queue_can_use_pm4_timestamp(queue),
             expect_pm4);
@@ -811,10 +806,10 @@ TEST_P(HostQueueTimestampTest, CaptureStrategiesAgreeOnTickOrderAndRate) {
   const iree_hal_amdgpu_physical_device_t* physical_device =
       pm4_device.first_physical_device();
   ASSERT_NE(physical_device, nullptr);
-  if (!IsaProvidesPm4Timestamps(physical_device)) {
-    GTEST_SKIP() << "this GPU ISA has no PM4 timestamp packet, so both devices "
-                    "would run the capture dispatch and there is no second "
-                    "clock source to compare against";
+  if (!PhysicalDeviceProvidesPm4Timestamps(physical_device)) {
+    GTEST_SKIP() << "this platform and GPU ISA do not provide a PM4 timestamp "
+                    "packet, so both devices would run the capture dispatch "
+                    "and there is no second clock source to compare against";
   }
 
   TestLogicalDevice dispatch_device;

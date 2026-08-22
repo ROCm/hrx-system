@@ -251,10 +251,9 @@ typedef iree_atomic_uint64_t iree_amdgpu_scoped_atomic_uint64_t;
 
 #if defined(IREE_AMDGPU_TARGET_DEVICE)
 
-// Returns a tick in the agent domain.
-// This can be converted to the system domain for correlation across agents and
-// the host with hsa_amd_profiling_convert_tick_to_system_domain. The value is
-// the same as that placed into signal start_ts/end_ts by the command processor.
+// Returns a fixed-frequency tick in the queue-timestamp domain. This agrees
+// with the PM4 timestamp strategy on the same agent, but its epoch need not
+// match HSA signal profiling timestamps or host-side KFD clock samples.
 #define iree_amdgpu_device_timestamp __builtin_readsteadycounter
 
 // Sleeps the current thread for some "short" amount of time.

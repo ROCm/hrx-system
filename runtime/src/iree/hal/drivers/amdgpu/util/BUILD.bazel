@@ -266,7 +266,9 @@ iree_runtime_cc_library(
     hdrs = ["device_clock.h"],
     deps = [
         ":kfd",
+        ":libhsa",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/base:core_headers",
     ],
 )
 
@@ -574,6 +576,8 @@ iree_runtime_cc_test(
     srcs = ["device_clock_test.cc"],
     deps = [
         ":device_clock",
+        ":libhsa",
+        ":topology",
         "//runtime/src/iree/base",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
