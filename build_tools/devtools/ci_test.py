@@ -1176,25 +1176,48 @@ class CiTest(unittest.TestCase):
             ".github/workflows/ci_iree_bazel.yml", "windows_bazel"
         )
 
-        self.assertIn("name: Windows / Repository / MSVC + ROCm", block)
+        self.assertIn("name: ${{ matrix.name }}", block)
+        self.assertRegex(
+            block,
+            r"name: Windows / Repository / clang-cl \+ ROCm\n"
+            r"\s+host_toolchain: clang-cl",
+        )
+        self.assertRegex(
+            block,
+            r"name: Windows / Repository / MSVC \+ ROCm\n"
+            r"\s+host_toolchain: msvc",
+        )
         self.assertNotIn("if: ${{ false }}", block)
         self.assertIn("runs-on: azure-windows-scale-rocm", block)
+        self.assertIn(
+            "BAZEL_LLVM: ${{ github.workspace }}\\build\\iree-bazel-windows\\rocm-root\\lib\\llvm",
+            block,
+        )
         self.assertIn("python build_tools/ci_core_windows.py fetch-rocm", block)
         self.assertIn("python dev.py bazel setup --venv", block)
         self.assertIn('Join-Path $env:SystemDrive "b"', block)
         self.assertNotIn('Join-Path $env:RUNNER_TEMP "bazel"', block)
         self.assertIn("startup --output_user_root=$bazelOutputRoot", block)
         self.assertNotIn("output_user_root=C:", block)
+        self.assertIn('if ("${{ matrix.host_toolchain }}" -eq "msvc")', block)
+        self.assertIn('"build --config=windows-msvc"', block)
         self.assertIn("VsDevCmd.bat", block)
+        self.assertIn('if "${{ matrix.host_toolchain }}"=="msvc"', block)
         self.assertIn('set "CC=cl.exe"', block)
         self.assertIn('set "CXX=cl.exe"', block)
         self.assertIn('set "AR=lib.exe"', block)
+        self.assertIn('set "CC=%BAZEL_LLVM%\\bin\\clang-cl.exe"', block)
+        self.assertIn('set "CXX=%BAZEL_LLVM%\\bin\\clang-cl.exe"', block)
+        self.assertIn('set "AR=%BAZEL_LLVM%\\bin\\llvm-lib.exe"', block)
         self.assertIn(
             "build_tools/devtools/ci.py iree-bazel-repository-integration",
             block,
         )
         self.assertIn("--amdgpu-target gfx11-generic", block)
-        self.assertNotIn('set "CC=%HRX_ROCM_ROOT%', block)
+        self.assertIn(
+            "bazel-profiles-iree-bazel-repository-integration-${{ matrix.host_toolchain }}",
+            block,
+        )
 
     def test_iree_workflows_do_not_trigger_on_libhrx_only_paths(self):
         for path in (

@@ -8,6 +8,10 @@
 # Keep Bazel module behavior explicit even when running older compatible tools.
 common --enable_bzlmod
 
+# Apply the repository's host-OS defaults without requiring every invocation to
+# spell an equivalent --config flag.
+common --enable_platform_specific_config
+
 # Treat stale direct dependency pins as errors instead of background warnings.
 common --check_direct_dependencies=error
 
@@ -41,6 +45,15 @@ build --enable_runfiles
 # legacy implicit init generation can synthesize empty __init__.py files in
 # runfiles trees, which is brittle around symlinked source runfiles.
 build --incompatible_default_to_explicit_init_py
+
+# Bazel 8+ selects clang-cl through an execution platform and the dedicated
+# rules_cc toolchain. Windows uses clang-cl by default; the MSVC config clears
+# those repeatable selections when it is layered after the host-OS default.
+build:windows --config=windows-clang-cl
+build:windows-clang-cl --extra_toolchains=@local_config_cc//:cc-toolchain-x64_windows-clang-cl
+build:windows-clang-cl --extra_execution_platforms=//build_tools/bazel:x64_windows_clang_cl
+build:windows-msvc --extra_toolchains=
+build:windows-msvc --extra_execution_platforms=
 
 # -----------------------------------------------------------------------------
 # Test presets.

@@ -76,6 +76,33 @@ equivalent symbolic-link policy. Provision both policies in the base image for
 CI runners that cannot elevate during a job. `python dev.py bazel configure`
 and `python dev.py bazel doctor` diagnose those capabilities.
 
+Windows Bazel builds use `clang-cl` by default and require `BAZEL_LLVM` to name
+the LLVM installation root. The MSVC ABI tools and SDK still come from the
+active Visual Studio developer environment. Configure once, then build the
+normal Loom tool surface:
+
+```powershell
+$env:BAZEL_LLVM = 'C:\Program Files\LLVM'
+python dev.py bazel setup --venv
+python dev.py bazel configure
+python dev.py bazel build `
+  //loom/src/loom/tools/iree-run-loom `
+  //loom/src/loom/tools/loom-compile `
+  //loom/binding/c:loomc
+```
+
+Use the explicit MSVC lane when checking both host compilers. It clears the
+clang-cl execution-platform selection while preserving the same configured
+feature and dependency graph:
+
+```powershell
+python dev.py bazel build `
+  //loom/src/loom/tools/iree-run-loom `
+  //loom/src/loom/tools/loom-compile `
+  //loom/binding/c:loomc `
+  --config=windows-msvc
+```
+
 The following is the host-only Loom baseline: it builds the VM and x86 target
 paths without requiring ROCm, Vulkan, WebGPU, or libHRX.
 
