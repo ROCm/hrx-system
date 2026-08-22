@@ -1430,6 +1430,24 @@ typedef struct loom_amdgpu_fragment_memory_address_layout_t {
       register_byte_offsets[LOOM_AMDGPU_MAX_MATRIX_FRAGMENT_32BIT_REGISTERS];
 } loom_amdgpu_fragment_memory_address_layout_t;
 
+typedef struct loom_amdgpu_fragment_memory_runtime_axis_t {
+  // Physical view axis whose byte stride is materialized at runtime.
+  uint8_t view_axis;
+  // Power-of-two divisor applied to the subgroup lane ID.
+  uint16_t lane_divisor;
+  // Optional power-of-two modulus applied after division; zero omits it.
+  uint16_t lane_modulus;
+  // Logical coordinate scale applied to the resulting lane digit.
+  uint16_t lane_coordinate_scale;
+  // Logical coordinate increment between separately addressed packed elements.
+  uint16_t packed_element_coordinate_stride;
+  // Materializable byte-stride product for this physical view axis.
+  loom_low_source_memory_axis_byte_stride_t byte_stride;
+  // Lane-independent logical coordinate of each physical fragment register.
+  uint32_t
+      register_coordinates[LOOM_AMDGPU_MAX_MATRIX_FRAGMENT_32BIT_REGISTERS];
+} loom_amdgpu_fragment_memory_runtime_axis_t;
+
 typedef struct loom_amdgpu_fragment_memory_plan_t {
   // Direction of the fragment memory movement.
   loom_low_source_memory_operation_kind_t operation_kind;
@@ -1445,8 +1463,13 @@ typedef struct loom_amdgpu_fragment_memory_plan_t {
   loom_value_id_t payload;
   // Optional F32 scale applied while decoding an FP8 load payload.
   loom_value_id_t fp8_load_scale_source;
-  // Per-axis byte strides selected from the view layout.
-  uint32_t axis_byte_strides[LOOM_ENCODING_ADDRESS_LAYOUT_MAX_RANK];
+  // Exact compile-time byte stride for each view axis, or zero when dynamic.
+  uint32_t static_axis_byte_strides[LOOM_ENCODING_ADDRESS_LAYOUT_MAX_RANK];
+  // Materialized runtime axes used by lane, register, or packed coordinates.
+  loom_amdgpu_fragment_memory_runtime_axis_t
+      runtime_axes[LOOM_MATRIX_FRAGMENT_AXIS_COUNT];
+  // Number of populated runtime axis plans.
+  uint8_t runtime_axis_count;
   // Rank of the typed view.
   uint8_t view_rank;
   // Number of target fragment coordinate registers in the selected layout.

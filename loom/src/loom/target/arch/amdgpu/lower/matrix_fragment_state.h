@@ -39,6 +39,32 @@ typedef struct loom_amdgpu_fragment_memory_address_accumulator_t {
   loom_amdgpu_fragment_memory_address_register_kind_t register_kind;
 } loom_amdgpu_fragment_memory_address_accumulator_t;
 
+#define LOOM_AMDGPU_FRAGMENT_MEMORY_ADDRESS_PRODUCT_VALUE_CAPACITY \
+  (LOOM_LOW_SOURCE_MEMORY_DYNAMIC_TERM_CAPACITY + 1)
+
+typedef struct loom_amdgpu_fragment_memory_address_product_key_t {
+  // Source SSA values multiplied to materialize the address product.
+  loom_value_id_t
+      values[LOOM_AMDGPU_FRAGMENT_MEMORY_ADDRESS_PRODUCT_VALUE_CAPACITY];
+  // Number of populated source SSA values.
+  uint8_t value_count;
+  // Static byte coefficient multiplied into the source values.
+  int64_t static_byte_coefficient;
+} loom_amdgpu_fragment_memory_address_product_key_t;
+
+typedef struct loom_amdgpu_fragment_memory_runtime_axis_base_key_t {
+  // Physical view axis represented by this runtime product.
+  uint8_t view_axis;
+  // Power-of-two divisor applied to the subgroup lane ID.
+  uint16_t lane_divisor;
+  // Optional power-of-two modulus applied after division; zero omits it.
+  uint16_t lane_modulus;
+  // Logical coordinate scale applied to the resulting lane digit.
+  uint16_t lane_coordinate_scale;
+  // Runtime byte-stride product materialized for the axis.
+  loom_amdgpu_fragment_memory_address_product_key_t byte_stride;
+} loom_amdgpu_fragment_memory_runtime_axis_base_key_t;
+
 typedef struct loom_amdgpu_fragment_memory_address_base_key_t {
   // Low block where the base address was materialized.
   loom_block_t* block;
@@ -51,17 +77,26 @@ typedef struct loom_amdgpu_fragment_memory_address_base_key_t {
       lane_terms[LOOM_MATRIX_FRAGMENT_AXIS_COUNT];
   // Number of dynamic source terms in the key.
   uint8_t dynamic_term_count;
-  // Source SSA values used for dynamic byte-address terms.
-  loom_value_id_t dynamic_values[LOOM_LOW_SOURCE_MEMORY_DYNAMIC_TERM_CAPACITY];
-  // Static byte strides paired with dynamic_values.
-  int64_t dynamic_byte_strides[LOOM_LOW_SOURCE_MEMORY_DYNAMIC_TERM_CAPACITY];
+  // Source products used for dynamic byte-address terms.
+  loom_amdgpu_fragment_memory_address_product_key_t
+      dynamic_terms[LOOM_LOW_SOURCE_MEMORY_DYNAMIC_TERM_CAPACITY];
+  // Number of runtime physical axes in the key.
+  uint8_t runtime_axis_count;
+  // Runtime physical-axis products contributing to the shared base.
+  loom_amdgpu_fragment_memory_runtime_axis_base_key_t
+      runtime_axes[LOOM_MATRIX_FRAGMENT_AXIS_COUNT];
 } loom_amdgpu_fragment_memory_address_base_key_t;
 
 typedef struct loom_amdgpu_fragment_memory_address_base_cache_t {
+  // Whether the cache contains a complete base and runtime-axis products.
+  bool valid;
   // Key for the cached base accumulator.
   loom_amdgpu_fragment_memory_address_base_key_t key;
-  // Cached low address accumulator. A NONE register kind means empty.
+  // Cached low address accumulator; NONE is a valid zero base.
   loom_amdgpu_fragment_memory_address_accumulator_t accumulator;
+  // Cached byte-stride product for each runtime physical axis.
+  loom_amdgpu_fragment_memory_address_accumulator_t
+      runtime_axis_byte_strides[LOOM_MATRIX_FRAGMENT_AXIS_COUNT];
 } loom_amdgpu_fragment_memory_address_base_cache_t;
 
 typedef struct loom_amdgpu_matrix_fragment_state_t {

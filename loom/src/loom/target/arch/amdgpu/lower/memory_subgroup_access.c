@@ -182,6 +182,8 @@ iree_status_t loom_amdgpu_fragment_memory_report_subgroup_access(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     const loom_amdgpu_matrix_fragment_layout_t* layout,
     const loom_amdgpu_fragment_memory_plan_t* plan,
+    const loom_amdgpu_fragment_memory_packet_plan_t* packet,
+    uint16_t element_index,
     const loom_low_descriptor_memory_effect_summary_t* issued,
     loom_low_lower_memory_subgroup_access_report_t* out_report) {
   static_assert(
@@ -215,14 +217,6 @@ iree_status_t loom_amdgpu_fragment_memory_report_subgroup_access(
     };
   }
 
-  if (!plan->dynamic_base_is_subgroup_uniform) {
-    out_report->unknown_reason =
-        IREE_SV("address-dynamic-base-not-subgroup-uniform");
-    return iree_ok_status();
-  }
-  out_report->lane_address_proof =
-      IREE_SV("compiled-fragment-lane-register-layout");
-
   uint32_t per_lane_packet_byte_count = 0;
   uint16_t unknown_width_count = 0;
   if (plan->operation_kind == LOOM_LOW_SOURCE_MEMORY_OPERATION_LOAD) {
@@ -250,6 +244,21 @@ iree_status_t loom_amdgpu_fragment_memory_report_subgroup_access(
     return iree_ok_status();
   }
   out_report->active_lane_proof = active_lane_proof.proof;
+
+  if (!loom_amdgpu_fragment_memory_runtime_packet_offset_is_subgroup_uniform(
+          plan, packet->register_index, element_index)) {
+    out_report->lane_mapping = IREE_SV("runtime-axis-terms");
+    out_report->unknown_reason = IREE_SV("address-runtime-fragment-stride");
+    return iree_ok_status();
+  }
+
+  if (!plan->dynamic_base_is_subgroup_uniform) {
+    out_report->unknown_reason =
+        IREE_SV("address-dynamic-base-not-subgroup-uniform");
+    return iree_ok_status();
+  }
+  out_report->lane_address_proof =
+      IREE_SV("compiled-fragment-lane-register-layout");
 
   loom_amdgpu_memory_calculate_subgroup_geometry(
       &plan->address_layout, layout->wave_size, per_lane_packet_byte_count,

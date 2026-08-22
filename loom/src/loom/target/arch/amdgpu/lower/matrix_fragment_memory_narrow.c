@@ -734,9 +734,9 @@ iree_status_t loom_amdgpu_emit_fragment_memory_fp8_to_packed_16bit_load_packet(
     const loom_amdgpu_matrix_fragment_layout_t* layout,
     const loom_amdgpu_fragment_memory_plan_t* plan,
     const loom_amdgpu_fragment_memory_packet_plan_t* packet,
-    const loom_amdgpu_fragment_memory_address_accumulator_t* base_accumulator,
-    loom_value_id_t low_address_resource, loom_value_id_t low_packet_resource,
-    loom_type_t vgpr_type, loom_type_t mask_type, loom_value_id_t low_soffset,
+    loom_amdgpu_fragment_memory_address_state_t* address_state,
+    loom_value_id_t low_packet_resource, loom_type_t vgpr_type,
+    loom_type_t mask_type, loom_value_id_t low_soffset,
     loom_value_id_t* out_low_packet) {
   *out_low_packet = LOOM_VALUE_ID_INVALID;
   loom_amdgpu_fragment_memory_packet_plan_t report_packet = *packet;
@@ -806,8 +806,8 @@ iree_status_t loom_amdgpu_emit_fragment_memory_fp8_to_packed_16bit_load_packet(
 
   IREE_RETURN_IF_ERROR(loom_amdgpu_emit_fragment_memory_vaddr(
       context, source_op, plan, report_packet.register_index,
-      /*element_index=*/0, report_packet.descriptor_ref, base_accumulator,
-      low_address_resource, vgpr_type, &address));
+      /*element_index=*/0, report_packet.descriptor_ref, address_state,
+      vgpr_type, &address));
 
   loom_type_t packet_type = vgpr_type;
   IREE_RETURN_IF_ERROR(loom_amdgpu_fragment_memory_packet_type(

@@ -639,7 +639,7 @@ static bool loom_amdgpu_fragment_memory_crosslane_packed_b16_store_layout(
       !loom_amdgpu_matrix_fragment_role_is_result_like(plan->role) ||
       plan->view_rank != LOOM_AMDGPU_FRAGMENT_UNBLOCKED_VIEW_RANK ||
       plan->element_byte_count != 2 ||
-      plan->axis_byte_strides[1] != plan->element_byte_count) {
+      plan->static_axis_byte_strides[1] != plan->element_byte_count) {
     return false;
   }
 

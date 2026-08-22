@@ -1381,7 +1381,8 @@ typedef struct loom_target_compile_report_subgroup_access_t {
   iree_string_view_t lane_address_proof;
   // Proof used to derive the active lane set.
   iree_string_view_t active_lane_proof;
-  // Address-function form: "uniform", "linear", or "digit-terms".
+  // Address-function form: "uniform", "linear", "digit-terms", or
+  // "runtime-axis-terms" when exact byte coefficients are unavailable.
   iree_string_view_t lane_mapping;
   // Exact byte-interval coverage: "dense", "gapped", or empty when unknown.
   iree_string_view_t interval_coverage;
@@ -1389,9 +1390,10 @@ typedef struct loom_target_compile_report_subgroup_access_t {
   iree_string_view_t unknown_reason;
   // Number of lanes in the modeled subgroup.
   uint8_t subgroup_size;
-  // Number of populated lossless lane-address terms.
+  // Number of populated lane-address terms with compile-time byte strides.
   uint8_t lane_term_count;
-  // Lossless relative address terms evaluated in array order.
+  // Relative address terms with compile-time byte strides, in array order.
+  // A runtime-axis mapping may have additional terms not represented here.
   loom_target_compile_report_subgroup_access_term_t
       lane_terms[LOOM_TARGET_COMPILE_REPORT_SUBGROUP_ACCESS_TERM_CAPACITY];
   // Selected target packet byte width issued by each active lane.

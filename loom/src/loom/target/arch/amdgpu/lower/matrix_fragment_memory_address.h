@@ -22,6 +22,25 @@ typedef struct loom_amdgpu_fragment_memory_address_t {
   int64_t immediate_offset;
 } loom_amdgpu_fragment_memory_address_t;
 
+typedef struct loom_amdgpu_fragment_memory_runtime_axis_address_state_t {
+  // Materialized runtime byte stride for this physical view axis.
+  loom_amdgpu_fragment_memory_address_accumulator_t byte_stride;
+  // Coordinate magnitude represented by scaled_byte_stride, or zero if empty.
+  uint32_t scaled_coordinate;
+  // Cached byte stride multiplied by scaled_coordinate.
+  loom_amdgpu_fragment_memory_address_accumulator_t scaled_byte_stride;
+} loom_amdgpu_fragment_memory_runtime_axis_address_state_t;
+
+typedef struct loom_amdgpu_fragment_memory_address_state_t {
+  // Shared source and lane base advanced across packet coordinates.
+  loom_amdgpu_fragment_memory_address_accumulator_t cursor;
+  // Runtime coordinate currently accumulated into cursor for each axis.
+  uint32_t current_coordinates[LOOM_MATRIX_FRAGMENT_AXIS_COUNT];
+  // Materialized stride and packet-step state for each runtime axis.
+  loom_amdgpu_fragment_memory_runtime_axis_address_state_t
+      runtime_axes[LOOM_MATRIX_FRAGMENT_AXIS_COUNT];
+} loom_amdgpu_fragment_memory_address_state_t;
+
 // Returns the exact byte offset contributed by one subgroup lane ID.
 uint64_t loom_amdgpu_fragment_memory_relative_lane_byte_offset(
     const loom_amdgpu_fragment_memory_address_layout_t* address_layout,
@@ -51,21 +70,26 @@ bool loom_amdgpu_fragment_memory_vaddr_static_offset_u32(
     const loom_amdgpu_fragment_memory_plan_t* plan, uint16_t register_index,
     uint16_t element_index, uint64_t* out_static_byte_offset);
 
+// Returns whether runtime fragment terms contribute only a subgroup-uniform
+// common offset to one packet. Source-origin terms are classified separately.
+bool loom_amdgpu_fragment_memory_runtime_packet_offset_is_subgroup_uniform(
+    const loom_amdgpu_fragment_memory_plan_t* plan, uint16_t register_index,
+    uint16_t element_index);
+
 // Emits the dynamic and lane-coordinate base shared by a fragment's packets.
-iree_status_t loom_amdgpu_emit_fragment_memory_base_address_accumulator(
+iree_status_t loom_amdgpu_initialize_fragment_memory_address_state(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     const loom_amdgpu_fragment_memory_plan_t* plan,
     loom_amdgpu_matrix_fragment_lane_ids_t* lane_ids, loom_type_t vgpr_type,
-    loom_amdgpu_fragment_memory_address_accumulator_t* out_accumulator);
+    loom_amdgpu_fragment_memory_address_state_t* out_state);
 
 // Emits one packet's VGPR address and descriptor immediate offset.
 iree_status_t loom_amdgpu_emit_fragment_memory_vaddr(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     const loom_amdgpu_fragment_memory_plan_t* plan, uint16_t register_index,
     uint16_t element_index, loom_amdgpu_descriptor_ref_t descriptor_ref,
-    const loom_amdgpu_fragment_memory_address_accumulator_t* base_accumulator,
-    loom_value_id_t low_resource, loom_type_t vgpr_type,
-    loom_amdgpu_fragment_memory_address_t* out_address);
+    loom_amdgpu_fragment_memory_address_state_t* address_state,
+    loom_type_t vgpr_type, loom_amdgpu_fragment_memory_address_t* out_address);
 
 #ifdef __cplusplus
 }  // extern "C"

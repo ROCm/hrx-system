@@ -1,21 +1,20 @@
 // Fragment result stores through a dynamic strided destination layout.
 //
 // The four tile origins force both row and column origin terms to participate
-// in address formation. The destination layout is authored with a dynamic
-// second stride even though the value is constant, matching kernels that keep
-// layout metadata parameterized while lowering f16 accumulator fragments into
-// f32 global memory.
+// in address formation. The destination column stride is a runtime launch
+// argument so the fragment store must preserve the physical layout through
+// target lowering. A padded stride makes an accidental dense store observable.
 amdgpu.target<gfx1100> @fragment_result_dynamic_gfx1100_wave64 {subgroup_size = 64}
 
 kernel.def target(@fragment_result_dynamic_gfx1100_wave64) @fragment_result_dynamic_strided_f16acc_f32_store() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
-} launch(%out_buffer: buffer) {
+} launch(%column_stride0: index, %out_buffer: buffer) {
   %base = index.constant 0 : offset
   %tile_origin = index.constant 0 : index
   %tile_extent = index.constant 16 : index
-  %column_stride = index.constant 64 : index
+  %column_stride = index.assume %column_stride0 [range(%column_stride0, 64, 128), mul(%column_stride0, 64)] : index
   %m = index.constant 16 : index
   %n = index.constant 16 : index
   %k = index.constant 16 : index
@@ -63,7 +62,7 @@ kernel.def @fill_fragment_result_dynamic_strided_f16acc_f32_store_expected() {
   %tile_value_bias = index.constant 1 : index
   %tile_grid_width = index.constant 2 : index
   %tile_extent = index.constant 16 : index
-  %column_stride = index.constant 64 : index
+  %column_stride = index.constant 128 : index
 
   %tile_row = index.div %wg, %tile_grid_width : index
   %tile_column = index.rem %wg, %tile_grid_width : index
@@ -80,17 +79,18 @@ kernel.def @fill_fragment_result_dynamic_strided_f16acc_f32_store_expected() {
   %tile_value = scalar.uitofp %tile_value_i32 : i32 to f32
 
   %out_global = buffer.assume.memory_space<global> %out_buffer : buffer
-  %out_view = buffer.view %out_global[%base] : buffer -> view<4096xf32>
-  view.store %tile_value, %out_view[%element_index] : f32, view<4096xf32>
+  %out_view = buffer.view %out_global[%base] : buffer -> view<8192xf32>
+  view.store %tile_value, %out_view[%element_index] : f32, view<8192xf32>
   kernel.return
 }
 
 check.case public @fragment_result_dynamic_strided_f16acc_f32_store_case {
-  %actual = check.generate.fill value(0.0) : tensor<4096xf32>
-  %expected = check.generate.fill value(0.0) : tensor<4096xf32>
-  kernel.launch @fragment_result_dynamic_strided_f16acc_f32_store(%actual) : (tensor<4096xf32>)
-  kernel.launch @fill_fragment_result_dynamic_strided_f16acc_f32_store_expected(%expected) : (tensor<4096xf32>)
-  check.expect.close actual(%actual) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<4096xf32>
+  %column_stride = check.literal value(128) : index
+  %actual = check.generate.fill value(0.0) : tensor<8192xf32>
+  %expected = check.generate.fill value(0.0) : tensor<8192xf32>
+  kernel.launch @fragment_result_dynamic_strided_f16acc_f32_store(%column_stride, %actual) : (index, tensor<8192xf32>)
+  kernel.launch @fill_fragment_result_dynamic_strided_f16acc_f32_store_expected(%expected) : (tensor<8192xf32>)
+  check.expect.close actual(%actual) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<8192xf32>
   check.return
 }
 
