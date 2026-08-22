@@ -55,6 +55,7 @@ loom_cc_library(
         "//loom/src/loom/tooling/execution/hal:artifact",
         "//loom/src/loom/tooling/execution/hal:runtime",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/io:byte_sequence",
     ],
 )
 
@@ -106,6 +107,7 @@ loom_cc_test(
         "//loom/src/loom/target/arch/spirv:profile",
         "//loom/src/loom/target/arch/spirv/descriptors:low_registry",
         "//loom/src/loom/target/arch/spirv/ops",
+        "//loom/src/loom/testing:byte_sequence",
         "//loom/src/loom/testing:module_ptr",
         "//loom/src/loom/tooling/execution/hal:artifact",
         "//loom/src/loom/tooling/execution/hal:runtime",

@@ -37,6 +37,7 @@ loom_cc_library(
         "//loom/src/loom/verify",
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
+        "//runtime/src/iree/io:byte_sequence",
     ],
 )
 
@@ -67,6 +68,7 @@ loom_cc_library(
         "//loom/src/loom/tooling/execution:session",
         "//loom/src/loom/verify",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/io:byte_sequence",
     ],
 )
 
@@ -81,6 +83,7 @@ loom_cc_library(
         "//loom/src/loom/target:types",
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
+        "//runtime/src/iree/io:byte_sequence",
         "//runtime/src/iree/tooling:value_io",
     ],
 )
@@ -158,6 +161,7 @@ loom_cc_library(
         "//runtime/src/iree/base",
         "//runtime/src/iree/base:core_headers",
         "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/io:byte_sequence",
     ],
 )
 
@@ -170,8 +174,10 @@ loom_cc_test(
         "//loom/src/loom/target:low_descriptor_registry_core_test",
         "//loom/src/loom/target:profile",
         "//loom/src/loom/target:types",
+        "//loom/src/loom/testing:byte_sequence",
         "//loom/src/loom/tooling/execution:session",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/io:byte_sequence",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],

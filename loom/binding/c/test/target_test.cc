@@ -10,6 +10,7 @@
 #include <memory>
 #include <string>
 
+#include "iree/io/byte_sequence.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/temp_file.h"
 #include "loom/ops/test/ops.h"
@@ -55,19 +56,30 @@ using TargetProfilePtr =
     HandlePtr<loomc_target_profile_t, loomc_target_profile_release>;
 using WorkspacePtr = HandlePtr<loomc_workspace_t, loomc_workspace_release>;
 
-void FakeArtifactRelease(void* storage, iree_allocator_t allocator) {
-  iree_allocator_free(allocator, storage);
-}
-
 typedef struct FakeArtifactSidecarStorage {
-  // Primary fake executable bytes.
-  uint8_t contents[4];
+  // Allocator owning this storage.
+  iree_allocator_t allocator;
+
   // Fake manifest sidecar descriptor.
   loom_target_emit_sidecar_artifact_t sidecar;
 } FakeArtifactSidecarStorage;
 
-void FakeArtifactSidecarRelease(void* storage, iree_allocator_t allocator) {
-  iree_allocator_free(allocator, storage);
+void FakeArtifactSidecarStorageRelease(void* storage) {
+  auto* artifact_storage = static_cast<FakeArtifactSidecarStorage*>(storage);
+  iree_allocator_free(artifact_storage->allocator, artifact_storage);
+}
+
+iree_status_t CreateFakeArtifactContents(
+    iree_const_byte_span_t source, iree_allocator_t allocator,
+    iree_io_byte_sequence_t** out_contents) {
+  *out_contents = nullptr;
+  void* data = nullptr;
+  IREE_RETURN_IF_ERROR(iree_allocator_clone(allocator, source, &data));
+  iree_byte_span_t contents = iree_make_byte_span(data, source.data_length);
+  iree_status_t status = iree_io_byte_sequence_create_from_span_move(
+      &contents, allocator, out_contents);
+  iree_allocator_free(allocator, contents.data);
+  return status;
 }
 
 iree_status_t EmitFakeArtifact(const loom_target_emit_request_t* request,
@@ -80,19 +92,15 @@ iree_status_t EmitFakeArtifact(const loom_target_emit_request_t* request,
   }
   static const char kManifestJson[] =
       "{\"kind\":\"loom.artifact_manifest\",\"mode\":\"summary\"}";
+  static const uint8_t kContents[] = {0x7F, 'L', 'O', 'M'};
   out_artifact->target_artifact_format = LOOM_TARGET_ARTIFACT_FORMAT_ELF;
   if (request->artifact_manifest.mode ==
       LOOM_TARGET_ARTIFACT_MANIFEST_MODE_NONE) {
-    uint8_t* contents = nullptr;
-    IREE_RETURN_IF_ERROR(
-        iree_allocator_malloc(request->allocator, 4, (void**)&contents));
-    contents[0] = 0x7F;
-    contents[1] = 'L';
-    contents[2] = 'O';
-    contents[3] = 'M';
-    out_artifact->contents = iree_make_const_byte_span(contents, 4);
-    out_artifact->storage = contents;
-    out_artifact->release = FakeArtifactRelease;
+    iree_io_byte_sequence_t* contents = nullptr;
+    IREE_RETURN_IF_ERROR(CreateFakeArtifactContents(
+        iree_make_const_byte_span(kContents, sizeof(kContents)),
+        request->allocator, &contents));
+    out_artifact->contents = contents;
     return iree_ok_status();
   }
 
@@ -100,22 +108,30 @@ iree_status_t EmitFakeArtifact(const loom_target_emit_request_t* request,
   IREE_RETURN_IF_ERROR(iree_allocator_malloc(
       request->allocator, sizeof(*storage), (void**)&storage));
   *storage = {};
-  storage->contents[0] = 0x7F;
-  storage->contents[1] = 'L';
-  storage->contents[2] = 'O';
-  storage->contents[3] = 'M';
-  storage->sidecar = {
-      /*.kind=*/LOOM_TARGET_EMIT_SIDECAR_ARTIFACT_KIND_ARTIFACT_MANIFEST,
-      /*.identifier=*/request->artifact_manifest.identifier,
-      /*.contents=*/
-      iree_make_const_byte_span((const uint8_t*)kManifestJson,
-                                sizeof(kManifestJson) - 1),
-  };
-  out_artifact->contents = iree_make_const_byte_span(storage->contents, 4);
+  storage->allocator = request->allocator;
+  iree_io_byte_sequence_t* contents = nullptr;
+  iree_status_t status = CreateFakeArtifactContents(
+      iree_make_const_byte_span(kContents, sizeof(kContents)),
+      request->allocator, &contents);
+  if (iree_status_is_ok(status)) {
+    status = CreateFakeArtifactContents(
+        iree_make_const_byte_span(kManifestJson, sizeof(kManifestJson) - 1),
+        request->allocator, &storage->sidecar.contents);
+  }
+  if (!iree_status_is_ok(status)) {
+    iree_io_byte_sequence_release(contents);
+    iree_io_byte_sequence_release(storage->sidecar.contents);
+    FakeArtifactSidecarStorageRelease(storage);
+    return status;
+  }
+  storage->sidecar.kind =
+      LOOM_TARGET_EMIT_SIDECAR_ARTIFACT_KIND_ARTIFACT_MANIFEST;
+  storage->sidecar.identifier = request->artifact_manifest.identifier;
+  out_artifact->contents = contents;
   out_artifact->sidecars = &storage->sidecar;
   out_artifact->sidecar_count = 1;
   out_artifact->storage = storage;
-  out_artifact->release = FakeArtifactSidecarRelease;
+  out_artifact->release_storage = FakeArtifactSidecarStorageRelease;
   return iree_ok_status();
 }
 

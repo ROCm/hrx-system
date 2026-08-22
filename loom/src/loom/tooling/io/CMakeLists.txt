@@ -19,6 +19,7 @@ loom_cc_library(
   DEPS
     iree::base
     iree::base::internal::path
+    iree::io::byte_sequence
     iree::io::file_handle
     iree::io::stream
     loom::util::stream
@@ -35,6 +36,24 @@ loom_cc_library(
   DEPS
     iree::base
   PUBLIC
+)
+
+loom_cc_test(
+  NAME
+    file_test
+  SRCS
+    "file_test.cc"
+  DEPS
+    ::file
+    iree::base
+    iree::io::byte_sequence
+    iree::io::file_handle
+    iree::io::stream
+    iree::testing::gtest
+    iree::testing::gtest_main
+    iree::testing::temp_file
+  LABELS
+    "requires-filesystem"
 )
 
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

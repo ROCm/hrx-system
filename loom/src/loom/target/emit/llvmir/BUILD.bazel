@@ -148,6 +148,7 @@ loom_cc_library(
         "//loom/src/loom/target:provider",
         "//loom/src/loom/util:stream",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/io:byte_sequence",
         "//runtime/src/iree/io:stream",
     ],
 )
@@ -316,6 +317,7 @@ loom_cc_test(
         "//loom/src/loom/testing:module_ptr",
         "//loom/src/loom/util:stream",
         "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/io:byte_sequence",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],

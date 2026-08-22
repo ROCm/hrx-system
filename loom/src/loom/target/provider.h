@@ -17,6 +17,7 @@
 
 #include "iree/base/api.h"
 #include "iree/base/internal/arena.h"
+#include "iree/io/byte_sequence.h"
 #include "loom/codegen/low/lower/lower.h"
 #include "loom/codegen/low/verify.h"
 #include "loom/ir/context.h"
@@ -68,8 +69,7 @@ typedef iree_status_t (*loom_target_materialize_definition_fn_t)(
     loom_symbol_ref_t symbol, loom_location_id_t location);
 
 // Target emission artifact storage release callback.
-typedef void (*loom_target_emit_artifact_release_fn_t)(
-    void* storage, iree_allocator_t allocator);
+typedef void (*loom_target_emit_artifact_storage_release_fn_t)(void* storage);
 
 typedef enum loom_target_emit_sidecar_artifact_kind_e {
   // Machine-readable artifact manifest for the primary artifact.
@@ -84,8 +84,10 @@ typedef struct loom_target_emit_sidecar_artifact_t {
   // Sidecar artifact identifier.
   iree_string_view_t identifier;
 
-  // Borrowed view over sidecar artifact bytes.
-  iree_const_byte_span_t contents;
+  // Immutable sidecar artifact contents. The containing artifact owns one
+  // reference; callers may retain the sequence when they need it to outlive
+  // the artifact.
+  iree_io_byte_sequence_t* contents;
 } loom_target_emit_sidecar_artifact_t;
 
 // One target artifact produced by an emitter.
@@ -93,8 +95,9 @@ typedef struct loom_target_emit_artifact_t {
   // Target-neutral artifact format produced by the emitter.
   loom_target_artifact_format_t target_artifact_format;
 
-  // Borrowed view over emitted artifact bytes.
-  iree_const_byte_span_t contents;
+  // Immutable primary artifact contents. The artifact owns one reference;
+  // callers may retain the sequence when they need it to outlive the artifact.
+  iree_io_byte_sequence_t* contents;
 
   // Optional emitter-owned sidecar artifacts.
   const loom_target_emit_sidecar_artifact_t* sidecars;
@@ -102,13 +105,17 @@ typedef struct loom_target_emit_artifact_t {
   // Number of entries in |sidecars|.
   iree_host_size_t sidecar_count;
 
-  // Emitter-owned storage that keeps artifact bytes, sidecar descriptors, and
-  // sidecar bytes alive until released.
+  // Optional emitter-owned storage that keeps sidecar descriptors, identifier
+  // strings, or other provider-specific metadata alive until released.
   void* storage;
 
-  // Optional callback that releases |storage|.
-  loom_target_emit_artifact_release_fn_t release;
+  // Optional callback that releases |storage| after artifact sequences.
+  loom_target_emit_artifact_storage_release_fn_t release_storage;
 } loom_target_emit_artifact_t;
+
+// Releases all storage owned by |artifact| and resets it to a zero-initialized
+// value. Safe to call on a zero-initialized artifact.
+void loom_target_emit_artifact_release(loom_target_emit_artifact_t* artifact);
 
 // Artifact manifest request passed to target-owned emitters.
 typedef struct loom_target_emit_artifact_manifest_request_t {

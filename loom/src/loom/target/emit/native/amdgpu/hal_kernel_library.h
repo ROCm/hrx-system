@@ -14,6 +14,7 @@
 #define LOOM_TARGET_EMIT_NATIVE_AMDGPU_HAL_KERNEL_LIBRARY_H_
 
 #include "iree/base/api.h"
+#include "iree/io/byte_sequence.h"
 #include "loom/error/diagnostic.h"
 #include "loom/ir/ir.h"
 #include "loom/target/emit/native/amdgpu/runtime_globals.h"
@@ -63,16 +64,12 @@ typedef struct loom_amdgpu_hal_kernel_library_t {
   iree_string_view_t target_key;
   // Durable target bundle resolved from the emitted entries.
   loom_target_bundle_storage_t target_bundle_storage;
-  // Allocator-owned HSACO ELF image bytes.
-  uint8_t* hsaco_data;
-  // Number of bytes in |hsaco_data|.
-  iree_host_size_t hsaco_data_length;
+  // Owned reference to immutable HSACO ELF image contents.
+  iree_io_byte_sequence_t* hsaco_data;
   // Textual listing format for |target_listing_data|.
   iree_string_view_t target_listing_format;
-  // Allocator-owned textual target listing.
-  char* target_listing_data;
-  // Number of bytes in |target_listing_data|, excluding the trailing NUL.
-  iree_host_size_t target_listing_data_length;
+  // Owned reference to immutable textual target listing contents.
+  iree_io_byte_sequence_t* target_listing_data;
   // Artifact manifest sidecar produced beside |hsaco_data|.
   loom_target_emit_sidecar_artifact_t artifact_manifest;
 } loom_amdgpu_hal_kernel_library_t;

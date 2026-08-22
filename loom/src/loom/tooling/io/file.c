@@ -176,6 +176,30 @@ iree_status_t loom_tooling_write_output_file(iree_string_view_t path,
                                                 "failed to flush stdout");
 }
 
+static iree_status_t loom_tooling_write_byte_sequence_segment(
+    void* user_data, iree_const_byte_span_t segment) {
+  loom_tooling_output_stream_t* output =
+      (loom_tooling_output_stream_t*)user_data;
+  return loom_output_stream_write(
+      &output->stream,
+      iree_make_string_view((const char*)segment.data, segment.data_length));
+}
+
+iree_status_t loom_tooling_write_output_byte_sequence(
+    iree_string_view_t path, const iree_io_byte_sequence_t* contents,
+    iree_allocator_t allocator) {
+  IREE_ASSERT_ARGUMENT(contents);
+  loom_tooling_output_stream_t output = {0};
+  IREE_RETURN_IF_ERROR(
+      loom_tooling_output_stream_open(path, allocator, &output));
+  iree_status_t status = iree_io_byte_sequence_enumerate(
+      contents, (iree_io_byte_sequence_segment_callback_t){
+                    .fn = loom_tooling_write_byte_sequence_segment,
+                    .user_data = &output,
+                });
+  return iree_status_join(status, loom_tooling_output_stream_close(&output));
+}
+
 iree_status_t loom_tooling_write_stdout(iree_string_view_t contents) {
   if (iree_string_view_is_empty(contents)) {
     return iree_ok_status();

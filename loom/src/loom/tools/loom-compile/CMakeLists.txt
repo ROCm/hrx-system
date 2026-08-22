@@ -61,6 +61,7 @@ loom_cc_binary(
   DEPS
     iree::base
     iree::base::tooling::flags
+    iree::io::byte_sequence
     iree::io::file_handle
     loom::codegen::low::text_asm
     loom::error::diagnostic

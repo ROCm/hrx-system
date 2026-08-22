@@ -19,6 +19,7 @@ loom_cc_library(
   DEPS
     iree::base
     iree::hal
+    iree::io::byte_sequence
     loom::error::diagnostic
     loom::ir
     loom::target::pipeline_options
@@ -60,6 +61,7 @@ loom_cc_library(
     ::artifact
     ::runtime
     iree::base
+    iree::io::byte_sequence
     loom::target::reporting::report
     loom::tooling::execution::compile_options
     loom::tooling::execution::session
@@ -79,6 +81,7 @@ loom_cc_library(
     ::runtime
     iree::base
     iree::hal
+    iree::io::byte_sequence
     iree::tooling::value_io
     loom::target::launch
     loom::target::types
@@ -162,6 +165,7 @@ loom_cc_library(
     iree::base
     iree::base::core_headers
     iree::base::internal::arena
+    iree::io::byte_sequence
     loom::target::entry_selection
     loom::tooling::execution::compile_report_capture
     loom::tooling::execution::execution_backend
@@ -178,12 +182,14 @@ loom_cc_test(
   DEPS
     ::candidate
     iree::base
+    iree::io::byte_sequence
     iree::testing::gtest
     iree::testing::gtest_main
     loom::ops::func
     loom::target::low_descriptor_registry_core_test
     loom::target::profile
     loom::target::types
+    loom::testing::byte_sequence
     loom::tooling::execution::session
 )
 

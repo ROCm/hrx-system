@@ -11,6 +11,18 @@ iree_add_all_subdirs()
 
 loom_cc_library(
   NAME
+    byte_sequence
+  HDRS
+    "byte_sequence.h"
+  DEPS
+    iree::base
+    iree::io::byte_sequence
+  TESTONLY
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
     context
   HDRS
     "context.h"

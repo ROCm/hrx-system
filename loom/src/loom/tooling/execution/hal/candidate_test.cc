@@ -6,11 +6,15 @@
 
 #include "loom/tooling/execution/hal/candidate.h"
 
+#include <cstring>
+
+#include "iree/io/byte_sequence.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 #include "loom/ops/func/ops.h"
 #include "loom/target/low_descriptor_registry_core_test.h"
 #include "loom/target/profile.h"
+#include "loom/testing/byte_sequence.h"
 
 namespace loom {
 namespace {
@@ -42,7 +46,6 @@ constexpr char kHalSource[] =
     "  func.return\n"
     "}\n";
 
-int kFakeHalTarget = 0;
 int kFakeHalRuntime = 0;
 bool g_fake_hal_emit_was_called = false;
 bool g_fake_hal_expect_module_target = false;
@@ -73,6 +76,26 @@ static const loom_target_profile_t kFakeTargetProfile = {
     /*.target_bundle=*/&kFakeTargetBundle,
 };
 static const loom_target_facts_t kFakeTargetRequirement = {};
+
+typedef struct fake_hal_artifact_storage_t {
+  // Immutable target-native artifact contents.
+  iree_io_byte_sequence_t* target_artifact;
+  // Immutable HAL executable contents.
+  iree_io_byte_sequence_t* executable;
+} fake_hal_artifact_storage_t;
+
+iree_status_t CreateFakeHalArtifactSequence(
+    iree_const_byte_span_t source, iree_allocator_t allocator,
+    iree_io_byte_sequence_t** out_sequence) {
+  *out_sequence = nullptr;
+  void* data = nullptr;
+  IREE_RETURN_IF_ERROR(iree_allocator_clone(allocator, source, &data));
+  iree_byte_span_t contents = iree_make_byte_span(data, source.data_length);
+  iree_status_t status = iree_io_byte_sequence_create_from_span_move(
+      &contents, allocator, out_sequence);
+  iree_allocator_free(allocator, contents.data);
+  return status;
+}
 
 const loom_run_hal_runtime_t* FakeHalRuntime() {
   return reinterpret_cast<const loom_run_hal_runtime_t*>(&kFakeHalRuntime);
@@ -110,7 +133,6 @@ iree_status_t FakeHalEmitArtifact(
     loom_run_hal_artifact_t* out_artifact) {
   (void)provider;
   (void)module;
-  (void)allocator;
   g_fake_hal_emit_was_called = true;
   g_fake_hal_emit_report = options->report;
   g_fake_hal_emit_function_versions = options->function_versions;
@@ -126,22 +148,38 @@ iree_status_t FakeHalEmitArtifact(
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "unexpected fake HAL target profile");
   }
+  fake_hal_artifact_storage_t* storage = nullptr;
+  IREE_RETURN_IF_ERROR(
+      iree_allocator_malloc(allocator, sizeof(*storage), (void**)&storage));
+  *storage = {};
+  iree_status_t status = CreateFakeHalArtifactSequence(
+      iree_make_const_byte_span(kFakeHalTargetArtifactData,
+                                sizeof(kFakeHalTargetArtifactData)),
+      allocator, &storage->target_artifact);
+  if (iree_status_is_ok(status)) {
+    status = CreateFakeHalArtifactSequence(
+        iree_make_const_byte_span(kFakeHalExecutableData,
+                                  sizeof(kFakeHalExecutableData)),
+        allocator, &storage->executable);
+  }
+  if (!iree_status_is_ok(status)) {
+    iree_io_byte_sequence_release(storage->target_artifact);
+    iree_io_byte_sequence_release(storage->executable);
+    iree_allocator_free(allocator, storage);
+    return status;
+  }
   *out_artifact = (loom_run_hal_artifact_t){
       /*.hal_target=*/nullptr,
       /*.target_key=*/IREE_SVL("fake-hal-target"),
       /*.target_bundle=*/&kFakeTargetBundle,
       /*.target_artifact_format=*/LOOM_TARGET_ARTIFACT_FORMAT_ELF,
-      /*.target_artifact_data=*/
-      iree_make_const_byte_span(kFakeHalTargetArtifactData,
-                                sizeof(kFakeHalTargetArtifactData)),
+      /*.target_artifact_data=*/storage->target_artifact,
       /*.target_listing_format=*/{},
       /*.target_listing_data=*/{},
       /*.sidecars=*/{},
       /*.sidecar_count=*/{},
-      /*.executable_data=*/
-      iree_make_const_byte_span(kFakeHalExecutableData,
-                                sizeof(kFakeHalExecutableData)),
-      /*.storage=*/&kFakeHalTarget,
+      /*.executable_data=*/storage->executable,
+      /*.storage=*/storage,
   };
   *out_emitted = true;
   return iree_ok_status();
@@ -151,7 +189,12 @@ void FakeHalDeinitializeArtifact(
     const loom_run_hal_artifact_provider_t* provider,
     loom_run_hal_artifact_t* artifact, iree_allocator_t allocator) {
   (void)provider;
-  (void)allocator;
+  auto* storage = static_cast<fake_hal_artifact_storage_t*>(artifact->storage);
+  if (storage != nullptr) {
+    iree_io_byte_sequence_release(storage->target_artifact);
+    iree_io_byte_sequence_release(storage->executable);
+    iree_allocator_free(allocator, storage);
+  }
   *artifact = {};
 }
 
@@ -243,13 +286,22 @@ TEST_F(HalCandidateTest, CompileHalExecutableCandidate) {
                                      IREE_SV("fake-hal-target")));
   EXPECT_EQ(candidate.artifact.target_artifact_format,
             LOOM_TARGET_ARTIFACT_FORMAT_ELF);
-  EXPECT_EQ(candidate.artifact.target_artifact_data.data,
-            kFakeHalTargetArtifactData);
-  EXPECT_EQ(candidate.artifact.target_artifact_data.data_length,
+  ASSERT_NE(candidate.artifact.target_artifact_data, nullptr);
+  testing::ByteSequenceClone target_artifact(iree_allocator_system());
+  IREE_ASSERT_OK(
+      target_artifact.Clone(candidate.artifact.target_artifact_data));
+  EXPECT_EQ(target_artifact.contents().data_length,
             sizeof(kFakeHalTargetArtifactData));
-  EXPECT_EQ(candidate.artifact.executable_data.data, kFakeHalExecutableData);
-  EXPECT_EQ(candidate.artifact.executable_data.data_length,
-            sizeof(kFakeHalExecutableData));
+  EXPECT_EQ(memcmp(target_artifact.contents().data, kFakeHalTargetArtifactData,
+                   sizeof(kFakeHalTargetArtifactData)),
+            0);
+  ASSERT_NE(candidate.artifact.executable_data, nullptr);
+  testing::ByteSequenceClone executable(iree_allocator_system());
+  IREE_ASSERT_OK(executable.Clone(candidate.artifact.executable_data));
+  EXPECT_EQ(executable.contents().data_length, sizeof(kFakeHalExecutableData));
+  EXPECT_EQ(memcmp(executable.contents().data, kFakeHalExecutableData,
+                   sizeof(kFakeHalExecutableData)),
+            0);
   EXPECT_EQ(candidate.compile_report.artifact_kind,
             LOOM_TARGET_COMPILE_ARTIFACT_KIND_HAL_EXECUTABLE);
   EXPECT_EQ(candidate.compile_report.status_code, IREE_STATUS_OK);

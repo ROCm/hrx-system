@@ -10,6 +10,7 @@
 
 #include "iree/base/internal/arena.h"
 #include "iree/hal/api.h"
+#include "iree/io/byte_sequence.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 #include "loom/codegen/low/text_asm.h"
@@ -25,6 +26,7 @@
 #include "loom/target/arch/amdgpu/target_info.h"
 #include "loom/target/emit/native/amdgpu/runtime_globals.h"
 #include "loom/target/entry_selection.h"
+#include "loom/testing/byte_sequence.h"
 #include "loom/testing/module_ptr.h"
 #include "loom/tooling/execution/hal/runtime.h"
 
@@ -285,12 +287,9 @@ class AmdgpuHalArtifactProviderTest : public ::testing::Test {
     EXPECT_NE(iree_string_view_find(artifact.target_key, target_name, 0),
               IREE_STRING_VIEW_NPOS);
     EXPECT_EQ(artifact.target_artifact_format, LOOM_TARGET_ARTIFACT_FORMAT_ELF);
-    EXPECT_EQ(artifact.target_artifact_data.data,
-              artifact.executable_data.data);
-    EXPECT_EQ(artifact.target_artifact_data.data_length,
-              artifact.executable_data.data_length);
-    EXPECT_NE(artifact.target_artifact_data.data, nullptr);
-    EXPECT_GT(artifact.target_artifact_data.data_length, 0u);
+    EXPECT_EQ(artifact.target_artifact_data, artifact.executable_data);
+    ASSERT_NE(artifact.target_artifact_data, nullptr);
+    EXPECT_GT(iree_io_byte_sequence_length(artifact.target_artifact_data), 0u);
     ASSERT_NE(artifact.target_bundle, nullptr);
     EXPECT_EQ(artifact.target_bundle->snapshot->codegen_format,
               LOOM_TARGET_CODEGEN_FORMAT_LOW_NATIVE);
@@ -719,18 +718,16 @@ TEST_F(AmdgpuHalArtifactProviderTest, RecordsDetailedReportRows) {
       iree_allocator_system(), &emitted, &artifact));
   EXPECT_TRUE(emitted);
   EXPECT_EQ(artifact.target_artifact_format, LOOM_TARGET_ARTIFACT_FORMAT_ELF);
-  EXPECT_EQ(artifact.target_artifact_data.data, artifact.executable_data.data);
-  EXPECT_EQ(artifact.target_artifact_data.data_length,
-            artifact.executable_data.data_length);
-  EXPECT_NE(artifact.target_artifact_data.data, nullptr);
-  if (artifact.target_artifact_data.data != nullptr) {
-    EXPECT_GT(artifact.target_artifact_data.data_length, 0u);
+  EXPECT_EQ(artifact.target_artifact_data, artifact.executable_data);
+  EXPECT_NE(artifact.target_artifact_data, nullptr);
+  if (artifact.target_artifact_data != nullptr) {
+    EXPECT_GT(iree_io_byte_sequence_length(artifact.target_artifact_data), 0u);
   }
   EXPECT_TRUE(iree_string_view_equal(artifact.target_listing_format,
                                      IREE_SV("amdgpu-assembly")));
-  EXPECT_NE(artifact.target_listing_data.data, nullptr);
-  if (artifact.target_listing_data.data != nullptr) {
-    EXPECT_GT(artifact.target_listing_data.data_length, 0u);
+  EXPECT_NE(artifact.target_listing_data, nullptr);
+  if (artifact.target_listing_data != nullptr) {
+    EXPECT_GT(iree_io_byte_sequence_length(artifact.target_listing_data), 0u);
   }
 
   EXPECT_EQ(report.source_low_rows.count, 0u);
@@ -780,10 +777,12 @@ TEST_F(AmdgpuHalArtifactProviderTest,
       iree_allocator_system(), &emitted, &artifact));
 
   EXPECT_TRUE(emitted);
-  ASSERT_NE(artifact.target_artifact_data.data, nullptr);
-  const iree_string_view_t hsaco =
-      iree_make_string_view((const char*)artifact.target_artifact_data.data,
-                            artifact.target_artifact_data.data_length);
+  ASSERT_NE(artifact.target_artifact_data, nullptr);
+  testing::ByteSequenceClone hsaco_contents(iree_allocator_system());
+  IREE_ASSERT_OK(hsaco_contents.Clone(artifact.target_artifact_data));
+  const iree_const_byte_span_t hsaco_bytes = hsaco_contents.contents();
+  const iree_string_view_t hsaco = iree_make_string_view(
+      (const char*)hsaco_bytes.data, hsaco_bytes.data_length);
   EXPECT_NE(iree_string_view_find(
                 hsaco, LOOM_AMDGPU_RUNTIME_GLOBAL_ASAN_CONFIG_NAME, 0),
             IREE_STRING_VIEW_NPOS);

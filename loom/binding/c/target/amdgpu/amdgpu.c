@@ -146,15 +146,13 @@ static void loomc_amdgpu_target_identity_from_internal(
   };
 }
 
-static void loomc_amdgpu_emit_artifact_release(void* storage,
-                                               iree_allocator_t allocator) {
-  iree_allocator_free(allocator, storage);
-}
+typedef struct loomc_amdgpu_emit_artifact_storage_t {
+  // Allocator owning this storage.
+  iree_allocator_t allocator;
 
-typedef struct loomc_amdgpu_emit_library_storage_t {
-  // AMDGPU kernel library storage.
-  loom_amdgpu_hal_kernel_library_t library;
-} loomc_amdgpu_emit_library_storage_t;
+  // Artifact manifest sidecar descriptor.
+  loom_target_emit_sidecar_artifact_t artifact_manifest;
+} loomc_amdgpu_emit_artifact_storage_t;
 
 typedef struct loomc_amdgpu_emit_option_prefix_t {
   // Structure type identifying the descriptor.
@@ -167,13 +165,10 @@ typedef struct loomc_amdgpu_emit_option_prefix_t {
   const void* next;
 } loomc_amdgpu_emit_option_prefix_t;
 
-static void loomc_amdgpu_emit_library_release(void* storage,
-                                              iree_allocator_t allocator) {
-  loomc_amdgpu_emit_library_storage_t* library_storage =
-      (loomc_amdgpu_emit_library_storage_t*)storage;
-  loom_amdgpu_hal_kernel_library_deinitialize(&library_storage->library,
-                                              allocator);
-  iree_allocator_free(allocator, library_storage);
+static void loomc_amdgpu_emit_artifact_storage_release(void* storage) {
+  loomc_amdgpu_emit_artifact_storage_t* artifact_storage =
+      (loomc_amdgpu_emit_artifact_storage_t*)storage;
+  iree_allocator_free(artifact_storage->allocator, artifact_storage);
 }
 
 static iree_status_t loomc_amdgpu_forward_diagnostic(
@@ -295,31 +290,28 @@ static iree_status_t loomc_amdgpu_emit_module_artifact(
         iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                          "AMDGPU HSACO emission produced no executable bytes");
   }
-  if (iree_status_is_ok(status) &&
-      library.artifact_manifest.contents.data == NULL) {
+  if (iree_status_is_ok(status) && library.artifact_manifest.contents == NULL) {
     out_artifact->target_artifact_format = LOOM_TARGET_ARTIFACT_FORMAT_ELF;
-    out_artifact->contents = iree_make_const_byte_span(
-        library.hsaco_data, library.hsaco_data_length);
-    out_artifact->storage = library.hsaco_data;
-    out_artifact->release = loomc_amdgpu_emit_artifact_release;
+    out_artifact->contents = library.hsaco_data;
     library.hsaco_data = NULL;
-    library.hsaco_data_length = 0;
   } else if (iree_status_is_ok(status)) {
-    loomc_amdgpu_emit_library_storage_t* storage = NULL;
+    loomc_amdgpu_emit_artifact_storage_t* storage = NULL;
     status = iree_allocator_malloc(request->allocator, sizeof(*storage),
                                    (void**)&storage);
     if (iree_status_is_ok(status)) {
-      *storage = (loomc_amdgpu_emit_library_storage_t){
-          .library = library,
+      *storage = (loomc_amdgpu_emit_artifact_storage_t){
+          .allocator = request->allocator,
+          .artifact_manifest = library.artifact_manifest,
       };
       out_artifact->target_artifact_format = LOOM_TARGET_ARTIFACT_FORMAT_ELF;
-      out_artifact->contents = iree_make_const_byte_span(
-          storage->library.hsaco_data, storage->library.hsaco_data_length);
-      out_artifact->sidecars = &storage->library.artifact_manifest;
+      out_artifact->contents = library.hsaco_data;
+      out_artifact->sidecars = &storage->artifact_manifest;
       out_artifact->sidecar_count = 1;
       out_artifact->storage = storage;
-      out_artifact->release = loomc_amdgpu_emit_library_release;
-      library = (loom_amdgpu_hal_kernel_library_t){0};
+      out_artifact->release_storage =
+          loomc_amdgpu_emit_artifact_storage_release;
+      library.hsaco_data = NULL;
+      library.artifact_manifest = (loom_target_emit_sidecar_artifact_t){0};
     }
   }
   loom_amdgpu_hal_kernel_library_deinitialize(&library, request->allocator);

@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "iree/base/internal/arena.h"
+#include "iree/io/byte_sequence.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 #include "loom/analysis/symbol_facts.h"
@@ -68,6 +69,20 @@ iree_status_t InitializeAmdgpuContext(
 
 std::string StringViewToString(iree_string_view_t value) {
   return std::string(value.data, value.size);
+}
+
+iree_status_t CloneByteSequenceToString(const iree_io_byte_sequence_t* sequence,
+                                        std::string* out_value) {
+  out_value->clear();
+  iree_byte_span_t contents = iree_byte_span_empty();
+  iree_status_t status =
+      iree_io_byte_sequence_clone(sequence, iree_allocator_system(), &contents);
+  if (iree_status_is_ok(status)) {
+    out_value->assign(reinterpret_cast<const char*>(contents.data),
+                      contents.data_length);
+  }
+  iree_allocator_free(iree_allocator_system(), contents.data);
+  return status;
 }
 
 bool HasTargetCapabilityString(const loom_target_compile_report_t& report,
@@ -887,8 +902,8 @@ TEST_F(AmdgpuHalKernelLibraryTest, EmitsGfx1250HardwareEntryEnvelope) {
   EXPECT_TRUE(emitted) << DiagnosticSummary(capture);
   EXPECT_TRUE(capture.diagnostics.empty()) << DiagnosticSummary(capture);
   ASSERT_NE(library.hsaco_data, nullptr);
-  const std::string hsaco(reinterpret_cast<const char*>(library.hsaco_data),
-                          library.hsaco_data_length);
+  std::string hsaco;
+  IREE_ASSERT_OK(CloneByteSequenceToString(library.hsaco_data, &hsaco));
   const std::vector<Section> sections = ReadSections(hsaco);
   const Section& dynamic_symbol_table = FindSection(sections, ".dynsym");
   const Section& dynamic_string_table = FindSection(sections, ".dynstr");
@@ -951,17 +966,17 @@ TEST_F(AmdgpuHalKernelLibraryTest, EmitsDynamicLocalSizeKernel) {
   EXPECT_TRUE(emitted) << DiagnosticSummary(capture);
   EXPECT_TRUE(capture.diagnostics.empty()) << DiagnosticSummary(capture);
   ASSERT_NE(library.hsaco_data, nullptr);
-  std::string hsaco(reinterpret_cast<const char*>(library.hsaco_data),
-                    library.hsaco_data_length);
+  std::string hsaco;
+  IREE_ASSERT_OK(CloneByteSequenceToString(library.hsaco_data, &hsaco));
   EXPECT_NE(hsaco.find("loom_kernel.kd"), std::string::npos);
   EXPECT_NE(hsaco.find(".max_flat_workgroup_size"), std::string::npos);
   EXPECT_EQ(hsaco.find(".reqd_workgroup_size"), std::string::npos);
   EXPECT_EQ(hsaco.find(".cluster_dims"), std::string::npos);
 
-  ASSERT_NE(library.artifact_manifest.contents.data, nullptr);
-  std::string manifest(
-      reinterpret_cast<const char*>(library.artifact_manifest.contents.data),
-      library.artifact_manifest.contents.data_length);
+  ASSERT_NE(library.artifact_manifest.contents, nullptr);
+  std::string manifest;
+  IREE_ASSERT_OK(
+      CloneByteSequenceToString(library.artifact_manifest.contents, &manifest));
   EXPECT_NE(manifest.find("\"name\":\"loom_kernel\""), std::string::npos)
       << manifest;
   EXPECT_NE(manifest.find("\"subgroup_size\":32"), std::string::npos)
@@ -1085,10 +1100,11 @@ TEST_F(AmdgpuHalKernelLibraryTest, EmitsEveryLinkedCanonicalTarget) {
     EXPECT_TRUE(capture.diagnostics.empty())
         << StringViewToString(target->name);
     EXPECT_NE(library.hsaco_data, nullptr) << StringViewToString(target->name);
-    EXPECT_GT(library.hsaco_data_length, 64u)
-        << StringViewToString(target->name);
-    if (library.hsaco_data_length > 64u) {
-      EXPECT_EQ(LoadLeU32(library.hsaco_data, 48),
+    std::string hsaco;
+    IREE_ASSERT_OK(CloneByteSequenceToString(library.hsaco_data, &hsaco));
+    EXPECT_GT(hsaco.size(), 64u) << StringViewToString(target->name);
+    if (hsaco.size() > 64u) {
+      EXPECT_EQ(LoadLeU32(hsaco, 48),
                 processor->properties.elf.machine_flags |
                     processor->properties.elf.feature_flags |
                     (processor->properties.elf.generic_version
@@ -1108,8 +1124,6 @@ TEST_F(AmdgpuHalKernelLibraryTest, EmitsEveryLinkedCanonicalTarget) {
     EXPECT_TRUE(iree_string_view_equal(library.target_key, expected_target_id))
         << StringViewToString(target->name);
     iree_arena_deinitialize(&target_id_arena);
-    std::string hsaco(reinterpret_cast<const char*>(library.hsaco_data),
-                      library.hsaco_data_length);
     EXPECT_NE(hsaco.find("loom_kernel.kd"), std::string::npos)
         << StringViewToString(target->name);
 
@@ -1220,23 +1234,23 @@ TEST_F(AmdgpuHalKernelLibraryTest,
     EXPECT_TRUE(
         iree_string_view_equal(library.target_key, artifact_target_key));
 
-    ASSERT_GE(library.hsaco_data_length, 64u);
+    ASSERT_NE(library.hsaco_data, nullptr);
+    std::string hsaco;
+    IREE_ASSERT_OK(CloneByteSequenceToString(library.hsaco_data, &hsaco));
+    ASSERT_GE(hsaco.size(), 64u);
     loom_amdgpu_amdhsa_target_id_t parsed_target_id = {};
     IREE_ASSERT_OK(loom_amdgpu_target_info_parse_amdhsa_target_id(
         code_object_target_view, &parsed_target_id));
     uint32_t expected_elf_flags = 0;
     IREE_ASSERT_OK(loom_amdgpu_target_info_amdhsa_target_id_elf_flags(
         &parsed_target_id, &expected_elf_flags));
-    EXPECT_EQ(LoadLeU32(library.hsaco_data, 48), expected_elf_flags);
-
-    const std::string hsaco(reinterpret_cast<const char*>(library.hsaco_data),
-                            library.hsaco_data_length);
+    EXPECT_EQ(LoadLeU32(hsaco, 48), expected_elf_flags);
     EXPECT_NE(hsaco.find(code_object_target), std::string::npos);
 
-    ASSERT_NE(library.artifact_manifest.contents.data, nullptr);
-    const std::string manifest(
-        reinterpret_cast<const char*>(library.artifact_manifest.contents.data),
-        library.artifact_manifest.contents.data_length);
+    ASSERT_NE(library.artifact_manifest.contents, nullptr);
+    std::string manifest;
+    IREE_ASSERT_OK(CloneByteSequenceToString(library.artifact_manifest.contents,
+                                             &manifest));
     EXPECT_NE(manifest.find("\"family\":\"amdgpu\""), std::string::npos)
         << manifest;
     EXPECT_NE(manifest.find(std::string("\"selector\":\"") +
@@ -1412,8 +1426,8 @@ TEST_F(AmdgpuHalKernelLibraryTest, EmitsArgumentMetadataFromLowKernelAbi) {
   EXPECT_TRUE(emitted);
   EXPECT_TRUE(capture.diagnostics.empty());
   ASSERT_NE(library.hsaco_data, nullptr);
-  std::string hsaco(reinterpret_cast<const char*>(library.hsaco_data),
-                    library.hsaco_data_length);
+  std::string hsaco;
+  IREE_ASSERT_OK(CloneByteSequenceToString(library.hsaco_data, &hsaco));
   EXPECT_NE(hsaco.find("binding0"), std::string::npos);
   EXPECT_NE(hsaco.find("global_buffer"), std::string::npos);
   EXPECT_NE(hsaco.find("extent"), std::string::npos);
@@ -1443,8 +1457,8 @@ TEST_F(AmdgpuHalKernelLibraryTest, EmitsAllCompatibleKernels) {
   EXPECT_TRUE(emitted);
   EXPECT_TRUE(capture.diagnostics.empty());
   ASSERT_NE(library.hsaco_data, nullptr);
-  std::string hsaco(reinterpret_cast<const char*>(library.hsaco_data),
-                    library.hsaco_data_length);
+  std::string hsaco;
+  IREE_ASSERT_OK(CloneByteSequenceToString(library.hsaco_data, &hsaco));
   const std::vector<Section> sections = ReadSections(hsaco);
   const Section& dynamic_symbol_table = FindSection(sections, ".dynsym");
   const Section& dynamic_string_table = FindSection(sections, ".dynstr");
@@ -1485,8 +1499,8 @@ TEST_F(AmdgpuHalKernelLibraryTest, EmitsRequestedRuntimeGlobals) {
   EXPECT_TRUE(emitted);
   EXPECT_TRUE(capture.diagnostics.empty());
   ASSERT_NE(library.hsaco_data, nullptr);
-  std::string hsaco(reinterpret_cast<const char*>(library.hsaco_data),
-                    library.hsaco_data_length);
+  std::string hsaco;
+  IREE_ASSERT_OK(CloneByteSequenceToString(library.hsaco_data, &hsaco));
 
   const std::vector<Section> sections = ReadSections(hsaco);
   const Section& dynsym = FindSection(sections, ".dynsym");
@@ -1592,8 +1606,8 @@ TEST_F(AmdgpuHalKernelLibraryTest,
   EXPECT_TRUE(emitted) << DiagnosticSummary(capture);
   EXPECT_TRUE(capture.diagnostics.empty()) << DiagnosticSummary(capture);
   ASSERT_NE(library.hsaco_data, nullptr);
-  const std::string hsaco(reinterpret_cast<const char*>(library.hsaco_data),
-                          library.hsaco_data_length);
+  std::string hsaco;
+  IREE_ASSERT_OK(CloneByteSequenceToString(library.hsaco_data, &hsaco));
 
   const std::vector<Section> sections = ReadSections(hsaco);
   const Section& dynsym = FindSection(sections, ".dynsym");
@@ -1715,8 +1729,8 @@ TEST_F(AmdgpuHalKernelLibraryTest,
   EXPECT_TRUE(emitted);
   EXPECT_TRUE(capture.diagnostics.empty());
   ASSERT_NE(library.hsaco_data, nullptr);
-  const std::string hsaco(reinterpret_cast<const char*>(library.hsaco_data),
-                          library.hsaco_data_length);
+  std::string hsaco;
+  IREE_ASSERT_OK(CloneByteSequenceToString(library.hsaco_data, &hsaco));
 
   const std::vector<Section> sections = ReadSections(hsaco);
   const Section& dynsym = FindSection(sections, ".dynsym");
@@ -1779,8 +1793,8 @@ TEST_F(AmdgpuHalKernelLibraryTest, EmitsSourceLoweredSanitizerSiteTableRodata) {
   EXPECT_TRUE(emitted);
   EXPECT_TRUE(capture.diagnostics.empty()) << DiagnosticSummary(capture);
   ASSERT_NE(library.hsaco_data, nullptr);
-  const std::string hsaco(reinterpret_cast<const char*>(library.hsaco_data),
-                          library.hsaco_data_length);
+  std::string hsaco;
+  IREE_ASSERT_OK(CloneByteSequenceToString(library.hsaco_data, &hsaco));
 
   const std::vector<Section> sections = ReadSections(hsaco);
   const Section& dynsym = FindSection(sections, ".dynsym");

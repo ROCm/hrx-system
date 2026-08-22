@@ -35,11 +35,6 @@ void loom_llvmir_artifact_emitter_options_initialize(
   };
 }
 
-static void loom_llvmir_artifact_storage_release(void* storage,
-                                                 iree_allocator_t allocator) {
-  iree_allocator_free(allocator, storage);
-}
-
 static iree_status_t loom_llvmir_artifact_emitter_options_resolve(
     const void* option_chain,
     loom_llvmir_emit_low_module_options_t* out_options) {
@@ -69,67 +64,51 @@ static iree_status_t loom_llvmir_artifact_emitter_options_resolve(
 
 static iree_status_t loom_llvmir_artifact_write_text(
     const loom_llvmir_module_t* module, iree_allocator_t allocator,
-    uint8_t** out_data, iree_host_size_t* out_length) {
-  *out_data = NULL;
-  *out_length = 0;
+    iree_io_byte_sequence_t** out_contents) {
+  *out_contents = NULL;
   iree_string_builder_t builder;
   iree_string_builder_initialize(allocator, &builder);
   loom_output_stream_t stream;
   loom_output_stream_for_builder(&builder, &stream);
   iree_status_t status = loom_llvmir_text_write_module(module, &stream);
+  iree_byte_span_t contents = iree_byte_span_empty();
   if (iree_status_is_ok(status)) {
-    *out_length = iree_string_builder_size(&builder);
-    *out_data = (uint8_t*)iree_string_builder_take_storage(&builder);
+    const iree_host_size_t contents_length = iree_string_builder_size(&builder);
+    contents = iree_make_byte_span(iree_string_builder_take_storage(&builder),
+                                   contents_length);
+    status = iree_io_byte_sequence_create_from_span_move(&contents, allocator,
+                                                         out_contents);
   }
+  iree_allocator_free(allocator, contents.data);
   iree_string_builder_deinitialize(&builder);
   return status;
 }
 
 static iree_status_t loom_llvmir_artifact_write_bitcode(
     const loom_llvmir_module_t* module, iree_allocator_t allocator,
-    uint8_t** out_data, iree_host_size_t* out_length) {
-  *out_data = NULL;
-  *out_length = 0;
+    iree_io_byte_sequence_t** out_contents) {
+  *out_contents = NULL;
   iree_io_stream_t* stream = NULL;
   iree_status_t status = iree_io_vec_stream_create(
       IREE_IO_STREAM_MODE_READABLE | IREE_IO_STREAM_MODE_WRITABLE |
           IREE_IO_STREAM_MODE_SEEKABLE,
-      4096, allocator, &stream);
+      32 * 1024, allocator, &stream);
 
   if (iree_status_is_ok(status)) {
     status = loom_llvmir_bitcode_write_module(module, stream);
   }
 
-  iree_host_size_t bitcode_length = 0;
   if (iree_status_is_ok(status)) {
     const iree_io_stream_pos_t stream_length = iree_io_stream_length(stream);
-    if (stream_length <= 0 ||
-        (uint64_t)stream_length > (uint64_t)IREE_HOST_SIZE_MAX) {
+    if (stream_length <= 0) {
       status = iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                                 "LLVM bitcode output length is invalid");
-    } else {
-      bitcode_length = (iree_host_size_t)stream_length;
     }
   }
-
-  uint8_t* bitcode_data = NULL;
   if (iree_status_is_ok(status)) {
-    status =
-        iree_allocator_malloc(allocator, bitcode_length, (void**)&bitcode_data);
-  }
-  if (iree_status_is_ok(status)) {
-    status = iree_io_stream_seek(stream, IREE_IO_STREAM_SEEK_SET, 0);
-  }
-  if (iree_status_is_ok(status)) {
-    status = iree_io_stream_read(stream, bitcode_length, bitcode_data, NULL);
-  }
-  if (iree_status_is_ok(status)) {
-    *out_data = bitcode_data;
-    *out_length = bitcode_length;
-    bitcode_data = NULL;
+    status = iree_io_vec_stream_move_contents(stream, out_contents);
   }
 
-  iree_allocator_free(allocator, bitcode_data);
   iree_io_stream_release(stream);
   return status;
 }
@@ -163,30 +142,26 @@ static iree_status_t loom_llvmir_artifact_emit(
     status = loom_llvmir_verify_module(module);
   }
 
-  uint8_t* artifact_data = NULL;
-  iree_host_size_t artifact_length = 0;
+  iree_io_byte_sequence_t* contents = NULL;
   if (iree_status_is_ok(status)) {
     switch (format) {
       case LOOM_LLVMIR_ARTIFACT_EMITTER_FORMAT_TEXT:
-        status = loom_llvmir_artifact_write_text(
-            module, request->allocator, &artifact_data, &artifact_length);
+        status = loom_llvmir_artifact_write_text(module, request->allocator,
+                                                 &contents);
         break;
       case LOOM_LLVMIR_ARTIFACT_EMITTER_FORMAT_BITCODE:
-        status = loom_llvmir_artifact_write_bitcode(
-            module, request->allocator, &artifact_data, &artifact_length);
+        status = loom_llvmir_artifact_write_bitcode(module, request->allocator,
+                                                    &contents);
         break;
     }
   }
   if (iree_status_is_ok(status)) {
     out_artifact->target_artifact_format = artifact_format;
-    out_artifact->contents =
-        iree_make_const_byte_span(artifact_data, artifact_length);
-    out_artifact->storage = artifact_data;
-    out_artifact->release = loom_llvmir_artifact_storage_release;
-    artifact_data = NULL;
+    out_artifact->contents = contents;
+    contents = NULL;
   }
 
-  iree_allocator_free(request->allocator, artifact_data);
+  iree_io_byte_sequence_release(contents);
   loom_llvmir_module_free(module);
   return status;
 }
