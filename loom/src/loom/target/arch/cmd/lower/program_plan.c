@@ -578,13 +578,35 @@ iree_status_t loom_cmd_program_plan_prepare(
     status = loom_cmd_program_plan_compute_kernel_config_facts(
         preparation_module, &launch_definitions, &source_facts);
   }
-  for (iree_host_size_t i = 0;
-       valid && i < source_program_count && iree_status_is_ok(status); ++i) {
-    loom_cmd_program_root_build_t* root = &root_builds[i];
-    status = loom_cmd_launch_graph_materialize(
-        preparation_module, root->program_op, &root->schedule,
-        &root->launch_resolution, &source_facts, block_pool, host_allocator,
-        &root->launch_graph);
+  loom_cmd_launch_program_source_t* launch_sources = NULL;
+  loom_cmd_launch_graph_t* launch_graphs = NULL;
+  if (valid && iree_status_is_ok(status)) {
+    status = iree_arena_allocate_array(&scratch_arena, source_program_count,
+                                       sizeof(*launch_sources),
+                                       (void**)&launch_sources);
+  }
+  if (valid && iree_status_is_ok(status)) {
+    status = iree_arena_allocate_array(&scratch_arena, source_program_count,
+                                       sizeof(*launch_graphs),
+                                       (void**)&launch_graphs);
+  }
+  if (valid && iree_status_is_ok(status)) {
+    for (iree_host_size_t i = 0; i < source_program_count; ++i) {
+      loom_cmd_program_root_build_t* root = &root_builds[i];
+      launch_sources[i] = (loom_cmd_launch_program_source_t){
+          .program_op = root->program_op,
+          .schedule = &root->schedule,
+          .resolution = &root->launch_resolution,
+      };
+    }
+    status = loom_cmd_launch_program_materialize(
+        preparation_module, launch_sources, source_program_count, &source_facts,
+        block_pool, host_allocator, &plan.launch_module, launch_graphs);
+  }
+  if (valid && iree_status_is_ok(status)) {
+    for (iree_host_size_t i = 0; i < source_program_count; ++i) {
+      root_builds[i].launch_graph = launch_graphs[i];
+    }
   }
 
   if (valid && iree_status_is_ok(status)) {
@@ -628,28 +650,6 @@ iree_status_t loom_cmd_program_plan_prepare(
         },
         block_pool, host_allocator, &plan.root_module);
   }
-  const loom_module_t** launch_source_modules = NULL;
-  if (valid && iree_status_is_ok(status)) {
-    status = iree_arena_allocate_array(&scratch_arena, source_program_count,
-                                       sizeof(*launch_source_modules),
-                                       (void**)&launch_source_modules);
-  }
-  if (valid && iree_status_is_ok(status)) {
-    for (iree_host_size_t i = 0; i < source_program_count; ++i) {
-      launch_source_modules[i] = root_builds[i].launch_graph.module;
-    }
-    status = loom_link_materialized_modules(
-        launch_source_modules, source_program_count,
-        &(loom_link_options_t){
-            .module_name = IREE_SV("command_program_launch"),
-            .root_symbols =
-                {
-                    .count = source_program_count,
-                    .values = root_names,
-                },
-        },
-        block_pool, host_allocator, &plan.launch_module);
-  }
   if (valid && iree_status_is_ok(status)) {
     for (iree_host_size_t i = 0; i < source_program_count; ++i) {
       loom_cmd_program_root_t* root = &plan.roots[i];
@@ -657,8 +657,7 @@ iree_status_t loom_cmd_program_plan_prepare(
       root->function_op =
           loom_cmd_program_plan_find_symbol(plan.root_module, build->name);
       root->abi_layout = build->lower_plan.abi_layout;
-      root->launch_function_op =
-          loom_cmd_program_plan_find_symbol(plan.launch_module, build->name);
+      root->launch_function_op = build->launch_graph.host_function_op;
       root->launch_tuple_count = build->launch_graph.host_tuple_count;
       root->dependency_unit_indices = build->dependency_unit_indices;
       root->dependency_count = build->dependency_count;
@@ -672,7 +671,6 @@ iree_status_t loom_cmd_program_plan_prepare(
 
   if (root_builds) {
     for (iree_host_size_t i = 0; i < source_program_count; ++i) {
-      loom_cmd_launch_graph_deinitialize(&root_builds[i].launch_graph);
       loom_cmd_parameter_requirement_table_deinitialize(
           &root_builds[i].parameters, host_allocator);
       iree_allocator_free(host_allocator,

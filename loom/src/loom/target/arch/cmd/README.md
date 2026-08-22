@@ -145,9 +145,13 @@ from its roots.
 
 ## Launch Counts
 
-The compiler inlines the exact launch-configuration regions of all scheduled
-kernels into one pure function per root. Canonicalization and common
-subexpression elimination run across the aggregate function, so equal dynamic
+The compiler represents each linked kernel configuration as a private pure
+helper in the plan's shared launch module. Scheduled launches become ordinary
+pure calls from one aggregate function per root. Common subexpression
+elimination merges calls with the same helper and ordered workload values
+before the surviving calls are inlined, so repeated dispatches do not expand
+the same launch arithmetic. Canonicalization and common subexpression
+elimination then simplify the aggregate function, and equal residual dynamic
 XYZ tuples produce one result slot regardless of how many dispatches use them.
 
 Launch counts have two portable placements:

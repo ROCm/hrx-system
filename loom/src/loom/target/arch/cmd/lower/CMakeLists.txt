@@ -98,6 +98,8 @@ loom_cc_library(
     loom::target::types
     loom::transforms::cleanup::canonicalize
     loom::transforms::cleanup::cse
+    loom::transforms::cleanup::dce
+    loom::transforms::symbol::inline_callables
     loom::util::fact_table
   PUBLIC
 )

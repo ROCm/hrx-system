@@ -91,6 +91,8 @@ loom_cc_library(
         "//loom/src/loom/target/arch/cmd:program",
         "//loom/src/loom/transforms/cleanup:canonicalize",
         "//loom/src/loom/transforms/cleanup:cse",
+        "//loom/src/loom/transforms/cleanup:dce",
+        "//loom/src/loom/transforms/symbol:inline_callables",
         "//loom/src/loom/util:fact_table",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
