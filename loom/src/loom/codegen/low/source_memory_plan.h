@@ -122,6 +122,44 @@ bool loom_low_source_memory_operation_kind_from_access(
 #define LOOM_LOW_SOURCE_MEMORY_DYNAMIC_REALIZATION_CAPACITY \
   (LOOM_LOW_SOURCE_MEMORY_DYNAMIC_TERM_CAPACITY / 2)
 
+typedef enum loom_low_source_memory_axis_byte_stride_kind_e {
+  // No supported address layout describes the axis stride.
+  LOOM_LOW_SOURCE_MEMORY_AXIS_BYTE_STRIDE_UNAVAILABLE = 0,
+  // The complete byte stride is an exact compile-time value.
+  LOOM_LOW_SOURCE_MEMORY_AXIS_BYTE_STRIDE_STATIC = 1,
+  // Runtime SSA factors materialize the byte stride product.
+  LOOM_LOW_SOURCE_MEMORY_AXIS_BYTE_STRIDE_DYNAMIC = 2,
+  // Facts describe a runtime stride but no SSA value materializes it.
+  LOOM_LOW_SOURCE_MEMORY_AXIS_BYTE_STRIDE_UNMATERIALIZED = 3,
+  // The authored stride cannot be represented by the bounded product.
+  LOOM_LOW_SOURCE_MEMORY_AXIS_BYTE_STRIDE_INVALID = 4,
+} loom_low_source_memory_axis_byte_stride_kind_t;
+
+typedef struct loom_low_source_memory_axis_byte_stride_t {
+  // Availability and materialization class of this physical axis stride.
+  loom_low_source_memory_axis_byte_stride_kind_t kind;
+  // Static byte coefficient multiplied by every dynamic factor.
+  int64_t static_byte_coefficient;
+  // Runtime SSA values multiplied into the byte stride.
+  loom_value_id_t dynamic_factors[LOOM_ENCODING_ADDRESS_LAYOUT_MAX_RANK];
+  // Number of populated dynamic factors.
+  uint8_t dynamic_factor_count;
+  // Facts for the complete byte stride product.
+  loom_value_facts_t byte_facts;
+  // Power-of-two shift for static_byte_coefficient, or BYTE_SHIFT_NONE.
+  uint32_t static_byte_shift;
+} loom_low_source_memory_axis_byte_stride_t;
+
+// Describes one physical view-axis byte stride as a bounded materializable
+// product. Dense layouts source runtime factors from suffix dimensions;
+// explicit strided layouts source them from the authored layout operands.
+// Exact facts fold into the static coefficient. Fact-only non-exact strides
+// are reported as UNMATERIALIZED instead of inventing an SSA source.
+void loom_low_source_memory_query_axis_byte_stride(
+    const loom_value_fact_table_t* fact_table,
+    const loom_vector_memory_access_t* vector_access, uint8_t view_axis,
+    loom_low_source_memory_axis_byte_stride_t* out_stride);
+
 typedef struct loom_low_source_memory_dynamic_term_t {
   // Dynamic source SSA value multiplied into this address term.
   loom_value_id_t index;

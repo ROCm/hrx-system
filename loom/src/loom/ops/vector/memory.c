@@ -62,6 +62,21 @@ bool loom_vector_memory_access_describe(
   (void)loom_vector_memory_query_layout(
       context, module, view_type, layout_strides,
       IREE_ARRAYSIZE(layout_strides), &layout_summary);
+  loom_encoding_address_layout_operands_t layout_operands = {0};
+  bool layout_has_non_exact_stride = false;
+  if (layout_summary.kind == LOOM_VALUE_FACT_ADDRESS_LAYOUT_STRIDED &&
+      layout_summary.strides != NULL) {
+    for (uint8_t i = 0; i < layout_summary.rank; ++i) {
+      if (!loom_value_facts_is_exact(layout_summary.strides[i])) {
+        layout_has_non_exact_stride = true;
+        break;
+      }
+    }
+  }
+  if (context != NULL && layout_has_non_exact_stride) {
+    (void)loom_encoding_query_type_address_layout_operands(module, view_type,
+                                                           &layout_operands);
+  }
   *out_access = (loom_vector_memory_access_t){
       .view_type = view_type,
       .vector_type = vector_type,
@@ -72,6 +87,7 @@ bool loom_vector_memory_access_describe(
       .static_element_byte_count = static_element_byte_count,
       .layout_kind = loom_vector_memory_layout_kind(layout_summary),
       .layout_summary = layout_summary,
+      .layout_operands = layout_operands,
   };
   if (layout_summary.strides == layout_strides) {
     for (uint8_t i = 0; i < layout_summary.rank; ++i) {

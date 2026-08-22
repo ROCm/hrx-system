@@ -66,6 +66,11 @@ typedef struct loom_vector_memory_access_t {
   // encoding values.
   loom_value_fact_address_layout_t layout_summary;
 
+  // Authored operands that materialize a non-exact explicit strided layout.
+  // Empty for dense/exact layouts and fact-only layouts without SSA stride
+  // provenance.
+  loom_encoding_address_layout_operands_t layout_operands;
+
   // Inline stride fact storage backing layout_summary.
   loom_value_facts_t layout_strides[LOOM_ENCODING_ADDRESS_LAYOUT_MAX_RANK];
 } loom_vector_memory_access_t;

@@ -643,6 +643,12 @@ TEST_F(VectorMemoryTest, StridedLayoutSupportsDynamicStride) {
   loom_vector_memory_access_t access;
   ASSERT_TRUE(Describe(view_type, vector_type, &access));
   EXPECT_EQ(access.layout_kind, LOOM_VECTOR_MEMORY_LAYOUT_STRIDED);
+  ASSERT_EQ(access.layout_operands.static_strides.kind, LOOM_ATTR_I64_ARRAY);
+  ASSERT_EQ(access.layout_operands.static_strides.count, 2u);
+  EXPECT_EQ(access.layout_operands.static_strides.i64_array[0], INT64_MIN);
+  EXPECT_EQ(access.layout_operands.static_strides.i64_array[1], 1);
+  ASSERT_EQ(access.layout_operands.dynamic_stride_count, 1u);
+  EXPECT_EQ(access.layout_operands.dynamic_stride_values[0], dynamic_stride);
 
   int64_t row_stride = 0;
   int64_t column_stride = 0;
@@ -666,6 +672,37 @@ TEST_F(VectorMemoryTest, StridedLayoutSupportsDynamicStride) {
       &access, static_index_attr, lane_indices,
       (uint8_t)IREE_ARRAYSIZE(lane_indices), &element_offset));
   EXPECT_EQ(element_offset, 0);
+}
+
+TEST_F(VectorMemoryTest,
+       PhysicalStorageCompositionPreservesDynamicLayoutOperands) {
+  const int64_t static_strides[] = {INT64_MIN, 1};
+  loom_value_id_t dynamic_stride = LOOM_VALUE_ID_INVALID;
+  IREE_ASSERT_OK(loom_builder_define_block_arg(
+      &builder_, loom_module_block(module_),
+      loom_type_scalar(LOOM_SCALAR_TYPE_INDEX), &dynamic_stride));
+  loom_value_id_t layout = LOOM_VALUE_ID_INVALID;
+  BuildStridedLayout(&dynamic_stride, /*dynamic_stride_count=*/1,
+                     static_strides, IREE_ARRAYSIZE(static_strides), &layout);
+  loom_value_id_t schema = LOOM_VALUE_ID_INVALID;
+  BuildGgmlQ4_0Schema(&schema);
+  loom_value_id_t storage = LOOM_VALUE_ID_INVALID;
+  BuildPhysicalStorage(layout, schema, &storage);
+  const loom_type_t view_type = ViewWithLayout(
+      loom_type_shaped_2d(LOOM_TYPE_VIEW, LOOM_SCALAR_TYPE_I8,
+                          loom_dim_pack_static(8), loom_dim_pack_static(18),
+                          /*encoding_id=*/0),
+      storage);
+  const loom_type_t vector_type =
+      loom_type_shaped_1d(LOOM_TYPE_VECTOR, LOOM_SCALAR_TYPE_I8,
+                          loom_dim_pack_static(1), /*encoding_id=*/0);
+
+  loom_vector_memory_access_t access;
+  ASSERT_TRUE(Describe(view_type, vector_type, &access));
+  ASSERT_EQ(access.layout_operands.static_strides.kind, LOOM_ATTR_I64_ARRAY);
+  ASSERT_EQ(access.layout_operands.static_strides.count, 2u);
+  ASSERT_EQ(access.layout_operands.dynamic_stride_count, 1u);
+  EXPECT_EQ(access.layout_operands.dynamic_stride_values[0], dynamic_stride);
 }
 
 TEST_F(VectorMemoryTest, ByteOffsetRejectsSubByteElementType) {
