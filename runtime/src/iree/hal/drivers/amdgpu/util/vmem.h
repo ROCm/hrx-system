@@ -24,6 +24,9 @@ typedef struct iree_hal_amdgpu_topology_t iree_hal_amdgpu_topology_t;
 typedef enum iree_hal_amdgpu_vmem_access_mode_e {
   // All agents may produce and consume the memory. Read/write for all agents.
   IREE_HAL_AMDGPU_ACCESS_MODE_SHARED = 0u,
+  // All GPU agents may produce and consume the memory. CPU agents have no
+  // access. This is used for device-only allocations shared across queues.
+  IREE_HAL_AMDGPU_ACCESS_MODE_DEVICE_SHARED,
   // Memory is accessed exclusively by the agent it is allocated on.
   // No other agent has access. Read/write for agent only.
   IREE_HAL_AMDGPU_ACCESS_MODE_EXCLUSIVE,
@@ -133,9 +136,19 @@ iree_status_t iree_hal_amdgpu_vmem_build_access_descs_for_topology(
 // iree_hal_amdgpu_vmem_ringbuffer_t
 //===----------------------------------------------------------------------===//
 
+// Storage strategy backing an AMDGPU virtual-memory ringbuffer.
+typedef enum iree_hal_amdgpu_vmem_ringbuffer_storage_e {
+  // No storage has been initialized.
+  IREE_HAL_AMDGPU_VMEM_RINGBUFFER_STORAGE_NONE = 0,
+  // HSA VMM allocation mapped three times into one reserved address range.
+  IREE_HAL_AMDGPU_VMEM_RINGBUFFER_STORAGE_HSA_VMEM = 1,
+  // Host section mapped three times and registered for device access.
+  IREE_HAL_AMDGPU_VMEM_RINGBUFFER_STORAGE_HOST_ALIASED = 2,
+} iree_hal_amdgpu_vmem_ringbuffer_storage_t;
+
 // An allocated ringbuffer using virtual memory mapping to present a contiguous
-// virtual address range that is backed by a single physical buffer but that
-// allows access before and after it.
+// host address range backed by one physical buffer that allows access before
+// and after its logical base.
 //
 // This presents as a ringbuffer that does not need any special logic for
 // wrapping from base offsets used when copying in memory. It follows the
@@ -144,11 +157,11 @@ iree_status_t iree_hal_amdgpu_vmem_build_access_descs_for_topology(
 // of virtual memory mapping the buffer multiple times, example code:
 // https://github.com/google/wuffs/blob/main/script/mmap-ring-buffer.c
 //
-// We use SVM to allocate the physical memory of the ringbuffer and then stitch
-// together 3 virtual memory ranges in one contiguous virtual allocation that
-// aliases the physical allocation. By treating the middle range as the base
-// buffer pointer we are then able to freely dereference both before and after
-// the base pointer by up to the ringbuffer size in length.
+// Platforms with host-visible HSA VMM use an HSA allocation mapped three times.
+// Windows uses three views of one pagefile-backed section and registers the
+// full three-view span with HSA because ROCr DXG VMM mappings are device-only.
+// By treating the middle range as the host base pointer we are able to freely
+// dereference both before and after it by up to the ringbuffer size in length.
 //   physical: <ringbuffer size> --+------+------+
 //                                 v      v      v
 //                        virtual: [prev] [base] [next]
@@ -160,20 +173,37 @@ typedef struct iree_hal_amdgpu_vmem_ringbuffer_t {
   // May be larger than the requested size if adjusted to the minimum allocation
   // granule.
   iree_device_size_t capacity;
-  // Physical allocation of the pinned ringbuffer memory.
-  // This is sized to the requested capacity of the ringbuffer.
+
+  // Storage strategy owning the ringbuffer mappings.
+  iree_hal_amdgpu_vmem_ringbuffer_storage_t storage;
+
+  // Physical allocation backing the ringbuffer's HSA VMM storage.
+  // This is not populated for host-aliased storage.
   hsa_amd_vmem_alloc_handle_t alloc_handle;
+
   // Base virtual address pointer of the ringbuffer. This is the start of the
-  // reserved address range.
-  IREE_AMDGPU_DEVICE_PTR void* va_base_ptr;
+  // three-view host address range.
+  void* va_base_ptr;
+
   // Base virtual address pointer of the central ringbuffer contents.
-  IREE_AMDGPU_DEVICE_PTR void* ring_base_ptr;
+  void* ring_base_ptr;
+
+  // Device-visible pointer to the central ringbuffer contents.
+  // This may differ from |ring_base_ptr| on platforms without unified virtual
+  // addressing.
+  IREE_AMDGPU_DEVICE_PTR void* device_base_ptr;
+
+  // Number of successfully established virtual-memory views.
+  iree_host_size_t mapped_view_count;
+
+  // Whether the three-view range at |va_base_ptr| is registered with HSA.
+  bool host_registration_active;
 } iree_hal_amdgpu_vmem_ringbuffer_t;
 
 // Initializes a ringbuffer by allocating the physical and virtual memory of at
 // least the requested |min_capacity| with at least 64 byte alignment.
 // |memory_type| selects the HSA allocation mode for the selected pool.
-// |access_descs| will be used to setup accessibility.
+// |access_descs| will be used to set up accessibility.
 iree_status_t iree_hal_amdgpu_vmem_ringbuffer_initialize(
     const iree_hal_amdgpu_libhsa_t* libhsa, hsa_agent_t local_agent,
     hsa_amd_memory_pool_t memory_pool,
@@ -183,9 +213,8 @@ iree_status_t iree_hal_amdgpu_vmem_ringbuffer_initialize(
     iree_hal_amdgpu_vmem_ringbuffer_t* out_ringbuffer);
 
 // Initializes a ringbuffer by allocating the physical and virtual memory of at
-// least the requested power-of-two |min_capacity| with at least
-// least 64 byte alignment. |topology| and |access_mode| will be used to setup
-// accessibility.
+// least the requested power-of-two |min_capacity| with at least 64 byte
+// alignment. |topology| and |access_mode| will be used to set up accessibility.
 iree_status_t iree_hal_amdgpu_vmem_ringbuffer_initialize_with_topology(
     const iree_hal_amdgpu_libhsa_t* libhsa, hsa_agent_t local_agent,
     hsa_amd_memory_pool_t memory_pool,

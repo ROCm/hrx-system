@@ -8,6 +8,25 @@
 
 #include "iree/hal/drivers/amdgpu/util/topology.h"
 
+#if defined(IREE_PLATFORM_WINDOWS)
+
+// clang-format off
+#include <windows.h>
+// clang-format on
+
+#include <limits.h>
+
+typedef PVOID(WINAPI* iree_hal_amdgpu_virtual_alloc2_fn_t)(
+    HANDLE process, PVOID base_address, SIZE_T size, ULONG allocation_type,
+    ULONG page_protection, MEM_EXTENDED_PARAMETER* extended_parameters,
+    ULONG parameter_count);
+
+typedef PVOID(WINAPI* iree_hal_amdgpu_map_view_of_file3_fn_t)(
+    HANDLE file_mapping, HANDLE process, PVOID base_address, ULONG64 offset,
+    SIZE_T view_size, ULONG allocation_type, ULONG page_protection,
+    MEM_EXTENDED_PARAMETER* extended_parameters, ULONG parameter_count);
+#endif  // IREE_PLATFORM_WINDOWS
+
 //===----------------------------------------------------------------------===//
 // Virtual Memory Utilities
 //===----------------------------------------------------------------------===//
@@ -259,6 +278,18 @@ iree_status_t iree_hal_amdgpu_vmem_build_access_descs_for_topology(
       }
       return iree_ok_status();
     }
+    case IREE_HAL_AMDGPU_ACCESS_MODE_DEVICE_SHARED: {
+      // All GPU devices get read/write access. The backing allocation remains
+      // inaccessible to CPU agents.
+      for (iree_host_size_t i = 0; i < topology->gpu_agent_count; ++i) {
+        access_descs[(*out_access_desc_count)++] =
+            (hsa_amd_memory_access_desc_t){
+                .agent_handle = topology->gpu_agents[i],
+                .permissions = HSA_ACCESS_PERMISSION_RW,
+            };
+      }
+      return iree_ok_status();
+    }
     case IREE_HAL_AMDGPU_ACCESS_MODE_EXCLUSIVE: {
       // Only the local agent can access the allocation.
       access_descs[(*out_access_desc_count)++] = (hsa_amd_memory_access_desc_t){
@@ -308,6 +339,207 @@ iree_status_t iree_hal_amdgpu_vmem_build_access_descs_for_topology(
 // iree_hal_amdgpu_vmem_ringbuffer_t
 //===----------------------------------------------------------------------===//
 
+#if defined(IREE_PLATFORM_WINDOWS)
+
+static void iree_hal_amdgpu_vmem_release_host_alias_views(
+    void* va_base_ptr, iree_device_size_t capacity,
+    iree_host_size_t mapped_view_count) {
+  for (iree_host_size_t i = 0; i < mapped_view_count; ++i) {
+    void* view_ptr = (uint8_t*)va_base_ptr + i * capacity;
+    const BOOL unmapped = UnmapViewOfFile(view_ptr);
+    IREE_ASSERT(unmapped && "failed to unmap AMDGPU host ringbuffer view");
+    (void)unmapped;
+  }
+}
+
+static iree_status_t iree_hal_amdgpu_vmem_ringbuffer_initialize_host_aliases(
+    const iree_hal_amdgpu_libhsa_t* libhsa, iree_device_size_t min_capacity,
+    const iree_hal_amdgpu_topology_t* topology,
+    iree_hal_amdgpu_vmem_ringbuffer_t* out_ringbuffer) {
+  if (IREE_UNLIKELY(min_capacity == 0)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "AMDGPU ringbuffer capacity must be non-zero");
+  }
+  if (IREE_UNLIKELY(topology->gpu_agent_count > INT_MAX)) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "AMDGPU ringbuffer GPU agent count exceeds the "
+                            "HSA host registration limit");
+  }
+
+  HMODULE kernelbase_module = GetModuleHandleW(L"kernelbase.dll");
+  iree_hal_amdgpu_virtual_alloc2_fn_t virtual_alloc2 =
+      kernelbase_module ? (iree_hal_amdgpu_virtual_alloc2_fn_t)GetProcAddress(
+                              kernelbase_module, "VirtualAlloc2")
+                        : NULL;
+  iree_hal_amdgpu_map_view_of_file3_fn_t map_view_of_file3 =
+      kernelbase_module
+          ? (iree_hal_amdgpu_map_view_of_file3_fn_t)GetProcAddress(
+                kernelbase_module, "MapViewOfFile3")
+          : NULL;
+  if (IREE_UNLIKELY(!virtual_alloc2 || !map_view_of_file3)) {
+    return iree_make_status(
+        IREE_STATUS_UNAVAILABLE,
+        "Windows host-aliased AMDGPU ringbuffers require VirtualAlloc2 and "
+        "MapViewOfFile3");
+  }
+
+  SYSTEM_INFO system_info;
+  GetSystemInfo(&system_info);
+  iree_device_size_t capacity = 0;
+  if (IREE_UNLIKELY(!iree_device_size_checked_align(
+                        min_capacity,
+                        (iree_device_size_t)system_info.dwAllocationGranularity,
+                        &capacity) ||
+                    capacity > SIZE_MAX / 3)) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "AMDGPU host ringbuffer capacity cannot be "
+                            "represented: minimum=%" PRIu64,
+                            (uint64_t)min_capacity);
+  }
+
+  const SIZE_T view_size = (SIZE_T)capacity;
+  void* placeholder_base =
+      virtual_alloc2(/*process=*/NULL, /*base_address=*/NULL, view_size * 3,
+                     MEM_RESERVE | MEM_RESERVE_PLACEHOLDER, PAGE_NOACCESS,
+                     /*extended_parameters=*/NULL, /*parameter_count=*/0);
+  if (IREE_UNLIKELY(!placeholder_base)) {
+    const DWORD error = GetLastError();
+    return iree_make_status(
+        iree_status_code_from_win32_error(error),
+        "VirtualAlloc2 failed to reserve %" PRIu64
+        " bytes for AMDGPU host ringbuffer aliases; error=%lu",
+        (uint64_t)capacity * 3, (unsigned long)error);
+  }
+
+  bool first_split = false;
+  bool second_split = false;
+  void* mapped_views[3] = {NULL};
+  HANDLE section = NULL;
+  iree_status_t status = iree_ok_status();
+
+  if (!VirtualFree(placeholder_base, view_size,
+                   MEM_RELEASE | MEM_PRESERVE_PLACEHOLDER)) {
+    const DWORD error = GetLastError();
+    status = iree_make_status(
+        iree_status_code_from_win32_error(error),
+        "VirtualFree failed to split the first AMDGPU host ringbuffer "
+        "placeholder; error=%lu",
+        (unsigned long)error);
+  } else {
+    first_split = true;
+  }
+  if (iree_status_is_ok(status)) {
+    void* second_placeholder = (uint8_t*)placeholder_base + capacity;
+    if (!VirtualFree(second_placeholder, view_size,
+                     MEM_RELEASE | MEM_PRESERVE_PLACEHOLDER)) {
+      const DWORD error = GetLastError();
+      status = iree_make_status(
+          iree_status_code_from_win32_error(error),
+          "VirtualFree failed to split the second AMDGPU host ringbuffer "
+          "placeholder; error=%lu",
+          (unsigned long)error);
+    } else {
+      second_split = true;
+    }
+  }
+
+  if (iree_status_is_ok(status)) {
+    ULARGE_INTEGER section_size;
+    section_size.QuadPart = (ULONGLONG)capacity;
+    section = CreateFileMappingW(INVALID_HANDLE_VALUE,
+                                 /*lpFileMappingAttributes=*/NULL,
+                                 PAGE_READWRITE, section_size.HighPart,
+                                 section_size.LowPart, /*lpName=*/NULL);
+    if (!section) {
+      const DWORD error = GetLastError();
+      status = iree_make_status(iree_status_code_from_win32_error(error),
+                                "CreateFileMappingW failed for a %" PRIu64
+                                " byte AMDGPU host ringbuffer; error=%lu",
+                                (uint64_t)capacity, (unsigned long)error);
+    }
+  }
+
+  for (iree_host_size_t i = 0;
+       iree_status_is_ok(status) && i < IREE_ARRAYSIZE(mapped_views); ++i) {
+    void* placeholder = (uint8_t*)placeholder_base + i * capacity;
+    mapped_views[i] =
+        map_view_of_file3(section, /*process=*/NULL, placeholder, /*offset=*/0,
+                          view_size, MEM_REPLACE_PLACEHOLDER, PAGE_READWRITE,
+                          /*extended_parameters=*/NULL, /*parameter_count=*/0);
+    if (!mapped_views[i]) {
+      const DWORD error = GetLastError();
+      status = iree_make_status(
+          iree_status_code_from_win32_error(error),
+          "MapViewOfFile3 failed for AMDGPU host ringbuffer view %" PRIhsz
+          "; error=%lu",
+          i, (unsigned long)error);
+    }
+  }
+
+  if (section) {
+    const BOOL closed = CloseHandle(section);
+    section = NULL;
+    if (iree_status_is_ok(status) && !closed) {
+      const DWORD error = GetLastError();
+      status = iree_make_status(
+          iree_status_code_from_win32_error(error),
+          "CloseHandle failed for AMDGPU host ringbuffer section; error=%lu",
+          (unsigned long)error);
+    }
+  }
+
+  if (iree_status_is_ok(status)) {
+    out_ringbuffer->capacity = capacity;
+    out_ringbuffer->storage =
+        IREE_HAL_AMDGPU_VMEM_RINGBUFFER_STORAGE_HOST_ALIASED;
+    out_ringbuffer->va_base_ptr = placeholder_base;
+    out_ringbuffer->ring_base_ptr = (uint8_t*)placeholder_base + capacity;
+    out_ringbuffer->mapped_view_count = IREE_ARRAYSIZE(mapped_views);
+
+    void* device_va_base_ptr = NULL;
+    status = iree_hsa_amd_memory_lock(
+        IREE_LIBHSA(libhsa), out_ringbuffer->va_base_ptr, (size_t)capacity * 3,
+        topology->gpu_agent_count ? (hsa_agent_t*)topology->gpu_agents : NULL,
+        (int)topology->gpu_agent_count, &device_va_base_ptr);
+    if (iree_status_is_ok(status)) {
+      out_ringbuffer->device_base_ptr = (uint8_t*)device_va_base_ptr + capacity;
+      out_ringbuffer->host_registration_active = true;
+    } else {
+      iree_hal_amdgpu_vmem_ringbuffer_deinitialize(libhsa, out_ringbuffer);
+    }
+  } else if (second_split) {
+    for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(mapped_views); ++i) {
+      void* placeholder = (uint8_t*)placeholder_base + i * capacity;
+      if (mapped_views[i]) {
+        const BOOL unmapped = UnmapViewOfFile(mapped_views[i]);
+        IREE_ASSERT(unmapped && "failed to unmap partial host ringbuffer view");
+        (void)unmapped;
+      } else {
+        const BOOL released = VirtualFree(placeholder, 0, MEM_RELEASE);
+        IREE_ASSERT(released &&
+                    "failed to release host ringbuffer placeholder");
+        (void)released;
+      }
+    }
+  } else if (first_split) {
+    const BOOL first_released = VirtualFree(placeholder_base, 0, MEM_RELEASE);
+    const BOOL remainder_released =
+        VirtualFree((uint8_t*)placeholder_base + capacity, 0, MEM_RELEASE);
+    IREE_ASSERT(first_released && remainder_released &&
+                "failed to release split host ringbuffer placeholders");
+    (void)first_released;
+    (void)remainder_released;
+  } else {
+    const BOOL released = VirtualFree(placeholder_base, 0, MEM_RELEASE);
+    IREE_ASSERT(released && "failed to release host ringbuffer placeholder");
+    (void)released;
+  }
+
+  return status;
+}
+
+#endif  // IREE_PLATFORM_WINDOWS
+
 iree_status_t iree_hal_amdgpu_vmem_ringbuffer_initialize(
     const iree_hal_amdgpu_libhsa_t* libhsa, hsa_agent_t local_agent,
     hsa_amd_memory_pool_t memory_pool,
@@ -349,6 +581,8 @@ iree_status_t iree_hal_amdgpu_vmem_ringbuffer_initialize(
       capacity * 3);
   out_ringbuffer->ring_base_ptr =
       (uint8_t*)out_ringbuffer->va_base_ptr + capacity;
+  out_ringbuffer->device_base_ptr = out_ringbuffer->ring_base_ptr;
+  out_ringbuffer->storage = IREE_HAL_AMDGPU_VMEM_RINGBUFFER_STORAGE_HSA_VMEM;
 
   // Allocate the physical memory for backing the ringbuffer.
   iree_status_t status = iree_hsa_amd_vmem_handle_create(
@@ -367,6 +601,7 @@ iree_status_t iree_hal_amdgpu_vmem_ringbuffer_initialize(
     status =
         iree_hsa_amd_vmem_map(IREE_LIBHSA(libhsa), va_offsets[i], capacity, 0,
                               out_ringbuffer->alloc_handle, /*flags=*/0);
+    if (iree_status_is_ok(status)) ++out_ringbuffer->mapped_view_count;
   }
 
   // Enable access on requested devices (no access by default).
@@ -393,8 +628,31 @@ iree_status_t iree_hal_amdgpu_vmem_ringbuffer_initialize_with_topology(
     iree_hal_amdgpu_vmem_access_mode_t access_mode,
     iree_hal_amdgpu_vmem_ringbuffer_t* out_ringbuffer) {
   IREE_ASSERT_ARGUMENT(libhsa);
+  IREE_ASSERT_ARGUMENT(topology);
   IREE_ASSERT_ARGUMENT(out_ringbuffer);
+  memset(out_ringbuffer, 0, sizeof(*out_ringbuffer));
   IREE_TRACE_ZONE_BEGIN(z0);
+
+#if defined(IREE_PLATFORM_WINDOWS)
+  hsa_amd_memory_type_t hsa_memory_type = MEMORY_TYPE_NONE;
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_hal_amdgpu_vmem_translate_memory_type(memory_type,
+                                                     &hsa_memory_type));
+  (void)hsa_memory_type;
+  (void)local_agent;
+  (void)memory_pool;
+  if (IREE_UNLIKELY(access_mode != IREE_HAL_AMDGPU_ACCESS_MODE_SHARED)) {
+    IREE_RETURN_AND_END_ZONE_IF_ERROR(
+        z0, iree_make_status(IREE_STATUS_UNIMPLEMENTED,
+                             "Windows host-aliased AMDGPU ringbuffers require "
+                             "shared access"));
+  }
+  iree_status_t status =
+      iree_hal_amdgpu_vmem_ringbuffer_initialize_host_aliases(
+          libhsa, min_capacity, topology, out_ringbuffer);
+  IREE_TRACE_ZONE_END(z0);
+  return status;
+#else
 
   // Allocate scratch for the access descriptors. Note that though we allocate
   // for all agents we don't pass agents with HSA_ACCESS_PERMISSION_NONE as that
@@ -418,6 +676,7 @@ iree_status_t iree_hal_amdgpu_vmem_ringbuffer_initialize_with_topology(
 
   IREE_TRACE_ZONE_END(z0);
   return status;
+#endif  // IREE_PLATFORM_WINDOWS
 }
 
 void iree_hal_amdgpu_vmem_ringbuffer_deinitialize(
@@ -427,25 +686,46 @@ void iree_hal_amdgpu_vmem_ringbuffer_deinitialize(
   IREE_ASSERT_ARGUMENT(ringbuffer);
   IREE_TRACE_ZONE_BEGIN(z0);
 
-  // Unmap physical allocation and release it.
-  if (ringbuffer->alloc_handle.handle) {
-    void* va_offsets[3] = {
-        (uint8_t*)ringbuffer->va_base_ptr + 0 * ringbuffer->capacity,
-        (uint8_t*)ringbuffer->va_base_ptr + 1 * ringbuffer->capacity,
-        (uint8_t*)ringbuffer->va_base_ptr + 2 * ringbuffer->capacity,
-    };
-    for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(va_offsets); ++i) {
-      iree_hal_amdgpu_hsa_cleanup_assert_success(iree_hsa_amd_vmem_unmap_raw(
-          libhsa, va_offsets[i], ringbuffer->capacity));
+  switch (ringbuffer->storage) {
+    case IREE_HAL_AMDGPU_VMEM_RINGBUFFER_STORAGE_NONE:
+      break;
+    case IREE_HAL_AMDGPU_VMEM_RINGBUFFER_STORAGE_HSA_VMEM: {
+      for (iree_host_size_t i = 0; i < ringbuffer->mapped_view_count; ++i) {
+        void* va_offset =
+            (uint8_t*)ringbuffer->va_base_ptr + i * ringbuffer->capacity;
+        iree_hal_amdgpu_hsa_cleanup_assert_success(iree_hsa_amd_vmem_unmap_raw(
+            libhsa, va_offset, ringbuffer->capacity));
+      }
+      if (ringbuffer->alloc_handle.handle) {
+        iree_hal_amdgpu_hsa_cleanup_assert_success(
+            iree_hsa_amd_vmem_handle_release_raw(libhsa,
+                                                 ringbuffer->alloc_handle));
+      }
+      if (ringbuffer->va_base_ptr) {
+        iree_hal_amdgpu_hsa_cleanup_assert_success(
+            iree_hsa_amd_vmem_address_free_raw(libhsa, ringbuffer->va_base_ptr,
+                                               ringbuffer->capacity * 3));
+      }
+      break;
     }
-    iree_hal_amdgpu_hsa_cleanup_assert_success(
-        iree_hsa_amd_vmem_handle_release_raw(libhsa, ringbuffer->alloc_handle));
-  }
-
-  if (ringbuffer->va_base_ptr) {
-    iree_hal_amdgpu_hsa_cleanup_assert_success(
-        iree_hsa_amd_vmem_address_free_raw(libhsa, ringbuffer->va_base_ptr,
-                                           ringbuffer->capacity * 3));
+    case IREE_HAL_AMDGPU_VMEM_RINGBUFFER_STORAGE_HOST_ALIASED:
+#if defined(IREE_PLATFORM_WINDOWS)
+      if (ringbuffer->host_registration_active) {
+        iree_hal_amdgpu_hsa_cleanup_assert_success(
+            iree_hsa_amd_memory_unlock_raw(libhsa, ringbuffer->va_base_ptr));
+      }
+      if (ringbuffer->va_base_ptr) {
+        iree_hal_amdgpu_vmem_release_host_alias_views(
+            ringbuffer->va_base_ptr, ringbuffer->capacity,
+            ringbuffer->mapped_view_count);
+      }
+#else
+      IREE_ASSERT(false && "host-aliased ringbuffer on unsupported platform");
+#endif  // IREE_PLATFORM_WINDOWS
+      break;
+    default:
+      IREE_ASSERT(false && "invalid AMDGPU ringbuffer storage strategy");
+      break;
   }
 
   memset(ringbuffer, 0, sizeof(*ringbuffer));

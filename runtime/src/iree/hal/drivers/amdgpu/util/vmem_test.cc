@@ -92,6 +92,26 @@ TEST_F(VMemTest, FindFineGlobalMemoryPool) {
           HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_EXTENDED_SCOPE_FINE_GRAINED));
 }
 
+TEST_F(VMemTest, BuildDeviceSharedAccessDescriptors) {
+  IREE_TRACE_SCOPE();
+  ASSERT_GE(topology.gpu_agent_count, 1);
+
+  hsa_amd_memory_access_desc_t access_descs[IREE_HAL_AMDGPU_MAX_CPU_AGENT +
+                                            IREE_HAL_AMDGPU_MAX_GPU_AGENT];
+  iree_host_size_t access_desc_count = 0;
+  IREE_ASSERT_OK(iree_hal_amdgpu_vmem_build_access_descs_for_topology(
+      &topology, topology.gpu_agents[0],
+      IREE_HAL_AMDGPU_ACCESS_MODE_DEVICE_SHARED, IREE_ARRAYSIZE(access_descs),
+      access_descs, &access_desc_count));
+
+  ASSERT_EQ(access_desc_count, topology.gpu_agent_count);
+  for (iree_host_size_t i = 0; i < access_desc_count; ++i) {
+    EXPECT_EQ(access_descs[i].agent_handle.handle,
+              topology.gpu_agents[i].handle);
+    EXPECT_EQ(access_descs[i].permissions, HSA_ACCESS_PERMISSION_RW);
+  }
+}
+
 //===----------------------------------------------------------------------===//
 // iree_hal_amdgpu_vmem_ringbuffer_t
 //===----------------------------------------------------------------------===//
