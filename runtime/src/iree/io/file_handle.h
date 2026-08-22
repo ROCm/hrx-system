@@ -197,6 +197,15 @@ static inline iree_io_file_handle_primitive_value_t iree_io_file_handle_value(
 IREE_API_EXPORT iree_status_t
 iree_io_file_handle_flush(iree_io_file_handle_t* handle);
 
+// Resizes the platform file backing |handle| to |new_size| bytes.
+//
+// The handle must allow IREE_IO_FILE_ACCESS_WRITE. Shrinking discards the
+// truncated range; the contents of a newly extended range are
+// platform-defined. Host-allocation handles have fixed extents and cannot be
+// resized.
+IREE_API_EXPORT iree_status_t
+iree_io_file_handle_resize(iree_io_file_handle_t* handle, uint64_t new_size);
+
 //===----------------------------------------------------------------------===//
 // iree_io_file_handle_t platform files
 //===----------------------------------------------------------------------===//
