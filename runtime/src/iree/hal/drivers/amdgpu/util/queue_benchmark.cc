@@ -262,6 +262,8 @@ class QueueBenchmark : public benchmark::Fixture {
     available_ = false;
   }
 
+  static bool initialization_failed() { return initialized_ && !available_; }
+
   void SetUp(benchmark::State& state) override {
     InitializeOnce();
     if (!available_) {
@@ -2228,6 +2230,7 @@ iree_io_file_contents_t*
 
 BENCHMARK_DEFINE_F(QueueBenchmark,
                    SameQueueBarrierWait)(benchmark::State& state) {
+  if (state.skipped()) return;
   for (auto _ : state) {
     if (!HandleStatus(state, SameQueueBarrierAndWait(),
                       "same-queue barrier failed")) {
@@ -2239,6 +2242,7 @@ BENCHMARK_DEFINE_F(QueueBenchmark,
 
 BENCHMARK_DEFINE_F(QueueBenchmark,
                    QueueAllocaWarmTlsfSubmitOnly)(benchmark::State& state) {
+  if (state.skipped()) return;
   const iree_device_size_t allocation_size =
       static_cast<iree_device_size_t>(state.range(0));
   iree_hal_pool_t* pool = nullptr;
@@ -2276,6 +2280,7 @@ BENCHMARK_DEFINE_F(QueueBenchmark,
 
 BENCHMARK_DEFINE_F(QueueBenchmark, QueueAllocaForcedTlsfGrowthSubmitOnly)(
     benchmark::State& state) {
+  if (state.skipped()) return;
   const iree_device_size_t allocation_size =
       static_cast<iree_device_size_t>(state.range(0));
 
@@ -2330,6 +2335,7 @@ BENCHMARK_DEFINE_F(QueueBenchmark, QueueAllocaForcedTlsfGrowthSubmitOnly)(
 
 BENCHMARK_DEFINE_F(QueueBenchmark,
                    HostCallBlockingWait)(benchmark::State& state) {
+  if (state.skipped()) return;
   for (auto _ : state) {
     if (!HandleStatus(state, HostCallAndWait(IREE_HAL_HOST_CALL_FLAG_NONE),
                       "blocking host call failed")) {
@@ -2341,6 +2347,7 @@ BENCHMARK_DEFINE_F(QueueBenchmark,
 
 BENCHMARK_DEFINE_F(QueueBenchmark,
                    HostCallBlockingRelaxedWait)(benchmark::State& state) {
+  if (state.skipped()) return;
   for (auto _ : state) {
     if (!HandleStatus(state, HostCallAndWait(IREE_HAL_HOST_CALL_FLAG_RELAXED),
                       "relaxed blocking host call failed")) {
@@ -2352,6 +2359,7 @@ BENCHMARK_DEFINE_F(QueueBenchmark,
 
 BENCHMARK_DEFINE_F(QueueBenchmark,
                    HostCallNonBlockingWait)(benchmark::State& state) {
+  if (state.skipped()) return;
   for (auto _ : state) {
     if (!HandleStatus(state,
                       HostCallAndWait(IREE_HAL_HOST_CALL_FLAG_NON_BLOCKING |
@@ -2365,6 +2373,7 @@ BENCHMARK_DEFINE_F(QueueBenchmark,
 
 BENCHMARK_DEFINE_F(QueueBenchmark,
                    HostCallBlockingBatch20FinalWait)(benchmark::State& state) {
+  if (state.skipped()) return;
   for (auto _ : state) {
     if (!HandleStatus(
             state,
@@ -2379,6 +2388,7 @@ BENCHMARK_DEFINE_F(QueueBenchmark,
 
 BENCHMARK_DEFINE_F(QueueBenchmark, HostCallBlockingRelaxedBatch20FinalWait)(
     benchmark::State& state) {
+  if (state.skipped()) return;
   for (auto _ : state) {
     if (!HandleStatus(
             state,
@@ -2393,6 +2403,7 @@ BENCHMARK_DEFINE_F(QueueBenchmark, HostCallBlockingRelaxedBatch20FinalWait)(
 
 BENCHMARK_DEFINE_F(QueueBenchmark, HostCallNonBlockingBatch20FinalWait)(
     benchmark::State& state) {
+  if (state.skipped()) return;
   for (auto _ : state) {
     if (!HandleStatus(
             state,
@@ -2409,6 +2420,7 @@ BENCHMARK_DEFINE_F(QueueBenchmark, HostCallNonBlockingBatch20FinalWait)(
 
 BENCHMARK_DEFINE_F(QueueBenchmark,
                    SameQueueBarrierBatch20FinalWait)(benchmark::State& state) {
+  if (state.skipped()) return;
   for (auto _ : state) {
     if (!HandleStatus(state, SameQueueBarrierBatchAndWait(kBatchCount),
                       "same-queue barrier batch failed")) {
@@ -2420,6 +2432,7 @@ BENCHMARK_DEFINE_F(QueueBenchmark,
 
 BENCHMARK_DEFINE_F(QueueBenchmark,
                    SameQueueBarrierBatchFinalWait)(benchmark::State& state) {
+  if (state.skipped()) return;
   const int64_t batch_count = state.range(0);
   for (auto _ : state) {
     if (!HandleStatus(state, SameQueueBarrierBatchAndWait(batch_count),
@@ -2432,6 +2445,7 @@ BENCHMARK_DEFINE_F(QueueBenchmark,
 
 BENCHMARK_DEFINE_F(QueueBenchmark,
                    SameQueueBarrierBatchSubmitOnly)(benchmark::State& state) {
+  if (state.skipped()) return;
   const int64_t batch_count = state.range(0);
   for (auto _ : state) {
     SubmittedCompletion completion;
@@ -2450,6 +2464,7 @@ BENCHMARK_DEFINE_F(QueueBenchmark,
 
 BENCHMARK_DEFINE_F(QueueBenchmark,
                    SameQueueEpochChain20)(benchmark::State& state) {
+  if (state.skipped()) return;
   for (auto _ : state) {
     if (!HandleStatus(state, SameQueueEpochChainAndWait(kBatchCount),
                       "same-queue epoch chain failed")) {
@@ -2461,6 +2476,7 @@ BENCHMARK_DEFINE_F(QueueBenchmark,
 
 BENCHMARK_DEFINE_F(QueueBenchmark,
                    SameQueueEpochChain)(benchmark::State& state) {
+  if (state.skipped()) return;
   const int64_t batch_count = state.range(0);
   for (auto _ : state) {
     if (!HandleStatus(state, SameQueueEpochChainAndWait(batch_count),
@@ -2473,6 +2489,7 @@ BENCHMARK_DEFINE_F(QueueBenchmark,
 
 BENCHMARK_DEFINE_F(QueueBenchmark,
                    SameQueueEpochChainSubmitOnly)(benchmark::State& state) {
+  if (state.skipped()) return;
   const int64_t batch_count = state.range(0);
   for (auto _ : state) {
     SubmittedCompletion completion;
@@ -2491,6 +2508,7 @@ BENCHMARK_DEFINE_F(QueueBenchmark,
 
 BENCHMARK_DEFINE_F(QueueBenchmark,
                    CrossQueueAlreadyCompletedWait)(benchmark::State& state) {
+  if (state.skipped()) return;
   if (!EnsureQueueAvailable(state, kQueue1)) return;
   if (!HandleStatus(state, PrimeProducerSemaphore(),
                     "failed to prime producer semaphore")) {
@@ -2508,6 +2526,7 @@ BENCHMARK_DEFINE_F(QueueBenchmark,
 
 BENCHMARK_DEFINE_F(QueueBenchmark,
                    CrossQueueBarrierValue)(benchmark::State& state) {
+  if (state.skipped()) return;
   if (!EnsureQueueAvailable(state, kQueue1)) return;
   for (auto _ : state) {
     if (!HandleStatus(state, CrossQueueBarrierValueAndWait(),
@@ -2520,6 +2539,7 @@ BENCHMARK_DEFINE_F(QueueBenchmark,
 
 BENCHMARK_DEFINE_F(QueueBenchmark, CrossQueueBarrierValueBatch20FinalWait)(
     benchmark::State& state) {
+  if (state.skipped()) return;
   if (!EnsureQueueAvailable(state, kQueue1)) return;
   for (auto _ : state) {
     if (!HandleStatus(state, CrossQueueBarrierValueBatchAndWait(kBatchCount),
@@ -2535,6 +2555,7 @@ BENCHMARK_DEFINE_F(QueueBenchmark, CrossQueueBarrierValueBatch20FinalWait)(
 
 BENCHMARK_DEFINE_F(QueueBenchmark, CrossQueueBarrierValueBatchFinalWait)(
     benchmark::State& state) {
+  if (state.skipped()) return;
   if (!EnsureQueueAvailable(state, kQueue1)) return;
   const int64_t batch_count = state.range(0);
   for (auto _ : state) {
@@ -2551,6 +2572,7 @@ BENCHMARK_DEFINE_F(QueueBenchmark, CrossQueueBarrierValueBatchFinalWait)(
 
 BENCHMARK_DEFINE_F(QueueBenchmark, CrossQueueBarrierValueBatchSubmitOnly)(
     benchmark::State& state) {
+  if (state.skipped()) return;
   if (!EnsureQueueAvailable(state, kQueue1)) return;
   const int64_t batch_count = state.range(0);
   for (auto _ : state) {
@@ -2573,6 +2595,7 @@ BENCHMARK_DEFINE_F(QueueBenchmark, CrossQueueBarrierValueBatchSubmitOnly)(
 
 BENCHMARK_DEFINE_F(QueueBenchmark,
                    CrossQueuePingPongChain20)(benchmark::State& state) {
+  if (state.skipped()) return;
   if (!EnsureQueueAvailable(state, kQueue1)) return;
   for (auto _ : state) {
     if (!HandleStatus(state, CrossQueuePingPongChainAndWait(kBatchCount),
@@ -2587,6 +2610,7 @@ BENCHMARK_DEFINE_F(QueueBenchmark,
 
 BENCHMARK_DEFINE_F(QueueBenchmark,
                    CrossQueuePingPongChain)(benchmark::State& state) {
+  if (state.skipped()) return;
   if (!EnsureQueueAvailable(state, kQueue1)) return;
   const int64_t handoff_count = state.range(0);
   for (auto _ : state) {
@@ -2602,6 +2626,7 @@ BENCHMARK_DEFINE_F(QueueBenchmark,
 
 BENCHMARK_DEFINE_F(QueueBenchmark,
                    CrossQueuePingPongChainSubmitOnly)(benchmark::State& state) {
+  if (state.skipped()) return;
   if (!EnsureQueueAvailable(state, kQueue1)) return;
   const int64_t handoff_count = state.range(0);
   for (auto _ : state) {
@@ -2623,6 +2648,7 @@ BENCHMARK_DEFINE_F(QueueBenchmark,
 
 BENCHMARK_DEFINE_F(QueueBenchmark, CrossQueuePingPongPublicFinalInline)(
     benchmark::State& state) {
+  if (state.skipped()) return;
   if (!EnsureQueueAvailable(state, kQueue1)) return;
   const int64_t handoff_count = state.range(0);
   for (auto _ : state) {
@@ -2641,6 +2667,7 @@ BENCHMARK_DEFINE_F(QueueBenchmark, CrossQueuePingPongPublicFinalInline)(
 BENCHMARK_DEFINE_F(QueueBenchmark,
                    CrossQueuePingPongPublicFinalInlineSubmitOnly)(
     benchmark::State& state) {
+  if (state.skipped()) return;
   if (!EnsureQueueAvailable(state, kQueue1)) return;
   const int64_t handoff_count = state.range(0);
   for (auto _ : state) {
@@ -2665,6 +2692,7 @@ BENCHMARK_DEFINE_F(QueueBenchmark,
 
 BENCHMARK_DEFINE_F(QueueBenchmark, CrossQueuePingPongPublicFinalSeparate)(
     benchmark::State& state) {
+  if (state.skipped()) return;
   if (!EnsureQueueAvailable(state, kQueue1)) return;
   const int64_t handoff_count = state.range(0);
   for (auto _ : state) {
@@ -2683,6 +2711,7 @@ BENCHMARK_DEFINE_F(QueueBenchmark, CrossQueuePingPongPublicFinalSeparate)(
 BENCHMARK_DEFINE_F(QueueBenchmark,
                    CrossQueuePingPongPublicFinalSeparateSubmitOnly)(
     benchmark::State& state) {
+  if (state.skipped()) return;
   if (!EnsureQueueAvailable(state, kQueue1)) return;
   const int64_t handoff_count = state.range(0);
   for (auto _ : state) {
@@ -2707,6 +2736,7 @@ BENCHMARK_DEFINE_F(QueueBenchmark,
 
 BENCHMARK_DEFINE_F(QueueBenchmark, CrossQueuePingPongCopyPublicFinalInline)(
     benchmark::State& state) {
+  if (state.skipped()) return;
   if (!EnsureQueueAvailable(state, kQueue1)) return;
   if (!EnsurePayloadBuffers(state)) return;
   const int64_t handoff_count = state.range(0);
@@ -2727,6 +2757,7 @@ BENCHMARK_DEFINE_F(QueueBenchmark, CrossQueuePingPongCopyPublicFinalInline)(
 BENCHMARK_DEFINE_F(QueueBenchmark,
                    CrossQueuePingPongCopyPublicFinalInlineSubmitOnly)(
     benchmark::State& state) {
+  if (state.skipped()) return;
   if (!EnsureQueueAvailable(state, kQueue1)) return;
   if (!EnsurePayloadBuffers(state)) return;
   const int64_t handoff_count = state.range(0);
@@ -2752,6 +2783,7 @@ BENCHMARK_DEFINE_F(QueueBenchmark,
 
 BENCHMARK_DEFINE_F(QueueBenchmark, CrossQueuePingPongFillPublicFinalInline)(
     benchmark::State& state) {
+  if (state.skipped()) return;
   if (!EnsureQueueAvailable(state, kQueue1)) return;
   if (!EnsurePayloadBuffers(state)) return;
   const int64_t handoff_count = state.range(0);
@@ -2772,6 +2804,7 @@ BENCHMARK_DEFINE_F(QueueBenchmark, CrossQueuePingPongFillPublicFinalInline)(
 BENCHMARK_DEFINE_F(QueueBenchmark,
                    CrossQueuePingPongFillPublicFinalInlineSubmitOnly)(
     benchmark::State& state) {
+  if (state.skipped()) return;
   if (!EnsureQueueAvailable(state, kQueue1)) return;
   if (!EnsurePayloadBuffers(state)) return;
   const int64_t handoff_count = state.range(0);
@@ -2797,6 +2830,7 @@ BENCHMARK_DEFINE_F(QueueBenchmark,
 
 BENCHMARK_DEFINE_F(QueueBenchmark, CrossQueuePingPongDispatchPublicFinalInline)(
     benchmark::State& state) {
+  if (state.skipped()) return;
   if (!EnsureQueueAvailable(state, kQueue1)) return;
   if (!EnsurePayloadBuffers(state)) return;
   if (!EnsureDispatchExecutable(state)) return;
@@ -2819,6 +2853,7 @@ BENCHMARK_DEFINE_F(
     QueueBenchmark,
     CrossQueuePingPongDispatchPublicFinalInlineEpochCompletionFloor)(
     benchmark::State& state) {
+  if (state.skipped()) return;
   if (!EnsureQueueAvailable(state, kQueue1)) return;
   if (!EnsurePayloadBuffers(state)) return;
   if (!EnsureDispatchExecutable(state)) return;
@@ -2851,6 +2886,7 @@ BENCHMARK_DEFINE_F(
 BENCHMARK_DEFINE_F(QueueBenchmark,
                    CrossQueuePingPongDispatchPublicFinalInlineSubmitOnly)(
     benchmark::State& state) {
+  if (state.skipped()) return;
   if (!EnsureQueueAvailable(state, kQueue1)) return;
   if (!EnsurePayloadBuffers(state)) return;
   if (!EnsureDispatchExecutable(state)) return;
@@ -2878,6 +2914,7 @@ BENCHMARK_DEFINE_F(QueueBenchmark,
 BENCHMARK_DEFINE_F(QueueBenchmark,
                    CrossQueuePingPongNoopDispatchPublicFinalInline)(
     benchmark::State& state) {
+  if (state.skipped()) return;
   if (!EnsureQueueAvailable(state, kQueue1)) return;
   if (!EnsureDispatchExecutable(state)) return;
   const int64_t handoff_count = state.range(0);
@@ -2898,6 +2935,7 @@ BENCHMARK_DEFINE_F(QueueBenchmark,
 BENCHMARK_DEFINE_F(QueueBenchmark,
                    CrossQueuePingPongNoopDispatchPublicFinalInlineSubmitOnly)(
     benchmark::State& state) {
+  if (state.skipped()) return;
   if (!EnsureQueueAvailable(state, kQueue1)) return;
   if (!EnsureDispatchExecutable(state)) return;
   const int64_t handoff_count = state.range(0);
@@ -2926,6 +2964,7 @@ BENCHMARK_DEFINE_F(QueueBenchmark,
 BENCHMARK_DEFINE_F(QueueBenchmark,
                    CrossQueuePingPongPreResolvedDispatchPublicFinalInline)(
     benchmark::State& state) {
+  if (state.skipped()) return;
   if (!EnsureQueueAvailable(state, kQueue1)) return;
   if (!EnsurePreResolvedDispatch(state)) return;
   const int64_t handoff_count = state.range(0);
@@ -2947,6 +2986,7 @@ BENCHMARK_DEFINE_F(
     QueueBenchmark,
     CrossQueuePingPongPreResolvedDispatchPublicFinalInlineSubmitOnly)(
     benchmark::State& state) {
+  if (state.skipped()) return;
   if (!EnsureQueueAvailable(state, kQueue1)) return;
   if (!EnsurePreResolvedDispatch(state)) return;
   const int64_t handoff_count = state.range(0);
@@ -2975,6 +3015,7 @@ BENCHMARK_DEFINE_F(
 BENCHMARK_DEFINE_F(QueueBenchmark,
                    SameQueuePrivateStreamCopyChainPublicFinalInline)(
     benchmark::State& state) {
+  if (state.skipped()) return;
   if (!EnsurePayloadBuffers(state)) return;
   const int64_t operation_count = state.range(0);
   for (auto _ : state) {
@@ -2991,6 +3032,7 @@ BENCHMARK_DEFINE_F(QueueBenchmark,
 BENCHMARK_DEFINE_F(QueueBenchmark,
                    SameQueuePrivateStreamCopyChainPublicFinalInlineSubmitOnly)(
     benchmark::State& state) {
+  if (state.skipped()) return;
   if (!EnsurePayloadBuffers(state)) return;
   const int64_t operation_count = state.range(0);
   for (auto _ : state) {
@@ -3012,6 +3054,7 @@ BENCHMARK_DEFINE_F(QueueBenchmark,
 BENCHMARK_DEFINE_F(QueueBenchmark,
                    SameQueuePrivateStreamDispatchChainPublicFinalInline)(
     benchmark::State& state) {
+  if (state.skipped()) return;
   if (!EnsurePayloadBuffers(state)) return;
   if (!EnsureDispatchExecutable(state)) return;
   const int64_t operation_count = state.range(0);
@@ -3030,6 +3073,7 @@ BENCHMARK_DEFINE_F(
     QueueBenchmark,
     SameQueuePrivateStreamDispatchChainPublicFinalInlineEpochCompletionFloor)(
     benchmark::State& state) {
+  if (state.skipped()) return;
   if (!EnsurePayloadBuffers(state)) return;
   if (!EnsureDispatchExecutable(state)) return;
   const int64_t operation_count = state.range(0);
@@ -3059,6 +3103,7 @@ BENCHMARK_DEFINE_F(
     QueueBenchmark,
     SameQueuePrivateStreamDispatchChainPublicFinalInlineSubmitOnly)(
     benchmark::State& state) {
+  if (state.skipped()) return;
   if (!EnsurePayloadBuffers(state)) return;
   if (!EnsureDispatchExecutable(state)) return;
   const int64_t operation_count = state.range(0);
@@ -3082,6 +3127,7 @@ BENCHMARK_DEFINE_F(
 BENCHMARK_DEFINE_F(QueueBenchmark,
                    SameQueuePrivateStreamNoopDispatchChainPublicFinalInline)(
     benchmark::State& state) {
+  if (state.skipped()) return;
   if (!EnsureDispatchExecutable(state)) return;
   const int64_t operation_count = state.range(0);
   for (auto _ : state) {
@@ -3099,6 +3145,7 @@ BENCHMARK_DEFINE_F(
     QueueBenchmark,
     SameQueuePrivateStreamNoopDispatchChainPublicFinalInlineSubmitOnly)(
     benchmark::State& state) {
+  if (state.skipped()) return;
   if (!EnsureDispatchExecutable(state)) return;
   const int64_t operation_count = state.range(0);
   for (auto _ : state) {
@@ -3124,6 +3171,7 @@ BENCHMARK_DEFINE_F(
     QueueBenchmark,
     SameQueuePrivateStreamPreResolvedDispatchChainPublicFinalInline)(
     benchmark::State& state) {
+  if (state.skipped()) return;
   if (!EnsurePreResolvedDispatch(state)) return;
   const int64_t operation_count = state.range(0);
   for (auto _ : state) {
@@ -3142,6 +3190,7 @@ BENCHMARK_DEFINE_F(
     QueueBenchmark,
     SameQueuePrivateStreamPreResolvedDispatchChainPublicFinalInlineSubmitOnly)(
     benchmark::State& state) {
+  if (state.skipped()) return;
   if (!EnsurePreResolvedDispatch(state)) return;
   const int64_t operation_count = state.range(0);
   for (auto _ : state) {
@@ -3166,6 +3215,7 @@ BENCHMARK_DEFINE_F(
 BENCHMARK_DEFINE_F(QueueBenchmark,
                    SameQueuePrivateStreamFillChainPublicFinalInline)(
     benchmark::State& state) {
+  if (state.skipped()) return;
   if (!EnsurePayloadBuffers(state)) return;
   const int64_t operation_count = state.range(0);
   for (auto _ : state) {
@@ -3182,6 +3232,7 @@ BENCHMARK_DEFINE_F(QueueBenchmark,
 BENCHMARK_DEFINE_F(QueueBenchmark,
                    SameQueuePrivateStreamFillChainPublicFinalInlineSubmitOnly)(
     benchmark::State& state) {
+  if (state.skipped()) return;
   if (!EnsurePayloadBuffers(state)) return;
   const int64_t operation_count = state.range(0);
   for (auto _ : state) {
@@ -3202,6 +3253,7 @@ BENCHMARK_DEFINE_F(QueueBenchmark,
 
 BENCHMARK_DEFINE_F(QueueBenchmark,
                    DispatchValidateOnly)(benchmark::State& state) {
+  if (state.skipped()) return;
   if (!EnsurePayloadBuffers(state)) return;
   if (!EnsureDispatchExecutable(state)) return;
   iree_hal_amdgpu_host_queue_t* host_queue = nullptr;
@@ -3224,6 +3276,7 @@ BENCHMARK_DEFINE_F(QueueBenchmark,
 
 BENCHMARK_DEFINE_F(QueueBenchmark,
                    DispatchBindingCountValidateOnly)(benchmark::State& state) {
+  if (state.skipped()) return;
   const int64_t binding_count = state.range(0);
   if (!EnsureBindingCountExecutable(state)) return;
   if (!EnsureBindingCountBuffers(state, binding_count)) return;
@@ -3250,6 +3303,7 @@ BENCHMARK_DEFINE_F(QueueBenchmark,
 BENCHMARK_DEFINE_F(QueueBenchmark,
                    SameQueueDispatchBindingCountPublicFinalInlineSubmitOnly)(
     benchmark::State& state) {
+  if (state.skipped()) return;
   const int64_t binding_count = state.range(0);
   if (!EnsureBindingCountExecutable(state)) return;
   if (!EnsureBindingCountBuffers(state, binding_count)) return;
@@ -3274,6 +3328,7 @@ BENCHMARK_DEFINE_F(
     QueueBenchmark,
     SameQueueCommandBufferBindingCountStaticPublicFinalInlineSubmitOnly)(
     benchmark::State& state) {
+  if (state.skipped()) return;
   const int64_t binding_count = state.range(0);
   if (!EnsureBindingCountCommandBuffer(state, binding_count)) return;
   for (auto _ : state) {
@@ -3296,6 +3351,7 @@ BENCHMARK_DEFINE_F(
 BENCHMARK_DEFINE_F(QueueBenchmark,
                    SameQueueCommandBufferDispatchChainStaticPublicFinalInline)(
     benchmark::State& state) {
+  if (state.skipped()) return;
   const int64_t operation_count = state.range(0);
   const int64_t binding_count = state.range(1);
   if (!EnsureBindingCountExecutable(state)) return;
@@ -3330,6 +3386,7 @@ BENCHMARK_DEFINE_F(QueueBenchmark,
 
 BENCHMARK_DEFINE_F(QueueBenchmark, ProfileGuardrailBarrierBatch20FinalWait)(
     benchmark::State& state) {
+  if (state.skipped()) return;
   RunProfileGuardrailFinalWaitBenchmark(
       state, kProfileGuardrailOperationCount, kProfileGuardrailOperationCount,
       "profile guardrail barrier batch flush failed",
@@ -3343,6 +3400,7 @@ BENCHMARK_DEFINE_F(QueueBenchmark, ProfileGuardrailBarrierBatch20FinalWait)(
 
 BENCHMARK_DEFINE_F(QueueBenchmark, ProfileGuardrailBarrierBatch20SubmitOnly)(
     benchmark::State& state) {
+  if (state.skipped()) return;
   RunProfileGuardrailSubmitOnlyBenchmark(
       state, kProfileGuardrailOperationCount, kProfileGuardrailOperationCount,
       "profile guardrail barrier batch wait failed",
@@ -3358,6 +3416,7 @@ BENCHMARK_DEFINE_F(QueueBenchmark, ProfileGuardrailBarrierBatch20SubmitOnly)(
 
 BENCHMARK_DEFINE_F(QueueBenchmark, ProfileGuardrailCopyBatch20FinalWait)(
     benchmark::State& state) {
+  if (state.skipped()) return;
   if (!EnsurePayloadBuffers(state)) return;
   RunProfileGuardrailFinalWaitBenchmark(
       state, kProfileGuardrailOperationCount, kProfileGuardrailOperationCount,
@@ -3373,6 +3432,7 @@ BENCHMARK_DEFINE_F(QueueBenchmark, ProfileGuardrailCopyBatch20FinalWait)(
 
 BENCHMARK_DEFINE_F(QueueBenchmark, ProfileGuardrailCopyBatch20SubmitOnly)(
     benchmark::State& state) {
+  if (state.skipped()) return;
   if (!EnsurePayloadBuffers(state)) return;
   RunProfileGuardrailSubmitOnlyBenchmark(
       state, kProfileGuardrailOperationCount, kProfileGuardrailOperationCount,
@@ -3391,6 +3451,7 @@ BENCHMARK_DEFINE_F(QueueBenchmark, ProfileGuardrailCopyBatch20SubmitOnly)(
 
 BENCHMARK_DEFINE_F(QueueBenchmark, ProfileGuardrailFillBatch20FinalWait)(
     benchmark::State& state) {
+  if (state.skipped()) return;
   if (!EnsurePayloadBuffers(state)) return;
   RunProfileGuardrailFinalWaitBenchmark(
       state, kProfileGuardrailOperationCount, kProfileGuardrailOperationCount,
@@ -3406,6 +3467,7 @@ BENCHMARK_DEFINE_F(QueueBenchmark, ProfileGuardrailFillBatch20FinalWait)(
 
 BENCHMARK_DEFINE_F(QueueBenchmark, ProfileGuardrailFillBatch20SubmitOnly)(
     benchmark::State& state) {
+  if (state.skipped()) return;
   if (!EnsurePayloadBuffers(state)) return;
   RunProfileGuardrailSubmitOnlyBenchmark(
       state, kProfileGuardrailOperationCount, kProfileGuardrailOperationCount,
@@ -3424,6 +3486,7 @@ BENCHMARK_DEFINE_F(QueueBenchmark, ProfileGuardrailFillBatch20SubmitOnly)(
 
 BENCHMARK_DEFINE_F(QueueBenchmark, ProfileGuardrailDispatchBatch20FinalWait)(
     benchmark::State& state) {
+  if (state.skipped()) return;
   if (!EnsurePayloadBuffers(state)) return;
   if (!EnsureDispatchExecutable(state)) return;
   RunProfileGuardrailFinalWaitBenchmark(
@@ -3440,6 +3503,7 @@ BENCHMARK_DEFINE_F(QueueBenchmark, ProfileGuardrailDispatchBatch20FinalWait)(
 
 BENCHMARK_DEFINE_F(QueueBenchmark, ProfileGuardrailDispatchBatch20SubmitOnly)(
     benchmark::State& state) {
+  if (state.skipped()) return;
   if (!EnsurePayloadBuffers(state)) return;
   if (!EnsureDispatchExecutable(state)) return;
   RunProfileGuardrailSubmitOnlyBenchmark(
@@ -3460,6 +3524,7 @@ BENCHMARK_DEFINE_F(QueueBenchmark, ProfileGuardrailDispatchBatch20SubmitOnly)(
 BENCHMARK_DEFINE_F(QueueBenchmark,
                    ProfileGuardrailCommandBufferDispatchChain20FinalWait)(
     benchmark::State& state) {
+  if (state.skipped()) return;
   if (!EnsureBindingCountExecutable(state)) return;
   if (!EnsureBindingCountBuffers(state, kProfileGuardrailBindingCount)) return;
 
@@ -3493,6 +3558,7 @@ BENCHMARK_DEFINE_F(QueueBenchmark,
 BENCHMARK_DEFINE_F(QueueBenchmark,
                    ProfileGuardrailCommandBufferDispatchChain20SubmitOnly)(
     benchmark::State& state) {
+  if (state.skipped()) return;
   if (!EnsureBindingCountExecutable(state)) return;
   if (!EnsureBindingCountBuffers(state, kProfileGuardrailBindingCount)) return;
 
@@ -3523,6 +3589,7 @@ BENCHMARK_DEFINE_F(
     QueueBenchmark,
     SameQueueCommandBufferDispatchChainStaticPublicFinalInlineSubmitOnly)(
     benchmark::State& state) {
+  if (state.skipped()) return;
   const int64_t operation_count = state.range(0);
   const int64_t binding_count = state.range(1);
   if (!EnsureBindingCountExecutable(state)) return;
@@ -3556,6 +3623,7 @@ BENCHMARK_DEFINE_F(
 
 BENCHMARK_DEFINE_F(QueueBenchmark,
                    WaitBeforeSignalChain)(benchmark::State& state) {
+  if (state.skipped()) return;
   if (!EnsureQueueAvailable(state, kQueue1)) return;
   for (auto _ : state) {
     if (!HandleStatus(state, WaitBeforeSignalChainAndWait(),
@@ -4025,7 +4093,8 @@ int main(int argc, char** argv) {
   benchmark::Initialize(&argc, argv);
   if (benchmark::ReportUnrecognizedArguments(argc, argv)) return 1;
   benchmark::RunSpecifiedBenchmarks();
+  const bool initialization_failed = QueueBenchmark::initialization_failed();
   benchmark::Shutdown();
   QueueBenchmark::DeinitializeOnce();
-  return 0;
+  return initialization_failed ? 1 : 0;
 }

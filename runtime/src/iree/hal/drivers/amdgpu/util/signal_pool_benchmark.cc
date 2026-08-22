@@ -26,12 +26,14 @@ class SignalPoolBenchmark : public benchmark::Fixture {
         IREE_HAL_AMDGPU_LIBHSA_FLAG_NONE, iree_string_view_list_empty(),
         host_allocator_, &libhsa_);
     if (!iree_status_is_ok(status)) {
+      iree_status_fprint(stderr, status);
       iree_status_free(status);
       return;
     }
     status =
         iree_hal_amdgpu_topology_initialize_with_defaults(&libhsa_, &topology_);
     if (!iree_status_is_ok(status)) {
+      iree_status_fprint(stderr, status);
       iree_status_free(status);
       iree_hal_amdgpu_libhsa_deinitialize(&libhsa_);
       return;
@@ -50,6 +52,8 @@ class SignalPoolBenchmark : public benchmark::Fixture {
     iree_hal_amdgpu_libhsa_deinitialize(&libhsa_);
     available_ = false;
   }
+
+  static bool initialization_failed() { return initialized_ && !available_; }
 
   void SetUp(benchmark::State& state) override {
     InitializeOnce();
@@ -80,6 +84,7 @@ iree_hal_amdgpu_topology_t SignalPoolBenchmark::topology_;
 
 BENCHMARK_DEFINE_F(SignalPoolBenchmark, RawHsaSignalCreateDestroy)
 (benchmark::State& state) {
+  if (state.skipped()) return;
   for (auto _ : state) {
     hsa_signal_t signal = {0};
     IREE_CHECK_OK(iree_hsa_amd_signal_create(
@@ -100,6 +105,7 @@ BENCHMARK_REGISTER_F(SignalPoolBenchmark, RawHsaSignalCreateDestroy);
 
 BENCHMARK_DEFINE_F(SignalPoolBenchmark, HostPoolAcquireRelease)
 (benchmark::State& state) {
+  if (state.skipped()) return;
   iree_hal_amdgpu_host_signal_pool_t pool;
   IREE_CHECK_OK(iree_hal_amdgpu_host_signal_pool_initialize(
       &libhsa_, /*initial_capacity=*/64, /*batch_size=*/32, host_allocator_,
@@ -121,7 +127,9 @@ BENCHMARK_REGISTER_F(SignalPoolBenchmark, HostPoolAcquireRelease);
 int main(int argc, char** argv) {
   benchmark::Initialize(&argc, argv);
   benchmark::RunSpecifiedBenchmarks();
+  const bool initialization_failed =
+      SignalPoolBenchmark::initialization_failed();
   benchmark::Shutdown();
   SignalPoolBenchmark::DeinitializeOnce();
-  return 0;
+  return initialization_failed ? 1 : 0;
 }
