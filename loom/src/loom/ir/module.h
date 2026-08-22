@@ -313,6 +313,12 @@ iree_status_t loom_module_recompute_type_uses(loom_module_t* module);
 bool loom_module_value_has_type_uses(const loom_module_t* module,
                                      loom_value_id_t value_id);
 
+// Returns true if any currently-active value type embeds an SSA reference.
+static inline bool loom_module_has_active_type_uses(
+    const loom_module_t* module) {
+  return module->type_uses.active_count > 0;
+}
+
 // Returns true if |value_id| is referenced by a predicate-list attribute on a
 // live operation. Aggregate attributes are inspected recursively.
 bool loom_module_value_has_predicate_attribute_uses(const loom_module_t* module,
