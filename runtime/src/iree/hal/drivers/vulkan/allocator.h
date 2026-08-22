@@ -23,6 +23,15 @@ extern "C" {
 typedef struct iree_hal_vulkan_allocator_t iree_hal_vulkan_allocator_t;
 typedef struct iree_hal_vulkan_queue_t iree_hal_vulkan_queue_t;
 
+// Maps one HAL queue affinity bit to its Vulkan queue family.
+typedef struct iree_hal_vulkan_allocator_queue_family_t {
+  // HAL queue affinity bit selecting this family.
+  iree_hal_queue_affinity_t queue_affinity;
+
+  // Vulkan queue family index used by the selected queue.
+  uint32_t family_index;
+} iree_hal_vulkan_allocator_queue_family_t;
+
 typedef enum iree_hal_vulkan_queue_alloca_strategy_e {
   // Invalid zero value used to catch uninitialized alloca plans.
   IREE_HAL_VULKAN_QUEUE_ALLOCA_STRATEGY_NONE = 0,
@@ -59,6 +68,8 @@ iree_status_t iree_hal_vulkan_allocator_create(
     iree_hal_vulkan_features_t enabled_features,
     iree_hal_vulkan_device_extensions_t enabled_extensions,
     iree_hal_queue_affinity_t queue_affinity_mask,
+    iree_host_size_t queue_family_count,
+    const iree_hal_vulkan_allocator_queue_family_t* queue_families,
     iree_hal_vulkan_queue_t* sparse_binding_queue,
     iree_async_proactor_t* proactor, iree_allocator_t host_allocator,
     iree_hal_allocator_t** out_allocator);
