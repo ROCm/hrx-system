@@ -869,6 +869,23 @@ ERR_STRUCTURE_052 = ErrorDef(
     ),
 )
 
+# ERR_STRUCTURE_053: Non-command effect in a command program.
+ERR_STRUCTURE_053 = ErrorDef(
+    domain=ErrorDomain.STRUCTURE,
+    code=53,
+    severity=Severity.ERROR,
+    summary="Non-command effect in a command program.",
+    message=(
+        "'{op_name}' has observable effects in a command-program body but "
+        "does not represent an explicit command"
+    ),
+    params=(ErrorParam("op_name", ParamKind.STRING),),
+    fix_hint=(
+        "Use an explicit command operation or declare the computation pure "
+        "when it has no observable effects"
+    ),
+)
+
 ALL_STRUCTURE_ERRORS: tuple[ErrorDef, ...] = (
     ERR_STRUCTURE_001,
     ERR_STRUCTURE_002,
@@ -921,4 +938,5 @@ ALL_STRUCTURE_ERRORS: tuple[ErrorDef, ...] = (
     ERR_STRUCTURE_050,
     ERR_STRUCTURE_051,
     ERR_STRUCTURE_052,
+    ERR_STRUCTURE_053,
 )

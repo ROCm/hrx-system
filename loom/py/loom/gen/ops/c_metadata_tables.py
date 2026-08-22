@@ -880,6 +880,8 @@ def generate_tables_c(
                         region_flags.append("LOOM_REGION_CLUSTER_UNIFORM_ARGS")
                     else:
                         raise ValueError(f"Op '{op.name}' region '{region_def.name}' has unsupported arg_uniform_scope '{arg_uniform_scope}'")
+                if region_def.command_effects_only:
+                    region_flags.append("LOOM_REGION_COMMAND_EFFECTS_ONLY")
                 flags = " | ".join(region_flags) if region_flags else "0"
                 terminator = c_traits.region_terminator_kind(op, region_def, ops_by_name)
                 lines.append(f"    {{{terminator}, {implicit_terminator}, {flags}}},")

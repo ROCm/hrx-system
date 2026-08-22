@@ -753,6 +753,9 @@ enum loom_region_flag_bits_e {
   // Scalar entry block arguments are identical across every workgroup in a
   // workgroup cluster. This implies workgroup uniformity.
   LOOM_REGION_CLUSTER_UNIFORM_ARGS = 1u << 5,
+  // Every directly observable effect in this region or a nested region must
+  // be represented by an op carrying LOOM_TRAIT_COMMAND_EFFECT.
+  LOOM_REGION_COMMAND_EFFECTS_ONLY = 1u << 6,
 };
 typedef uint8_t loom_region_flags_t;
 

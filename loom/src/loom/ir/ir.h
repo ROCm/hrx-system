@@ -735,6 +735,10 @@ enum loom_trait_bits_e {
   // operations use this independently from SYMBOL_DEFINE and do not enter the
   // module symbol table.
   LOOM_TRAIT_MODULE_SCOPE = 1u << 26,
+  // Op represents an explicit command-program effect such as dispatch or
+  // schedule composition. The op independently declares its exact or unknown
+  // effects; this trait classifies those effects instead of replacing them.
+  LOOM_TRAIT_COMMAND_EFFECT = 1u << 27,
 };
 typedef uint32_t loom_trait_flags_t;
 

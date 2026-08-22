@@ -263,13 +263,15 @@ static void loom_verify_op_trait_flags_consistency(
                               IREE_ARRAYSIZE(params));
 }
 
-void loom_verify_op_effective_trait_consistency(
+loom_trait_flags_t loom_verify_op_effective_trait_consistency(
     loom_verify_state_t* state, const loom_op_t* op,
     const loom_op_vtable_t* vtable) {
   loom_trait_flags_t effective_traits =
       loom_op_effective_traits(state->module, op);
-  if (effective_traits == vtable->traits) return;
-  loom_verify_op_trait_flags_consistency(state, op, vtable, effective_traits);
+  if (effective_traits != vtable->traits) {
+    loom_verify_op_trait_flags_consistency(state, op, vtable, effective_traits);
+  }
+  return effective_traits;
 }
 
 static iree_string_view_t loom_verify_kind_name(loom_verify_state_t* state,

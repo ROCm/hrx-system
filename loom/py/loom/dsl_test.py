@@ -45,6 +45,7 @@ from loom.dsl import (
     ATTR_TYPE_SYMBOL_SET,
     BUFFER,
     BY_REFERENCE,
+    COMMAND_EFFECT,
     COMMUTATIVE,
     COMPILE_TIME_ONLY,
     CONSTANT_LIKE,
@@ -2646,6 +2647,14 @@ class TestEffects:
     def test_unknown_effects_not_pure(self) -> None:
         op = Op("test.call", traits=[UNKNOWN_EFFECTS])
         assert not op.is_pure
+
+    def test_command_effect_classifies_unknown_effects(self) -> None:
+        op = Op("test.command", traits=[UNKNOWN_EFFECTS, COMMAND_EFFECT])
+        assert not op.is_pure
+
+    def test_command_effect_requires_observable_effects(self) -> None:
+        with _raises(ValueError, match="COMMAND_EFFECT requires"):
+            Op("test.bad", traits=[COMMAND_EFFECT])
 
     def test_allocating_result(self) -> None:
         op = Op(

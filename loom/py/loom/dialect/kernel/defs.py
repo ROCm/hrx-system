@@ -45,6 +45,7 @@ from loom.dsl import (
     ATTR_TYPE_ENUM,
     ATTR_TYPE_I64,
     ATTR_TYPE_STRING,
+    COMMAND_EFFECT,
     CONVERGENT,
     I1,
     INDEX,
@@ -1887,7 +1888,7 @@ kernel_launch = Op(
             symbol_ref=SymbolReference("kernel", ["kernel"]),
         ),
     ],
-    traits=[UNKNOWN_EFFECTS, NoAncestor("kernel.def")],
+    traits=[UNKNOWN_EFFECTS, COMMAND_EFFECT, NoAncestor("kernel.def")],
     interfaces=[
         CallLikeInterface(
             callee="callee",
@@ -1951,6 +1952,7 @@ def _launch_schedule(name: str, doc: str) -> Op:
         ],
         traits=[
             UNKNOWN_EFFECTS,
+            COMMAND_EFFECT,
             ImplicitTerminator("kernel.launch.yield"),
             NoAncestor("kernel.def"),
         ],

@@ -214,15 +214,16 @@ static iree_status_t loom_verify_consume_value_after_op(
       op->parent_block ? op->parent_block->parent_region : NULL;
   if (parent_region &&
       iree_any_bit_set(parent_region->flags, LOOM_REGION_INSTANCE_FLAG_CFG)) {
-    if (!state->current_consumption_query) {
+    if (!state->region_scope.consumption_query) {
       return iree_make_status(
           IREE_STATUS_FAILED_PRECONDITION,
           "verifier CFG consumed-value checks require a consumption query");
     }
     loom_consumption_use_t use = {0};
     bool found_use = false;
-    IREE_RETURN_IF_ERROR(loom_consumption_find_use_after(
-        state->current_consumption_query, op, consumed_id, &use, &found_use));
+    IREE_RETURN_IF_ERROR(
+        loom_consumption_find_use_after(state->region_scope.consumption_query,
+                                        op, consumed_id, &use, &found_use));
     if (found_use) {
       loom_verify_emit_consumed_value_use(state, use.op, use.operand_index,
                                           consumed_id, op);
