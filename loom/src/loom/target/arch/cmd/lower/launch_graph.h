@@ -73,13 +73,15 @@ typedef struct loom_cmd_launch_graph_t {
 
 // Materializes the aggregate launch-count graph for |source_program_op|.
 //
-// Each scheduled kernel's exact launch-config region is cloned with its
-// workload operands substituted. Pure command-program dataflow required by
-// those operands is cloned once, and ordinary canonicalization plus CSE runs
-// across the combined function. Equal residual xyz tuples share one dense host
-// result ordinal. Exact tuples are returned as direct launch metadata.
-// |source_facts| is a borrowed table populated for the source program and each
-// scheduled kernel's launch-config region by the owning program plan.
+// Scheduled launches are grouped by exact {kernel definition, ordered workload
+// SSA values} identity. Each unique launch-config region is cloned once with
+// its workload operands substituted, and launch rows retain their identity
+// assignment. Pure command-program dataflow required by those operands is
+// cloned once, and ordinary canonicalization plus CSE runs across the combined
+// function. Equal residual xyz tuples share one dense host result ordinal.
+// Exact tuples are returned as direct launch metadata. |source_facts| is a
+// borrowed table populated for the source program and each scheduled kernel's
+// launch-config region by the owning program plan.
 //
 // This host slice accepts only workload values derived from command-program
 // specialization arguments and pure scalar operations. Buffer-sourced values

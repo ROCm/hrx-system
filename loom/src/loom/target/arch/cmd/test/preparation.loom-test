@@ -520,3 +520,107 @@ low.func.def public retain target<cmd.core> abi(command_program) abi_layout({ent
   cmd.dispatch.direct.barrier<%32, %34>[%39, %38, %38]()
   return
 }
+
+// ====
+
+// RUN: emit command-launch-config @repeated_launch_identities
+
+kernel.def @wide_tiles(%extent: index) {
+  %c1 = index.constant 1 : index
+  %rounding = index.constant 15 : index
+  %tile_size = index.constant 16 : index
+  %rounded = index.add %extent, %rounding : index
+  %groups = index.div %rounded, %tile_size : index
+  kernel.launch.config workgroups(%groups, %c1, %c1) workgroup_size(%tile_size, %c1, %c1) : index
+} launch() {
+  kernel.return
+}
+
+kernel.def @narrow_tiles(%extent: index) {
+  %c1 = index.constant 1 : index
+  %rounding = index.constant 7 : index
+  %tile_size = index.constant 8 : index
+  %rounded = index.add %extent, %rounding : index
+  %groups = index.div %rounded, %tile_size : index
+  kernel.launch.config workgroups(%groups, %c1, %c1) workgroup_size(%tile_size, %c1, %c1) : index
+} launch() {
+  kernel.return
+}
+
+command.program.def public @repeated_launch_identities(%extent: index) launch() where [range(%extent, 1, 4096)] {
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c63 = index.constant 63 : index
+  %c64 = index.constant 64 : index
+  %distinct_extent = index.add %extent, %c1 : index
+  scf.for %iteration = [%c0 to %c63 step %c1] unroll {
+    kernel.launch @wide_tiles[%extent]() : [index]()
+  }
+  scf.for %iteration = [%c0 to %c64 step %c1] unroll {
+    kernel.launch @narrow_tiles[%extent]() : [index]()
+  }
+  kernel.launch @wide_tiles[%distinct_extent]() : [index]()
+  command.return
+}
+
+// ----
+func.def public retain pure @repeated_launch_identities(%extent: index) -> (index, index, index, index, index, index, index, index, index) where [range(%extent, 1, 4096)] {
+  %c1 = index.constant 1 : index
+  %rounding$11 = index.constant 15 : index
+  %rounded$12 = index.add %extent, %rounding$11 : index
+  %13 = index.constant 4 : index
+  %groups$14 = index.shrui %rounded$12, %13 : index
+  %rounding$15 = index.constant 7 : index
+  %rounded$16 = index.add %extent, %rounding$15 : index
+  %17 = index.constant 3 : index
+  %groups$18 = index.shrui %rounded$16, %17 : index
+  %distinct_extent = index.add %extent, %c1 : index
+  %rounded$20 = index.add %distinct_extent, %rounding$11 : index
+  %groups$21 = index.shrui %rounded$20, %13 : index
+  func.return %groups$14, %c1, %c1, %groups$18, %c1, %c1, %groups$21, %c1, %c1 : index, index, index, index, index, index, index, index, index
+}
+
+// ====
+
+// RUN: emit command-launch-config @growing_identity_table
+
+kernel.def @identity_tiles(%extent: index) {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%extent, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch() {
+  kernel.return
+}
+
+command.program.def public @growing_identity_table(%extent: index) launch() where [range(%extent, 1, 4096)] {
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c10 = index.constant 10 : index
+  scf.for %iteration = [%c0 to %c10 step %c1] unroll {
+    %workload = index.add %extent, %iteration : index
+    kernel.launch @identity_tiles[%workload]() : [index]()
+  }
+  command.return
+}
+
+// ----
+func.def public retain pure @growing_identity_table(%extent: index) -> (index, index, index, index, index, index, index, index, index, index, index, index, index, index, index, index, index, index, index, index, index, index, index, index, index, index, index, index, index, index) where [range(%extent, 1, 4096)] {
+  %c1 = index.constant 1 : index
+  %workload_1 = index.add %extent, %c1 : index
+  %iteration_2 = index.constant 2 : index
+  %workload_2 = index.add %extent, %iteration_2 : index
+  %iteration_3 = index.constant 3 : index
+  %workload_3 = index.add %extent, %iteration_3 : index
+  %iteration_4 = index.constant 4 : index
+  %workload_4 = index.add %extent, %iteration_4 : index
+  %iteration_5 = index.constant 5 : index
+  %workload_5 = index.add %extent, %iteration_5 : index
+  %iteration_6 = index.constant 6 : index
+  %workload_6 = index.add %extent, %iteration_6 : index
+  %iteration_7 = index.constant 7 : index
+  %workload_7 = index.add %extent, %iteration_7 : index
+  %iteration_8 = index.constant 8 : index
+  %workload_8 = index.add %extent, %iteration_8 : index
+  %iteration_9 = index.constant 9 : index
+  %workload_9 = index.add %extent, %iteration_9 : index
+  func.return %extent, %c1, %c1, %workload_1, %c1, %c1, %workload_2, %c1, %c1, %workload_3, %c1, %c1, %workload_4, %c1, %c1, %workload_5, %c1, %c1, %workload_6, %c1, %c1, %workload_7, %c1, %c1, %workload_8, %c1, %c1, %workload_9, %c1, %c1 : index, index, index, index, index, index, index, index, index, index, index, index, index, index, index, index, index, index, index, index, index, index, index, index, index, index, index, index, index, index
+}

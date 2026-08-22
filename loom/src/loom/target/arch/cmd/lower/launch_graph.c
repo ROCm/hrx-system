@@ -34,37 +34,126 @@ typedef struct loom_cmd_launch_graph_producer_frame_t {
   uint16_t next_operand;
 } loom_cmd_launch_graph_producer_frame_t;
 
-typedef struct loom_cmd_launch_graph_build_t {
+// Non-recursive pure-producer traversal stack.
+typedef struct loom_cmd_launch_graph_producer_stack_t {
+  // Active frames in dependency traversal order.
+  loom_cmd_launch_graph_producer_frame_t* frames;
+  // Number of active frames in |frames|.
+  iree_host_size_t count;
+  // Allocated entry capacity of |frames|.
+  iree_host_size_t capacity;
+} loom_cmd_launch_graph_producer_stack_t;
+
+// Final placement shared by launches with the same exact configuration
+// identity.
+typedef struct loom_cmd_launch_graph_placement_t {
+  // Placement selecting the populated payload member.
+  loom_cmd_launch_count_kind_t kind;
+  union {
+    // Exact workgroup count when |kind| is DIRECT.
+    loom_target_dispatch_workgroup_count_t direct;
+    // Dense xyz tuple ordinal returned by the host function when HOST.
+    uint32_t host_tuple_ordinal;
+  } payload;
+} loom_cmd_launch_graph_placement_t;
+
+// One exact kernel launch-configuration identity.
+typedef struct loom_cmd_launch_graph_identity_t {
+  // Concrete kernel definition containing the configuration body.
+  const loom_op_t* kernel_op;
+  // Ordered source-program workload values bound to the configuration body.
+  loom_value_slice_t source_workloads;
+  // Structural hash populated when the identity set becomes table-backed.
+  uint32_t hash;
+  // First scheduled launch with this identity, used for diagnostics.
+  iree_host_size_t first_launch_index;
+  // Final direct or host placement populated after configuration evaluation.
+  loom_cmd_launch_graph_placement_t placement;
+} loom_cmd_launch_graph_identity_t;
+
+enum {
+  LOOM_CMD_LAUNCH_GRAPH_INLINE_IDENTITY_CAPACITY = 4,
+  LOOM_CMD_LAUNCH_GRAPH_INLINE_RESULT_CAPACITY =
+      LOOM_CMD_LAUNCH_GRAPH_INLINE_IDENTITY_CAPACITY *
+      LOOM_CMD_PROGRAM_LAUNCH_COUNT_DIMENSION_COUNT,
+};
+
+// Scratch identity plan formed while assigning scheduled launch rows.
+typedef struct loom_cmd_launch_graph_identity_plan_t {
+  // Unique identities in first scheduled occurrence order.
+  loom_cmd_launch_graph_identity_t* identities;
+  // Number of entries populated in |identities|.
+  iree_host_size_t identity_count;
+  // Allocated entry capacity of |identities|.
+  iree_host_size_t identity_capacity;
+  // Open-addressed scratch slots, initially mapping exact identities.
+  iree_host_size_t* slot_ordinals;
+  // Power-of-two number of entries in |slot_ordinals|.
+  iree_host_size_t slot_capacity;
+  // Identity ordinal for each scheduled launch.
+  iree_host_size_t* launch_identity_ordinals;
+  // Flattened xyz results for each unique identity.
+  loom_value_id_t* result_values;
+} loom_cmd_launch_graph_identity_plan_t;
+
+// Uninitialized stack storage used before an identity plan needs arena growth.
+typedef struct loom_cmd_launch_graph_inline_storage_t {
+  // Inline identity storage covering common small command programs.
+  loom_cmd_launch_graph_identity_t
+      inline_identities[LOOM_CMD_LAUNCH_GRAPH_INLINE_IDENTITY_CAPACITY];
+  // Inline launch assignments covering common small command programs.
+  iree_host_size_t inline_launch_identity_ordinals
+      [LOOM_CMD_LAUNCH_GRAPH_INLINE_IDENTITY_CAPACITY];
+  // Inline flattened xyz results covering common small command programs.
+  loom_value_id_t
+      inline_result_values[LOOM_CMD_LAUNCH_GRAPH_INLINE_RESULT_CAPACITY];
+} loom_cmd_launch_graph_inline_storage_t;
+
+// Immutable source inputs consumed by launch extraction.
+typedef struct loom_cmd_launch_graph_source_t {
   // Immutable verified source module.
-  const loom_module_t* source_module;
+  const loom_module_t* module;
   // Source command program being factored.
-  loom_func_like_t source_program;
+  loom_func_like_t program;
   // Existing command schedule defining launch order.
   const loom_cmd_schedule_plan_t* schedule;
   // Borrowed source facts populated by the owning program plan.
-  const loom_value_fact_table_t* source_facts;
+  const loom_value_fact_table_t* facts;
+} loom_cmd_launch_graph_source_t;
+
+// Mutable aggregate host IR under construction.
+typedef struct loom_cmd_launch_graph_target_t {
   // Owned aggregate host module under construction.
   loom_module_t* module;
   // Aggregate host function under construction.
-  loom_func_like_t host_function;
+  loom_func_like_t function;
   // Builder positioned in the aggregate host function body.
   loom_builder_t builder;
   // Source program value to aggregate host value mapping.
   loom_ir_remap_t program_remap;
+} loom_cmd_launch_graph_target_t;
+
+// Product tables retained with the aggregate host module.
+typedef struct loom_cmd_launch_graph_product_t {
+  // Launch placement rows owned by the target module.
+  loom_cmd_launch_count_t* launches;
+  // Ordered wave rows owned by the target module.
+  loom_cmd_schedule_wave_t* waves;
+} loom_cmd_launch_graph_product_t;
+
+typedef struct loom_cmd_launch_graph_build_t {
+  // Immutable source inputs.
+  loom_cmd_launch_graph_source_t source;
+  // Mutable aggregate host IR.
+  loom_cmd_launch_graph_target_t target;
   // Scratch storage discarded after extraction.
   iree_arena_allocator_t* scratch_arena;
-  // Non-recursive pure-producer traversal stack.
-  loom_cmd_launch_graph_producer_frame_t* producer_frames;
-  // Number of active producer frames.
-  iree_host_size_t producer_frame_count;
-  // Allocated producer frame capacity.
-  iree_host_size_t producer_frame_capacity;
-  // Flattened xyz result values before tuple compaction.
-  loom_value_id_t* launch_result_values;
-  // Launch placement rows owned by |module|.
-  loom_cmd_launch_count_t* launches;
-  // Ordered wave rows owned by |module|.
-  loom_cmd_schedule_wave_t* waves;
+  // Pure source-producer materialization state.
+  loom_cmd_launch_graph_producer_stack_t producer_stack;
+  // Exact configuration identities and per-launch assignments.
+  loom_cmd_launch_graph_identity_plan_t identity_plan;
+  // Retained launch and wave product tables.
+  loom_cmd_launch_graph_product_t product;
 } loom_cmd_launch_graph_build_t;
 
 static iree_string_view_t loom_cmd_launch_graph_symbol_name(
@@ -90,32 +179,246 @@ static loom_op_t* loom_cmd_launch_graph_resolve_kernel(
   return kernel_op;
 }
 
+// Extends an FNV-1a hash with one byte span.
+static uint32_t loom_cmd_launch_graph_hash_bytes(uint32_t hash,
+                                                 const void* data,
+                                                 iree_host_size_t length) {
+  const uint8_t* bytes = (const uint8_t*)data;
+  for (iree_host_size_t i = 0; i < length; ++i) {
+    hash ^= bytes[i];
+    hash *= 16777619u;
+  }
+  return hash;
+}
+
+static uint32_t loom_cmd_launch_graph_hash_identity(
+    const loom_op_t* kernel_op, loom_value_slice_t source_workloads) {
+  uint32_t hash = 2166136261u;
+  const uintptr_t kernel_bits = (uintptr_t)kernel_op;
+  hash =
+      loom_cmd_launch_graph_hash_bytes(hash, &kernel_bits, sizeof(kernel_bits));
+  hash = loom_cmd_launch_graph_hash_bytes(hash, &source_workloads.count,
+                                          sizeof(source_workloads.count));
+  return loom_cmd_launch_graph_hash_bytes(
+      hash, source_workloads.values,
+      (iree_host_size_t)source_workloads.count * sizeof(loom_value_id_t));
+}
+
+static bool loom_cmd_launch_graph_identity_matches(
+    const loom_cmd_launch_graph_identity_t* identity,
+    const loom_op_t* kernel_op, loom_value_slice_t source_workloads) {
+  return identity->kernel_op == kernel_op &&
+         identity->source_workloads.count == source_workloads.count &&
+         (source_workloads.count == 0 ||
+          memcmp(identity->source_workloads.values, source_workloads.values,
+                 (iree_host_size_t)source_workloads.count *
+                     sizeof(loom_value_id_t)) == 0);
+}
+
+static bool loom_cmd_launch_graph_identity_equal(
+    const loom_cmd_launch_graph_identity_t* identity,
+    const loom_op_t* kernel_op, loom_value_slice_t source_workloads,
+    uint32_t hash) {
+  return identity->hash == hash && loom_cmd_launch_graph_identity_matches(
+                                       identity, kernel_op, source_workloads);
+}
+
+static iree_status_t loom_cmd_launch_graph_reserve_identity(
+    loom_cmd_launch_graph_build_t* build) {
+  loom_cmd_launch_graph_identity_plan_t* plan = &build->identity_plan;
+  if (plan->identity_count < plan->identity_capacity) {
+    return iree_ok_status();
+  }
+  return iree_arena_grow_array(
+      build->scratch_arena, plan->identity_count,
+      iree_max(plan->identity_count + 1, 16u), sizeof(*plan->identities),
+      &plan->identity_capacity, (void**)&plan->identities);
+}
+
+static iree_status_t loom_cmd_launch_graph_grow_identity_slots(
+    loom_cmd_launch_graph_build_t* build) {
+  loom_cmd_launch_graph_identity_plan_t* plan = &build->identity_plan;
+  const bool initialize_hashes = plan->slot_capacity == 0;
+  iree_host_size_t new_capacity = 16;
+  if (plan->slot_capacity != 0 &&
+      !iree_host_size_checked_mul(plan->slot_capacity, 2, &new_capacity)) {
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "launch configuration table is too large");
+  }
+  iree_host_size_t* new_slots = NULL;
+  IREE_RETURN_IF_ERROR(
+      iree_arena_allocate_array(build->scratch_arena, new_capacity,
+                                sizeof(*new_slots), (void**)&new_slots));
+  memset(new_slots, 0xFF, new_capacity * sizeof(*new_slots));
+
+  const iree_host_size_t slot_mask = new_capacity - 1;
+  for (iree_host_size_t i = 0; i < plan->identity_count; ++i) {
+    if (initialize_hashes) {
+      plan->identities[i].hash = loom_cmd_launch_graph_hash_identity(
+          plan->identities[i].kernel_op, plan->identities[i].source_workloads);
+    }
+    iree_host_size_t slot = plan->identities[i].hash & slot_mask;
+    while (new_slots[slot] != IREE_HOST_SIZE_MAX) {
+      slot = (slot + 1) & slot_mask;
+    }
+    new_slots[slot] = i;
+  }
+  plan->slot_ordinals = new_slots;
+  plan->slot_capacity = new_capacity;
+  return iree_ok_status();
+}
+
+// Forms exact configuration identities while assigning the existing scheduled
+// launch rows. The schedule is visited once; later body construction visits
+// only unique identities.
+static iree_status_t loom_cmd_launch_graph_build_identity_plan(
+    loom_cmd_launch_graph_build_t* build,
+    loom_cmd_launch_graph_inline_storage_t* inline_storage) {
+  const iree_host_size_t launch_count = build->source.schedule->command_count;
+  loom_cmd_launch_graph_identity_plan_t* plan = &build->identity_plan;
+  if (launch_count != 0) {
+    plan->identities = inline_storage->inline_identities;
+    plan->identity_capacity = IREE_ARRAYSIZE(inline_storage->inline_identities);
+    plan->result_values = inline_storage->inline_result_values;
+    if (launch_count <=
+        IREE_ARRAYSIZE(inline_storage->inline_launch_identity_ordinals)) {
+      plan->launch_identity_ordinals =
+          inline_storage->inline_launch_identity_ordinals;
+    } else {
+      IREE_RETURN_IF_ERROR(
+          iree_arena_allocate_array(build->scratch_arena, launch_count,
+                                    sizeof(*plan->launch_identity_ordinals),
+                                    (void**)&plan->launch_identity_ordinals));
+    }
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        &build->target.module->arena, launch_count,
+        sizeof(*build->product.launches), (void**)&build->product.launches));
+    memset(build->product.launches, 0,
+           launch_count * sizeof(*build->product.launches));
+  }
+  if (build->source.schedule->wave_count != 0) {
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        &build->target.module->arena, build->source.schedule->wave_count,
+        sizeof(*build->product.waves), (void**)&build->product.waves));
+    memcpy(build->product.waves, build->source.schedule->waves,
+           build->source.schedule->wave_count * sizeof(*build->product.waves));
+  }
+
+  // The common single-launch program cannot share a configuration identity and
+  // therefore needs neither hashing nor table initialization.
+  if (launch_count == 1) {
+    const loom_op_t* launch_op = build->source.schedule->commands[0];
+    plan->identities[0] = (loom_cmd_launch_graph_identity_t){
+        .kernel_op = loom_cmd_launch_graph_resolve_kernel(build->source.module,
+                                                          launch_op),
+        .source_workloads = loom_kernel_launch_workloads(launch_op),
+        .first_launch_index = 0,
+    };
+    plan->identity_count = 1;
+    plan->launch_identity_ordinals[0] = 0;
+    build->product.launches[0].source_op = launch_op;
+    return iree_ok_status();
+  }
+
+  for (iree_host_size_t launch_index = 0; launch_index < launch_count;
+       ++launch_index) {
+    const loom_op_t* launch_op = build->source.schedule->commands[launch_index];
+    loom_op_t* kernel_op =
+        loom_cmd_launch_graph_resolve_kernel(build->source.module, launch_op);
+    const loom_value_slice_t source_workloads =
+        loom_kernel_launch_workloads(launch_op);
+    uint32_t hash = 0;
+    iree_host_size_t identity_ordinal = IREE_HOST_SIZE_MAX;
+    iree_host_size_t slot = IREE_HOST_SIZE_MAX;
+    if (plan->slot_capacity == 0) {
+      // Keep bounded identity sets cheaper than hashing regardless of dispatch
+      // count. The fifth unique identity promotes the plan to a table.
+      for (iree_host_size_t candidate_ordinal = 0;
+           candidate_ordinal < plan->identity_count; ++candidate_ordinal) {
+        if (loom_cmd_launch_graph_identity_matches(
+                &plan->identities[candidate_ordinal], kernel_op,
+                source_workloads)) {
+          identity_ordinal = candidate_ordinal;
+          break;
+        }
+      }
+    } else {
+      hash = loom_cmd_launch_graph_hash_identity(kernel_op, source_workloads);
+      const iree_host_size_t slot_mask = plan->slot_capacity - 1;
+      slot = hash & slot_mask;
+      while (plan->slot_ordinals[slot] != IREE_HOST_SIZE_MAX) {
+        const iree_host_size_t candidate_ordinal = plan->slot_ordinals[slot];
+        if (loom_cmd_launch_graph_identity_equal(
+                &plan->identities[candidate_ordinal], kernel_op,
+                source_workloads, hash)) {
+          identity_ordinal = candidate_ordinal;
+          break;
+        }
+        slot = (slot + 1) & slot_mask;
+      }
+    }
+    if (identity_ordinal == IREE_HOST_SIZE_MAX) {
+      if (plan->slot_capacity == 0 &&
+          plan->identity_count ==
+              LOOM_CMD_LAUNCH_GRAPH_INLINE_IDENTITY_CAPACITY) {
+        IREE_RETURN_IF_ERROR(loom_cmd_launch_graph_grow_identity_slots(build));
+        hash = loom_cmd_launch_graph_hash_identity(kernel_op, source_workloads);
+        slot = hash & (plan->slot_capacity - 1);
+        while (plan->slot_ordinals[slot] != IREE_HOST_SIZE_MAX) {
+          slot = (slot + 1) & (plan->slot_capacity - 1);
+        }
+      } else if (plan->slot_capacity != 0 &&
+                 plan->identity_count + 1 > plan->slot_capacity / 2) {
+        IREE_RETURN_IF_ERROR(loom_cmd_launch_graph_grow_identity_slots(build));
+        slot = hash & (plan->slot_capacity - 1);
+        while (plan->slot_ordinals[slot] != IREE_HOST_SIZE_MAX) {
+          slot = (slot + 1) & (plan->slot_capacity - 1);
+        }
+      }
+      IREE_RETURN_IF_ERROR(loom_cmd_launch_graph_reserve_identity(build));
+      identity_ordinal = plan->identity_count++;
+      plan->identities[identity_ordinal] = (loom_cmd_launch_graph_identity_t){
+          .kernel_op = kernel_op,
+          .source_workloads = source_workloads,
+          .hash = hash,
+          .first_launch_index = launch_index,
+      };
+      if (plan->slot_capacity != 0) {
+        plan->slot_ordinals[slot] = identity_ordinal;
+      }
+    }
+    plan->launch_identity_ordinals[launch_index] = identity_ordinal;
+    build->product.launches[launch_index].source_op = launch_op;
+  }
+  return iree_ok_status();
+}
+
 static bool loom_cmd_launch_graph_op_is_nested_in_program(
     const loom_cmd_launch_graph_build_t* build, const loom_op_t* op) {
   for (const loom_op_t* ancestor = op ? op->parent_op : NULL; ancestor;
        ancestor = ancestor->parent_op) {
-    if (ancestor == build->source_program.op) return true;
+    if (ancestor == build->source.program.op) return true;
   }
   return false;
 }
 
 static iree_status_t loom_cmd_launch_graph_reserve_producer_frame(
     loom_cmd_launch_graph_build_t* build) {
-  if (build->producer_frame_count < build->producer_frame_capacity) {
+  if (build->producer_stack.count < build->producer_stack.capacity) {
     return iree_ok_status();
   }
   return iree_arena_grow_array(
-      build->scratch_arena, build->producer_frame_count,
-      iree_max(build->producer_frame_count + 1, 16u),
-      sizeof(*build->producer_frames), &build->producer_frame_capacity,
-      (void**)&build->producer_frames);
+      build->scratch_arena, build->producer_stack.count,
+      iree_max(build->producer_stack.count + 1, 16u),
+      sizeof(*build->producer_stack.frames), &build->producer_stack.capacity,
+      (void**)&build->producer_stack.frames);
 }
 
 static iree_status_t loom_cmd_launch_graph_push_producer(
     loom_cmd_launch_graph_build_t* build, loom_value_id_t source_value) {
-  IREE_ASSERT_LT(source_value, build->source_module->values.count);
+  IREE_ASSERT_LT(source_value, build->source.module->values.count);
   const loom_value_t* value =
-      loom_module_value(build->source_module, source_value);
+      loom_module_value(build->source.module, source_value);
   if (loom_value_is_block_arg(value)) {
     return iree_make_status(
         IREE_STATUS_UNIMPLEMENTED,
@@ -128,12 +431,12 @@ static iree_status_t loom_cmd_launch_graph_push_producer(
   const loom_op_t* producer = loom_value_def_op(value);
   IREE_ASSERT(producer != NULL);
   const loom_trait_flags_t traits =
-      loom_op_effective_traits(build->source_module, producer);
+      loom_op_effective_traits(build->source.module, producer);
   if (!loom_cmd_launch_graph_op_is_nested_in_program(build, producer) ||
       producer->region_count != 0 ||
       !iree_any_bit_set(traits, LOOM_TRAIT_PURE)) {
     const iree_string_view_t op_name =
-        loom_op_name(build->source_module, producer);
+        loom_op_name(build->source.module, producer);
     return iree_make_status(
         IREE_STATUS_UNIMPLEMENTED,
         "launch workload value %%%u is produced by `%.*s`, which cannot be "
@@ -142,7 +445,7 @@ static iree_status_t loom_cmd_launch_graph_push_producer(
   }
 
   IREE_RETURN_IF_ERROR(loom_cmd_launch_graph_reserve_producer_frame(build));
-  build->producer_frames[build->producer_frame_count++] =
+  build->producer_stack.frames[build->producer_stack.count++] =
       (loom_cmd_launch_graph_producer_frame_t){
           .op = producer,
           .next_operand = 0,
@@ -159,23 +462,23 @@ static iree_status_t loom_cmd_launch_graph_resolve_program_value(
     loom_cmd_launch_graph_build_t* build, loom_value_id_t source_value,
     loom_value_id_t* out_target_value) {
   *out_target_value = LOOM_VALUE_ID_INVALID;
-  if (loom_ir_remap_try_lookup_value(&build->program_remap, source_value,
+  if (loom_ir_remap_try_lookup_value(&build->target.program_remap, source_value,
                                      out_target_value)) {
     return iree_ok_status();
   }
 
   IREE_RETURN_IF_ERROR(
       loom_cmd_launch_graph_push_producer(build, source_value));
-  while (build->producer_frame_count != 0) {
+  while (build->producer_stack.count != 0) {
     loom_cmd_launch_graph_producer_frame_t* frame =
-        &build->producer_frames[build->producer_frame_count - 1];
+        &build->producer_stack.frames[build->producer_stack.count - 1];
 
     bool pushed_dependency = false;
     const loom_value_id_t* operands = loom_op_const_operands(frame->op);
     while (frame->next_operand < frame->op->operand_count) {
       const loom_value_id_t operand = operands[frame->next_operand++];
       loom_value_id_t mapped_operand = LOOM_VALUE_ID_INVALID;
-      if (loom_ir_remap_try_lookup_value(&build->program_remap, operand,
+      if (loom_ir_remap_try_lookup_value(&build->target.program_remap, operand,
                                          &mapped_operand)) {
         continue;
       }
@@ -190,16 +493,17 @@ static iree_status_t loom_cmd_launch_graph_resolve_program_value(
                                      : loom_op_const_results(frame->op)[0];
     loom_value_id_t mapped_first_result = LOOM_VALUE_ID_INVALID;
     if (first_result == LOOM_VALUE_ID_INVALID ||
-        !loom_ir_remap_try_lookup_value(&build->program_remap, first_result,
-                                        &mapped_first_result)) {
+        !loom_ir_remap_try_lookup_value(&build->target.program_remap,
+                                        first_result, &mapped_first_result)) {
       loom_op_t* cloned_op = NULL;
-      IREE_RETURN_IF_ERROR(loom_ir_clone_op(&build->builder, frame->op,
-                                            &build->program_remap, &cloned_op));
+      IREE_RETURN_IF_ERROR(loom_ir_clone_op(&build->target.builder, frame->op,
+                                            &build->target.program_remap,
+                                            &cloned_op));
     }
-    --build->producer_frame_count;
+    --build->producer_stack.count;
   }
 
-  return loom_ir_remap_resolve_value(&build->program_remap, source_value,
+  return loom_ir_remap_resolve_value(&build->target.program_remap, source_value,
                                      out_target_value);
 }
 
@@ -207,19 +511,20 @@ static iree_status_t loom_cmd_launch_graph_copy_value_name(
     loom_cmd_launch_graph_build_t* build, loom_ir_remap_t* remap,
     loom_value_id_t source_value, loom_value_id_t target_value) {
   const loom_string_id_t source_name =
-      loom_module_value(build->source_module, source_value)->name_id;
+      loom_module_value(build->source.module, source_value)->name_id;
   if (source_name == LOOM_STRING_ID_INVALID) return iree_ok_status();
   loom_string_id_t target_name = LOOM_STRING_ID_INVALID;
   IREE_RETURN_IF_ERROR(loom_ir_remap_string_id(
       remap, source_name, /*allow_invalid=*/false, &target_name));
-  return loom_module_set_value_name(build->module, target_value, target_name);
+  return loom_module_set_value_name(build->target.module, target_value,
+                                    target_name);
 }
 
 static iree_status_t loom_cmd_launch_graph_attach_program_predicates(
     loom_cmd_launch_graph_build_t* build) {
   uint16_t source_predicate_count = 0;
   const loom_predicate_t* source_predicates =
-      loom_func_like_predicates(build->source_program, &source_predicate_count);
+      loom_func_like_predicates(build->source.program, &source_predicate_count);
   if (source_predicate_count == 0) return iree_ok_status();
 
   loom_predicate_t* host_source_predicates = NULL;
@@ -234,8 +539,8 @@ static iree_status_t loom_cmd_launch_graph_attach_program_predicates(
       if (predicate.arg_tags[arg_index] != LOOM_PRED_ARG_VALUE) continue;
       loom_value_id_t target_value = LOOM_VALUE_ID_INVALID;
       if (!loom_ir_remap_try_lookup_value(
-              &build->program_remap, (loom_value_id_t)predicate.args[arg_index],
-              &target_value)) {
+              &build->target.program_remap,
+              (loom_value_id_t)predicate.args[arg_index], &target_value)) {
         all_values_mapped = false;
         break;
       }
@@ -248,13 +553,13 @@ static iree_status_t loom_cmd_launch_graph_attach_program_predicates(
 
   loom_predicate_t* host_predicates = NULL;
   IREE_RETURN_IF_ERROR(loom_ir_remap_predicate_list(
-      &build->program_remap, host_source_predicates, host_predicate_count,
-      &host_predicates));
+      &build->target.program_remap, host_source_predicates,
+      host_predicate_count, &host_predicates));
   loom_rewriter_t rewriter = {0};
-  IREE_RETURN_IF_ERROR(
-      loom_rewriter_initialize(&rewriter, build->module, build->scratch_arena));
+  IREE_RETURN_IF_ERROR(loom_rewriter_initialize(&rewriter, build->target.module,
+                                                build->scratch_arena));
   iree_status_t status = loom_rewriter_set_attr(
-      &rewriter, build->host_function.op, loom_func_def_predicates_ATTR_INDEX,
+      &rewriter, build->target.function.op, loom_func_def_predicates_ATTR_INDEX,
       loom_attr_predicate_list(host_predicates, host_predicate_count));
   loom_rewriter_deinitialize(&rewriter);
   return status;
@@ -264,15 +569,15 @@ static iree_status_t loom_cmd_launch_graph_build_host_function(
     loom_cmd_launch_graph_build_t* build) {
   uint16_t source_argument_count = 0;
   const loom_value_id_t* source_arguments =
-      loom_func_like_arg_ids(build->source_program, &source_argument_count);
+      loom_func_like_arg_ids(build->source.program, &source_argument_count);
   const int64_t specialization_count_i64 =
-      loom_func_like_specialization_count(build->source_program);
+      loom_func_like_specialization_count(build->source.program);
   IREE_ASSERT_GE(specialization_count_i64, 0);
   IREE_ASSERT_LE(specialization_count_i64, source_argument_count);
   const uint16_t specialization_count = (uint16_t)specialization_count_i64;
 
   const iree_host_size_t result_count =
-      build->schedule->command_count *
+      build->identity_plan.identity_count *
       LOOM_CMD_PROGRAM_LAUNCH_COUNT_DIMENSION_COUNT;
   if (result_count > UINT16_MAX) {
     return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
@@ -303,32 +608,33 @@ static iree_status_t loom_cmd_launch_graph_build_host_function(
   }
 
   const loom_symbol_ref_t source_callee =
-      loom_func_like_callee(build->source_program);
+      loom_func_like_callee(build->source.program);
   const iree_string_view_t source_name =
-      loom_cmd_launch_graph_symbol_name(build->source_module, source_callee);
+      loom_cmd_launch_graph_symbol_name(build->source.module, source_callee);
   loom_string_id_t target_name = LOOM_STRING_ID_INVALID;
-  IREE_RETURN_IF_ERROR(
-      loom_module_intern_string(build->module, source_name, &target_name));
+  IREE_RETURN_IF_ERROR(loom_module_intern_string(build->target.module,
+                                                 source_name, &target_name));
   loom_symbol_id_t target_symbol = LOOM_SYMBOL_ID_INVALID;
-  IREE_RETURN_IF_ERROR(
-      loom_module_add_symbol(build->module, target_name, &target_symbol));
+  IREE_RETURN_IF_ERROR(loom_module_add_symbol(build->target.module, target_name,
+                                              &target_symbol));
 
   loom_location_id_t target_location = LOOM_LOCATION_UNKNOWN;
   IREE_RETURN_IF_ERROR(loom_ir_remap_location_id(
-      &build->program_remap, build->source_program.op->location,
+      &build->target.program_remap, build->source.program.op->location,
       &target_location));
   loom_func_def_build_flags_t build_flags = LOOM_FUNC_DEF_BUILD_FLAG_HAS_PURITY;
   uint8_t visibility = 0;
-  if (loom_func_like_visibility(build->source_program) != 0) {
+  if (loom_func_like_visibility(build->source.program) != 0) {
     build_flags |= LOOM_FUNC_DEF_BUILD_FLAG_HAS_VISIBILITY;
     visibility = LOOM_FUNC_VISIBILITY_PUBLIC;
   }
 
-  loom_builder_initialize(build->module, &build->module->arena,
-                          loom_module_block(build->module), &build->builder);
+  loom_builder_initialize(build->target.module, &build->target.module->arena,
+                          loom_module_block(build->target.module),
+                          &build->target.builder);
   loom_op_t* host_function_op = NULL;
   IREE_RETURN_IF_ERROR(loom_func_def_build(
-      &build->builder, build_flags, visibility, /*retain=*/0, /*cc=*/0,
+      &build->target.builder, build_flags, visibility, /*retain=*/0, /*cc=*/0,
       LOOM_FUNC_PURITY_PURE, /*temperature=*/0, /*inline_policy=*/0,
       loom_symbol_ref_null(), /*abi=*/0, loom_named_attr_slice_empty(),
       LOOM_STRING_ID_INVALID, loom_named_attr_slice_empty(),
@@ -337,67 +643,50 @@ static iree_status_t loom_cmd_launch_graph_build_host_function(
       /*tied_results=*/NULL, /*tied_result_count=*/0,
       /*predicates=*/NULL, /*predicates_count=*/0, target_location,
       &host_function_op));
-  build->host_function = loom_func_like_cast(build->module, host_function_op);
-  IREE_ASSERT(loom_func_like_isa(build->host_function));
+  build->target.function =
+      loom_func_like_cast(build->target.module, host_function_op);
+  IREE_ASSERT(loom_func_like_isa(build->target.function));
 
   uint16_t host_argument_count = 0;
   const loom_value_id_t* host_arguments =
-      loom_func_like_arg_ids(build->host_function, &host_argument_count);
+      loom_func_like_arg_ids(build->target.function, &host_argument_count);
   IREE_ASSERT_EQ(host_argument_count, specialization_count);
   IREE_RETURN_IF_ERROR(
-      loom_ir_remap_map_values(&build->program_remap, source_arguments,
+      loom_ir_remap_map_values(&build->target.program_remap, source_arguments,
                                host_arguments, specialization_count));
   for (uint16_t i = 0; i < specialization_count; ++i) {
     loom_type_t host_type = {0};
     IREE_RETURN_IF_ERROR(loom_ir_remap_type(
-        &build->program_remap,
-        loom_module_value_type(build->source_module, source_arguments[i]),
+        &build->target.program_remap,
+        loom_module_value_type(build->source.module, source_arguments[i]),
         &host_type));
     IREE_RETURN_IF_ERROR(loom_module_set_value_type(
-        build->module, host_arguments[i], host_type));
+        build->target.module, host_arguments[i], host_type));
     IREE_RETURN_IF_ERROR(loom_cmd_launch_graph_copy_value_name(
-        build, &build->program_remap, source_arguments[i], host_arguments[i]));
+        build, &build->target.program_remap, source_arguments[i],
+        host_arguments[i]));
   }
   IREE_RETURN_IF_ERROR(loom_cmd_launch_graph_attach_program_predicates(build));
 
-  loom_builder_enter_region(&build->builder, host_function_op,
-                            loom_func_like_body(build->host_function));
+  loom_builder_enter_region(&build->target.builder, host_function_op,
+                            loom_func_like_body(build->target.function));
   return iree_ok_status();
 }
 
-static iree_status_t loom_cmd_launch_graph_clone_config(
-    loom_cmd_launch_graph_build_t* build, iree_host_size_t launch_index) {
-  const loom_op_t* launch_op = build->schedule->commands[launch_index];
-  loom_op_t* kernel_op =
-      loom_cmd_launch_graph_resolve_kernel(build->source_module, launch_op);
+static iree_status_t loom_cmd_launch_graph_clone_config_body(
+    loom_cmd_launch_graph_build_t* build, const loom_op_t* kernel_op,
+    loom_builder_t* builder, loom_ir_remap_t* config_remap,
+    loom_value_id_t* out_result_values) {
   loom_region_t* config_region = loom_kernel_def_config(kernel_op);
   loom_block_t* config_block = loom_region_entry_block(config_region);
   const loom_op_t* launch_config = loom_kernel_def_launch_config_op(kernel_op);
-
-  const loom_value_slice_t source_workloads =
-      loom_kernel_launch_workloads(launch_op);
-  const loom_value_slice_t config_arguments =
-      loom_kernel_workload_arg_ids(build->source_module, kernel_op);
-  IREE_ASSERT_EQ(source_workloads.count, config_arguments.count);
-
-  loom_ir_remap_t config_remap = {0};
-  IREE_RETURN_IF_ERROR(
-      loom_ir_remap_initialize(build->source_module, build->module,
-                               build->scratch_arena, NULL, &config_remap));
-  for (uint16_t i = 0; i < source_workloads.count; ++i) {
-    loom_value_id_t target_workload = LOOM_VALUE_ID_INVALID;
-    IREE_RETURN_IF_ERROR(loom_cmd_launch_graph_resolve_program_value(
-        build, source_workloads.values[i], &target_workload));
-    IREE_RETURN_IF_ERROR(loom_ir_remap_map_value(
-        &config_remap, config_arguments.values[i], target_workload));
-  }
 
   const loom_op_t* config_op = NULL;
   loom_block_for_each_op(config_block, config_op) {
     if (config_op == launch_config) continue;
     if (config_op->region_count != 0) {
       const iree_string_view_t op_name =
-          loom_op_name(build->source_module, config_op);
+          loom_op_name(build->source.module, config_op);
       return iree_make_status(
           IREE_STATUS_UNIMPLEMENTED,
           "aggregate launch extraction does not support nested regions in "
@@ -408,38 +697,38 @@ static iree_status_t loom_cmd_launch_graph_clone_config(
     const loom_value_id_t* source_results = loom_op_const_results(config_op);
     for (uint16_t i = 0; i < config_op->result_count; ++i) {
       const loom_value_facts_t facts =
-          loom_value_fact_table_lookup(build->source_facts, source_results[i]);
+          loom_value_fact_table_lookup(build->source.facts, source_results[i]);
       const loom_type_t type =
-          loom_module_value_type(build->source_module, source_results[i]);
+          loom_module_value_type(build->source.module, source_results[i]);
       materialize_results &=
           loom_value_facts_can_materialize_constant(facts, type);
     }
     if (!materialize_results) {
       loom_op_t* cloned_op = NULL;
-      IREE_RETURN_IF_ERROR(loom_ir_clone_op(&build->builder, config_op,
-                                            &config_remap, &cloned_op));
+      IREE_RETURN_IF_ERROR(
+          loom_ir_clone_op(builder, config_op, config_remap, &cloned_op));
       continue;
     }
 
     loom_location_id_t target_location = LOOM_LOCATION_UNKNOWN;
     IREE_RETURN_IF_ERROR(loom_ir_remap_location_id(
-        &config_remap, config_op->location, &target_location));
+        config_remap, config_op->location, &target_location));
     for (uint16_t i = 0; i < config_op->result_count; ++i) {
       const loom_value_id_t source_result = source_results[i];
       loom_type_t target_type = {0};
       IREE_RETURN_IF_ERROR(loom_ir_remap_type(
-          &config_remap,
-          loom_module_value_type(build->source_module, source_result),
+          config_remap,
+          loom_module_value_type(build->source.module, source_result),
           &target_type));
       loom_value_id_t target_result = LOOM_VALUE_ID_INVALID;
       IREE_RETURN_IF_ERROR(loom_constant_build(
-          &build->builder,
-          loom_value_fact_table_lookup(build->source_facts, source_result),
+          builder,
+          loom_value_fact_table_lookup(build->source.facts, source_result),
           target_type, target_location, &target_result));
       IREE_RETURN_IF_ERROR(
-          loom_ir_remap_map_value(&config_remap, source_result, target_result));
+          loom_ir_remap_map_value(config_remap, source_result, target_result));
       IREE_RETURN_IF_ERROR(loom_cmd_launch_graph_copy_value_name(
-          build, &config_remap, source_result, target_result));
+          build, config_remap, source_result, target_result));
     }
   }
   for (uint8_t dimension = 0;
@@ -448,49 +737,57 @@ static iree_status_t loom_cmd_launch_graph_clone_config(
         loom_kernel_launch_config_workgroup_count_operand(
             launch_config, (loom_kernel_dimension_t)dimension);
     IREE_RETURN_IF_ERROR(loom_ir_remap_resolve_value(
-        &config_remap, source_count,
-        &build->launch_result_values
-             [launch_index * LOOM_CMD_PROGRAM_LAUNCH_COUNT_DIMENSION_COUNT +
-              dimension]));
+        config_remap, source_count, &out_result_values[dimension]));
   }
   return iree_ok_status();
+}
+
+static iree_status_t loom_cmd_launch_graph_clone_config(
+    loom_cmd_launch_graph_build_t* build, iree_host_size_t identity_ordinal) {
+  const loom_cmd_launch_graph_identity_t* identity =
+      &build->identity_plan.identities[identity_ordinal];
+  const loom_value_slice_t config_arguments =
+      loom_kernel_workload_arg_ids(build->source.module, identity->kernel_op);
+  IREE_ASSERT_EQ(identity->source_workloads.count, config_arguments.count);
+
+  loom_ir_remap_t config_remap = {0};
+  IREE_RETURN_IF_ERROR(
+      loom_ir_remap_initialize(build->source.module, build->target.module,
+                               build->scratch_arena, NULL, &config_remap));
+  for (uint16_t i = 0; i < identity->source_workloads.count; ++i) {
+    loom_value_id_t target_workload = LOOM_VALUE_ID_INVALID;
+    IREE_RETURN_IF_ERROR(loom_cmd_launch_graph_resolve_program_value(
+        build, identity->source_workloads.values[i], &target_workload));
+    IREE_RETURN_IF_ERROR(loom_ir_remap_map_value(
+        &config_remap, config_arguments.values[i], target_workload));
+  }
+  return loom_cmd_launch_graph_clone_config_body(
+      build, identity->kernel_op, &build->target.builder, &config_remap,
+      &build->identity_plan
+           .result_values[identity_ordinal *
+                          LOOM_CMD_PROGRAM_LAUNCH_COUNT_DIMENSION_COUNT]);
 }
 
 static iree_status_t loom_cmd_launch_graph_build_body(
     loom_cmd_launch_graph_build_t* build) {
   const iree_host_size_t result_count =
-      build->schedule->command_count *
+      build->identity_plan.identity_count *
       LOOM_CMD_PROGRAM_LAUNCH_COUNT_DIMENSION_COUNT;
-  if (result_count != 0) {
+  if (result_count > LOOM_CMD_LAUNCH_GRAPH_INLINE_RESULT_CAPACITY) {
     IREE_RETURN_IF_ERROR(
         iree_arena_allocate_array(build->scratch_arena, result_count,
-                                  sizeof(*build->launch_result_values),
-                                  (void**)&build->launch_result_values));
-  }
-  if (build->schedule->command_count != 0) {
-    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        &build->module->arena, build->schedule->command_count,
-        sizeof(*build->launches), (void**)&build->launches));
-    memset(build->launches, 0,
-           build->schedule->command_count * sizeof(*build->launches));
-  }
-  if (build->schedule->wave_count != 0) {
-    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        &build->module->arena, build->schedule->wave_count,
-        sizeof(*build->waves), (void**)&build->waves));
-    memcpy(build->waves, build->schedule->waves,
-           build->schedule->wave_count * sizeof(*build->waves));
+                                  sizeof(*build->identity_plan.result_values),
+                                  (void**)&build->identity_plan.result_values));
   }
 
-  for (iree_host_size_t i = 0; i < build->schedule->command_count; ++i) {
-    build->launches[i].source_op = build->schedule->commands[i];
+  for (iree_host_size_t i = 0; i < build->identity_plan.identity_count; ++i) {
     IREE_RETURN_IF_ERROR(loom_cmd_launch_graph_clone_config(build, i));
   }
 
   loom_op_t* return_op = NULL;
-  return loom_func_return_build(&build->builder, build->launch_result_values,
-                                result_count, build->host_function.op->location,
-                                &return_op);
+  return loom_func_return_build(
+      &build->target.builder, build->identity_plan.result_values, result_count,
+      build->target.function.op->location, &return_op);
 }
 
 static iree_status_t loom_cmd_launch_graph_run_cse(
@@ -539,42 +836,51 @@ static bool loom_cmd_launch_graph_tuples_equal(const loom_value_id_t* left,
   return left[0] == right[0] && left[1] == right[1] && left[2] == right[2];
 }
 
+static uint32_t loom_cmd_launch_graph_hash_tuple(const loom_value_id_t* tuple) {
+  return loom_cmd_launch_graph_hash_bytes(
+      2166136261u, tuple,
+      LOOM_CMD_PROGRAM_LAUNCH_COUNT_DIMENSION_COUNT * sizeof(*tuple));
+}
+
 static iree_status_t loom_cmd_launch_graph_compact_results(
     loom_cmd_launch_graph_build_t* build, const loom_value_fact_table_t* facts,
     uint32_t* out_host_tuple_count) {
   *out_host_tuple_count = 0;
   loom_block_t* host_block =
-      loom_region_entry_block(loom_func_like_body(build->host_function));
+      loom_region_entry_block(loom_func_like_body(build->target.function));
   loom_op_t* old_return_op = host_block->last_op;
   IREE_ASSERT(loom_func_return_isa(old_return_op));
   const loom_value_slice_t return_values =
       loom_func_return_operands(old_return_op);
   const iree_host_size_t result_count =
-      build->schedule->command_count *
+      build->identity_plan.identity_count *
       LOOM_CMD_PROGRAM_LAUNCH_COUNT_DIMENSION_COUNT;
   IREE_ASSERT_EQ(return_values.count, result_count);
 
-  bool* remove_results = NULL;
-  loom_value_id_t* unique_tuples = NULL;
-  loom_value_id_t* kept_values = NULL;
+  bool inline_remove_results[LOOM_CMD_LAUNCH_GRAPH_INLINE_RESULT_CAPACITY];
+  bool* remove_results = inline_remove_results;
+  // Body construction no longer needs this scratch array after the return op
+  // copies its operands, so reuse it for the compacted return operands.
+  loom_value_id_t* kept_values = build->identity_plan.result_values;
   if (result_count != 0) {
-    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        build->scratch_arena, result_count, sizeof(*remove_results),
-        (void**)&remove_results));
+    if (result_count > LOOM_CMD_LAUNCH_GRAPH_INLINE_RESULT_CAPACITY) {
+      IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+          build->scratch_arena, result_count, sizeof(*remove_results),
+          (void**)&remove_results));
+    }
     memset(remove_results, 1, result_count * sizeof(*remove_results));
-    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        build->scratch_arena, result_count, sizeof(*unique_tuples),
-        (void**)&unique_tuples));
-    IREE_RETURN_IF_ERROR(
-        iree_arena_allocate_array(build->scratch_arena, result_count,
-                                  sizeof(*kept_values), (void**)&kept_values));
   }
 
+  iree_host_size_t* tuple_identity_ordinals = NULL;
+  iree_host_size_t first_host_identity_ordinal = IREE_HOST_SIZE_MAX;
   uint32_t host_tuple_count = 0;
-  for (iree_host_size_t launch_index = 0;
-       launch_index < build->schedule->command_count; ++launch_index) {
+  for (iree_host_size_t identity_ordinal = 0;
+       identity_ordinal < build->identity_plan.identity_count;
+       ++identity_ordinal) {
+    loom_cmd_launch_graph_identity_t* identity =
+        &build->identity_plan.identities[identity_ordinal];
     const loom_value_id_t* tuple =
-        &return_values.values[launch_index *
+        &return_values.values[identity_ordinal *
                               LOOM_CMD_PROGRAM_LAUNCH_COUNT_DIMENSION_COUNT];
     loom_target_dispatch_workgroup_count_t direct = {0};
     uint32_t* direct_values[] = {&direct.x, &direct.y, &direct.z};
@@ -585,70 +891,140 @@ static iree_status_t loom_cmd_launch_graph_compact_results(
       bool is_exact = false;
       if (!loom_cmd_launch_graph_exact_u32(
               facts, tuple[dimension], direct_values[dimension], &is_exact)) {
-        return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                                "launch %" PRIhsz
-                                " workgroup-count dimension %u is outside u32",
-                                launch_index, (unsigned)dimension);
+        return iree_make_status(
+            IREE_STATUS_OUT_OF_RANGE,
+            "launch %" PRIhsz " workgroup-count dimension %u is outside u32",
+            identity->first_launch_index, (unsigned)dimension);
       }
       all_exact &= is_exact;
     }
     if (all_exact) {
-      build->launches[launch_index].kind = LOOM_CMD_LAUNCH_COUNT_KIND_DIRECT;
-      build->launches[launch_index].payload.direct = direct;
+      identity->placement.kind = LOOM_CMD_LAUNCH_COUNT_KIND_DIRECT;
+      identity->placement.payload.direct = direct;
       continue;
     }
 
-    uint32_t tuple_ordinal = 0;
-    for (; tuple_ordinal < host_tuple_count; ++tuple_ordinal) {
-      if (loom_cmd_launch_graph_tuples_equal(
-              tuple,
-              &unique_tuples[(iree_host_size_t)tuple_ordinal *
-                             LOOM_CMD_PROGRAM_LAUNCH_COUNT_DIMENSION_COUNT])) {
-        break;
+    uint32_t tuple_ordinal = UINT32_MAX;
+    bool is_new_tuple = false;
+    if (build->identity_plan.identity_count <=
+        LOOM_CMD_LAUNCH_GRAPH_INLINE_IDENTITY_CAPACITY) {
+      // A short scan is cheaper than hashing for the bounded inline case.
+      for (iree_host_size_t candidate_ordinal = 0;
+           candidate_ordinal < identity_ordinal; ++candidate_ordinal) {
+        const loom_cmd_launch_graph_identity_t* candidate_identity =
+            &build->identity_plan.identities[candidate_ordinal];
+        if (candidate_identity->placement.kind !=
+            LOOM_CMD_LAUNCH_COUNT_KIND_HOST) {
+          continue;
+        }
+        const loom_value_id_t* candidate_tuple =
+            &return_values
+                 .values[candidate_ordinal *
+                         LOOM_CMD_PROGRAM_LAUNCH_COUNT_DIMENSION_COUNT];
+        if (loom_cmd_launch_graph_tuples_equal(tuple, candidate_tuple)) {
+          tuple_ordinal =
+              candidate_identity->placement.payload.host_tuple_ordinal;
+          break;
+        }
+      }
+      is_new_tuple = tuple_ordinal == UINT32_MAX;
+    } else if (host_tuple_count == 0) {
+      // Defer table initialization until a second dynamic tuple can benefit.
+      is_new_tuple = true;
+    } else {
+      if (!tuple_identity_ordinals) {
+        tuple_identity_ordinals = build->identity_plan.slot_ordinals;
+        memset(tuple_identity_ordinals, 0xFF,
+               build->identity_plan.slot_capacity *
+                   sizeof(*tuple_identity_ordinals));
+        const loom_value_id_t* first_tuple =
+            &return_values
+                 .values[first_host_identity_ordinal *
+                         LOOM_CMD_PROGRAM_LAUNCH_COUNT_DIMENSION_COUNT];
+        const iree_host_size_t slot_mask =
+            build->identity_plan.slot_capacity - 1;
+        iree_host_size_t first_slot =
+            loom_cmd_launch_graph_hash_tuple(first_tuple) & slot_mask;
+        tuple_identity_ordinals[first_slot] = first_host_identity_ordinal;
+      }
+
+      const iree_host_size_t slot_mask = build->identity_plan.slot_capacity - 1;
+      iree_host_size_t slot =
+          loom_cmd_launch_graph_hash_tuple(tuple) & slot_mask;
+      while (tuple_identity_ordinals[slot] != IREE_HOST_SIZE_MAX) {
+        const iree_host_size_t candidate_identity_ordinal =
+            tuple_identity_ordinals[slot];
+        const loom_value_id_t* candidate_tuple =
+            &return_values
+                 .values[candidate_identity_ordinal *
+                         LOOM_CMD_PROGRAM_LAUNCH_COUNT_DIMENSION_COUNT];
+        if (loom_cmd_launch_graph_tuples_equal(tuple, candidate_tuple)) {
+          tuple_ordinal =
+              build->identity_plan.identities[candidate_identity_ordinal]
+                  .placement.payload.host_tuple_ordinal;
+          break;
+        }
+        slot = (slot + 1) & slot_mask;
+      }
+      if (tuple_ordinal == UINT32_MAX) {
+        tuple_identity_ordinals[slot] = identity_ordinal;
+        is_new_tuple = true;
       }
     }
-    if (tuple_ordinal == host_tuple_count) {
-      if (host_tuple_count == UINT32_MAX) {
-        return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                                "host launch tuple count exceeds u32");
+    if (is_new_tuple) {
+      tuple_ordinal = host_tuple_count++;
+      if (first_host_identity_ordinal == IREE_HOST_SIZE_MAX) {
+        first_host_identity_ordinal = identity_ordinal;
       }
-      memcpy(&unique_tuples[(iree_host_size_t)host_tuple_count *
-                            LOOM_CMD_PROGRAM_LAUNCH_COUNT_DIMENSION_COUNT],
-             tuple,
-             LOOM_CMD_PROGRAM_LAUNCH_COUNT_DIMENSION_COUNT * sizeof(*tuple));
       for (uint8_t dimension = 0;
            dimension < LOOM_CMD_PROGRAM_LAUNCH_COUNT_DIMENSION_COUNT;
            ++dimension) {
-        remove_results[launch_index *
+        remove_results[identity_ordinal *
                            LOOM_CMD_PROGRAM_LAUNCH_COUNT_DIMENSION_COUNT +
                        dimension] = false;
+        kept_values[(iree_host_size_t)tuple_ordinal *
+                        LOOM_CMD_PROGRAM_LAUNCH_COUNT_DIMENSION_COUNT +
+                    dimension] = tuple[dimension];
       }
-      ++host_tuple_count;
     }
-    build->launches[launch_index].kind = LOOM_CMD_LAUNCH_COUNT_KIND_HOST;
-    build->launches[launch_index].payload.host_tuple_ordinal = tuple_ordinal;
+    identity->placement.kind = LOOM_CMD_LAUNCH_COUNT_KIND_HOST;
+    identity->placement.payload.host_tuple_ordinal = tuple_ordinal;
   }
 
-  iree_host_size_t kept_count = 0;
-  for (iree_host_size_t i = 0; i < result_count; ++i) {
-    if (!remove_results[i]) kept_values[kept_count++] = return_values.values[i];
+  for (iree_host_size_t launch_index = 0;
+       launch_index < build->source.schedule->command_count; ++launch_index) {
+    loom_cmd_launch_count_t* launch = &build->product.launches[launch_index];
+    const loom_cmd_launch_graph_placement_t* placement =
+        &build->identity_plan
+             .identities[build->identity_plan
+                             .launch_identity_ordinals[launch_index]]
+             .placement;
+    launch->kind = placement->kind;
+    if (placement->kind == LOOM_CMD_LAUNCH_COUNT_KIND_DIRECT) {
+      launch->payload.direct = placement->payload.direct;
+    } else {
+      IREE_ASSERT_EQ(placement->kind, LOOM_CMD_LAUNCH_COUNT_KIND_HOST);
+      launch->payload.host_tuple_ordinal =
+          placement->payload.host_tuple_ordinal;
+    }
   }
-  IREE_ASSERT_EQ(kept_count, (iree_host_size_t)host_tuple_count *
-                                 LOOM_CMD_PROGRAM_LAUNCH_COUNT_DIMENSION_COUNT);
+  const iree_host_size_t kept_count =
+      (iree_host_size_t)host_tuple_count *
+      LOOM_CMD_PROGRAM_LAUNCH_COUNT_DIMENSION_COUNT;
 
   loom_builder_t builder;
-  loom_builder_initialize(build->module, &build->module->arena, host_block,
-                          &builder);
+  loom_builder_initialize(build->target.module, &build->target.module->arena,
+                          host_block, &builder);
   loom_builder_set_before(&builder, old_return_op);
   loom_op_t* new_return_op = NULL;
   IREE_RETURN_IF_ERROR(loom_func_return_build(&builder, kept_values, kept_count,
                                               old_return_op->location,
                                               &new_return_op));
-  IREE_RETURN_IF_ERROR(loom_op_erase(build->module, old_return_op));
+  IREE_RETURN_IF_ERROR(loom_op_erase(build->target.module, old_return_op));
 
   uint16_t removed_count = 0;
   IREE_RETURN_IF_ERROR(loom_op_remove_results(
-      build->module, build->host_function.op, remove_results,
+      build->target.module, build->target.function.op, remove_results,
       build->scratch_arena, &removed_count));
   IREE_ASSERT_EQ(removed_count, result_count - kept_count);
   *out_host_tuple_count = host_tuple_count;
@@ -679,22 +1055,32 @@ iree_status_t loom_cmd_launch_graph_materialize(
   bool fact_owner_initialized = false;
   loom_canonicalizer_t canonicalizer;
   bool canonicalizer_initialized = false;
+  loom_cmd_launch_graph_inline_storage_t inline_storage;
 
   loom_cmd_launch_graph_build_t build = {
-      .source_module = source_module,
-      .source_program = loom_func_like_cast(source_module, source_program_op),
-      .schedule = schedule,
-      .source_facts = source_facts,
-      .module = graph_module,
+      .source =
+          {
+              .module = source_module,
+              .program = loom_func_like_cast(source_module, source_program_op),
+              .schedule = schedule,
+              .facts = source_facts,
+          },
+      .target =
+          {
+              .module = graph_module,
+          },
   };
-  IREE_ASSERT(loom_func_like_isa(build.source_program));
+  IREE_ASSERT(loom_func_like_isa(build.source.program));
   if (iree_status_is_ok(status)) {
     iree_arena_initialize(block_pool, &scratch_arena);
     scratch_arena_initialized = true;
     build.scratch_arena = &scratch_arena;
     status =
         loom_ir_remap_initialize(source_module, graph_module, &scratch_arena,
-                                 NULL, &build.program_remap);
+                                 NULL, &build.target.program_remap);
+  }
+  if (iree_status_is_ok(status)) {
+    status = loom_cmd_launch_graph_build_identity_plan(&build, &inline_storage);
   }
   if (iree_status_is_ok(status)) {
     status = loom_cmd_launch_graph_build_host_function(&build);
@@ -712,18 +1098,18 @@ iree_status_t loom_cmd_launch_graph_materialize(
   if (iree_status_is_ok(status)) {
     loom_canonicalizer_result_t result = {0};
     status = loom_canonicalizer_run_function(
-        &canonicalizer, build.host_function, &(loom_canonicalizer_options_t){0},
-        &result);
+        &canonicalizer, build.target.function,
+        &(loom_canonicalizer_options_t){0}, &result);
   }
   if (iree_status_is_ok(status)) {
-    status = loom_cmd_launch_graph_run_cse(graph_module, build.host_function,
+    status = loom_cmd_launch_graph_run_cse(graph_module, build.target.function,
                                            block_pool);
   }
   if (iree_status_is_ok(status)) {
     loom_canonicalizer_result_t result = {0};
     status = loom_canonicalizer_run_function(
-        &canonicalizer, build.host_function, &(loom_canonicalizer_options_t){0},
-        &result);
+        &canonicalizer, build.target.function,
+        &(loom_canonicalizer_options_t){0}, &result);
   }
 
   uint32_t host_tuple_count = 0;
@@ -737,8 +1123,8 @@ iree_status_t loom_cmd_launch_graph_materialize(
   if (iree_status_is_ok(status)) {
     loom_canonicalizer_result_t result = {0};
     status = loom_canonicalizer_run_function(
-        &canonicalizer, build.host_function, &(loom_canonicalizer_options_t){0},
-        &result);
+        &canonicalizer, build.target.function,
+        &(loom_canonicalizer_options_t){0}, &result);
   }
 
   if (canonicalizer_initialized) {
@@ -758,10 +1144,10 @@ iree_status_t loom_cmd_launch_graph_materialize(
 
   *out_graph = (loom_cmd_launch_graph_t){
       .module = graph_module,
-      .host_function_op = build.host_function.op,
-      .launches = build.launches,
+      .host_function_op = build.target.function.op,
+      .launches = build.product.launches,
       .launch_count = schedule->command_count,
-      .waves = build.waves,
+      .waves = build.product.waves,
       .wave_count = schedule->wave_count,
       .host_tuple_count = host_tuple_count,
   };
