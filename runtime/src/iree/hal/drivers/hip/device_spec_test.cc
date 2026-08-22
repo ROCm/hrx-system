@@ -83,10 +83,52 @@ TEST(DeviceSpecTest, CreatesSpecFromParams) {
       iree_hal_device_spec_memory(device_spec);
   ASSERT_NE(memory, nullptr);
   ASSERT_EQ(memory->memory_type_count, 1);
-  ASSERT_EQ(memory->external_buffer_handle_count, 1);
+  EXPECT_TRUE(iree_all_bits_set(
+      memory->memory_types[0].memory_type,
+      IREE_HAL_MEMORY_TYPE_HOST_LOCAL | IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL));
+
+  iree_hal_external_buffer_handle_selection_t host_buffer_selection = {
+      /*.handle_type_mask=*/IREE_HAL_TOPOLOGY_HANDLE_TYPE_NATIVE,
+      /*.direction_flags=*/IREE_HAL_EXTERNAL_HANDLE_DIRECTION_FLAG_IMPORT,
+      /*.buffer_usage=*/IREE_HAL_BUFFER_USAGE_MAPPING,
+      /*.memory_access=*/IREE_HAL_MEMORY_ACCESS_READ,
+      /*.compatible_memory_type_mask=*/1u << 0,
+      /*.capability_flags=*/IREE_HAL_EXTERNAL_HANDLE_CAPABILITY_FLAG_BORROWED,
+  };
+  const iree_hal_external_buffer_handle_spec_t* host_buffer_handle =
+      iree_hal_device_spec_find_external_buffer_handle(device_spec,
+                                                       &host_buffer_selection);
+  ASSERT_NE(host_buffer_handle, nullptr);
   EXPECT_TRUE(
-      iree_all_bits_set(memory->external_buffer_handles[0].direction_flags,
+      iree_all_bits_set(host_buffer_handle->direction_flags,
                         IREE_HAL_EXTERNAL_HANDLE_DIRECTION_FLAG_IMPORT));
+  EXPECT_TRUE(iree_all_bits_set(host_buffer_handle->allowed_buffer_usage,
+                                IREE_HAL_BUFFER_USAGE_MAPPING));
+  EXPECT_TRUE(iree_all_bits_set(host_buffer_handle->allowed_memory_access,
+                                IREE_HAL_MEMORY_ACCESS_ALL));
+
+  iree_hal_external_buffer_handle_selection_t device_buffer_selection = {
+      /*.handle_type_mask=*/IREE_HAL_TOPOLOGY_HANDLE_TYPE_NATIVE,
+      /*.direction_flags=*/IREE_HAL_EXTERNAL_HANDLE_DIRECTION_FLAG_EXPORT,
+      /*.buffer_usage=*/IREE_HAL_BUFFER_USAGE_DISPATCH,
+      /*.memory_access=*/IREE_HAL_MEMORY_ACCESS_NONE,
+      /*.compatible_memory_type_mask=*/1u << 0,
+      /*.capability_flags=*/IREE_HAL_EXTERNAL_HANDLE_CAPABILITY_FLAG_BORROWED,
+  };
+  const iree_hal_external_buffer_handle_spec_t* device_buffer_handle =
+      iree_hal_device_spec_find_external_buffer_handle(
+          device_spec, &device_buffer_selection);
+  ASSERT_NE(device_buffer_handle, nullptr);
+  EXPECT_NE(device_buffer_handle, host_buffer_handle);
+  EXPECT_TRUE(
+      iree_all_bits_set(device_buffer_handle->direction_flags,
+                        IREE_HAL_EXTERNAL_HANDLE_DIRECTION_FLAG_IMPORT |
+                            IREE_HAL_EXTERNAL_HANDLE_DIRECTION_FLAG_EXPORT));
+  EXPECT_TRUE(iree_all_bits_set(
+      device_buffer_handle->allowed_buffer_usage,
+      IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_DISPATCH));
+  EXPECT_EQ(device_buffer_handle->allowed_memory_access,
+            IREE_HAL_MEMORY_ACCESS_NONE);
 
   const iree_hal_device_queue_spec_t* queues =
       iree_hal_device_spec_queues(device_spec);
