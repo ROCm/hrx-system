@@ -6,9 +6,7 @@
 
 #include "iree/io/vec_stream.h"
 
-#include <array>
-#include <string>
-#include <string_view>
+#include <memory>
 
 #include "iree/base/api.h"
 #include "iree/testing/gtest.h"
@@ -18,37 +16,42 @@ namespace {
 
 using iree::Status;
 using iree::StatusCode;
+using iree::StatusOr;
 using iree::testing::status::StatusIs;
 using testing::ElementsAre;
-using testing::ElementsAreArray;
-using testing::Eq;
 
 using StreamPtr =
     std::unique_ptr<iree_io_stream_t, void (*)(iree_io_stream_t*)>;
 
-static StreamPtr CreateStream(iree_io_stream_mode_t mode,
-                              size_t block_size = 1 * 1024) {
+static StatusOr<StreamPtr> CreateStream(iree_io_stream_mode_t mode,
+                                        size_t block_size = 1 * 1024) {
   iree_io_stream_t* stream = NULL;
-  IREE_CHECK_OK(iree_io_vec_stream_create(mode, block_size,
-                                          iree_allocator_system(), &stream));
+  iree_status_t status = iree_io_vec_stream_create(
+      mode, block_size, iree_allocator_system(), &stream);
+  if (!iree_status_is_ok(status)) return status;
   return StreamPtr(stream, iree_io_stream_release);
 }
 
 template <typename T, size_t N>
-static StreamPtr CreateStreamWithContents(iree_io_stream_mode_t mode,
-                                          T (&elements)[N],
-                                          size_t block_size = 1 * 1024) {
+static StatusOr<StreamPtr> CreateStreamWithContents(iree_io_stream_mode_t mode,
+                                                    T (&elements)[N],
+                                                    size_t block_size = 1024) {
   iree_io_stream_t* stream = NULL;
-  IREE_CHECK_OK(iree_io_vec_stream_create(mode | IREE_IO_STREAM_MODE_WRITABLE,
-                                          block_size, iree_allocator_system(),
-                                          &stream));
-  IREE_CHECK_OK(iree_io_stream_write(stream, sizeof(T) * N, elements));
-  IREE_CHECK_OK(iree_io_stream_seek(stream, IREE_IO_STREAM_SEEK_SET, 0));
-  return StreamPtr(stream, iree_io_stream_release);
+  iree_status_t status =
+      iree_io_vec_stream_create(mode | IREE_IO_STREAM_MODE_WRITABLE, block_size,
+                                iree_allocator_system(), &stream);
+  if (!iree_status_is_ok(status)) return status;
+  StreamPtr stream_owner(stream, iree_io_stream_release);
+  status = iree_io_stream_write(stream, sizeof(T) * N, elements);
+  if (!iree_status_is_ok(status)) return status;
+  status = iree_io_stream_seek(stream, IREE_IO_STREAM_SEEK_SET, 0);
+  if (!iree_status_is_ok(status)) return status;
+  return stream_owner;
 }
 
 TEST(VecStreamTest, Empty) {
-  auto stream = CreateStream(IREE_IO_STREAM_MODE_READABLE);
+  IREE_ASSERT_OK_AND_ASSIGN(auto stream,
+                            CreateStream(IREE_IO_STREAM_MODE_READABLE));
   EXPECT_EQ(iree_io_stream_mode(stream.get()), IREE_IO_STREAM_MODE_READABLE);
   EXPECT_EQ(iree_io_stream_offset(stream.get()), 0);
   EXPECT_EQ(iree_io_stream_length(stream.get()), 0);
@@ -57,7 +60,9 @@ TEST(VecStreamTest, Empty) {
 
 TEST(VecStreamTest, SeekSet) {
   uint8_t data[5] = {0, 1, 2, 3, 4};
-  auto stream = CreateStreamWithContents(IREE_IO_STREAM_MODE_READABLE, data);
+  IREE_ASSERT_OK_AND_ASSIGN(
+      auto stream,
+      CreateStreamWithContents(IREE_IO_STREAM_MODE_READABLE, data));
 
   // Streams start at origin 0.
   EXPECT_EQ(iree_io_stream_offset(stream.get()), 0);
@@ -101,7 +106,9 @@ TEST(VecStreamTest, SeekSet) {
 
 TEST(VecStreamTest, SeekFromCurrent) {
   uint8_t data[5] = {0, 1, 2, 3, 4};
-  auto stream = CreateStreamWithContents(IREE_IO_STREAM_MODE_READABLE, data);
+  IREE_ASSERT_OK_AND_ASSIGN(
+      auto stream,
+      CreateStreamWithContents(IREE_IO_STREAM_MODE_READABLE, data));
 
   // Streams start at origin 0.
   EXPECT_EQ(iree_io_stream_offset(stream.get()), 0);
@@ -167,7 +174,9 @@ TEST(VecStreamTest, SeekFromCurrent) {
 
 TEST(VecStreamTest, SeekFromEnd) {
   uint8_t data[5] = {0, 1, 2, 3, 4};
-  auto stream = CreateStreamWithContents(IREE_IO_STREAM_MODE_READABLE, data);
+  IREE_ASSERT_OK_AND_ASSIGN(
+      auto stream,
+      CreateStreamWithContents(IREE_IO_STREAM_MODE_READABLE, data));
 
   // Streams start at origin 0.
   EXPECT_EQ(iree_io_stream_offset(stream.get()), 0);
@@ -212,7 +221,9 @@ TEST(VecStreamTest, SeekFromEnd) {
 
 TEST(VecStreamTest, SeekToAlignment) {
   uint8_t data[5] = {0, 1, 2, 3, 4};
-  auto stream = CreateStreamWithContents(IREE_IO_STREAM_MODE_READABLE, data);
+  IREE_ASSERT_OK_AND_ASSIGN(
+      auto stream,
+      CreateStreamWithContents(IREE_IO_STREAM_MODE_READABLE, data));
 
   // Streams start at origin 0.
   EXPECT_EQ(iree_io_stream_offset(stream.get()), 0);
@@ -261,7 +272,9 @@ TEST(VecStreamTest, SeekToAlignment) {
 
 TEST(VecStreamTest, ReadUpTo) {
   uint8_t data[5] = {0, 1, 2, 3, 4};
-  auto stream = CreateStreamWithContents(IREE_IO_STREAM_MODE_READABLE, data);
+  IREE_ASSERT_OK_AND_ASSIGN(
+      auto stream,
+      CreateStreamWithContents(IREE_IO_STREAM_MODE_READABLE, data));
 
   // Streams start at origin 0.
   EXPECT_EQ(iree_io_stream_offset(stream.get()), 0);
@@ -321,7 +334,9 @@ TEST(VecStreamTest, ReadUpTo) {
 
 TEST(VecStreamTest, ReadExact) {
   uint8_t data[5] = {0, 1, 2, 3, 4};
-  auto stream = CreateStreamWithContents(IREE_IO_STREAM_MODE_READABLE, data);
+  IREE_ASSERT_OK_AND_ASSIGN(
+      auto stream,
+      CreateStreamWithContents(IREE_IO_STREAM_MODE_READABLE, data));
 
   // Streams start at origin 0.
   EXPECT_EQ(iree_io_stream_offset(stream.get()), 0);
@@ -374,8 +389,9 @@ TEST(VecStreamTest, ReadExact) {
 }
 
 TEST(VecStreamTest, Write) {
-  auto stream =
-      CreateStream(IREE_IO_STREAM_MODE_READABLE | IREE_IO_STREAM_MODE_WRITABLE);
+  IREE_ASSERT_OK_AND_ASSIGN(auto stream,
+                            CreateStream(IREE_IO_STREAM_MODE_READABLE |
+                                         IREE_IO_STREAM_MODE_WRITABLE));
 
   uint8_t data[5] = {0xDD};
   const uint8_t write_buffer[8] = {0, 1, 2, 3, 4, 5, 6, 7};
@@ -432,8 +448,9 @@ TEST(VecStreamTest, Write) {
 }
 
 TEST(VecStreamTest, FillSizes) {
-  auto stream =
-      CreateStream(IREE_IO_STREAM_MODE_READABLE | IREE_IO_STREAM_MODE_WRITABLE);
+  IREE_ASSERT_OK_AND_ASSIGN(auto stream,
+                            CreateStream(IREE_IO_STREAM_MODE_READABLE |
+                                         IREE_IO_STREAM_MODE_WRITABLE));
 
   uint8_t pattern[] = {0x80, 0x90, 0xA0, 0xB0, 0xC0, 0xD0, 0xE0, 0xF0};
 
@@ -446,8 +463,9 @@ TEST(VecStreamTest, FillSizes) {
 }
 
 TEST(VecStreamTest, Fill1) {
-  auto stream =
-      CreateStream(IREE_IO_STREAM_MODE_READABLE | IREE_IO_STREAM_MODE_WRITABLE);
+  IREE_ASSERT_OK_AND_ASSIGN(auto stream,
+                            CreateStream(IREE_IO_STREAM_MODE_READABLE |
+                                         IREE_IO_STREAM_MODE_WRITABLE));
 
   uint8_t pattern[] = {0x80, 0x90, 0xA0, 0xB0, 0xC0, 0xD0, 0xE0, 0xF0};
 
@@ -474,8 +492,9 @@ TEST(VecStreamTest, Fill1) {
 }
 
 TEST(VecStreamTest, Fill2) {
-  auto stream =
-      CreateStream(IREE_IO_STREAM_MODE_READABLE | IREE_IO_STREAM_MODE_WRITABLE);
+  IREE_ASSERT_OK_AND_ASSIGN(auto stream,
+                            CreateStream(IREE_IO_STREAM_MODE_READABLE |
+                                         IREE_IO_STREAM_MODE_WRITABLE));
 
   uint8_t pattern[] = {0x80, 0x90, 0xA0, 0xB0, 0xC0, 0xD0, 0xE0, 0xF0};
 
@@ -502,8 +521,9 @@ TEST(VecStreamTest, Fill2) {
 }
 
 TEST(VecStreamTest, Fill4) {
-  auto stream =
-      CreateStream(IREE_IO_STREAM_MODE_READABLE | IREE_IO_STREAM_MODE_WRITABLE);
+  IREE_ASSERT_OK_AND_ASSIGN(auto stream,
+                            CreateStream(IREE_IO_STREAM_MODE_READABLE |
+                                         IREE_IO_STREAM_MODE_WRITABLE));
 
   uint8_t pattern[] = {0x80, 0x90, 0xA0, 0xB0, 0xC0, 0xD0, 0xE0, 0xF0};
 
@@ -529,8 +549,9 @@ TEST(VecStreamTest, Fill4) {
 }
 
 TEST(VecStreamTest, Fill8Unaligned) {
-  auto stream =
-      CreateStream(IREE_IO_STREAM_MODE_READABLE | IREE_IO_STREAM_MODE_WRITABLE);
+  IREE_ASSERT_OK_AND_ASSIGN(auto stream,
+                            CreateStream(IREE_IO_STREAM_MODE_READABLE |
+                                         IREE_IO_STREAM_MODE_WRITABLE));
 
   uint8_t pattern[] = {0x80, 0x90, 0xA0, 0xB0, 0xC0, 0xD0, 0xE0, 0xF0};
 
@@ -552,8 +573,9 @@ TEST(VecStreamTest, Fill8Unaligned) {
 }
 
 TEST(VecStreamTest, Fill8End) {
-  auto stream =
-      CreateStream(IREE_IO_STREAM_MODE_READABLE | IREE_IO_STREAM_MODE_WRITABLE);
+  IREE_ASSERT_OK_AND_ASSIGN(auto stream,
+                            CreateStream(IREE_IO_STREAM_MODE_READABLE |
+                                         IREE_IO_STREAM_MODE_WRITABLE));
 
   uint8_t pattern[] = {0x80, 0x90, 0xA0, 0xB0, 0xC0, 0xD0, 0xE0, 0xF0};
 
