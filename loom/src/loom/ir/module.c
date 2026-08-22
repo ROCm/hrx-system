@@ -1869,6 +1869,8 @@ static iree_status_t loom_type_use_prepare_callback(loom_value_id_t value_id,
 static iree_status_t loom_type_use_prepare_for_type(
     loom_module_t* module, loom_type_t type,
     iree_host_size_t* out_reference_count) {
+  *out_reference_count = 0;
+  if (!loom_type_may_reference_values(type)) return iree_ok_status();
   loom_type_use_prepare_t prepare = {
       .module = module,
       .reference_count = 0,
