@@ -83,6 +83,21 @@ TEST(AmdgpuDriverOptionsTest, HostTsanRejectsAsanBeforeLoadingHsa) {
 }
 #endif  // IREE_SANITIZER_THREAD
 
+#if defined(IREE_PLATFORM_WINDOWS) && !defined(IREE_SANITIZER_THREAD)
+TEST(AmdgpuDriverOptionsTest, WindowsRejectsPremappedAsanBeforeLoadingHsa) {
+  iree_hal_amdgpu_logical_device_options_t options;
+  iree_hal_amdgpu_logical_device_options_initialize(&options);
+  options.asan.enabled = 1;
+  options.asan.shadow_mode = IREE_HAL_AMDGPU_ASAN_SHADOW_MODE_PREMAPPED;
+
+  const iree_hal_amdgpu_logical_device_host_compatibility_t compatibility =
+      iree_hal_amdgpu_logical_device_options_query_host_compatibility(&options);
+  EXPECT_EQ(
+      compatibility,
+      IREE_HAL_AMDGPU_LOGICAL_DEVICE_HOST_COMPATIBILITY_INCOMPATIBLE_WINDOWS_PREMAPPED_ASAN);
+}
+#endif  // IREE_PLATFORM_WINDOWS && !IREE_SANITIZER_THREAD
+
 TEST(AmdgpuDriverOptionsTest, RejectsMissingSearchPathStorageBeforeLoadingHsa) {
   iree_hal_amdgpu_driver_options_t options;
   iree_hal_amdgpu_driver_options_initialize(&options);

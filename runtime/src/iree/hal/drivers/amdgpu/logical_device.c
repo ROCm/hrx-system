@@ -252,6 +252,12 @@ iree_hal_amdgpu_logical_device_options_query_host_compatibility(
     return IREE_HAL_AMDGPU_LOGICAL_DEVICE_HOST_COMPATIBILITY_INCOMPATIBLE_HOST_TSAN_ASAN;
   }
 #endif  // IREE_SANITIZER_THREAD
+#if defined(IREE_PLATFORM_WINDOWS)
+  if (options->asan.enabled &&
+      options->asan.shadow_mode == IREE_HAL_AMDGPU_ASAN_SHADOW_MODE_PREMAPPED) {
+    return IREE_HAL_AMDGPU_LOGICAL_DEVICE_HOST_COMPATIBILITY_INCOMPATIBLE_WINDOWS_PREMAPPED_ASAN;
+  }
+#endif  // IREE_PLATFORM_WINDOWS
   return IREE_HAL_AMDGPU_LOGICAL_DEVICE_HOST_COMPATIBILITY_COMPATIBLE;
 }
 
@@ -450,12 +456,23 @@ iree_status_t iree_hal_amdgpu_logical_device_options_verify_supported_features(
           (uint64_t)options->asan.owned_application_size, (uint64_t)0,
           (uint64_t)application_coverage_size);
     }
-    if (iree_hal_amdgpu_logical_device_options_query_host_compatibility(
-            options) ==
-        IREE_HAL_AMDGPU_LOGICAL_DEVICE_HOST_COMPATIBILITY_INCOMPATIBLE_HOST_TSAN_ASAN) {
-      return iree_make_status(
-          IREE_STATUS_UNIMPLEMENTED,
-          "AMDGPU ASAN is not supported in host ThreadSanitizer builds");
+    switch (iree_hal_amdgpu_logical_device_options_query_host_compatibility(
+        options)) {
+      case IREE_HAL_AMDGPU_LOGICAL_DEVICE_HOST_COMPATIBILITY_COMPATIBLE:
+        break;
+      case IREE_HAL_AMDGPU_LOGICAL_DEVICE_HOST_COMPATIBILITY_INCOMPATIBLE_HOST_TSAN_ASAN:
+        return iree_make_status(
+            IREE_STATUS_UNIMPLEMENTED,
+            "AMDGPU ASAN is not supported in host ThreadSanitizer builds");
+      case IREE_HAL_AMDGPU_LOGICAL_DEVICE_HOST_COMPATIBILITY_INCOMPATIBLE_WINDOWS_PREMAPPED_ASAN:
+        return iree_make_status(
+            IREE_STATUS_UNIMPLEMENTED,
+            "AMDGPU premapped ASAN shadow mode is not supported on Windows; "
+            "use sparse shadow mode");
+      default:
+        return iree_make_status(
+            IREE_STATUS_INTERNAL,
+            "unknown AMDGPU logical-device host compatibility result");
     }
   }
   if (options->tsan.enabled) {

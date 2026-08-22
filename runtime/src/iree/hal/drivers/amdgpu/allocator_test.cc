@@ -15,6 +15,7 @@
 #include "iree/hal/drivers/amdgpu/physical_device.h"
 #include "iree/hal/drivers/amdgpu/queue_affinity.h"
 #include "iree/hal/drivers/amdgpu/util/info.h"
+#include "iree/hal/drivers/amdgpu/util/shadow_map.h"
 #include "iree/hal/drivers/amdgpu/util/topology.h"
 #include "iree/hal/drivers/amdgpu/util/vmem.h"
 #include "iree/testing/gtest.h"
@@ -288,6 +289,8 @@ static const char* QueryHostIncompatibilityReason(
       return nullptr;
     case IREE_HAL_AMDGPU_LOGICAL_DEVICE_HOST_COMPATIBILITY_INCOMPATIBLE_HOST_TSAN_ASAN:
       return "AMDGPU ASAN is not supported in host ThreadSanitizer builds";
+    case IREE_HAL_AMDGPU_LOGICAL_DEVICE_HOST_COMPATIBILITY_INCOMPATIBLE_WINDOWS_PREMAPPED_ASAN:
+      return "AMDGPU premapped ASAN shadow mode is not supported on Windows";
     default:
       return "AMDGPU logical-device options are not compatible with this host";
   }
@@ -1993,6 +1996,59 @@ TEST_F(AllocatorTest, AsanPremappedShadowModeCoversUnpublishedAddresses) {
       IREE_LIBHSA(&libhsa_), &shadow_byte,
       (void*)(uintptr_t)shadow_range.shadow_address, sizeof(shadow_byte)));
   EXPECT_EQ(shadow_byte, kHeapRedzoneShadowValue);
+}
+
+TEST_F(AllocatorTest, PremappedShadowAliasesPhysicalSlab) {
+  hsa_agent_t gpu_agent = topology_.gpu_agents[0];
+  hsa_amd_memory_pool_t memory_pool = {0};
+  IREE_ASSERT_OK(iree_hal_amdgpu_find_coarse_global_memory_pool(
+      &libhsa_, gpu_agent, &memory_pool));
+
+  hsa_amd_memory_access_desc_t access_descs[IREE_HAL_AMDGPU_MAX_CPU_AGENT +
+                                            IREE_HAL_AMDGPU_MAX_GPU_AGENT];
+  iree_host_size_t access_desc_count = 0;
+  IREE_ASSERT_OK(iree_hal_amdgpu_vmem_build_access_descs_for_topology(
+      &topology_, gpu_agent, IREE_HAL_AMDGPU_ACCESS_MODE_DEVICE_SHARED,
+      IREE_ARRAYSIZE(access_descs), access_descs, &access_desc_count));
+
+  constexpr iree_device_size_t kSlabSize =
+      IREE_HAL_AMDGPU_ASAN_DEFAULT_SHADOW_SLAB_SIZE;
+  constexpr uint8_t kHeapRedzoneShadowValue = 0xFAu;
+  iree_hal_amdgpu_shadow_map_hsa_params_t params = {};
+  params.host_allocator = host_allocator_;
+  params.libhsa = &libhsa_;
+  params.memory_pool = memory_pool;
+  params.memory_type = IREE_HAL_AMDGPU_VMEM_MEMORY_TYPE_DEFAULT;
+  params.shadow_scale_shift = IREE_HAL_AMDGPU_ASAN_MAX_SHADOW_SCALE_SHIFT;
+  params.application_window_base = 0;
+  params.shadow_size = 2 * kSlabSize;
+  params.requested_slab_size = kSlabSize;
+  params.mapping_mode = IREE_HAL_AMDGPU_SHADOW_MAP_MAPPING_MODE_PREMAPPED;
+  params.initial_slab_value = kHeapRedzoneShadowValue;
+  params.access_desc_count = access_desc_count;
+  params.access_descs = access_descs;
+  iree_hal_amdgpu_shadow_map_t shadow_map = {0};
+  IREE_ASSERT_OK(
+      iree_hal_amdgpu_shadow_map_initialize_hsa(&params, &shadow_map));
+
+  std::array<uint8_t, 4> observed = {};
+  const std::array<iree_device_size_t, 4> offsets = {
+      0,
+      kSlabSize / 4,
+      kSlabSize,
+      kSlabSize + kSlabSize / 4,
+  };
+  for (iree_host_size_t i = 0; i < offsets.size(); ++i) {
+    IREE_EXPECT_OK(iree_hsa_memory_copy(
+        IREE_LIBHSA(&libhsa_), &observed[i],
+        (uint8_t*)shadow_map.reservation_base_ptr + offsets[i],
+        sizeof(observed[i])));
+  }
+  for (uint8_t shadow_byte : observed) {
+    EXPECT_EQ(shadow_byte, kHeapRedzoneShadowValue);
+  }
+
+  iree_hal_amdgpu_shadow_map_deinitialize(&shadow_map);
 }
 
 TEST_F(AllocatorTest, DeviceAllocationExportReportsHsaPointer) {

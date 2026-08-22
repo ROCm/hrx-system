@@ -123,6 +123,10 @@ enum iree_hal_amdgpu_logical_device_host_compatibility_e {
   // is incompatible with AMDGPU ASAN's production sparse address layout.
   IREE_HAL_AMDGPU_LOGICAL_DEVICE_HOST_COMPATIBILITY_INCOMPATIBLE_HOST_TSAN_ASAN =
       1,
+  // Windows DXGK cannot practically materialize the production-sized alias
+  // mapping required by premapped AMDGPU ASAN shadow mode.
+  IREE_HAL_AMDGPU_LOGICAL_DEVICE_HOST_COMPATIBILITY_INCOMPATIBLE_WINDOWS_PREMAPPED_ASAN =
+      2,
 };
 
 // Selects how AMDGPU ASAN reports affect the owning logical device.

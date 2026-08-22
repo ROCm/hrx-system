@@ -204,8 +204,9 @@ static iree_status_t iree_hal_amdgpu_slab_provider_build_vmem_access_descs(
   hsa_agent_t local_agent =
       provider->topology->gpu_agents[provider->physical_device_ordinal];
   return iree_hal_amdgpu_vmem_build_access_descs_for_topology(
-      provider->topology, local_agent, IREE_HAL_AMDGPU_ACCESS_MODE_SHARED,
-      access_desc_capacity, access_descs, out_access_desc_count);
+      provider->topology, local_agent,
+      IREE_HAL_AMDGPU_ACCESS_MODE_DEVICE_SHARED, access_desc_capacity,
+      access_descs, out_access_desc_count);
 }
 
 static void iree_hal_amdgpu_slab_provider_finalize_vmem_handle(

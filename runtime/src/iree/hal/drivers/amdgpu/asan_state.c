@@ -290,7 +290,7 @@ static iree_status_t iree_hal_amdgpu_asan_state_initialize_shadow_map(
   iree_host_size_t access_desc_count = 0;
   IREE_RETURN_IF_ERROR(iree_hal_amdgpu_vmem_build_access_descs_for_topology(
       &system->topology, physical_device->device_agent,
-      IREE_HAL_AMDGPU_ACCESS_MODE_SHARED, IREE_ARRAYSIZE(access_descs),
+      IREE_HAL_AMDGPU_ACCESS_MODE_DEVICE_SHARED, IREE_ARRAYSIZE(access_descs),
       access_descs, &access_desc_count));
 
   iree_hal_amdgpu_shadow_map_hsa_params_t shadow_map_params = {

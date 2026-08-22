@@ -91,7 +91,7 @@ IREE_FLAG(string, amdgpu_asan_shadow_mode, "sparse",
           "AMDGPU ASAN shadow mapping mode: 'sparse' maps precise shadow slabs "
           "on demand; 'premapped' aliases a shared poisoned slab across the "
           "full shadow reservation so arbitrary covered shadow reads report "
-          "instead of faulting.");
+          "instead of faulting (premapped mode is unavailable on Windows).");
 IREE_FLAG(
     string, amdgpu_asan_shadow_backing, "device-local",
     "AMDGPU ASAN physical shadow slab backing: 'device-local' backs shadow "
