@@ -6,6 +6,8 @@
 
 #include "loom/tooling/execution/hal/candidate.h"
 
+#include "iree/io/byte_sequence.h"
+
 static iree_status_t loom_run_hal_candidate_publish_compile_report(
     const loom_run_candidate_compile_options_t* options,
     const loom_run_hal_candidate_t* candidate) {
@@ -60,8 +62,11 @@ static void loom_run_hal_candidate_record_report_status(
     report->target_key = candidate->artifact.target_key;
     report->artifact_format = loom_target_artifact_format_name(
         candidate->artifact.target_artifact_format);
-    loom_target_compile_report_record_artifact_size(
-        report, candidate->artifact.executable_data.data_length);
+    if (candidate->artifact.executable_data != NULL) {
+      loom_target_compile_report_record_artifact_size(
+          report,
+          iree_io_byte_sequence_length(candidate->artifact.executable_data));
+    }
   }
   loom_target_compile_report_record_status(report, status_code);
 }
@@ -85,13 +90,17 @@ static iree_status_t loom_run_hal_candidate_emit_selected_target(
   iree_status_t status = provider->emit_artifact(
       provider, run_module->module, &candidate->device_target,
       &provider_options, allocator, &candidate->compiled, &candidate->artifact);
-  if (iree_status_is_ok(status) && candidate->compiled &&
-      candidate->artifact.target_bundle == NULL) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "HAL artifact provider '%.*s' emitted an artifact without its durable "
-        "target bundle",
-        (int)provider->name.size, provider->name.data);
+  if (iree_status_is_ok(status) && candidate->compiled) {
+    IREE_ASSERT(candidate->artifact.target_bundle != NULL);
+    IREE_ASSERT(candidate->artifact.target_artifact_data != NULL);
+    IREE_ASSERT_GT(
+        iree_io_byte_sequence_length(candidate->artifact.target_artifact_data),
+        0);
+    IREE_ASSERT(candidate->artifact.executable_data != NULL);
+    IREE_ASSERT_GT(
+        iree_io_byte_sequence_length(candidate->artifact.executable_data), 0);
+    IREE_ASSERT(candidate->artifact.sidecar_count == 0 ||
+                candidate->artifact.sidecars != NULL);
   }
   return status;
 }

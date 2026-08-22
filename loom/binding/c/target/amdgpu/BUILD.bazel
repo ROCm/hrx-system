@@ -48,6 +48,7 @@ loom_cc_library(
         "//loom/src/loom/target/arch/amdgpu/records:target_records",
         "//loom/src/loom/target/emit/native/amdgpu:hal_kernel_library",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/io:byte_sequence",
     ],
     alwayslink = True,
 )

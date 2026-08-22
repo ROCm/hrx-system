@@ -193,9 +193,10 @@ TEST_F(HalInvocationTest, PreparedCandidatePrepareRequiresInitializedRuntime) {
   loom_run_hal_artifact_t executable = {};
   loom_run_hal_prepared_candidate_t candidate = {};
 
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
-                        loom_run_hal_prepared_candidate_prepare(
-                            &runtime, &executable, &candidate));
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      loom_run_hal_prepared_candidate_prepare(
+          &runtime, &executable, iree_allocator_system(), &candidate));
 
   loom_run_hal_prepared_candidate_deinitialize(&candidate);
 }

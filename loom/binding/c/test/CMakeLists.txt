@@ -227,6 +227,7 @@ loom_cc_test(
   DEPS
     ::test_util
     iree::base
+    iree::io::byte_sequence
     iree::testing::gtest
     iree::testing::gtest_main
     iree::testing::temp_file

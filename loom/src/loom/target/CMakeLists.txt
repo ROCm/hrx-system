@@ -623,6 +623,7 @@ loom_cc_library(
     ::resolved_target
     iree::base
     iree::base::internal::arena
+    iree::io::byte_sequence
     loom::codegen::low::lower
     loom::codegen::low::verify
     loom::ir

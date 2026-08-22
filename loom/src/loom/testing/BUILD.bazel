@@ -13,6 +13,16 @@ package(
 )
 
 loom_cc_library(
+    name = "byte_sequence",
+    testonly = True,
+    hdrs = ["byte_sequence.h"],
+    deps = [
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/io:byte_sequence",
+    ],
+)
+
+loom_cc_library(
     name = "context",
     testonly = True,
     srcs = ["context.c"],

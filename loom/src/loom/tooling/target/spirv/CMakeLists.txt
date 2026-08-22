@@ -20,6 +20,7 @@ loom_cc_library(
   DEPS
     ::vulkan_profile
     iree::base
+    iree::io::byte_sequence
     loom::target::arch::spirv::descriptors::low_registry
     loom::target::arch::spirv::facts
     loom::target::arch::spirv::low_verify
@@ -105,6 +106,7 @@ loom_cc_test(
     loom::target::arch::spirv::ops
     loom::target::arch::spirv::profile
     loom::target::types
+    loom::testing::byte_sequence
     loom::testing::module_ptr
     loom::tooling::execution::hal::artifact
     loom::tooling::execution::hal::runtime

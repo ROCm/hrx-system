@@ -10,6 +10,7 @@
 #include <string>
 
 #include "iree/base/internal/arena.h"
+#include "iree/io/byte_sequence.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 #include "loom/analysis/symbol_facts.h"
@@ -247,14 +248,17 @@ class LlvmirModuleEmitterTest : public ::testing::Test {
     request.scratch_arena = &scratch_arena;
     request.allocator = iree_allocator_system();
     iree_status_t status = text_emitter->emit(&request, &artifact);
-    if (iree_status_is_ok(status) && artifact.contents.data != nullptr) {
-      out_text->assign(reinterpret_cast<const char*>(artifact.contents.data),
-                       artifact.contents.data_length);
+    iree_byte_span_t contents = iree_byte_span_empty();
+    if (iree_status_is_ok(status) && artifact.contents != nullptr) {
+      status = iree_io_byte_sequence_clone(artifact.contents,
+                                           iree_allocator_system(), &contents);
     }
-    if (artifact.storage != nullptr) {
-      IREE_ASSERT(artifact.release != nullptr);
-      artifact.release(artifact.storage, iree_allocator_system());
+    if (iree_status_is_ok(status)) {
+      out_text->assign(reinterpret_cast<const char*>(contents.data),
+                       contents.data_length);
     }
+    iree_allocator_free(iree_allocator_system(), contents.data);
+    loom_target_emit_artifact_release(&artifact);
     iree_arena_deinitialize(&scratch_arena);
     return status;
   }

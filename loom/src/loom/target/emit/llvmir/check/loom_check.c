@@ -242,7 +242,7 @@ static iree_status_t loom_llvmir_loom_check_write_bitcode_bytes(
   iree_status_t status = iree_io_vec_stream_create(
       IREE_IO_STREAM_MODE_READABLE | IREE_IO_STREAM_MODE_WRITABLE |
           IREE_IO_STREAM_MODE_SEEKABLE,
-      4096, allocator, &bitcode_stream);
+      32 * 1024, allocator, &bitcode_stream);
 
   uint8_t* bitcode_data = NULL;
   iree_host_size_t bitcode_length = 0;

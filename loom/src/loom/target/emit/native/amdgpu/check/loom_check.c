@@ -9,6 +9,7 @@
 #include <inttypes.h>
 
 #include "iree/base/alignment.h"
+#include "iree/io/byte_sequence.h"
 #include "loom/codegen/low/allocation_json.h"
 #include "loom/codegen/low/frame.h"
 #include "loom/codegen/low/packet_json.h"
@@ -411,6 +412,13 @@ static bool loom_amdgpu_loom_check_is_kernel_assembly_target(
          iree_string_view_equal(target_name, IREE_SV("amdgpu-kernel-asm"));
 }
 
+static iree_status_t loom_amdgpu_loom_check_append_artifact_segment(
+    void* user_data, iree_const_byte_span_t segment) {
+  return iree_string_builder_append_string(
+      (iree_string_builder_t*)user_data,
+      iree_make_string_view((const char*)segment.data, segment.data_length));
+}
+
 static iree_status_t loom_amdgpu_loom_check_emit_hal_kernel_assembly(
     const loom_check_emit_provider_request_t* request) {
   const loom_amdgpu_hal_kernel_library_options_t options = {
@@ -435,10 +443,12 @@ static iree_status_t loom_amdgpu_loom_check_emit_hal_kernel_assembly(
           IREE_STATUS_INTERNAL,
           "AMDGPU HAL kernel library omitted its requested assembly listing");
     } else {
-      status = iree_string_builder_append_string(
-          &request->result->actual_output,
-          iree_make_string_view(library.target_listing_data,
-                                library.target_listing_data_length));
+      status = iree_io_byte_sequence_enumerate(
+          library.target_listing_data,
+          (iree_io_byte_sequence_segment_callback_t){
+              .fn = loom_amdgpu_loom_check_append_artifact_segment,
+              .user_data = &request->result->actual_output,
+          });
     }
   } else if (iree_status_is_ok(status) &&
              (request->diagnostic_collector == NULL ||

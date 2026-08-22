@@ -12,6 +12,7 @@
 
 #include "iree/base/internal/path.h"
 #include "iree/hal/api.h"
+#include "iree/io/byte_sequence.h"
 #include "iree/tooling/device_util.h"
 #include "loom/sanitizer/options.h"
 #include "loom/tooling/execution/benchmark.h"
@@ -1619,14 +1620,14 @@ static iree_status_t iree_benchmark_loom_append_target_artifact_extension(
 static iree_status_t iree_benchmark_loom_write_candidate_byte_artifact(
     iree_benchmark_loom_artifact_bundle_t* bundle,
     iree_benchmark_loom_bundle_file_kind_t kind, iree_string_view_t directory,
-    iree_string_view_t leaf, iree_const_byte_span_t contents,
+    iree_string_view_t leaf, const iree_io_byte_sequence_t* contents,
     iree_allocator_t allocator, char** inout_path_storage,
     iree_string_view_t* inout_path) {
   if (!iree_benchmark_loom_artifact_bundle_wants_debug_artifacts(bundle) ||
       !iree_string_view_is_empty(*inout_path)) {
     return iree_ok_status();
   }
-  if (contents.data == NULL || contents.data_length == 0) {
+  if (contents == NULL || iree_io_byte_sequence_length(contents) == 0) {
     return iree_ok_status();
   }
 
@@ -1638,10 +1639,8 @@ static iree_status_t iree_benchmark_loom_write_candidate_byte_artifact(
         iree_make_cstring_view(path_storage), allocator);
   }
   if (iree_status_is_ok(status)) {
-    status = loom_tooling_write_output_file(
-        iree_make_cstring_view(path_storage),
-        iree_make_string_view((const char*)contents.data, contents.data_length),
-        allocator);
+    status = loom_tooling_write_output_byte_sequence(
+        iree_make_cstring_view(path_storage), contents, allocator);
   }
   if (iree_status_is_ok(status)) {
     status = iree_benchmark_loom_artifact_bundle_record_file(

@@ -18,6 +18,7 @@
 
 #include "iree/base/api.h"
 #include "iree/hal/api.h"
+#include "iree/io/byte_sequence.h"
 #include "loom/error/diagnostic.h"
 #include "loom/ir/module.h"
 #include "loom/target/pipeline_options.h"
@@ -55,27 +56,30 @@ static inline const loom_target_bundle_t* loom_run_hal_device_target_bundle(
 }
 
 // Loadable HAL artifact bytes ready for iree_hal_device_load_executable.
+//
+// Sequence pointers are borrowed from |storage| for the artifact lifetime.
+// Callers may retain individual sequences when they must outlive the artifact.
 typedef struct loom_run_hal_artifact_t {
   // Exact target row borrowed from the active HAL device spec.
   const iree_hal_executable_target_t* hal_target;
   // Family-owned target key used to emit the artifact.
   iree_string_view_t target_key;
-  // Target-neutral bundle resolved for the artifact, when available.
+  // Durable target-neutral bundle resolved for the artifact.
   const loom_target_bundle_t* target_bundle;
   // Target-native artifact format.
   loom_target_artifact_format_t target_artifact_format;
-  // Target-native artifact bytes.
-  iree_const_byte_span_t target_artifact_data;
+  // Borrowed target-native artifact contents owned by |storage|.
+  iree_io_byte_sequence_t* target_artifact_data;
   // Target-owned textual listing format, such as `amdgpu-assembly`.
   iree_string_view_t target_listing_format;
-  // Target-owned textual listing bytes for debug artifact bundles.
-  iree_const_byte_span_t target_listing_data;
+  // Borrowed textual listing contents owned by |storage|.
+  iree_io_byte_sequence_t* target_listing_data;
   // Optional sidecar artifacts produced beside executable_data.
   const loom_target_emit_sidecar_artifact_t* sidecars;
   // Number of entries in |sidecars|.
   iree_host_size_t sidecar_count;
-  // Provider-owned executable bytes passed to the HAL loader.
-  iree_const_byte_span_t executable_data;
+  // Borrowed executable contents owned by |storage|.
+  iree_io_byte_sequence_t* executable_data;
   // Provider-owned storage released by |deinitialize_artifact|.
   void* storage;
 } loom_run_hal_artifact_t;
@@ -100,9 +104,11 @@ typedef void (*loom_run_hal_deinitialize_device_target_fn_t)(
     const loom_run_hal_artifact_provider_t* provider,
     loom_run_hal_device_target_t* target, iree_allocator_t allocator);
 
-// Emits a loader-ready HAL artifact. Returning OK with |out_emitted| false is
-// reserved for product diagnostics emitted through |diagnostic_sink|; provider
-// contract failures return a non-OK status.
+// Emits a loader-ready HAL artifact. When |out_emitted| is true the artifact
+// has a target bundle, non-empty target-native and executable contents, and a
+// valid descriptor and contents for every sidecar. Returning OK with
+// |out_emitted| false is reserved for product diagnostics emitted through
+// |diagnostic_sink|; infrastructure failures return a non-OK status.
 typedef iree_status_t (*loom_run_hal_emit_artifact_fn_t)(
     const loom_run_hal_artifact_provider_t* provider, loom_module_t* module,
     const loom_run_hal_device_target_t* target,

@@ -78,6 +78,7 @@ loom_cc_library(
     iree::base
     iree::base::internal
     iree::base::internal::arena
+    iree::io::byte_sequence
     iree::io::file_handle
     iree::io::stream
     loom::analysis::symbol_value_constraints

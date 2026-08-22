@@ -6,6 +6,24 @@
 
 #include "loom/target/provider.h"
 
+void loom_target_emit_artifact_release(loom_target_emit_artifact_t* artifact) {
+  if (artifact == NULL) {
+    return;
+  }
+  IREE_ASSERT(artifact->sidecar_count == 0 || artifact->sidecars != NULL);
+  IREE_ASSERT(artifact->storage == NULL || artifact->release_storage != NULL);
+  iree_io_byte_sequence_release(artifact->contents);
+  if (artifact->sidecars != NULL) {
+    for (iree_host_size_t i = 0; i < artifact->sidecar_count; ++i) {
+      iree_io_byte_sequence_release(artifact->sidecars[i].contents);
+    }
+  }
+  if (artifact->storage != NULL && artifact->release_storage != NULL) {
+    artifact->release_storage(artifact->storage);
+  }
+  *artifact = (loom_target_emit_artifact_t){0};
+}
+
 static iree_status_t loom_target_environment_append_low_descriptor_registry(
     loom_target_environment_t* environment,
     const loom_target_provider_t* provider) {

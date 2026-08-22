@@ -8,9 +8,11 @@
 
 #include <cstring>
 #include <fstream>
+#include <memory>
 #include <string>
 
 #include "iree/base/internal/json.h"
+#include "iree/io/byte_sequence.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 #include "iree/testing/temp_file.h"
@@ -19,6 +21,23 @@
 
 namespace loom {
 namespace {
+
+using ByteSequencePtr =
+    std::unique_ptr<iree_io_byte_sequence_t,
+                    decltype(&iree_io_byte_sequence_release)>;
+
+static iree_status_t CloneByteSpanToSequence(
+    iree_const_byte_span_t source, iree_allocator_t allocator,
+    iree_io_byte_sequence_t** out_sequence) {
+  *out_sequence = nullptr;
+  void* data = nullptr;
+  IREE_RETURN_IF_ERROR(iree_allocator_clone(allocator, source, &data));
+  iree_byte_span_t contents = iree_make_byte_span(data, source.data_length);
+  iree_status_t status = iree_io_byte_sequence_create_from_span_move(
+      &contents, allocator, out_sequence);
+  iree_allocator_free(allocator, contents.data);
+  return status;
+}
 
 static iree_string_view_t ParseJsonDocument(iree_string_view_t json) {
   iree_string_view_t cursor = json;
@@ -756,11 +775,16 @@ TEST(BenchmarkReportTest, WritesArtifactManifestSidecarPath) {
   iree_benchmark_loom_hal_context_t context = {};
   context.artifact_bundle = &bundle;
   const char kManifestJson[] = "{\"kind\":\"loom.artifact_manifest\"}";
+  iree_io_byte_sequence_t* manifest_sequence = nullptr;
+  IREE_ASSERT_OK(CloneByteSpanToSequence(
+      iree_make_const_byte_span(kManifestJson, sizeof(kManifestJson) - 1),
+      iree_allocator_system(), &manifest_sequence));
+  ByteSequencePtr manifest_sequence_owner(manifest_sequence,
+                                          iree_io_byte_sequence_release);
   loom_target_emit_sidecar_artifact_t sidecar = {};
   sidecar.kind = LOOM_TARGET_EMIT_SIDECAR_ARTIFACT_KIND_ARTIFACT_MANIFEST;
   sidecar.identifier = IREE_SV("artifact_manifest");
-  sidecar.contents =
-      iree_make_const_byte_span(kManifestJson, sizeof(kManifestJson) - 1);
+  sidecar.contents = manifest_sequence;
 
   iree_benchmark_loom_hal_actual_provider_t provider = {};
   provider.context = &context;

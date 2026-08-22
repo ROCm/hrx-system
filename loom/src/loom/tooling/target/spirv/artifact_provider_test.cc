@@ -24,6 +24,7 @@
 #include "loom/target/arch/spirv/descriptors/low_registry.h"
 #include "loom/target/arch/spirv/ops/registry.h"
 #include "loom/target/arch/spirv/profile.h"
+#include "loom/testing/byte_sequence.h"
 #include "loom/testing/module_ptr.h"
 #include "loom/tooling/execution/hal/runtime.h"
 #include "loom/tooling/target/spirv/vulkan_profile.h"
@@ -31,6 +32,7 @@
 namespace loom {
 namespace {
 
+using ::loom::testing::ByteSequenceClone;
 using ::loom::testing::ModulePtr;
 
 typedef struct fake_hal_device_t {
@@ -347,14 +349,15 @@ TEST_F(SpirvVulkanHalArtifactProviderTest, EmitsRawBdaSpirvArtifact) {
             LOOM_TARGET_ABI_HAL_KERNEL);
   EXPECT_EQ(artifact.target_artifact_format,
             LOOM_TARGET_ARTIFACT_FORMAT_SPIRV_BINARY);
-  EXPECT_EQ(artifact.target_artifact_data.data, artifact.executable_data.data);
-  EXPECT_EQ(artifact.target_artifact_data.data_length,
-            artifact.executable_data.data_length);
-  ASSERT_NE(artifact.executable_data.data, nullptr);
-  ASSERT_GE(artifact.executable_data.data_length, sizeof(uint32_t));
+  EXPECT_EQ(artifact.target_artifact_data, artifact.executable_data);
+  ASSERT_NE(artifact.executable_data, nullptr);
+  ByteSequenceClone executable_data(iree_allocator_system());
+  IREE_ASSERT_OK(executable_data.Clone(artifact.executable_data));
+  const iree_const_byte_span_t executable_contents = executable_data.contents();
+  ASSERT_GE(executable_contents.data_length, sizeof(uint32_t));
 
   uint32_t magic = 0;
-  memcpy(&magic, artifact.executable_data.data, sizeof(magic));
+  memcpy(&magic, executable_contents.data, sizeof(magic));
   EXPECT_EQ(magic, 0x07230203u);
 
   loom_spirv_vulkan_hal_artifact_provider.deinitialize_artifact(
@@ -379,12 +382,15 @@ TEST_F(SpirvVulkanHalArtifactProviderTest, EmitsAllCompatibleEntries) {
       iree_allocator_system(), &emitted, &artifact));
 
   ASSERT_TRUE(emitted);
-  ASSERT_NE(artifact.executable_data.data, nullptr);
-  ASSERT_EQ(artifact.executable_data.data_length % sizeof(uint32_t), 0u);
+  ASSERT_NE(artifact.executable_data, nullptr);
+  ByteSequenceClone executable_data(iree_allocator_system());
+  IREE_ASSERT_OK(executable_data.Clone(artifact.executable_data));
+  const iree_const_byte_span_t executable_contents = executable_data.contents();
+  ASSERT_EQ(executable_contents.data_length % sizeof(uint32_t), 0u);
 
-  const uint32_t* spirv_words = (const uint32_t*)artifact.executable_data.data;
+  const uint32_t* spirv_words = (const uint32_t*)executable_contents.data;
   const iree_host_size_t spirv_word_count =
-      artifact.executable_data.data_length / sizeof(uint32_t);
+      executable_contents.data_length / sizeof(uint32_t);
 
   iree_hal_vulkan_spirv_module_analysis_t analysis = {};
   IREE_ASSERT_OK(iree_hal_vulkan_spirv_analyze_module(

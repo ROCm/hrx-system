@@ -545,19 +545,9 @@ static iree_status_t loom_run_hal_testbench_run_compile_pipeline(
     loom_run_hal_testbench_actual_provider_t* provider, loom_module_t* module,
     const loom_compile_pipeline_options_t* options, iree_string_view_t stage,
     loom_compile_pipeline_result_t* out_result) {
-  const iree_host_size_t prior_error_count = provider->diagnostic_error_count;
-  iree_status_t status = loom_compile_run_pipeline(
+  IREE_RETURN_IF_ERROR(loom_compile_run_pipeline(
       module, options, loom_run_session_block_pool(provider->session),
-      out_result);
-  if (!iree_status_is_ok(status)) {
-    if (provider->diagnostic_error_count == prior_error_count) {
-      return status;
-    }
-    iree_status_free(status);
-    loom_run_hal_testbench_record_compile_rejection(
-        provider, stage, IREE_SV("pass_diagnostics"), iree_string_view_empty());
-    return iree_ok_status();
-  }
+      out_result));
   if (out_result->pass.error_count != 0) {
     loom_run_hal_testbench_record_compile_rejection(
         provider, stage, IREE_SV("pass_diagnostics"), iree_string_view_empty());
@@ -732,13 +722,6 @@ iree_status_t loom_run_hal_testbench_actual_provider_compile(
       provider->context->host_allocator, &provider->candidate);
   provider->compile_report_available = true;
   if (!iree_status_is_ok(status)) {
-    if (provider->diagnostic_error_count != emit_error_count) {
-      iree_status_free(status);
-      loom_run_hal_testbench_record_compile_rejection(
-          provider, IREE_SV("emit"), IREE_SV("emit_diagnostics"),
-          iree_string_view_empty());
-      return iree_ok_status();
-    }
     return status;
   }
   if (!provider->candidate.compiled) {
@@ -757,7 +740,7 @@ iree_status_t loom_run_hal_testbench_actual_provider_compile(
 
   IREE_RETURN_IF_ERROR(loom_run_hal_prepared_candidate_prepare(
       &provider->context->runtime, &provider->candidate.artifact,
-      &provider->prepared_candidate));
+      provider->context->host_allocator, &provider->prepared_candidate));
   provider->prepared_candidate_initialized = true;
   return iree_ok_status();
 }

@@ -10,6 +10,7 @@
 
 #include "iree/base/api.h"
 #include "iree/base/tooling/flags.h"
+#include "iree/io/byte_sequence.h"
 #include "iree/io/file_contents.h"
 #include "loom/codegen/low/text_asm.h"
 #include "loom/error/diagnostic.h"
@@ -639,14 +640,14 @@ static iree_status_t loom_compile_write_optional_target_artifact(
   if (iree_string_view_is_empty(path)) {
     return iree_ok_status();
   }
-  if (artifact->target_artifact_data.data == NULL ||
-      artifact->target_artifact_data.data_length == 0) {
+  if (artifact->target_artifact_data == NULL ||
+      iree_io_byte_sequence_length(artifact->target_artifact_data) == 0) {
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                             "selected HAL artifact provider produced no "
                             "target-native artifact");
   }
-  return loom_compile_write_bytes(path, artifact->target_artifact_data,
-                                  allocator);
+  return loom_tooling_write_output_byte_sequence(
+      path, artifact->target_artifact_data, allocator);
 }
 
 static iree_status_t loom_compile_write_optional_artifact_manifest(
@@ -675,7 +676,8 @@ static iree_status_t loom_compile_write_optional_artifact_manifest(
                             "selected HAL artifact provider produced no "
                             "artifact manifest");
   }
-  return loom_compile_write_bytes(path, manifest->contents, allocator);
+  return loom_tooling_write_output_byte_sequence(path, manifest->contents,
+                                                 allocator);
 }
 
 static iree_status_t loom_compile_write_report(
@@ -789,7 +791,7 @@ static iree_status_t loom_compile_emit_hal(
                                    artifact_provider, run_module,
                                    compile_options, allocator, &candidate);
   if (iree_status_is_ok(status) && candidate.compiled) {
-    status = loom_compile_write_bytes(
+    status = loom_tooling_write_output_byte_sequence(
         output_path, candidate.artifact.executable_data, allocator);
   }
   if (iree_status_is_ok(status) && candidate.compiled) {
@@ -971,22 +973,22 @@ static iree_status_t loom_compile_emit_target(
   if (compile_options->report != NULL) {
     loom_target_compile_report_record_status(compile_options->report,
                                              iree_status_code(status));
-    if (artifact.contents.data_length != 0) {
+    if (artifact.contents != NULL) {
       loom_target_compile_report_record_artifact_size(
-          compile_options->report, artifact.contents.data_length);
+          compile_options->report,
+          iree_io_byte_sequence_length(artifact.contents));
     }
   }
   if (iree_status_is_ok(status) && diagnostic_emitter.error_count == 0 &&
-      artifact.contents.data != NULL && artifact.contents.data_length != 0) {
-    status =
-        loom_compile_write_bytes(output_path, artifact.contents, allocator);
+      artifact.contents != NULL &&
+      iree_io_byte_sequence_length(artifact.contents) != 0) {
+    status = loom_tooling_write_output_byte_sequence(
+        output_path, artifact.contents, allocator);
     if (iree_status_is_ok(status)) {
       *out_emitted = true;
     }
   }
-  if (artifact.storage != NULL && artifact.release != NULL) {
-    artifact.release(artifact.storage, allocator);
-  }
+  loom_target_emit_artifact_release(&artifact);
   iree_arena_deinitialize(&arena);
   return status;
 }

@@ -276,15 +276,18 @@ iree_status_t loom_run_hal_binding_list_total_byte_length(
     const loom_run_hal_binding_list_t* binding_list, uint64_t* out_byte_length);
 
 // Prepares a HAL executable object from provider-produced artifact bytes.
+// Segmented executable contents are cloned once into transient contiguous
+// storage for the synchronous HAL loader and released before returning.
 iree_status_t loom_run_hal_artifact_prepare(
     const loom_run_hal_runtime_t* runtime,
-    const loom_run_hal_artifact_t* artifact,
+    const loom_run_hal_artifact_t* artifact, iree_allocator_t host_allocator,
     iree_hal_executable_t** out_hal_executable);
 
-// Prepares |artifact| once for repeated dispatches.
+// Prepares |artifact| once for repeated dispatches. The transient contiguous
+// loader clone is released before the prepared candidate is returned.
 iree_status_t loom_run_hal_prepared_candidate_prepare(
     const loom_run_hal_runtime_t* runtime,
-    const loom_run_hal_artifact_t* artifact,
+    const loom_run_hal_artifact_t* artifact, iree_allocator_t host_allocator,
     loom_run_hal_prepared_candidate_t* out_candidate);
 
 // Dispatches a prepared HAL executable with |binding_list|.
@@ -397,7 +400,8 @@ iree_status_t loom_run_hal_invocation_execute(
     const loom_run_hal_runtime_t* runtime,
     const loom_run_hal_artifact_t* artifact,
     const loom_run_hal_binding_list_t* binding_list,
-    const loom_run_hal_invocation_options_t* options);
+    const loom_run_hal_invocation_options_t* options,
+    iree_allocator_t host_allocator);
 
 // Parses textual binding specs into a reusable typed invocation plan.
 iree_status_t loom_run_hal_invocation_plan_prepare_from_specs(

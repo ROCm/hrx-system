@@ -9,11 +9,6 @@
 #include "loomc/target/spirv/base.h"
 #include "target.h"
 
-static void loomc_spirv_emit_artifact_release(void* storage,
-                                              iree_allocator_t allocator) {
-  iree_allocator_free(allocator, storage);
-}
-
 static iree_status_t loomc_spirv_emit_module_artifact(
     const loom_target_emit_request_t* request,
     loom_target_emit_artifact_t* out_artifact) {
@@ -28,14 +23,18 @@ static iree_status_t loomc_spirv_emit_module_artifact(
       request->diagnostic_emitter, request->scratch_arena, &options, &binary,
       request->allocator);
   if (iree_status_is_ok(status)) {
-    out_artifact->target_artifact_format =
-        LOOM_TARGET_ARTIFACT_FORMAT_SPIRV_BINARY;
-    out_artifact->contents = iree_make_const_byte_span(
-        binary.words, binary.word_count * sizeof(uint32_t));
-    out_artifact->storage = binary.words;
-    out_artifact->release = loomc_spirv_emit_artifact_release;
-    binary.words = NULL;
-    binary.word_count = 0;
+    iree_byte_span_t contents =
+        iree_make_byte_span(binary.words, binary.word_count * sizeof(uint32_t));
+    iree_io_byte_sequence_t* sequence = NULL;
+    status = iree_io_byte_sequence_create_from_span_move(
+        &contents, request->allocator, &sequence);
+    if (iree_status_is_ok(status)) {
+      binary.words = NULL;
+      binary.word_count = 0;
+      out_artifact->target_artifact_format =
+          LOOM_TARGET_ARTIFACT_FORMAT_SPIRV_BINARY;
+      out_artifact->contents = sequence;
+    }
   }
 
   loom_spirv_module_binary_deinitialize(&binary, request->allocator);

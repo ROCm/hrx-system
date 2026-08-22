@@ -516,17 +516,6 @@ static iree_status_t loomc_emit_capture_diagnostic(
       capture->result, /*source=*/NULL, LOOM_EMITTER_VERIFIER, emission));
 }
 
-static void loomc_emit_artifact_release(loom_target_emit_artifact_t* artifact,
-                                        iree_allocator_t allocator) {
-  if (artifact == NULL) {
-    return;
-  }
-  if (artifact->storage != NULL && artifact->release != NULL) {
-    artifact->release(artifact->storage, allocator);
-  }
-  *artifact = (loom_target_emit_artifact_t){0};
-}
-
 static loomc_status_t loomc_emit_sidecar_artifact_metadata(
     loom_target_emit_sidecar_artifact_kind_t kind,
     loomc_artifact_kind_t* out_kind, loomc_string_view_t* out_format) {
@@ -647,14 +636,35 @@ static loomc_status_t loomc_emit_add_compile_report_artifact(
   return status;
 }
 
+static loomc_status_t loomc_emit_add_byte_sequence_artifact(
+    loomc_result_t* result, loomc_artifact_kind_t kind,
+    loomc_string_view_t format, loomc_string_view_t identifier,
+    const iree_io_byte_sequence_t* contents) {
+  const loomc_allocator_t allocator = loomc_result_allocator(result);
+  const iree_allocator_t host_allocator = iree_allocator_from_loomc(allocator);
+  iree_byte_span_t cloned_contents = iree_byte_span_empty();
+  loomc_status_t status = loomc_status_from_iree(
+      iree_io_byte_sequence_clone(contents, host_allocator, &cloned_contents));
+  if (loomc_status_is_ok(status)) {
+    status = loomc_result_add_artifact_take_contents(
+        result, kind, format, identifier,
+        loomc_make_byte_span(cloned_contents.data,
+                             cloned_contents.data_length));
+  }
+  if (loomc_status_is_ok(status)) {
+    cloned_contents = iree_byte_span_empty();
+  }
+  iree_allocator_free(host_allocator, cloned_contents.data);
+  return status;
+}
+
 static loomc_status_t loomc_emit_add_artifact(
     loomc_result_t* result, const loomc_emit_resolved_options_t* options,
     const loom_target_emitter_t* emitter,
     loom_target_emit_artifact_t* target_artifact) {
-  if (target_artifact->contents.data == NULL &&
-      target_artifact->contents.data_length != 0) {
+  if (target_artifact->contents == NULL) {
     return loomc_make_status(LOOMC_STATUS_INTERNAL,
-                             "emitter returned artifact length with no data");
+                             "emitter returned no artifact contents");
   }
   if (target_artifact->sidecar_count != 0 &&
       target_artifact->sidecars == NULL) {
@@ -680,46 +690,25 @@ static loomc_status_t loomc_emit_add_artifact(
   loomc_status_t status = loomc_ok_status();
   const loomc_artifact_kind_t artifact_kind =
       loomc_emit_primary_artifact_kind(target_artifact->target_artifact_format);
-  if (target_artifact->sidecar_count == 0) {
-    status = loomc_result_add_artifact_take_contents(
-        result, artifact_kind,
-        loomc_string_view_from_iree(emitter->public_artifact_format),
-        loomc_emit_identifier(options, emitter),
-        loomc_byte_span_from_iree(target_artifact->contents));
-  } else {
-    const loomc_artifact_t artifact = {
-        .kind = artifact_kind,
-        .format = loomc_string_view_from_iree(emitter->public_artifact_format),
-        .identifier = loomc_emit_identifier(options, emitter),
-        .contents = loomc_byte_span_from_iree(target_artifact->contents),
-    };
-    status = loomc_result_add_artifact(result, &artifact);
-  }
-  if (loomc_status_is_ok(status) && target_artifact->sidecar_count == 0) {
-    target_artifact->contents = iree_const_byte_span_empty();
-    target_artifact->storage = NULL;
-    target_artifact->release = NULL;
-  }
+  status = loomc_emit_add_byte_sequence_artifact(
+      result, artifact_kind,
+      loomc_string_view_from_iree(emitter->public_artifact_format),
+      loomc_emit_identifier(options, emitter), target_artifact->contents);
   for (iree_host_size_t i = 0;
        i < target_artifact->sidecar_count && loomc_status_is_ok(status); ++i) {
     const loom_target_emit_sidecar_artifact_t* sidecar =
         &target_artifact->sidecars[i];
-    if (sidecar->contents.data == NULL && sidecar->contents.data_length != 0) {
-      return loomc_make_status(
-          LOOMC_STATUS_INTERNAL,
-          "emitter returned sidecar artifact length with no data");
+    if (sidecar->contents == NULL) {
+      return loomc_make_status(LOOMC_STATUS_INTERNAL,
+                               "emitter returned no sidecar contents");
     }
     loomc_artifact_kind_t kind = LOOMC_ARTIFACT_KIND_REPORT;
     loomc_string_view_t format = loomc_string_view_empty();
     LOOMC_RETURN_IF_ERROR(
         loomc_emit_sidecar_artifact_metadata(sidecar->kind, &kind, &format));
-    const loomc_artifact_t artifact = {
-        .kind = kind,
-        .format = format,
-        .identifier = loomc_string_view_from_iree(sidecar->identifier),
-        .contents = loomc_byte_span_from_iree(sidecar->contents),
-    };
-    status = loomc_result_add_artifact(result, &artifact);
+    status = loomc_emit_add_byte_sequence_artifact(
+        result, kind, format, loomc_string_view_from_iree(sidecar->identifier),
+        sidecar->contents);
   }
   return status;
 }
@@ -842,9 +831,10 @@ loomc_status_t loomc_emit_module(loomc_target_environment_t* target_environment,
         if (compile_report_initialized) {
           loom_target_compile_report_record_status(
               &compile_report, iree_status_code(emit_status));
-          if (target_artifact.contents.data_length != 0) {
+          if (target_artifact.contents != NULL) {
             loom_target_compile_report_record_artifact_size(
-                &compile_report, target_artifact.contents.data_length);
+                &compile_report,
+                iree_io_byte_sequence_length(target_artifact.contents));
           }
         }
         status = loomc_status_from_iree(emit_status);
@@ -872,7 +862,7 @@ loomc_status_t loomc_emit_module(loomc_target_environment_t* target_environment,
 
   loomc_allocator_free(allocator, (void*)manifest_identifier.data);
   loomc_allocator_free(allocator, (void*)compile_report_identifier.data);
-  loomc_emit_artifact_release(&target_artifact, host_allocator);
+  loom_target_emit_artifact_release(&target_artifact);
   loom_target_compile_report_deinitialize(&compile_report);
   if (scratch_arena_initialized) {
     iree_arena_deinitialize(&scratch_arena);

@@ -430,27 +430,20 @@ static iree_status_t loom_amdgpu_hal_artifact_provider_emit_artifact(
       module, &library_options, allocator, &library_emitted,
       &storage->kernel_library);
   if (iree_status_is_ok(status) && library_emitted) {
-    iree_const_byte_span_t hsaco_data =
-        iree_make_const_byte_span(storage->kernel_library.hsaco_data,
-                                  storage->kernel_library.hsaco_data_length);
     *out_artifact = (loom_run_hal_artifact_t){
         .hal_target = target->hal_target,
         .target_key = storage->kernel_library.target_key,
         .target_bundle = &storage->kernel_library.target_bundle_storage.bundle,
         .target_artifact_format = LOOM_TARGET_ARTIFACT_FORMAT_ELF,
-        .target_artifact_data = hsaco_data,
+        .target_artifact_data = storage->kernel_library.hsaco_data,
         .target_listing_format = storage->kernel_library.target_listing_format,
-        .target_listing_data = iree_make_const_byte_span(
-            (const uint8_t*)storage->kernel_library.target_listing_data,
-            storage->kernel_library.target_listing_data_length),
-        .sidecars =
-            storage->kernel_library.artifact_manifest.contents.data != NULL
-                ? &storage->kernel_library.artifact_manifest
-                : NULL,
+        .target_listing_data = storage->kernel_library.target_listing_data,
+        .sidecars = storage->kernel_library.artifact_manifest.contents != NULL
+                        ? &storage->kernel_library.artifact_manifest
+                        : NULL,
         .sidecar_count =
-            storage->kernel_library.artifact_manifest.contents.data != NULL ? 1
-                                                                            : 0,
-        .executable_data = hsaco_data,
+            storage->kernel_library.artifact_manifest.contents != NULL ? 1 : 0,
+        .executable_data = storage->kernel_library.hsaco_data,
         .storage = storage,
     };
     *out_emitted = true;
@@ -466,14 +459,16 @@ static void loom_amdgpu_hal_artifact_provider_deinitialize_artifact(
     const loom_run_hal_artifact_provider_t* provider,
     loom_run_hal_artifact_t* artifact, iree_allocator_t allocator) {
   (void)provider;
-  if (artifact == NULL || artifact->storage == NULL) {
+  if (artifact == NULL) {
     return;
   }
-  loom_amdgpu_hal_artifact_storage_t* storage =
-      (loom_amdgpu_hal_artifact_storage_t*)artifact->storage;
-  loom_amdgpu_hal_kernel_library_deinitialize(&storage->kernel_library,
-                                              allocator);
-  iree_allocator_free(allocator, storage);
+  if (artifact->storage != NULL) {
+    loom_amdgpu_hal_artifact_storage_t* storage =
+        (loom_amdgpu_hal_artifact_storage_t*)artifact->storage;
+    loom_amdgpu_hal_kernel_library_deinitialize(&storage->kernel_library,
+                                                allocator);
+    iree_allocator_free(allocator, storage);
+  }
   *artifact = (loom_run_hal_artifact_t){0};
 }
 

@@ -98,6 +98,7 @@ loom_cc_library(
     ::spill_lowering
     iree::base
     iree::base::core_headers
+    iree::io::byte_sequence
     loom::codegen::low::allocation_json
     loom::codegen::low::frame
     loom::codegen::low::packet_json
@@ -590,6 +591,7 @@ loom_cc_library(
     ::spill_lowering
     iree::base
     iree::base::internal::arena
+    iree::io::byte_sequence
     iree::io::stream
     loom::analysis::symbol_facts
     loom::codegen::low::allocation_materialization
@@ -636,6 +638,7 @@ loom_cc_test(
     ::runtime_globals
     iree::base
     iree::base::internal::arena
+    iree::io::byte_sequence
     iree::testing::gtest
     iree::testing::gtest_main
     loom::analysis::symbol_facts
