@@ -4833,6 +4833,7 @@ def _validate_trait_field_contracts(
     op_name: str,
     operands: tuple[Operand, ...],
     results: tuple[Result | TiedResult, ...],
+    regions: tuple[RegionDef, ...],
     traits: tuple[Trait, ...],
 ) -> None:
     """Validate trait contracts that depend on declared operand/result shape."""
@@ -4842,6 +4843,14 @@ def _validate_trait_field_contracts(
             f"Op '{op_name}': VALUE_ALIAS requires at least one operand "
             "and exactly one result"
         )
+    if "ConstantLike" in trait_names:
+        if "Pure" not in trait_names:
+            raise ValueError(f"Op '{op_name}': CONSTANT_LIKE requires PURE semantics")
+        if operands or regions or len(results) != 1 or results[0].variadic:
+            raise ValueError(
+                f"Op '{op_name}': CONSTANT_LIKE requires no operands or regions "
+                "and exactly one result"
+            )
     if (
         "CompileTimeOnly" in trait_names
         and results
@@ -5726,7 +5735,11 @@ class Op:
                 tuple(traits),
             )
         _validate_trait_field_contracts(
-            name, frozen_operands, frozen_results, tuple(traits)
+            name,
+            frozen_operands,
+            frozen_results,
+            frozen_regions,
+            tuple(traits),
         )
         _validate_keyed_module_record(
             name,

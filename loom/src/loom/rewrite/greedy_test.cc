@@ -243,6 +243,41 @@ TEST_F(GreedyRewriteTest, ExplicitTargetFactsSetAnalysisScope) {
   iree_arena_deinitialize(&arena);
 }
 
+TEST_F(GreedyRewriteTest, AttributeMutationRefreshesConstantFacts) {
+  loom_type_t i32 = loom_type_scalar(LOOM_SCALAR_TYPE_I32);
+  loom_op_t* constant_op = NULL;
+  IREE_ASSERT_OK(loom_test_constant_build(&builder_, loom_attr_i64(1), i32,
+                                          LOOM_LOCATION_UNKNOWN, &constant_op));
+  loom_value_id_t result = loom_test_constant_result(constant_op);
+
+  iree_arena_allocator_t arena;
+  iree_arena_initialize(&block_pool_, &arena);
+  loom_pass_value_fact_owner_t fact_owner;
+  loom_pass_value_fact_owner_initialize(&block_pool_, &fact_owner);
+  loom_value_fact_table_t* facts = NULL;
+  IREE_ASSERT_OK(loom_pass_value_fact_owner_prepare(
+      &fact_owner, module_, loom_pass_value_fact_scope_function(function_),
+      &facts));
+  loom_rewriter_t rewriter;
+  IREE_ASSERT_OK(loom_rewriter_initialize(&rewriter, module_, &arena));
+  IREE_ASSERT_OK(loom_rewriter_enable_analysis(&rewriter, function_, facts));
+
+  int64_t value = 0;
+  ASSERT_TRUE(loom_value_facts_as_exact_i64(
+      loom_rewriter_value_facts(&rewriter, result), &value));
+  EXPECT_EQ(value, 1);
+  IREE_ASSERT_OK(loom_rewriter_set_attr(&rewriter, constant_op,
+                                        loom_test_constant_value_ATTR_INDEX,
+                                        loom_attr_i64(7)));
+  ASSERT_TRUE(loom_value_facts_as_exact_i64(
+      loom_rewriter_value_facts(&rewriter, result), &value));
+  EXPECT_EQ(value, 7);
+
+  loom_rewriter_deinitialize(&rewriter);
+  loom_pass_value_fact_owner_deinitialize(&fact_owner);
+  iree_arena_deinitialize(&arena);
+}
+
 TEST_F(GreedyRewriteTest, NamePolicyCanDisableOptionalNames) {
   loom_type_t index_type = loom_type_scalar(LOOM_SCALAR_TYPE_INDEX);
   loom_value_id_t source = LOOM_VALUE_ID_INVALID;
