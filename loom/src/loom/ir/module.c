@@ -3658,6 +3658,35 @@ typedef iree_status_t (*loom_module_type_clone_fn_t)(loom_module_t* module,
                                                      const void* clone_context,
                                                      loom_type_t* out_type);
 
+static bool loom_type_has_same_storage(loom_type_t lhs, loom_type_t rhs) {
+  return lhs.header == rhs.header && lhs.encoding_id == rhs.encoding_id &&
+         lhs.encoding_flags == rhs.encoding_flags &&
+         lhs.dims[0] == rhs.dims[0] && lhs.dims[1] == rhs.dims[1];
+}
+
+static void loom_module_note_recent_exact_type(loom_module_t* module,
+                                               loom_type_id_t type_id) {
+  IREE_ASSERT(type_id < module->types.count);
+  const uint32_t ordinal = type_id + 1;
+  if (module->recent_exact_type_ordinals[0] == ordinal) return;
+  module->recent_exact_type_ordinals[1] = module->recent_exact_type_ordinals[0];
+  module->recent_exact_type_ordinals[0] = ordinal;
+}
+
+static loom_type_id_t loom_module_find_recent_exact_type(
+    const loom_module_t* module, loom_type_t type) {
+  for (iree_host_size_t i = 0;
+       i < IREE_ARRAYSIZE(module->recent_exact_type_ordinals); ++i) {
+    const uint32_t ordinal = module->recent_exact_type_ordinals[i];
+    if (ordinal == 0) continue;
+    const loom_type_id_t type_id = ordinal - 1;
+    if (loom_type_has_same_storage(module->types.entries[type_id], type)) {
+      return type_id;
+    }
+  }
+  return LOOM_TYPE_ID_INVALID;
+}
+
 static void loom_module_note_recent_register_type(loom_module_t* module,
                                                   loom_type_id_t type_id) {
   IREE_ASSERT(type_id < module->types.count);
@@ -3669,26 +3698,6 @@ static void loom_module_note_recent_register_type(loom_module_t* module,
   module->recent_register_type_ordinals[1] =
       module->recent_register_type_ordinals[0];
   module->recent_register_type_ordinals[0] = ordinal;
-}
-
-static bool loom_type_has_same_storage(loom_type_t lhs, loom_type_t rhs) {
-  return lhs.header == rhs.header && lhs.encoding_id == rhs.encoding_id &&
-         lhs.encoding_flags == rhs.encoding_flags &&
-         lhs.dims[0] == rhs.dims[0] && lhs.dims[1] == rhs.dims[1];
-}
-
-static loom_type_id_t loom_module_find_recent_register_type_exact(
-    const loom_module_t* module, loom_type_t type) {
-  for (iree_host_size_t i = 0;
-       i < IREE_ARRAYSIZE(module->recent_register_type_ordinals); ++i) {
-    const uint32_t ordinal = module->recent_register_type_ordinals[i];
-    if (ordinal == 0) continue;
-    const loom_type_id_t type_id = ordinal - 1;
-    if (loom_type_has_same_storage(module->types.entries[type_id], type)) {
-      return type_id;
-    }
-  }
-  return LOOM_TYPE_ID_INVALID;
 }
 
 static loom_type_id_t loom_module_find_recent_register_type_structural(
@@ -4157,6 +4166,7 @@ static iree_status_t loom_module_intern_type_impl(
   if (existing_index != UINT32_MAX) {
     *out_interned_type = module->types.entries[existing_index];
     if (out_type_id) *out_type_id = (loom_type_id_t)existing_index;
+    loom_module_note_recent_exact_type(module, (loom_type_id_t)existing_index);
     return iree_ok_status();
   }
   if (out_miss) *out_miss = true;
@@ -4187,6 +4197,7 @@ static iree_status_t loom_module_intern_type_impl(
   if (result_index != new_index) {
     *out_interned_type = module->types.entries[result_index];
     if (out_type_id) *out_type_id = (loom_type_id_t)result_index;
+    loom_module_note_recent_exact_type(module, (loom_type_id_t)result_index);
     return iree_ok_status();
   }
 
@@ -4195,6 +4206,7 @@ static iree_status_t loom_module_intern_type_impl(
   module->types.count++;
   *out_interned_type = type;
   if (out_type_id) *out_type_id = (loom_type_id_t)new_index;
+  loom_module_note_recent_exact_type(module, (loom_type_id_t)new_index);
   return iree_ok_status();
 }
 
@@ -4282,14 +4294,12 @@ static iree_status_t loom_module_intern_type_with_dependencies(
     loom_module_t* module, loom_type_t type, loom_type_t* out_interned_type,
     loom_type_id_t* out_type_id) {
   type = loom_module_canonicalize_shaped_type_attachment(module, type);
-  if (loom_type_is_register(type) && loom_type_register_has_value_type(type)) {
-    const loom_type_id_t recent_type_id =
-        loom_module_find_recent_register_type_exact(module, type);
-    if (recent_type_id != LOOM_TYPE_ID_INVALID) {
-      *out_interned_type = module->types.entries[recent_type_id];
-      if (out_type_id) *out_type_id = recent_type_id;
-      return iree_ok_status();
-    }
+  const loom_type_id_t recent_type_id =
+      loom_module_find_recent_exact_type(module, type);
+  if (recent_type_id != LOOM_TYPE_ID_INVALID) {
+    *out_interned_type = module->types.entries[recent_type_id];
+    if (out_type_id) *out_type_id = recent_type_id;
+    return iree_ok_status();
   }
   switch (loom_type_kind(type)) {
     case LOOM_TYPE_TILE:
@@ -4530,6 +4540,7 @@ iree_status_t loom_module_intern_register_type(loom_module_t* module,
     *out_interned_type = module->types.entries[type_id];
   }
   loom_module_note_recent_register_type(module, type_id);
+  loom_module_note_recent_exact_type(module, type_id);
   return iree_ok_status();
 }
 

@@ -2372,6 +2372,10 @@ typedef struct loom_module_t {
   loom_intern_table_t type_intern;
   loom_intern_table_t encoding_intern;
 
+  // One-based IDs of the two most-recent exact type candidates, newest first.
+  // Zero denotes an empty slot and keeps zero-initialized modules inert.
+  uint32_t recent_exact_type_ordinals[2];
+
   // One-based IDs of the two most-recent typed-register types, newest first.
   // Zero denotes an empty slot and keeps zero-initialized modules inert.
   uint32_t recent_register_type_ordinals[2];
