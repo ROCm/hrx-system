@@ -284,7 +284,9 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Adjust git config
-        run: git config --global --add safe.directory "$PWD"
+        run: |
+          mkdir -p "$HOME"
+          git config --global --add safe.directory "$PWD"
 
       - name: Set up Python
         uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0

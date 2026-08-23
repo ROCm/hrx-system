@@ -986,6 +986,23 @@ class CiTest(unittest.TestCase):
         self.assertNotIn("iree-bazel-amdgpu-msan", block)
         self.assertNotIn("iree-bazel-amdgpu-sanitizers", block)
 
+    def test_amdgpu_container_jobs_initialize_git_home(self):
+        for path, job_name in (
+            (".github/workflows/ci_iree_bazel.yml", "linux_bazel_amdgpu"),
+            (".github/workflows/ci_iree_cmake.yml", "linux_cmake_amdgpu"),
+        ):
+            with self.subTest(path=path):
+                block = self.workflow_job_block(path, job_name)
+                mkdir_command = 'mkdir -p "$HOME"'
+                git_config_command = (
+                    'git config --global --add safe.directory "$PWD"'
+                )
+                self.assertIn(mkdir_command, block)
+                self.assertIn(git_config_command, block)
+                self.assertLess(
+                    block.index(mkdir_command), block.index(git_config_command)
+                )
+
     def test_bazel_workflow_uploads_profiles_for_each_attempted_job(self):
         cases = (
             (
