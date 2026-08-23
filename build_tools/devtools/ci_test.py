@@ -412,9 +412,14 @@ class CiTest(unittest.TestCase):
             steps = ci.steps_from_args(args)
 
         amdgpu_test = next(step for step in steps if step.name == "Test IREE / AMDGPU")
+        relative_path = (
+            Path("bin/hsa-runtime64.dll")
+            if ci.sys.platform == "win32"
+            else Path("lib/libhsa-runtime64.so.1")
+        )
         self.assertIn(
             "--test_env=IREE_HAL_AMDGPU_LIBHSA_PATH="
-            + str(Path("/tmp/rocm-root") / "lib" / "libhsa-runtime64.so.1"),
+            + str(Path("/tmp/rocm-root") / relative_path),
             amdgpu_test.argv,
         )
 
@@ -1584,6 +1589,24 @@ class CiTest(unittest.TestCase):
             "-DIREE_HAL_AMDGPU_DEVICE_TOOLCHAIN_ROCM_PATH=/tmp/rocm-root",
             configure_step.argv,
         )
+
+    def test_cmake_amdgpu_tests_pin_libhsa_from_rocm_root(self):
+        args = ci.parse_arguments(["iree-cmake-amdgpu"])
+
+        with mock.patch.dict(
+            ci.os.environ,
+            {"HRX_ROCM_ROOT": "/tmp/rocm-root"},
+            clear=True,
+        ):
+            steps = ci.steps_from_args(args)
+            expected_env = ci.amdgpu_libhsa_test_env()
+
+        test_steps = [
+            step for step in steps if step.name.startswith("Test IREE CMake AMDGPU")
+        ]
+        self.assertEqual(len(test_steps), 2)
+        for step in test_steps:
+            self.assertEqual(step.env, expected_env)
 
     def test_cmake_amdgpu_tsan_excludes_only_host_incompatible_tests(self):
         args = ci.parse_arguments(["iree-cmake-amdgpu-tsan"])
