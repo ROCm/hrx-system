@@ -184,7 +184,7 @@ Disassembly of section CODE:
   end
 
 <for_with_iter_args>:
-        .local v128, v128
+        .local v128
   local.get  3
   local.set  5
   block
@@ -197,8 +197,6 @@ Disassembly of section CODE:
   local.get  5
   local.get  4
   i32x4.add
-  local.set  6
-  local.get  6
   local.set  5
   local.get  0
   local.get  2
@@ -208,8 +206,6 @@ Disassembly of section CODE:
   end
   end
   local.get  5
-  local.set  4
-  local.get  4
   local.get  3
   i32x4.add
   local.set  4
@@ -278,15 +274,15 @@ Disassembly of section CODE:
   local.get  4
   v128.bitselect
   local.set  3
-  local.get  3
-  local.set  1
   else
   local.get  1
   local.get  2
   i32x4.mul
   local.set  1
-  end
   local.get  1
+  local.set  3
+  end
+  local.get  3
   return
   end
 
@@ -431,11 +427,11 @@ Disassembly of section CODE:
   local.get  2
   i32.add
   local.set  2
-  local.get  2
-  local.set  1
   else
-  end
   local.get  1
+  local.set  2
+  end
+  local.get  2
   return
   end
 
