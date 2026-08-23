@@ -15,6 +15,7 @@
 #include "loom/codegen/low/target_binding.h"
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
+#include "loom/ir/structural_hash.h"
 #include "loom/ops/op_defs.h"
 #include "loom/target/function_version.h"
 #include "loom/target/pass_environment.h"
@@ -42,17 +43,6 @@ const loom_pass_info_t* loom_cse_pass_info(void) {
 // Op hashing and equality
 //===----------------------------------------------------------------------===//
 
-// FNV-1a hash over a byte range, folded into a running hash.
-static uint32_t loom_cse_hash_bytes(const void* data, iree_host_size_t length,
-                                    uint32_t hash) {
-  const uint8_t* bytes = (const uint8_t*)data;
-  for (iree_host_size_t i = 0; i < length; ++i) {
-    hash ^= bytes[i];
-    hash *= 16777619u;
-  }
-  return hash;
-}
-
 // Computes a content-aware hash for an op based on its kind, operands,
 // result types, attributes, and instance flags. Uses loom_attribute_hash
 // for each attribute so pointer-valued attribute kinds (I64_ARRAY,
@@ -62,36 +52,40 @@ static uint32_t loom_cse_hash_bytes(const void* data, iree_host_size_t length,
 // different result types from the same operands.
 static uint32_t loom_cse_hash_op(const loom_module_t* module,
                                  const loom_op_t* op) {
-  uint32_t hash = 2166136261u;
-  hash = loom_cse_hash_bytes(&op->kind, sizeof(op->kind), hash);
+  uint32_t hash = loom_structural_hash_initialize();
+  hash = loom_structural_hash_mix_u16(hash, op->kind);
+  hash = loom_structural_hash_mix_u16(hash, op->operand_count);
   const loom_value_id_t* operands = loom_op_operands((loom_op_t*)op);
-  hash = loom_cse_hash_bytes(
-      operands, (iree_host_size_t)op->operand_count * sizeof(loom_value_id_t),
-      hash);
+  for (uint16_t i = 0; i < op->operand_count; ++i) {
+    hash = loom_structural_hash_mix_u32(hash, operands[i]);
+  }
   const loom_op_vtable_t* vtable = loom_op_vtable(module, op);
   uint8_t operand_segment_count = loom_op_vtable_operand_segment_count(vtable);
+  hash = loom_structural_hash_mix_u8(hash, operand_segment_count);
   if (operand_segment_count > 0) {
-    hash = loom_cse_hash_bytes(
-        loom_op_const_operand_segment_counts(op),
-        (iree_host_size_t)operand_segment_count * sizeof(uint16_t), hash);
+    const uint16_t* segment_counts = loom_op_const_operand_segment_counts(op);
+    for (uint8_t i = 0; i < operand_segment_count; ++i) {
+      hash = loom_structural_hash_mix_u16(hash, segment_counts[i]);
+    }
   }
   const loom_value_id_t* results = loom_op_results((loom_op_t*)op);
+  hash = loom_structural_hash_mix_u16(hash, op->result_count);
   for (uint16_t i = 0; i < op->result_count; ++i) {
     if (results[i] != LOOM_VALUE_ID_INVALID) {
       loom_type_t type = loom_module_value_type(module, results[i]);
-      hash = loom_cse_hash_bytes(&type, sizeof(type), hash);
+      hash = loom_structural_hash_mix_u32(hash, loom_type_hash(type));
     }
   }
+  hash = loom_structural_hash_mix_u8(hash, op->attribute_count);
   if (op->attribute_count > 0) {
     const loom_attribute_t* attrs = loom_op_attrs((loom_op_t*)op);
     for (uint8_t i = 0; i < op->attribute_count; ++i) {
       uint32_t attribute_hash = loom_attribute_hash(&attrs[i]);
-      hash = loom_cse_hash_bytes(&attribute_hash, sizeof(attribute_hash), hash);
+      hash = loom_structural_hash_mix_u32(hash, attribute_hash);
     }
   }
-  hash = loom_cse_hash_bytes(&op->instance_flags, sizeof(op->instance_flags),
-                             hash);
-  return hash;
+  hash = loom_structural_hash_mix_u8(hash, op->instance_flags);
+  return loom_structural_hash_finalize(hash);
 }
 
 // Structural equality: two ops are CSE-equivalent if they have the
@@ -246,7 +240,7 @@ static loom_cse_low_state_t loom_cse_low_packet_state(
 typedef struct loom_cse_entry_t {
   // NULL = empty, TOMBSTONE = deleted, else = live.
   loom_op_t* op;
-  // FNV-1a hash of the op's identity.
+  // Structural hash of the op's identity.
   uint32_t hash;
   // Trait flags at insert time.
   loom_trait_flags_t traits;

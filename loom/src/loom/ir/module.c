@@ -10,6 +10,7 @@
 
 #include "loom/ir/context.h"
 #include "loom/ir/parameterized_type.h"
+#include "loom/ir/structural_hash.h"
 
 //===----------------------------------------------------------------------===//
 // Hash function
@@ -29,21 +30,6 @@ static uint32_t loom_hash_bytes_extend(uint32_t hash, const void* data,
 // FNV-1a hash over a byte array.
 static uint32_t loom_hash_bytes(const void* data, iree_host_size_t length) {
   return loom_hash_bytes_extend(2166136261u, data, length);
-}
-
-// Extends an FNV-1a hash with one uint16_t.
-static uint32_t loom_hash_u16_extend(uint32_t hash, uint16_t value) {
-  return loom_hash_bytes_extend(hash, &value, sizeof(value));
-}
-
-// Extends an FNV-1a hash with one uint32_t.
-static uint32_t loom_hash_u32_extend(uint32_t hash, uint32_t value) {
-  return loom_hash_bytes_extend(hash, &value, sizeof(value));
-}
-
-// Extends an FNV-1a hash with one uint64_t.
-static uint32_t loom_hash_u64_extend(uint32_t hash, uint64_t value) {
-  return loom_hash_bytes_extend(hash, &value, sizeof(value));
 }
 
 static uint32_t loom_hash_string_view(iree_string_view_t string) {
@@ -3853,21 +3839,22 @@ static uint32_t loom_function_type_hash(const loom_type_t* arg_types,
                                         uint16_t arg_count,
                                         const loom_type_t* result_types,
                                         uint16_t result_count) {
-  uint32_t hash = 2166136261u;
+  uint32_t hash = loom_structural_hash_initialize();
   uint32_t header = loom_type_make_raw_header(LOOM_TYPE_FUNCTION, 0, 0, 0);
-  hash = loom_hash_u32_extend(hash, header);
-  hash = loom_hash_u16_extend(hash, 0);
-  hash = loom_hash_u16_extend(hash, 0);
-  hash = loom_hash_u16_extend(hash, arg_count);
-  hash = loom_hash_u16_extend(hash, result_count);
-  hash = loom_hash_u16_extend(hash, (uint16_t)(arg_count + result_count));
+  hash = loom_structural_hash_mix_u32(hash, header);
+  hash = loom_structural_hash_mix_u16(hash, 0);
+  hash = loom_structural_hash_mix_u16(hash, 0);
+  hash = loom_structural_hash_mix_u16(hash, arg_count);
+  hash = loom_structural_hash_mix_u16(hash, result_count);
+  hash =
+      loom_structural_hash_mix_u16(hash, (uint16_t)(arg_count + result_count));
   for (uint16_t i = 0; i < arg_count; ++i) {
-    hash = loom_hash_u32_extend(hash, loom_type_hash(arg_types[i]));
+    hash = loom_structural_hash_mix_u32(hash, loom_type_hash(arg_types[i]));
   }
   for (uint16_t i = 0; i < result_count; ++i) {
-    hash = loom_hash_u32_extend(hash, loom_type_hash(result_types[i]));
+    hash = loom_structural_hash_mix_u32(hash, loom_type_hash(result_types[i]));
   }
-  return hash;
+  return loom_structural_hash_finalize(hash);
 }
 
 // Computes loom_type_hash() without recursively hashing canonical immediate
@@ -3876,40 +3863,44 @@ static uint32_t loom_function_type_hash(const loom_type_t* arg_types,
 static uint32_t loom_topological_type_hash(
     const loom_topological_type_context_t* context) {
   const loom_type_t type = context->type;
-  uint32_t hash = 2166136261u;
-  hash = loom_hash_u32_extend(hash, type.header);
-  hash = loom_hash_u16_extend(hash, type.encoding_id);
-  hash = loom_hash_u16_extend(hash, type.encoding_flags);
+  uint32_t hash = loom_structural_hash_initialize();
+  hash = loom_structural_hash_mix_u32(hash, type.header);
+  hash = loom_structural_hash_mix_u16(hash, type.encoding_id);
+  hash = loom_structural_hash_mix_u16(hash, type.encoding_flags);
 
   switch (loom_type_kind(type)) {
     case LOOM_TYPE_FUNCTION: {
       const loom_func_type_data_t* data = loom_type_func_data(type);
-      hash = loom_hash_u16_extend(hash, data->arg_count);
-      hash = loom_hash_u16_extend(hash, data->result_count);
-      hash = loom_hash_u16_extend(hash, (uint16_t)context->dependency_count);
+      hash = loom_structural_hash_mix_u16(hash, data->arg_count);
+      hash = loom_structural_hash_mix_u16(hash, data->result_count);
+      hash = loom_structural_hash_mix_u16(hash,
+                                          (uint16_t)context->dependency_count);
       for (iree_host_size_t i = 0; i < context->dependency_count; ++i) {
-        hash = loom_hash_u32_extend(
+        hash = loom_structural_hash_mix_u32(
             hash, context->module->types.hashes[context->dependency_ids[i]]);
       }
-      return hash;
+      return loom_structural_hash_finalize(hash);
     }
     case LOOM_TYPE_DIALECT:
-      hash = loom_hash_u32_extend(hash, loom_type_dialect_name_id(type));
-      hash = loom_hash_u16_extend(hash, (uint16_t)context->dependency_count);
+      hash =
+          loom_structural_hash_mix_u32(hash, loom_type_dialect_name_id(type));
+      hash = loom_structural_hash_mix_u16(hash,
+                                          (uint16_t)context->dependency_count);
       for (iree_host_size_t i = 0; i < context->dependency_count; ++i) {
-        hash = loom_hash_u32_extend(
+        hash = loom_structural_hash_mix_u32(
             hash, context->module->types.hashes[context->dependency_ids[i]]);
       }
-      return hash;
+      return loom_structural_hash_finalize(hash);
     case LOOM_TYPE_REGISTER: {
       if (context->dependency_count == 0) {
         return loom_type_hash(type);
       }
       const loom_register_type_data_t* data = loom_type_register_data(type);
-      hash = loom_hash_u64_extend(hash, data->carrier_payload0);
-      hash = loom_hash_u64_extend(hash, data->carrier_payload1);
-      return loom_hash_u32_extend(
+      hash = loom_structural_hash_mix_u64(hash, data->carrier_payload0);
+      hash = loom_structural_hash_mix_u64(hash, data->carrier_payload1);
+      hash = loom_structural_hash_mix_u32(
           hash, context->module->types.hashes[context->dependency_ids[0]]);
+      return loom_structural_hash_finalize(hash);
     }
     default:
       return loom_type_hash(type);
