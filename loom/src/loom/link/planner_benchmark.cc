@@ -69,12 +69,21 @@ class PlannerCatalogFixture {
     BuildModule(module);
     SerializeModule(module);
     module_ = module;
+
+    CheckStatus(loom_module_allocate(&context_, IREE_SV("planner_requester"),
+                                     &block_pool_, nullptr,
+                                     iree_allocator_system(), &input_module_));
+    BuildIdentityModule(input_module_, IREE_SV("requester_entry"));
   }
 
   PlannerCatalogFixture(const PlannerCatalogFixture&) = delete;
   PlannerCatalogFixture& operator=(const PlannerCatalogFixture&) = delete;
 
   ~PlannerCatalogFixture() {
+    for (loom_module_t* module : benchmark_modules_) {
+      loom_module_free(module);
+    }
+    loom_module_free(input_module_);
     loom_module_free(module_);
     loom_context_deinitialize(&context_);
     iree_arena_block_pool_deinitialize(&block_pool_);
@@ -113,6 +122,46 @@ class PlannerCatalogFixture {
     return index;
   }
 
+  loom_link_module_index_t* BuildUnrelatedProviderIndex(
+      uint32_t library_provider_count) {
+    loom_link_module_index_t* index = nullptr;
+    CheckStatus(loom_link_module_index_create(&context_, &block_pool_,
+                                              iree_allocator_system(), &index));
+    benchmark_modules_.reserve(benchmark_modules_.size() +
+                               library_provider_count);
+    for (uint32_t i = 0; i < library_provider_count; ++i) {
+      char name[32];
+      const int name_length =
+          std::snprintf(name, sizeof(name), "library_%08u", i);
+      if (name_length <= 0 || name_length >= (int)sizeof(name)) {
+        std::abort();
+      }
+      const iree_string_view_t name_view =
+          iree_make_string_view(name, (iree_host_size_t)name_length);
+      loom_module_t* module = nullptr;
+      CheckStatus(loom_module_allocate(&context_, name_view, &block_pool_,
+                                       nullptr, iree_allocator_system(),
+                                       &module));
+      benchmark_modules_.push_back(module);
+      BuildIdentityModule(module, name_view);
+      const loom_link_module_index_add_options_t library_options = {
+          /*.provider_name=*/name_view,
+          /*.role=*/LOOM_LINK_PROVIDER_ROLE_LIBRARY,
+      };
+      CheckStatus(loom_link_module_index_add_materialized(
+          index, module, &library_options,
+          /*out_provider_ordinal=*/nullptr));
+    }
+    const loom_link_module_index_add_options_t input_options = {
+        /*.provider_name=*/IREE_SV("requester"),
+        /*.role=*/LOOM_LINK_PROVIDER_ROLE_INPUT,
+    };
+    CheckStatus(loom_link_module_index_add_materialized(
+        index, input_module_, &input_options,
+        /*out_provider_ordinal=*/nullptr));
+    return index;
+  }
+
   std::string SymbolName(uint32_t ordinal) const {
     char name[32];
     std::snprintf(name, sizeof(name), "function_%08u", ordinal);
@@ -125,6 +174,45 @@ class PlannerCatalogFixture {
   const loom_module_t* module() const { return module_; }
 
  private:
+  void BuildIdentityModule(loom_module_t* module,
+                           iree_string_view_t function_name) {
+    loom_type_t i32_type = loom_type_scalar(LOOM_SCALAR_TYPE_I32);
+    CheckStatus(loom_module_intern_type(module, i32_type, &i32_type));
+    loom_string_id_t name_id = LOOM_STRING_ID_INVALID;
+    CheckStatus(loom_module_intern_string(module, function_name, &name_id));
+    loom_symbol_id_t symbol_id = LOOM_SYMBOL_ID_INVALID;
+    CheckStatus(loom_module_add_symbol(module, name_id, &symbol_id));
+
+    loom_builder_t module_builder;
+    loom_builder_initialize(module, &module->arena, loom_module_block(module),
+                            &module_builder);
+    const loom_symbol_ref_t symbol_ref = {
+        /*.module_id=*/0,
+        /*.symbol_id=*/symbol_id,
+    };
+    loom_op_t* function_op = nullptr;
+    CheckStatus(loom_test_func_build(
+        &module_builder, LOOM_TEST_FUNC_BUILD_FLAG_HAS_VISIBILITY,
+        LOOM_TEST_VISIBILITY_PUBLIC, /*cc=*/0, symbol_ref, &i32_type,
+        /*arg_types_count=*/1, &i32_type, /*result_count=*/1,
+        /*tied_results=*/nullptr, /*tied_result_count=*/0,
+        /*predicates=*/nullptr, /*predicates_count=*/0, LOOM_LOCATION_NONE,
+        &function_op));
+    const loom_func_like_t function = loom_func_like_cast(module, function_op);
+    uint16_t argument_count = 0;
+    const loom_value_id_t* arguments =
+        loom_func_like_arg_ids(function, &argument_count);
+    if (argument_count != 1) std::abort();
+    loom_builder_t body_builder;
+    loom_builder_initialize(
+        module, &module->arena,
+        loom_region_entry_block(loom_func_like_body(function)), &body_builder);
+    loom_op_t* yield_op = nullptr;
+    CheckStatus(loom_test_yield_build(&body_builder, arguments,
+                                      /*values_count=*/1, LOOM_LOCATION_NONE,
+                                      &yield_op));
+  }
+
   void BuildModule(loom_module_t* module) {
     loom_type_t i32_type = loom_type_scalar(LOOM_SCALAR_TYPE_I32);
     CheckStatus(loom_module_intern_type(module, i32_type, &i32_type));
@@ -232,6 +320,8 @@ class PlannerCatalogFixture {
   iree_arena_block_pool_t block_pool_;
   loom_context_t context_ = {};
   loom_module_t* module_ = nullptr;
+  loom_module_t* input_module_ = nullptr;
+  std::vector<loom_module_t*> benchmark_modules_;
   std::vector<uint8_t> bytes_;
 };
 
@@ -596,6 +686,47 @@ static void BM_Plan_SelectiveChain_Catalog(benchmark::State& state) {
   const uint32_t symbol_count = (uint32_t)state.range(0);
   BenchmarkPlan(state, LOOM_LINK_PLAN_SELECTIVE, /*root_ordinal=*/0,
                 symbol_count);
+}
+
+static void BM_Plan_InputExport_UnrelatedLibraryProviders(
+    benchmark::State& state) {
+  const uint32_t library_provider_count = (uint32_t)state.range(0);
+  PlannerCatalogFixture fixture(/*symbol_count=*/1);
+  loom_link_module_index_t* index =
+      fixture.BuildUnrelatedProviderIndex(library_provider_count);
+  const loom_link_plan_options_t options = {
+      /*.mode=*/LOOM_LINK_PLAN_SELECTIVE,
+      /*.root_symbols=*/iree_string_view_list_empty(),
+      /*.include_input_exports=*/true,
+  };
+
+  for (auto _ : state) {
+    loom_link_plan_t* plan = nullptr;
+    CheckStatus(
+        loom_link_plan_build(index, &options, iree_allocator_system(), &plan));
+    if (loom_link_plan_symbol_count(plan) != 1) {
+      std::abort();
+    }
+    const loom_link_plan_symbol_t* root = loom_link_plan_symbol_at(plan, 0);
+    const loom_link_module_index_symbol_t* symbol =
+        loom_link_module_index_symbol_at(index, root->symbol_ordinal);
+    const loom_link_module_index_provider_t* provider =
+        loom_link_module_index_symbol_provider(index, symbol);
+    if (!provider || provider->role != LOOM_LINK_PROVIDER_ROLE_INPUT) {
+      std::abort();
+    }
+    benchmark::DoNotOptimize(plan);
+    state.PauseTiming();
+    loom_link_plan_free(plan);
+    state.ResumeTiming();
+  }
+  state.counters["library_exports"] =
+      static_cast<double>(library_provider_count);
+  state.counters["providers"] = static_cast<double>(library_provider_count + 1);
+  state.counters["requester_exports"] = 1.0;
+  state.counters["selected_symbols"] = 1.0;
+  state.SetComplexityN(library_provider_count);
+  loom_link_module_index_free(index);
 }
 
 static void BM_Plan_ImportedCandidateResolution(benchmark::State& state) {
@@ -1230,6 +1361,9 @@ BENCHMARK(BM_ProviderImportOccurrenceLookup)
 BENCHMARK(BM_Plan_Archive_Catalog)->Apply(CatalogScales)->Complexity();
 BENCHMARK(BM_Plan_SelectiveLeaf_Catalog)->Apply(CatalogScales)->Complexity();
 BENCHMARK(BM_Plan_SelectiveChain_Catalog)->Apply(CatalogScales)->Complexity();
+BENCHMARK(BM_Plan_InputExport_UnrelatedLibraryProviders)
+    ->Apply(CatalogScales)
+    ->Complexity(benchmark::o1);
 BENCHMARK(BM_Plan_ImportedCandidateResolution)
     ->Apply(CatalogScales)
     ->Complexity();
