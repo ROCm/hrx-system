@@ -27,6 +27,12 @@
 namespace clang::tidy::iree {
 namespace {
 
+std::string NormalizePathSeparators(StringRef Path) {
+  std::string NormalizedPath = Path.str();
+  std::replace(NormalizedPath.begin(), NormalizedPath.end(), '\\', '/');
+  return NormalizedPath;
+}
+
 bool IsExternalMacroBody(SourceLocation Location,
                          const SourceManager& SourceManager) {
   if (!Location.isMacroID()) {
@@ -37,7 +43,9 @@ bool IsExternalMacroBody(SourceLocation Location,
     return true;
   }
   llvm::StringRef Filename = SourceManager.getFilename(SpellingLocation);
-  return Filename.contains("/external/") || Filename.starts_with("external/");
+  std::string NormalizedFilename = NormalizePathSeparators(Filename);
+  return StringRef(NormalizedFilename).contains("/external/") ||
+         StringRef(NormalizedFilename).starts_with("external/");
 }
 
 std::optional<std::string> SourceText(CharSourceRange Range,
@@ -246,8 +254,9 @@ bool IsAllowedRefCountFieldName(const FieldDecl* Field,
 
   SourceLocation Location = SourceManager.getExpansionLoc(Field->getLocation());
   StringRef Filename = SourceManager.getFilename(Location);
+  std::string NormalizedFilename = NormalizePathSeparators(Filename);
   return Field->getName() == "counter" &&
-         Filename.ends_with("runtime/src/iree/vm/ref.h");
+         StringRef(NormalizedFilename).ends_with("runtime/src/iree/vm/ref.h");
 }
 
 bool IsRefCountAnchorField(const FieldDecl* Field,
@@ -659,11 +668,7 @@ std::optional<DirectRefCountOperation> DirectRefCountOperationStatement(
   if (!Variable || !Variable->getType()->isAnyPointerType()) {
     return std::nullopt;
   }
-  return DirectRefCountOperation{
-      .Variable = Variable,
-      .Function = Callee,
-      .Location = Call->getBeginLoc(),
-  };
+  return DirectRefCountOperation{Variable, Callee, Call->getBeginLoc()};
 }
 
 std::optional<DirectRefCountOperation> DirectReleaseStatement(
@@ -708,11 +713,8 @@ std::optional<DirectRefCountOperation> IfElseMergedReleaseStatement(
       ThenRelease->Function != ElseRelease->Function) {
     return std::nullopt;
   }
-  return DirectRefCountOperation{
-      .Variable = ThenRelease->Variable,
-      .Function = ThenRelease->Function,
-      .Location = Statement->getIfLoc(),
-  };
+  return DirectRefCountOperation{ThenRelease->Variable, ThenRelease->Function,
+                                 Statement->getIfLoc()};
 }
 
 const VarDecl* DirectVariableAssignment(const Stmt* Statement) {
@@ -930,8 +932,8 @@ class ReleaseFlowAnalyzer final
     }
     --ReferenceCount;
     if (ReferenceCount == 0) {
-      Released[Release.Variable] = ReleaseInfo{.Function = Release.Function,
-                                               .Location = Release.Location};
+      Released[Release.Variable] =
+          ReleaseInfo{Release.Function, Release.Location};
     }
   }
 

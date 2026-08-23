@@ -607,6 +607,15 @@ python dev.py bazel build `
   --config=windows-msvc
 ```
 
+Repository clang-tidy development has a stricter LLVM requirement than normal
+host compilation. The LLVM installation must include `clang-tidy`,
+`run-clang-tidy`, `llvm-config`, development headers, and static libraries. The
+supported prebuilt Windows distribution does not export the symbols required
+by loadable clang-tidy modules, so each build system links the IREE checks into
+a dedicated analyzer executable. Bazel builds that executable entirely inside
+its own graph and never configures or invokes CMake; the CMake lane builds the
+equivalent executable independently.
+
 The following is the host-only Loom baseline: it builds the VM and x86 target
 paths without requiring ROCm, Vulkan, WebGPU, or libHRX.
 

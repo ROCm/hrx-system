@@ -18,7 +18,7 @@ from pathlib import Path
 def parse_arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--clang-tidy", required=True, type=Path)
-    parser.add_argument("--plugin", required=True, type=Path)
+    parser.add_argument("--plugin", type=Path)
     args, unittest_args = parser.parse_known_args()
     sys.argv = [sys.argv[0], *unittest_args]
     return args
@@ -28,10 +28,17 @@ def source_path(test_file: str, relative_path: str) -> Path:
     return Path(test_file).resolve().with_name(relative_path)
 
 
+def clang_tidy_command(clang_tidy: Path, plugin: Path | None) -> list[str]:
+    command = [str(clang_tidy)]
+    if plugin:
+        command.append(f"--load={plugin}")
+    return command
+
+
 def run_clang_tidy(
     *,
     clang_tidy: Path,
-    plugin: Path,
+    plugin: Path | None,
     checks: str,
     source: Path,
     compiler_args: list[str] | None = None,
@@ -40,8 +47,7 @@ def run_clang_tidy(
         compiler_args = ["-std=c11"]
     completed = subprocess.run(
         [
-            str(clang_tidy),
-            f"--load={plugin}",
+            *clang_tidy_command(clang_tidy, plugin),
             f"--checks={checks}",
             str(source),
             "--",
@@ -60,7 +66,7 @@ def run_clang_tidy(
 def run_clang_tidy_fix(
     *,
     clang_tidy: Path,
-    plugin: Path,
+    plugin: Path | None,
     checks: str,
     source: Path,
     compiler_args: list[str] | None = None,
@@ -72,8 +78,7 @@ def run_clang_tidy_fix(
         shutil.copy2(source, fixed_source)
         completed = subprocess.run(
             [
-                str(clang_tidy),
-                f"--load={plugin}",
+                *clang_tidy_command(clang_tidy, plugin),
                 f"--checks={checks}",
                 "--fix",
                 str(fixed_source),

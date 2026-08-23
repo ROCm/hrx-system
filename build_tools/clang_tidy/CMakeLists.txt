@@ -15,7 +15,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 find_package(LLVM REQUIRED CONFIG)
 find_package(Clang REQUIRED CONFIG)
 
-add_library(IREEClangTidyPlugin MODULE
+set(IREE_CLANG_TIDY_SOURCES
   iree/ExtentChecks.cc
   iree/IreeTidyModule.cc
   iree/LifecycleChecks.cc
@@ -27,40 +27,81 @@ add_library(IREEClangTidyPlugin MODULE
   iree/TraceChecks.cc
 )
 
-target_include_directories(IREEClangTidyPlugin
+if(WIN32)
+  add_executable(IREEClangTidy
+    iree_clang_tidy_main.cc
+    ${IREE_CLANG_TIDY_SOURCES}
+  )
+  set(IREE_CLANG_TIDY_TARGET IREEClangTidy)
+  set(IREE_CLANG_TIDY_TEST_EXECUTABLE "$<TARGET_FILE:IREEClangTidy>")
+  set(IREE_CLANG_TIDY_TEST_PLUGIN_ARGUMENT)
+  file(GLOB IREE_CLANG_TIDY_LLVM_STATIC_LIBRARIES
+    "${LLVM_LIBRARY_DIRS}/*.lib"
+  )
+  list(FILTER IREE_CLANG_TIDY_LLVM_STATIC_LIBRARIES EXCLUDE REGEX
+    "[/\\\\](LLVM-C|LTO|Remarks|libclang)\\.lib$"
+  )
+  target_link_libraries(IREEClangTidy
+    PRIVATE
+      ${IREE_CLANG_TIDY_LLVM_STATIC_LIBRARIES}
+      advapi32
+      ntdll
+      ole32
+      psapi
+      shell32
+      uuid
+      version
+      ws2_32
+  )
+  target_compile_definitions(IREEClangTidy PRIVATE CLANG_BUILD_STATIC)
+  set_property(TARGET IREEClangTidy PROPERTY
+    MSVC_RUNTIME_LIBRARY MultiThreaded
+  )
+else()
+  add_library(IREEClangTidyPlugin MODULE ${IREE_CLANG_TIDY_SOURCES})
+  set(IREE_CLANG_TIDY_TARGET IREEClangTidyPlugin)
+  find_program(CLANG_TIDY_EXECUTABLE
+    NAMES
+      clang-tidy
+      clang-tidy-${LLVM_VERSION_MAJOR}
+    HINTS
+      "${LLVM_TOOLS_BINARY_DIR}"
+    REQUIRED
+  )
+  set(IREE_CLANG_TIDY_TEST_EXECUTABLE "${CLANG_TIDY_EXECUTABLE}")
+  set(IREE_CLANG_TIDY_TEST_PLUGIN_ARGUMENT
+    "--plugin=$<TARGET_FILE:IREEClangTidyPlugin>"
+  )
+endif()
+
+target_include_directories(${IREE_CLANG_TIDY_TARGET}
   PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}"
     ${LLVM_INCLUDE_DIRS}
     ${CLANG_INCLUDE_DIRS}
 )
-target_compile_definitions(IREEClangTidyPlugin
+target_compile_definitions(${IREE_CLANG_TIDY_TARGET}
   PRIVATE
     ${LLVM_DEFINITIONS}
 )
 
 if(NOT LLVM_ENABLE_EH)
   if(MSVC)
-    target_compile_options(IREEClangTidyPlugin PRIVATE /EHs-c-)
+    target_compile_definitions(${IREE_CLANG_TIDY_TARGET}
+      PRIVATE _HAS_EXCEPTIONS=0
+    )
+    target_compile_options(${IREE_CLANG_TIDY_TARGET} PRIVATE /EHs-c-)
   else()
-    target_compile_options(IREEClangTidyPlugin PRIVATE -fno-exceptions)
+    target_compile_options(${IREE_CLANG_TIDY_TARGET} PRIVATE -fno-exceptions)
   endif()
 endif()
 if(NOT LLVM_ENABLE_RTTI)
   if(MSVC)
-    target_compile_options(IREEClangTidyPlugin PRIVATE /GR-)
+    target_compile_options(${IREE_CLANG_TIDY_TARGET} PRIVATE /GR-)
   else()
-    target_compile_options(IREEClangTidyPlugin PRIVATE -fno-rtti)
+    target_compile_options(${IREE_CLANG_TIDY_TARGET} PRIVATE -fno-rtti)
   endif()
 endif()
-
-find_program(CLANG_TIDY_EXECUTABLE
-  NAMES
-    clang-tidy
-    clang-tidy-${LLVM_VERSION_MAJOR}
-  HINTS
-    "${LLVM_TOOLS_BINARY_DIR}"
-  REQUIRED
-)
 
 find_package(Python3 COMPONENTS Interpreter REQUIRED)
 
@@ -70,8 +111,8 @@ add_test(
   COMMAND
     Python3::Interpreter
     "${CMAKE_CURRENT_SOURCE_DIR}/test/extent_checks_test.py"
-    "--clang-tidy=${CLANG_TIDY_EXECUTABLE}"
-    "--plugin=$<TARGET_FILE:IREEClangTidyPlugin>"
+    "--clang-tidy=${IREE_CLANG_TIDY_TEST_EXECUTABLE}"
+    ${IREE_CLANG_TIDY_TEST_PLUGIN_ARGUMENT}
 )
 
 add_test(
@@ -79,8 +120,8 @@ add_test(
   COMMAND
     Python3::Interpreter
     "${CMAKE_CURRENT_SOURCE_DIR}/test/smoke_test.py"
-    "--clang-tidy=${CLANG_TIDY_EXECUTABLE}"
-    "--plugin=$<TARGET_FILE:IREEClangTidyPlugin>"
+    "--clang-tidy=${IREE_CLANG_TIDY_TEST_EXECUTABLE}"
+    ${IREE_CLANG_TIDY_TEST_PLUGIN_ARGUMENT}
 )
 
 add_test(
@@ -88,8 +129,8 @@ add_test(
   COMMAND
     Python3::Interpreter
     "${CMAKE_CURRENT_SOURCE_DIR}/test/status_checks_test.py"
-    "--clang-tidy=${CLANG_TIDY_EXECUTABLE}"
-    "--plugin=$<TARGET_FILE:IREEClangTidyPlugin>"
+    "--clang-tidy=${IREE_CLANG_TIDY_TEST_EXECUTABLE}"
+    ${IREE_CLANG_TIDY_TEST_PLUGIN_ARGUMENT}
 )
 
 add_test(
@@ -97,8 +138,8 @@ add_test(
   COMMAND
     Python3::Interpreter
     "${CMAKE_CURRENT_SOURCE_DIR}/test/lifecycle_checks_test.py"
-    "--clang-tidy=${CLANG_TIDY_EXECUTABLE}"
-    "--plugin=$<TARGET_FILE:IREEClangTidyPlugin>"
+    "--clang-tidy=${IREE_CLANG_TIDY_TEST_EXECUTABLE}"
+    ${IREE_CLANG_TIDY_TEST_PLUGIN_ARGUMENT}
 )
 
 add_test(
@@ -106,8 +147,8 @@ add_test(
   COMMAND
     Python3::Interpreter
     "${CMAKE_CURRENT_SOURCE_DIR}/test/recursion_check_test.py"
-    "--clang-tidy=${CLANG_TIDY_EXECUTABLE}"
-    "--plugin=$<TARGET_FILE:IREEClangTidyPlugin>"
+    "--clang-tidy=${IREE_CLANG_TIDY_TEST_EXECUTABLE}"
+    ${IREE_CLANG_TIDY_TEST_PLUGIN_ARGUMENT}
 )
 
 add_test(
@@ -116,8 +157,8 @@ add_test(
     Python3::Interpreter
     "${CMAKE_CURRENT_SOURCE_DIR}/test/recursion_cross_tu_driver_test.py"
     "--aggregator=${CMAKE_CURRENT_SOURCE_DIR}/aggregate_recursion_summaries.py"
-    "--clang-tidy=${CLANG_TIDY_EXECUTABLE}"
-    "--plugin=$<TARGET_FILE:IREEClangTidyPlugin>"
+    "--clang-tidy=${IREE_CLANG_TIDY_TEST_EXECUTABLE}"
+    ${IREE_CLANG_TIDY_TEST_PLUGIN_ARGUMENT}
 )
 
 add_test(
@@ -125,8 +166,8 @@ add_test(
   COMMAND
     Python3::Interpreter
     "${CMAKE_CURRENT_SOURCE_DIR}/test/refcount_checks_test.py"
-    "--clang-tidy=${CLANG_TIDY_EXECUTABLE}"
-    "--plugin=$<TARGET_FILE:IREEClangTidyPlugin>"
+    "--clang-tidy=${IREE_CLANG_TIDY_TEST_EXECUTABLE}"
+    ${IREE_CLANG_TIDY_TEST_PLUGIN_ARGUMENT}
 )
 
 add_test(
@@ -134,8 +175,8 @@ add_test(
   COMMAND
     Python3::Interpreter
     "${CMAKE_CURRENT_SOURCE_DIR}/test/trace_checks_test.py"
-    "--clang-tidy=${CLANG_TIDY_EXECUTABLE}"
-    "--plugin=$<TARGET_FILE:IREEClangTidyPlugin>"
+    "--clang-tidy=${IREE_CLANG_TIDY_TEST_EXECUTABLE}"
+    ${IREE_CLANG_TIDY_TEST_PLUGIN_ARGUMENT}
 )
 
 add_test(
@@ -143,6 +184,6 @@ add_test(
   COMMAND
     Python3::Interpreter
     "${CMAKE_CURRENT_SOURCE_DIR}/test/style_checks_test.py"
-    "--clang-tidy=${CLANG_TIDY_EXECUTABLE}"
-    "--plugin=$<TARGET_FILE:IREEClangTidyPlugin>"
+    "--clang-tidy=${IREE_CLANG_TIDY_TEST_EXECUTABLE}"
+    ${IREE_CLANG_TIDY_TEST_PLUGIN_ARGUMENT}
 )

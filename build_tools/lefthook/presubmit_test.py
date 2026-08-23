@@ -10,6 +10,7 @@ import contextlib
 import importlib.util
 import io
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -672,6 +673,59 @@ class PresubmitTest(unittest.TestCase):
                 ["runtime/src/iree/base/status.c"],
             )
 
+    def test_windows_path_lookup_finds_extensionless_tools(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            tool = Path(temporary_directory) / "run-clang-tidy"
+            tool.write_text("#!/usr/bin/env python3\n", encoding="utf-8")
+            tool.chmod(0o755)
+            with (
+                mock.patch.object(presubmit.sys, "platform", "win32"),
+                mock.patch.object(presubmit.shutil, "which", return_value=None),
+                mock.patch.object(
+                    presubmit.os,
+                    "get_exec_path",
+                    return_value=[temporary_directory],
+                ),
+            ):
+                self.assertEqual(
+                    presubmit.executable_from_path(("run-clang-tidy",)),
+                    str(tool),
+                )
+
+    def test_windows_root_lookup_resolves_executable_suffix(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            tool = Path(temporary_directory) / "bin" / "llvm-config.exe"
+            tool.parent.mkdir()
+            tool.write_bytes(b"")
+            tool.chmod(0o755)
+            with (
+                mock.patch.object(presubmit.sys, "platform", "win32"),
+                mock.patch.dict(
+                    os.environ,
+                    {"IREE_LLVM_ROOT": temporary_directory},
+                    clear=True,
+                ),
+            ):
+                self.assertEqual(
+                    presubmit.executable_from_roots(
+                        ("IREE_LLVM_ROOT",), ("llvm-config",)
+                    ),
+                    str(tool),
+                )
+
+    def test_windows_run_clang_tidy_uses_python_for_shebang_script(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            tool = Path(temporary_directory) / "run-clang-tidy"
+            tool.write_text("#!/usr/bin/env python3\n", encoding="utf-8")
+            with (
+                mock.patch.object(presubmit.sys, "platform", "win32"),
+                mock.patch.object(presubmit, "find_llvm_tool", return_value=str(tool)),
+            ):
+                self.assertEqual(
+                    presubmit.clang_tidy_run_tool(),
+                    (sys.executable, str(tool)),
+                )
+
     def test_cmake_clang_tidy_command_uses_parallel_driver(self):
         with mock.patch.object(presubmit, "clang_tidy_jobs", return_value=17):
             command = presubmit.cmake_clang_tidy_command(
@@ -692,12 +746,57 @@ class PresubmitTest(unittest.TestCase):
         self.assertIn("-j", command)
         self.assertIn("17", command)
         self.assertIn("-warnings-as-errors=*", command)
-        self.assertEqual(command[-1], "runtime/src/iree/base/status.c")
+        self.assertIsNotNone(
+            re.search(
+                command[-1],
+                str(presubmit.REPO_ROOT / "runtime/src/iree/base/status.c"),
+            )
+        )
 
-    def test_cmake_clang_tidy_plugin_configure_pins_matching_packages(self):
+    def test_cmake_clang_tidy_command_supports_in_process_checks(self):
+        command = presubmit.cmake_clang_tidy_command(
+            run_clang_tidy=["python", "run-clang-tidy"],
+            clang_tidy="iree-clang-tidy",
+            plugin=None,
+            compile_commands_dir=Path("build/cmake-debug"),
+            files=["runtime/src/iree/base/status.c"],
+        )
+
+        self.assertEqual(command[:2], ["python", "run-clang-tidy"])
+        self.assertIn("iree-clang-tidy", command)
+        self.assertFalse(any(argument.startswith("-load=") for argument in command))
+
+    def test_cmake_clang_tidy_commands_batch_file_patterns(self):
+        files = [
+            f"runtime/src/iree/base/{index}_{'source' * 10}.c" for index in range(20)
+        ]
+        with mock.patch.object(presubmit, "COMMAND_LINE_CHARACTER_LIMIT", 512):
+            commands = presubmit.cmake_clang_tidy_commands(
+                run_clang_tidy=["python", "run-clang-tidy"],
+                clang_tidy="iree-clang-tidy",
+                plugin=None,
+                compile_commands_dir=Path("build/cmake-debug"),
+                files=files,
+            )
+
+        expected_patterns = presubmit.cmake_clang_tidy_file_patterns(files)
+        self.assertGreater(len(commands), 1)
+        self.assertEqual(
+            [
+                argument
+                for command in commands
+                for argument in command
+                if argument in expected_patterns
+            ],
+            expected_patterns,
+        )
+        for command in commands:
+            self.assertLessEqual(len(subprocess.list2cmdline(command)), 512)
+
+    def test_cmake_clang_tidy_configure_pins_matching_packages(self):
         llvm_package_dir = Path("/opt/llvm/lib/cmake/llvm")
 
-        command = presubmit.cmake_clang_tidy_plugin_configure_command(
+        command = presubmit.cmake_clang_tidy_configure_command(
             llvm_package_dir=llvm_package_dir
         )
 
@@ -742,7 +841,54 @@ class PresubmitTest(unittest.TestCase):
         self.assertIn("19", command)
         self.assertIn("-fix", command)
         self.assertIn("-format", command)
-        self.assertEqual(command[-1], "runtime/src/iree/base/status.c")
+        self.assertIsNotNone(
+            re.search(
+                command[-1],
+                str(presubmit.REPO_ROOT / "runtime/src/iree/base/status.c"),
+            )
+        )
+
+    def test_cmake_clang_tidy_fix_command_supports_in_process_checks(self):
+        command = presubmit.cmake_run_clang_tidy_fix_command(
+            run_clang_tidy=["python", "run-clang-tidy"],
+            clang_tidy="iree-clang-tidy",
+            clang_apply_replacements="clang-apply-replacements",
+            plugin=None,
+            compile_commands_dir=Path("build/cmake-debug"),
+            files=["runtime/src/iree/base/status.c"],
+        )
+
+        self.assertEqual(command[:2], ["python", "run-clang-tidy"])
+        self.assertIn("iree-clang-tidy", command)
+        self.assertFalse(any(argument.startswith("-load=") for argument in command))
+
+    def test_cmake_clang_tidy_fix_commands_batch_file_patterns(self):
+        files = [
+            f"runtime/src/iree/base/{index}_{'source' * 10}.c" for index in range(20)
+        ]
+        with mock.patch.object(presubmit, "COMMAND_LINE_CHARACTER_LIMIT", 512):
+            commands = presubmit.cmake_run_clang_tidy_fix_commands(
+                run_clang_tidy=["python", "run-clang-tidy"],
+                clang_tidy="iree-clang-tidy",
+                clang_apply_replacements="clang-apply-replacements",
+                plugin=None,
+                compile_commands_dir=Path("build/cmake-debug"),
+                files=files,
+            )
+
+        expected_patterns = presubmit.cmake_clang_tidy_file_patterns(files)
+        self.assertGreater(len(commands), 1)
+        self.assertEqual(
+            [
+                argument
+                for command in commands
+                for argument in command
+                if argument in expected_patterns
+            ],
+            expected_patterns,
+        )
+        for command in commands:
+            self.assertLessEqual(len(subprocess.list2cmdline(command)), 512)
 
     def test_cmake_build_dir_uses_recorded_devtools_state(self):
         with tempfile.TemporaryDirectory() as temporary_dir:
