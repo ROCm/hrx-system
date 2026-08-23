@@ -56,6 +56,7 @@ loom_cc_library(
     "parameterized_type.h"
     "scalar_type.h"
     "semantics.h"
+    "structural_hash.h"
     "type_constraint.h"
     "type_descriptor.h"
     "types.h"
