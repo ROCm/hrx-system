@@ -333,6 +333,15 @@ static inline loom_type_use_id_t loom_module_value_first_incoming_type_use(
       ->first_incoming_use_id;
 }
 
+// Returns the first type-use record carried by |value_id|'s type, or INVALID
+// when the value is out of range or its type has no SSA references.
+static inline loom_type_use_id_t loom_module_value_first_outgoing_type_use(
+    const loom_module_t* module, loom_value_id_t value_id) {
+  if (value_id >= module->values.count) return LOOM_TYPE_USE_ID_INVALID;
+  return loom_value_table_const_type_use_heads(&module->values, value_id)
+      ->first_outgoing_use_id;
+}
+
 // Walks SSA value references embedded in |attr|. Type-valued attributes are
 // resolved through |module| and aggregate attributes are visited in structural
 // order. References are not deduplicated.
