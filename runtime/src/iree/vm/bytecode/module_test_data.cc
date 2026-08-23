@@ -189,7 +189,7 @@ std::vector<uint8_t> BuildOwnershipGlobals() {
   return section.Take();
 }
 
-std::vector<uint8_t> BuildOwnershipRodata() {
+std::vector<uint8_t> BuildTestRodata() {
   constexpr std::string_view kPayload = "loom-vm-v1";
   ByteBuffer section;
   section.Append(iree_vm_bytecode_v0_rodata_header_t{1, 0});
@@ -608,7 +608,7 @@ std::vector<uint8_t> BuildOwnershipModuleImage() {
       {IREE_VM_BYTECODE_SECTION_EXPORTS, 0, BuildOwnershipExports()},
       {IREE_VM_BYTECODE_SECTION_FUNCTIONS, 0, BuildOwnershipFunctions()},
       {IREE_VM_BYTECODE_SECTION_GLOBALS, 0, BuildOwnershipGlobals()},
-      {IREE_VM_BYTECODE_SECTION_RODATA, 0, BuildOwnershipRodata()},
+      {IREE_VM_BYTECODE_SECTION_RODATA, 0, BuildTestRodata()},
       {IREE_VM_BYTECODE_SECTION_PRESENTATION,
        IREE_VM_BYTECODE_SECTION_FLAG_SKIPPABLE, BuildOwnershipPresentation()},
       {IREE_VM_BYTECODE_SECTION_METADATA,
@@ -639,6 +639,7 @@ std::vector<uint8_t> BuildScalarStateModuleImage() {
       {IREE_VM_BYTECODE_SECTION_FUNCTIONS, 0, BuildScalarStateFunctions()},
       {IREE_VM_BYTECODE_SECTION_CONSTANTS, 0, BuildScalarStateConstants()},
       {IREE_VM_BYTECODE_SECTION_GLOBALS, 0, BuildScalarStateGlobals()},
+      {IREE_VM_BYTECODE_SECTION_RODATA, 0, BuildTestRodata()},
   });
 }
 

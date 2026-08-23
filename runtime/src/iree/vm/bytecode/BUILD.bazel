@@ -87,6 +87,7 @@ iree_runtime_cc_library(
         "interpreter_float_math.c",
         "interpreter_float_math.h",
         "interpreter_integer.h",
+        "interpreter_stack.h",
         "module.c",
         "verification_isa.c",
     ],
@@ -96,6 +97,7 @@ iree_runtime_cc_library(
     deps = [
         ":module",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/base:core_headers",
         "//runtime/src/iree/base/internal",
         "//runtime/src/iree/base/internal:unicode",
         "//runtime/src/iree/vm",
@@ -178,6 +180,21 @@ iree_runtime_cc_test(
     ],
     deps = [
         "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+        "//runtime/src/iree/vm/bytecode/wire",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "interpreter_stack_test",
+    srcs = [
+        "interpreter_stack.h",
+        "interpreter_stack_test.cc",
+    ],
+    deps = [
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base:core_headers",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
         "//runtime/src/iree/vm/bytecode/wire",

@@ -1,0 +1,174 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+#ifndef IREE_VM_BYTECODE_INTERPRETER_STACK_H_
+#define IREE_VM_BYTECODE_INTERPRETER_STACK_H_
+
+#include <stdint.h>
+
+#include "iree/base/alignment.h"
+#include "iree/vm/bytecode/wire/core/selectors.h"
+
+// Loads one verified memory.format lane group from |source|. The caller has
+// already proven the complete byte and register ranges. Keeping every format
+// as a fixed-width leaf lets compilers emit straight-line unaligned loads after
+// the one selector dispatch.
+static inline void iree_vm_bytecode_stack_load_lanes(uint8_t format,
+                                                     const uint8_t* source,
+                                                     uint64_t* target_values) {
+#define IREE_VM_BYTECODE_STACK_LOAD_LANE(load_fn, byte_offset, value_offset) \
+  target_values[value_offset] = load_fn(source + byte_offset)
+#define IREE_VM_BYTECODE_STACK_LOAD_X1(load_fn, element_bytes) \
+  IREE_VM_BYTECODE_STACK_LOAD_LANE(load_fn, 0, 0)
+#define IREE_VM_BYTECODE_STACK_LOAD_X2(load_fn, element_bytes) \
+  IREE_VM_BYTECODE_STACK_LOAD_X1(load_fn, element_bytes);      \
+  IREE_VM_BYTECODE_STACK_LOAD_LANE(load_fn, element_bytes, 1)
+#define IREE_VM_BYTECODE_STACK_LOAD_X4(load_fn, element_bytes)     \
+  IREE_VM_BYTECODE_STACK_LOAD_X2(load_fn, element_bytes);          \
+  IREE_VM_BYTECODE_STACK_LOAD_LANE(load_fn, 2 * element_bytes, 2); \
+  IREE_VM_BYTECODE_STACK_LOAD_LANE(load_fn, 3 * element_bytes, 3)
+#define IREE_VM_BYTECODE_STACK_LOAD_X8(load_fn, element_bytes)     \
+  IREE_VM_BYTECODE_STACK_LOAD_X4(load_fn, element_bytes);          \
+  IREE_VM_BYTECODE_STACK_LOAD_LANE(load_fn, 4 * element_bytes, 4); \
+  IREE_VM_BYTECODE_STACK_LOAD_LANE(load_fn, 5 * element_bytes, 5); \
+  IREE_VM_BYTECODE_STACK_LOAD_LANE(load_fn, 6 * element_bytes, 6); \
+  IREE_VM_BYTECODE_STACK_LOAD_LANE(load_fn, 7 * element_bytes, 7)
+  switch (format) {
+    case IREE_VM_ISA_MEMORY_FORMAT_I8_X1:
+      IREE_VM_BYTECODE_STACK_LOAD_X1(iree_unaligned_load_le_u8, 1);
+      return;
+    case IREE_VM_ISA_MEMORY_FORMAT_I8_X2:
+      IREE_VM_BYTECODE_STACK_LOAD_X2(iree_unaligned_load_le_u8, 1);
+      return;
+    case IREE_VM_ISA_MEMORY_FORMAT_I8_X4:
+      IREE_VM_BYTECODE_STACK_LOAD_X4(iree_unaligned_load_le_u8, 1);
+      return;
+    case IREE_VM_ISA_MEMORY_FORMAT_I8_X8:
+      IREE_VM_BYTECODE_STACK_LOAD_X8(iree_unaligned_load_le_u8, 1);
+      return;
+    case IREE_VM_ISA_MEMORY_FORMAT_I16_X1:
+      IREE_VM_BYTECODE_STACK_LOAD_X1(iree_unaligned_load_le_u16, 2);
+      return;
+    case IREE_VM_ISA_MEMORY_FORMAT_I16_X2:
+      IREE_VM_BYTECODE_STACK_LOAD_X2(iree_unaligned_load_le_u16, 2);
+      return;
+    case IREE_VM_ISA_MEMORY_FORMAT_I16_X4:
+      IREE_VM_BYTECODE_STACK_LOAD_X4(iree_unaligned_load_le_u16, 2);
+      return;
+    case IREE_VM_ISA_MEMORY_FORMAT_I16_X8:
+      IREE_VM_BYTECODE_STACK_LOAD_X8(iree_unaligned_load_le_u16, 2);
+      return;
+    case IREE_VM_ISA_MEMORY_FORMAT_I32_X1:
+      IREE_VM_BYTECODE_STACK_LOAD_X1(iree_unaligned_load_le_u32, 4);
+      return;
+    case IREE_VM_ISA_MEMORY_FORMAT_I32_X2:
+      IREE_VM_BYTECODE_STACK_LOAD_X2(iree_unaligned_load_le_u32, 4);
+      return;
+    case IREE_VM_ISA_MEMORY_FORMAT_I32_X4:
+      IREE_VM_BYTECODE_STACK_LOAD_X4(iree_unaligned_load_le_u32, 4);
+      return;
+    case IREE_VM_ISA_MEMORY_FORMAT_I32_X8:
+      IREE_VM_BYTECODE_STACK_LOAD_X8(iree_unaligned_load_le_u32, 4);
+      return;
+    case IREE_VM_ISA_MEMORY_FORMAT_I64_X1:
+      IREE_VM_BYTECODE_STACK_LOAD_X1(iree_unaligned_load_le_u64, 8);
+      return;
+    case IREE_VM_ISA_MEMORY_FORMAT_I64_X2:
+      IREE_VM_BYTECODE_STACK_LOAD_X2(iree_unaligned_load_le_u64, 8);
+      return;
+    case IREE_VM_ISA_MEMORY_FORMAT_I64_X4:
+      IREE_VM_BYTECODE_STACK_LOAD_X4(iree_unaligned_load_le_u64, 8);
+      return;
+    default:
+      IREE_VM_BYTECODE_STACK_LOAD_X8(iree_unaligned_load_le_u64, 8);
+      return;
+  }
+#undef IREE_VM_BYTECODE_STACK_LOAD_X8
+#undef IREE_VM_BYTECODE_STACK_LOAD_X4
+#undef IREE_VM_BYTECODE_STACK_LOAD_X2
+#undef IREE_VM_BYTECODE_STACK_LOAD_X1
+#undef IREE_VM_BYTECODE_STACK_LOAD_LANE
+}
+
+// Stores one verified memory.format lane group to |target|. The caller has
+// already proven the complete byte and register ranges.
+static inline void iree_vm_bytecode_stack_store_lanes(
+    uint8_t format, const uint64_t* source_values, uint8_t* target) {
+#define IREE_VM_BYTECODE_STACK_STORE_LANE(store_fn, byte_offset, value_offset) \
+  store_fn(target + byte_offset, source_values[value_offset])
+#define IREE_VM_BYTECODE_STACK_STORE_X1(store_fn, element_bytes) \
+  IREE_VM_BYTECODE_STACK_STORE_LANE(store_fn, 0, 0)
+#define IREE_VM_BYTECODE_STACK_STORE_X2(store_fn, element_bytes) \
+  IREE_VM_BYTECODE_STACK_STORE_X1(store_fn, element_bytes);      \
+  IREE_VM_BYTECODE_STACK_STORE_LANE(store_fn, element_bytes, 1)
+#define IREE_VM_BYTECODE_STACK_STORE_X4(store_fn, element_bytes)     \
+  IREE_VM_BYTECODE_STACK_STORE_X2(store_fn, element_bytes);          \
+  IREE_VM_BYTECODE_STACK_STORE_LANE(store_fn, 2 * element_bytes, 2); \
+  IREE_VM_BYTECODE_STACK_STORE_LANE(store_fn, 3 * element_bytes, 3)
+#define IREE_VM_BYTECODE_STACK_STORE_X8(store_fn, element_bytes)     \
+  IREE_VM_BYTECODE_STACK_STORE_X4(store_fn, element_bytes);          \
+  IREE_VM_BYTECODE_STACK_STORE_LANE(store_fn, 4 * element_bytes, 4); \
+  IREE_VM_BYTECODE_STACK_STORE_LANE(store_fn, 5 * element_bytes, 5); \
+  IREE_VM_BYTECODE_STACK_STORE_LANE(store_fn, 6 * element_bytes, 6); \
+  IREE_VM_BYTECODE_STACK_STORE_LANE(store_fn, 7 * element_bytes, 7)
+  switch (format) {
+    case IREE_VM_ISA_MEMORY_FORMAT_I8_X1:
+      IREE_VM_BYTECODE_STACK_STORE_X1(iree_unaligned_store_le_u8, 1);
+      return;
+    case IREE_VM_ISA_MEMORY_FORMAT_I8_X2:
+      IREE_VM_BYTECODE_STACK_STORE_X2(iree_unaligned_store_le_u8, 1);
+      return;
+    case IREE_VM_ISA_MEMORY_FORMAT_I8_X4:
+      IREE_VM_BYTECODE_STACK_STORE_X4(iree_unaligned_store_le_u8, 1);
+      return;
+    case IREE_VM_ISA_MEMORY_FORMAT_I8_X8:
+      IREE_VM_BYTECODE_STACK_STORE_X8(iree_unaligned_store_le_u8, 1);
+      return;
+    case IREE_VM_ISA_MEMORY_FORMAT_I16_X1:
+      IREE_VM_BYTECODE_STACK_STORE_X1(iree_unaligned_store_le_u16, 2);
+      return;
+    case IREE_VM_ISA_MEMORY_FORMAT_I16_X2:
+      IREE_VM_BYTECODE_STACK_STORE_X2(iree_unaligned_store_le_u16, 2);
+      return;
+    case IREE_VM_ISA_MEMORY_FORMAT_I16_X4:
+      IREE_VM_BYTECODE_STACK_STORE_X4(iree_unaligned_store_le_u16, 2);
+      return;
+    case IREE_VM_ISA_MEMORY_FORMAT_I16_X8:
+      IREE_VM_BYTECODE_STACK_STORE_X8(iree_unaligned_store_le_u16, 2);
+      return;
+    case IREE_VM_ISA_MEMORY_FORMAT_I32_X1:
+      IREE_VM_BYTECODE_STACK_STORE_X1(iree_unaligned_store_le_u32, 4);
+      return;
+    case IREE_VM_ISA_MEMORY_FORMAT_I32_X2:
+      IREE_VM_BYTECODE_STACK_STORE_X2(iree_unaligned_store_le_u32, 4);
+      return;
+    case IREE_VM_ISA_MEMORY_FORMAT_I32_X4:
+      IREE_VM_BYTECODE_STACK_STORE_X4(iree_unaligned_store_le_u32, 4);
+      return;
+    case IREE_VM_ISA_MEMORY_FORMAT_I32_X8:
+      IREE_VM_BYTECODE_STACK_STORE_X8(iree_unaligned_store_le_u32, 4);
+      return;
+    case IREE_VM_ISA_MEMORY_FORMAT_I64_X1:
+      IREE_VM_BYTECODE_STACK_STORE_X1(iree_unaligned_store_le_u64, 8);
+      return;
+    case IREE_VM_ISA_MEMORY_FORMAT_I64_X2:
+      IREE_VM_BYTECODE_STACK_STORE_X2(iree_unaligned_store_le_u64, 8);
+      return;
+    case IREE_VM_ISA_MEMORY_FORMAT_I64_X4:
+      IREE_VM_BYTECODE_STACK_STORE_X4(iree_unaligned_store_le_u64, 8);
+      return;
+    default:
+      IREE_VM_BYTECODE_STACK_STORE_X8(iree_unaligned_store_le_u64, 8);
+      return;
+  }
+#undef IREE_VM_BYTECODE_STACK_STORE_X8
+#undef IREE_VM_BYTECODE_STACK_STORE_X4
+#undef IREE_VM_BYTECODE_STACK_STORE_X2
+#undef IREE_VM_BYTECODE_STACK_STORE_X1
+#undef IREE_VM_BYTECODE_STACK_STORE_LANE
+}
+
+#endif  // IREE_VM_BYTECODE_INTERPRETER_STACK_H_

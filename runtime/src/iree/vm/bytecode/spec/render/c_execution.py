@@ -14,16 +14,25 @@ from execution import ExecutableInstruction
 from model.isa import Instruction, InstructionFieldRole
 from model.isa.validation import (
     ALLOWED_RANGE,
+    ALLOWED_VALUES,
     ANY_BITS,
     CONSTANT_POOL_ORDINAL,
     GLOBAL_ORDINAL,
+    LOCAL_BYTES_FIXED_BASE,
+    LOCAL_BYTES_RANGE_BASE,
+    LOCAL_BYTES_RANGE_LENGTH,
+    LOCAL_BYTES_RANGE_MEMORY_FORMAT,
+    LOCAL_BYTES_REPEATED_BASE,
+    LOCAL_BYTES_REPEATED_COUNT,
     REGISTER_REF,
     REGISTER_VALUE,
     RODATA_ORDINAL,
+    RODATA_STATIC_OFFSET,
     SELECTOR,
+    VALUE_REGISTER_RANGE_FROM_MEMORY_FORMAT,
     ZERO,
 )
-from model.schema import EntityReference, ScalarEncoding
+from model.schema import EntityReference, FieldReference, ScalarEncoding
 from model.specification import Projection
 
 
@@ -119,6 +128,26 @@ def _validate_verification_form(
             (InstructionFieldRole.PADDING,),
             array_length=array_length,
         )
+
+    def require_lane_range(base_field: str, format_field: str) -> None:
+        if len(instruction.constraints) != 1:
+            raise ValueError(
+                f"{instruction.mnemonic}: lane transfer requires exactly one "
+                "record constraint"
+            )
+        constraint = instruction.constraints[0]
+        expected_arguments = (
+            FieldReference(base_field),
+            FieldReference(format_field),
+        )
+        if (
+            constraint.rule_id != VALUE_REGISTER_RANGE_FROM_MEMORY_FORMAT.entity_id
+            or tuple(constraint.arguments) != expected_arguments
+        ):
+            raise ValueError(
+                f"{instruction.mnemonic}: lane-range constraint does not match "
+                "its runtime verification form"
+            )
 
     if verification_form in ("CONTROL_BLOCK", "CONTROL_RETURN"):
         if instruction.byte_length != 4:
@@ -339,6 +368,228 @@ def _validate_verification_form(
             SELECTOR.entity_id,
             (InstructionFieldRole.IMMEDIATE,),
             rule_arguments=(EntityReference(selector_table_id),),
+        )
+    elif verification_form == "STACK_LOAD":
+        if instruction.byte_length != 8:
+            raise ValueError(f"{instruction.mnemonic}: stack load is not 8 bytes")
+        require_value(1)
+        require_field(
+            2,
+            2,
+            LOCAL_BYTES_RANGE_MEMORY_FORMAT.entity_id,
+            (InstructionFieldRole.IMMEDIATE,),
+            rule_arguments=(FieldReference("format_u8"),),
+        )
+        require_field(
+            4,
+            1,
+            SELECTOR.entity_id,
+            (InstructionFieldRole.IMMEDIATE,),
+            rule_arguments=(EntityReference("core.selector.memory.format"),),
+        )
+        require_zero(5, 1, array_length=3)
+        require_lane_range("dst_v8", "format_u8")
+    elif verification_form == "STACK_STORE":
+        if instruction.byte_length != 8:
+            raise ValueError(f"{instruction.mnemonic}: stack store is not 8 bytes")
+        require_zero(1, 1)
+        require_field(
+            2,
+            2,
+            LOCAL_BYTES_RANGE_MEMORY_FORMAT.entity_id,
+            (InstructionFieldRole.IMMEDIATE,),
+            rule_arguments=(FieldReference("format_u8"),),
+        )
+        require_value(4)
+        require_field(
+            5,
+            1,
+            SELECTOR.entity_id,
+            (InstructionFieldRole.IMMEDIATE,),
+            rule_arguments=(EntityReference("core.selector.memory.format"),),
+        )
+        require_zero(6, 2)
+        require_lane_range("src_v8", "format_u8")
+    elif verification_form in ("STACK_LOAD_INDEXED", "STACK_STORE_INDEXED"):
+        if instruction.byte_length != 8:
+            raise ValueError(
+                f"{instruction.mnemonic}: indexed stack access is not 8 bytes"
+            )
+        is_load = verification_form == "STACK_LOAD_INDEXED"
+        if is_load:
+            require_value(1)
+        else:
+            require_zero(1, 1)
+        require_field(
+            2,
+            2,
+            LOCAL_BYTES_RANGE_MEMORY_FORMAT.entity_id,
+            (InstructionFieldRole.IMMEDIATE,),
+            rule_arguments=(FieldReference("format_u8"),),
+        )
+        require_value(4)
+        require_field(
+            5,
+            1,
+            ALLOWED_RANGE.entity_id,
+            (InstructionFieldRole.IMMEDIATE,),
+            rule_arguments=(1, 255),
+        )
+        register_offset = 1 if is_load else 6
+        format_offset = 6 if is_load else 7
+        if not is_load:
+            require_value(register_offset)
+        require_field(
+            format_offset,
+            1,
+            SELECTOR.entity_id,
+            (InstructionFieldRole.IMMEDIATE,),
+            rule_arguments=(EntityReference("core.selector.memory.format"),),
+        )
+        if is_load:
+            require_zero(7, 1)
+        require_lane_range("dst_v8" if is_load else "src_v8", "format_u8")
+    elif verification_form == "STACK_FILL":
+        if instruction.byte_length != 8:
+            raise ValueError(f"{instruction.mnemonic}: stack fill is not 8 bytes")
+        require_zero(1, 1)
+        require_field(
+            2,
+            2,
+            LOCAL_BYTES_RANGE_BASE.entity_id,
+            (InstructionFieldRole.IMMEDIATE,),
+            rule_arguments=(FieldReference("length_u16"),),
+        )
+        require_field(
+            4,
+            2,
+            LOCAL_BYTES_RANGE_LENGTH.entity_id,
+            (InstructionFieldRole.IMMEDIATE,),
+        )
+        require_value(6)
+        require_field(
+            7,
+            1,
+            ALLOWED_VALUES.entity_id,
+            (InstructionFieldRole.IMMEDIATE,),
+            rule_arguments=((1, 2, 4, 8),),
+        )
+    elif verification_form in ("STACK_COPY", "STACK_COMPARE"):
+        if instruction.byte_length != 8:
+            raise ValueError(
+                f"{instruction.mnemonic}: stack range operation is not 8 bytes"
+            )
+        if verification_form == "STACK_COPY":
+            require_zero(1, 1)
+        else:
+            require_value(1)
+        for offset in (2, 4):
+            require_field(
+                offset,
+                2,
+                LOCAL_BYTES_RANGE_BASE.entity_id,
+                (InstructionFieldRole.IMMEDIATE,),
+                rule_arguments=(FieldReference("length_u16"),),
+            )
+        require_field(
+            6,
+            2,
+            LOCAL_BYTES_RANGE_LENGTH.entity_id,
+            (InstructionFieldRole.IMMEDIATE,),
+        )
+    elif verification_form == "STACK_COPY_RODATA":
+        if instruction.byte_length != 12:
+            raise ValueError(
+                f"{instruction.mnemonic}: stack rodata copy is not 12 bytes"
+            )
+        require_zero(1, 1)
+        require_field(
+            2,
+            2,
+            LOCAL_BYTES_RANGE_BASE.entity_id,
+            (InstructionFieldRole.IMMEDIATE,),
+            rule_arguments=(FieldReference("length_u16"),),
+        )
+        require_field(
+            4,
+            2,
+            RODATA_ORDINAL.entity_id,
+            (InstructionFieldRole.IMMEDIATE,),
+        )
+        require_field(
+            6,
+            2,
+            LOCAL_BYTES_RANGE_LENGTH.entity_id,
+            (InstructionFieldRole.IMMEDIATE,),
+        )
+        require_field(
+            8,
+            4,
+            RODATA_STATIC_OFFSET.entity_id,
+            (InstructionFieldRole.IMMEDIATE,),
+            rule_arguments=(
+                FieldReference("rodata_u16"),
+                FieldReference("length_u16"),
+            ),
+        )
+    elif verification_form in ("STACK_CONST_S16_I32", "STACK_CONST_S16_I64"):
+        if instruction.byte_length != 8:
+            raise ValueError(
+                f"{instruction.mnemonic}: repeated stack constant is not 8 bytes"
+            )
+        element_byte_length = 4 if verification_form.endswith("I32") else 8
+        require_zero(1, 1)
+        require_field(
+            2,
+            2,
+            LOCAL_BYTES_REPEATED_BASE.entity_id,
+            (InstructionFieldRole.IMMEDIATE,),
+            rule_arguments=(
+                FieldReference("count_u16"),
+                element_byte_length,
+                element_byte_length,
+            ),
+        )
+        require_field(
+            4,
+            2,
+            LOCAL_BYTES_REPEATED_COUNT.entity_id,
+            (InstructionFieldRole.IMMEDIATE,),
+        )
+        require_field(
+            6,
+            2,
+            ANY_BITS.entity_id,
+            (InstructionFieldRole.IMMEDIATE,),
+        )
+    elif verification_form in ("STACK_PACK_I32", "STACK_PACK_I64"):
+        immediate_byte_length = 2 if verification_form.endswith("I32") else 4
+        destination_byte_length = 4 if verification_form.endswith("I32") else 8
+        payload_byte_length = instruction.byte_length - 4
+        if payload_byte_length <= 0 or payload_byte_length % immediate_byte_length:
+            raise ValueError(f"{instruction.mnemonic}: stack pack payload is malformed")
+        lane_count = payload_byte_length // immediate_byte_length
+        if lane_count not in (2, 4, 8):
+            raise ValueError(
+                f"{instruction.mnemonic}: stack pack lane count is unsupported"
+            )
+        require_zero(1, 1)
+        require_field(
+            2,
+            2,
+            LOCAL_BYTES_FIXED_BASE.entity_id,
+            (InstructionFieldRole.IMMEDIATE,),
+            rule_arguments=(
+                destination_byte_length * lane_count,
+                destination_byte_length,
+            ),
+        )
+        require_field(
+            4,
+            immediate_byte_length,
+            ANY_BITS.entity_id,
+            (InstructionFieldRole.IMMEDIATE,),
+            array_length=lane_count,
         )
     else:
         raise ValueError(

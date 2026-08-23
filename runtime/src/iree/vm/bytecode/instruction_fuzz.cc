@@ -36,7 +36,7 @@
 namespace {
 
 constexpr iree_host_size_t kInvocationStorageSize = 16 * 1024;
-constexpr iree_host_size_t kMaximumRecordLength = 12;
+constexpr iree_host_size_t kMaximumRecordLength = 36;
 
 #define IREE_VM_BYTECODE_EXECUTION_INFO_ROW(record_length, form) record_length,
 constexpr uint8_t kRecordLengths[256] = {
@@ -125,6 +125,7 @@ void FillScalarFunction(const uint8_t* record, uint8_t record_length,
       function.row->value_register_count_u16 != 6) {
     std::abort();
   }
+  function.row->local_byte_length_u16 = 512;
 
   uint8_t* cursor = function.bytecode;
   const uint8_t* const end =

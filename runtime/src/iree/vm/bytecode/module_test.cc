@@ -24,6 +24,8 @@
 #include "iree/vm/bytecode/wire/core/global.h"
 #include "iree/vm/bytecode/wire/core/integer.h"
 #include "iree/vm/bytecode/wire/core/opcodes.h"
+#include "iree/vm/bytecode/wire/core/selectors.h"
+#include "iree/vm/bytecode/wire/core/stack.h"
 #include "iree/vm/bytecode/wire/module_format.h"
 #include "iree/vm/process.h"
 
@@ -627,6 +629,199 @@ TEST(VMBytecodeModuleTest,
   ceildiv_u64.src_v8 = 1;
   ceildiv_u64.log2_u8 = 64;
   expect_rejected(ceildiv_u64);
+
+  iree_vm_environment_free(environment);
+}
+
+TEST(VMBytecodeModuleTest, RejectsMalformedStackInstructions) {
+  iree_vm_environment_t* environment = nullptr;
+  IREE_ASSERT_OK(
+      iree_vm_environment_allocate(iree_allocator_system(), &environment));
+  const auto expect_rejected = [&](const auto& record) {
+    std::vector<uint8_t> image = BuildScalarStateModuleImage();
+    const MutableFunctionImage function = FindFunctionImage(&image, 1);
+    ASSERT_NE(function.row, nullptr);
+    function.row->local_byte_length_u16 = 64;
+
+    uint8_t* cursor = function.bytecode;
+    const uint8_t* const end =
+        function.bytecode + function.row->bytecode_length_u32;
+    const iree_vm_isa_control_block_record_t block = {
+        IREE_VM_ISA_CORE_OPCODE_CONTROL_BLOCK, {0, 0, 0}};
+    std::memcpy(cursor, &block, sizeof(block));
+    cursor += sizeof(block);
+    ASSERT_LE(sizeof(record), static_cast<size_t>(end - cursor));
+    std::memcpy(cursor, &record, sizeof(record));
+    cursor += sizeof(record);
+    const iree_vm_isa_constant_zero_record_t zero = {
+        IREE_VM_ISA_CORE_OPCODE_CONSTANT_ZERO, 0, 0};
+    while (cursor < end - sizeof(iree_vm_isa_control_return_record_t)) {
+      std::memcpy(cursor, &zero, sizeof(zero));
+      cursor += sizeof(zero);
+    }
+    const iree_vm_isa_control_return_record_t return_record = {
+        IREE_VM_ISA_CORE_OPCODE_CONTROL_RETURN, {0, 0, 0}};
+    std::memcpy(cursor, &return_record, sizeof(return_record));
+    cursor += sizeof(return_record);
+    ASSERT_EQ(cursor, end);
+
+    iree_vm_module_t* module = nullptr;
+    IREE_EXPECT_STATUS_IS(
+        IREE_STATUS_INVALID_ARGUMENT,
+        iree_vm_bytecode_module_create(
+            environment, IREE_SV("malformed_stack"),
+            {iree_make_const_byte_span(image.data(), image.size()),
+             iree_allocator_null()},
+            iree_allocator_system(), &module));
+    EXPECT_EQ(module, nullptr);
+    iree_vm_module_release(module);
+  };
+
+  iree_vm_isa_stack_load_record_t load = {};
+  load.opcode_u8 = IREE_VM_ISA_CORE_OPCODE_STACK_LOAD;
+  load.format_u8 = IREE_VM_ISA_MEMORY_FORMAT_I64_X1;
+  load.zero_padding_u8[0] = 1;
+  expect_rejected(load);
+  load.zero_padding_u8[0] = 0;
+  load.format_u8 = 0x10;
+  expect_rejected(load);
+  load.format_u8 = IREE_VM_ISA_MEMORY_FORMAT_I64_X1;
+  load.base_u16 = 57;
+  expect_rejected(load);
+  load.base_u16 = 0;
+  load.dst_v8 = 6;
+  expect_rejected(load);
+
+  iree_vm_isa_stack_store_record_t store = {};
+  store.opcode_u8 = IREE_VM_ISA_CORE_OPCODE_STACK_STORE;
+  store.format_u8 = IREE_VM_ISA_MEMORY_FORMAT_I64_X1;
+  store.zero_padding_u16 = 1;
+  expect_rejected(store);
+  store.zero_padding_u16 = 0;
+  store.src_v8 = 6;
+  expect_rejected(store);
+
+  iree_vm_isa_stack_load_indexed_record_t load_indexed = {};
+  load_indexed.opcode_u8 = IREE_VM_ISA_CORE_OPCODE_STACK_LOAD_INDEXED;
+  load_indexed.scale_u8 = 1;
+  load_indexed.format_u8 = IREE_VM_ISA_MEMORY_FORMAT_I64_X1;
+  load_indexed.scale_u8 = 0;
+  expect_rejected(load_indexed);
+  load_indexed.scale_u8 = 1;
+  load_indexed.zero_padding_u8 = 1;
+  expect_rejected(load_indexed);
+  load_indexed.zero_padding_u8 = 0;
+  load_indexed.index_v8 = 6;
+  expect_rejected(load_indexed);
+
+  iree_vm_isa_stack_store_indexed_record_t store_indexed = {};
+  store_indexed.opcode_u8 = IREE_VM_ISA_CORE_OPCODE_STACK_STORE_INDEXED;
+  store_indexed.scale_u8 = 1;
+  store_indexed.format_u8 = IREE_VM_ISA_MEMORY_FORMAT_I64_X1;
+  store_indexed.zero_padding_u8 = 1;
+  expect_rejected(store_indexed);
+  store_indexed.zero_padding_u8 = 0;
+  store_indexed.src_v8 = 6;
+  expect_rejected(store_indexed);
+
+  iree_vm_isa_stack_fill_record_t fill = {};
+  fill.opcode_u8 = IREE_VM_ISA_CORE_OPCODE_STACK_FILL;
+  fill.length_u16 = 8;
+  fill.pattern_width_u8 = 8;
+  fill.zero_padding_u8 = 1;
+  expect_rejected(fill);
+  fill.zero_padding_u8 = 0;
+  fill.pattern_width_u8 = 3;
+  expect_rejected(fill);
+  fill.pattern_width_u8 = 8;
+  fill.target_base_u16 = 60;
+  expect_rejected(fill);
+  fill.target_base_u16 = 0;
+  fill.pattern_v8 = 6;
+  expect_rejected(fill);
+
+  iree_vm_isa_stack_copy_record_t copy = {};
+  copy.opcode_u8 = IREE_VM_ISA_CORE_OPCODE_STACK_COPY;
+  copy.source_u16 = 8;
+  copy.length_u16 = 8;
+  copy.zero_padding_u8 = 1;
+  expect_rejected(copy);
+  copy.zero_padding_u8 = 0;
+  copy.target_u16 = 60;
+  expect_rejected(copy);
+  copy.target_u16 = 0;
+  copy.source_u16 = 60;
+  expect_rejected(copy);
+
+  iree_vm_isa_stack_compare_record_t compare = {};
+  compare.opcode_u8 = IREE_VM_ISA_CORE_OPCODE_STACK_COMPARE;
+  compare.rhs_u16 = 8;
+  compare.length_u16 = 8;
+  compare.dst_v8 = 6;
+  expect_rejected(compare);
+  compare.dst_v8 = 0;
+  compare.lhs_u16 = 60;
+  expect_rejected(compare);
+  compare.lhs_u16 = 0;
+  compare.rhs_u16 = 60;
+  expect_rejected(compare);
+
+  iree_vm_isa_stack_copy_rodata_record_t copy_rodata = {};
+  copy_rodata.opcode_u8 = IREE_VM_ISA_CORE_OPCODE_STACK_COPY_RODATA;
+  copy_rodata.length_u16 = 4;
+  copy_rodata.zero_padding_u8 = 1;
+  expect_rejected(copy_rodata);
+  copy_rodata.zero_padding_u8 = 0;
+  copy_rodata.rodata_u16 = 1;
+  expect_rejected(copy_rodata);
+  copy_rodata.rodata_u16 = 0;
+  copy_rodata.source_offset_u32 = 8;
+  expect_rejected(copy_rodata);
+  copy_rodata.source_offset_u32 = 0;
+  copy_rodata.target_u16 = 62;
+  expect_rejected(copy_rodata);
+
+  iree_vm_isa_stack_const_s16_i32_record_t const_i32 = {};
+  const_i32.opcode_u8 = IREE_VM_ISA_CORE_OPCODE_STACK_CONST_S16_I32;
+  const_i32.count_u16 = 2;
+  const_i32.zero_padding_u8 = 1;
+  expect_rejected(const_i32);
+  const_i32.zero_padding_u8 = 0;
+  const_i32.target_u16 = 2;
+  expect_rejected(const_i32);
+  const_i32.target_u16 = 60;
+  expect_rejected(const_i32);
+
+  iree_vm_isa_stack_const_s16_i64_record_t const_i64 = {};
+  const_i64.opcode_u8 = IREE_VM_ISA_CORE_OPCODE_STACK_CONST_S16_I64;
+  const_i64.count_u16 = 2;
+  const_i64.zero_padding_u8 = 1;
+  expect_rejected(const_i64);
+  const_i64.zero_padding_u8 = 0;
+  const_i64.target_u16 = 4;
+  expect_rejected(const_i64);
+  const_i64.target_u16 = 56;
+  expect_rejected(const_i64);
+
+  iree_vm_isa_stack_pack_i32_u16_x8_record_t pack_i32 = {};
+  pack_i32.opcode_u8 = IREE_VM_ISA_CORE_OPCODE_STACK_PACK_I32_U16_X8;
+  pack_i32.zero_padding_u8 = 1;
+  expect_rejected(pack_i32);
+  pack_i32.zero_padding_u8 = 0;
+  pack_i32.target_u16 = 2;
+  expect_rejected(pack_i32);
+  pack_i32.target_u16 = 36;
+  expect_rejected(pack_i32);
+
+  iree_vm_isa_stack_pack_i64_u32_x8_record_t pack_i64 = {};
+  pack_i64.opcode_u8 = IREE_VM_ISA_CORE_OPCODE_STACK_PACK_I64_U32_X8;
+  pack_i64.zero_padding_u8 = 1;
+  expect_rejected(pack_i64);
+  pack_i64.zero_padding_u8 = 0;
+  pack_i64.target_u16 = 4;
+  expect_rejected(pack_i64);
+  pack_i64.target_u16 = 8;
+  expect_rejected(pack_i64);
 
   iree_vm_environment_free(environment);
 }

@@ -8,9 +8,11 @@
 
 #include <string.h>
 
+#include "iree/vm/buffer.h"
 #include "iree/vm/bytecode/interpreter_float.h"
 #include "iree/vm/bytecode/interpreter_float_math.h"
 #include "iree/vm/bytecode/interpreter_integer.h"
+#include "iree/vm/bytecode/interpreter_stack.h"
 #include "iree/vm/bytecode/module_reader.h"
 #include "iree/vm/bytecode/wire/core/buffer.h"
 #include "iree/vm/bytecode/wire/core/constant.h"
@@ -20,6 +22,7 @@
 #include "iree/vm/bytecode/wire/core/global.h"
 #include "iree/vm/bytecode/wire/core/integer.h"
 #include "iree/vm/bytecode/wire/core/opcodes.h"
+#include "iree/vm/bytecode/wire/core/stack.h"
 #include "iree/vm/bytecode/wire/core/value.h"
 #include "iree/vm/invocation_storage.h"
 
@@ -146,6 +149,86 @@ static inline void iree_vm_bytecode_copy_direct_values(uint64_t* target,
   }
 }
 
+// Resolves one verified indexed local-byte access. Static verification has
+// already proven |base| plus |access_length| fits the local byte array and
+// |scale| is nonzero. Division folds the architectural u16 index ceiling and
+// scaled-range requirement into one failure branch before any mutation.
+static iree_status_t iree_vm_bytecode_stack_resolve_index(
+    uint16_t local_byte_length, uint16_t base, uint8_t access_length,
+    uint64_t index, uint8_t scale, uint16_t* out_effective_base) {
+  const uint32_t available = (uint32_t)local_byte_length - access_length - base;
+  if (IREE_UNLIKELY(index > available / scale)) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "indexed stack access is out of range");
+  }
+  *out_effective_base = (uint16_t)(base + (uint32_t)index * scale);
+  return iree_ok_status();
+}
+
+// Repeats the low |pattern_width| bytes of |pattern| across |target|. The
+// caller handles an empty range before forming |target|.
+static void iree_vm_bytecode_stack_fill(uint8_t* target, uint16_t length,
+                                        uint64_t pattern,
+                                        uint8_t pattern_width) {
+  if (pattern_width == 1) {
+    memset(target, (uint8_t)pattern, length);
+    return;
+  }
+  uint64_t expanded_pattern = pattern;
+  if (pattern_width == 2) {
+    expanded_pattern &= UINT64_C(0xFFFF);
+    expanded_pattern |= expanded_pattern << 16;
+    expanded_pattern |= expanded_pattern << 32;
+  } else if (pattern_width == 4) {
+    expanded_pattern &= UINT64_C(0xFFFFFFFF);
+    expanded_pattern |= expanded_pattern << 32;
+  }
+  while (length >= sizeof(expanded_pattern)) {
+    iree_unaligned_store_le_u64(target, expanded_pattern);
+    target += sizeof(expanded_pattern);
+    length -= sizeof(expanded_pattern);
+  }
+  if (length != 0) {
+    uint8_t tail[sizeof(expanded_pattern)];
+    iree_unaligned_store_le_u64(tail, expanded_pattern);
+    memcpy(target, tail, length);
+  }
+}
+
+static void iree_vm_bytecode_stack_const_s16_i32(uint8_t* target,
+                                                 uint16_t count,
+                                                 int16_t immediate) {
+  const uint32_t value = (uint32_t)(int32_t)immediate;
+  for (uint16_t i = 0; i < count; ++i) {
+    iree_unaligned_store_le_u32(target + i * sizeof(value), value);
+  }
+}
+
+static void iree_vm_bytecode_stack_const_s16_i64(uint8_t* target,
+                                                 uint16_t count,
+                                                 int16_t immediate) {
+  const uint64_t value = (uint64_t)(int64_t)immediate;
+  for (uint16_t i = 0; i < count; ++i) {
+    iree_unaligned_store_le_u64(target + i * sizeof(value), value);
+  }
+}
+
+static void iree_vm_bytecode_stack_pack_i32(uint8_t* target,
+                                            const uint16_t* immediates,
+                                            uint8_t count) {
+  for (uint8_t i = 0; i < count; ++i) {
+    iree_unaligned_store_le_u32(target + i * sizeof(uint32_t), immediates[i]);
+  }
+}
+
+static void iree_vm_bytecode_stack_pack_i64(uint8_t* target,
+                                            const uint32_t* immediates,
+                                            uint8_t count) {
+  for (uint8_t i = 0; i < count; ++i) {
+    iree_unaligned_store_le_u64(target + i * sizeof(uint64_t), immediates[i]);
+  }
+}
+
 static iree_status_t iree_vm_bytecode_publish_results(
     const iree_vm_bytecode_module_t* module,
     const iree_vm_bytecode_v0_function_row_t* function,
@@ -207,9 +290,11 @@ iree_status_t iree_vm_bytecode_function_start(
   uint8_t* frame_checkpoint = invocation->stack_cursor;
   uint64_t* values = NULL;
   iree_vm_ref_t* refs = NULL;
+  uint8_t* local_bytes = NULL;
   // Verification requires the register bank to cover every result, so the
   // final comparison is equality for every published image.
-  if (function->ref_register_count_u16 == 0 &&
+  if (function->local_byte_length_u16 == 0 &&
+      function->ref_register_count_u16 == 0 &&
       function->value_register_count_u16 <= 16 &&
       function->value_register_count_u16 <= signature->result_value_count_u16) {
     // Result banks are invocation-owned staging until the root succeeds. A
@@ -219,16 +304,21 @@ iree_status_t iree_vm_bytecode_function_start(
   } else {
     const iree_host_size_t frame_storage_size =
         function->value_register_count_u16 * sizeof(uint64_t) +
-        function->ref_register_count_u16 * sizeof(iree_vm_ref_t);
+        function->ref_register_count_u16 * sizeof(iree_vm_ref_t) +
+        function->local_byte_length_u16;
     uint8_t* frame_storage = NULL;
     IREE_RETURN_IF_ERROR(iree_vm_invocation_stack_reserve(
         invocation, frame_storage_size,
         iree_max(iree_alignof(uint64_t), iree_alignof(iree_vm_ref_t)),
         &frame_checkpoint, &frame_storage));
     values = (uint64_t*)frame_storage;
+    uint8_t* ref_storage =
+        frame_storage + function->value_register_count_u16 * sizeof(uint64_t);
     if (function->ref_register_count_u16) {
-      refs = (iree_vm_ref_t*)(values + function->value_register_count_u16);
+      refs = (iree_vm_ref_t*)ref_storage;
     }
+    local_bytes =
+        ref_storage + function->ref_register_count_u16 * sizeof(iree_vm_ref_t);
   }
   for (uint16_t i = 0; i < function->ref_register_count_u16; ++i) {
     refs[i] = iree_vm_ref_null();
@@ -869,6 +959,161 @@ iree_status_t iree_vm_bytecode_function_start(
     values[record->dst_v8] = result;
     IREE_VM_BYTECODE_DISPATCH_NEXT(
         iree_vm_isa_conversion_float_to_integer_record_t);
+  }
+  IREE_VM_BYTECODE_DISPATCH_CASE(STACK_LOAD, stack_load) {
+    const iree_vm_isa_stack_load_record_t* record =
+        (const iree_vm_isa_stack_load_record_t*)record_data;
+    iree_vm_bytecode_stack_load_lanes(record->format_u8,
+                                      local_bytes + record->base_u16,
+                                      values + record->dst_v8);
+    IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_isa_stack_load_record_t);
+  }
+  IREE_VM_BYTECODE_DISPATCH_CASE(STACK_STORE, stack_store) {
+    const iree_vm_isa_stack_store_record_t* record =
+        (const iree_vm_isa_stack_store_record_t*)record_data;
+    iree_vm_bytecode_stack_store_lanes(record->format_u8,
+                                       values + record->src_v8,
+                                       local_bytes + record->base_u16);
+    IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_isa_stack_store_record_t);
+  }
+  IREE_VM_BYTECODE_DISPATCH_CASE(STACK_LOAD_INDEXED, stack_load_indexed) {
+    const iree_vm_isa_stack_load_indexed_record_t* record =
+        (const iree_vm_isa_stack_load_indexed_record_t*)record_data;
+    const uint8_t access_length =
+        (uint8_t)(1u << ((record->format_u8 >> 2) + (record->format_u8 & 3u)));
+    uint16_t effective_base = 0;
+    status = iree_vm_bytecode_stack_resolve_index(
+        function->local_byte_length_u16, record->base_u16, access_length,
+        values[record->index_v8], record->scale_u8, &effective_base);
+    if (!iree_status_is_ok(status)) {
+      IREE_VM_BYTECODE_DISPATCH_TERMINATE();
+    }
+    iree_vm_bytecode_stack_load_lanes(record->format_u8,
+                                      local_bytes + effective_base,
+                                      values + record->dst_v8);
+    IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_isa_stack_load_indexed_record_t);
+  }
+  IREE_VM_BYTECODE_DISPATCH_CASE(STACK_STORE_INDEXED, stack_store_indexed) {
+    const iree_vm_isa_stack_store_indexed_record_t* record =
+        (const iree_vm_isa_stack_store_indexed_record_t*)record_data;
+    const uint8_t access_length =
+        (uint8_t)(1u << ((record->format_u8 >> 2) + (record->format_u8 & 3u)));
+    uint16_t effective_base = 0;
+    status = iree_vm_bytecode_stack_resolve_index(
+        function->local_byte_length_u16, record->base_u16, access_length,
+        values[record->index_v8], record->scale_u8, &effective_base);
+    if (!iree_status_is_ok(status)) {
+      IREE_VM_BYTECODE_DISPATCH_TERMINATE();
+    }
+    iree_vm_bytecode_stack_store_lanes(record->format_u8,
+                                       values + record->src_v8,
+                                       local_bytes + effective_base);
+    IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_isa_stack_store_indexed_record_t);
+  }
+  IREE_VM_BYTECODE_DISPATCH_CASE(STACK_FILL, stack_fill) {
+    const iree_vm_isa_stack_fill_record_t* record =
+        (const iree_vm_isa_stack_fill_record_t*)record_data;
+    if (record->length_u16 != 0) {
+      iree_vm_bytecode_stack_fill(
+          local_bytes + record->target_base_u16, record->length_u16,
+          values[record->pattern_v8], record->pattern_width_u8);
+    }
+    IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_isa_stack_fill_record_t);
+  }
+  IREE_VM_BYTECODE_DISPATCH_CASE(STACK_COPY, stack_copy) {
+    const iree_vm_isa_stack_copy_record_t* record =
+        (const iree_vm_isa_stack_copy_record_t*)record_data;
+    if (record->length_u16 != 0) {
+      memmove(local_bytes + record->target_u16,
+              local_bytes + record->source_u16, record->length_u16);
+    }
+    IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_isa_stack_copy_record_t);
+  }
+  IREE_VM_BYTECODE_DISPATCH_CASE(STACK_COMPARE, stack_compare) {
+    const iree_vm_isa_stack_compare_record_t* record =
+        (const iree_vm_isa_stack_compare_record_t*)record_data;
+    int ordering = 0;
+    if (record->length_u16 != 0) {
+      ordering = memcmp(local_bytes + record->lhs_u16,
+                        local_bytes + record->rhs_u16, record->length_u16);
+    }
+    values[record->dst_v8] = ordering < 0   ? UINT32_MAX
+                             : ordering > 0 ? UINT32_C(1)
+                                            : UINT32_C(0);
+    IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_isa_stack_compare_record_t);
+  }
+  IREE_VM_BYTECODE_DISPATCH_CASE(STACK_COPY_RODATA, stack_copy_rodata) {
+    const iree_vm_isa_stack_copy_rodata_record_t* record =
+        (const iree_vm_isa_stack_copy_rodata_record_t*)record_data;
+    if (record->length_u16 != 0) {
+      const uint8_t* source = (const uint8_t*)iree_vm_buffer_const_data(
+          &module->rodata_roots[record->rodata_u16]);
+      memcpy(local_bytes + record->target_u16,
+             source + record->source_offset_u32, record->length_u16);
+    }
+    IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_isa_stack_copy_rodata_record_t);
+  }
+  IREE_VM_BYTECODE_DISPATCH_CASE(STACK_CONST_S16_I32, stack_const_s16_i32) {
+    const iree_vm_isa_stack_const_s16_i32_record_t* record =
+        (const iree_vm_isa_stack_const_s16_i32_record_t*)record_data;
+    if (record->count_u16 != 0) {
+      iree_vm_bytecode_stack_const_s16_i32(local_bytes + record->target_u16,
+                                           record->count_u16,
+                                           record->immediate_i16);
+    }
+    IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_isa_stack_const_s16_i32_record_t);
+  }
+  IREE_VM_BYTECODE_DISPATCH_CASE(STACK_CONST_S16_I64, stack_const_s16_i64) {
+    const iree_vm_isa_stack_const_s16_i64_record_t* record =
+        (const iree_vm_isa_stack_const_s16_i64_record_t*)record_data;
+    if (record->count_u16 != 0) {
+      iree_vm_bytecode_stack_const_s16_i64(local_bytes + record->target_u16,
+                                           record->count_u16,
+                                           record->immediate_i16);
+    }
+    IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_isa_stack_const_s16_i64_record_t);
+  }
+  IREE_VM_BYTECODE_DISPATCH_CASE(STACK_PACK_I32_U16_X2, stack_pack_i32_u16_x2) {
+    const iree_vm_isa_stack_pack_i32_u16_x2_record_t* record =
+        (const iree_vm_isa_stack_pack_i32_u16_x2_record_t*)record_data;
+    iree_vm_bytecode_stack_pack_i32(local_bytes + record->target_u16,
+                                    record->immediates_le, 2);
+    IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_isa_stack_pack_i32_u16_x2_record_t);
+  }
+  IREE_VM_BYTECODE_DISPATCH_CASE(STACK_PACK_I32_U16_X4, stack_pack_i32_u16_x4) {
+    const iree_vm_isa_stack_pack_i32_u16_x4_record_t* record =
+        (const iree_vm_isa_stack_pack_i32_u16_x4_record_t*)record_data;
+    iree_vm_bytecode_stack_pack_i32(local_bytes + record->target_u16,
+                                    record->immediates_le, 4);
+    IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_isa_stack_pack_i32_u16_x4_record_t);
+  }
+  IREE_VM_BYTECODE_DISPATCH_CASE(STACK_PACK_I32_U16_X8, stack_pack_i32_u16_x8) {
+    const iree_vm_isa_stack_pack_i32_u16_x8_record_t* record =
+        (const iree_vm_isa_stack_pack_i32_u16_x8_record_t*)record_data;
+    iree_vm_bytecode_stack_pack_i32(local_bytes + record->target_u16,
+                                    record->immediates_le, 8);
+    IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_isa_stack_pack_i32_u16_x8_record_t);
+  }
+  IREE_VM_BYTECODE_DISPATCH_CASE(STACK_PACK_I64_U32_X2, stack_pack_i64_u32_x2) {
+    const iree_vm_isa_stack_pack_i64_u32_x2_record_t* record =
+        (const iree_vm_isa_stack_pack_i64_u32_x2_record_t*)record_data;
+    iree_vm_bytecode_stack_pack_i64(local_bytes + record->target_u16,
+                                    record->immediates_le, 2);
+    IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_isa_stack_pack_i64_u32_x2_record_t);
+  }
+  IREE_VM_BYTECODE_DISPATCH_CASE(STACK_PACK_I64_U32_X4, stack_pack_i64_u32_x4) {
+    const iree_vm_isa_stack_pack_i64_u32_x4_record_t* record =
+        (const iree_vm_isa_stack_pack_i64_u32_x4_record_t*)record_data;
+    iree_vm_bytecode_stack_pack_i64(local_bytes + record->target_u16,
+                                    record->immediates_le, 4);
+    IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_isa_stack_pack_i64_u32_x4_record_t);
+  }
+  IREE_VM_BYTECODE_DISPATCH_CASE(STACK_PACK_I64_U32_X8, stack_pack_i64_u32_x8) {
+    const iree_vm_isa_stack_pack_i64_u32_x8_record_t* record =
+        (const iree_vm_isa_stack_pack_i64_u32_x8_record_t*)record_data;
+    iree_vm_bytecode_stack_pack_i64(local_bytes + record->target_u16,
+                                    record->immediates_le, 8);
+    IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_isa_stack_pack_i64_u32_x8_record_t);
   }
   IREE_VM_BYTECODE_DISPATCH_END();
 

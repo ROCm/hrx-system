@@ -60,11 +60,13 @@ iree_cc_library(
     "interpreter_float_math.c"
     "interpreter_float_math.h"
     "interpreter_integer.h"
+    "interpreter_stack.h"
     "module.c"
     "verification_isa.c"
   DEPS
     ::module
     iree::base
+    iree::base::core_headers
     iree::base::internal
     iree::base::internal::unicode
     iree::vm
@@ -146,6 +148,20 @@ iree_cc_test(
     "interpreter_integer_test.cc"
   DEPS
     iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+    iree::vm::bytecode::wire
+)
+
+iree_cc_test(
+  NAME
+    interpreter_stack_test
+  SRCS
+    "interpreter_stack.h"
+    "interpreter_stack_test.cc"
+  DEPS
+    iree::base
+    iree::base::core_headers
     iree::testing::gtest
     iree::testing::gtest_main
     iree::vm::bytecode::wire
