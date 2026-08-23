@@ -25,6 +25,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import traceback
 from dataclasses import dataclass
@@ -125,6 +126,16 @@ CMAKE_CLANG_TIDY_EXTENSIONS = {
     ".m",
     ".mm",
 }
+# clang-tidy always uses Clang's parser, including when consuming an MSVC
+# compilation database. Keep its Windows compiler diagnostics aligned with the
+# repository's clang-cl policy while leaving all clang-tidy checks enabled.
+WINDOWS_CMAKE_CLANG_TIDY_EXTRA_ARGS = (
+    "-Wno-unused-command-line-argument",
+    "-Wno-unused-function",
+    "-Wno-unused-lambda-capture",
+    "-Wno-unused-variable",
+    "-Wno-invalid-offsetof",
+)
 PYTHON_EXTENSIONS = {".py"}
 WATCHWORD_PATTERNS = (
     re.compile("DO " + "NOT SUBMIT"),
@@ -489,19 +500,7 @@ def run_command(command: list[str], description: str, verbose: bool) -> bool:
     if verbose:
         print("  " + command_text(command))
         sys.stdout.flush()
-        result = subprocess.run(command, cwd=REPO_ROOT)
-        output = None
-    else:
-        result = subprocess.run(
-            command,
-            cwd=REPO_ROOT,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-        )
-        output = result.stdout
+    result = run_command_batch(command)
     elapsed_seconds = time.monotonic() - start_time
     if result.returncode == 0:
         print(f"[ok] {description} ({format_duration(elapsed_seconds)})")
@@ -510,7 +509,6 @@ def run_command(command: list[str], description: str, verbose: bool) -> bool:
         description,
         elapsed_seconds,
         command=None if verbose else command,
-        output=output,
         exit_code=result.returncode,
     )
     return False
@@ -523,8 +521,11 @@ class CommandBatchResult:
     output: str
 
 
-def run_command_batch(command: list[str]) -> CommandBatchResult:
-    result = subprocess.run(
+def run_command_batch(
+    command: list[str], output_lock: threading.Lock | None = None
+) -> CommandBatchResult:
+    output_lines = []
+    with subprocess.Popen(
         command,
         cwd=REPO_ROOT,
         stdout=subprocess.PIPE,
@@ -532,11 +533,24 @@ def run_command_batch(command: list[str]) -> CommandBatchResult:
         text=True,
         encoding="utf-8",
         errors="replace",
-    )
+        bufsize=1,
+    ) as process:
+        if process.stdout is None:
+            raise RuntimeError("presubmit subprocess stdout pipe was not created")
+        for line in process.stdout:
+            if output_lock is None:
+                sys.stdout.write(line)
+                sys.stdout.flush()
+            else:
+                with output_lock:
+                    sys.stdout.write(line)
+                    sys.stdout.flush()
+            output_lines.append(line)
+        returncode = process.wait()
     return CommandBatchResult(
         command=command,
-        returncode=result.returncode,
-        output=result.stdout,
+        returncode=returncode,
+        output="".join(output_lines),
     )
 
 
@@ -562,9 +576,10 @@ def run_parallel_commands(
         sys.stdout.flush()
 
     results: list[CommandBatchResult | None] = [None] * len(commands)
+    output_lock = threading.Lock()
     with concurrent.futures.ThreadPoolExecutor(max_workers=jobs) as executor:
         future_to_index = {
-            executor.submit(run_command_batch, command): index
+            executor.submit(run_command_batch, command, output_lock): index
             for index, command in enumerate(commands)
         }
         for future in concurrent.futures.as_completed(future_to_index):
@@ -1864,6 +1879,14 @@ def cmake_clang_tidy_file_patterns(files: list[str]) -> list[str]:
     return [f"^{re.escape(str((REPO_ROOT / path).resolve()))}$" for path in files]
 
 
+def cmake_clang_tidy_extra_arg_options() -> list[str]:
+    if sys.platform != "win32":
+        return []
+    return [
+        f"-extra-arg={argument}" for argument in WINDOWS_CMAKE_CLANG_TIDY_EXTRA_ARGS
+    ]
+
+
 def cmake_clang_tidy_command(
     *,
     run_clang_tidy: str | Sequence[str],
@@ -1879,6 +1902,7 @@ def cmake_clang_tidy_command(
         "-p",
         str(compile_commands_dir),
         f"-config-file={CLANG_TIDY_CONFIG}",
+        *cmake_clang_tidy_extra_arg_options(),
     ]
     if plugin:
         command.append(f"-load={plugin}")
@@ -1941,6 +1965,7 @@ def cmake_run_clang_tidy_fix_command(
         "-p",
         str(compile_commands_dir),
         f"-config-file={CLANG_TIDY_CONFIG}",
+        *cmake_clang_tidy_extra_arg_options(),
     ]
     if plugin:
         command.append(f"-load={plugin}")
