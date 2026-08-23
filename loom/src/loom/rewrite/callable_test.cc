@@ -375,7 +375,7 @@ TEST_F(CallableInlineTest, ConsumingInlineMovesBodyAndErasesCallee) {
   IREE_ASSERT_OK(
       loom_rewriter_initialize(&rewriter, module_, &rewriter_arena_));
   IREE_ASSERT_OK(
-      loom_callable_inline_consuming_direct_call(&rewriter, call_op));
+      loom_callable_inline_consuming_call(&rewriter, call_op, callee));
   loom_rewriter_deinitialize(&rewriter);
 
   EXPECT_TRUE(iree_any_bit_set(call_op->flags, LOOM_OP_FLAG_DEAD));
@@ -399,52 +399,6 @@ TEST_F(CallableInlineTest, ConsumingInlineMovesBodyAndErasesCallee) {
   EXPECT_TRUE(iree_string_view_equal(
       module_->strings.entries[loom_module_value(module_, negated)->name_id],
       IREE_SV("call_result")));
-}
-
-TEST_F(CallableInlineTest, ConsumingInlineRejectsPublicCallee) {
-  loom_type_t i32 = loom_type_scalar(LOOM_SCALAR_TYPE_I32);
-  loom_symbol_ref_t callee_ref = MakeSymbol(IREE_SV("negate"));
-  loom_symbol_ref_t caller_ref = MakeSymbol(IREE_SV("caller"));
-  loom_op_t* callee_op = BuildNegateFunction(callee_ref, i32);
-  module_->symbols.entries[callee_ref.symbol_id].flags |=
-      LOOM_SYMBOL_FLAG_PUBLIC;
-  loom_op_t* call_op = nullptr;
-  BuildCaller(caller_ref, callee_ref, i32, &call_op);
-
-  loom_rewriter_t rewriter = {};
-  IREE_ASSERT_OK(
-      loom_rewriter_initialize(&rewriter, module_, &rewriter_arena_));
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_FAILED_PRECONDITION,
-      loom_callable_inline_consuming_direct_call(&rewriter, call_op));
-  loom_rewriter_deinitialize(&rewriter);
-
-  EXPECT_FALSE(iree_any_bit_set(call_op->flags, LOOM_OP_FLAG_DEAD));
-  EXPECT_FALSE(iree_any_bit_set(callee_op->flags, LOOM_OP_FLAG_DEAD));
-}
-
-TEST_F(CallableInlineTest, ConsumingInlineRejectsAdditionalCalleeReference) {
-  loom_type_t i32 = loom_type_scalar(LOOM_SCALAR_TYPE_I32);
-  loom_symbol_ref_t callee_ref = MakeSymbol(IREE_SV("negate"));
-  loom_symbol_ref_t caller_ref = MakeSymbol(IREE_SV("caller"));
-  loom_symbol_ref_t other_caller_ref = MakeSymbol(IREE_SV("other_caller"));
-  loom_op_t* callee_op = BuildNegateFunction(callee_ref, i32);
-  loom_op_t* call_op = nullptr;
-  BuildCaller(caller_ref, callee_ref, i32, &call_op);
-  loom_op_t* other_call_op = nullptr;
-  BuildCaller(other_caller_ref, callee_ref, i32, &other_call_op);
-
-  loom_rewriter_t rewriter = {};
-  IREE_ASSERT_OK(
-      loom_rewriter_initialize(&rewriter, module_, &rewriter_arena_));
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_FAILED_PRECONDITION,
-      loom_callable_inline_consuming_direct_call(&rewriter, call_op));
-  loom_rewriter_deinitialize(&rewriter);
-
-  EXPECT_FALSE(iree_any_bit_set(call_op->flags, LOOM_OP_FLAG_DEAD));
-  EXPECT_FALSE(iree_any_bit_set(other_call_op->flags, LOOM_OP_FLAG_DEAD));
-  EXPECT_FALSE(iree_any_bit_set(callee_op->flags, LOOM_OP_FLAG_DEAD));
 }
 
 TEST_F(CallableInlineTest, InlinesExactTemplateCall) {

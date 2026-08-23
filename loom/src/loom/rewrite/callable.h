@@ -44,19 +44,17 @@ iree_status_t loom_callable_inline_direct_call(loom_rewriter_t* rewriter,
 
 // Inlines |callee| at |call_op| using same-module move materialization.
 //
-// This consumes the callee definition. The callee must be private, the selected
-// call must be the only live symbol reference to the callee outside of the
-// callee's own defining attribute, and the callee body must satisfy the same
-// single-block terminator shape as clone inlining. On success body ops are
-// moved before the call, call results are replaced by remapped terminator
-// operands, the call is erased, and the consumed callee op is erased.
+// This consumes the callee definition. The caller must have an exact immutable
+// reference plan proving that the callee is private and that the selected call
+// will be the final live reference outside of the callee's own defining
+// attribute. This helper does not rediscover that global ownership by scanning
+// the module. The callee body must satisfy the same single-block terminator
+// shape as clone inlining. On success body ops are moved before the call, call
+// results are replaced by remapped terminator operands, the call is erased, and
+// the consumed callee op is erased.
 iree_status_t loom_callable_inline_consuming_call(loom_rewriter_t* rewriter,
                                                   loom_op_t* call_op,
                                                   loom_func_like_t callee);
-
-// Resolves |call_op|'s direct callee and then consuming-inlines it.
-iree_status_t loom_callable_inline_consuming_direct_call(
-    loom_rewriter_t* rewriter, loom_op_t* call_op);
 
 // Clones one same-module function-like definition as |target_ref|.
 //

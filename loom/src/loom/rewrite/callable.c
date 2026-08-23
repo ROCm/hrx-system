@@ -250,39 +250,22 @@ static bool loom_callable_symbol_ref_equal(loom_symbol_ref_t a,
   return a.module_id == b.module_id && a.symbol_id == b.symbol_id;
 }
 
-typedef enum loom_callable_symbol_scan_mode_e {
-  LOOM_CALLABLE_SYMBOL_SCAN_EXACT,
-  LOOM_CALLABLE_SYMBOL_SCAN_OTHER,
-} loom_callable_symbol_scan_mode_t;
-
-static bool loom_callable_symbol_scan_matches(
-    loom_symbol_ref_t ref, loom_symbol_ref_t target_ref,
-    loom_callable_symbol_scan_mode_t mode) {
-  switch (mode) {
-    case LOOM_CALLABLE_SYMBOL_SCAN_EXACT:
-      return loom_callable_symbol_ref_equal(ref, target_ref);
-    case LOOM_CALLABLE_SYMBOL_SCAN_OTHER:
-      return !loom_symbol_ref_is_valid(ref) ||
-             !loom_callable_symbol_ref_equal(ref, target_ref);
-  }
-  return true;
-}
-
-static bool loom_callable_attr_may_reference_symbol_in_mode(
+static bool loom_callable_attr_may_reference_other_symbol(
     const loom_module_t* module, const loom_attribute_t* attr,
-    loom_symbol_ref_t target_ref, loom_callable_symbol_scan_mode_t mode,
-    uint8_t depth) {
+    loom_symbol_ref_t ignored_symbol_ref, uint8_t depth) {
   if (!attr) return false;
   if (depth > LOOM_ATTR_AGGREGATE_MAX_NESTING_DEPTH) return true;
   switch ((loom_attr_kind_t)attr->kind) {
     case LOOM_ATTR_SYMBOL:
-      return loom_callable_symbol_scan_matches(loom_attr_as_symbol(*attr),
-                                               target_ref, mode);
+      return !loom_symbol_ref_is_valid(loom_attr_as_symbol(*attr)) ||
+             !loom_callable_symbol_ref_equal(loom_attr_as_symbol(*attr),
+                                             ignored_symbol_ref);
     case LOOM_ATTR_SYMBOL_ARRAY:
     case LOOM_ATTR_SYMBOL_SET: {
       for (uint16_t i = 0; i < attr->count; ++i) {
-        if (loom_callable_symbol_scan_matches(attr->symbol_refs[i], target_ref,
-                                              mode)) {
+        if (!loom_symbol_ref_is_valid(attr->symbol_refs[i]) ||
+            !loom_callable_symbol_ref_equal(attr->symbol_refs[i],
+                                            ignored_symbol_ref)) {
           return true;
         }
       }
@@ -291,8 +274,8 @@ static bool loom_callable_attr_may_reference_symbol_in_mode(
     case LOOM_ATTR_DICT:
       if (attr->count > 0 && !attr->dict_entries) return true;
       for (uint16_t i = 0; i < attr->count; ++i) {
-        if (loom_callable_attr_may_reference_symbol_in_mode(
-                module, &attr->dict_entries[i].value, target_ref, mode,
+        if (loom_callable_attr_may_reference_other_symbol(
+                module, &attr->dict_entries[i].value, ignored_symbol_ref,
                 (uint8_t)(depth + 1))) {
           return true;
         }
@@ -301,8 +284,8 @@ static bool loom_callable_attr_may_reference_symbol_in_mode(
     case LOOM_ATTR_PARAMETERIZED:
       if (attr->count > 0 && !attr->parameterized_slots) return true;
       for (uint16_t i = 0; i < attr->count; ++i) {
-        if (loom_callable_attr_may_reference_symbol_in_mode(
-                module, &attr->parameterized_slots[i], target_ref, mode,
+        if (loom_callable_attr_may_reference_other_symbol(
+                module, &attr->parameterized_slots[i], ignored_symbol_ref,
                 (uint8_t)(depth + 1))) {
           return true;
         }
@@ -311,8 +294,8 @@ static bool loom_callable_attr_may_reference_symbol_in_mode(
     case LOOM_ATTR_PARAMETERIZED_ARRAY:
       if (attr->count > 0 && !attr->parameterized_array) return true;
       for (uint16_t i = 0; i < attr->count; ++i) {
-        if (loom_callable_attr_may_reference_symbol_in_mode(
-                module, &attr->parameterized_array[i], target_ref, mode,
+        if (loom_callable_attr_may_reference_other_symbol(
+                module, &attr->parameterized_array[i], ignored_symbol_ref,
                 (uint8_t)(depth + 1))) {
           return true;
         }
@@ -324,8 +307,8 @@ static bool loom_callable_attr_may_reference_symbol_in_mode(
       if (!encoding) return true;
       if (encoding->attribute_count > 0 && !encoding->attributes) return true;
       for (uint8_t i = 0; i < encoding->attribute_count; ++i) {
-        if (loom_callable_attr_may_reference_symbol_in_mode(
-                module, &encoding->attributes[i].value, target_ref, mode,
+        if (loom_callable_attr_may_reference_other_symbol(
+                module, &encoding->attributes[i].value, ignored_symbol_ref,
                 (uint8_t)(depth + 1))) {
           return true;
         }
@@ -337,31 +320,17 @@ static bool loom_callable_attr_may_reference_symbol_in_mode(
   }
 }
 
-static bool loom_callable_op_may_reference_symbol_in_mode(
+static bool loom_callable_op_may_reference_other_symbol(
     const loom_module_t* module, const loom_op_t* op,
-    loom_symbol_ref_t target_ref, loom_callable_symbol_scan_mode_t mode) {
+    loom_symbol_ref_t ignored_symbol_ref) {
   const loom_attribute_t* attrs = loom_op_const_attrs(op);
   for (uint8_t i = 0; i < op->attribute_count; ++i) {
-    if (loom_callable_attr_may_reference_symbol_in_mode(module, &attrs[i],
-                                                        target_ref, mode, 0)) {
+    if (loom_callable_attr_may_reference_other_symbol(module, &attrs[i],
+                                                      ignored_symbol_ref, 0)) {
       return true;
     }
   }
   return false;
-}
-
-static bool loom_callable_op_may_reference_symbol(
-    const loom_module_t* module, const loom_op_t* op,
-    loom_symbol_ref_t symbol_ref) {
-  return loom_callable_op_may_reference_symbol_in_mode(
-      module, op, symbol_ref, LOOM_CALLABLE_SYMBOL_SCAN_EXACT);
-}
-
-static bool loom_callable_op_may_reference_other_symbol(
-    const loom_module_t* module, const loom_op_t* op,
-    loom_symbol_ref_t ignored_symbol_ref) {
-  return loom_callable_op_may_reference_symbol_in_mode(
-      module, op, ignored_symbol_ref, LOOM_CALLABLE_SYMBOL_SCAN_OTHER);
 }
 
 static bool loom_callable_region_may_reference_other_symbol(
@@ -387,60 +356,6 @@ static bool loom_callable_region_may_reference_other_symbol(
     }
   }
   return false;
-}
-
-static bool loom_callable_region_may_reference_symbol_except(
-    const loom_module_t* module, const loom_region_t* region,
-    loom_symbol_ref_t symbol_ref, const loom_op_t* ignored_attr_op_a,
-    const loom_op_t* ignored_attr_op_b) {
-  if (!region) return false;
-  loom_block_t* block = NULL;
-  loom_region_for_each_block(region, block) {
-    const loom_op_t* op = NULL;
-    loom_block_for_each_op(block, op) {
-      if (iree_any_bit_set(op->flags, LOOM_OP_FLAG_DEAD)) continue;
-      if (op != ignored_attr_op_a && op != ignored_attr_op_b &&
-          loom_callable_op_may_reference_symbol(module, op, symbol_ref)) {
-        return true;
-      }
-      loom_region_t** regions = loom_op_regions(op);
-      for (uint8_t i = 0; i < op->region_count; ++i) {
-        if (loom_callable_region_may_reference_symbol_except(
-                module, regions[i], symbol_ref, ignored_attr_op_a,
-                ignored_attr_op_b)) {
-          return true;
-        }
-      }
-    }
-  }
-  return false;
-}
-
-static iree_status_t loom_callable_validate_consumable_callee(
-    const loom_module_t* module, const loom_op_t* call_op,
-    loom_func_like_t callee) {
-  loom_symbol_ref_t callee_ref = loom_func_like_callee(callee);
-  if (!loom_symbol_ref_is_valid(callee_ref) || callee_ref.module_id != 0 ||
-      callee_ref.symbol_id >= module->symbols.count) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "callee symbol ref {module=%u, symbol=%u} is invalid in target module",
-        (unsigned)callee_ref.module_id, (unsigned)callee_ref.symbol_id);
-  }
-  const loom_symbol_t* symbol = &module->symbols.entries[callee_ref.symbol_id];
-  if (iree_any_bit_set(symbol->flags, LOOM_SYMBOL_FLAG_PUBLIC)) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "consuming inline requires a private callee symbol");
-  }
-  if (loom_callable_region_may_reference_symbol_except(
-          module, module->body, callee_ref, call_op, callee.op)) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "consuming inline requires the selected call to be the only live "
-        "callee reference");
-  }
-  return iree_ok_status();
 }
 
 static bool loom_callable_value_is_call_operand(loom_call_like_t call,
@@ -550,8 +465,6 @@ iree_status_t loom_callable_inline_consuming_call(loom_rewriter_t* rewriter,
   loom_call_like_t call = {0};
   IREE_RETURN_IF_ERROR(
       loom_callable_get_whole_call(rewriter->module, call_op, &call));
-  IREE_RETURN_IF_ERROR(loom_callable_validate_consumable_callee(
-      rewriter->module, call_op, callee));
 
   loom_block_t* entry_block = NULL;
   loom_op_t* terminator_op = NULL;
@@ -595,14 +508,6 @@ iree_status_t loom_callable_inline_direct_call(loom_rewriter_t* rewriter,
   IREE_RETURN_IF_ERROR(
       loom_callable_resolve_direct_callee(rewriter->module, call_op, &callee));
   return loom_callable_inline_call(rewriter, call_op, callee);
-}
-
-iree_status_t loom_callable_inline_consuming_direct_call(
-    loom_rewriter_t* rewriter, loom_op_t* call_op) {
-  loom_func_like_t callee = {0};
-  IREE_RETURN_IF_ERROR(
-      loom_callable_resolve_direct_callee(rewriter->module, call_op, &callee));
-  return loom_callable_inline_consuming_call(rewriter, call_op, callee);
 }
 
 typedef struct loom_callable_clone_symbol_state_t {
