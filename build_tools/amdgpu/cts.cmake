@@ -169,7 +169,10 @@ function(iree_amdgpu_hal_cts_testdata)
     set(_REGISTRATION_TARGET_NAME
       "${_RULE_TARGET_NAME}_${_TARGET_FRAGMENT}"
     )
-    set(_REGISTRATION "${_RULE_NAME}_${_TARGET_FRAGMENT}_registration.cc")
+    # This basename is repeated beneath the generated target's object directory.
+    # Keep the internal suffix compact so Windows paths remain below CMake's
+    # object-file safety limit without constraining the public target name.
+    set(_REGISTRATION "${_RULE_NAME}_${_TARGET_FRAGMENT}_reg.cc")
     set(_REGISTRATION_TEMPLATE
       "${IREE_SOURCE_DIR}/runtime/src/iree/hal/cts/util/testdata_target.cc.tpl"
     )
