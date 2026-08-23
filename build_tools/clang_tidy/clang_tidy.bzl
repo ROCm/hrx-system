@@ -9,6 +9,7 @@
 load(
     "@iree_clang_tidy_llvm//:config.bzl",
     "CLANG_TIDY_CLANG_RESOURCE_DIR",
+    "CLANG_TIDY_LLVM_IS_WINDOWS",
     "CLANG_TIDY_LLVM_TARGET_COMPATIBLE_WITH",
 )
 load("@rules_cc//cc:find_cc_toolchain.bzl", "CC_TOOLCHAIN_ATTRS", "find_cc_toolchain", "use_cc_toolchain")
@@ -25,15 +26,25 @@ load(
 # action uses GCC. Keep target semantic flags intact but omit GCC driver flags
 # that Clang rejects before it can analyze the source.
 _CLANG_TIDY_UNSUPPORTED_COMPILE_ARGS = {
+    "-c": None,
     "-fno-canonical-system-headers": None,
+    "/c": None,
+    "/showIncludes": None,
 }
 
-def _clang_tidy_compile_args(compile_args):
+def _clang_tidy_compile_args(compile_command, source):
     filtered_args = [
         arg
-        for arg in compile_args
-        if arg not in _CLANG_TIDY_UNSUPPORTED_COMPILE_ARGS
+        for arg in compile_command.compile_args
+        if arg not in _CLANG_TIDY_UNSUPPORTED_COMPILE_ARGS and arg.replace("\\", "/") != source.path
     ]
+
+    # A fixed compilation database does not preserve the compiler executable
+    # that normally selects Clang's driver dialect. Restore CL mode when the
+    # configured Bazel compiler consumes MSVC-style arguments.
+    compiler_name = compile_command.compiler.replace("\\", "/").split("/")[-1].lower()
+    if compiler_name in ["cl", "cl.exe", "clang-cl", "clang-cl.exe"]:
+        filtered_args.insert(0, "--driver-mode=cl")
 
     # Preserve the resource directory named by Bazel's crosstool module map.
     # The clang-tidy VFS overlay redirects this virtual path to the declared,
@@ -158,9 +169,12 @@ def _run_clang_tidy_action(ctx, target, cc_toolchain, feature_configuration, sou
     report = ctx.actions.declare_file(report_path)
     fixes = None
     outputs = [report]
+    tools = [ctx.executable._clang_tidy]
     args = ctx.actions.args()
     args.add("--clang-tidy", ctx.executable._clang_tidy)
-    args.add("--plugin", ctx.executable._plugin)
+    if not CLANG_TIDY_LLVM_IS_WINDOWS:
+        args.add("--plugin", ctx.executable._plugin)
+        tools.append(ctx.executable._plugin)
     args.add("--source", source)
     args.add("--output", report)
     args.add("--config-file", ctx.file._config)
@@ -173,24 +187,23 @@ def _run_clang_tidy_action(ctx, target, cc_toolchain, feature_configuration, sou
     else:
         args.add("--warnings-as-errors=%s" % ctx.attr._warnings_as_errors)
     args.add("--")
-    args.add_all(_clang_tidy_compile_args(compile_command.compile_args))
+    args.add_all(_clang_tidy_compile_args(compile_command, source))
 
     compilation_context = target[CcInfo].compilation_context
     inputs = depset(
         direct = [source, ctx.file._config, ctx.file._clang_resource_overlay],
         transitive = _compilation_input_depsets(compilation_context) + [
             depset(ctx.files._clang_resource_headers),
+            cc_toolchain.all_files,
         ],
     )
     ctx.actions.run(
         executable = ctx.executable._runner,
         arguments = [args],
+        env = compile_command.environment,
         inputs = inputs,
         outputs = outputs,
-        tools = [
-            ctx.executable._clang_tidy,
-            ctx.executable._plugin,
-        ],
+        tools = tools,
         mnemonic = "IreeClangTidy",
         progress_message = "Running clang-tidy on %s" % source.short_path,
     )
@@ -206,9 +219,12 @@ def _run_recursion_summary_action(ctx, target, cc_toolchain, feature_configurati
     )
     report = ctx.actions.declare_file(_recursion_report_path(target.label, source))
     summary = ctx.actions.declare_file(_recursion_summary_path(target.label, source))
+    tools = [ctx.executable._clang_tidy]
     args = ctx.actions.args()
     args.add("--clang-tidy", ctx.executable._clang_tidy)
-    args.add("--plugin", ctx.executable._plugin)
+    if not CLANG_TIDY_LLVM_IS_WINDOWS:
+        args.add("--plugin", ctx.executable._plugin)
+        tools.append(ctx.executable._plugin)
     args.add("--source", source)
     args.add("--output", report)
     args.add("--config-file", ctx.file._config)
@@ -217,24 +233,23 @@ def _run_recursion_summary_action(ctx, target, cc_toolchain, feature_configurati
     args.add("--recursion-summary", summary)
     args.add("--suppress-recursion-diagnostics")
     args.add("--")
-    args.add_all(_clang_tidy_compile_args(compile_command.compile_args))
+    args.add_all(_clang_tidy_compile_args(compile_command, source))
 
     compilation_context = target[CcInfo].compilation_context
     inputs = depset(
         direct = [source, ctx.file._config, ctx.file._clang_resource_overlay],
         transitive = _compilation_input_depsets(compilation_context) + [
             depset(ctx.files._clang_resource_headers),
+            cc_toolchain.all_files,
         ],
     )
     ctx.actions.run(
         executable = ctx.executable._runner,
         arguments = [args],
+        env = compile_command.environment,
         inputs = inputs,
         outputs = [report, summary],
-        tools = [
-            ctx.executable._clang_tidy,
-            ctx.executable._plugin,
-        ],
+        tools = tools,
         mnemonic = "IreeRecursionSummary",
         progress_message = "Extracting recursion call graph from %s" % source.short_path,
     )
@@ -321,7 +336,7 @@ collect_clang_tidy_aspect = aspect(
         ),
         "_clang_tidy": attr.label(
             cfg = "exec",
-            default = Label("@iree_clang_tidy_llvm//:clang-tidy"),
+            default = Label("//build_tools/clang_tidy:clang-tidy-tool"),
             executable = True,
         ),
         "_config": attr.label(
@@ -422,7 +437,7 @@ collect_recursion_aspect = aspect(
         ),
         "_clang_tidy": attr.label(
             cfg = "exec",
-            default = Label("@iree_clang_tidy_llvm//:clang-tidy"),
+            default = Label("//build_tools/clang_tidy:clang-tidy-tool"),
             executable = True,
         ),
         "_config": attr.label(

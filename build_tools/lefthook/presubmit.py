@@ -29,7 +29,7 @@ import time
 import traceback
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Sequence
 from urllib.parse import urlparse
 from urllib.request import url2pathname
 
@@ -1002,15 +1002,23 @@ def clang_tidy_analysis_paths(inputs: PresubmitInputs) -> list[str]:
     return inputs.selected_paths
 
 
-def is_executable_path(path: str) -> bool:
-    return Path(path).is_file() and os.access(path, os.X_OK)
+def resolve_executable_path(path: str | Path) -> str | None:
+    candidates = [Path(path)]
+    if sys.platform == "win32" and candidates[0].suffix.lower() != ".exe":
+        candidates.append(Path(f"{path}.exe"))
+    for candidate in candidates:
+        if candidate.is_file() and os.access(candidate, os.X_OK):
+            return str(candidate)
+    return None
 
 
 def executable_from_env(env_names: tuple[str, ...]) -> str | None:
     for env_name in env_names:
         value = os.environ.get(env_name)
-        if value and is_executable_path(value):
-            return value
+        if value:
+            resolved_path = resolve_executable_path(value)
+            if resolved_path:
+                return resolved_path
     return None
 
 
@@ -1022,9 +1030,9 @@ def executable_from_roots(
         if not root:
             continue
         for tool_name in tool_names:
-            candidate = Path(root) / "bin" / tool_name
-            if is_executable_path(str(candidate)):
-                return str(candidate)
+            resolved_path = resolve_executable_path(Path(root) / "bin" / tool_name)
+            if resolved_path:
+                return resolved_path
     return None
 
 
@@ -1033,6 +1041,11 @@ def executable_from_path(tool_names: tuple[str, ...]) -> str | None:
         path = shutil.which(tool_name)
         if path:
             return path
+        if sys.platform == "win32":
+            for directory in os.get_exec_path():
+                resolved_path = resolve_executable_path(Path(directory) / tool_name)
+                if resolved_path:
+                    return resolved_path
     return None
 
 
@@ -1090,12 +1103,23 @@ def clang_tidy_apply_replacements_tool() -> str | None:
     )
 
 
-def clang_tidy_run_tool() -> str | None:
-    return find_llvm_tool(
+def clang_tidy_run_tool() -> tuple[str, ...] | None:
+    tool = find_llvm_tool(
         env_names=("IREE_RUN_CLANG_TIDY_BINARY", "RUN_CLANG_TIDY"),
         root_env_names=("IREE_CLANG_TIDY_LLVM_ROOT", "IREE_LLVM_ROOT", "LLVM_ROOT"),
         tool_names=("run-clang-tidy", "run-clang-tidy-22"),
     )
+    if not tool:
+        return None
+    if sys.platform == "win32":
+        try:
+            with Path(tool).open("rb") as file:
+                first_line = file.readline(256).lower()
+        except OSError:
+            first_line = b""
+        if first_line.startswith(b"#!") and b"python" in first_line:
+            return (sys.executable, tool)
+    return (tool,)
 
 
 def clang_tidy_required(profile: str) -> bool:
@@ -1555,7 +1579,7 @@ def run_root_devtools_tests(paths: list[str], verbose: bool) -> bool:
                 "--scenario",
                 "dry-run",
             ],
-            "Root devtools CMake smoke test",
+            "Root devtools CMake wrapper planning test",
             verbose,
         )
         and ok
@@ -1785,14 +1809,14 @@ def llvm_cmake_dir(llvm_config: str) -> str | None:
         errors="replace",
     )
     if result.returncode != 0:
-        print(f"[fail] clang-tidy CMake plugin: {llvm_config} --cmakedir failed")
+        print(f"[fail] clang-tidy CMake tooling: {llvm_config} --cmakedir failed")
         if result.stdout:
             print(result.stdout.rstrip())
         return None
     return result.stdout.strip()
 
 
-def cmake_clang_tidy_plugin_configure_command(*, llvm_package_dir: Path) -> list[str]:
+def cmake_clang_tidy_configure_command(*, llvm_package_dir: Path) -> list[str]:
     clang_package_dir = llvm_package_dir.parent / "clang"
     return [
         "cmake",
@@ -1827,27 +1851,64 @@ def cmake_clang_tidy_plugin_path(build_dir: Path) -> Path | None:
     return None
 
 
+def cmake_clang_tidy_executable_path(build_dir: Path) -> Path | None:
+    for name in ("IREEClangTidy.exe", "iree-clang-tidy.exe"):
+        candidate = build_dir / name
+        if candidate.is_file():
+            return candidate
+    matches = sorted(build_dir.rglob("*IREEClangTidy*.exe"))
+    return matches[0] if matches else None
+
+
+def cmake_clang_tidy_file_patterns(files: list[str]) -> list[str]:
+    return [f"^{re.escape(str((REPO_ROOT / path).resolve()))}$" for path in files]
+
+
 def cmake_clang_tidy_command(
     *,
-    run_clang_tidy: str,
+    run_clang_tidy: str | Sequence[str],
     clang_tidy: str,
-    plugin: Path,
+    plugin: Path | None,
     compile_commands_dir: Path,
     files: list[str],
 ) -> list[str]:
-    return [
-        run_clang_tidy,
+    command = [
+        *([run_clang_tidy] if isinstance(run_clang_tidy, str) else run_clang_tidy),
         "-clang-tidy-binary",
         clang_tidy,
         "-p",
         str(compile_commands_dir),
         f"-config-file={CLANG_TIDY_CONFIG}",
-        f"-load={plugin}",
+    ]
+    if plugin:
+        command.append(f"-load={plugin}")
+    return [
+        *command,
         "-j",
         str(clang_tidy_jobs()),
         "-warnings-as-errors=*",
-        *files,
+        *cmake_clang_tidy_file_patterns(files),
     ]
+
+
+def cmake_clang_tidy_commands(
+    *,
+    run_clang_tidy: str | Sequence[str],
+    clang_tidy: str,
+    plugin: Path | None,
+    compile_commands_dir: Path,
+    files: list[str],
+) -> list[list[str]]:
+    command_prefix = cmake_clang_tidy_command(
+        run_clang_tidy=run_clang_tidy,
+        clang_tidy=clang_tidy,
+        plugin=plugin,
+        compile_commands_dir=compile_commands_dir,
+        files=[],
+    )
+    return command_argument_batches(
+        command_prefix, cmake_clang_tidy_file_patterns(files)
+    )
 
 
 def cmake_generated_compile_inputs_command(*, compile_commands_dir: Path) -> list[str]:
@@ -1864,15 +1925,15 @@ def cmake_generated_compile_inputs_command(*, compile_commands_dir: Path) -> lis
 
 def cmake_run_clang_tidy_fix_command(
     *,
-    run_clang_tidy: str,
+    run_clang_tidy: str | Sequence[str],
     clang_tidy: str,
     clang_apply_replacements: str,
-    plugin: Path,
+    plugin: Path | None,
     compile_commands_dir: Path,
     files: list[str],
 ) -> list[str]:
-    return [
-        run_clang_tidy,
+    command = [
+        *([run_clang_tidy] if isinstance(run_clang_tidy, str) else run_clang_tidy),
         "-clang-tidy-binary",
         clang_tidy,
         "-clang-apply-replacements-binary",
@@ -1880,14 +1941,40 @@ def cmake_run_clang_tidy_fix_command(
         "-p",
         str(compile_commands_dir),
         f"-config-file={CLANG_TIDY_CONFIG}",
-        f"-load={plugin}",
+    ]
+    if plugin:
+        command.append(f"-load={plugin}")
+    return [
+        *command,
         "-j",
         str(clang_tidy_jobs()),
         "-fix",
         "-format",
         "-style=file",
-        *files,
+        *cmake_clang_tidy_file_patterns(files),
     ]
+
+
+def cmake_run_clang_tidy_fix_commands(
+    *,
+    run_clang_tidy: str | Sequence[str],
+    clang_tidy: str,
+    clang_apply_replacements: str,
+    plugin: Path | None,
+    compile_commands_dir: Path,
+    files: list[str],
+) -> list[list[str]]:
+    command_prefix = cmake_run_clang_tidy_fix_command(
+        run_clang_tidy=run_clang_tidy,
+        clang_tidy=clang_tidy,
+        clang_apply_replacements=clang_apply_replacements,
+        plugin=plugin,
+        compile_commands_dir=compile_commands_dir,
+        files=[],
+    )
+    return command_argument_batches(
+        command_prefix, cmake_clang_tidy_file_patterns(files)
+    )
 
 
 CLANG_TIDY_REPLACEMENT_PATH_FIELD_RE = re.compile(
@@ -2019,7 +2106,7 @@ def run_clang_tidy_cmake(
                 "clang-apply-replacements for --fix."
             )
             return False
-    if not require_tool("cmake", "clang-tidy CMake plugin"):
+    if not require_tool("cmake", "clang-tidy CMake tooling"):
         return False
 
     llvm_package_dir_value = llvm_cmake_dir(llvm_config)
@@ -2029,19 +2116,19 @@ def run_clang_tidy_cmake(
     clang_package_dir = llvm_package_dir.parent / "clang"
     if not (clang_package_dir / "ClangConfig.cmake").is_file():
         print(
-            "[fail] clang-tidy CMake plugin: matching Clang package is "
+            "[fail] clang-tidy CMake tooling: matching Clang package is "
             f"missing under {clang_package_dir}"
         )
         return False
 
     ok = True
-    configure_command = cmake_clang_tidy_plugin_configure_command(
+    configure_command = cmake_clang_tidy_configure_command(
         llvm_package_dir=llvm_package_dir
     )
     ok = (
         run_command(
             configure_command,
-            "clang-tidy CMake plugin configure",
+            "clang-tidy CMake tooling configure",
             verbose,
         )
         and ok
@@ -2049,7 +2136,7 @@ def run_clang_tidy_cmake(
     ok = (
         run_command(
             ["cmake", "--build", str(CLANG_TIDY_CMAKE_BUILD_DIR)],
-            "clang-tidy CMake plugin build",
+            "clang-tidy CMake tooling build",
             verbose,
         )
         and ok
@@ -2063,7 +2150,7 @@ def run_clang_tidy_cmake(
                     str(CLANG_TIDY_CMAKE_BUILD_DIR),
                     "--output-on-failure",
                 ],
-                "clang-tidy CMake plugin tests",
+                "clang-tidy CMake tooling tests",
                 verbose,
             )
             and ok
@@ -2071,13 +2158,24 @@ def run_clang_tidy_cmake(
     if not candidate_files:
         return ok
 
-    plugin = cmake_clang_tidy_plugin_path(CLANG_TIDY_CMAKE_BUILD_DIR)
-    if not plugin:
-        print(
-            f"[fail] clang-tidy CMake plugin: built plugin was not found under "
-            f"{CLANG_TIDY_CMAKE_BUILD_DIR}"
-        )
-        return False
+    plugin = None
+    if sys.platform == "win32":
+        built_clang_tidy = cmake_clang_tidy_executable_path(CLANG_TIDY_CMAKE_BUILD_DIR)
+        if not built_clang_tidy:
+            print(
+                f"[fail] clang-tidy CMake tooling: built executable was not found "
+                f"under {CLANG_TIDY_CMAKE_BUILD_DIR}"
+            )
+            return False
+        clang_tidy = str(built_clang_tidy)
+    else:
+        plugin = cmake_clang_tidy_plugin_path(CLANG_TIDY_CMAKE_BUILD_DIR)
+        if not plugin:
+            print(
+                f"[fail] clang-tidy CMake tooling: built plugin was not found under "
+                f"{CLANG_TIDY_CMAKE_BUILD_DIR}"
+            )
+            return False
 
     compile_commands_dir = cmake_build_dir_from_env()
     compile_commands = compile_commands_dir / "compile_commands.json"
@@ -2104,8 +2202,8 @@ def run_clang_tidy_cmake(
 
     if fix:
         ok = (
-            run_command(
-                cmake_run_clang_tidy_fix_command(
+            run_parallel_commands(
+                cmake_run_clang_tidy_fix_commands(
                     run_clang_tidy=run_clang_tidy,
                     clang_tidy=clang_tidy,
                     clang_apply_replacements=clang_apply_replacements,
@@ -2115,13 +2213,14 @@ def run_clang_tidy_cmake(
                 ),
                 "clang-tidy CMake fix",
                 verbose,
+                jobs=1,
             )
             and ok
         )
         if ok:
             ok = (
-                run_command(
-                    cmake_clang_tidy_command(
+                run_parallel_commands(
+                    cmake_clang_tidy_commands(
                         run_clang_tidy=run_clang_tidy,
                         clang_tidy=clang_tidy,
                         plugin=plugin,
@@ -2130,13 +2229,14 @@ def run_clang_tidy_cmake(
                     ),
                     "clang-tidy CMake compile database after fixes",
                     verbose,
+                    jobs=1,
                 )
                 and ok
             )
     else:
         ok = (
-            run_command(
-                cmake_clang_tidy_command(
+            run_parallel_commands(
+                cmake_clang_tidy_commands(
                     run_clang_tidy=run_clang_tidy,
                     clang_tidy=clang_tidy,
                     plugin=plugin,
@@ -2145,6 +2245,7 @@ def run_clang_tidy_cmake(
                 ),
                 "clang-tidy CMake compile database",
                 verbose,
+                jobs=1,
             )
             and ok
         )
@@ -2283,7 +2384,7 @@ def run_clang_tidy(
                     CLANG_TIDY_REPO_ENV,
                     "//build_tools/clang_tidy:plugin_tests",
                 ],
-                "clang-tidy plugin tests",
+                "clang-tidy tooling tests",
                 verbose,
             )
             and ok

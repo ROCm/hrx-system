@@ -1,11 +1,11 @@
 # IREE Clang-Tidy Checks
 
-This directory contains the out-of-tree clang-tidy plugin for IREE C/C++
-contract and style checks.
-
-The plugin builds against the LLVM installation that provides the `clang-tidy`
-binary that loads it. Normal runtime, Loom, and libhrx builds do not require
-LLVM development packages.
+This directory contains IREE C/C++ contract and style checks for clang-tidy.
+Unix hosts build an out-of-tree module loaded by the matching `clang-tidy`
+binary. Windows links the same checks into a dedicated `IREEClangTidy`
+executable because the supported prebuilt LLVM distribution does not export
+the symbols needed by loadable clang-tidy modules. Normal runtime, Loom, and
+libhrx builds do not require LLVM development packages.
 
 `clang_tidy_config.yaml` is the single repository analysis policy. Bazel
 declares it as an input to each clang-tidy action, and the secondary CMake lane
@@ -29,13 +29,14 @@ Discovery checks `IREE_CLANG_TIDY_LLVM_CONFIG`, `LLVM_CONFIG`,
 The selected `llvm-config --bindir` must contain the matching `clang-tidy` and
 `clang++`; discovery never mixes tools from different LLVM installations.
 
-The external repository imports the selected tools, Clang resource headers,
-and their exact non-glibc ELF dynamic-library closure. It does not import the
-LLVM installation's entire library directory or Clang's target runtime
-libraries. The imported resource headers are exposed through a stable virtual
-resource directory, so the source LLVM prefix does not enter clang-tidy action
-keys. Selected tools must have usable rpaths rather than depending on ambient
-loader configuration.
+The external repository exposes the selected tools and Clang resource headers
+through symlinks or junctions instead of copying the LLVM installation. On ELF
+hosts it also imports the tools' exact non-glibc dynamic-library closure, but
+not the whole LLVM library directory or Clang target runtimes. On Windows it
+exposes the installed static libraries used to link the dedicated analyzer.
+The resource headers use a stable virtual directory, so the source LLVM prefix
+does not enter clang-tidy action keys. ELF tools must have usable rpaths rather
+than depending on ambient loader configuration.
 
 The Bazel action runner uses the same configured C/C++ compile arguments that
 feed `dev.py bazel compile-commands`, builds one cacheable action per source
@@ -46,6 +47,10 @@ iree-bazel-test --repo_env=IREE_CLANG_TIDY_LLVM=auto \
   //build_tools/clang_tidy:plugin_tests
 ```
 
+On Windows the analyzer is built directly as a Bazel `cc_binary`. No CMake
+configuration, executable, or generated artifact participates in a Bazel
+clang-tidy action.
+
 ## CMake
 
 ```bash
@@ -54,14 +59,15 @@ python dev.py cmake clang-tidy runtime/src/iree/base/status.c
 python dev.py cmake clang-tidy --base origin/main
 ```
 
-The CMake command builds the plugin in `.tmp/iree-clang-tidy-plugin`,
-materializes generated C/C++ compile inputs in the configured CMake build tree,
-and runs `run-clang-tidy` against source files using that build tree's
-`compile_commands.json`. Select the CMake build tree with `--cmake-build-dir`
-or `IREE_CMAKE_BUILD_DIR`. The runner defaults to a capped parallel job count
-and can be tuned with `IREE_CLANG_TIDY_JOBS`.
+The CMake command builds the platform analyzer in
+`.tmp/iree-clang-tidy-plugin`: a loadable module on Unix or the in-process
+`IREEClangTidy` executable on Windows. It materializes generated C/C++ compile
+inputs in the configured CMake build tree and runs `run-clang-tidy` against
+source files using that tree's `compile_commands.json`. Select the CMake build
+tree with `--cmake-build-dir` or `IREE_CMAKE_BUILD_DIR`. The runner defaults to
+a capped parallel job count and can be tuned with `IREE_CLANG_TIDY_JOBS`.
 
-Plugin-only CMake validation is also available:
+Tooling-only CMake validation is also available:
 
 ```bash
 cmake -S build_tools/clang_tidy -B .tmp/iree-clang-tidy-plugin \
@@ -152,7 +158,7 @@ including which edges are indirect.
 The Bazel-owned whole-target lane writes one versioned JSON call graph per
 translation unit and aggregates those graphs before computing SCCs. This makes
 cycles spanning C/C++ source files visible without relying on link-time
-optimization or a compilation database. The secondary CMake plugin tests feed
+optimization or a compilation database. The secondary CMake tooling tests feed
 the same summaries into the same aggregator. A local inventory of the Loom
 compiler and its configured runtime dependencies is available without enabling
 policy enforcement:

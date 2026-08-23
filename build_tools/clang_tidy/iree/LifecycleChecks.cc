@@ -149,10 +149,7 @@ CallerOwnedAllocateOutParameterFor(const FunctionDecl* Function) {
     const FunctionDecl* DeinitializeFunction =
         MatchingDeinitializeFunction(Function, Record);
     if (DeinitializeFunction) {
-      return CallerOwnedAllocateOutParameter{
-          .Parameter = Parameter,
-          .DeinitializeFunction = DeinitializeFunction,
-      };
+      return CallerOwnedAllocateOutParameter{Parameter, DeinitializeFunction};
     }
   }
   return std::nullopt;

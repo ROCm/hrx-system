@@ -6,6 +6,7 @@
 
 #include "iree/StatusChecks.h"
 
+#include <limits>
 #include <optional>
 
 #include "clang/AST/Decl.h"
@@ -217,7 +218,8 @@ bool IsKnownStatusConsumer(StringRef Name) {
 }
 
 std::optional<unsigned> KnownStatusSinkArgument(StringRef Name) {
-  if (Name == "iree_async_proactor_io_uring_push_software_completion") {
+  if (Name == "iree_async_proactor_io_uring_push_software_completion" ||
+      Name == "iree_async_proactor_iocp_post_stashed_status") {
     return 2;
   }
   return std::nullopt;
@@ -474,7 +476,7 @@ bool IsBorrowedStatusCheckExemptFunction(StringRef Name) {
   return IsStatusObserver(Name) || IsKnownStatusConsumer(Name) ||
          IsKnownStatusTransferProducer(Name) || IsKnownStatusClone(Name) ||
          IsKnownStatusNoOwnerProducer(Name) ||
-         Name == "iree_async_proactor_io_uring_push_software_completion" ||
+         KnownStatusSinkArgument(Name).has_value() ||
          Name == "iree_hal_status_as_semaphore_failure" ||
          Name == "iree_status_from_loomc" || Name == "loomc_status_from_iree" ||
          Name == "iree_status_from_loomc_status" ||
@@ -1198,23 +1200,25 @@ class StatusLifetimeAnalyzer {
     auto Decomposed = SourceManager.getDecomposedLoc(Begin);
     bool Invalid = false;
     StringRef Buffer = SourceManager.getBufferData(Decomposed.first, &Invalid);
-    if (Invalid || Decomposed.second > Buffer.size()) {
+    if (Invalid || Buffer.size() > std::numeric_limits<unsigned>::max() ||
+        Decomposed.second > Buffer.size()) {
       return std::nullopt;
     }
+    unsigned BufferSize = static_cast<unsigned>(Buffer.size());
 
-    for (unsigned I = Decomposed.second; I < Buffer.size(); ++I) {
+    for (unsigned I = Decomposed.second; I < BufferSize; ++I) {
       if (Buffer[I] == '\r' || Buffer[I] == '\n') {
         return std::nullopt;
       }
       if (Buffer[I] != ';') {
         continue;
       }
-      for (unsigned End = I + 1; End < Buffer.size(); ++End) {
+      for (unsigned End = I + 1; End < BufferSize; ++End) {
         if (Buffer[End] == ' ' || Buffer[End] == '\t') {
           continue;
         }
         if (Buffer[End] == '\r') {
-          if (End + 1 < Buffer.size() && Buffer[End + 1] == '\n') {
+          if (End + 1 < BufferSize && Buffer[End + 1] == '\n') {
             return End + 2;
           }
           return End + 1;
@@ -1224,7 +1228,7 @@ class StatusLifetimeAnalyzer {
         }
         return std::nullopt;
       }
-      return Buffer.size();
+      return BufferSize;
     }
     return std::nullopt;
   }

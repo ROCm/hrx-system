@@ -31,6 +31,12 @@
 namespace clang::tidy::iree {
 namespace {
 
+std::string NormalizePathSeparators(StringRef Path) {
+  std::string NormalizedPath = Path.str();
+  std::replace(NormalizedPath.begin(), NormalizedPath.end(), '\\', '/');
+  return NormalizedPath;
+}
+
 bool IsExternalMacroBody(SourceLocation Location,
                          const SourceManager& SourceManager) {
   if (!Location.isMacroID()) {
@@ -41,7 +47,9 @@ bool IsExternalMacroBody(SourceLocation Location,
     return true;
   }
   llvm::StringRef Filename = SourceManager.getFilename(SpellingLocation);
-  return Filename.contains("/external/") || Filename.starts_with("external/");
+  std::string NormalizedFilename = NormalizePathSeparators(Filename);
+  return StringRef(NormalizedFilename).contains("/external/") ||
+         StringRef(NormalizedFilename).starts_with("external/");
 }
 
 bool IsStatusTestMacroName(StringRef Name) {
@@ -60,9 +68,12 @@ bool IsTestFilename(StringRef Filename) {
   if (Filename.empty()) {
     return false;
   }
-  StringRef Basename = llvm::sys::path::filename(Filename);
-  return Filename.contains("/test/") || Filename.contains("/testing/") ||
-         Filename.contains("/cts/") || Basename.contains("_test.") ||
+  std::string NormalizedFilename = NormalizePathSeparators(Filename);
+  StringRef NormalizedPath = NormalizedFilename;
+  StringRef Basename = llvm::sys::path::filename(NormalizedPath);
+  return NormalizedPath.contains("/test/") ||
+         NormalizedPath.contains("/testing/") ||
+         NormalizedPath.contains("/cts/") || Basename.contains("_test.") ||
          Basename.contains("_test_") || Basename == "test_base.h";
 }
 

@@ -5,7 +5,10 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 #include "clang-tidy/ClangTidyModule.h"
+#include "llvm/Config/llvm-config.h"
+#if LLVM_VERSION_MAJOR < 22
 #include "clang-tidy/ClangTidyModuleRegistry.h"
+#endif  // LLVM_VERSION_MAJOR < 22
 #include "iree/ExtentChecks.h"
 #include "iree/LifecycleChecks.h"
 #include "iree/RecursionCheck.h"

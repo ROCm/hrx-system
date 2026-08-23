@@ -4,12 +4,15 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include <stdint.h>
-
 typedef struct iree_status_handle_t* iree_status_t;
 typedef struct iree_hal_amdgpu_reclaim_entry_t iree_hal_amdgpu_reclaim_entry_t;
+typedef __INTPTR_TYPE__ intptr_t;
 typedef intptr_t iree_host_size_t;
 typedef int iree_status_code_t;
+typedef __UINTPTR_TYPE__ uintptr_t;
+typedef struct iree_clang_tidy_status_operation_t {
+  void* next;
+} iree_clang_tidy_status_operation_t;
 typedef void (*iree_clang_tidy_status_const_callback_t)(
     void* user_data, const iree_status_t status);
 
@@ -32,6 +35,12 @@ iree_status_t iree_async_socket_query_failure(void* socket);
 iree_status_t iree_status_clone(iree_status_t status);
 void iree_async_proactor_io_uring_push_software_completion(
     void* proactor, void* operation, iree_status_t status);
+void iree_async_proactor_iocp_post_stashed_status(
+    void* proactor, iree_clang_tidy_status_operation_t* operation,
+    iree_status_t status) {
+  (void)proactor;
+  operation->next = (void*)(uintptr_t)status;
+}
 
 iree_status_t iree_clang_tidy_status_assigned_source(void);
 iree_status_t iree_clang_tidy_status_cleanup_source(void);
@@ -418,6 +427,13 @@ void iree_clang_tidy_status_borrowed_parameter_sink(
     void* proactor, void* operation, iree_status_t sink_parameter_status) {
   iree_async_proactor_io_uring_push_software_completion(proactor, operation,
                                                         sink_parameter_status);
+}
+
+void iree_clang_tidy_status_borrowed_parameter_iocp_sink(
+    void* proactor, iree_clang_tidy_status_operation_t* operation,
+    iree_status_t iocp_sink_parameter_status) {
+  iree_async_proactor_iocp_post_stashed_status(proactor, operation,
+                                               iocp_sink_parameter_status);
 }
 
 void iree_clang_tidy_status_borrowed_parameter_reclaim_callback(

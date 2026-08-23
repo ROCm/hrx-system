@@ -20,7 +20,7 @@ def parse_arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--aggregator", required=True, type=Path)
     parser.add_argument("--clang-tidy", required=True, type=Path)
-    parser.add_argument("--plugin", required=True, type=Path)
+    parser.add_argument("--plugin", type=Path)
     args, unittest_args = parser.parse_known_args()
     sys.argv = [sys.argv[0], *unittest_args]
     return args
@@ -44,10 +44,12 @@ class RecursionCrossTranslationUnitDriverTest(unittest.TestCase):
                 environment = os.environ.copy()
                 environment["IREE_CLANG_TIDY_RECURSION_SUMMARY"] = str(summary)
                 environment["IREE_CLANG_TIDY_RECURSION_DIAGNOSTICS"] = "0"
+                command = [str(_ARGS.clang_tidy)]
+                if _ARGS.plugin:
+                    command.append(f"--load={_ARGS.plugin}")
                 completed = subprocess.run(
                     [
-                        str(_ARGS.clang_tidy),
-                        f"--load={_ARGS.plugin}",
+                        *command,
                         "--checks=-*,iree-unbounded-recursion",
                         str(source),
                         "--",

@@ -12,6 +12,35 @@ load(":clang_tidy.bzl", "iree_clang_tidy", "iree_recursion_analysis")
 
 package(default_visibility = ["//visibility:public"])
 
+_CLANG_TIDY_TEST_ARGS = select({
+    "@platforms//os:windows": [
+        "--clang-tidy=$(location :iree-clang-tidy)",
+    ],
+    "//conditions:default": [
+        "--clang-tidy=$(location @iree_clang_tidy_llvm//:clang-tidy)",
+        "--plugin=$(location :IREEClangTidyPlugin.so)",
+    ],
+})
+
+_CLANG_TIDY_TEST_DATA = select({
+    "@platforms//os:windows": [":iree-clang-tidy"],
+    "//conditions:default": [
+        ":IREEClangTidyPlugin.so",
+        "@iree_clang_tidy_llvm//:clang-tidy",
+    ],
+})
+
+_WINDOWS_MSVC_ANALYZER_COPTS = select({
+    "//build_tools/bazel:cc_compiler_msvc": [
+        "/external:anglebrackets",
+        "/external:W0",
+        "/external:env:INCLUDE",
+        "/external:Iexternal/+clang_tidy_llvm_repo+iree_clang_tidy_llvm/include",
+        "/wd4244",
+    ],
+    "//conditions:default": [],
+})
+
 exports_files([
     "clang_tidy_config.yaml",
     "clang_tidy.bzl",
@@ -33,6 +62,7 @@ filegroup(
         "README.md",
         "aggregate_recursion_summaries.py",
         "clang_tidy_config.yaml",
+        "iree_clang_tidy_main.cc",
         ":plugin_sources",
         ":testdata",
     ],
@@ -99,22 +129,59 @@ cc_binary(
     ],
 )
 
+cc_binary(
+    name = "iree-clang-tidy",
+    srcs = [
+        "iree_clang_tidy_main.cc",
+        ":plugin_sources",
+    ],
+    copts = CLANG_TIDY_LLVM_COPTS + _WINDOWS_MSVC_ANALYZER_COPTS,
+    defines = [
+        "CLANG_BUILD_STATIC",
+        "_HAS_EXCEPTIONS=0",
+    ],
+    features = ["static_link_msvcrt"],
+    includes = ["."],
+    linkopts = [
+        "advapi32.lib",
+        "ntdll.lib",
+        "ole32.lib",
+        "psapi.lib",
+        "shell32.lib",
+        "uuid.lib",
+        "version.lib",
+        "ws2_32.lib",
+    ],
+    tags = ["manual"],
+    target_compatible_with = CLANG_TIDY_LLVM_TARGET_COMPATIBLE_WITH + select({
+        "@platforms//os:windows": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        "@iree_clang_tidy_llvm//:llvm_headers",
+        "@iree_clang_tidy_llvm//:llvm_static_libraries",
+    ],
+)
+
+alias(
+    name = "clang-tidy-tool",
+    actual = select({
+        "@platforms//os:windows": ":iree-clang-tidy",
+        "//conditions:default": "@iree_clang_tidy_llvm//:clang-tidy",
+    }),
+)
+
 py_test(
     name = "extent_checks_test",
     srcs = [
         "test/clang_tidy_test.py",
         "test/extent_checks_test.py",
     ],
-    args = [
-        "--clang-tidy=$(location @iree_clang_tidy_llvm//:clang-tidy)",
-        "--plugin=$(location :IREEClangTidyPlugin.so)",
-    ],
+    args = _CLANG_TIDY_TEST_ARGS,
     data = [
         "test/extent_checks.c",
         "test/extent_checks.cc",
-        ":IREEClangTidyPlugin.so",
-        "@iree_clang_tidy_llvm//:clang-tidy",
-    ],
+    ] + _CLANG_TIDY_TEST_DATA,
     imports = ["test"],
     main = "test/extent_checks_test.py",
     tags = ["manual"],
@@ -127,15 +194,10 @@ py_test(
         "test/clang_tidy_test.py",
         "test/smoke_test.py",
     ],
-    args = [
-        "--clang-tidy=$(location @iree_clang_tidy_llvm//:clang-tidy)",
-        "--plugin=$(location :IREEClangTidyPlugin.so)",
-    ],
+    args = _CLANG_TIDY_TEST_ARGS,
     data = [
         "test/smoke.c",
-        ":IREEClangTidyPlugin.so",
-        "@iree_clang_tidy_llvm//:clang-tidy",
-    ],
+    ] + _CLANG_TIDY_TEST_DATA,
     imports = ["test"],
     main = "test/smoke_test.py",
     tags = ["manual"],
@@ -148,16 +210,11 @@ py_test(
         "test/clang_tidy_test.py",
         "test/status_checks_test.py",
     ],
-    args = [
-        "--clang-tidy=$(location @iree_clang_tidy_llvm//:clang-tidy)",
-        "--plugin=$(location :IREEClangTidyPlugin.so)",
-    ],
+    args = _CLANG_TIDY_TEST_ARGS,
     data = [
         "test/status_checks.c",
         "test/status_checks.cc",
-        ":IREEClangTidyPlugin.so",
-        "@iree_clang_tidy_llvm//:clang-tidy",
-    ],
+    ] + _CLANG_TIDY_TEST_DATA,
     imports = ["test"],
     main = "test/status_checks_test.py",
     tags = ["manual"],
@@ -170,16 +227,11 @@ py_test(
         "test/clang_tidy_test.py",
         "test/lifecycle_checks_test.py",
     ],
-    args = [
-        "--clang-tidy=$(location @iree_clang_tidy_llvm//:clang-tidy)",
-        "--plugin=$(location :IREEClangTidyPlugin.so)",
-    ],
+    args = _CLANG_TIDY_TEST_ARGS,
     data = [
         "test/lifecycle_checks.c",
         "test/non_identifier_functions.cc",
-        ":IREEClangTidyPlugin.so",
-        "@iree_clang_tidy_llvm//:clang-tidy",
-    ],
+    ] + _CLANG_TIDY_TEST_DATA,
     imports = ["test"],
     main = "test/lifecycle_checks_test.py",
     tags = ["manual"],
@@ -192,15 +244,10 @@ py_test(
         "test/clang_tidy_test.py",
         "test/recursion_check_test.py",
     ],
-    args = [
-        "--clang-tidy=$(location @iree_clang_tidy_llvm//:clang-tidy)",
-        "--plugin=$(location :IREEClangTidyPlugin.so)",
-    ],
+    args = _CLANG_TIDY_TEST_ARGS,
     data = [
         "test/recursion_check.c",
-        ":IREEClangTidyPlugin.so",
-        "@iree_clang_tidy_llvm//:clang-tidy",
-    ],
+    ] + _CLANG_TIDY_TEST_DATA,
     imports = ["test"],
     main = "test/recursion_check_test.py",
     tags = ["manual"],
@@ -249,16 +296,11 @@ py_test(
         "test/clang_tidy_test.py",
         "test/refcount_checks_test.py",
     ],
-    args = [
-        "--clang-tidy=$(location @iree_clang_tidy_llvm//:clang-tidy)",
-        "--plugin=$(location :IREEClangTidyPlugin.so)",
-    ],
+    args = _CLANG_TIDY_TEST_ARGS,
     data = [
         "test/non_identifier_functions.cc",
         "test/refcount_checks.c",
-        ":IREEClangTidyPlugin.so",
-        "@iree_clang_tidy_llvm//:clang-tidy",
-    ],
+    ] + _CLANG_TIDY_TEST_DATA,
     imports = ["test"],
     main = "test/refcount_checks_test.py",
     tags = ["manual"],
@@ -271,15 +313,10 @@ py_test(
         "test/clang_tidy_test.py",
         "test/trace_checks_test.py",
     ],
-    args = [
-        "--clang-tidy=$(location @iree_clang_tidy_llvm//:clang-tidy)",
-        "--plugin=$(location :IREEClangTidyPlugin.so)",
-    ],
+    args = _CLANG_TIDY_TEST_ARGS,
     data = [
         "test/trace_checks.c",
-        ":IREEClangTidyPlugin.so",
-        "@iree_clang_tidy_llvm//:clang-tidy",
-    ],
+    ] + _CLANG_TIDY_TEST_DATA,
     imports = ["test"],
     main = "test/trace_checks_test.py",
     tags = ["manual"],
@@ -292,18 +329,13 @@ py_test(
         "test/clang_tidy_test.py",
         "test/style_checks_test.py",
     ],
-    args = [
-        "--clang-tidy=$(location @iree_clang_tidy_llvm//:clang-tidy)",
-        "--plugin=$(location :IREEClangTidyPlugin.so)",
-    ],
+    args = _CLANG_TIDY_TEST_ARGS,
     data = [
         "fixtures/status_macro_scope.c",
         "test/status_macro_scope_test.cc",
         "test/style_checks.c",
         "test/style_checks.cc",
-        ":IREEClangTidyPlugin.so",
-        "@iree_clang_tidy_llvm//:clang-tidy",
-    ],
+    ] + _CLANG_TIDY_TEST_DATA,
     imports = ["test"],
     main = "test/style_checks_test.py",
     tags = ["manual"],
@@ -331,6 +363,7 @@ cc_library(
     name = "action_smoke_subject",
     testonly = True,
     srcs = ["test/action_smoke.c"],
+    hdrs = ["test/action_smoke.h"],
     tags = ["manual"],
 )
 

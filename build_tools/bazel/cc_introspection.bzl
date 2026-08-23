@@ -164,8 +164,8 @@ def iree_cc_compile_command(ctx, target, cc_toolchain, feature_configuration, so
       source: Source file to model.
 
     Returns:
-      Struct containing compiler, language, full arguments, and compiler
-      arguments without the compiler executable.
+      Struct containing compiler, language, full arguments, compiler arguments
+      without the compiler executable, and the compile action environment.
     """
     language = iree_cc_source_language(source)
     action_name = _compile_action_name(language)
@@ -197,9 +197,15 @@ def iree_cc_compile_command(ctx, target, cc_toolchain, feature_configuration, so
         action_name = action_name,
         variables = variables,
     )
+    environment = cc_common.get_environment_variables(
+        action_name = action_name,
+        feature_configuration = feature_configuration,
+        variables = variables,
+    )
     return struct(
         arguments = [compiler] + compile_args,
         compiler = compiler,
         compile_args = compile_args,
+        environment = environment,
         language = language,
     )

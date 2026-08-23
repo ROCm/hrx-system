@@ -43,6 +43,7 @@ class StatusChecksTest(clang_tidy_test.ClangTidyAssertions):
                 "annotated_parameter_status",
                 "cloned_parameter_status",
                 "sink_parameter_status",
+                "iocp_sink_parameter_status",
                 "reclaim_callback_parameter_status",
             ],
         )

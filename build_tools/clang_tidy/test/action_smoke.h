@@ -4,10 +4,9 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "build_tools/clang_tidy/test/action_smoke.h"
+#ifndef IREE_BUILD_TOOLS_CLANG_TIDY_TEST_ACTION_SMOKE_H_
+#define IREE_BUILD_TOOLS_CLANG_TIDY_TEST_ACTION_SMOKE_H_
 
-#include <stdlib.h>
+#define IREE_CLANG_TIDY_ACTION_SMOKE_VALUE 0
 
-int iree_clang_tidy_action_smoke_good(void) {
-  return IREE_CLANG_TIDY_ACTION_SMOKE_VALUE == EXIT_SUCCESS;
-}
+#endif  // IREE_BUILD_TOOLS_CLANG_TIDY_TEST_ACTION_SMOKE_H_
