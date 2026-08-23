@@ -291,6 +291,27 @@ func.def public @entry(%arg: i32) -> (i32) {
     EXPECT_EQ(demand.apply_op->kind, LOOM_OP_TEMPLATE_APPLY);
     EXPECT_EQ(demand.next_source_demand_id, LOOM_TEMPLATE_DEMAND_ID_INVALID);
   }
+
+  ASSERT_EQ(table.template_providers.count, 2u);
+  ASSERT_NE(table.template_providers.first_by_family_symbol_id, nullptr);
+  loom_template_provider_reference_id_t provider_id =
+      table.template_providers
+          .first_by_family_symbol_id[undemanded_family_symbol_id];
+  ASSERT_NE(provider_id, LOOM_TEMPLATE_PROVIDER_REFERENCE_ID_INVALID);
+  EXPECT_EQ(table.template_providers.values[provider_id].symbol_id,
+            outer_provider);
+  EXPECT_EQ(
+      table.template_providers.values[provider_id].next_family_provider_id,
+      LOOM_TEMPLATE_PROVIDER_REFERENCE_ID_INVALID);
+
+  provider_id =
+      table.template_providers.first_by_family_symbol_id[family_symbol_id];
+  ASSERT_NE(provider_id, LOOM_TEMPLATE_PROVIDER_REFERENCE_ID_INVALID);
+  EXPECT_EQ(table.template_providers.values[provider_id].symbol_id,
+            FindSymbol(module.get(), IREE_SV("demo_provider")));
+  EXPECT_EQ(
+      table.template_providers.values[provider_id].next_family_provider_id,
+      LOOM_TEMPLATE_PROVIDER_REFERENCE_ID_INVALID);
 }
 
 TEST_F(SymbolReferencesTest, OpenParameterizedArraysAreNotSymbolReferences) {
