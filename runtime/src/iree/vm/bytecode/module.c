@@ -342,7 +342,7 @@ static const iree_vm_module_vtable_t iree_vm_bytecode_module_vtable = {
     IREE_VM_MODULE_ABI_VERSION_0,
     iree_vm_bytecode_module_destroy,
     iree_vm_bytecode_function_start,
-    iree_vm_module_function_resume_unreachable,
+    iree_vm_bytecode_function_resume,
     iree_vm_bytecode_module_attach_state,
     iree_vm_bytecode_module_seal_state,
     iree_vm_bytecode_module_detach_state,

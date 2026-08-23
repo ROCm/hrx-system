@@ -11,6 +11,7 @@
 #include "iree/vm/buffer.h"
 #include "iree/vm/bytecode/interpreter_float.h"
 #include "iree/vm/bytecode/interpreter_float_math.h"
+#include "iree/vm/bytecode/interpreter_frame.h"
 #include "iree/vm/bytecode/interpreter_integer.h"
 #include "iree/vm/bytecode/interpreter_stack.h"
 #include "iree/vm/bytecode/module_reader.h"
@@ -68,7 +69,7 @@ IREE_VM_BYTECODE_ASSERT_CONTROL_STATUS(INCOMPATIBLE);
   static const void* const dispatch_table[256] = { \
       IREE_VM_BYTECODE_EXECUTABLE_OPCODE_LIST(     \
           IREE_VM_BYTECODE_DISPATCH_TABLE_ENTRY)}; \
-  const uint8_t* record_data = bytecode;           \
+  const uint8_t* record_data = program_counter;    \
   do {                                             \
   goto* dispatch_table[record_data[0]]
 #define IREE_VM_BYTECODE_DISPATCH_CASE(opcode, label) \
@@ -88,12 +89,12 @@ IREE_VM_BYTECODE_ASSERT_CONTROL_STATUS(INCOMPATIBLE);
   }                                                                         \
   while (false)
 #else
-#define IREE_VM_BYTECODE_DISPATCH_BEGIN()                                   \
-  const uint8_t* record_data = bytecode;                                    \
-  const uint8_t* bytecode_end = bytecode + function->bytecode_length_u32 -  \
-                                sizeof(iree_vm_isa_control_block_record_t); \
-  bool dispatch_terminated = false;                                         \
-  while (!dispatch_terminated && record_data < bytecode_end) {              \
+#define IREE_VM_BYTECODE_DISPATCH_BEGIN()                      \
+  const uint8_t* record_data = program_counter;                \
+  const uint8_t* bytecode_end =                                \
+      function_bytecode + function->bytecode_length_u32;       \
+  bool dispatch_terminated = false;                            \
+  while (!dispatch_terminated && record_data < bytecode_end) { \
     switch (record_data[0]) {
 #define IREE_VM_BYTECODE_DISPATCH_CASE(opcode, label) \
   case IREE_VM_ISA_CORE_OPCODE_##opcode:
@@ -258,6 +259,44 @@ static inline void iree_vm_bytecode_copy_direct_values(uint64_t* target,
   }
 }
 
+static void iree_vm_bytecode_initialize_state(
+    const iree_vm_bytecode_v0_function_row_t* function,
+    const iree_vm_bytecode_v0_signature_row_t* signature,
+    iree_vm_bytecode_execution_state_t* state) {
+  const iree_vm_call_packet_t* call = state->call;
+  const uint32_t ref_count =
+      function->ref_register_count_u16 + function->local_ref_count_u32;
+  state->ref_count = ref_count;
+  for (uint32_t i = 0; i < ref_count; ++i) {
+    state->refs[i] = iree_vm_ref_null();
+  }
+  const uint32_t function_count = function->function_register_count_u16 +
+                                  function->local_function_count_u32;
+  if (function_count != 0) {
+    memset(state->functions, 0, function_count * sizeof(*state->functions));
+  }
+
+  const uint16_t direct_value_count = signature->argument_value_count_u16 < 16
+                                          ? signature->argument_value_count_u16
+                                          : 16;
+  iree_vm_bytecode_copy_direct_values(
+      state->values, call->value_arguments.direct, direct_value_count);
+  const uint16_t direct_ref_count = signature->argument_ref_count_u16 < 16
+                                        ? signature->argument_ref_count_u16
+                                        : 16;
+  for (uint16_t i = 0; i < direct_ref_count; ++i) {
+    iree_vm_call_ref_argument_load_move(call, i, &state->refs[i]);
+  }
+  const uint16_t direct_function_count =
+      signature->argument_function_count_u16 < 16
+          ? signature->argument_function_count_u16
+          : 16;
+  if (direct_function_count != 0) {
+    memcpy(state->functions, call->function_arguments.direct,
+           direct_function_count * sizeof(*state->functions));
+  }
+}
+
 // Resolves one verified indexed local-byte access. Static verification has
 // already proven |base| plus |access_length| fits the local byte array and
 // |scale| is nonzero. Division folds the architectural u16 index ceiling and
@@ -415,94 +454,21 @@ static iree_status_t iree_vm_bytecode_publish_results(
   return iree_ok_status();
 }
 
-iree_status_t iree_vm_bytecode_function_start(
-    iree_vm_module_t* base_module,
-    const iree_vm_module_function_start_params_t* params,
+static iree_status_t iree_vm_bytecode_execute(
+    iree_vm_bytecode_module_t* module,
+    const iree_vm_bytecode_v0_function_row_t* function,
+    const iree_vm_module_execution_t* execution,
+    iree_vm_bytecode_execution_state_t* state,
     iree_vm_execution_outcome_t* out_outcome) {
-  iree_vm_bytecode_module_t* module = iree_vm_bytecode_module_cast(base_module);
-  const iree_vm_bytecode_v0_function_row_t* function =
-      &module->layout.functions.rows[params->function_ordinal];
-  const iree_vm_bytecode_v0_signature_row_t* signature =
-      &module->layout.signatures.rows[function->signature_ordinal_u16];
-  iree_vm_invocation_t* invocation = params->execution.invocation;
-  uint8_t* frame_checkpoint = invocation->stack_cursor;
-  uint64_t* values = NULL;
-  iree_vm_ref_t* refs = NULL;
-  iree_vm_ref_t* local_refs = NULL;
-  iree_vm_function_ref_t* functions = NULL;
-  iree_vm_function_ref_t* local_functions = NULL;
-  uint8_t* local_bytes = NULL;
-  // Verification requires the register bank to cover every result, so the
-  // final comparison is equality for every published image.
-  if (function->local_byte_length_u16 == 0 &&
-      function->ref_register_count_u16 == 0 &&
-      function->local_ref_count_u32 == 0 &&
-      function->function_register_count_u16 == 0 &&
-      function->local_function_count_u32 == 0 &&
-      function->value_register_count_u16 <= 16 &&
-      function->value_register_count_u16 <= signature->result_value_count_u16) {
-    // Result banks are invocation-owned staging until the root succeeds. A
-    // scalar-only leaf whose complete register bank fits the direct result
-    // prefix can execute in place without reserving or copying a frame.
-    values = params->call.value_results.direct;
-  } else {
-    const uint32_t ref_count =
-        function->ref_register_count_u16 + function->local_ref_count_u32;
-    const uint32_t function_count = function->function_register_count_u16 +
-                                    function->local_function_count_u32;
-    const iree_host_size_t frame_storage_size =
-        function->value_register_count_u16 * sizeof(uint64_t) +
-        (iree_host_size_t)ref_count * sizeof(iree_vm_ref_t) +
-        (iree_host_size_t)function_count * sizeof(iree_vm_function_ref_t) +
-        function->local_byte_length_u16;
-    uint8_t* frame_storage = NULL;
-    IREE_RETURN_IF_ERROR(iree_vm_invocation_stack_reserve(
-        invocation, frame_storage_size,
-        iree_max(iree_max(iree_alignof(uint64_t), iree_alignof(iree_vm_ref_t)),
-                 iree_alignof(iree_vm_function_ref_t)),
-        &frame_checkpoint, &frame_storage));
-    values = (uint64_t*)frame_storage;
-    uint8_t* ref_storage =
-        frame_storage + function->value_register_count_u16 * sizeof(uint64_t);
-    refs = (iree_vm_ref_t*)ref_storage;
-    local_refs = refs + function->ref_register_count_u16;
-    functions =
-        (iree_vm_function_ref_t*)(local_refs + function->local_ref_count_u32);
-    local_functions = functions + function->function_register_count_u16;
-    local_bytes =
-        (uint8_t*)(local_functions + function->local_function_count_u32);
-  }
-  const uint32_t ref_count =
-      function->ref_register_count_u16 + function->local_ref_count_u32;
-  for (uint32_t i = 0; i < ref_count; ++i) {
-    refs[i] = iree_vm_ref_null();
-  }
-  const uint32_t function_count = function->function_register_count_u16 +
-                                  function->local_function_count_u32;
-  if (function_count != 0) {
-    memset(functions, 0, function_count * sizeof(*functions));
-  }
-  const uint16_t direct_value_count = signature->argument_value_count_u16 < 16
-                                          ? signature->argument_value_count_u16
-                                          : 16;
-  iree_vm_bytecode_copy_direct_values(
-      values, params->call.value_arguments.direct, direct_value_count);
-  const uint16_t direct_ref_count = signature->argument_ref_count_u16 < 16
-                                        ? signature->argument_ref_count_u16
-                                        : 16;
-  for (uint16_t i = 0; i < direct_ref_count; ++i) {
-    iree_vm_call_ref_argument_load_move(&params->call, i, &refs[i]);
-  }
-  const uint16_t direct_function_count =
-      signature->argument_function_count_u16 < 16
-          ? signature->argument_function_count_u16
-          : 16;
-  if (direct_function_count != 0) {
-    memcpy(functions, params->call.function_arguments.direct,
-           direct_function_count * sizeof(*functions));
-  }
-
-  void* process_storage = params->execution.process_storage;
+  iree_vm_invocation_t* invocation = execution->invocation;
+  const iree_vm_call_packet_t* call = state->call;
+  uint64_t* values = state->values;
+  iree_vm_ref_t* refs = state->refs;
+  iree_vm_ref_t* local_refs = state->local_refs;
+  iree_vm_function_ref_t* functions = state->functions;
+  iree_vm_function_ref_t* local_functions = state->local_functions;
+  uint8_t* local_bytes = state->local_bytes;
+  void* process_storage = execution->process_storage;
   uint64_t* global_values = NULL;
   iree_vm_ref_t* global_refs = NULL;
   iree_vm_function_ref_t* global_functions = NULL;
@@ -530,8 +496,7 @@ iree_status_t iree_vm_bytecode_function_start(
   const iree_vm_bytecode_v0_switch_target_entry_t* switch_targets =
       module->layout.functions.switch_targets +
       function->switch_target_base_u32;
-  const uint8_t* bytecode =
-      function_bytecode + sizeof(iree_vm_isa_control_block_record_t);
+  const uint8_t* program_counter = state->program_counter;
   iree_status_t status = iree_ok_status();
 
   IREE_VM_BYTECODE_DISPATCH_BEGIN();
@@ -539,11 +504,35 @@ iree_status_t iree_vm_bytecode_function_start(
     IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_isa_control_block_record_t);
   }
   IREE_VM_BYTECODE_DISPATCH_CASE(CONTROL_RETURN, control_return) {
-    status = iree_vm_bytecode_publish_results(module, function,
-                                              &params->execution, &params->call,
+    status = iree_vm_bytecode_publish_results(module, function, execution, call,
                                               values, refs, functions);
     if (iree_status_is_ok(status)) {
       *out_outcome = IREE_VM_EXECUTION_OUTCOME_COMPLETED;
+    }
+    IREE_VM_BYTECODE_DISPATCH_TERMINATE();
+  }
+  IREE_VM_BYTECODE_DISPATCH_CASE(CONTROL_YIELD_S32, control_yield_s32) {
+    const iree_vm_isa_control_yield_s32_record_t* record =
+        (const iree_vm_isa_control_yield_s32_record_t*)record_data;
+    if (!state->frame) {
+      status =
+          iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                           "bytecode function yielded without a durable frame");
+      IREE_VM_BYTECODE_DISPATCH_TERMINATE();
+    }
+    if (invocation->has_external_borrowed_arguments) {
+      status = iree_make_status(
+          IREE_STATUS_FAILED_PRECONDITION,
+          "bytecode function yielded while external borrowed refs were live");
+      IREE_VM_BYTECODE_DISPATCH_TERMINATE();
+    }
+    state->program_counter = iree_vm_bytecode_direct_target(
+        record_data, sizeof(*record), record->target_rel32);
+    *out_outcome = IREE_VM_EXECUTION_OUTCOME_SUSPENDED;
+    const iree_vm_invocation_wake_callback_t wake_callback =
+        iree_vm_invocation_wake_callback(invocation);
+    if (wake_callback.function) {
+      wake_callback.function(wake_callback.user_data);
     }
     IREE_VM_BYTECODE_DISPATCH_TERMINATE();
   }
@@ -641,8 +630,7 @@ iree_status_t iree_vm_bytecode_function_start(
                                  value_abi_argument_load) {
     const iree_vm_isa_value_abi_argument_load_record_t* record =
         (const iree_vm_isa_value_abi_argument_load_record_t*)record_data;
-    values[record->dst_v8] =
-        params->call.value_arguments.overflow[record->slot_u16];
+    values[record->dst_v8] = call->value_arguments.overflow[record->slot_u16];
     IREE_VM_BYTECODE_DISPATCH_NEXT(
         iree_vm_isa_value_abi_argument_load_record_t);
   }
@@ -650,16 +638,14 @@ iree_status_t iree_vm_bytecode_function_start(
                                  value_abi_result_store) {
     const iree_vm_isa_value_abi_result_store_record_t* record =
         (const iree_vm_isa_value_abi_result_store_record_t*)record_data;
-    params->call.value_results.overflow[record->slot_u16] =
-        values[record->src_v8];
+    call->value_results.overflow[record->slot_u16] = values[record->src_v8];
     IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_isa_value_abi_result_store_record_t);
   }
   IREE_VM_BYTECODE_DISPATCH_CASE(REF_ABI_ARGUMENT_LOAD_BORROW,
                                  ref_abi_argument_load_borrow) {
     const iree_vm_isa_ref_abi_argument_load_borrow_record_t* record =
         (const iree_vm_isa_ref_abi_argument_load_borrow_record_t*)record_data;
-    const iree_vm_ref_t source =
-        params->call.ref_arguments.overflow[record->slot_u16];
+    const iree_vm_ref_t source = call->ref_arguments.overflow[record->slot_u16];
     const iree_vm_ref_t borrowed =
         source.object ? iree_vm_ref_from_ptr_borrowed(source.object,
                                                       iree_vm_ref_type(source))
@@ -672,9 +658,8 @@ iree_status_t iree_vm_bytecode_function_start(
                                  ref_abi_argument_load_move) {
     const iree_vm_isa_ref_abi_argument_load_move_record_t* record =
         (const iree_vm_isa_ref_abi_argument_load_move_record_t*)record_data;
-    iree_vm_bytecode_ref_move(
-        &refs[record->dst_r8],
-        &params->call.ref_arguments.overflow[record->slot_u16]);
+    iree_vm_bytecode_ref_move(&refs[record->dst_r8],
+                              &call->ref_arguments.overflow[record->slot_u16]);
     IREE_VM_BYTECODE_DISPATCH_NEXT(
         iree_vm_isa_ref_abi_argument_load_move_record_t);
   }
@@ -683,8 +668,8 @@ iree_status_t iree_vm_bytecode_function_start(
     const iree_vm_isa_ref_abi_result_store_move_record_t* record =
         (const iree_vm_isa_ref_abi_result_store_move_record_t*)record_data;
     iree_vm_ref_t new_result = iree_vm_ref_move(&refs[record->src_r8]);
-    iree_vm_bytecode_ref_replace(
-        &params->call.ref_results.overflow[record->slot_u16], new_result);
+    iree_vm_bytecode_ref_replace(&call->ref_results.overflow[record->slot_u16],
+                                 new_result);
     IREE_VM_BYTECODE_DISPATCH_NEXT(
         iree_vm_isa_ref_abi_result_store_move_record_t);
   }
@@ -693,13 +678,13 @@ iree_status_t iree_vm_bytecode_function_start(
     const iree_vm_isa_func_abi_argument_load_record_t* record =
         (const iree_vm_isa_func_abi_argument_load_record_t*)record_data;
     functions[record->dst_f8] =
-        params->call.function_arguments.overflow[record->slot_u16];
+        call->function_arguments.overflow[record->slot_u16];
     IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_isa_func_abi_argument_load_record_t);
   }
   IREE_VM_BYTECODE_DISPATCH_CASE(FUNC_ABI_RESULT_STORE, func_abi_result_store) {
     const iree_vm_isa_func_abi_result_store_record_t* record =
         (const iree_vm_isa_func_abi_result_store_record_t*)record_data;
-    params->call.function_results.overflow[record->slot_u16] =
+    call->function_results.overflow[record->slot_u16] =
         functions[record->src_f8];
     IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_isa_func_abi_result_store_record_t);
   }
@@ -938,9 +923,8 @@ iree_status_t iree_vm_bytecode_function_start(
     const iree_vm_bytecode_v0_global_function_descriptor_row_t* descriptor =
         &module->layout.globals.functions[record->global_u16];
     if (!iree_vm_bytecode_function_matches_global(
-            params->execution.invocation->process->program,
-            functions[record->src_f8], params->execution.linked_module,
-            descriptor)) {
+            invocation->process->program, functions[record->src_f8],
+            execution->linked_module, descriptor)) {
       status =
           iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                            "immutable function global contract does not match");
@@ -979,9 +963,8 @@ iree_status_t iree_vm_bytecode_function_start(
     const iree_vm_bytecode_v0_global_function_descriptor_row_t* descriptor =
         &module->layout.globals.functions[record->global_u16];
     if (!iree_vm_bytecode_function_matches_global(
-            params->execution.invocation->process->program,
-            functions[record->src_f8], params->execution.linked_module,
-            descriptor)) {
+            invocation->process->program, functions[record->src_f8],
+            execution->linked_module, descriptor)) {
       status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                                 "mutable function global contract does not "
                                 "match");
@@ -1443,8 +1426,7 @@ iree_status_t iree_vm_bytecode_function_start(
     const iree_vm_isa_func_address_record_t* record =
         (const iree_vm_isa_func_address_record_t*)record_data;
     const iree_vm_program_t* program = invocation->process->program;
-    const iree_vm_linked_module_t* linked_module =
-        params->execution.linked_module;
+    const iree_vm_linked_module_t* linked_module = execution->linked_module;
     if (record->target_kind_u8 == IREE_VM_ISA_CONTROL_CALL_TARGET_LOCAL) {
       uint32_t mapping = program
                              ->callables[linked_module->callable_base +
@@ -1480,7 +1462,7 @@ iree_status_t iree_vm_bytecode_function_start(
     const iree_vm_isa_func_import_resolved_record_t* record =
         (const iree_vm_isa_func_import_resolved_record_t*)record_data;
     values[record->dst_v8] =
-        params->execution.linked_module
+        execution->linked_module
             ->import_target_bits[record->import_ordinal_u16] != 0;
     IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_isa_func_import_resolved_record_t);
   }
@@ -1777,8 +1759,173 @@ iree_status_t iree_vm_bytecode_function_start(
   }
   IREE_VM_BYTECODE_DISPATCH_END();
 
-  iree_vm_bytecode_frame_reset(refs, ref_count);
+  return status;
+}
+
+static bool iree_vm_bytecode_function_is_scalar_leaf(
+    const iree_vm_bytecode_v0_function_row_t* function,
+    const iree_vm_bytecode_v0_signature_row_t* signature) {
+  // Verification requires the register bank to cover every result, so the
+  // final comparison is equality for every published image.
+  return function->local_byte_length_u16 == 0 &&
+         function->ref_register_count_u16 == 0 &&
+         function->local_ref_count_u32 == 0 &&
+         function->function_register_count_u16 == 0 &&
+         function->local_function_count_u32 == 0 &&
+         function->value_register_count_u16 <= 16 &&
+         function->value_register_count_u16 <=
+             signature->result_value_count_u16;
+}
+
+static iree_status_t iree_vm_bytecode_function_start_transient(
+    iree_vm_bytecode_module_t* module,
+    const iree_vm_bytecode_v0_function_row_t* function,
+    const iree_vm_bytecode_v0_signature_row_t* signature,
+    const iree_vm_module_function_start_params_t* params,
+    iree_vm_execution_outcome_t* out_outcome) {
+  iree_vm_invocation_t* invocation = params->execution.invocation;
+  uint8_t* frame_checkpoint = invocation->stack_cursor;
+  iree_vm_bytecode_execution_state_t state = {
+      .call = &params->call,
+      .program_counter = module->layout.functions.bytecode_data +
+                         function->bytecode_offset_u32 +
+                         sizeof(iree_vm_isa_control_block_record_t),
+      .frame = NULL,
+  };
+  if (iree_vm_bytecode_function_is_scalar_leaf(function, signature)) {
+    // Result banks are invocation-owned staging until the root succeeds. A
+    // scalar-only leaf whose complete register bank fits the direct result
+    // prefix can execute in place without reserving or copying a frame.
+    state.values = params->call.value_results.direct;
+    const uint16_t direct_value_count =
+        signature->argument_value_count_u16 < 16
+            ? signature->argument_value_count_u16
+            : 16;
+    iree_vm_bytecode_copy_direct_values(
+        state.values, params->call.value_arguments.direct, direct_value_count);
+  } else {
+    const uint32_t ref_count =
+        function->ref_register_count_u16 + function->local_ref_count_u32;
+    const uint32_t function_count = function->function_register_count_u16 +
+                                    function->local_function_count_u32;
+    const iree_host_size_t frame_storage_size =
+        function->value_register_count_u16 * sizeof(uint64_t) +
+        (iree_host_size_t)ref_count * sizeof(iree_vm_ref_t) +
+        (iree_host_size_t)function_count * sizeof(iree_vm_function_ref_t) +
+        function->local_byte_length_u16;
+    uint8_t* frame_storage = NULL;
+    IREE_RETURN_IF_ERROR(iree_vm_invocation_stack_reserve(
+        invocation, frame_storage_size,
+        iree_max(iree_max(iree_alignof(uint64_t), iree_alignof(iree_vm_ref_t)),
+                 iree_alignof(iree_vm_function_ref_t)),
+        &frame_checkpoint, &frame_storage));
+    state.values = (uint64_t*)frame_storage;
+    state.refs =
+        (iree_vm_ref_t*)(frame_storage +
+                         function->value_register_count_u16 * sizeof(uint64_t));
+    state.local_refs = state.refs + function->ref_register_count_u16;
+    state.functions = (iree_vm_function_ref_t*)(state.local_refs +
+                                                function->local_ref_count_u32);
+    state.local_functions =
+        state.functions + function->function_register_count_u16;
+    state.local_bytes =
+        (uint8_t*)(state.local_functions + function->local_function_count_u32);
+    iree_vm_bytecode_initialize_state(function, signature, &state);
+  }
+  iree_status_t status = iree_vm_bytecode_execute(
+      module, function, &params->execution, &state, out_outcome);
+  const uint32_t ref_count =
+      function->ref_register_count_u16 + function->local_ref_count_u32;
+  iree_vm_bytecode_frame_reset(state.refs, ref_count);
   iree_vm_invocation_stack_rewind(invocation, frame_checkpoint);
+  return status;
+}
+
+static iree_status_t iree_vm_bytecode_function_start_durable(
+    iree_vm_bytecode_module_t* module,
+    const iree_vm_bytecode_v0_function_row_t* function,
+    const iree_vm_bytecode_v0_signature_row_t* signature,
+    const iree_vm_module_function_start_params_t* params,
+    iree_vm_execution_outcome_t* out_outcome) {
+  iree_vm_bytecode_frame_layout_t layout;
+  IREE_RETURN_IF_ERROR(iree_vm_bytecode_query_frame_layout(function, &layout));
+  iree_vm_frame_t* frame = NULL;
+  IREE_RETURN_IF_ERROR(iree_vm_invocation_push_frame(
+      params, layout.frame, iree_vm_bytecode_frame_cleanup, &frame));
+
+  uint8_t* frame_storage = (uint8_t*)iree_vm_frame_storage(frame);
+  iree_vm_bytecode_execution_state_t* state =
+      (iree_vm_bytecode_execution_state_t*)frame_storage;
+  iree_vm_call_packet_t* call =
+      (iree_vm_call_packet_t*)(frame_storage + layout.call_offset);
+  *call = params->call;
+  *state = (iree_vm_bytecode_execution_state_t){
+      .call = call,
+      .program_counter = module->layout.functions.bytecode_data +
+                         function->bytecode_offset_u32 +
+                         sizeof(iree_vm_isa_control_block_record_t),
+      .frame = frame,
+      .values = (uint64_t*)(frame_storage + layout.values_offset),
+      .refs = (iree_vm_ref_t*)(frame_storage + layout.refs_offset),
+      .local_refs = (iree_vm_ref_t*)(frame_storage + layout.local_refs_offset),
+      .functions =
+          (iree_vm_function_ref_t*)(frame_storage + layout.functions_offset),
+      .local_functions =
+          (iree_vm_function_ref_t*)(frame_storage +
+                                    layout.local_functions_offset),
+      .local_bytes = frame_storage + layout.local_bytes_offset,
+  };
+  iree_vm_bytecode_initialize_state(function, signature, state);
+
+  iree_status_t status = iree_vm_bytecode_execute(
+      module, function, &params->execution, state, out_outcome);
+  if (iree_status_is_ok(status) &&
+      *out_outcome == IREE_VM_EXECUTION_OUTCOME_COMPLETED) {
+    iree_vm_invocation_pop_frame(params->execution.invocation, frame);
+  }
+  return status;
+}
+
+iree_status_t iree_vm_bytecode_function_start(
+    iree_vm_module_t* base_module,
+    const iree_vm_module_function_start_params_t* params,
+    iree_vm_execution_outcome_t* out_outcome) {
+  iree_vm_bytecode_module_t* module = iree_vm_bytecode_module_cast(base_module);
+  const iree_vm_bytecode_v0_function_row_t* function =
+      &module->layout.functions.rows[params->function_ordinal];
+  const iree_vm_bytecode_v0_signature_row_t* signature =
+      &module->layout.signatures.rows[function->signature_ordinal_u16];
+  return iree_any_bit_set(function->flags_u16,
+                          IREE_VM_BYTECODE_FUNCTION_FLAG_MAY_YIELD)
+             ? iree_vm_bytecode_function_start_durable(
+                   module, function, signature, params, out_outcome)
+             : iree_vm_bytecode_function_start_transient(
+                   module, function, signature, params, out_outcome);
+}
+
+iree_status_t iree_vm_bytecode_function_resume(
+    iree_vm_module_t* base_module,
+    const iree_vm_module_function_resume_params_t* params,
+    iree_vm_execution_outcome_t* out_outcome) {
+  const iree_vm_cancel_reason_t cancel_reason =
+      iree_vm_invocation_cancel_reason(params->execution.invocation);
+  if (cancel_reason != IREE_VM_CANCEL_REASON_NONE) {
+    return iree_vm_invocation_cancel_status(cancel_reason);
+  }
+
+  iree_vm_bytecode_module_t* module = iree_vm_bytecode_module_cast(base_module);
+  const uint16_t function_ordinal =
+      iree_vm_frame_function_ordinal(params->frame);
+  const iree_vm_bytecode_v0_function_row_t* function =
+      &module->layout.functions.rows[function_ordinal];
+  iree_vm_bytecode_execution_state_t* state =
+      (iree_vm_bytecode_execution_state_t*)iree_vm_frame_storage(params->frame);
+  iree_status_t status = iree_vm_bytecode_execute(
+      module, function, &params->execution, state, out_outcome);
+  if (iree_status_is_ok(status) &&
+      *out_outcome == IREE_VM_EXECUTION_OUTCOME_COMPLETED) {
+    iree_vm_invocation_pop_frame(params->execution.invocation, params->frame);
+  }
   return status;
 }
 

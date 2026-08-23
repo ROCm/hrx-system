@@ -25,6 +25,7 @@ typedef enum iree_vm_bytecode_verification_form_e {
   IREE_VM_BYTECODE_VERIFICATION_FORM_NONE = 0,
   IREE_VM_BYTECODE_VERIFICATION_FORM_CONTROL_BLOCK,
   IREE_VM_BYTECODE_VERIFICATION_FORM_CONTROL_RETURN,
+  IREE_VM_BYTECODE_VERIFICATION_FORM_CONTROL_YIELD_S32,
   IREE_VM_BYTECODE_VERIFICATION_FORM_CONTROL_BRANCH_S16,
   IREE_VM_BYTECODE_VERIFICATION_FORM_CONTROL_BRANCH_S32,
   IREE_VM_BYTECODE_VERIFICATION_FORM_CONTROL_BRANCH_CONDITIONAL_S16,
@@ -398,6 +399,7 @@ static iree_status_t iree_vm_bytecode_verify_direct_targets(
         break;
       case IREE_VM_BYTECODE_VERIFICATION_FORM_CONTROL_BRANCH_S32:
       case IREE_VM_BYTECODE_VERIFICATION_FORM_CONTROL_BRANCH_CONDITIONAL_S32:
+      case IREE_VM_BYTECODE_VERIFICATION_FORM_CONTROL_YIELD_S32:
         target_word_delta =
             (int32_t)iree_unaligned_load_le_u32(record_data + 4);
         break;
@@ -504,6 +506,17 @@ static iree_status_t iree_vm_bytecode_function_verify(
             record->zero_padding_u8[2] != 0) {
           return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                                   "control.return padding is nonzero");
+        }
+        break;
+      }
+      case IREE_VM_BYTECODE_VERIFICATION_FORM_CONTROL_YIELD_S32: {
+        const iree_vm_isa_control_yield_s32_record_t* record =
+            (const iree_vm_isa_control_yield_s32_record_t*)record_data;
+        if (record->zero_padding_u8[0] != 0 ||
+            record->zero_padding_u8[1] != 0 ||
+            record->zero_padding_u8[2] != 0) {
+          return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                  "control.yield.s32 padding is nonzero");
         }
         break;
       }
@@ -1494,6 +1507,7 @@ static iree_status_t iree_vm_bytecode_function_verify(
                             ordinal);
   }
   if (final_form != IREE_VM_BYTECODE_VERIFICATION_FORM_CONTROL_RETURN &&
+      final_form != IREE_VM_BYTECODE_VERIFICATION_FORM_CONTROL_YIELD_S32 &&
       final_form != IREE_VM_BYTECODE_VERIFICATION_FORM_CONTROL_BRANCH_S16 &&
       final_form != IREE_VM_BYTECODE_VERIFICATION_FORM_CONTROL_BRANCH_S32 &&
       final_form != IREE_VM_BYTECODE_VERIFICATION_FORM_CONTROL_FAIL) {

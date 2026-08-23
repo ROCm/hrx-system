@@ -15,4 +15,10 @@ iree_status_t iree_vm_bytecode_function_start(
     const iree_vm_module_function_start_params_t* params,
     iree_vm_execution_outcome_t* out_outcome);
 
+// Resumes one suspended verified B0 bytecode function frame.
+iree_status_t iree_vm_bytecode_function_resume(
+    iree_vm_module_t* base_module,
+    const iree_vm_module_function_resume_params_t* params,
+    iree_vm_execution_outcome_t* out_outcome);
+
 #endif  // IREE_VM_BYTECODE_INTERPRETER_H_

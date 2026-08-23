@@ -442,6 +442,24 @@ TEST(VMBytecodeModuleTest, RejectsMalformedDirectControlFlow) {
                 sizeof(branch));
   });
 
+  // Yield uses the same verified direct-target domain as a wide branch while
+  // requiring all reserved bytes to remain zero.
+  expect_rejected([&](MutableFunctionImage function) {
+    const iree_vm_isa_control_yield_s32_record_t yield = {
+        IREE_VM_ISA_CORE_OPCODE_CONTROL_YIELD_S32, {1, 0, 0}, 0};
+    std::memcpy(function.bytecode + kSwitchOffset, &yield, sizeof(yield));
+  });
+  expect_rejected([&](MutableFunctionImage function) {
+    const iree_vm_isa_control_yield_s32_record_t yield = {
+        IREE_VM_ISA_CORE_OPCODE_CONTROL_YIELD_S32, {0, 0, 0}, INT32_MAX};
+    std::memcpy(function.bytecode + kSwitchOffset, &yield, sizeof(yield));
+  });
+  expect_rejected([&](MutableFunctionImage function) {
+    const iree_vm_isa_control_yield_s32_record_t yield = {
+        IREE_VM_ISA_CORE_OPCODE_CONTROL_YIELD_S32, {0, 0, 0}, 1};
+    std::memcpy(function.bytecode + kSwitchOffset, &yield, sizeof(yield));
+  });
+
   expect_rejected([&](MutableFunctionImage function) {
     function.row->block_count_u32 = 1;
     auto* switch_targets =

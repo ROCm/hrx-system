@@ -198,7 +198,7 @@ def _validate_verification_form(
             CONTROL_TARGET_RELATIVE_S16.entity_id,
             (InstructionFieldRole.IMMEDIATE,),
         )
-    elif verification_form == "CONTROL_BRANCH_S32":
+    elif verification_form in ("CONTROL_BRANCH_S32", "CONTROL_YIELD_S32"):
         if instruction.byte_length != 8:
             raise ValueError(f"{instruction.mnemonic}: wide branch is not 8 bytes")
         require_zero(1, 1, array_length=3)

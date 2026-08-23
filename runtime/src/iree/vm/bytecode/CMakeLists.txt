@@ -59,6 +59,8 @@ iree_cc_library(
     "interpreter_float.h"
     "interpreter_float_math.c"
     "interpreter_float_math.h"
+    "interpreter_frame.c"
+    "interpreter_frame.h"
     "interpreter_integer.h"
     "interpreter_stack.h"
     "module.c"
