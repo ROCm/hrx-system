@@ -18,9 +18,11 @@
 #include <cstdlib>
 #include <cstring>
 #include <initializer_list>
+#include <utility>
 #include <vector>
 
 #include "iree/base/api.h"
+#include "iree/base/status_cc.h"
 #include "iree/vm/bytecode/inspection.h"
 #include "iree/vm/bytecode/module.h"
 #include "iree/vm/bytecode/module_test_data.h"
@@ -67,21 +69,20 @@ void RequireOk(iree_status_t status) {
   if (!iree_status_is_ok(status)) iree_status_abort(status);
 }
 
-// Consumes a failure only when its code is an explicitly modeled outcome of
-// malformed input. Any other failure is an infrastructure defect and remains
-// visible to the fuzzing engine.
-bool ConsumeExpectedFailure(
+// Returns true for success and false for an explicitly modeled failure caused
+// by malformed fuzz input. Any other failure is an infrastructure defect and
+// remains visible to the fuzzing engine.
+bool IsSuccessfulOrExpectedFailure(
     iree_status_t status,
     std::initializer_list<iree_status_code_t> expected_codes) {
-  if (iree_status_is_ok(status)) return true;
-  const iree_status_code_t actual_code = iree_status_code(status);
+  iree::Status owned_status(std::move(status));
+  if (owned_status.ok()) return true;
+  const iree_status_code_t actual_code =
+      static_cast<iree_status_code_t>(owned_status.code());
   for (const iree_status_code_t expected_code : expected_codes) {
-    if (actual_code == expected_code) {
-      iree_status_free(status);
-      return false;
-    }
+    if (actual_code == expected_code) return false;
   }
-  iree_status_abort(status);
+  iree_status_abort(owned_status.release());
 }
 
 bool IsFuzzableOpcode(uint8_t opcode) {
@@ -250,7 +251,8 @@ void ExerciseInspection(const std::vector<uint8_t>& image) {
   iree_status_t dump_status = iree_vm_bytecode_module_dump(
       IREE_SV("instruction_fuzz"), image_span, {CountDumpBytes, &sink},
       iree_allocator_system());
-  if (ConsumeExpectedFailure(dump_status, {IREE_STATUS_INVALID_ARGUMENT}) &&
+  if (IsSuccessfulOrExpectedFailure(dump_status,
+                                    {IREE_STATUS_INVALID_ARGUMENT}) &&
       sink.byte_count == 0) {
     std::abort();
   }
@@ -278,7 +280,7 @@ void InvokeRecord(iree_vm_invocation_t* invocation, iree_vm_function_t function,
   for (const iree_vm_variant_t argument : *arguments) {
     if (!iree_vm_variant_is_empty(argument)) std::abort();
   }
-  if (ConsumeExpectedFailure(
+  if (IsSuccessfulOrExpectedFailure(
           status, {IREE_STATUS_INVALID_ARGUMENT, IREE_STATUS_OUT_OF_RANGE,
                    IREE_STATUS_FAILED_PRECONDITION})) {
     iree_vm_variant_span_reset(
@@ -309,10 +311,11 @@ void ExerciseExecutable(const std::vector<uint8_t>& image,
   iree_vm_environment_free(environment);
   const bool module_created =
       AllowsUnimplementedSelector(opcode)
-          ? ConsumeExpectedFailure(module_status, {IREE_STATUS_INVALID_ARGUMENT,
-                                                   IREE_STATUS_UNIMPLEMENTED})
-          : ConsumeExpectedFailure(module_status,
-                                   {IREE_STATUS_INVALID_ARGUMENT});
+          ? IsSuccessfulOrExpectedFailure(
+                module_status,
+                {IREE_STATUS_INVALID_ARGUMENT, IREE_STATUS_UNIMPLEMENTED})
+          : IsSuccessfulOrExpectedFailure(module_status,
+                                          {IREE_STATUS_INVALID_ARGUMENT});
   if (!module_created) {
     if (module != nullptr) std::abort();
     return;
