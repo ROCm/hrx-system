@@ -5,6 +5,7 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 #include "iree/vm/bytecode/verification.h"
+#include "iree/vm/bytecode/wire/core/abi.h"
 #include "iree/vm/bytecode/wire/core/buffer.h"
 #include "iree/vm/bytecode/wire/core/constant.h"
 #include "iree/vm/bytecode/wire/core/control.h"
@@ -21,6 +22,8 @@ typedef enum iree_vm_bytecode_verification_form_e {
   IREE_VM_BYTECODE_VERIFICATION_FORM_NONE = 0,
   IREE_VM_BYTECODE_VERIFICATION_FORM_CONTROL_BLOCK,
   IREE_VM_BYTECODE_VERIFICATION_FORM_CONTROL_RETURN,
+  IREE_VM_BYTECODE_VERIFICATION_FORM_VALUE_ABI_ARGUMENT_LOAD,
+  IREE_VM_BYTECODE_VERIFICATION_FORM_VALUE_ABI_RESULT_STORE,
   IREE_VM_BYTECODE_VERIFICATION_FORM_CONSTANT_ZERO,
   IREE_VM_BYTECODE_VERIFICATION_FORM_CONSTANT_S16,
   IREE_VM_BYTECODE_VERIFICATION_FORM_CONSTANT_I32,
@@ -201,6 +204,8 @@ static iree_status_t iree_vm_bytecode_verify_value_binary_selector_record(
 iree_status_t iree_vm_bytecode_function_verify(
     const iree_vm_bytecode_module_layout_t* layout,
     const iree_vm_bytecode_v0_function_row_t* function, uint32_t ordinal) {
+  const iree_vm_bytecode_v0_signature_row_t* signature =
+      &layout->signatures.rows[function->signature_ordinal_u16];
   const uint8_t* bytecode =
       layout->functions.bytecode_data + function->bytecode_offset_u32;
   if (bytecode[0] != IREE_VM_ISA_CORE_OPCODE_CONTROL_BLOCK) {
@@ -254,6 +259,38 @@ iree_status_t iree_vm_bytecode_function_verify(
               "control.return must be the final record with "
               "canonical padding");
         }
+        break;
+      }
+      case IREE_VM_BYTECODE_VERIFICATION_FORM_VALUE_ABI_ARGUMENT_LOAD: {
+        const iree_vm_isa_value_abi_argument_load_record_t* record =
+            (const iree_vm_isa_value_abi_argument_load_record_t*)record_data;
+        const uint16_t overflow_count =
+            signature->argument_value_count_u16 > 16
+                ? signature->argument_value_count_u16 - 16
+                : 0;
+        if (record->slot_u16 >= overflow_count) {
+          return iree_make_status(
+              IREE_STATUS_INVALID_ARGUMENT,
+              "value argument overflow slot ordinal is out of range");
+        }
+        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_value_register(
+            record->dst_v8, function->value_register_count_u16));
+        break;
+      }
+      case IREE_VM_BYTECODE_VERIFICATION_FORM_VALUE_ABI_RESULT_STORE: {
+        const iree_vm_isa_value_abi_result_store_record_t* record =
+            (const iree_vm_isa_value_abi_result_store_record_t*)record_data;
+        const uint16_t overflow_count =
+            signature->result_value_count_u16 > 16
+                ? signature->result_value_count_u16 - 16
+                : 0;
+        if (record->slot_u16 >= overflow_count) {
+          return iree_make_status(
+              IREE_STATUS_INVALID_ARGUMENT,
+              "value result overflow slot ordinal is out of range");
+        }
+        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_value_register(
+            record->src_v8, function->value_register_count_u16));
         break;
       }
       case IREE_VM_BYTECODE_VERIFICATION_FORM_CONSTANT_ZERO: {
@@ -796,15 +833,14 @@ iree_status_t iree_vm_bytecode_module_verify_executable(
         &plan->layout.functions.rows[i];
     const iree_vm_bytecode_v0_signature_row_t* signature =
         &plan->layout.signatures.rows[function->signature_ordinal_u16];
-    if (signature->argument_value_count_u16 > 16 ||
-        signature->result_value_count_u16 > 16 ||
-        signature->argument_ref_count_u16 > 16 ||
+    if (signature->argument_ref_count_u16 > 16 ||
         signature->result_ref_count_u16 > 16 ||
         signature->argument_function_count_u16 != 0 ||
         signature->result_function_count_u16 != 0) {
       return iree_make_status(
           IREE_STATUS_UNIMPLEMENTED,
-          "B0 bytecode functions support only direct value/ref banks");
+          "B0 bytecode functions support only direct ref banks and no "
+          "function banks");
     }
     if (function->switch_target_entry_count_u32 != 0 ||
         function->local_ref_count_u32 != 0 ||

@@ -14,6 +14,7 @@
 #include "iree/vm/bytecode/interpreter_integer.h"
 #include "iree/vm/bytecode/interpreter_stack.h"
 #include "iree/vm/bytecode/module_reader.h"
+#include "iree/vm/bytecode/wire/core/abi.h"
 #include "iree/vm/bytecode/wire/core/buffer.h"
 #include "iree/vm/bytecode/wire/core/constant.h"
 #include "iree/vm/bytecode/wire/core/control.h"
@@ -266,10 +267,6 @@ static iree_status_t iree_vm_bytecode_publish_results(
   if (call->value_results.direct != values) {
     iree_vm_bytecode_copy_direct_values(call->value_results.direct, values,
                                         direct_value_count);
-    if (signature->result_value_count_u16 > 16) {
-      memcpy(call->value_results.overflow, values + 16,
-             (signature->result_value_count_u16 - 16) * sizeof(uint64_t));
-    }
   }
   for (uint16_t i = 0; i < signature->result_ref_count_u16; ++i) {
     iree_vm_call_ref_result_store_move(call, i, &refs[i]);
@@ -328,10 +325,6 @@ iree_status_t iree_vm_bytecode_function_start(
                                           : 16;
   iree_vm_bytecode_copy_direct_values(
       values, params->call.value_arguments.direct, direct_value_count);
-  if (signature->argument_value_count_u16 > 16) {
-    memcpy(values + 16, params->call.value_arguments.overflow,
-           (signature->argument_value_count_u16 - 16) * sizeof(uint64_t));
-  }
   for (uint16_t i = 0; i < signature->argument_ref_count_u16; ++i) {
     iree_vm_call_ref_argument_load_move(&params->call, i, &refs[i]);
   }
@@ -367,6 +360,23 @@ iree_status_t iree_vm_bytecode_function_start(
       *out_outcome = IREE_VM_EXECUTION_OUTCOME_COMPLETED;
     }
     IREE_VM_BYTECODE_DISPATCH_TERMINATE();
+  }
+  IREE_VM_BYTECODE_DISPATCH_CASE(VALUE_ABI_ARGUMENT_LOAD,
+                                 value_abi_argument_load) {
+    const iree_vm_isa_value_abi_argument_load_record_t* record =
+        (const iree_vm_isa_value_abi_argument_load_record_t*)record_data;
+    values[record->dst_v8] =
+        params->call.value_arguments.overflow[record->slot_u16];
+    IREE_VM_BYTECODE_DISPATCH_NEXT(
+        iree_vm_isa_value_abi_argument_load_record_t);
+  }
+  IREE_VM_BYTECODE_DISPATCH_CASE(VALUE_ABI_RESULT_STORE,
+                                 value_abi_result_store) {
+    const iree_vm_isa_value_abi_result_store_record_t* record =
+        (const iree_vm_isa_value_abi_result_store_record_t*)record_data;
+    params->call.value_results.overflow[record->slot_u16] =
+        values[record->src_v8];
+    IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_isa_value_abi_result_store_record_t);
   }
   IREE_VM_BYTECODE_DISPATCH_CASE(CONSTANT_ZERO, constant_zero) {
     do {

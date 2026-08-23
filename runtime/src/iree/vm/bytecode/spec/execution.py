@@ -35,6 +35,8 @@ class ExecutableInstruction:
 EXECUTABLE_INSTRUCTIONS = (
     ExecutableInstruction("control.block", "CONTROL_BLOCK"),
     ExecutableInstruction("control.return", "CONTROL_RETURN"),
+    ExecutableInstruction("value.abi.argument.load", "VALUE_ABI_ARGUMENT_LOAD"),
+    ExecutableInstruction("value.abi.result.store", "VALUE_ABI_RESULT_STORE"),
     ExecutableInstruction("constant.zero", "CONSTANT_ZERO"),
     ExecutableInstruction("constant.s16", "CONSTANT_S16"),
     ExecutableInstruction("constant.i32", "CONSTANT_I32"),

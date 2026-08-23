@@ -11,6 +11,7 @@
 #include <string_view>
 #include <utility>
 
+#include "iree/vm/bytecode/wire/core/abi.h"
 #include "iree/vm/bytecode/wire/core/buffer.h"
 #include "iree/vm/bytecode/wire/core/constant.h"
 #include "iree/vm/bytecode/wire/core/control.h"
@@ -332,6 +333,79 @@ std::vector<uint8_t> BuildLaunchConfigFunctions() {
   return section.Take();
 }
 
+std::vector<uint8_t> BuildValueOverflowSignatures() {
+  ByteBuffer section;
+  section.Append(iree_vm_bytecode_v0_signatures_header_t{1});
+  section.Append(iree_vm_bytecode_v0_signature_row_t{
+      0,
+      18,
+      18,
+      0,
+      0,
+      0,
+      0,
+  });
+  for (int i = 0; i < 36; ++i) {
+    section.Append(iree_vm_bytecode_v0_signature_descriptor_row_t{
+        IREE_VM_BYTECODE_SIGNATURE_KIND_I64, 0});
+  }
+  return section.Take();
+}
+
+std::vector<uint8_t> BuildValueOverflowCallableTypes() {
+  ByteBuffer section;
+  section.Append(iree_vm_bytecode_v0_callable_types_header_t{1});
+  section.Append(iree_vm_bytecode_v0_callable_type_row_t{0, 0});
+  return section.Take();
+}
+
+std::vector<uint8_t> BuildValueOverflowExports() {
+  ByteBuffer section;
+  section.Append(iree_vm_bytecode_v0_exports_header_t{2});
+  section.Append(iree_vm_bytecode_v0_export_row_t{1, 0, 1, 0});
+  section.Append(iree_vm_bytecode_v0_export_row_t{0, 0, 0, 0});
+  return section.Take();
+}
+
+void AppendValueOverflowTransfers(ByteBuffer* bytecode) {
+  bytecode->Append(iree_vm_isa_value_abi_argument_load_record_t{
+      IREE_VM_ISA_CORE_OPCODE_VALUE_ABI_ARGUMENT_LOAD, 16, 0});
+  bytecode->Append(iree_vm_isa_value_abi_argument_load_record_t{
+      IREE_VM_ISA_CORE_OPCODE_VALUE_ABI_ARGUMENT_LOAD, 17, 1});
+  bytecode->Append(iree_vm_isa_value_abi_result_store_record_t{
+      IREE_VM_ISA_CORE_OPCODE_VALUE_ABI_RESULT_STORE, 16, 0});
+  bytecode->Append(iree_vm_isa_value_abi_result_store_record_t{
+      IREE_VM_ISA_CORE_OPCODE_VALUE_ABI_RESULT_STORE, 17, 1});
+}
+
+std::vector<uint8_t> BuildValueOverflowFunctions() {
+  ByteBuffer bytecode;
+  bytecode.Append(iree_vm_isa_control_block_record_t{
+      IREE_VM_ISA_CORE_OPCODE_CONTROL_BLOCK, {0, 0, 0}});
+  AppendValueOverflowTransfers(&bytecode);
+  bytecode.Append(iree_vm_isa_control_return_record_t{
+      IREE_VM_ISA_CORE_OPCODE_CONTROL_RETURN, {0, 0, 0}});
+
+  bytecode.Append(iree_vm_isa_control_block_record_t{
+      IREE_VM_ISA_CORE_OPCODE_CONTROL_BLOCK, {0, 0, 0}});
+  AppendValueOverflowTransfers(&bytecode);
+  bytecode.Append(iree_vm_isa_conversion_float_to_integer_record_t{
+      IREE_VM_ISA_CORE_OPCODE_CONVERSION_FLOAT_TO_INTEGER, 0, 0,
+      IREE_VM_ISA_FLOAT_TO_INTEGER_F32_TO_U32});
+  bytecode.Append(iree_vm_isa_control_return_record_t{
+      IREE_VM_ISA_CORE_OPCODE_CONTROL_RETURN, {0, 0, 0}});
+  std::vector<uint8_t> bytecode_data = bytecode.Take();
+
+  ByteBuffer section;
+  section.Append(iree_vm_bytecode_v0_functions_header_t{2});
+  section.Append(iree_vm_bytecode_v0_function_row_t{
+      0, 0, 0, 24, 0, 0, 0, 18, 0, 0, 0, 0, {0, 0, 0}});
+  section.Append(iree_vm_bytecode_v0_function_row_t{
+      0, 0, 24, 28, 0, 0, 0, 18, 0, 0, 0, 0, {0, 0, 0}});
+  section.AppendBytes(bytecode_data.data(), bytecode_data.size());
+  return section.Take();
+}
+
 std::vector<uint8_t> BuildScalarStateSignatures() {
   ByteBuffer section;
   section.Append(iree_vm_bytecode_v0_signatures_header_t{2});
@@ -625,6 +699,18 @@ std::vector<uint8_t> BuildLaunchConfigModuleImage() {
        BuildLaunchConfigCallableTypes()},
       {IREE_VM_BYTECODE_SECTION_EXPORTS, 0, BuildLaunchConfigExports()},
       {IREE_VM_BYTECODE_SECTION_FUNCTIONS, 0, BuildLaunchConfigFunctions()},
+  });
+}
+
+std::vector<uint8_t> BuildValueOverflowModuleImage() {
+  return BuildImage({
+      {IREE_VM_BYTECODE_SECTION_STRINGS, 0,
+       BuildStrings({"identity", "fail_after_store"})},
+      {IREE_VM_BYTECODE_SECTION_SIGNATURES, 0, BuildValueOverflowSignatures()},
+      {IREE_VM_BYTECODE_SECTION_CALLABLE_TYPES, 0,
+       BuildValueOverflowCallableTypes()},
+      {IREE_VM_BYTECODE_SECTION_EXPORTS, 0, BuildValueOverflowExports()},
+      {IREE_VM_BYTECODE_SECTION_FUNCTIONS, 0, BuildValueOverflowFunctions()},
   });
 }
 

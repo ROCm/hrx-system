@@ -45,12 +45,14 @@ FAMILY = InstructionFamily(
         "typed ref states. Function overflow slots are complete 16-byte "
         "non-owning function carriers. Argument storage is read-only except "
         "for explicit consuming ref moves. Result storage is private to the "
-        "paused caller and is cleared before callee entry. Call entry validates "
-        "the complete argument packet and control.return validates the complete "
-        "result packet, so these physical-bank handlers perform no signature "
-        "walk or dynamic type check. The caller and packet remain live while a "
-        "callee executes or suspends. ABI operations are infallible after "
-        "verification and never suspend."
+        "paused caller. Ref and function result carriers begin as canonical "
+        "null; value result cells contain unspecified bits until stored. Call "
+        "entry validates the complete argument packet and control.return "
+        "validates runtime-typed result carriers before publication, so these "
+        "physical-bank handlers perform no signature walk or dynamic type "
+        "check. The caller and packet remain live while a callee executes or "
+        "suspends. ABI operations are infallible after verification and never "
+        "suspend."
     ),
 )
 

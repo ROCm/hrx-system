@@ -36,6 +36,9 @@ std::vector<uint8_t> BuildOwnershipModuleImage();
 // full-signature no-op decomposition functions.
 std::vector<uint8_t> BuildLaunchConfigModuleImage();
 
+// Builds an exact value-overflow fixture with successful and failing exports.
+std::vector<uint8_t> BuildValueOverflowModuleImage();
+
 // Builds one scalar-state fixture containing every Core 0.0 value constant,
 // selection, mutable value-global, and constant-pool operation.
 std::vector<uint8_t> BuildScalarStateModuleImage();

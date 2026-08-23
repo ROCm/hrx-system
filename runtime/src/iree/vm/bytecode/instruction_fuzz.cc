@@ -63,6 +63,7 @@ static_assert(RecordLengthsFitFixture(),
 enum class FixtureKind {
   kScalarState,
   kOwnership,
+  kValueOverflow,
 };
 
 void RequireOk(iree_status_t status) {
@@ -101,6 +102,9 @@ uint8_t SelectOpcode(uint8_t selector) {
 
 FixtureKind SelectFixture(uint8_t opcode) {
   switch (opcode) {
+    case IREE_VM_ISA_CORE_OPCODE_VALUE_ABI_ARGUMENT_LOAD:
+    case IREE_VM_ISA_CORE_OPCODE_VALUE_ABI_RESULT_STORE:
+      return FixtureKind::kValueOverflow;
     case IREE_VM_ISA_CORE_OPCODE_GLOBAL_VALUE_IMMUTABLE_LOAD:
     case IREE_VM_ISA_CORE_OPCODE_GLOBAL_VALUE_IMMUTABLE_STORE:
     case IREE_VM_ISA_CORE_OPCODE_BUFFER_RODATA_LOAD:
@@ -108,6 +112,11 @@ FixtureKind SelectFixture(uint8_t opcode) {
     default:
       return FixtureKind::kScalarState;
   }
+}
+
+iree_string_view_t FixtureExportName(FixtureKind fixture_kind) {
+  return fixture_kind == FixtureKind::kValueOverflow ? IREE_SV("identity")
+                                                     : IREE_SV("run");
 }
 
 template <typename T>
@@ -190,6 +199,19 @@ void FillOwnershipFunction(const uint8_t* record, uint8_t record_length,
   }
 }
 
+void FillValueOverflowFunction(const uint8_t* record, uint8_t record_length,
+                               std::vector<uint8_t>* image) {
+  using iree::vm::bytecode::testing::FindFunctionImage;
+  using iree::vm::bytecode::testing::MutableFunctionImage;
+  const MutableFunctionImage function = FindFunctionImage(image, 0);
+  if (function.row == nullptr || function.row->bytecode_length_u32 != 24 ||
+      function.row->value_register_count_u16 != 18 || record_length != 4) {
+    std::abort();
+  }
+  std::memcpy(function.bytecode + sizeof(iree_vm_isa_control_block_record_t),
+              record, record_length);
+}
+
 std::vector<uint8_t> BuildRecordImage(const uint8_t* data, size_t size,
                                       FixtureKind* out_fixture_kind,
                                       uint8_t* out_opcode) {
@@ -212,6 +234,10 @@ std::vector<uint8_t> BuildRecordImage(const uint8_t* data, size_t size,
       image = iree::vm::bytecode::testing::BuildOwnershipModuleImage();
       FillOwnershipFunction(record.data(), record_length, &image);
       break;
+    case FixtureKind::kValueOverflow:
+      image = iree::vm::bytecode::testing::BuildValueOverflowModuleImage();
+      FillValueOverflowFunction(record.data(), record_length, &image);
+      break;
   }
   *out_fixture_kind = fixture_kind;
   *out_opcode = opcode;
@@ -230,22 +256,24 @@ iree_status_t CountDumpBytes(void* user_data, iree_string_view_t text) {
   return iree_ok_status();
 }
 
-void ExerciseDescription(iree_vm_export_t export_value) {
+void ExerciseDescription(iree_vm_export_t export_value,
+                         iree_string_view_t expected_name) {
   iree_host_size_t required_size = 0;
   RequireOk(iree_vm_export_query_description(
       export_value, iree_byte_span_empty(), &required_size, nullptr));
-  alignas(max_align_t) std::array<uint8_t, 1024> storage = {};
+  alignas(max_align_t) std::array<uint8_t, 4096> storage = {};
   if (required_size > storage.size()) std::abort();
   iree_vm_export_description_t description = {};
   RequireOk(iree_vm_export_query_description(
       export_value, iree_make_byte_span(storage.data(), required_size),
       &required_size, &description));
-  if (!iree_string_view_equal(description.name, IREE_SV("run"))) {
+  if (!iree_string_view_equal(description.name, expected_name)) {
     std::abort();
   }
 }
 
-void ExerciseInspection(const std::vector<uint8_t>& image) {
+void ExerciseInspection(const std::vector<uint8_t>& image,
+                        FixtureKind fixture_kind) {
   const iree_const_byte_span_t image_span =
       iree_make_const_byte_span(image.data(), image.size());
   CountingDumpSink sink = {};
@@ -264,8 +292,9 @@ void ExerciseInspection(const std::vector<uint8_t>& image) {
       iree_allocator_system(), &module));
   if (iree_vm_module_export_count(module) != 2) std::abort();
   iree_vm_export_t run_export = {};
-  RequireOk(iree_vm_module_lookup_export(module, IREE_SV("run"), &run_export));
-  ExerciseDescription(run_export);
+  const iree_string_view_t export_name = FixtureExportName(fixture_kind);
+  RequireOk(iree_vm_module_lookup_export(module, export_name, &run_export));
+  ExerciseDescription(run_export, export_name);
   iree_vm_module_release(module);
 }
 
@@ -324,8 +353,9 @@ void ExerciseExecutable(const std::vector<uint8_t>& image,
   if (module == nullptr) std::abort();
 
   iree_vm_export_t run_export = {};
-  RequireOk(iree_vm_module_lookup_export(module, IREE_SV("run"), &run_export));
-  ExerciseDescription(run_export);
+  const iree_string_view_t export_name = FixtureExportName(fixture_kind);
+  RequireOk(iree_vm_module_lookup_export(module, export_name, &run_export));
+  ExerciseDescription(run_export, export_name);
 
   iree_vm_program_t* program = nullptr;
   RequireOk(iree_vm_program_create({module, iree_vm_module_span_empty()},
@@ -357,6 +387,15 @@ void ExerciseExecutable(const std::vector<uint8_t>& image,
       InvokeRecord(invocation, run, &arguments, &results);
       break;
     }
+    case FixtureKind::kValueOverflow: {
+      std::array<iree_vm_variant_t, 18> arguments = {};
+      for (iree_host_size_t i = 0; i < arguments.size(); ++i) {
+        arguments[i] = iree_vm_variant_from_i64(static_cast<int64_t>(i));
+      }
+      std::array<iree_vm_variant_t, 18> results = {};
+      InvokeRecord(invocation, run, &arguments, &results);
+      break;
+    }
   }
 
   iree_vm_invocation_deinitialize(invocation);
@@ -372,7 +411,7 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
   uint8_t opcode = 0;
   const std::vector<uint8_t> image =
       BuildRecordImage(data, size, &fixture_kind, &opcode);
-  ExerciseInspection(image);
+  ExerciseInspection(image, fixture_kind);
   ExerciseExecutable(image, fixture_kind, opcode);
   return 0;
 }

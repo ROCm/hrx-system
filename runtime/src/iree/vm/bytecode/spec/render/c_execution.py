@@ -13,6 +13,7 @@ from collections.abc import Sequence
 from execution import ExecutableInstruction
 from model.isa import Instruction, InstructionFieldRole
 from model.isa.validation import (
+    ABI_SLOT,
     ALLOWED_RANGE,
     ALLOWED_VALUES,
     ANY_BITS,
@@ -153,6 +154,25 @@ def _validate_verification_form(
         if instruction.byte_length != 4:
             raise ValueError(f"{instruction.mnemonic}: control record is not 4 bytes")
         require_zero(1, 1, array_length=3)
+    elif verification_form in (
+        "VALUE_ABI_ARGUMENT_LOAD",
+        "VALUE_ABI_RESULT_STORE",
+    ):
+        if instruction.byte_length != 4:
+            raise ValueError(f"{instruction.mnemonic}: value ABI record is not 4 bytes")
+        require_value(1)
+        packet_contract = (
+            "argument.value"
+            if verification_form == "VALUE_ABI_ARGUMENT_LOAD"
+            else "result.value"
+        )
+        require_field(
+            2,
+            2,
+            ABI_SLOT.entity_id,
+            (InstructionFieldRole.IMMEDIATE,),
+            rule_arguments=(packet_contract,),
+        )
     elif verification_form in ("CONSTANT_ZERO", "CONSTANT_I32", "CONSTANT_I64"):
         require_value(1)
         require_zero(2, 2)

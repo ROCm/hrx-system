@@ -18,6 +18,7 @@
 #include "iree/vm/buffer.h"
 #include "iree/vm/bytecode/inspection.h"
 #include "iree/vm/bytecode/module_test_data.h"
+#include "iree/vm/bytecode/wire/core/abi.h"
 #include "iree/vm/bytecode/wire/core/constant.h"
 #include "iree/vm/bytecode/wire/core/control.h"
 #include "iree/vm/bytecode/wire/core/float.h"
@@ -563,6 +564,58 @@ TEST(VMBytecodeModuleTest, RejectsMalformedScalarStateInstructions) {
   iree_vm_environment_free(environment);
 }
 
+TEST(VMBytecodeModuleTest, RejectsMalformedValueABIInstructions) {
+  iree_vm_environment_t* environment = nullptr;
+  IREE_ASSERT_OK(
+      iree_vm_environment_allocate(iree_allocator_system(), &environment));
+  const auto expect_rejected = [&](const auto& mutate) {
+    std::vector<uint8_t> image = BuildValueOverflowModuleImage();
+    const MutableFunctionImage function = FindFunctionImage(&image, 0);
+    ASSERT_NE(function.row, nullptr);
+    mutate(function);
+
+    iree_vm_module_t* module = nullptr;
+    IREE_EXPECT_STATUS_IS(
+        IREE_STATUS_INVALID_ARGUMENT,
+        iree_vm_bytecode_module_create(
+            environment, IREE_SV("malformed_value_abi"),
+            {iree_make_const_byte_span(image.data(), image.size()),
+             iree_allocator_null()},
+            iree_allocator_system(), &module));
+    EXPECT_EQ(module, nullptr);
+    iree_vm_module_release(module);
+  };
+
+  expect_rejected([](MutableFunctionImage function) {
+    auto* record =
+        reinterpret_cast<iree_vm_isa_value_abi_argument_load_record_t*>(
+            function.bytecode + sizeof(iree_vm_isa_control_block_record_t));
+    record->dst_v8 = 18;
+  });
+  expect_rejected([](MutableFunctionImage function) {
+    auto* record =
+        reinterpret_cast<iree_vm_isa_value_abi_argument_load_record_t*>(
+            function.bytecode + sizeof(iree_vm_isa_control_block_record_t));
+    record->slot_u16 = 2;
+  });
+  expect_rejected([](MutableFunctionImage function) {
+    auto* record =
+        reinterpret_cast<iree_vm_isa_value_abi_result_store_record_t*>(
+            function.bytecode + sizeof(iree_vm_isa_control_block_record_t) +
+            2 * sizeof(iree_vm_isa_value_abi_argument_load_record_t));
+    record->src_v8 = 18;
+  });
+  expect_rejected([](MutableFunctionImage function) {
+    auto* record =
+        reinterpret_cast<iree_vm_isa_value_abi_result_store_record_t*>(
+            function.bytecode + sizeof(iree_vm_isa_control_block_record_t) +
+            2 * sizeof(iree_vm_isa_value_abi_argument_load_record_t));
+    record->slot_u16 = 2;
+  });
+
+  iree_vm_environment_free(environment);
+}
+
 TEST(VMBytecodeModuleTest,
      RejectsMalformedIntegerComparisonAndAddressingInstructions) {
   iree_vm_environment_t* environment = nullptr;
@@ -1024,6 +1077,98 @@ TEST(VMBytecodeModuleTest, ExecutesCompleteLaunchConfiguration) {
                      iree_vm_variant_span_from_array(results)));
   EXPECT_EQ(std::memcmp(results, untouched_results.data(), sizeof(results)), 0);
   iree_vm_variant_span_reset(iree_vm_variant_span_from_array(results));
+
+  iree_vm_invocation_free(invocation);
+  iree_vm_process_release(process);
+  iree_vm_program_release(program);
+  iree_vm_module_release(module);
+}
+
+TEST(VMBytecodeModuleTest, ExecutesExactValueOverflowTransactionally) {
+  std::vector<uint8_t> image = BuildValueOverflowModuleImage();
+  iree_vm_environment_t* environment = nullptr;
+  IREE_ASSERT_OK(
+      iree_vm_environment_allocate(iree_allocator_system(), &environment));
+  iree_vm_module_t* module = nullptr;
+  IREE_ASSERT_OK(iree_vm_bytecode_module_create(
+      environment, IREE_SV("overflow"),
+      {iree_make_const_byte_span(image.data(), image.size()),
+       iree_allocator_null()},
+      iree_allocator_system(), &module));
+  iree_vm_environment_free(environment);
+
+  iree_vm_program_t* program = nullptr;
+  IREE_ASSERT_OK(iree_vm_program_create({module, iree_vm_module_span_empty()},
+                                        iree_allocator_system(), &program));
+  iree_vm_invocation_t* invocation = nullptr;
+  IREE_ASSERT_OK(iree_vm_invocation_allocate(
+      kInvocationStorageSize, iree_allocator_system(), &invocation));
+  iree_vm_process_t* process = nullptr;
+  IREE_ASSERT_OK(iree_vm_process_create(program, invocation,
+                                        iree_vm_variant_span_empty(),
+                                        iree_allocator_system(), &process));
+
+  const std::array<int64_t, 18> expected = {
+      0,
+      1,
+      -1,
+      INT64_MIN,
+      INT64_MAX,
+      17,
+      -29,
+      INT64_C(0x0123456789ABCDEF),
+      -INT64_C(0x0123456789ABCDEF),
+      101,
+      202,
+      303,
+      404,
+      505,
+      606,
+      707,
+      INT64_C(0x13579BDF2468ACE0),
+      -INT64_C(0x13579BDF2468ACE0),
+  };
+  std::array<iree_vm_variant_t, 18> arguments = {};
+  for (iree_host_size_t i = 0; i < arguments.size(); ++i) {
+    arguments[i] = iree_vm_variant_from_i64(expected[i]);
+  }
+  std::array<iree_vm_variant_t, 18> results = {};
+  iree_vm_function_t identity = iree_vm_function_null();
+  IREE_ASSERT_OK(iree_vm_process_lookup_function(
+      process, IREE_SV("overflow"), IREE_SV("identity"), &identity));
+  IREE_ASSERT_OK(iree_vm_invoke(
+      invocation, identity,
+      iree_vm_variant_span_from_ptr(arguments.data(), arguments.size()),
+      iree_vm_variant_span_from_ptr(results.data(), results.size())));
+  for (iree_host_size_t i = 0; i < results.size(); ++i) {
+    int64_t actual = 0;
+    IREE_ASSERT_OK(iree_vm_i64_from_variant(results[i], &actual));
+    EXPECT_EQ(actual, expected[i]);
+  }
+  iree_vm_variant_span_reset(
+      iree_vm_variant_span_from_ptr(results.data(), results.size()));
+
+  for (iree_host_size_t i = 0; i < arguments.size(); ++i) {
+    arguments[i] = iree_vm_variant_from_i64(expected[i]);
+    results[i] = iree_vm_variant_from_i64(INT64_C(0x123456789ABCDEF));
+  }
+  arguments[0] = iree_vm_variant_from_i64(INT64_C(0x7FC00000));
+  const std::array<iree_vm_variant_t, 18> untouched_results = results;
+  iree_vm_function_t fail_after_store = iree_vm_function_null();
+  IREE_ASSERT_OK(iree_vm_process_lookup_function(process, IREE_SV("overflow"),
+                                                 IREE_SV("fail_after_store"),
+                                                 &fail_after_store));
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      iree_vm_invoke(
+          invocation, fail_after_store,
+          iree_vm_variant_span_from_ptr(arguments.data(), arguments.size()),
+          iree_vm_variant_span_from_ptr(results.data(), results.size())));
+  EXPECT_EQ(
+      std::memcmp(results.data(), untouched_results.data(), sizeof(results)),
+      0);
+  iree_vm_variant_span_reset(
+      iree_vm_variant_span_from_ptr(results.data(), results.size()));
 
   iree_vm_invocation_free(invocation);
   iree_vm_process_release(process);
