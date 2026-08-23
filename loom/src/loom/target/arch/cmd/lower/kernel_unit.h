@@ -100,6 +100,17 @@ bool loom_cmd_kernel_unit_boundaries_equivalent(
     const loom_op_t* rhs_launch_op,
     const loom_value_fact_table_t* source_facts);
 
+// Returns a process-local hash of one resolved kernel-unit boundary.
+//
+// The resolved kernel definition participates in the identity. Scalar workload
+// and device argument facts are projected through the same boundary semantics
+// used by loom_cmd_kernel_unit_boundaries_equivalent. Hash collisions require
+// an exact equivalence check.
+uint32_t loom_cmd_kernel_unit_boundary_hash(
+    const loom_module_t* source_module, const loom_op_t* source_kernel_op,
+    const loom_op_t* source_launch_op,
+    const loom_value_fact_table_t* source_facts);
+
 // Materializes one compiler-owned kernel unit from |source| and
 // |source_launch_op|.
 //

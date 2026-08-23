@@ -64,9 +64,34 @@ typedef struct loom_cmd_program_root_build_t {
 typedef struct loom_cmd_dependency_source_t {
   // Source launch carrying the specialized boundary facts.
   const loom_op_t* launch_op;
+
   // Plan-wide kernel definition ordinal launched by |launch_op|.
   uint32_t definition_ordinal;
+
+  // Process-local hash of the complete kernel-unit boundary.
+  uint32_t boundary_hash;
 } loom_cmd_dependency_source_t;
+
+// Scratch placement state for plan-wide and root-local dependency identities.
+typedef struct loom_cmd_dependency_placement_t {
+  // Plan-wide unique dependency placement.
+  struct {
+    // Source identity for each materialized dependency unit.
+    loom_cmd_dependency_source_t* sources;
+
+    // Open-addressed slots containing dependency indices or UINT32_MAX.
+    uint32_t* slots;
+
+    // Power-of-two number of entries in slots.
+    iree_host_size_t slot_capacity;
+  } plan;
+
+  // Root-local dense placement of plan-wide dependency units.
+  struct {
+    // Root-local ordinal by plan-wide dependency index, or UINT32_MAX.
+    uint32_t* ordinal_by_plan_dependency;
+  } root;
+} loom_cmd_dependency_placement_t;
 
 static iree_status_t loom_cmd_program_plan_build_root_preparation_body(
     loom_builder_t* builder, void* user_data) {
@@ -267,6 +292,70 @@ static iree_status_t loom_cmd_program_plan_allocate_tables(
   return iree_ok_status();
 }
 
+static iree_status_t loom_cmd_dependency_placement_initialize(
+    iree_host_size_t dependency_capacity, iree_arena_allocator_t* arena,
+    loom_cmd_dependency_placement_t* out_placement) {
+  *out_placement = (loom_cmd_dependency_placement_t){0};
+  if (dependency_capacity == 0) return iree_ok_status();
+
+  iree_host_size_t minimum_slot_capacity = 0;
+  if (!iree_host_size_checked_mul(dependency_capacity, 2,
+                                  &minimum_slot_capacity)) {
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "dependency placement table is too large");
+  }
+  const iree_host_size_t slot_capacity =
+      iree_host_size_next_power_of_two(minimum_slot_capacity);
+  if (!iree_host_size_is_power_of_two(slot_capacity)) {
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "dependency placement table is too large");
+  }
+
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      arena, dependency_capacity, sizeof(*out_placement->plan.sources),
+      (void**)&out_placement->plan.sources));
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      arena, slot_capacity, sizeof(*out_placement->plan.slots),
+      (void**)&out_placement->plan.slots));
+  memset(out_placement->plan.slots, 0xFF,
+         slot_capacity * sizeof(*out_placement->plan.slots));
+  out_placement->plan.slot_capacity = slot_capacity;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      arena, dependency_capacity,
+      sizeof(*out_placement->root.ordinal_by_plan_dependency),
+      (void**)&out_placement->root.ordinal_by_plan_dependency));
+  memset(out_placement->root.ordinal_by_plan_dependency, 0xFF,
+         dependency_capacity *
+             sizeof(*out_placement->root.ordinal_by_plan_dependency));
+  return iree_ok_status();
+}
+
+static uint32_t loom_cmd_dependency_placement_lookup(
+    const loom_cmd_dependency_placement_t* placement,
+    const loom_module_t* source_module, const loom_op_t* source_launch,
+    uint32_t definition_ordinal, uint32_t boundary_hash,
+    const loom_value_fact_table_t* source_facts,
+    iree_host_size_t* out_empty_slot) {
+  const iree_host_size_t slot_mask = placement->plan.slot_capacity - 1;
+  iree_host_size_t slot = boundary_hash & slot_mask;
+  for (;;) {
+    const uint32_t dependency_index = placement->plan.slots[slot];
+    if (dependency_index == UINT32_MAX) {
+      *out_empty_slot = slot;
+      return UINT32_MAX;
+    }
+    const loom_cmd_dependency_source_t* source =
+        &placement->plan.sources[dependency_index];
+    if (source->boundary_hash == boundary_hash &&
+        source->definition_ordinal == definition_ordinal &&
+        loom_cmd_kernel_unit_boundaries_equivalent(
+            source_module, source_launch, source->launch_op, source_facts)) {
+      return dependency_index;
+    }
+    slot = (slot + 1) & slot_mask;
+  }
+}
+
 static iree_status_t loom_cmd_program_plan_build_lower_plan(
     loom_cmd_program_plan_t* plan, loom_module_t* preparation_module,
     loom_op_t* root_program_op, const loom_cmd_schedule_plan_t* schedule,
@@ -274,7 +363,7 @@ static iree_status_t loom_cmd_program_plan_build_lower_plan(
     const loom_cmd_launch_graph_t* launch_graph,
     const loom_cmd_launch_resolution_t* launch_resolution,
     const loom_cmd_kernel_unit_source_t* kernel_sources,
-    loom_cmd_dependency_source_t* dependency_sources,
+    loom_cmd_dependency_placement_t* dependency_placement,
     iree_arena_allocator_t* scratch_arena, iree_arena_block_pool_t* block_pool,
     loom_cmd_parameter_requirement_table_t* out_parameters,
     loom_cmd_transient_requirement_t* out_transient,
@@ -302,36 +391,39 @@ static iree_status_t loom_cmd_program_plan_build_lower_plan(
     const loom_op_t* source_launch = schedule->commands[i];
     const uint32_t definition_ordinal =
         launch_resolution->definition_ordinals[i];
-    uint32_t dependency_index = 0;
-    while (
-        dependency_index < plan->dependency_count &&
-        (definition_ordinal !=
-             dependency_sources[dependency_index].definition_ordinal ||
-         !loom_cmd_kernel_unit_boundaries_equivalent(
-             preparation_module, source_launch,
-             dependency_sources[dependency_index].launch_op, source_facts))) {
-      ++dependency_index;
-    }
-    if (dependency_index == plan->dependency_count) {
+    const uint32_t boundary_hash = loom_cmd_kernel_unit_boundary_hash(
+        preparation_module, kernel_sources[definition_ordinal].kernel_op,
+        source_launch, source_facts);
+    iree_host_size_t empty_slot = IREE_HOST_SIZE_MAX;
+    uint32_t dependency_index = loom_cmd_dependency_placement_lookup(
+        dependency_placement, preparation_module, source_launch,
+        definition_ordinal, boundary_hash, source_facts, &empty_slot);
+    if (dependency_index == UINT32_MAX) {
+      IREE_ASSERT_LT(plan->dependency_count, UINT32_MAX);
+      dependency_index = (uint32_t)plan->dependency_count;
       loom_cmd_kernel_unit_t* new_unit =
           &plan->dependency_units[dependency_index];
       IREE_RETURN_IF_ERROR(loom_cmd_kernel_unit_materialize(
           &kernel_sources[definition_ordinal], source_launch, source_facts,
           block_pool, plan->host_allocator, new_unit));
-      dependency_sources[dependency_index] = (loom_cmd_dependency_source_t){
-          .launch_op = source_launch,
-          .definition_ordinal = definition_ordinal,
-      };
+      dependency_placement->plan.sources[dependency_index] =
+          (loom_cmd_dependency_source_t){
+              .launch_op = source_launch,
+              .definition_ordinal = definition_ordinal,
+              .boundary_hash = boundary_hash,
+          };
+      IREE_ASSERT_NE(empty_slot, IREE_HOST_SIZE_MAX);
+      dependency_placement->plan.slots[empty_slot] = dependency_index;
       ++plan->dependency_count;
     }
     const loom_cmd_kernel_unit_t* unit =
         &plan->dependency_units[dependency_index];
-    uint32_t root_dependency_index = 0;
-    while (root_dependency_index < dependency_count &&
-           dependency_unit_indices[root_dependency_index] != dependency_index) {
-      ++root_dependency_index;
-    }
-    if (root_dependency_index == dependency_count) {
+    uint32_t root_dependency_index =
+        dependency_placement->root.ordinal_by_plan_dependency[dependency_index];
+    if (root_dependency_index == UINT32_MAX) {
+      root_dependency_index = dependency_count;
+      dependency_placement->root.ordinal_by_plan_dependency[dependency_index] =
+          root_dependency_index;
       dependency_unit_indices[dependency_count++] = dependency_index;
     }
     launches[i] = (loom_cmd_lower_launch_t){
@@ -340,6 +432,10 @@ static iree_status_t loom_cmd_program_plan_build_lower_plan(
         .argument_count = unit->argument_count,
         .source_argument_ordinals = unit->source_argument_ordinals,
     };
+  }
+  for (uint32_t i = 0; i < dependency_count; ++i) {
+    dependency_placement->root
+        .ordinal_by_plan_dependency[dependency_unit_indices[i]] = UINT32_MAX;
   }
 
   const loom_func_like_t root_program =
@@ -631,11 +727,10 @@ iree_status_t loom_cmd_program_plan_prepare(
     status = loom_cmd_program_plan_allocate_tables(source_program_count,
                                                    dependency_capacity, &plan);
   }
-  loom_cmd_dependency_source_t* dependency_sources = NULL;
-  if (valid && iree_status_is_ok(status) && dependency_capacity > 0) {
-    status = iree_arena_allocate_array(&scratch_arena, dependency_capacity,
-                                       sizeof(*dependency_sources),
-                                       (void**)&dependency_sources);
+  loom_cmd_dependency_placement_t dependency_placement = {0};
+  if (valid && iree_status_is_ok(status)) {
+    status = loom_cmd_dependency_placement_initialize(
+        dependency_capacity, &scratch_arena, &dependency_placement);
   }
   for (iree_host_size_t i = 0;
        valid && i < source_program_count && iree_status_is_ok(status); ++i) {
@@ -643,7 +738,7 @@ iree_status_t loom_cmd_program_plan_prepare(
     status = loom_cmd_program_plan_build_lower_plan(
         &plan, preparation_module, root->program_op, &root->schedule,
         &source_facts, &root->launch_graph, &root->launch_resolution,
-        kernel_sources, dependency_sources, &scratch_arena, block_pool,
+        kernel_sources, &dependency_placement, &scratch_arena, block_pool,
         &root->parameters, &root->transient, &root->lower_plan,
         &root->dependency_unit_indices, &root->dependency_count);
   }

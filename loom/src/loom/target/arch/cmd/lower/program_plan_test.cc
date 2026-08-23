@@ -279,6 +279,49 @@ command.program.def public @parameterized() launch(%parameters: buffer, %target:
   loom_cmd_program_plan_deinitialize(&plan);
 }
 
+TEST_F(CmdProgramPlanTest, InternsExactKernelBoundaries) {
+  ModulePtr source_module = ParseAndVerify(R"(
+kernel.def @dispatch(%element_count: index) {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%element_count, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch() {
+  kernel.return
+}
+
+command.program.def public @root() launch() {
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  kernel.launch @dispatch[%c1]() : [index]()
+  kernel.launch @dispatch[%c1]() : [index]()
+  kernel.launch @dispatch[%c2]() : [index]()
+  command.return
+}
+)");
+  ASSERT_NE(source_module, nullptr);
+  const loom_op_t* source_programs[] = {
+      FindSymbol(source_module.get(), IREE_SV("root")),
+  };
+
+  loom_cmd_program_plan_t plan = {};
+  bool valid = false;
+  IREE_ASSERT_OK(loom_cmd_program_plan_prepare(
+      source_module.get(), source_programs, IREE_ARRAYSIZE(source_programs),
+      loom_pass_builtin_registry(),
+      /*diagnostic_emitter=*/{}, &block_pool_, &valid, &plan,
+      iree_allocator_system()));
+  ASSERT_TRUE(valid);
+  source_module.reset();
+
+  ASSERT_EQ(plan.dependency_count, 2u);
+  ASSERT_EQ(plan.root_count, 1u);
+  ASSERT_EQ(plan.roots[0].dependency_count, 2u);
+  ASSERT_NE(plan.roots[0].dependency_unit_indices, nullptr);
+  EXPECT_EQ(plan.roots[0].dependency_unit_indices[0], 0u);
+  EXPECT_EQ(plan.roots[0].dependency_unit_indices[1], 1u);
+
+  loom_cmd_program_plan_deinitialize(&plan);
+}
+
 TEST_F(CmdProgramPlanTest, PreservesKernelDependencyClosure) {
   ModulePtr source_module = ParseAndVerify(R"(
 template.decl @test.live(%value: i32) -> (i32)

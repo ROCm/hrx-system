@@ -11,6 +11,7 @@
 #include "loom/analysis/symbol_liveness.h"
 #include "loom/ir/attribute.h"
 #include "loom/ir/module.h"
+#include "loom/ir/structural_hash.h"
 #include "loom/link/linker.h"
 #include "loom/ops/buffer/ops.h"
 #include "loom/ops/index/ops.h"
@@ -56,19 +57,46 @@ bool loom_cmd_kernel_unit_boundaries_equivalent(
     const loom_module_t* source_module, const loom_op_t* lhs_launch_op,
     const loom_op_t* rhs_launch_op,
     const loom_value_fact_table_t* source_facts) {
-  IREE_ASSERT_ARGUMENT(source_module);
-  IREE_ASSERT_ARGUMENT(lhs_launch_op);
-  IREE_ASSERT_ARGUMENT(rhs_launch_op);
-  IREE_ASSERT_ARGUMENT(source_facts);
-  IREE_ASSERT(loom_kernel_launch_isa(lhs_launch_op));
-  IREE_ASSERT(loom_kernel_launch_isa(rhs_launch_op));
-
   return loom_cmd_kernel_unit_value_groups_equivalent(
              source_module, loom_kernel_launch_workloads(lhs_launch_op),
              loom_kernel_launch_workloads(rhs_launch_op), source_facts) &&
          loom_cmd_kernel_unit_value_groups_equivalent(
              source_module, loom_kernel_launch_arguments(lhs_launch_op),
              loom_kernel_launch_arguments(rhs_launch_op), source_facts);
+}
+
+static uint32_t loom_cmd_kernel_unit_hash_boundary_value_group(
+    const loom_module_t* source_module, loom_value_slice_t values,
+    const loom_value_fact_table_t* source_facts, uint32_t hash) {
+  for (uint16_t i = 0; i < values.count; ++i) {
+    const loom_type_t type =
+        loom_module_value_type(source_module, values.values[i]);
+    if (!loom_type_is_scalar(type)) continue;
+    const loom_value_facts_t facts = loom_cmd_kernel_unit_boundary_facts(
+        loom_value_fact_table_lookup(source_facts, values.values[i]));
+    hash = loom_structural_hash_mix_u64(hash, (uint64_t)facts.range_lo);
+    hash = loom_structural_hash_mix_u64(hash, (uint64_t)facts.range_hi);
+    hash = loom_structural_hash_mix_u64(hash, (uint64_t)facts.known_divisor);
+    hash = loom_structural_hash_mix_u32(hash, facts.flags);
+    hash = loom_structural_hash_mix_u32(hash, facts.extension_id);
+  }
+  return hash;
+}
+
+uint32_t loom_cmd_kernel_unit_boundary_hash(
+    const loom_module_t* source_module, const loom_op_t* source_kernel_op,
+    const loom_op_t* source_launch_op,
+    const loom_value_fact_table_t* source_facts) {
+  uint32_t hash = loom_structural_hash_initialize();
+  hash =
+      loom_structural_hash_mix_u64(hash, (uint64_t)(uintptr_t)source_kernel_op);
+  hash = loom_cmd_kernel_unit_hash_boundary_value_group(
+      source_module, loom_kernel_launch_workloads(source_launch_op),
+      source_facts, hash);
+  hash = loom_cmd_kernel_unit_hash_boundary_value_group(
+      source_module, loom_kernel_launch_arguments(source_launch_op),
+      source_facts, hash);
+  return loom_structural_hash_finalize(hash);
 }
 
 static bool loom_cmd_kernel_unit_symbol_is_template_provider(
