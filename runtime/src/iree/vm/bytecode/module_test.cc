@@ -1418,6 +1418,201 @@ TEST(VMBytecodeModuleTest, RejectsMalformedFunctionInstructions) {
   iree_vm_environment_free(environment);
 }
 
+TEST(VMBytecodeModuleTest, ExecutesFunctionGlobalsAndOverflowABI) {
+  std::vector<uint8_t> image = BuildFunctionStateModuleImage();
+  iree_vm_environment_t* environment = nullptr;
+  IREE_ASSERT_OK(
+      iree_vm_environment_allocate(iree_allocator_system(), &environment));
+  iree_vm_module_t* module = nullptr;
+  IREE_ASSERT_OK(iree_vm_bytecode_module_create(
+      environment, IREE_SV("function_state"),
+      {iree_make_const_byte_span(image.data(), image.size()),
+       iree_allocator_null()},
+      iree_allocator_system(), &module));
+  iree_vm_environment_free(environment);
+
+  iree_vm_program_t* program = nullptr;
+  IREE_ASSERT_OK(iree_vm_program_create({module, iree_vm_module_span_empty()},
+                                        iree_allocator_system(), &program));
+  iree_vm_export_t callback_export = {};
+  IREE_ASSERT_OK(iree_vm_module_lookup_export(module, IREE_SV("callback"),
+                                              &callback_export));
+  iree_vm_function_ref_t callback = iree_vm_function_ref_null();
+  IREE_ASSERT_OK(
+      iree_vm_function_ref_from_export(program, callback_export, &callback));
+
+  iree_vm_invocation_t* invocation = nullptr;
+  IREE_ASSERT_OK(iree_vm_invocation_allocate(
+      kInvocationStorageSize, iree_allocator_system(), &invocation));
+  iree_vm_variant_t process_arguments[] = {
+      iree_vm_variant_from_function_ref(callback),
+      iree_vm_variant_from_function_ref(callback),
+  };
+  iree_vm_process_t* process = nullptr;
+  IREE_ASSERT_OK(iree_vm_process_create(
+      program, invocation, iree_vm_variant_span_from_array(process_arguments),
+      iree_allocator_system(), &process));
+
+  iree_vm_function_t read = iree_vm_function_null();
+  IREE_ASSERT_OK(iree_vm_process_lookup_function(
+      process, IREE_SV("function_state"), IREE_SV("read"), &read));
+  iree_vm_variant_t read_results[2] = {};
+  IREE_ASSERT_OK(iree_vm_invoke(invocation, read, iree_vm_variant_span_empty(),
+                                iree_vm_variant_span_from_array(read_results)));
+  for (iree_vm_variant_t result : read_results) {
+    iree_vm_function_ref_t actual = iree_vm_function_ref_null();
+    IREE_ASSERT_OK(iree_vm_function_ref_from_variant(result, &actual));
+    EXPECT_EQ(actual.program_bits, callback.program_bits);
+    EXPECT_EQ(actual.target_bits, callback.target_bits);
+  }
+  iree_vm_variant_span_reset(iree_vm_variant_span_from_array(read_results));
+
+  iree_vm_function_t overflow = iree_vm_function_null();
+  IREE_ASSERT_OK(iree_vm_process_lookup_function(
+      process, IREE_SV("function_state"), IREE_SV("overflow"), &overflow));
+  std::array<iree_vm_variant_t, 18> overflow_arguments;
+  std::array<iree_vm_variant_t, 18> overflow_results = {};
+  for (iree_vm_variant_t& argument : overflow_arguments) {
+    argument = iree_vm_variant_from_function_ref(callback);
+  }
+  IREE_ASSERT_OK(
+      iree_vm_invoke(invocation, overflow,
+                     iree_vm_variant_span_from_ptr(overflow_arguments.data(),
+                                                   overflow_arguments.size()),
+                     iree_vm_variant_span_from_ptr(overflow_results.data(),
+                                                   overflow_results.size())));
+  for (iree_vm_variant_t result : overflow_results) {
+    iree_vm_function_ref_t actual = iree_vm_function_ref_null();
+    IREE_ASSERT_OK(iree_vm_function_ref_from_variant(result, &actual));
+    EXPECT_EQ(actual.program_bits, callback.program_bits);
+    EXPECT_EQ(actual.target_bits, callback.target_bits);
+  }
+  iree_vm_variant_span_reset(iree_vm_variant_span_from_ptr(
+      overflow_results.data(), overflow_results.size()));
+
+  iree_vm_function_t bad_store = iree_vm_function_null();
+  IREE_ASSERT_OK(iree_vm_process_lookup_function(
+      process, IREE_SV("function_state"), IREE_SV("bad_store"), &bad_store));
+  iree_vm_invocation_t* failure_invocation = nullptr;
+  IREE_ASSERT_OK(iree_vm_invocation_allocate(
+      kInvocationStorageSize, iree_allocator_system(), &failure_invocation));
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        iree_vm_invoke(failure_invocation, bad_store,
+                                       iree_vm_variant_span_empty(),
+                                       iree_vm_variant_span_empty()));
+  iree_vm_invocation_free(failure_invocation);
+
+  read_results[0] = iree_vm_variant_empty();
+  read_results[1] = iree_vm_variant_empty();
+  IREE_ASSERT_OK(iree_vm_invoke(invocation, read, iree_vm_variant_span_empty(),
+                                iree_vm_variant_span_from_array(read_results)));
+  iree_vm_function_ref_t mutable_after_failure = iree_vm_function_ref_null();
+  IREE_ASSERT_OK(iree_vm_function_ref_from_variant(read_results[1],
+                                                   &mutable_after_failure));
+  EXPECT_EQ(mutable_after_failure.program_bits, callback.program_bits);
+  EXPECT_EQ(mutable_after_failure.target_bits, callback.target_bits);
+  iree_vm_variant_span_reset(iree_vm_variant_span_from_array(read_results));
+
+  iree_vm_function_t bad_result = iree_vm_function_null();
+  IREE_ASSERT_OK(iree_vm_process_lookup_function(
+      process, IREE_SV("function_state"), IREE_SV("bad_result"), &bad_result));
+  const iree_vm_variant_t sentinel = iree_vm_variant_from_i32(123);
+  iree_vm_variant_t bad_results[] = {sentinel};
+  failure_invocation = nullptr;
+  IREE_ASSERT_OK(iree_vm_invocation_allocate(
+      kInvocationStorageSize, iree_allocator_system(), &failure_invocation));
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_FAILED_PRECONDITION,
+      iree_vm_invoke(failure_invocation, bad_result,
+                     iree_vm_variant_span_empty(),
+                     iree_vm_variant_span_from_array(bad_results)));
+  iree_vm_invocation_free(failure_invocation);
+  EXPECT_EQ(bad_results[0].payload, sentinel.payload);
+  EXPECT_EQ(bad_results[0].metadata, sentinel.metadata);
+
+  iree_vm_invocation_free(invocation);
+  iree_vm_process_release(process);
+  iree_vm_program_release(program);
+  iree_vm_module_release(module);
+}
+
+TEST(VMBytecodeModuleTest, RejectsMalformedFunctionStateInstructions) {
+  iree_vm_environment_t* environment = nullptr;
+  IREE_ASSERT_OK(
+      iree_vm_environment_allocate(iree_allocator_system(), &environment));
+  const auto expect_rejected = [&](std::vector<uint8_t>& image) {
+    iree_vm_module_t* module = nullptr;
+    IREE_EXPECT_STATUS_IS(
+        IREE_STATUS_INVALID_ARGUMENT,
+        iree_vm_bytecode_module_create(
+            environment, IREE_SV("malformed_function_state"),
+            {iree_make_const_byte_span(image.data(), image.size()),
+             iree_allocator_null()},
+            iree_allocator_system(), &module));
+    EXPECT_EQ(module, nullptr);
+    iree_vm_module_release(module);
+  };
+
+  struct ByteMutation {
+    // Function-table ordinal containing the byte to replace.
+    uint32_t function_ordinal;
+    // Byte offset from the function's first instruction.
+    uint32_t byte_offset;
+    // Replacement byte value.
+    uint8_t value;
+  };
+  const ByteMutation mutations[] = {
+      {1, 5, 2},    // Immutable store source register.
+      {1, 6, 1},    // Immutable store global partition.
+      {1, 10, 0},   // Mutable store global partition.
+      {2, 5, 2},    // Immutable load destination register.
+      {2, 6, 1},    // Immutable load global partition.
+      {2, 10, 0},   // Mutable load global partition.
+      {4, 5, 18},   // Function argument overflow destination register.
+      {4, 6, 2},    // Function argument overflow slot.
+      {4, 13, 18},  // Function result overflow source register.
+      {4, 14, 2},   // Function result overflow slot.
+  };
+  for (const ByteMutation& mutation : mutations) {
+    std::vector<uint8_t> image = BuildFunctionStateModuleImage();
+    const MutableFunctionImage function =
+        FindFunctionImage(&image, mutation.function_ordinal);
+    ASSERT_NE(function.row, nullptr);
+    ASSERT_LT(mutation.byte_offset, function.row->bytecode_length_u32);
+    function.bytecode[mutation.byte_offset] = mutation.value;
+    expect_rejected(image);
+  }
+
+  std::vector<uint8_t> image = BuildFunctionStateModuleImage();
+  auto* globals = reinterpret_cast<iree_vm_bytecode_v0_globals_header_t*>(
+      FindSectionPayload(&image, IREE_VM_BYTECODE_SECTION_GLOBALS));
+  ASSERT_NE(globals, nullptr);
+  globals->immutable_function_count_u32 = 3;
+  expect_rejected(image);
+
+  image = BuildFunctionStateModuleImage();
+  globals = reinterpret_cast<iree_vm_bytecode_v0_globals_header_t*>(
+      FindSectionPayload(&image, IREE_VM_BYTECODE_SECTION_GLOBALS));
+  ASSERT_NE(globals, nullptr);
+  auto* descriptors =
+      reinterpret_cast<iree_vm_bytecode_v0_global_function_descriptor_row_t*>(
+          globals + 1);
+  descriptors[0].callable_type_ordinal_u16 = 7;
+  expect_rejected(image);
+
+  image = BuildFunctionStateModuleImage();
+  globals = reinterpret_cast<iree_vm_bytecode_v0_globals_header_t*>(
+      FindSectionPayload(&image, IREE_VM_BYTECODE_SECTION_GLOBALS));
+  ASSERT_NE(globals, nullptr);
+  descriptors =
+      reinterpret_cast<iree_vm_bytecode_v0_global_function_descriptor_row_t*>(
+          globals + 1);
+  descriptors[0].flags_u16 = 2;
+  expect_rejected(image);
+
+  iree_vm_environment_free(environment);
+}
+
 TEST(VMBytecodeModuleTest, RejectsMalformedFloatInstructions) {
   iree_vm_environment_t* environment = nullptr;
   IREE_ASSERT_OK(

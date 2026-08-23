@@ -190,23 +190,33 @@ def _validate_verification_form(
         "VALUE_ABI_RESULT_STORE",
         "REF_ABI_ARGUMENT_LOAD",
         "REF_ABI_RESULT_STORE",
+        "FUNC_ABI_ARGUMENT_LOAD",
+        "FUNC_ABI_RESULT_STORE",
     ):
         if instruction.byte_length != 4:
             raise ValueError(f"{instruction.mnemonic}: ABI record is not 4 bytes")
         is_argument = verification_form in (
             "VALUE_ABI_ARGUMENT_LOAD",
             "REF_ABI_ARGUMENT_LOAD",
+            "FUNC_ABI_ARGUMENT_LOAD",
         )
         is_ref = verification_form in (
             "REF_ABI_ARGUMENT_LOAD",
             "REF_ABI_RESULT_STORE",
         )
-        if is_ref:
+        is_function = verification_form in (
+            "FUNC_ABI_ARGUMENT_LOAD",
+            "FUNC_ABI_RESULT_STORE",
+        )
+        if is_function:
+            require_function(1)
+        elif is_ref:
             require_ref(1)
         else:
             require_value(1)
         packet_contract = (
-            f"{'argument' if is_argument else 'result'}.{'ref' if is_ref else 'value'}"
+            f"{'argument' if is_argument else 'result'}."
+            f"{'function' if is_function else 'ref' if is_ref else 'value'}"
         )
         require_field(
             2,
@@ -329,10 +339,16 @@ def _validate_verification_form(
         "GLOBAL_REF_IMMUTABLE_STORE",
         "GLOBAL_REF_MUTABLE_LOAD",
         "GLOBAL_REF_MUTABLE_STORE",
+        "GLOBAL_FUNC_IMMUTABLE_LOAD",
+        "GLOBAL_FUNC_IMMUTABLE_STORE",
+        "GLOBAL_FUNC_MUTABLE_LOAD",
+        "GLOBAL_FUNC_MUTABLE_STORE",
     ):
         if instruction.byte_length != 4:
             raise ValueError(f"{instruction.mnemonic}: global record is not 4 bytes")
-        if verification_form.startswith("GLOBAL_REF_"):
+        if verification_form.startswith("GLOBAL_FUNC_"):
+            require_function(1)
+        elif verification_form.startswith("GLOBAL_REF_"):
             require_ref(1)
         else:
             require_value(1)

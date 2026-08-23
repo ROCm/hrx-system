@@ -194,6 +194,42 @@ iree_vm_program_resolve_callable(const iree_vm_program_t* program,
              : NULL;
 }
 
+// Returns whether |function_ref| is null or satisfies one linked callable
+// declaration in |signature_module|. The check is structural and performs no
+// provider calls, name lookup, allocation, or retention.
+static inline bool iree_vm_program_function_ref_matches(
+    const iree_vm_program_t* program, iree_vm_function_ref_t function_ref,
+    const iree_vm_linked_module_t* signature_module,
+    uint16_t expected_callable_type_ordinal) {
+  if (iree_vm_function_ref_is_null(function_ref)) return true;
+  if (function_ref.program_bits != (uint64_t)(uintptr_t)program ||
+      (function_ref.target_bits & 3u) != 0) {
+    return false;
+  }
+  const uint16_t module_ordinal =
+      iree_vm_program_target_module_ordinal(function_ref.target_bits);
+  const uint16_t function_ordinal =
+      iree_vm_program_target_function_ordinal(function_ref.target_bits);
+  if (module_ordinal >= program->linked_module_count ||
+      function_ordinal >= program->linked_modules[module_ordinal]
+                              .module->descriptor->counts.function_count) {
+    return false;
+  }
+  const uint32_t target_token =
+      iree_vm_program_target_callable_token(function_ref.target_bits);
+  if (!iree_vm_program_resolve_callable(program, target_token)) return false;
+  const uint32_t expected_mapping =
+      program
+          ->callables[signature_module->callable_base +
+                      expected_callable_type_ordinal]
+          .mapping;
+  if (target_token != iree_vm_program_callable_token(expected_mapping)) {
+    return false;
+  }
+  return !iree_vm_program_target_may_yield(function_ref.target_bits) ||
+         iree_vm_program_callable_may_yield(expected_mapping);
+}
+
 // Finds one exact retained module by implementation identity.
 const iree_vm_linked_module_t* iree_vm_program_find_linked_module(
     const iree_vm_program_t* program, const iree_vm_module_t* module,

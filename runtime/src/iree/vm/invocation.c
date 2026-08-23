@@ -285,41 +285,6 @@ iree_status_t iree_vm_invocation_validate_boundary(
   return iree_ok_status();
 }
 
-static bool iree_vm_invocation_function_ref_matches(
-    const iree_vm_program_t* program, iree_vm_function_ref_t function_ref,
-    const iree_vm_linked_module_t* signature_module,
-    uint16_t expected_callable_type_ordinal) {
-  if (iree_vm_function_ref_is_null(function_ref)) return true;
-  if (function_ref.program_bits != (uint64_t)(uintptr_t)program ||
-      (function_ref.target_bits & 3u) != 0) {
-    return false;
-  }
-  const uint16_t module_ordinal =
-      iree_vm_program_target_module_ordinal(function_ref.target_bits);
-  const uint16_t function_ordinal =
-      iree_vm_program_target_function_ordinal(function_ref.target_bits);
-  if (module_ordinal >= program->linked_module_count ||
-      function_ordinal >= program->linked_modules[module_ordinal]
-                              .module->descriptor->counts.function_count) {
-    return false;
-  }
-  const uint32_t target_token =
-      iree_vm_program_target_callable_token(function_ref.target_bits);
-  if (!iree_vm_program_resolve_callable(program, target_token)) {
-    return false;
-  }
-  const uint32_t expected_mapping =
-      program
-          ->callables[signature_module->callable_base +
-                      expected_callable_type_ordinal]
-          .mapping;
-  if (target_token != iree_vm_program_callable_token(expected_mapping)) {
-    return false;
-  }
-  return !iree_vm_program_target_may_yield(function_ref.target_bits) ||
-         iree_vm_program_callable_may_yield(expected_mapping);
-}
-
 static iree_status_t iree_vm_invocation_validate_arguments(
     const iree_vm_process_t* process, uint64_t target_bits,
     const iree_vm_linked_module_t* signature_module,
@@ -398,9 +363,9 @@ static iree_status_t iree_vm_invocation_validate_arguments(
       function_ref.program_bits = argument.payload;
       function_ref.target_bits =
           argument.metadata & ~(uint64_t)IREE_VM_VARIANT_TAG_MASK;
-      if (!iree_vm_invocation_function_ref_matches(
-              process->program, function_ref, signature_module,
-              type.type_ordinal)) {
+      if (!iree_vm_program_function_ref_matches(process->program, function_ref,
+                                                signature_module,
+                                                type.type_ordinal)) {
         return iree_make_status(
             IREE_STATUS_INVALID_ARGUMENT,
             "invocation function argument contract mismatch");
@@ -1036,7 +1001,7 @@ IREE_API_EXPORT iree_status_t iree_vm_invocation_call_function_ref(
       expected_callable_type_ordinal >=
           execution->linked_module->module->descriptor->counts
               .callable_type_count ||
-      !iree_vm_invocation_function_ref_matches(
+      !iree_vm_program_function_ref_matches(
           execution->invocation->process->program, function_ref,
           execution->linked_module, expected_callable_type_ordinal)) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -1158,7 +1123,7 @@ iree_status_t iree_vm_invocation_validate_root_results(
       const iree_vm_function_ref_t function_ref =
           *iree_vm_call_function_result_slot(&invocation->root_call.packet,
                                              function_ordinal++);
-      if (!iree_vm_invocation_function_ref_matches(
+      if (!iree_vm_program_function_ref_matches(
               program, function_ref, signature_module, type.type_ordinal)) {
         return iree_make_status(
             IREE_STATUS_INTERNAL,
