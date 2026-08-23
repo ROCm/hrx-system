@@ -709,6 +709,9 @@ class SymbolDefinition:
         leave this as LOOM_SYMBOL_NONE while still participating in IR symbol
         lookup and verification.
     fact_domain: Optional C symbol for the dialect-owned symbol fact domain.
+    visibility: Optional enum attribute carrying generic public/private symbol
+        visibility. FuncLike symbols inherit the visibility field declared by
+        their FuncLike interface when this is absent.
     retain: Optional enum attribute that marks symbols which ordinary symbol
         DCE must preserve even when unreachable.
     flags: Generic roles that affect symbol processing independent of the
@@ -723,6 +726,7 @@ class SymbolDefinition:
     interfaces: tuple[str, ...]
     bytecode_kind: str = "LOOM_SYMBOL_NONE"
     fact_domain: str | None = None
+    visibility: str | None = None
     retain: str | None = None
     flags: tuple[SymbolDefinitionFlag, ...] = ()
     value_contract: SymbolValueContract | None = None
@@ -736,6 +740,7 @@ class SymbolDefinition:
         interfaces: list[str] | tuple[str, ...],
         bytecode_kind: str = "LOOM_SYMBOL_NONE",
         fact_domain: str | None = None,
+        visibility: str | None = None,
         retain: str | None = None,
         flags: list[SymbolDefinitionFlag] | tuple[SymbolDefinitionFlag, ...] = (),
         value_contract: SymbolValueContract | None = None,
@@ -747,6 +752,8 @@ class SymbolDefinition:
             raise ValueError("SymbolDefinition: field must be non-empty")
         if not name:
             raise ValueError("SymbolDefinition: name must be non-empty")
+        if visibility is not None and not visibility:
+            raise ValueError("SymbolDefinition: visibility must be non-empty")
         if retain is not None and not retain:
             raise ValueError("SymbolDefinition: retain must be non-empty")
         if not frozen_interfaces:
@@ -795,6 +802,7 @@ class SymbolDefinition:
         object.__setattr__(self, "interfaces", frozen_interfaces)
         object.__setattr__(self, "bytecode_kind", bytecode_kind)
         object.__setattr__(self, "fact_domain", fact_domain)
+        object.__setattr__(self, "visibility", visibility)
         object.__setattr__(self, "retain", retain)
         object.__setattr__(self, "flags", frozen_flags)
         object.__setattr__(self, "value_contract", value_contract)

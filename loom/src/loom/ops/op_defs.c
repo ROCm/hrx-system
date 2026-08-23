@@ -2843,6 +2843,16 @@ void loom_module_link_symbol_defining_op(loom_module_t* module, loom_op_t* op,
     symbol->defining_op = op;
     symbol->definition = vtable->symbol_def;
     symbol->kind = vtable->symbol_def->bytecode_kind;
+    const uint8_t visibility_attr_index_plus_one =
+        vtable->symbol_def->visibility_attr_index_plus_one;
+    if (visibility_attr_index_plus_one) {
+      const uint8_t visibility_attr_index = visibility_attr_index_plus_one - 1;
+      symbol->flags &= (loom_symbol_flags_t)~LOOM_SYMBOL_FLAG_PUBLIC;
+      if (visibility_attr_index < op->attribute_count &&
+          loom_attr_as_enum(attrs[visibility_attr_index]) != 0) {
+        symbol->flags |= LOOM_SYMBOL_FLAG_PUBLIC;
+      }
+    }
     symbol->flags &= (loom_symbol_flags_t)~LOOM_SYMBOL_FLAG_RETAIN;
     const uint8_t retain_attr_index_plus_one =
         vtable->symbol_def->retain_attr_index_plus_one;

@@ -1292,6 +1292,54 @@ def test_generate_tables_emits_generic_symbol_definition_flags() -> None:
     assert (".flags = LOOM_SYMBOL_DEFINITION_FLAG_DECLARATION | LOOM_SYMBOL_DEFINITION_FLAG_TEST_ONLY,") in tables_c
 
 
+def test_generate_tables_emits_generic_symbol_visibility() -> None:
+    visibility = EnumDef("Visibility", [EnumCase("public", 1)])
+    op = Op(
+        "test.symbol",
+        group=Dialect("test"),
+        traits=[SYMBOL_DEFINE],
+        attrs=[
+            AttrDef("name", ATTR_TYPE_SYMBOL),
+            AttrDef("visibility", ATTR_TYPE_ENUM, enum_def=visibility, optional=True),
+        ],
+        symbol_def=SymbolDefinition(
+            field="name",
+            name="test symbol",
+            interfaces=["record"],
+            visibility="visibility",
+        ),
+    )
+
+    tables_c = generate_tables_c("test", 0x01, [op])
+
+    assert ".visibility_attr_index_plus_one = 2," in tables_c
+
+
+def test_generate_tables_inherits_func_like_symbol_visibility() -> None:
+    visibility = EnumDef("Visibility", [EnumCase("public", 1)])
+    op = Op(
+        "test.function",
+        group=Dialect("test"),
+        traits=[SYMBOL_DEFINE],
+        attrs=[
+            AttrDef("callee", ATTR_TYPE_SYMBOL),
+            AttrDef("visibility", ATTR_TYPE_ENUM, enum_def=visibility, optional=True),
+        ],
+        symbol_def=SymbolDefinition(
+            field="callee",
+            name="function",
+            interfaces=["func_like", "callable"],
+        ),
+        regions=[RegionDef("body")],
+        interfaces=[FuncLikeInterface(callee="callee", visibility="visibility", body="body")],
+        format=[SymbolRef("callee"), FuncArgs("args"), Region("body")],
+    )
+
+    tables_c = generate_tables_c("test", 0x01, [op])
+
+    assert ".visibility_attr_index_plus_one = 2," in tables_c
+
+
 def test_generate_kernel_declaration_preserves_both_signatures() -> None:
     op = Op(
         "test.kernel_decl",

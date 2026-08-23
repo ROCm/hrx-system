@@ -24,6 +24,7 @@ from loom.dsl import (
     EffectKind,
     EncodingFamilyDef,
     EnumDef,
+    FuncLikeInterface,
     Op,
     OperandOwnershipEffect,
     ParameterizedAttrDef,
@@ -200,10 +201,28 @@ def _symbol_retain_attr_index(op: Op) -> int | None:
     if op.symbol_def is None or op.symbol_def.retain is None:
         return None
     retain_attr_index = c_queries.resolve_attr_index(op, op.symbol_def.retain, "symbol_def.retain")
-    retain_attr = op.attrs[retain_attr_index]
+    retain_attr = c_queries.non_flags_attrs(op)[retain_attr_index]
     if retain_attr.attr_type != ATTR_TYPE_ENUM:
         raise ValueError(f"Op {op.name!r}: symbol_def.retain {op.symbol_def.retain!r} must name an enum attr")
     return retain_attr_index
+
+
+def _symbol_visibility_attr_index(op: Op) -> int | None:
+    """Returns the generic visibility attribute index for a symbol op."""
+
+    if op.symbol_def is None:
+        return None
+    visibility = op.symbol_def.visibility
+    if visibility is None:
+        func_like = c_queries.find_interface(op, FuncLikeInterface)
+        visibility = func_like.visibility if func_like is not None else None
+    if visibility is None:
+        return None
+    visibility_attr_index = c_queries.resolve_attr_index(op, visibility, "symbol visibility")
+    visibility_attr = c_queries.non_flags_attrs(op)[visibility_attr_index]
+    if visibility_attr.attr_type != ATTR_TYPE_ENUM:
+        raise ValueError(f"Op {op.name!r}: symbol visibility {visibility!r} must name an enum attr")
+    return visibility_attr_index
 
 
 def _symbol_value_contract_indices(
@@ -934,6 +953,7 @@ def generate_tables_c(
         # Symbol definition descriptor.
         if op.symbol_def is not None:
             attr_index = c_queries.resolve_attr_index(op, op.symbol_def.field, "symbol_def")
+            visibility_attr_index = _symbol_visibility_attr_index(op)
             retain_attr_index = _symbol_retain_attr_index(op)
             value_contract_indices = _symbol_value_contract_indices(op)
             kernel_contract_indices = _symbol_kernel_contract_indices(op)
@@ -943,6 +963,8 @@ def generate_tables_c(
             lines.append(f"    .name = {_bstring_expr(op.symbol_def.name)},")
             if attr_index != 0:
                 lines.append(f"    .name_attr_index = {attr_index},")
+            if visibility_attr_index is not None:
+                lines.append(f"    .visibility_attr_index_plus_one = {visibility_attr_index + 1},")
             if retain_attr_index is not None:
                 lines.append(f"    .retain_attr_index_plus_one = {retain_attr_index + 1},")
             definition_flags: list[str] = []
