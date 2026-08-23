@@ -146,6 +146,47 @@ func.def @dead() {
   EXPECT_EQ(liveness.contributed_edge_count, 0u);
 }
 
+TEST_F(SymbolLivenessTest, ExplicitRootReachesDependencies) {
+  ModulePtr module = ParseModule(R"(
+func.def @entry() {
+  func.call @helper() : ()
+  func.return
+}
+
+func.def @helper() {
+  func.return
+}
+
+func.def @dead() {
+  func.return
+}
+)");
+
+  const loom_symbol_id_t root_symbol_ids[] = {
+      FindSymbol(module.get(), IREE_SV("entry")),
+  };
+  loom_symbol_liveness_options_t options = {
+      /*.flags=*/{},
+      /*.root_query=*/{},
+      /*.root_query_user_data=*/{},
+      /*.contributors=*/{},
+      /*.contributor_count=*/{},
+      /*.root_symbol_ids=*/
+      {
+          /*.values=*/root_symbol_ids,
+          /*.count=*/IREE_ARRAYSIZE(root_symbol_ids),
+      },
+  };
+  loom_symbol_liveness_t liveness = ComputeLiveness(module.get(), &options);
+
+  EXPECT_TRUE(loom_symbol_liveness_is_live(
+      &liveness, FindSymbol(module.get(), IREE_SV("entry"))));
+  EXPECT_TRUE(loom_symbol_liveness_is_live(
+      &liveness, FindSymbol(module.get(), IREE_SV("helper"))));
+  EXPECT_FALSE(loom_symbol_liveness_is_live(
+      &liveness, FindSymbol(module.get(), IREE_SV("dead"))));
+}
+
 TEST_F(SymbolLivenessTest, ModuleAvailabilityDoesNotRootSymbols) {
   ModulePtr module = ParseModule(R"(
 test.record @available
