@@ -8,6 +8,7 @@
 #define IREE_HAL_DRIVERS_AMDGPU_HOST_QUEUE_PROFILE_EVENTS_H_
 
 #include "iree/hal/drivers/amdgpu/host_queue.h"
+#include "iree/hal/utils/profile_clock_alignment.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -150,7 +151,7 @@ void iree_hal_amdgpu_host_queue_retire_profile_queue_device_events(
 // and completion paths only append to the queue-local batch.
 iree_status_t iree_hal_amdgpu_host_queue_write_profile_events(
     iree_hal_amdgpu_host_queue_t* queue, iree_hal_profile_sink_t* sink,
-    uint64_t session_id);
+    uint64_t session_id, iree_hal_profile_clock_alignment_t* clock_alignment);
 
 #ifdef __cplusplus
 }  // extern "C"

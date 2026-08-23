@@ -3429,16 +3429,8 @@ static void iree_hal_vulkan_queue_profile_record_device_tick_range(
   if (!clock_alignment) return;
 
   iree_slim_mutex_lock(&clock_alignment->mutex);
-  if (clock_alignment->has_event_ticks) {
-    clock_alignment->minimum_event_tick =
-        iree_min(clock_alignment->minimum_event_tick, start_tick);
-    clock_alignment->maximum_event_tick =
-        iree_max(clock_alignment->maximum_event_tick, end_tick);
-  } else {
-    clock_alignment->minimum_event_tick = start_tick;
-    clock_alignment->maximum_event_tick = end_tick;
-    clock_alignment->has_event_ticks = true;
-  }
+  iree_hal_profile_clock_alignment_record_event_range(&clock_alignment->state,
+                                                      start_tick, end_tick);
   iree_slim_mutex_unlock(&clock_alignment->mutex);
 }
 

@@ -34,6 +34,7 @@
 #include "iree/hal/drivers/amdgpu/util/vmem.h"
 #include "iree/hal/topology_builder.h"
 #include "iree/hal/utils/file_registry.h"
+#include "iree/hal/utils/profile_clock_alignment.h"
 
 //===----------------------------------------------------------------------===//
 // Utilities
@@ -1121,15 +1122,24 @@ iree_hal_amdgpu_logical_device_write_profile_clock_correlations(
       data_families, IREE_HAL_DEVICE_PROFILING_DATA_DEVICE_QUEUE_EVENTS);
   for (iree_host_size_t i = 0; i < record_count && iree_status_is_ok(status);
        ++i) {
+    iree_hal_amdgpu_physical_device_t* physical_device =
+        logical_device->physical_devices[i];
     status = iree_hal_amdgpu_logical_device_sample_profile_clock_correlation(
-        logical_device, logical_device->physical_devices[i], &records[i]);
-    if (iree_status_is_ok(status) && has_queue_device_events) {
-      // Queue-device spans use PM4 COPY_DATA GPU-clock timestamps, while clock
-      // correlations use KFD clock-counter samples. Both are useful on their
-      // own, but the KFD sample is not guaranteed to strictly bound or align
-      // with PM4 event ticks closely enough for host timeline fitting.
-      records[i].flags |=
-          IREE_HAL_PROFILE_CLOCK_CORRELATION_FLAG_DEVICE_TICK_UNALIGNED;
+        logical_device, physical_device, &records[i]);
+    if (iree_status_is_ok(status)) {
+      const bool has_invalid_dispatch_tick_alignment =
+          iree_hal_profile_clock_alignment_record_clock_tick(
+              &physical_device->profile_clock_alignment,
+              records[i].device_tick);
+      if (has_queue_device_events || has_invalid_dispatch_tick_alignment) {
+        // Queue-device spans use PM4 COPY_DATA GPU-clock timestamps, which are
+        // not guaranteed to align with the sampled platform clock. Dispatch
+        // event alignment is checked dynamically against ticks harvested in
+        // this profile session so runtime-specific epoch differences are also
+        // represented without discarding the raw event timeline.
+        records[i].flags |=
+            IREE_HAL_PROFILE_CLOCK_CORRELATION_FLAG_DEVICE_TICK_UNALIGNED;
+      }
     }
   }
 
@@ -1200,7 +1210,8 @@ static iree_status_t iree_hal_amdgpu_logical_device_write_profile_events(
          j < physical_device->host_queue_count && iree_status_is_ok(status);
          ++j) {
       status = iree_hal_amdgpu_host_queue_write_profile_events(
-          &physical_device->host_queues[j], sink, session_id);
+          &physical_device->host_queues[j], sink, session_id,
+          &physical_device->profile_clock_alignment);
     }
   }
   IREE_TRACE_ZONE_END(z0);
@@ -3343,6 +3354,13 @@ static iree_status_t iree_hal_amdgpu_logical_device_profiling_begin(
   iree_status_t status = iree_hal_device_profiling_options_clone(
       &resolved_options, logical_device->host_allocator, &session_options,
       &options_storage);
+  if (iree_status_is_ok(status)) {
+    for (iree_host_size_t i = 0; i < logical_device->physical_device_count;
+         ++i) {
+      iree_hal_profile_clock_alignment_reset(
+          &logical_device->physical_devices[i]->profile_clock_alignment);
+    }
+  }
   iree_hal_profile_sink_t* sink = session_options.sink;
   uint64_t session_id = 0;
   iree_hal_profile_chunk_metadata_t metadata = {0};

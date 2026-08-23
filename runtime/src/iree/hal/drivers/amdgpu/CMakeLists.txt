@@ -390,6 +390,7 @@ iree_cc_library(
     iree::hal::memory::tracing
     iree::hal::utils::elf_format
     iree::hal::utils::files
+    iree::hal::utils::profile_clock_alignment
     iree::hal::utils::resource_set
   PUBLIC
 )
@@ -485,6 +486,7 @@ iree_cc_library(
     iree::hal::executable::amdgpu::target_id
     iree::hal::memory::slab_provider
     iree::hal::memory::tracing
+    iree::hal::utils::profile_clock_alignment
   PUBLIC
 )
 endif()

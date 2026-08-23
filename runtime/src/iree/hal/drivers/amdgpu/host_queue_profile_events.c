@@ -553,6 +553,17 @@ static iree_status_t iree_hal_amdgpu_host_queue_copy_queue_device_events(
   return iree_ok_status();
 }
 
+static void iree_hal_amdgpu_host_queue_record_dispatch_event_tick_ranges(
+    const iree_hal_profile_dispatch_event_t* events,
+    iree_host_size_t event_count,
+    iree_hal_profile_clock_alignment_t* clock_alignment) {
+  if (!clock_alignment) return;
+  for (iree_host_size_t i = 0; i < event_count; ++i) {
+    iree_hal_profile_clock_alignment_record_event_range(
+        clock_alignment, events[i].start_tick, events[i].end_tick);
+  }
+}
+
 static iree_status_t iree_hal_amdgpu_host_queue_build_event_relationships(
     iree_hal_amdgpu_host_queue_t* queue,
     const iree_hal_profile_dispatch_event_t* dispatch_events,
@@ -625,7 +636,7 @@ static iree_status_t iree_hal_amdgpu_host_queue_build_event_relationships(
 
 iree_status_t iree_hal_amdgpu_host_queue_write_profile_events(
     iree_hal_amdgpu_host_queue_t* queue, iree_hal_profile_sink_t* sink,
-    uint64_t session_id) {
+    uint64_t session_id, iree_hal_profile_clock_alignment_t* clock_alignment) {
   if (!sink) return iree_ok_status();
   if (IREE_UNLIKELY(queue->device_ordinal > UINT32_MAX)) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
@@ -671,6 +682,9 @@ iree_status_t iree_hal_amdgpu_host_queue_write_profile_events(
   const bool has_events =
       dispatch_event_count != 0 || queue_device_event_count != 0;
   if (iree_status_is_ok(status) && has_events) {
+    iree_hal_amdgpu_host_queue_record_dispatch_event_tick_ranges(
+        dispatch_events, dispatch_event_count, clock_alignment);
+
     iree_hal_profile_chunk_metadata_t metadata =
         iree_hal_profile_chunk_metadata_default();
     const uint32_t physical_device_ordinal = (uint32_t)queue->device_ordinal;
