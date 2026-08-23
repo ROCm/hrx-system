@@ -74,6 +74,40 @@ void CountBufferRelease(void* user_data, iree_byte_span_t storage) {
   ++*static_cast<int*>(user_data);
 }
 
+struct RefStateTestObject {
+  // Required offset-zero VM-visible ownership prefix.
+  iree_vm_ref_object_t ref_object;
+  // Incremented when the final owner is released.
+  int* destruction_count;
+};
+
+struct RefStateTestTypes {
+  // Type deliberately incompatible with vm.buffer.
+  iree_vm_ref_type_t object;
+};
+
+extern const iree_vm_ref_type_table_t kRefStateTestTypeTable;
+
+void DestroyRefStateTestObject(void* object) {
+  auto* test_object = static_cast<RefStateTestObject*>(object);
+  ++*test_object->destruction_count;
+}
+
+const iree_vm_ref_type_descriptor_t kRefStateTestObjectType = {
+    DestroyRefStateTestObject,
+    &kRefStateTestTypeTable,
+    IREE_SV("object"),
+};
+const RefStateTestTypes kRefStateTestTypes = {
+    &kRefStateTestObjectType,
+};
+const iree_vm_ref_type_table_t kRefStateTestTypeTable = {
+    sizeof(kRefStateTestTypeTable),
+    IREE_VM_REF_TYPE_TABLE_FLAG_NONE,
+    IREE_SV("zz_test"),
+    {&kRefStateTestTypes, 1},
+};
+
 std::string_view ToStringView(iree_string_view_t value) {
   return std::string_view(value.data, value.size);
 }
@@ -518,6 +552,162 @@ TEST(VMBytecodeModuleTest, ExecutesTypedRefOwnershipExactly) {
   iree_vm_module_release(module);
 }
 
+TEST(VMBytecodeModuleTest, ExecutesRefABIAndGlobalOwnershipExactly) {
+  std::vector<uint8_t> image = BuildRefStateModuleImage();
+  iree_vm_environment_t* environment = nullptr;
+  IREE_ASSERT_OK(
+      iree_vm_environment_allocate(iree_allocator_system(), &environment));
+  IREE_ASSERT_OK(iree_vm_environment_register_ref_type_table(
+      environment, &kRefStateTestTypeTable));
+  iree_vm_module_t* module = nullptr;
+  IREE_ASSERT_OK(iree_vm_bytecode_module_create(
+      environment, IREE_SV("ref_state"),
+      {iree_make_const_byte_span(image.data(), image.size()),
+       iree_allocator_null()},
+      iree_allocator_system(), &module));
+  iree_vm_environment_free(environment);
+
+  iree_vm_ref_type_t buffer_type = nullptr;
+  IREE_ASSERT_OK(iree_vm_module_ref_type_by_ordinal(module, 0, &buffer_type));
+  const iree_vm_ref_types_t vm_types = {buffer_type};
+  iree_vm_program_t* program = nullptr;
+  IREE_ASSERT_OK(iree_vm_program_create({module, iree_vm_module_span_empty()},
+                                        iree_allocator_system(), &program));
+  iree_vm_invocation_t* invocation = nullptr;
+  IREE_ASSERT_OK(iree_vm_invocation_allocate(
+      kInvocationStorageSize, iree_allocator_system(), &invocation));
+
+  uint8_t immutable_storage = 0;
+  uint8_t mutable_storage = 0;
+  int immutable_release_count = 0;
+  int mutable_release_count = 0;
+  iree_vm_buffer_t* immutable_buffer = nullptr;
+  iree_vm_buffer_t* mutable_buffer = nullptr;
+  IREE_ASSERT_OK(iree_vm_buffer_wrap(
+      IREE_VM_BUFFER_ACCESS_FLAG_READ,
+      iree_make_byte_span(&immutable_storage, sizeof(immutable_storage)),
+      {CountBufferRelease, &immutable_release_count}, iree_allocator_system(),
+      &immutable_buffer));
+  IREE_ASSERT_OK(iree_vm_buffer_wrap(
+      IREE_VM_BUFFER_ACCESS_FLAG_READ,
+      iree_make_byte_span(&mutable_storage, sizeof(mutable_storage)),
+      {CountBufferRelease, &mutable_release_count}, iree_allocator_system(),
+      &mutable_buffer));
+
+  iree_vm_variant_t invalid_process_arguments[] = {
+      iree_vm_variant_null(),
+      iree_vm_buffer_variant_from_ptr_borrowed(&vm_types, mutable_buffer),
+  };
+  iree_vm_process_t* process = nullptr;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      iree_vm_process_create(
+          program, invocation,
+          iree_vm_variant_span_from_array(invalid_process_arguments),
+          iree_allocator_system(), &process));
+  EXPECT_EQ(process, nullptr);
+  EXPECT_TRUE(iree_vm_variant_is_empty(invalid_process_arguments[0]));
+  EXPECT_TRUE(iree_vm_variant_is_empty(invalid_process_arguments[1]));
+  EXPECT_EQ(immutable_release_count, 0);
+  EXPECT_EQ(mutable_release_count, 0);
+
+  iree_vm_variant_t process_arguments[] = {
+      iree_vm_buffer_variant_from_ptr_borrowed(&vm_types, immutable_buffer),
+      iree_vm_buffer_variant_from_ptr_borrowed(&vm_types, mutable_buffer),
+  };
+  IREE_ASSERT_OK(iree_vm_process_create(
+      program, invocation, iree_vm_variant_span_from_array(process_arguments),
+      iree_allocator_system(), &process));
+  EXPECT_TRUE(iree_vm_variant_is_empty(process_arguments[0]));
+  EXPECT_TRUE(iree_vm_variant_is_empty(process_arguments[1]));
+
+  iree_vm_function_t read = iree_vm_function_null();
+  IREE_ASSERT_OK(iree_vm_process_lookup_function(process, IREE_SV("ref_state"),
+                                                 IREE_SV("read"), &read));
+  iree_vm_variant_t read_results[2] = {};
+  IREE_ASSERT_OK(iree_vm_invoke(invocation, read, iree_vm_variant_span_empty(),
+                                iree_vm_variant_span_from_array(read_results)));
+  iree_vm_buffer_t* read_buffer = nullptr;
+  IREE_ASSERT_OK(iree_vm_buffer_ptr_from_variant_borrowed(
+      &vm_types, read_results[0], &read_buffer));
+  EXPECT_EQ(read_buffer, immutable_buffer);
+  IREE_ASSERT_OK(iree_vm_buffer_ptr_from_variant_borrowed(
+      &vm_types, read_results[1], &read_buffer));
+  EXPECT_EQ(read_buffer, mutable_buffer);
+  iree_vm_variant_span_reset(iree_vm_variant_span_from_array(read_results));
+
+  int wrong_type_destruction_count = 0;
+  RefStateTestObject wrong_type_object = {};
+  iree_vm_ref_object_initialize(&wrong_type_object.ref_object);
+  wrong_type_object.destruction_count = &wrong_type_destruction_count;
+  iree_vm_function_t wrong_store = iree_vm_function_null();
+  IREE_ASSERT_OK(iree_vm_process_lookup_function(
+      process, IREE_SV("ref_state"), IREE_SV("wrong_store"), &wrong_store));
+  iree_vm_variant_t wrong_argument[] = {iree_vm_variant_from_ptr_borrowed(
+      &wrong_type_object, &kRefStateTestObjectType)};
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      iree_vm_invoke(invocation, wrong_store,
+                     iree_vm_variant_span_from_array(wrong_argument),
+                     iree_vm_variant_span_empty()));
+  EXPECT_TRUE(iree_vm_variant_is_empty(wrong_argument[0]));
+  EXPECT_EQ(wrong_type_destruction_count, 0);
+
+  read_results[0] = iree_vm_variant_empty();
+  read_results[1] = iree_vm_variant_empty();
+  IREE_ASSERT_OK(iree_vm_invoke(invocation, read, iree_vm_variant_span_empty(),
+                                iree_vm_variant_span_from_array(read_results)));
+  read_buffer = nullptr;
+  IREE_ASSERT_OK(iree_vm_buffer_ptr_from_variant_borrowed(
+      &vm_types, read_results[1], &read_buffer));
+  EXPECT_EQ(read_buffer, mutable_buffer);
+  iree_vm_variant_span_reset(iree_vm_variant_span_from_array(read_results));
+
+  std::array<iree_vm_variant_t, 17> overflow_arguments;
+  for (iree_host_size_t i = 0; i < overflow_arguments.size() - 1; ++i) {
+    overflow_arguments[i] = iree_vm_variant_null();
+  }
+  overflow_arguments.back() =
+      iree_vm_buffer_variant_from_ptr_borrowed(&vm_types, immutable_buffer);
+  std::array<iree_vm_variant_t, 17> overflow_results = {};
+  iree_vm_function_t overflow = iree_vm_function_null();
+  IREE_ASSERT_OK(iree_vm_process_lookup_function(
+      process, IREE_SV("ref_state"), IREE_SV("overflow"), &overflow));
+  IREE_ASSERT_OK(
+      iree_vm_invoke(invocation, overflow,
+                     iree_vm_variant_span_from_ptr(overflow_arguments.data(),
+                                                   overflow_arguments.size()),
+                     iree_vm_variant_span_from_ptr(overflow_results.data(),
+                                                   overflow_results.size())));
+  for (const iree_vm_variant_t argument : overflow_arguments) {
+    EXPECT_TRUE(iree_vm_variant_is_empty(argument));
+  }
+  for (iree_host_size_t i = 0; i < overflow_results.size() - 1; ++i) {
+    EXPECT_TRUE(iree_vm_variant_is_null(overflow_results[i]));
+  }
+  read_buffer = nullptr;
+  IREE_ASSERT_OK(iree_vm_buffer_ptr_from_variant_borrowed(
+      &vm_types, overflow_results.back(), &read_buffer));
+  EXPECT_EQ(read_buffer, immutable_buffer);
+  iree_vm_variant_span_reset(iree_vm_variant_span_from_ptr(
+      overflow_results.data(), overflow_results.size()));
+  EXPECT_EQ(immutable_release_count, 0);
+  EXPECT_EQ(mutable_release_count, 0);
+
+  iree_vm_process_release(process);
+  iree_vm_invocation_free(invocation);
+  iree_vm_program_release(program);
+  iree_vm_module_release(module);
+  EXPECT_EQ(immutable_release_count, 0);
+  EXPECT_EQ(mutable_release_count, 0);
+  iree_vm_buffer_release(immutable_buffer);
+  iree_vm_buffer_release(mutable_buffer);
+  EXPECT_EQ(immutable_release_count, 1);
+  EXPECT_EQ(mutable_release_count, 1);
+  iree_vm_ref_object_release(&wrong_type_object, &kRefStateTestObjectType);
+  EXPECT_EQ(wrong_type_destruction_count, 1);
+}
+
 TEST(VMBytecodeModuleTest, PreservesIntegerSourcesAcrossDestinationAliasing) {
   auto expect_result = [](uint8_t opcode, uint8_t dst, uint8_t lhs_or_src,
                           uint8_t rhs_or_zero, int32_t argument,
@@ -737,6 +927,63 @@ TEST(VMBytecodeModuleTest, RejectsMalformedValueABIInstructions) {
             2 * sizeof(iree_vm_isa_value_abi_argument_load_record_t));
     record->slot_u16 = 2;
   });
+
+  iree_vm_environment_free(environment);
+}
+
+TEST(VMBytecodeModuleTest, RejectsMalformedRefABIAndGlobalInstructions) {
+  iree_vm_environment_t* environment = nullptr;
+  IREE_ASSERT_OK(
+      iree_vm_environment_allocate(iree_allocator_system(), &environment));
+  IREE_ASSERT_OK(iree_vm_environment_register_ref_type_table(
+      environment, &kRefStateTestTypeTable));
+  struct ByteMutation {
+    // Function-table ordinal containing the byte to replace.
+    uint32_t function_ordinal;
+    // Byte offset from the function's first instruction.
+    uint32_t byte_offset;
+    // Replacement byte value.
+    uint8_t value;
+  };
+  const ByteMutation mutations[] = {
+      // Each ref ABI record validates its register and overflow slot.
+      {2, 5, 18},
+      {2, 6, 1},
+      {2, 9, 18},
+      {2, 10, 1},
+      {2, 13, 18},
+      {2, 14, 1},
+      // Global records validate both registers and immutable partitions.
+      {0, 5, 2},
+      {0, 6, 1},
+      {0, 9, 2},
+      {0, 10, 0},
+      {0, 10, 2},
+      {1, 5, 2},
+      {1, 6, 1},
+      {1, 9, 2},
+      {1, 10, 0},
+      {1, 10, 2},
+  };
+  for (const ByteMutation& mutation : mutations) {
+    std::vector<uint8_t> image = BuildRefStateModuleImage();
+    const MutableFunctionImage function =
+        FindFunctionImage(&image, mutation.function_ordinal);
+    ASSERT_NE(function.row, nullptr);
+    ASSERT_LT(mutation.byte_offset, function.row->bytecode_length_u32);
+    function.bytecode[mutation.byte_offset] = mutation.value;
+
+    iree_vm_module_t* module = nullptr;
+    IREE_EXPECT_STATUS_IS(
+        IREE_STATUS_INVALID_ARGUMENT,
+        iree_vm_bytecode_module_create(
+            environment, IREE_SV("malformed_ref_state"),
+            {iree_make_const_byte_span(image.data(), image.size()),
+             iree_allocator_null()},
+            iree_allocator_system(), &module));
+    EXPECT_EQ(module, nullptr);
+    iree_vm_module_release(module);
+  }
 
   iree_vm_environment_free(environment);
 }

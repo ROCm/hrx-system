@@ -25,6 +25,8 @@ typedef enum iree_vm_bytecode_verification_form_e {
   IREE_VM_BYTECODE_VERIFICATION_FORM_CONTROL_RETURN,
   IREE_VM_BYTECODE_VERIFICATION_FORM_VALUE_ABI_ARGUMENT_LOAD,
   IREE_VM_BYTECODE_VERIFICATION_FORM_VALUE_ABI_RESULT_STORE,
+  IREE_VM_BYTECODE_VERIFICATION_FORM_REF_ABI_ARGUMENT_LOAD,
+  IREE_VM_BYTECODE_VERIFICATION_FORM_REF_ABI_RESULT_STORE,
   IREE_VM_BYTECODE_VERIFICATION_FORM_CONSTANT_ZERO,
   IREE_VM_BYTECODE_VERIFICATION_FORM_CONSTANT_S16,
   IREE_VM_BYTECODE_VERIFICATION_FORM_CONSTANT_I32,
@@ -37,6 +39,10 @@ typedef enum iree_vm_bytecode_verification_form_e {
   IREE_VM_BYTECODE_VERIFICATION_FORM_GLOBAL_VALUE_IMMUTABLE_STORE,
   IREE_VM_BYTECODE_VERIFICATION_FORM_GLOBAL_VALUE_MUTABLE_LOAD,
   IREE_VM_BYTECODE_VERIFICATION_FORM_GLOBAL_VALUE_MUTABLE_STORE,
+  IREE_VM_BYTECODE_VERIFICATION_FORM_GLOBAL_REF_IMMUTABLE_LOAD,
+  IREE_VM_BYTECODE_VERIFICATION_FORM_GLOBAL_REF_IMMUTABLE_STORE,
+  IREE_VM_BYTECODE_VERIFICATION_FORM_GLOBAL_REF_MUTABLE_LOAD,
+  IREE_VM_BYTECODE_VERIFICATION_FORM_GLOBAL_REF_MUTABLE_STORE,
   IREE_VM_BYTECODE_VERIFICATION_FORM_VALUE_BINARY_4,
   IREE_VM_BYTECODE_VERIFICATION_FORM_INTEGER_COMPARE,
   IREE_VM_BYTECODE_VERIFICATION_FORM_INTEGER_LEA,
@@ -310,6 +316,39 @@ iree_status_t iree_vm_bytecode_function_verify(
             record->src_v8, function->value_register_count_u16));
         break;
       }
+      case IREE_VM_BYTECODE_VERIFICATION_FORM_REF_ABI_ARGUMENT_LOAD: {
+        const iree_vm_isa_ref_abi_argument_load_borrow_record_t* record =
+            (const iree_vm_isa_ref_abi_argument_load_borrow_record_t*)
+                record_data;
+        const uint16_t overflow_count =
+            signature->argument_ref_count_u16 > 16
+                ? signature->argument_ref_count_u16 - 16
+                : 0;
+        if (record->slot_u16 >= overflow_count) {
+          return iree_make_status(
+              IREE_STATUS_INVALID_ARGUMENT,
+              "ref argument overflow slot ordinal is out of range");
+        }
+        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_ref_register(
+            record->dst_r8, function->ref_register_count_u16));
+        break;
+      }
+      case IREE_VM_BYTECODE_VERIFICATION_FORM_REF_ABI_RESULT_STORE: {
+        const iree_vm_isa_ref_abi_result_store_move_record_t* record =
+            (const iree_vm_isa_ref_abi_result_store_move_record_t*)record_data;
+        const uint16_t overflow_count =
+            signature->result_ref_count_u16 > 16
+                ? signature->result_ref_count_u16 - 16
+                : 0;
+        if (record->slot_u16 >= overflow_count) {
+          return iree_make_status(
+              IREE_STATUS_INVALID_ARGUMENT,
+              "ref result overflow slot ordinal is out of range");
+        }
+        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_ref_register(
+            record->src_r8, function->ref_register_count_u16));
+        break;
+      }
       case IREE_VM_BYTECODE_VERIFICATION_FORM_CONSTANT_ZERO: {
         const iree_vm_isa_constant_zero_record_t* record =
             (const iree_vm_isa_constant_zero_record_t*)record_data;
@@ -453,6 +492,66 @@ iree_status_t iree_vm_bytecode_function_verify(
           return iree_make_status(
               IREE_STATUS_INVALID_ARGUMENT,
               "mutable value-global ordinal is out of range");
+        }
+        break;
+      }
+      case IREE_VM_BYTECODE_VERIFICATION_FORM_GLOBAL_REF_IMMUTABLE_LOAD: {
+        const iree_vm_isa_global_ref_immutable_load_borrow_record_t* record =
+            (const iree_vm_isa_global_ref_immutable_load_borrow_record_t*)
+                record_data;
+        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_ref_register(
+            record->dst_r8, function->ref_register_count_u16));
+        if (!layout->globals.header ||
+            record->global_u16 >=
+                layout->globals.header->immutable_ref_count_u32) {
+          return iree_make_status(
+              IREE_STATUS_INVALID_ARGUMENT,
+              "immutable ref-global ordinal is out of range");
+        }
+        break;
+      }
+      case IREE_VM_BYTECODE_VERIFICATION_FORM_GLOBAL_REF_IMMUTABLE_STORE: {
+        const iree_vm_isa_global_ref_immutable_store_move_record_t* record =
+            (const iree_vm_isa_global_ref_immutable_store_move_record_t*)
+                record_data;
+        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_ref_register(
+            record->src_r8, function->ref_register_count_u16));
+        if (!layout->globals.header ||
+            record->global_u16 >=
+                layout->globals.header->immutable_ref_count_u32) {
+          return iree_make_status(
+              IREE_STATUS_INVALID_ARGUMENT,
+              "immutable ref-global ordinal is out of range");
+        }
+        break;
+      }
+      case IREE_VM_BYTECODE_VERIFICATION_FORM_GLOBAL_REF_MUTABLE_LOAD: {
+        const iree_vm_isa_global_ref_mutable_load_retain_record_t* record =
+            (const iree_vm_isa_global_ref_mutable_load_retain_record_t*)
+                record_data;
+        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_ref_register(
+            record->dst_r8, function->ref_register_count_u16));
+        if (!layout->globals.header ||
+            record->global_u16 <
+                layout->globals.header->immutable_ref_count_u32 ||
+            record->global_u16 >= layout->globals.header->ref_count_u32) {
+          return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                  "mutable ref-global ordinal is out of range");
+        }
+        break;
+      }
+      case IREE_VM_BYTECODE_VERIFICATION_FORM_GLOBAL_REF_MUTABLE_STORE: {
+        const iree_vm_isa_global_ref_mutable_store_move_record_t* record =
+            (const iree_vm_isa_global_ref_mutable_store_move_record_t*)
+                record_data;
+        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_ref_register(
+            record->src_r8, function->ref_register_count_u16));
+        if (!layout->globals.header ||
+            record->global_u16 <
+                layout->globals.header->immutable_ref_count_u32 ||
+            record->global_u16 >= layout->globals.header->ref_count_u32) {
+          return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                  "mutable ref-global ordinal is out of range");
         }
         break;
       }
@@ -925,14 +1024,11 @@ iree_status_t iree_vm_bytecode_module_verify_executable(
         &plan->layout.functions.rows[i];
     const iree_vm_bytecode_v0_signature_row_t* signature =
         &plan->layout.signatures.rows[function->signature_ordinal_u16];
-    if (signature->argument_ref_count_u16 > 16 ||
-        signature->result_ref_count_u16 > 16 ||
-        signature->argument_function_count_u16 != 0 ||
+    if (signature->argument_function_count_u16 != 0 ||
         signature->result_function_count_u16 != 0) {
       return iree_make_status(
           IREE_STATUS_UNIMPLEMENTED,
-          "B0 bytecode functions support only direct ref banks and no "
-          "function banks");
+          "B0 bytecode functions do not support function banks");
     }
     if (function->switch_target_entry_count_u32 != 0 ||
         function->local_function_count_u32 != 0) {

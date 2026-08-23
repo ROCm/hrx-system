@@ -119,6 +119,17 @@ static inline void iree_vm_bytecode_ref_move(iree_vm_ref_t* target,
   iree_vm_bytecode_ref_replace(target, moved_ref);
 }
 
+// Returns whether |ref| satisfies one resolved ref-global descriptor.
+static inline bool iree_vm_bytecode_ref_matches_global(
+    iree_vm_ref_t ref, iree_vm_ref_type_t expected_type,
+    const iree_vm_bytecode_v0_global_ref_descriptor_row_t* descriptor) {
+  if (iree_vm_ref_is_null(ref)) {
+    return iree_any_bit_set(descriptor->flags_u16,
+                            IREE_VM_BYTECODE_GLOBAL_REF_FLAG_NULLABLE);
+  }
+  return iree_vm_ref_type(ref) == expected_type;
+}
+
 static void iree_vm_bytecode_frame_reset(iree_vm_ref_t* refs,
                                          uint32_t ref_count) {
   for (uint32_t i = 0; i < ref_count; ++i) {
@@ -275,8 +286,11 @@ static iree_status_t iree_vm_bytecode_publish_results(
       const iree_vm_bytecode_v0_signature_descriptor_row_t* descriptor =
           &result_descriptors[i];
       if (descriptor->kind_u16 != IREE_VM_BYTECODE_SIGNATURE_KIND_REF) continue;
-      if (refs[ref_ordinal].object &&
-          iree_vm_ref_type(refs[ref_ordinal]) !=
+      const iree_vm_ref_t result_ref =
+          ref_ordinal < 16 ? refs[ref_ordinal]
+                           : call->ref_results.overflow[ref_ordinal - 16];
+      if (result_ref.object &&
+          iree_vm_ref_type(result_ref) !=
               module->resolved_ref_types[descriptor->type_ordinal_u16]) {
         return iree_make_status(
             IREE_STATUS_FAILED_PRECONDITION,
@@ -293,7 +307,10 @@ static iree_status_t iree_vm_bytecode_publish_results(
     iree_vm_bytecode_copy_direct_values(call->value_results.direct, values,
                                         direct_value_count);
   }
-  for (uint16_t i = 0; i < signature->result_ref_count_u16; ++i) {
+  const uint16_t direct_ref_count = signature->result_ref_count_u16 < 16
+                                        ? signature->result_ref_count_u16
+                                        : 16;
+  for (uint16_t i = 0; i < direct_ref_count; ++i) {
     iree_vm_call_ref_result_store_move(call, i, &refs[i]);
   }
   return iree_ok_status();
@@ -354,23 +371,28 @@ iree_status_t iree_vm_bytecode_function_start(
                                           : 16;
   iree_vm_bytecode_copy_direct_values(
       values, params->call.value_arguments.direct, direct_value_count);
-  for (uint16_t i = 0; i < signature->argument_ref_count_u16; ++i) {
+  const uint16_t direct_ref_count = signature->argument_ref_count_u16 < 16
+                                        ? signature->argument_ref_count_u16
+                                        : 16;
+  for (uint16_t i = 0; i < direct_ref_count; ++i) {
     iree_vm_call_ref_argument_load_move(&params->call, i, &refs[i]);
   }
 
   void* process_storage = params->execution.process_storage;
-  uint64_t* global_values =
-      module->layout.globals.header
-          ? iree_vm_bytecode_process_values(module, process_storage)
-          : NULL;
-  uint64_t* global_value_set_bits =
-      module->layout.globals.header
-          ? iree_vm_bytecode_process_value_set_bits(module, process_storage)
-          : NULL;
-  iree_vm_bytecode_process_state_t* process_state =
-      module->layout.globals.header
-          ? iree_vm_bytecode_process_state(process_storage)
-          : NULL;
+  uint64_t* global_values = NULL;
+  iree_vm_ref_t* global_refs = NULL;
+  uint64_t* global_value_set_bits = NULL;
+  uint64_t* global_ref_set_bits = NULL;
+  iree_vm_bytecode_process_state_t* process_state = NULL;
+  if (module->layout.globals.header) {
+    global_values = iree_vm_bytecode_process_values(module, process_storage);
+    global_refs = iree_vm_bytecode_process_refs(module, process_storage);
+    global_value_set_bits =
+        iree_vm_bytecode_process_value_set_bits(module, process_storage);
+    global_ref_set_bits =
+        iree_vm_bytecode_process_ref_set_bits(module, process_storage);
+    process_state = iree_vm_bytecode_process_state(process_storage);
+  }
   const iree_vm_bytecode_v0_constant_cell_t* constant_cells =
       module->layout.constants.cells;
   const uint8_t* bytecode = module->layout.functions.bytecode_data +
@@ -406,6 +428,40 @@ iree_status_t iree_vm_bytecode_function_start(
     params->call.value_results.overflow[record->slot_u16] =
         values[record->src_v8];
     IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_isa_value_abi_result_store_record_t);
+  }
+  IREE_VM_BYTECODE_DISPATCH_CASE(REF_ABI_ARGUMENT_LOAD_BORROW,
+                                 ref_abi_argument_load_borrow) {
+    const iree_vm_isa_ref_abi_argument_load_borrow_record_t* record =
+        (const iree_vm_isa_ref_abi_argument_load_borrow_record_t*)record_data;
+    const iree_vm_ref_t source =
+        params->call.ref_arguments.overflow[record->slot_u16];
+    const iree_vm_ref_t borrowed =
+        source.object ? iree_vm_ref_from_ptr_borrowed(source.object,
+                                                      iree_vm_ref_type(source))
+                      : iree_vm_ref_null();
+    iree_vm_bytecode_ref_replace(&refs[record->dst_r8], borrowed);
+    IREE_VM_BYTECODE_DISPATCH_NEXT(
+        iree_vm_isa_ref_abi_argument_load_borrow_record_t);
+  }
+  IREE_VM_BYTECODE_DISPATCH_CASE(REF_ABI_ARGUMENT_LOAD_MOVE,
+                                 ref_abi_argument_load_move) {
+    const iree_vm_isa_ref_abi_argument_load_move_record_t* record =
+        (const iree_vm_isa_ref_abi_argument_load_move_record_t*)record_data;
+    iree_vm_bytecode_ref_move(
+        &refs[record->dst_r8],
+        &params->call.ref_arguments.overflow[record->slot_u16]);
+    IREE_VM_BYTECODE_DISPATCH_NEXT(
+        iree_vm_isa_ref_abi_argument_load_move_record_t);
+  }
+  IREE_VM_BYTECODE_DISPATCH_CASE(REF_ABI_RESULT_STORE_MOVE,
+                                 ref_abi_result_store_move) {
+    const iree_vm_isa_ref_abi_result_store_move_record_t* record =
+        (const iree_vm_isa_ref_abi_result_store_move_record_t*)record_data;
+    iree_vm_ref_t new_result = iree_vm_ref_move(&refs[record->src_r8]);
+    iree_vm_bytecode_ref_replace(
+        &params->call.ref_results.overflow[record->slot_u16], new_result);
+    IREE_VM_BYTECODE_DISPATCH_NEXT(
+        iree_vm_isa_ref_abi_result_store_move_record_t);
   }
   IREE_VM_BYTECODE_DISPATCH_CASE(CONSTANT_ZERO, constant_zero) {
     do {
@@ -520,6 +576,94 @@ iree_status_t iree_vm_bytecode_function_start(
     global_values[record->global_u16] = values[record->src_v8];
     IREE_VM_BYTECODE_DISPATCH_NEXT(
         iree_vm_isa_global_value_mutable_store_record_t);
+  }
+  IREE_VM_BYTECODE_DISPATCH_CASE(GLOBAL_REF_IMMUTABLE_LOAD_BORROW,
+                                 global_ref_immutable_load_borrow) {
+    const iree_vm_isa_global_ref_immutable_load_borrow_record_t* record =
+        (const iree_vm_isa_global_ref_immutable_load_borrow_record_t*)
+            record_data;
+    if (process_state->construction_state ==
+            IREE_VM_BYTECODE_CONSTRUCTION_STATE_OPEN &&
+        !iree_vm_bytecode_bit_test(global_ref_set_bits, record->global_u16)) {
+      status =
+          iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                           "immutable ref global is unset during construction");
+      IREE_VM_BYTECODE_DISPATCH_TERMINATE();
+    }
+    const iree_vm_ref_t source = global_refs[record->global_u16];
+    const iree_vm_ref_t borrowed =
+        source.object ? iree_vm_ref_from_ptr_borrowed(source.object,
+                                                      iree_vm_ref_type(source))
+                      : iree_vm_ref_null();
+    iree_vm_bytecode_ref_replace(&refs[record->dst_r8], borrowed);
+    IREE_VM_BYTECODE_DISPATCH_NEXT(
+        iree_vm_isa_global_ref_immutable_load_borrow_record_t);
+  }
+  IREE_VM_BYTECODE_DISPATCH_CASE(GLOBAL_REF_IMMUTABLE_STORE_MOVE,
+                                 global_ref_immutable_store_move) {
+    const iree_vm_isa_global_ref_immutable_store_move_record_t* record =
+        (const iree_vm_isa_global_ref_immutable_store_move_record_t*)
+            record_data;
+    if (process_state->construction_state !=
+            IREE_VM_BYTECODE_CONSTRUCTION_STATE_OPEN ||
+        iree_vm_bytecode_bit_test(global_ref_set_bits, record->global_u16)) {
+      status = iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                                "immutable ref global cannot be initialized");
+      IREE_VM_BYTECODE_DISPATCH_TERMINATE();
+    }
+    const iree_vm_bytecode_v0_global_ref_descriptor_row_t* descriptor =
+        &module->layout.globals.refs[record->global_u16];
+    const iree_vm_ref_type_t expected_type =
+        module->resolved_ref_types[descriptor->ref_type_ordinal_u16];
+    if (!iree_vm_bytecode_ref_matches_global(refs[record->src_r8],
+                                             expected_type, descriptor)) {
+      status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "immutable ref global type does not match");
+      IREE_VM_BYTECODE_DISPATCH_TERMINATE();
+    }
+    const iree_vm_ref_t new_ref = iree_vm_ref_move(&refs[record->src_r8]);
+    iree_vm_bytecode_ref_replace(&global_refs[record->global_u16], new_ref);
+    iree_vm_bytecode_bit_set(global_ref_set_bits, record->global_u16);
+    IREE_VM_BYTECODE_DISPATCH_NEXT(
+        iree_vm_isa_global_ref_immutable_store_move_record_t);
+  }
+  IREE_VM_BYTECODE_DISPATCH_CASE(GLOBAL_REF_MUTABLE_LOAD_RETAIN,
+                                 global_ref_mutable_load_retain) {
+    const iree_vm_isa_global_ref_mutable_load_retain_record_t* record =
+        (const iree_vm_isa_global_ref_mutable_load_retain_record_t*)record_data;
+    const iree_vm_bytecode_v0_global_ref_descriptor_row_t* descriptor =
+        &module->layout.globals.refs[record->global_u16];
+    const iree_vm_ref_t source = global_refs[record->global_u16];
+    if (!source.object &&
+        !iree_any_bit_set(descriptor->flags_u16,
+                          IREE_VM_BYTECODE_GLOBAL_REF_FLAG_NULLABLE)) {
+      status = iree_make_status(
+          IREE_STATUS_FAILED_PRECONDITION,
+          "nonnullable mutable ref global is temporarily null");
+      IREE_VM_BYTECODE_DISPATCH_TERMINATE();
+    }
+    iree_vm_bytecode_ref_retain(&refs[record->dst_r8], source);
+    IREE_VM_BYTECODE_DISPATCH_NEXT(
+        iree_vm_isa_global_ref_mutable_load_retain_record_t);
+  }
+  IREE_VM_BYTECODE_DISPATCH_CASE(GLOBAL_REF_MUTABLE_STORE_MOVE,
+                                 global_ref_mutable_store_move) {
+    const iree_vm_isa_global_ref_mutable_store_move_record_t* record =
+        (const iree_vm_isa_global_ref_mutable_store_move_record_t*)record_data;
+    const iree_vm_bytecode_v0_global_ref_descriptor_row_t* descriptor =
+        &module->layout.globals.refs[record->global_u16];
+    const iree_vm_ref_type_t expected_type =
+        module->resolved_ref_types[descriptor->ref_type_ordinal_u16];
+    if (!iree_vm_bytecode_ref_matches_global(refs[record->src_r8],
+                                             expected_type, descriptor)) {
+      status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "mutable ref global type does not match");
+      IREE_VM_BYTECODE_DISPATCH_TERMINATE();
+    }
+    const iree_vm_ref_t new_ref = iree_vm_ref_move(&refs[record->src_r8]);
+    iree_vm_bytecode_ref_replace(&global_refs[record->global_u16], new_ref);
+    IREE_VM_BYTECODE_DISPATCH_NEXT(
+        iree_vm_isa_global_ref_mutable_store_move_record_t);
   }
   IREE_VM_BYTECODE_DISPATCH_CASE(INTEGER_ADD_I32, integer_add_i32) {
     const iree_vm_isa_integer_add_i32_record_t* record =

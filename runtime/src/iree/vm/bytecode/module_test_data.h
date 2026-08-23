@@ -35,6 +35,9 @@ std::vector<uint8_t> BuildOwnershipModuleImage();
 // Builds one typed-ref fixture covering register and local-slot ownership.
 std::vector<uint8_t> BuildRefModuleImage();
 
+// Builds one typed-ref fixture covering ABI overflow and global ownership.
+std::vector<uint8_t> BuildRefStateModuleImage();
+
 // Builds the exact 17-record launch-configuration fixture plus empty and
 // full-signature no-op decomposition functions.
 std::vector<uint8_t> BuildLaunchConfigModuleImage();

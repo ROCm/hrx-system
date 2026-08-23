@@ -37,6 +37,9 @@ EXECUTABLE_INSTRUCTIONS = (
     ExecutableInstruction("control.return", "CONTROL_RETURN"),
     ExecutableInstruction("value.abi.argument.load", "VALUE_ABI_ARGUMENT_LOAD"),
     ExecutableInstruction("value.abi.result.store", "VALUE_ABI_RESULT_STORE"),
+    ExecutableInstruction("ref.abi.argument.load.borrow", "REF_ABI_ARGUMENT_LOAD"),
+    ExecutableInstruction("ref.abi.argument.load.move", "REF_ABI_ARGUMENT_LOAD"),
+    ExecutableInstruction("ref.abi.result.store.move", "REF_ABI_RESULT_STORE"),
     ExecutableInstruction("constant.zero", "CONSTANT_ZERO"),
     ExecutableInstruction("constant.s16", "CONSTANT_S16"),
     ExecutableInstruction("constant.i32", "CONSTANT_I32"),
@@ -51,6 +54,14 @@ EXECUTABLE_INSTRUCTIONS = (
     ),
     ExecutableInstruction("global.value.mutable.load", "GLOBAL_VALUE_MUTABLE_LOAD"),
     ExecutableInstruction("global.value.mutable.store", "GLOBAL_VALUE_MUTABLE_STORE"),
+    ExecutableInstruction(
+        "global.ref.immutable.load.borrow", "GLOBAL_REF_IMMUTABLE_LOAD"
+    ),
+    ExecutableInstruction(
+        "global.ref.immutable.store.move", "GLOBAL_REF_IMMUTABLE_STORE"
+    ),
+    ExecutableInstruction("global.ref.mutable.load.retain", "GLOBAL_REF_MUTABLE_LOAD"),
+    ExecutableInstruction("global.ref.mutable.store.move", "GLOBAL_REF_MUTABLE_STORE"),
     ExecutableInstruction("integer.add.i32", "VALUE_BINARY_4"),
     ExecutableInstruction("integer.add.i64", "VALUE_BINARY_4"),
     ExecutableInstruction("integer.sub.i32", "VALUE_BINARY_4"),
