@@ -470,7 +470,8 @@ ProviderLinkArtifact LinkProviderSourcesToBytecode(
   return artifact;
 }
 
-bool ModuleHasSymbol(const loom_module_t* module, const char* name) {
+const loom_symbol_t* FindModuleSymbol(const loom_module_t* module,
+                                      const char* name) {
   for (iree_host_size_t i = 0; i < module->symbols.count; ++i) {
     const loom_symbol_t* symbol = &module->symbols.entries[i];
     if (symbol->name_id >= module->strings.count) {
@@ -479,10 +480,14 @@ bool ModuleHasSymbol(const loom_module_t* module, const char* name) {
     iree_string_view_t symbol_name = module->strings.entries[symbol->name_id];
     if (symbol_name.size == strlen(name) &&
         memcmp(symbol_name.data, name, symbol_name.size) == 0) {
-      return true;
+      return symbol;
     }
   }
-  return false;
+  return nullptr;
+}
+
+bool ModuleHasSymbol(const loom_module_t* module, const char* name) {
+  return FindModuleSymbol(module, name) != nullptr;
 }
 
 std::string PrintModule(const loom_module_t* module) {
@@ -515,8 +520,14 @@ void VerifyLinkedCallerModule(const loomc_module_t* module) {
   const loom_module_t* internal_module = loomc_module_const_loom_module(module);
   ASSERT_NE(internal_module, nullptr);
   VerifyModule(internal_module);
-  EXPECT_TRUE(ModuleHasSymbol(internal_module, "caller"));
-  EXPECT_TRUE(ModuleHasSymbol(internal_module, "identity"));
+  const loom_symbol_t* caller = FindModuleSymbol(internal_module, "caller");
+  const loom_symbol_t* identity = FindModuleSymbol(internal_module, "identity");
+  ASSERT_NE(caller, nullptr);
+  ASSERT_NE(identity, nullptr);
+  EXPECT_TRUE(iree_all_bits_set(
+      caller->flags, LOOM_SYMBOL_FLAG_PUBLIC | LOOM_SYMBOL_FLAG_RETAIN));
+  EXPECT_FALSE(iree_any_bit_set(
+      identity->flags, LOOM_SYMBOL_FLAG_PUBLIC | LOOM_SYMBOL_FLAG_RETAIN));
   EXPECT_FALSE(ModuleHasSymbol(internal_module, "unused_harness"));
   EXPECT_FALSE(ModuleHasSymbol(internal_module, "unused_library"));
 }
@@ -646,7 +657,6 @@ func.def public @unused_library(%x: i32) -> (i32) {
       ToString(loomc_source_contents(serialized_text.get()));
   EXPECT_NE(linked_text.find("func.def public retain @caller"),
             std::string::npos);
-  EXPECT_NE(linked_text.find("func.def public @identity"), std::string::npos);
   EXPECT_EQ(linked_text.find("unused_harness"), std::string::npos);
   EXPECT_EQ(linked_text.find("unused_library"), std::string::npos);
   ModulePtr text_source_module = DeserializeModuleFromSource(

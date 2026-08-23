@@ -373,15 +373,11 @@ loomc_status_t loomc_link_module(loomc_linker_t* linker,
       .user_data = &materialization_context,
       .allocator = loomc_link_iree_allocator(linker->allocator),
   };
-  const iree_string_view_list_t output_roots = {
-      .count = options->root_symbol_count,
-      .values = root_symbols,
-  };
   loomc_host_size_t before_diagnostics = loomc_result_diagnostic_count(result);
   if (loomc_status_is_ok(status) && loomc_result_succeeded(result)) {
     iree_status_t operation_status = loom_link_index_materialize(
         loomc_link_index_module_index(options->link_index), &plan_options,
-        &environment, loomc_link_module_name(linker, options), output_roots,
+        &environment, loomc_link_module_name(linker, options),
         &index_materialization);
     status = loomc_link_translate_operation_status(
         result, before_diagnostics, loomc_make_cstring_view("LINK/MATERIALIZE"),

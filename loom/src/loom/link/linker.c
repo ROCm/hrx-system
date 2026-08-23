@@ -68,6 +68,14 @@ typedef struct loom_linker_symbol_set_index_t {
   iree_host_size_t use_capacity;
 } loom_linker_symbol_set_index_t;
 
+// Transient selective-link state for one target symbol.
+typedef struct loom_linker_planned_symbol_t {
+  // Requested outward disposition accumulated across selected sources.
+  loom_linker_symbol_output_t output;
+  // True when the construction-time identity is global across providers.
+  bool global_identity;
+} loom_linker_planned_symbol_t;
+
 struct loom_linker_t {
   // Context shared by all source modules and the target module.
   loom_context_t* context;
@@ -85,6 +93,13 @@ struct loom_linker_t {
   iree_host_size_t private_name_ordinal;
   // Symbol-set attributes indexed by referenced target symbol.
   loom_linker_symbol_set_index_t symbol_set_index;
+  // Selective-plan state indexed by target symbol.
+  struct {
+    // Per-target-symbol construction identity and outward disposition.
+    loom_linker_planned_symbol_t* symbols;
+    // Allocated entries in |symbols|.
+    iree_host_size_t capacity;
+  } planned;
   // Canonical projected and existing provider-import sink.
   loom_link_provider_import_sink_t provider_import_sink;
   // True once finish has transferred the output module to the caller.
@@ -94,6 +109,8 @@ struct loom_linker_t {
 typedef struct loom_linker_exact_selection_t {
   // Strictly increasing module-local source ordinals, or NULL when dense.
   const iree_host_size_t* ordinals;
+  // Output dispositions in source-selection order, or NULL when authored.
+  const loom_linker_symbol_output_t* outputs;
   // Number of selected source symbols.
   iree_host_size_t count;
   // True when the selection is the complete dense source-symbol domain.
@@ -236,6 +253,22 @@ static iree_status_t loom_linker_ensure_symbol_set_capacity(
        ++i) {
     index->symbol_use_heads[i] = LOOM_LINKER_SYMBOL_SET_USE_ID_INVALID;
   }
+  return iree_ok_status();
+}
+
+static iree_status_t loom_linker_ensure_planned_symbol_capacity(
+    loom_linker_t* linker, iree_host_size_t required_capacity) {
+  if (required_capacity <= linker->planned.capacity) {
+    return iree_ok_status();
+  }
+  const iree_host_size_t old_capacity = linker->planned.capacity;
+  IREE_RETURN_IF_ERROR(iree_arena_grow_array(
+      &linker->scratch_arena, old_capacity, required_capacity,
+      sizeof(*linker->planned.symbols), &linker->planned.capacity,
+      (void**)&linker->planned.symbols));
+  memset(linker->planned.symbols + old_capacity, 0,
+         (linker->planned.capacity - old_capacity) *
+             sizeof(*linker->planned.symbols));
   return iree_ok_status();
 }
 
@@ -390,7 +423,12 @@ static iree_status_t loom_linker_resolve_source_symbol(
   const bool source_concrete =
       loom_link_symbol_is_concrete_definition(source_symbol);
 
+  const bool target_planned_global =
+      target_symbol_id != LOOM_SYMBOL_ID_INVALID &&
+      target_symbol_id < linker->planned.capacity &&
+      linker->planned.symbols[target_symbol_id].global_identity;
   if (source_global && target_symbol_id != LOOM_SYMBOL_ID_INVALID &&
+      !target_planned_global &&
       loom_link_target_symbol_is_private_concrete(linker, target_symbol_id)) {
     IREE_RETURN_IF_ERROR(
         loom_linker_rename_private_target_symbol(linker, target_symbol_id));
@@ -412,6 +450,9 @@ static iree_status_t loom_linker_resolve_source_symbol(
   if (target_symbol_id == LOOM_SYMBOL_ID_INVALID) {
     IREE_RETURN_IF_ERROR(loom_linker_add_target_symbol(linker, target_name_id,
                                                        &target_symbol_id));
+  }
+  if (source_global && target_symbol_id < linker->planned.capacity) {
+    linker->planned.symbols[target_symbol_id].global_identity = true;
   }
 
   loom_symbol_ref_t target_ref = {
@@ -900,7 +941,7 @@ static iree_status_t loom_link_merge_func_contract(
     loom_linker_t* linker, loom_linker_source_t* link_source,
     const loom_module_t* source_module, loom_op_t* source_op,
     iree_arena_allocator_t* arena, loom_symbol_ref_t target_ref,
-    loom_op_t* target_op) {
+    loom_op_t* target_op, bool merge_output_contract) {
   if (source_op == target_op) return iree_ok_status();
 
   loom_func_like_t source_func = loom_func_like_cast(source_module, source_op);
@@ -947,21 +988,6 @@ static iree_status_t loom_link_merge_func_contract(
 
   const loom_link_func_contract_attr_t attrs[] = {
       {
-          .source_attr_index = source_func.vtable->visibility_attr_index,
-          .target_attr_index = target_func.vtable->visibility_attr_index,
-          .field_name = IREE_SV("visibility"),
-      },
-      {
-          .source_attr_index = source_func.vtable->import_module_attr_index,
-          .target_attr_index = target_func.vtable->import_module_attr_index,
-          .field_name = IREE_SV("import_module"),
-      },
-      {
-          .source_attr_index = source_func.vtable->import_symbol_attr_index,
-          .target_attr_index = target_func.vtable->import_symbol_attr_index,
-          .field_name = IREE_SV("import_symbol"),
-      },
-      {
           .source_attr_index = source_func.vtable->cc_attr_index,
           .target_attr_index = target_func.vtable->cc_attr_index,
           .field_name = IREE_SV("cc"),
@@ -1007,21 +1033,6 @@ static iree_status_t loom_link_merge_func_contract(
           .field_name = IREE_SV("abi_attrs"),
       },
       {
-          .source_attr_index = source_func.vtable->export_symbol_attr_index,
-          .target_attr_index = target_func.vtable->export_symbol_attr_index,
-          .field_name = IREE_SV("export_symbol"),
-      },
-      {
-          .source_attr_index = source_func.vtable->export_attrs_attr_index,
-          .target_attr_index = target_func.vtable->export_attrs_attr_index,
-          .field_name = IREE_SV("export_attrs"),
-      },
-      {
-          .source_attr_index = source_func.vtable->export_linkage_attr_index,
-          .target_attr_index = target_func.vtable->export_linkage_attr_index,
-          .field_name = IREE_SV("export_linkage"),
-      },
-      {
           .source_attr_index = source_func.vtable->predicates_attr_index,
           .target_attr_index = target_func.vtable->predicates_attr_index,
           .field_name = IREE_SV("predicates"),
@@ -1044,6 +1055,46 @@ static iree_status_t loom_link_merge_func_contract(
         &contract_remap, linker, target_ref, source_func,
         attrs[i].source_attr_index, target_func, attrs[i].target_attr_index,
         attrs[i].field_name));
+  }
+  if (merge_output_contract) {
+    const loom_link_func_contract_attr_t output_attrs[] = {
+        {
+            .source_attr_index = source_func.vtable->visibility_attr_index,
+            .target_attr_index = target_func.vtable->visibility_attr_index,
+            .field_name = IREE_SV("visibility"),
+        },
+        {
+            .source_attr_index = source_func.vtable->import_module_attr_index,
+            .target_attr_index = target_func.vtable->import_module_attr_index,
+            .field_name = IREE_SV("import_module"),
+        },
+        {
+            .source_attr_index = source_func.vtable->import_symbol_attr_index,
+            .target_attr_index = target_func.vtable->import_symbol_attr_index,
+            .field_name = IREE_SV("import_symbol"),
+        },
+        {
+            .source_attr_index = source_func.vtable->export_symbol_attr_index,
+            .target_attr_index = target_func.vtable->export_symbol_attr_index,
+            .field_name = IREE_SV("export_symbol"),
+        },
+        {
+            .source_attr_index = source_func.vtable->export_attrs_attr_index,
+            .target_attr_index = target_func.vtable->export_attrs_attr_index,
+            .field_name = IREE_SV("export_attrs"),
+        },
+        {
+            .source_attr_index = source_func.vtable->export_linkage_attr_index,
+            .target_attr_index = target_func.vtable->export_linkage_attr_index,
+            .field_name = IREE_SV("export_linkage"),
+        },
+    };
+    for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(output_attrs); ++i) {
+      IREE_RETURN_IF_ERROR(loom_link_merge_func_attr(
+          &contract_remap, linker, target_ref, source_func,
+          output_attrs[i].source_attr_index, target_func,
+          output_attrs[i].target_attr_index, output_attrs[i].field_name));
+    }
   }
   return iree_ok_status();
 }
@@ -1244,7 +1295,7 @@ static iree_status_t loom_link_merge_symbol_contract(
     loom_linker_t* linker, loom_linker_source_t* link_source,
     const loom_module_t* source_module, loom_op_t* source_op,
     iree_arena_allocator_t* arena, loom_symbol_ref_t target_ref,
-    loom_op_t* target_op) {
+    loom_op_t* target_op, bool merge_output_contract) {
   if (source_op == target_op) return iree_ok_status();
   const loom_symbol_definition_descriptor_t* source_definition =
       loom_link_op_symbol_definition(source_module, source_op);
@@ -1259,9 +1310,9 @@ static iree_status_t loom_link_merge_symbol_contract(
 
   if (loom_symbol_definition_implements(source_definition,
                                         LOOM_SYMBOL_INTERFACE_FUNC_LIKE)) {
-    IREE_RETURN_IF_ERROR(
-        loom_link_merge_func_contract(linker, link_source, source_module,
-                                      source_op, arena, target_ref, target_op));
+    IREE_RETURN_IF_ERROR(loom_link_merge_func_contract(
+        linker, link_source, source_module, source_op, arena, target_ref,
+        target_op, merge_output_contract));
   }
   if (loom_symbol_definition_has_value_contract(source_definition)) {
     IREE_RETURN_IF_ERROR(loom_link_merge_value_contract(
@@ -1290,6 +1341,201 @@ static iree_status_t loom_linker_clone_source_op(loom_linker_source_t* source,
   return loom_ir_clone_op(&builder, source_op, remap, out_cloned_op);
 }
 
+static loom_linker_symbol_output_t loom_linker_combine_symbol_output(
+    loom_linker_symbol_output_t lhs, loom_linker_symbol_output_t rhs) {
+  if (lhs == LOOM_LINKER_SYMBOL_OUTPUT_ROOT ||
+      rhs == LOOM_LINKER_SYMBOL_OUTPUT_ROOT) {
+    return LOOM_LINKER_SYMBOL_OUTPUT_ROOT;
+  }
+  if (lhs == LOOM_LINKER_SYMBOL_OUTPUT_DEPENDENCY ||
+      rhs == LOOM_LINKER_SYMBOL_OUTPUT_DEPENDENCY) {
+    return LOOM_LINKER_SYMBOL_OUTPUT_DEPENDENCY;
+  }
+  return LOOM_LINKER_SYMBOL_OUTPUT_AUTHORED;
+}
+
+static iree_status_t loom_linker_replace_output_attr(
+    loom_linker_t* linker, loom_symbol_ref_t target_ref, loom_ir_remap_t* remap,
+    const loom_op_t* source_op, uint8_t source_attr_index, loom_op_t* target_op,
+    uint8_t target_attr_index, iree_string_view_t field_name) {
+  const bool source_present =
+      source_attr_index != LOOM_ATTR_INDEX_NONE &&
+      !loom_attr_is_absent(loom_op_const_attrs(source_op)[source_attr_index]);
+  if (target_attr_index == LOOM_ATTR_INDEX_NONE) {
+    return source_present ? loom_link_incompatible_contract_status(
+                                linker, target_ref, field_name)
+                          : iree_ok_status();
+  }
+  if (!source_present) {
+    loom_op_attrs(target_op)[target_attr_index] = loom_attr_absent();
+    return iree_ok_status();
+  }
+  loom_attribute_t source_attr =
+      loom_op_const_attrs(source_op)[source_attr_index];
+  if (remap) {
+    return loom_ir_remap_attribute(
+        remap, source_attr, &loom_op_attrs(target_op)[target_attr_index]);
+  }
+  loom_op_attrs(target_op)[target_attr_index] = source_attr;
+  return iree_ok_status();
+}
+
+static void loom_linker_internalize_symbol_output(loom_linker_t* linker,
+                                                  loom_op_t* target_op) {
+  const loom_op_vtable_t* target_vtable =
+      loom_op_vtable(linker->target_module, target_op);
+  const loom_symbol_definition_descriptor_t* target_definition =
+      target_vtable->symbol_def;
+  const uint8_t target_visibility_attr_index =
+      loom_symbol_definition_visibility_attr_index(target_definition);
+  const uint8_t target_retain_attr_index =
+      target_definition->retain_attr_index_plus_one
+          ? target_definition->retain_attr_index_plus_one - 1
+          : LOOM_ATTR_INDEX_NONE;
+
+  if (target_visibility_attr_index != LOOM_ATTR_INDEX_NONE) {
+    loom_op_attrs(target_op)[target_visibility_attr_index] = loom_attr_absent();
+  }
+  if (target_retain_attr_index != LOOM_ATTR_INDEX_NONE) {
+    loom_op_attrs(target_op)[target_retain_attr_index] = loom_attr_absent();
+  }
+  loom_func_like_t target_func =
+      loom_func_like_cast(linker->target_module, target_op);
+  if (loom_func_like_isa(target_func)) {
+    const uint8_t export_attr_indices[] = {
+        target_func.vtable->export_symbol_attr_index,
+        target_func.vtable->export_attrs_attr_index,
+        target_func.vtable->export_linkage_attr_index,
+    };
+    for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(export_attr_indices); ++i) {
+      if (export_attr_indices[i] != LOOM_ATTR_INDEX_NONE) {
+        loom_op_attrs(target_op)[export_attr_indices[i]] = loom_attr_absent();
+      }
+    }
+  }
+  loom_module_link_symbol_defining_op(linker->target_module, target_op,
+                                      target_vtable);
+}
+
+static iree_status_t loom_linker_apply_root_symbol_output(
+    loom_linker_source_t* source, const loom_module_t* root_module,
+    loom_op_t* root_op, loom_symbol_ref_t target_ref, loom_op_t* target_op) {
+  loom_linker_t* linker = source->linker;
+  const loom_op_vtable_t* target_vtable =
+      loom_op_vtable(linker->target_module, target_op);
+  const loom_symbol_definition_descriptor_t* target_definition =
+      target_vtable->symbol_def;
+  const uint8_t target_visibility_attr_index =
+      loom_symbol_definition_visibility_attr_index(target_definition);
+  const uint8_t target_retain_attr_index =
+      target_definition->retain_attr_index_plus_one
+          ? target_definition->retain_attr_index_plus_one - 1
+          : LOOM_ATTR_INDEX_NONE;
+  const loom_op_vtable_t* root_vtable = loom_op_vtable(root_module, root_op);
+  const loom_symbol_definition_descriptor_t* root_definition =
+      root_vtable->symbol_def;
+  loom_ir_remap_t* remap = NULL;
+  if (root_module != linker->target_module) {
+    IREE_RETURN_IF_ERROR(loom_linker_get_source_remap(source, &remap));
+  }
+
+  IREE_RETURN_IF_ERROR(loom_linker_replace_output_attr(
+      linker, target_ref, remap, root_op,
+      loom_symbol_definition_visibility_attr_index(root_definition), target_op,
+      target_visibility_attr_index, IREE_SV("visibility")));
+
+  loom_func_like_t root_func = loom_func_like_cast(root_module, root_op);
+  loom_func_like_t target_func =
+      loom_func_like_cast(linker->target_module, target_op);
+  if (loom_func_like_isa(root_func) || loom_func_like_isa(target_func)) {
+    if (!loom_func_like_isa(root_func) || !loom_func_like_isa(target_func)) {
+      return loom_link_incompatible_contract_status(linker, target_ref,
+                                                    IREE_SV("func_like"));
+    }
+    const bool target_declaration =
+        loom_symbol_definition_is_declaration(target_definition);
+    const loom_link_func_contract_attr_t export_attrs[] = {
+        {
+            .source_attr_index = root_func.vtable->export_symbol_attr_index,
+            .target_attr_index = target_func.vtable->export_symbol_attr_index,
+            .field_name = IREE_SV("export_symbol"),
+        },
+        {
+            .source_attr_index = root_func.vtable->export_attrs_attr_index,
+            .target_attr_index = target_func.vtable->export_attrs_attr_index,
+            .field_name = IREE_SV("export_attrs"),
+        },
+        {
+            .source_attr_index = root_func.vtable->export_linkage_attr_index,
+            .target_attr_index = target_func.vtable->export_linkage_attr_index,
+            .field_name = IREE_SV("export_linkage"),
+        },
+    };
+    for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(export_attrs); ++i) {
+      IREE_RETURN_IF_ERROR(loom_linker_replace_output_attr(
+          linker, target_ref, remap, root_op, export_attrs[i].source_attr_index,
+          target_op, export_attrs[i].target_attr_index,
+          export_attrs[i].field_name));
+    }
+    const loom_link_func_contract_attr_t import_attrs[] = {
+        {
+            .source_attr_index = root_func.vtable->import_module_attr_index,
+            .target_attr_index = target_func.vtable->import_module_attr_index,
+            .field_name = IREE_SV("import_module"),
+        },
+        {
+            .source_attr_index = root_func.vtable->import_symbol_attr_index,
+            .target_attr_index = target_func.vtable->import_symbol_attr_index,
+            .field_name = IREE_SV("import_symbol"),
+        },
+    };
+    for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(import_attrs); ++i) {
+      IREE_RETURN_IF_ERROR(loom_linker_replace_output_attr(
+          linker, target_ref, target_declaration ? remap : NULL,
+          target_declaration ? root_op : target_op,
+          target_declaration ? import_attrs[i].source_attr_index
+                             : LOOM_ATTR_INDEX_NONE,
+          target_op, import_attrs[i].target_attr_index,
+          import_attrs[i].field_name));
+    }
+  }
+  if (target_retain_attr_index != LOOM_ATTR_INDEX_NONE) {
+    loom_op_attrs(target_op)[target_retain_attr_index] = loom_attr_enum(1);
+  }
+  loom_module_link_symbol_defining_op(linker->target_module, target_op,
+                                      target_vtable);
+  return iree_ok_status();
+}
+
+static iree_status_t loom_linker_apply_symbol_output(
+    loom_linker_source_t* source, const loom_module_t* root_module,
+    loom_op_t* root_op, loom_symbol_ref_t target_ref, loom_op_t* target_op,
+    loom_linker_symbol_output_t output) {
+  if (output == LOOM_LINKER_SYMBOL_OUTPUT_AUTHORED) {
+    return iree_ok_status();
+  }
+  if (output == LOOM_LINKER_SYMBOL_OUTPUT_DEPENDENCY) {
+    loom_linker_internalize_symbol_output(source->linker, target_op);
+    return iree_ok_status();
+  }
+  return loom_linker_apply_root_symbol_output(source, root_module, root_op,
+                                              target_ref, target_op);
+}
+
+static iree_status_t loom_linker_commit_symbol_output(
+    loom_linker_source_t* source, const loom_module_t* root_module,
+    loom_op_t* root_op, loom_symbol_ref_t target_ref, loom_op_t* target_op,
+    loom_linker_symbol_output_t output) {
+  IREE_RETURN_IF_ERROR(loom_linker_apply_symbol_output(
+      source, root_module, root_op, target_ref, target_op, output));
+  if (output == LOOM_LINKER_SYMBOL_OUTPUT_AUTHORED) {
+    return iree_ok_status();
+  }
+  loom_linker_t* linker = source->linker;
+  linker->planned.symbols[target_ref.symbol_id].output = output;
+  return iree_ok_status();
+}
+
 static iree_status_t loom_linker_duplicate_concrete_status(
     const loom_linker_t* linker, loom_symbol_ref_t target_ref) {
   iree_string_view_t name =
@@ -1301,7 +1547,7 @@ static iree_status_t loom_linker_duplicate_concrete_status(
 
 static iree_status_t loom_linker_clone_or_merge_symbol_op(
     loom_linker_source_t* source, uint16_t source_symbol_id,
-    loom_symbol_ref_t target_ref) {
+    loom_symbol_ref_t target_ref, loom_linker_symbol_output_t source_output) {
   loom_linker_t* linker = source->linker;
   const loom_symbol_t* source_symbol =
       &source->module->symbols.entries[source_symbol_id];
@@ -1313,11 +1559,28 @@ static iree_status_t loom_linker_clone_or_merge_symbol_op(
   loom_op_t* target_op = target_symbol->defining_op;
   const bool source_declaration =
       loom_link_symbol_is_declaration(source_symbol);
+  const loom_linker_symbol_output_t target_output =
+      target_ref.symbol_id < linker->planned.capacity
+          ? linker->planned.symbols[target_ref.symbol_id].output
+          : LOOM_LINKER_SYMBOL_OUTPUT_AUTHORED;
+  const loom_linker_symbol_output_t output =
+      loom_linker_combine_symbol_output(source_output, target_output);
+  const loom_module_t* root_module = NULL;
+  loom_op_t* root_op = NULL;
+  if (target_output == LOOM_LINKER_SYMBOL_OUTPUT_ROOT) {
+    root_module = linker->target_module;
+    root_op = target_op;
+  } else if (source_output == LOOM_LINKER_SYMBOL_OUTPUT_ROOT) {
+    root_module = source->module;
+    root_op = source_op;
+  }
 
   if (!target_op) {
     loom_op_t* cloned_op = NULL;
-    return loom_linker_clone_source_op(source, source_op, /*before_op=*/NULL,
-                                       &cloned_op);
+    IREE_RETURN_IF_ERROR(loom_linker_clone_source_op(
+        source, source_op, /*before_op=*/NULL, &cloned_op));
+    return loom_linker_commit_symbol_output(source, root_module, root_op,
+                                            target_ref, cloned_op, output);
   }
 
   const bool target_declaration =
@@ -1328,18 +1591,25 @@ static iree_status_t loom_linker_clone_or_merge_symbol_op(
         loom_linker_clone_source_op(source, source_op, target_op, &cloned_op));
     IREE_RETURN_IF_ERROR(loom_link_merge_symbol_contract(
         linker, source, linker->target_module, target_op, source->arena,
-        target_ref, cloned_op));
+        target_ref, cloned_op, output == LOOM_LINKER_SYMBOL_OUTPUT_AUTHORED));
+    IREE_RETURN_IF_ERROR(loom_linker_apply_symbol_output(
+        source, root_module, root_op, target_ref, cloned_op, output));
     IREE_RETURN_IF_ERROR(loom_op_erase(linker->target_module, target_op));
     loom_module_link_symbol_defining_op(
         linker->target_module, cloned_op,
         loom_op_vtable(linker->target_module, cloned_op));
+    if (output != LOOM_LINKER_SYMBOL_OUTPUT_AUTHORED) {
+      linker->planned.symbols[target_ref.symbol_id].output = output;
+    }
     return iree_ok_status();
   }
 
   if (source_declaration) {
-    return loom_link_merge_symbol_contract(linker, source, source->module,
-                                           source_op, source->arena, target_ref,
-                                           target_op);
+    IREE_RETURN_IF_ERROR(loom_link_merge_symbol_contract(
+        linker, source, source->module, source_op, source->arena, target_ref,
+        target_op, output == LOOM_LINKER_SYMBOL_OUTPUT_AUTHORED));
+    return loom_linker_commit_symbol_output(source, root_module, root_op,
+                                            target_ref, target_op, output);
   }
 
   bool merge_duplicate_value_definition = false;
@@ -1347,7 +1617,8 @@ static iree_status_t loom_linker_clone_or_merge_symbol_op(
       linker, target_op, source->module, source_op, source->arena, target_ref,
       &merge_duplicate_value_definition));
   if (merge_duplicate_value_definition) {
-    return iree_ok_status();
+    return loom_linker_commit_symbol_output(source, root_module, root_op,
+                                            target_ref, target_op, output);
   }
   return loom_linker_duplicate_concrete_status(linker, target_ref);
 }
@@ -1628,7 +1899,8 @@ static iree_status_t loom_linker_clone_module_body(
     IREE_RETURN_IF_ERROR(loom_linker_map_source_symbol(
         source, source_ref.symbol_id, &target_ref));
     IREE_RETURN_IF_ERROR(loom_linker_clone_or_merge_symbol_op(
-        source, source_ref.symbol_id, target_ref));
+        source, source_ref.symbol_id, target_ref,
+        LOOM_LINKER_SYMBOL_OUTPUT_AUTHORED));
   }
   return iree_ok_status();
 }
@@ -1783,6 +2055,11 @@ iree_status_t loom_linker_create(loom_context_t* context,
   iree_status_t status =
       loom_module_allocate(context, module_name, block_pool, /*hints=*/NULL,
                            allocator, &linker->target_module);
+  if (iree_status_is_ok(status) && options &&
+      options->planned_symbol_capacity != 0) {
+    status = loom_linker_ensure_planned_symbol_capacity(
+        linker, options->planned_symbol_capacity);
+  }
   if (iree_status_is_ok(status)) {
     status = loom_link_provider_import_sink_initialize(
         linker->target_module, &linker->scratch_arena,
@@ -1885,8 +2162,16 @@ iree_status_t loom_linker_add_module(loom_linker_t* linker,
 static iree_status_t loom_linker_add_exact_selection(
     loom_linker_t* linker, const loom_module_t* source_module,
     loom_linker_exact_selection_t selection,
+    loom_linker_source_symbol_output_list_t source_outputs,
     loom_linker_source_provider_import_list_t provider_imports,
     loom_linker_target_symbol_list_t out_target_symbols) {
+  if (source_outputs.count != 0 && (source_outputs.count != selection.count ||
+                                    source_outputs.values == NULL)) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "source output has %zu entries but selection has %zu",
+        source_outputs.count, selection.count);
+  }
   if (out_target_symbols.count != 0 &&
       (out_target_symbols.count != selection.count ||
        out_target_symbols.values == NULL)) {
@@ -1894,6 +2179,16 @@ static iree_status_t loom_linker_add_exact_selection(
         IREE_STATUS_INVALID_ARGUMENT,
         "target symbol output has %zu entries but selection has %zu",
         out_target_symbols.count, selection.count);
+  }
+  if (source_outputs.count != 0) {
+    iree_host_size_t required_capacity = 0;
+    if (!iree_host_size_checked_add(linker->target_module->symbols.count,
+                                    selection.count, &required_capacity)) {
+      return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                              "planned symbol capacity overflow");
+    }
+    IREE_RETURN_IF_ERROR(
+        loom_linker_ensure_planned_symbol_capacity(linker, required_capacity));
   }
   iree_arena_allocator_t source_arena;
   iree_arena_initialize(linker->block_pool, &source_arena);
@@ -1904,6 +2199,7 @@ static iree_status_t loom_linker_add_exact_selection(
       .source_symbol_count = source_module->symbols.count,
       .exact = selection,
   };
+  source.exact.outputs = source_outputs.values;
   source.symbol_remap = loom_ir_remap_symbol_callback_make(
       selection.dense ? loom_linker_remap_dense_symbol
                       : loom_linker_remap_exact_symbol,
@@ -1941,7 +2237,9 @@ static iree_status_t loom_linker_add_exact_selection(
       if (loom_link_op_symbol_ref(source_module, source_op, &source_ref)) {
         status = loom_linker_clone_or_merge_symbol_op(
             &source, source_ref.symbol_id,
-            source.target_symbols[source_ref.symbol_id]);
+            source.target_symbols[source_ref.symbol_id],
+            source.exact.outputs ? source.exact.outputs[source_ref.symbol_id]
+                                 : LOOM_LINKER_SYMBOL_OUTPUT_AUTHORED);
       } else if (!loom_module_import_isa(source_op)) {
         loom_op_t* cloned_op = NULL;
         status = loom_linker_clone_source_op(&source, source_op,
@@ -1974,7 +2272,10 @@ static iree_status_t loom_linker_add_exact_selection(
       const loom_linker_exact_symbol_op_t* selected_op = &selected_ops[i];
       status = loom_linker_clone_or_merge_symbol_op(
           &source, selected_op->source_symbol_id,
-          source.target_symbols[selected_op->selection_ordinal]);
+          source.target_symbols[selected_op->selection_ordinal],
+          source.exact.outputs
+              ? source.exact.outputs[selected_op->selection_ordinal]
+              : LOOM_LINKER_SYMBOL_OUTPUT_AUTHORED);
     }
   }
 
@@ -2018,6 +2319,7 @@ static iree_status_t loom_linker_add_exact_selection(
 iree_status_t loom_linker_add_module_symbols(
     loom_linker_t* linker, const loom_module_t* source_module,
     loom_linker_source_symbol_list_t source_symbols,
+    loom_linker_source_symbol_output_list_t source_outputs,
     loom_linker_source_provider_import_list_t provider_imports,
     loom_linker_target_symbol_list_t out_target_symbols) {
   IREE_RETURN_IF_ERROR(
@@ -2032,11 +2334,12 @@ iree_status_t loom_linker_add_module_symbols(
           .ordinals = source_symbols.ordinals,
           .count = source_symbols.count,
       },
-      provider_imports, out_target_symbols);
+      source_outputs, provider_imports, out_target_symbols);
 }
 
 iree_status_t loom_linker_add_exact_module(
     loom_linker_t* linker, const loom_module_t* source_module,
+    loom_linker_source_symbol_output_list_t source_outputs,
     loom_linker_source_provider_import_list_t provider_imports,
     loom_linker_target_symbol_list_t out_target_symbols) {
   IREE_RETURN_IF_ERROR(
@@ -2049,7 +2352,7 @@ iree_status_t loom_linker_add_exact_module(
           .count = source_module->symbols.count,
           .dense = true,
       },
-      provider_imports, out_target_symbols);
+      source_outputs, provider_imports, out_target_symbols);
 }
 
 iree_status_t loom_linker_finalize_roots(loom_linker_t* linker,

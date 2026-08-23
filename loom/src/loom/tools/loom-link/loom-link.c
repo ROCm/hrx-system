@@ -1015,14 +1015,9 @@ int main(int argc, char** argv) {
         .allocator = allocator,
     };
     if (iree_status_is_ok(status)) {
-      status =
-          loom_link_index_materialize(link_index.module_index, &plan_options,
-                                      &environment, IREE_SV("linked"),
-                                      (iree_string_view_list_t){
-                                          .count = roots.count,
-                                          .values = roots.values,
-                                      },
-                                      &materialization);
+      status = loom_link_index_materialize(link_index.module_index,
+                                           &plan_options, &environment,
+                                           IREE_SV("linked"), &materialization);
     }
   }
   if (iree_status_is_ok(status) && FLAG_print_plan) {

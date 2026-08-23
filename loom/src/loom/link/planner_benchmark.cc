@@ -719,6 +719,7 @@ static void BM_Link_ImportedCandidateEndToEnd(benchmark::State& state) {
 
     const loom_linker_options_t linker_options = {
         /*.module_name=*/IREE_SV("linked"),
+        /*.planned_symbol_capacity=*/0,
         /*.provider_imports=*/
         {
             /*.count=*/import_projection.provider_imports.count,
@@ -739,7 +740,9 @@ static void BM_Link_ImportedCandidateEndToEnd(benchmark::State& state) {
           index, selection.source_module, fixture.context(),
           fixture.block_pool());
       CheckStatus(loom_linker_add_exact_module(
-          linker, materialized_module, import_projection.modules.values[i],
+          linker, materialized_module,
+          loom_linker_source_symbol_output_list_empty(),
+          import_projection.modules.values[i],
           loom_linker_target_symbol_list_empty()));
       loom_module_free(materialized_module);
     }
@@ -975,6 +978,7 @@ static void BenchmarkExactLink(benchmark::State& state,
     state.ResumeTiming();
     CheckStatus(loom_linker_add_module_symbols(
         linker, fixture.module(), source_symbols,
+        loom_linker_source_symbol_output_list_empty(),
         loom_linker_source_provider_import_list_empty(),
         loom_linker_target_symbol_list_empty()));
     benchmark::DoNotOptimize(linker);
@@ -1007,7 +1011,7 @@ static void BM_LinkExactDense_Catalog(benchmark::State& state) {
                                    iree_allocator_system(), &linker));
     state.ResumeTiming();
     CheckStatus(loom_linker_add_exact_module(
-        linker, fixture.module(),
+        linker, fixture.module(), loom_linker_source_symbol_output_list_empty(),
         loom_linker_source_provider_import_list_empty(),
         loom_linker_target_symbol_list_empty()));
     benchmark::DoNotOptimize(linker);
@@ -1157,7 +1161,7 @@ static void BenchmarkSelectiveMaterializeAndLink(
       std::abort();
     }
     CheckStatus(loom_linker_add_exact_module(
-        linker, selected_module,
+        linker, selected_module, loom_linker_source_symbol_output_list_empty(),
         loom_linker_source_provider_import_list_empty(),
         loom_linker_target_symbol_list_empty()));
     loom_module_free(selected_module);

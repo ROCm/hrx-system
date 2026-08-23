@@ -21,6 +21,7 @@
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
 #include "loom/link/module_index.h"
+#include "loom/ops/op_defs.h"
 #include "loom/ops/op_registry.h"
 #include "loom/verify/verify.h"
 
@@ -133,9 +134,8 @@ class LinkIndexMaterializerTest : public ::testing::Test {
     environment.context = &context_;
     environment.block_pool = &block_pool_;
     environment.allocator = iree_allocator_system();
-    return loom_link_index_materialize(
-        index, &plan_options, &environment, IREE_SV("linked"),
-        plan_options.root_symbols, out_materialization);
+    return loom_link_index_materialize(index, &plan_options, &environment,
+                                       IREE_SV("linked"), out_materialization);
   }
 
   loom_link_index_materialization_t MaterializeWithPolicy(
@@ -470,6 +470,249 @@ template.def<@demo.leaf> @leaf_impl(%x: i32) -> (i32) {
     EXPECT_TRUE(loom_link_plan_contains_symbol(materialization.plan,
                                                provider->ordinal));
   }
+  loom_link_index_materialization_deinitialize(&materialization);
+}
+
+TEST_F(LinkIndexMaterializerTest,
+       SelectiveLinkInternalizesLibraryDependencies) {
+  loom_module_t* requester = Parse(IREE_SV(R"(
+func.decl @helper(%x: i32) -> (i32)
+
+func.def public export("request_entry") @entry(%x: i32) -> (i32) {
+  %result = func.call @helper(%x) : (i32) -> (i32)
+  func.return %result : i32
+}
+)"),
+                                   IREE_SV("requester.loom"));
+  loom_module_t* library = Parse(IREE_SV(R"(
+func.def public export("library_helper") @helper(%x: i32) -> (i32) {
+  func.return %x : i32
+}
+
+func.def public export("unrelated") @unused(%x: i32) -> (i32) {
+  func.return %x : i32
+}
+)"),
+                                 IREE_SV("library.loom"));
+
+  IndexPtr index = CreateIndex();
+  AddMaterialized(index.get(), requester, IREE_SV("requester"),
+                  LOOM_LINK_PROVIDER_ROLE_INPUT);
+  AddMaterialized(index.get(), library, IREE_SV("library"),
+                  LOOM_LINK_PROVIDER_ROLE_LIBRARY);
+
+  loom_link_index_materialization_t materialization =
+      Materialize(index.get(), IREE_SV("@entry"));
+  Verify(materialization.module);
+
+  const loom_symbol_t* entry =
+      FindSymbol(materialization.module, IREE_SV("entry"));
+  const loom_symbol_t* helper =
+      FindSymbol(materialization.module, IREE_SV("helper"));
+  ASSERT_NE(entry, nullptr);
+  ASSERT_NE(helper, nullptr);
+  EXPECT_EQ(FindSymbol(materialization.module, IREE_SV("unused")), nullptr);
+  EXPECT_TRUE(iree_all_bits_set(
+      entry->flags, LOOM_SYMBOL_FLAG_PUBLIC | LOOM_SYMBOL_FLAG_RETAIN));
+  EXPECT_FALSE(iree_any_bit_set(
+      helper->flags, LOOM_SYMBOL_FLAG_PUBLIC | LOOM_SYMBOL_FLAG_RETAIN));
+
+  loom_func_like_t entry_func =
+      loom_func_like_cast(materialization.module, entry->defining_op);
+  loom_func_like_t helper_func =
+      loom_func_like_cast(materialization.module, helper->defining_op);
+  ASSERT_TRUE(loom_func_like_isa(entry_func));
+  ASSERT_TRUE(loom_func_like_isa(helper_func));
+  const loom_string_id_t entry_export =
+      loom_func_like_export_symbol(entry_func);
+  ASSERT_NE(entry_export, LOOM_STRING_ID_INVALID);
+  EXPECT_TRUE(iree_string_view_equal(
+      materialization.module->strings.entries[entry_export],
+      IREE_SV("request_entry")));
+  EXPECT_EQ(loom_func_like_export_symbol(helper_func), LOOM_STRING_ID_INVALID);
+
+  loom_link_index_materialization_deinitialize(&materialization);
+}
+
+TEST_F(LinkIndexMaterializerTest,
+       RequesterDeclarationControlsResolvedRootSurface) {
+  loom_module_t* requester = Parse(IREE_SV(R"(
+func.decl public import("upstream", "identity") export("request_identity") @identity(%x: i32) -> (i32)
+)"),
+                                   IREE_SV("requester.loom"));
+  loom_module_t* library = Parse(IREE_SV(R"(
+func.def public export("provider_identity") @identity(%x: i32) -> (i32) {
+  func.return %x : i32
+}
+)"),
+                                 IREE_SV("library.loom"));
+
+  IndexPtr index = CreateIndex();
+  AddMaterialized(index.get(), library, IREE_SV("library"),
+                  LOOM_LINK_PROVIDER_ROLE_LIBRARY);
+  AddMaterialized(index.get(), requester, IREE_SV("requester"),
+                  LOOM_LINK_PROVIDER_ROLE_INPUT);
+
+  loom_link_index_materialization_t materialization =
+      Materialize(index.get(), IREE_SV("@identity"));
+  Verify(materialization.module);
+
+  const loom_link_module_index_module_t* library_module =
+      loom_link_module_index_module_at(index.get(), 0);
+  ASSERT_NE(library_module, nullptr);
+  const loom_link_module_index_symbol_t* library_identity =
+      loom_link_module_index_symbol_at(index.get(),
+                                       library_module->symbol_start_ordinal);
+  ASSERT_NE(library_identity, nullptr);
+  EXPECT_TRUE(loom_link_plan_contains_symbol(materialization.plan,
+                                             library_identity->ordinal));
+
+  const loom_symbol_t* identity =
+      FindSymbol(materialization.module, IREE_SV("identity"));
+  ASSERT_NE(identity, nullptr);
+  EXPECT_TRUE(iree_all_bits_set(
+      identity->flags, LOOM_SYMBOL_FLAG_PUBLIC | LOOM_SYMBOL_FLAG_RETAIN));
+  EXPECT_FALSE(loom_symbol_definition_is_declaration(identity->definition));
+  loom_func_like_t identity_func =
+      loom_func_like_cast(materialization.module, identity->defining_op);
+  ASSERT_TRUE(loom_func_like_isa(identity_func));
+  EXPECT_EQ(loom_func_like_import_module(identity_func),
+            LOOM_STRING_ID_INVALID);
+  EXPECT_EQ(loom_func_like_import_symbol(identity_func),
+            LOOM_STRING_ID_INVALID);
+  const loom_string_id_t export_symbol =
+      loom_func_like_export_symbol(identity_func);
+  ASSERT_NE(export_symbol, LOOM_STRING_ID_INVALID);
+  EXPECT_TRUE(iree_string_view_equal(
+      materialization.module->strings.entries[export_symbol],
+      IREE_SV("request_identity")));
+
+  loom_link_index_materialization_deinitialize(&materialization);
+}
+
+TEST_F(LinkIndexMaterializerTest, UnresolvedRootPreservesImportSurface) {
+  loom_module_t* requester = Parse(IREE_SV(R"(
+func.decl public import("upstream", "identity") export("request_identity") @identity(%x: i32) -> (i32)
+)"),
+                                   IREE_SV("requester.loom"));
+
+  IndexPtr index = CreateIndex();
+  AddMaterialized(index.get(), requester, IREE_SV("requester"),
+                  LOOM_LINK_PROVIDER_ROLE_INPUT);
+
+  loom_link_index_materialization_t materialization = MaterializeWithPolicy(
+      index.get(), IREE_SV("@identity"), LOOM_LINK_PLAN_UNRESOLVED_ALLOW);
+  Verify(materialization.module);
+
+  const loom_symbol_t* identity =
+      FindSymbol(materialization.module, IREE_SV("identity"));
+  ASSERT_NE(identity, nullptr);
+  EXPECT_TRUE(iree_all_bits_set(
+      identity->flags, LOOM_SYMBOL_FLAG_PUBLIC | LOOM_SYMBOL_FLAG_RETAIN));
+  EXPECT_TRUE(loom_symbol_definition_is_declaration(identity->definition));
+  loom_func_like_t identity_func =
+      loom_func_like_cast(materialization.module, identity->defining_op);
+  ASSERT_TRUE(loom_func_like_isa(identity_func));
+  EXPECT_NE(loom_func_like_import_module(identity_func),
+            LOOM_STRING_ID_INVALID);
+  EXPECT_NE(loom_func_like_import_symbol(identity_func),
+            LOOM_STRING_ID_INVALID);
+
+  loom_link_index_materialization_deinitialize(&materialization);
+}
+
+TEST_F(LinkIndexMaterializerTest, ExplicitPrivateRootRemainsPrivate) {
+  loom_module_t* requester = Parse(IREE_SV(R"(
+func.def @entry(%x: i32) -> (i32) {
+  func.return %x : i32
+}
+)"),
+                                   IREE_SV("requester.loom"));
+
+  IndexPtr index = CreateIndex();
+  AddMaterialized(index.get(), requester, IREE_SV("requester"),
+                  LOOM_LINK_PROVIDER_ROLE_INPUT);
+
+  loom_link_index_materialization_t materialization =
+      Materialize(index.get(), IREE_SV("@entry"));
+  Verify(materialization.module);
+
+  const loom_symbol_t* entry =
+      FindSymbol(materialization.module, IREE_SV("entry"));
+  ASSERT_NE(entry, nullptr);
+  EXPECT_TRUE(iree_any_bit_set(entry->flags, LOOM_SYMBOL_FLAG_RETAIN));
+  EXPECT_FALSE(iree_any_bit_set(entry->flags, LOOM_SYMBOL_FLAG_PUBLIC));
+
+  loom_link_index_materialization_deinitialize(&materialization);
+}
+
+TEST_F(LinkIndexMaterializerTest, ArchivePreservesLibraryOutputSurface) {
+  loom_module_t* requester = Parse(IREE_SV(R"(
+func.def public export("request_entry") @entry(%x: i32) -> (i32) {
+  func.return %x : i32
+}
+)"),
+                                   IREE_SV("requester.loom"));
+  loom_module_t* library = Parse(IREE_SV(R"(
+func.def public export("library_helper") @helper(%x: i32) -> (i32) {
+  func.return %x : i32
+}
+)"),
+                                 IREE_SV("library.loom"));
+
+  IndexPtr index = CreateIndex();
+  AddMaterialized(index.get(), requester, IREE_SV("requester"),
+                  LOOM_LINK_PROVIDER_ROLE_INPUT);
+  AddMaterialized(index.get(), library, IREE_SV("library"),
+                  LOOM_LINK_PROVIDER_ROLE_LIBRARY);
+
+  loom_link_index_materialization_t materialization = {};
+  IREE_ASSERT_OK(
+      TryMaterialize(index.get(), IREE_SV("@entry"), LOOM_LINK_PLAN_ARCHIVE,
+                     LOOM_LINK_PLAN_UNRESOLVED_ERROR, &materialization));
+  Verify(materialization.module);
+
+  const loom_symbol_t* helper =
+      FindSymbol(materialization.module, IREE_SV("helper"));
+  ASSERT_NE(helper, nullptr);
+  EXPECT_TRUE(iree_any_bit_set(helper->flags, LOOM_SYMBOL_FLAG_PUBLIC));
+  loom_func_like_t helper_func =
+      loom_func_like_cast(materialization.module, helper->defining_op);
+  ASSERT_TRUE(loom_func_like_isa(helper_func));
+  const loom_string_id_t export_symbol =
+      loom_func_like_export_symbol(helper_func);
+  ASSERT_NE(export_symbol, LOOM_STRING_ID_INVALID);
+  EXPECT_TRUE(iree_string_view_equal(
+      materialization.module->strings.entries[export_symbol],
+      IREE_SV("library_helper")));
+
+  loom_link_index_materialization_deinitialize(&materialization);
+}
+
+TEST_F(LinkIndexMaterializerTest,
+       SelectiveLinkInternalizesGenericSymbolDependencies) {
+  loom_module_t* requester = Parse(IREE_SV(R"(
+check.case public @case {
+  check.return
+}
+
+check.benchmark<@case> @benchmark
+)"),
+                                   IREE_SV("requester.loom"));
+
+  IndexPtr index = CreateIndex();
+  AddMaterialized(index.get(), requester, IREE_SV("requester"),
+                  LOOM_LINK_PROVIDER_ROLE_INPUT);
+
+  loom_link_index_materialization_t materialization =
+      Materialize(index.get(), IREE_SV("@benchmark"));
+  Verify(materialization.module);
+
+  const loom_symbol_t* check_case =
+      FindSymbol(materialization.module, IREE_SV("case"));
+  ASSERT_NE(check_case, nullptr);
+  EXPECT_FALSE(iree_any_bit_set(check_case->flags, LOOM_SYMBOL_FLAG_PUBLIC));
+
   loom_link_index_materialization_deinitialize(&materialization);
 }
 

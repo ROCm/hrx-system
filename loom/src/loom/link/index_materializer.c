@@ -180,7 +180,7 @@ static iree_status_t loom_link_index_materialize_selective(
     const loom_link_module_index_t* index,
     const loom_link_plan_options_t* plan_options,
     const loom_link_plan_materialization_environment_t* environment,
-    iree_string_view_t module_name, iree_string_view_list_t output_roots,
+    iree_string_view_t module_name,
     loom_link_index_materialization_t* out_materialization) {
   const iree_host_size_t symbol_count =
       loom_link_module_index_symbol_count(index);
@@ -207,9 +207,8 @@ static iree_status_t loom_link_index_materialize_selective(
     iree_arena_allocator_t iteration_arena;
     iree_arena_initialize(environment->block_pool, &iteration_arena);
     loom_link_plan_materialization_t analysis = {0};
-    status =
-        loom_link_plan_materialize(plan, environment, module_name, output_roots,
-                                   &iteration_arena, &analysis);
+    status = loom_link_plan_materialize(plan, environment, module_name,
+                                        &iteration_arena, &analysis);
     loom_template_selection_query_result_t query = {0};
     if (iree_status_is_ok(status)) {
       status = loom_link_index_query_candidates(
@@ -237,7 +236,7 @@ static iree_status_t loom_link_index_materialize_selective(
     iree_arena_initialize(environment->block_pool, &final_arena);
     loom_link_plan_materialization_t final = {0};
     status = loom_link_plan_materialize(stable_plan, environment, module_name,
-                                        output_roots, &final_arena, &final);
+                                        &final_arena, &final);
     if (iree_status_is_ok(status)) {
       out_materialization->plan = stable_plan;
       out_materialization->module = final.module;
@@ -258,7 +257,7 @@ static iree_status_t loom_link_index_materialize_archive(
     const loom_link_module_index_t* index,
     const loom_link_plan_options_t* plan_options,
     const loom_link_plan_materialization_environment_t* environment,
-    iree_string_view_t module_name, iree_string_view_list_t output_roots,
+    iree_string_view_t module_name,
     loom_link_index_materialization_t* out_materialization) {
   loom_link_plan_t* plan = NULL;
   IREE_RETURN_IF_ERROR(
@@ -267,7 +266,7 @@ static iree_status_t loom_link_index_materialize_archive(
   iree_arena_initialize(environment->block_pool, &arena);
   loom_link_plan_materialization_t result = {0};
   iree_status_t status = loom_link_plan_materialize(
-      plan, environment, module_name, output_roots, &arena, &result);
+      plan, environment, module_name, &arena, &result);
   if (iree_status_is_ok(status)) {
     out_materialization->plan = plan;
     out_materialization->module = result.module;
@@ -294,7 +293,7 @@ iree_status_t loom_link_index_materialize(
     const loom_link_module_index_t* index,
     const loom_link_plan_options_t* plan_options,
     const loom_link_plan_materialization_environment_t* environment,
-    iree_string_view_t module_name, iree_string_view_list_t output_roots,
+    iree_string_view_t module_name,
     loom_link_index_materialization_t* out_materialization) {
   IREE_ASSERT_ARGUMENT(index);
   IREE_ASSERT_ARGUMENT(plan_options);
@@ -311,12 +310,10 @@ iree_status_t loom_link_index_materialize(
   switch (plan_options->mode) {
     case LOOM_LINK_PLAN_ARCHIVE:
       return loom_link_index_materialize_archive(
-          index, plan_options, environment, module_name, output_roots,
-          out_materialization);
+          index, plan_options, environment, module_name, out_materialization);
     case LOOM_LINK_PLAN_SELECTIVE:
       return loom_link_index_materialize_selective(
-          index, plan_options, environment, module_name, output_roots,
-          out_materialization);
+          index, plan_options, environment, module_name, out_materialization);
   }
   IREE_ASSERT_UNREACHABLE("unknown link plan mode");
   IREE_BUILTIN_UNREACHABLE();

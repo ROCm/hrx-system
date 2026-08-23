@@ -872,6 +872,13 @@ static inline bool loom_symbol_definition_is_test_only(
                                         LOOM_SYMBOL_DEFINITION_FLAG_TEST_ONLY);
 }
 
+static inline uint8_t loom_symbol_definition_visibility_attr_index(
+    const loom_symbol_definition_descriptor_t* descriptor) {
+  return descriptor && descriptor->visibility_attr_index_plus_one
+             ? descriptor->visibility_attr_index_plus_one - 1
+             : LOOM_ATTR_INDEX_NONE;
+}
+
 static inline bool loom_symbol_definition_has_value_contract(
     const loom_symbol_definition_descriptor_t* descriptor) {
   return descriptor && descriptor->value_contract_result_index_plus_one != 0;
