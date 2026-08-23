@@ -118,14 +118,14 @@ void iree_async_proactor_iocp_submit_continuation_chain(
 // Returns the number of directly-invoked callbacks (for completion counting).
 iree_host_size_t iree_async_proactor_iocp_dispatch_linked_continuation(
     iree_async_proactor_iocp_t* proactor, iree_async_operation_t* operation,
-    iree_status_t trigger_status) {
+    iree_status_code_t trigger_status_code) {
   iree_async_operation_t* continuation = operation->linked_next;
   if (!continuation) return 0;
 
   // Detach the chain before potentially recursive submit.
   operation->linked_next = NULL;
 
-  if (iree_status_is_ok(trigger_status)) {
+  if (trigger_status_code == IREE_STATUS_OK) {
     iree_async_proactor_iocp_submit_continuation_chain(proactor, continuation);
     return 0;  // Submitted ops produce completions counted by the drain loop.
   } else {
@@ -202,13 +202,14 @@ static void iree_async_proactor_iocp_post_submit_failure(
                              (DWORD)error_code, (ULONG_PTR)operation, NULL);
 }
 
-// Posts a direct completion with a pre-computed iree_status_t. The status is
-// stashed in operation->next (available as scratch for non-carrier operations)
-// and retrieved by the poll thread via the sentinel in bytes_transferred.
+// Posts a direct completion with a pre-computed iree_status_t. Takes ownership
+// of the status and stashes it in operation->next (available as scratch for
+// non-carrier operations) until the poll thread retrieves it via the sentinel
+// in bytes_transferred.
 static void iree_async_proactor_iocp_post_stashed_status(
     iree_async_proactor_iocp_t* proactor, iree_async_operation_t* operation,
-    iree_status_t op_status) {
-  operation->next = (iree_async_operation_t*)(uintptr_t)op_status;
+    iree_status_t status) {
+  operation->next = (iree_async_operation_t*)(uintptr_t)status;
   PostQueuedCompletionStatus((HANDLE)proactor->completion_port,
                              IREE_ASYNC_IOCP_STASHED_STATUS_SENTINEL,
                              (ULONG_PTR)operation, NULL);
@@ -918,8 +919,8 @@ static iree_status_t iree_async_proactor_iocp_submit_message(
     // Fire-and-forget: no source completion callback. Dispatch linked
     // continuation directly with the send status.
     iree_async_proactor_iocp_dispatch_linked_continuation(
-        proactor, &message->base, send_status);
-    iree_status_ignore(send_status);
+        proactor, &message->base, iree_status_code(send_status));
+    iree_status_free(send_status);
     return iree_ok_status();
   }
 

@@ -260,7 +260,7 @@ static void iree_async_proactor_iocp_dispatch_completion(
   }
   if (!iree_any_bit_set(flags, IREE_ASYNC_COMPLETION_FLAG_MORE)) {
     *completed_count += iree_async_proactor_iocp_dispatch_linked_continuation(
-        proactor, operation, status);
+        proactor, operation, iree_status_code(status));
     iree_async_operation_release_resources(operation);
   }
   iree_async_proactor_complete_operation(operation, status, flags);

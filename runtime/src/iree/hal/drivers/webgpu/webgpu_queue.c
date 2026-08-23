@@ -507,7 +507,7 @@ static void iree_hal_webgpu_queue_op_release_resources(
 // semaphores (so downstream waiters see the error rather than hanging),
 // releases per-op resources, both semaphore lists, and frees the slab.
 static void iree_hal_webgpu_queue_state_submit_failed(
-    iree_hal_webgpu_queue_state_t* state, iree_status_t submit_status) {
+    iree_hal_webgpu_queue_state_t* state, const iree_status_t submit_status) {
   iree_hal_semaphore_list_fail(state->signal_semaphore_list,
                                iree_status_clone(submit_status));
   iree_hal_webgpu_queue_op_release_resources(state);

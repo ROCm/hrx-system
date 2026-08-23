@@ -424,7 +424,7 @@ void iree_async_proactor_iocp_submit_continuation_chain(
 // Returns the number of directly-invoked callbacks. (proactor_submit.c)
 iree_host_size_t iree_async_proactor_iocp_dispatch_linked_continuation(
     iree_async_proactor_iocp_t* proactor, iree_async_operation_t* operation,
-    iree_status_t trigger_status);
+    iree_status_code_t trigger_status_code);
 
 // Submit vtable implementation (in proactor_submit.c).
 iree_status_t iree_async_proactor_iocp_submit(
