@@ -24,7 +24,7 @@
 #include "workspace.h"
 
 enum {
-  LOOMC_LINK_KNOWN_FLAGS = LOOMC_LINK_FLAG_INCLUDE_EXPORTED_ROOTS |
+  LOOMC_LINK_KNOWN_FLAGS = LOOMC_LINK_FLAG_INCLUDE_INPUT_EXPORTS |
                            LOOMC_LINK_FLAG_ALLOW_UNRESOLVED_SYMBOLS |
                            LOOMC_LINK_FLAG_STRIP_TEST_SYMBOLS,
 };
@@ -219,7 +219,7 @@ static void loomc_link_materialization_context_initialize(
 static bool loomc_link_options_selective(const loomc_link_options_t* options) {
   return options->root_symbol_count != 0 ||
          loomc_link_any_flag_set(options->flags,
-                                 LOOMC_LINK_FLAG_INCLUDE_EXPORTED_ROOTS);
+                                 LOOMC_LINK_FLAG_INCLUDE_INPUT_EXPORTS);
 }
 
 static iree_string_view_t loomc_link_module_name(
@@ -344,8 +344,8 @@ loomc_status_t loomc_link_module(loomc_linker_t* linker,
               .count = options->root_symbol_count,
               .values = root_symbols,
           },
-      .include_exported_roots = loomc_link_any_flag_set(
-          options->flags, LOOMC_LINK_FLAG_INCLUDE_EXPORTED_ROOTS),
+      .include_input_exports = loomc_link_any_flag_set(
+          options->flags, LOOMC_LINK_FLAG_INCLUDE_INPUT_EXPORTS),
       .unresolved_policy =
           loomc_link_any_flag_set(options->flags,
                                   LOOMC_LINK_FLAG_ALLOW_UNRESOLVED_SYMBOLS)

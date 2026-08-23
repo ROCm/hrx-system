@@ -835,7 +835,7 @@ static void BM_Project_RetainedProviderImports(benchmark::State& state) {
   const loom_link_plan_options_t options = {
       /*.mode=*/LOOM_LINK_PLAN_SELECTIVE,
       /*.root_symbols=*/{/*.count=*/1, /*.values=*/&root},
-      /*.include_exported_roots=*/false,
+      /*.include_input_exports=*/false,
       /*.unresolved_policy=*/LOOM_LINK_PLAN_UNRESOLVED_ALLOW,
   };
   loom_link_plan_t* plan = nullptr;
@@ -892,7 +892,7 @@ static void BM_Project_LinkerImports(benchmark::State& state) {
   const loom_link_plan_options_t options = {
       /*.mode=*/LOOM_LINK_PLAN_SELECTIVE,
       /*.root_symbols=*/{/*.count=*/1, /*.values=*/&root},
-      /*.include_exported_roots=*/false,
+      /*.include_input_exports=*/false,
       /*.unresolved_policy=*/LOOM_LINK_PLAN_UNRESOLVED_ALLOW,
   };
   loom_link_plan_t* plan = nullptr;

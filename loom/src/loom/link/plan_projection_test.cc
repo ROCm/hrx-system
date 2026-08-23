@@ -303,7 +303,7 @@ func.def @resolved(%x: i32) -> (i32) {
   loom_link_plan_options_t options = {
       /*.mode=*/LOOM_LINK_PLAN_SELECTIVE,
       /*.root_symbols=*/{/*.count=*/IREE_ARRAYSIZE(roots), /*.values=*/roots},
-      /*.include_exported_roots=*/false,
+      /*.include_input_exports=*/false,
       /*.unresolved_policy=*/LOOM_LINK_PLAN_UNRESOLVED_ALLOW,
   };
   options.provider_resolver = &resolver;
@@ -431,7 +431,7 @@ func.def public @entry(%x: i32) -> (i32) {
   const loom_link_plan_options_t options = {
       /*.mode=*/LOOM_LINK_PLAN_SELECTIVE,
       /*.root_symbols=*/{/*.count=*/IREE_ARRAYSIZE(roots), /*.values=*/roots},
-      /*.include_exported_roots=*/false,
+      /*.include_input_exports=*/false,
       /*.unresolved_policy=*/LOOM_LINK_PLAN_UNRESOLVED_ALLOW,
   };
   LinkPlanPtr plan = BuildPlan(index.get(), &options);

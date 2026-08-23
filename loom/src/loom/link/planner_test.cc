@@ -994,7 +994,7 @@ func.def @helper(%x: i32) -> (i32) {
   loom_link_plan_options_t options = {
       /*.mode=*/LOOM_LINK_PLAN_SELECTIVE,
       /*.root_symbols=*/{},
-      /*.include_exported_roots=*/true,
+      /*.include_input_exports=*/true,
   };
   PlanPtr plan = BuildPlan(index.get(), &options);
 
@@ -1344,7 +1344,7 @@ func.def public @same(%x: i32) -> (i32) {
       BuildPlanStatus(index.get(), /*options=*/nullptr, &plan));
 }
 
-TEST_F(LinkPlannerTest, ExportedRootsRejectDuplicateDefinitionsBehindDecl) {
+TEST_F(LinkPlannerTest, InputExportsDoNotRootLibraryAlternatives) {
   loom_module_t* harness = Parse(IREE_SV(R"(
 func.decl public @same(%x: i32) -> (i32)
 )"));
@@ -1369,12 +1369,27 @@ func.def public @same(%x: i32) -> (i32) {
   loom_link_plan_options_t options = {
       /*.mode=*/LOOM_LINK_PLAN_SELECTIVE,
       /*.root_symbols=*/{},
-      /*.include_exported_roots=*/true,
+      /*.include_input_exports=*/true,
   };
 
-  PlanPtr plan;
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_ALREADY_EXISTS,
-                        BuildPlanStatus(index.get(), &options, &plan));
+  PlanPtr plan = BuildPlan(index.get(), &options);
+
+  const loom_link_module_index_symbol_t* declaration =
+      loom_link_module_index_lookup_global(index.get(), IREE_SV("same"));
+  const loom_link_module_index_symbol_t* first_definition =
+      loom_link_module_index_next_global_duplicate(index.get(), declaration);
+  const loom_link_module_index_symbol_t* second_definition =
+      loom_link_module_index_next_global_duplicate(index.get(),
+                                                   first_definition);
+  const loom_link_plan_symbol_t* planned_declaration =
+      FindPlannedSymbol(plan.get(), declaration);
+  const loom_link_plan_symbol_t* planned_definition =
+      FindPlannedSymbol(plan.get(), first_definition);
+  ASSERT_NE(planned_declaration, nullptr);
+  ASSERT_NE(planned_definition, nullptr);
+  EXPECT_EQ(planned_declaration->reason, LOOM_LINK_PLAN_LIVE_ROOT);
+  EXPECT_EQ(planned_definition->reason, LOOM_LINK_PLAN_LIVE_DEPENDENCY);
+  EXPECT_FALSE(ContainsSymbol(plan.get(), second_definition));
 }
 
 TEST_F(LinkPlannerTest, SelectiveReportsMissingRoot) {
@@ -1426,7 +1441,7 @@ func.def @helper(%x: i32) -> (i32) {
   loom_link_plan_options_t options = {
       /*.mode=*/LOOM_LINK_PLAN_SELECTIVE,
       /*.root_symbols=*/{/*.count=*/IREE_ARRAYSIZE(roots), /*.values=*/roots},
-      /*.include_exported_roots=*/{},
+      /*.include_input_exports=*/{},
       /*.unresolved_policy=*/{},
       /*.test_symbol_policy=*/{},
       /*.strip_symbol=*/StripNamedSymbol,
@@ -1487,7 +1502,7 @@ check.benchmark<@kernel_case> @kernel_bench
   loom_link_plan_options_t strip_options = {
       /*.mode=*/LOOM_LINK_PLAN_ARCHIVE,
       /*.root_symbols=*/{},
-      /*.include_exported_roots=*/{},
+      /*.include_input_exports=*/{},
       /*.unresolved_policy=*/{},
       /*.test_symbol_policy=*/LOOM_LINK_PLAN_TEST_SYMBOL_STRIP,
   };
@@ -1551,7 +1566,7 @@ check.case public @kernel_case {
   loom_link_plan_options_t options = {
       /*.mode=*/LOOM_LINK_PLAN_SELECTIVE,
       /*.root_symbols=*/{/*.count=*/IREE_ARRAYSIZE(roots), /*.values=*/roots},
-      /*.include_exported_roots=*/{},
+      /*.include_input_exports=*/{},
       /*.unresolved_policy=*/{},
       /*.test_symbol_policy=*/LOOM_LINK_PLAN_TEST_SYMBOL_STRIP,
   };
@@ -1583,7 +1598,7 @@ func.def public @second(%x: i32) -> (i32) {
   loom_link_plan_options_t options = {
       /*.mode=*/LOOM_LINK_PLAN_SELECTIVE,
       /*.root_symbols=*/{},
-      /*.include_exported_roots=*/true,
+      /*.include_input_exports=*/true,
   };
   PlanPtr plan = BuildPlan(index.get(), &options);
 

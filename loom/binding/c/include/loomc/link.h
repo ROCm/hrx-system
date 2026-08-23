@@ -98,8 +98,8 @@ typedef struct loomc_linker_options_t {
 
 /// Link operation flags.
 typedef enum loomc_link_flag_bits_e {
-  /// Select exported symbols as roots and compute their dependency closure.
-  LOOMC_LINK_FLAG_INCLUDE_EXPORTED_ROOTS = 1u << 0,
+  /// Select exported INPUT-provider symbols as roots and compute their closure.
+  LOOMC_LINK_FLAG_INCLUDE_INPUT_EXPORTS = 1u << 0,
 
   /// Preserve reachable unresolved references and `module.import` demands for
   /// a later link or specialization step.
@@ -116,7 +116,7 @@ typedef uint32_t loomc_link_flags_t;
 ///
 /// A link invocation consumes a frozen index and returns either a retained
 /// module or a failed result with diagnostics. Supplying roots or
-/// `LOOMC_LINK_FLAG_INCLUDE_EXPORTED_ROOTS` selects a dependency closure.
+/// `LOOMC_LINK_FLAG_INCLUDE_INPUT_EXPORTS` selects a dependency closure.
 /// Supplying neither performs archive-style linking and materializes all
 /// linkable symbols in stable index order. Linking preserves every target
 /// carried by the selected symbols. Config options materialize on the linked

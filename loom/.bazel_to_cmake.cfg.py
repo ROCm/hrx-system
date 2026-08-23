@@ -193,7 +193,7 @@ class LoomBuildFileFunctions(bazel_to_cmake_converter.BuildFileFunctions):
         mode="archive",
         output=None,
         output_format="text",
-        include_exported_roots=False,
+        include_input_exports=False,
         strip_check=False,
         require_resolved_config=False,
         tags=None,
@@ -219,8 +219,8 @@ class LoomBuildFileFunctions(bazel_to_cmake_converter.BuildFileFunctions):
         output_format_block = self._convert_string_arg_block(
             "OUTPUT_FORMAT", output_format
         )
-        include_exported_roots_block = self._convert_option_block(
-            "INCLUDE_EXPORTED_ROOTS", include_exported_roots
+        include_input_exports_block = self._convert_option_block(
+            "INCLUDE_INPUT_EXPORTS", include_input_exports
         )
         strip_check_block = self._convert_option_block("STRIP_CHECK", strip_check)
         require_resolved_config_block = self._convert_option_block(
@@ -237,7 +237,7 @@ class LoomBuildFileFunctions(bazel_to_cmake_converter.BuildFileFunctions):
             f"{mode_block}"
             f"{output_block}"
             f"{output_format_block}"
-            f"{include_exported_roots_block}"
+            f"{include_input_exports_block}"
             f"{strip_check_block}"
             f"{require_resolved_config_block}"
             f")\n\n"
