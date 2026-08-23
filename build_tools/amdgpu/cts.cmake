@@ -108,6 +108,7 @@ function(iree_amdgpu_hal_cts_testdata)
   endif()
 
   set(_TARGET_LIBS)
+  set(_TARGET_ORDINAL 0)
   foreach(_CODE_OBJECT_TARGET ${_CODE_OBJECT_TARGETS})
     iree_amdgpu_target_label_fragment(
       _TARGET_FRAGMENT
@@ -169,7 +170,11 @@ function(iree_amdgpu_hal_cts_testdata)
     set(_REGISTRATION_TARGET_NAME
       "${_RULE_TARGET_NAME}_${_TARGET_FRAGMENT}"
     )
-    set(_REGISTRATION "${_RULE_NAME}_${_TARGET_FRAGMENT}_registration.cc")
+    # The object directory already contains the full target fragment. Use the
+    # expansion ordinal to keep the private source basename unique without
+    # repeating that fragment in Windows object paths.
+    set(_REGISTRATION "${_RULE_NAME}_reg${_TARGET_ORDINAL}.cc")
+    math(EXPR _TARGET_ORDINAL "${_TARGET_ORDINAL} + 1")
     set(_REGISTRATION_TEMPLATE
       "${IREE_SOURCE_DIR}/runtime/src/iree/hal/cts/util/testdata_target.cc.tpl"
     )
