@@ -1300,7 +1300,7 @@ func.def @second() {
   loom_block_unlink_op(source, second_op);
   IREE_ASSERT_OK(
       loom_block_insert_before_op(source, source_block, first_op, second_op));
-  loom_module_record_op_effects(source, second_op);
+  loom_module_record_op_summaries(source, second_op);
 
   loom_linker_t* dense_linker = CreateIncrementalLinker();
   IREE_ASSERT_OK(loom_linker_add_exact_module(

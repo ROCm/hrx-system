@@ -130,6 +130,7 @@ TRAIT_MAP: dict[str, str] = {
     "Involution": "LOOM_TRAIT_INVOLUTION",
     "Terminator": "LOOM_TRAIT_TERMINATOR",
     "ConstantLike": "LOOM_TRAIT_CONSTANT_LIKE",
+    "Poison": "LOOM_TRAIT_POISON",
     "Elementwise": "LOOM_TRAIT_ELEMENTWISE",
     "Decomposable": "LOOM_TRAIT_DECOMPOSABLE",
     "SymbolDefine": "LOOM_TRAIT_SYMBOL_DEFINE",

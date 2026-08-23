@@ -13,14 +13,7 @@
 #include "loom/ops/vector/ops.h"
 
 bool loom_op_is_poison(const loom_op_t* op) {
-  if (!op) return false;
-  switch (op->kind) {
-    case LOOM_OP_SCALAR_POISON:
-    case LOOM_OP_VECTOR_POISON:
-      return true;
-    default:
-      return false;
-  }
+  return op && loom_traits_are_poison(op->traits);
 }
 
 bool loom_value_is_poison(const loom_module_t* module,

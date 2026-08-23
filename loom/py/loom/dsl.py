@@ -134,6 +134,7 @@ __all__ = [
     "INVOLUTION",
     "TERMINATOR",
     "CONSTANT_LIKE",
+    "POISON",
     "ELEMENTWISE",
     "DECOMPOSABLE",
     "SYMBOL_DEFINE",
@@ -1146,6 +1147,7 @@ IDEMPOTENT = Trait("Idempotent")
 INVOLUTION = Trait("Involution")
 TERMINATOR = Trait("Terminator")
 CONSTANT_LIKE = Trait("ConstantLike")
+POISON = Trait("Poison")
 ELEMENTWISE = Trait("Elementwise")
 DECOMPOSABLE = Trait("Decomposable")
 SYMBOL_DEFINE = Trait("SymbolDefine")
@@ -4849,6 +4851,16 @@ def _validate_trait_field_contracts(
         if operands or regions or len(results) != 1 or results[0].variadic:
             raise ValueError(
                 f"Op '{op_name}': CONSTANT_LIKE requires no operands or regions "
+                "and exactly one result"
+            )
+    if "Poison" in trait_names:
+        if "Pure" not in trait_names:
+            raise ValueError(f"Op '{op_name}': POISON requires PURE semantics")
+        if "ConstantLike" in trait_names:
+            raise ValueError(f"Op '{op_name}': POISON cannot also be CONSTANT_LIKE")
+        if operands or regions or len(results) != 1 or results[0].variadic:
+            raise ValueError(
+                f"Op '{op_name}': POISON requires no operands or regions "
                 "and exactly one result"
             )
     if (
