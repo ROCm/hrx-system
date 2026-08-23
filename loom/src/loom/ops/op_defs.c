@@ -523,7 +523,8 @@ void loom_call_like_set_callee(loom_module_t* module, loom_call_like_t call,
   loom_op_attrs(call.op)[call.vtable->callee_attr_index] =
       loom_attr_symbol(callee);
   loom_op_refresh_effective_traits(module, call.op);
-  loom_module_update_op_direct_effects(call.op, old_traits, call.op->traits);
+  loom_module_update_op_direct_summaries(module, call.op, old_traits,
+                                         call.op->traits);
 }
 
 loom_value_slice_t loom_call_like_operands(loom_call_like_t call) {
@@ -762,7 +763,8 @@ void loom_func_like_set_target(loom_module_t* module, loom_func_like_t func,
   loom_op_attrs(func.op)[func.vtable->target_attr_index] =
       loom_attr_symbol(target);
   loom_op_refresh_effective_traits(module, func.op);
-  loom_module_update_op_direct_effects(func.op, old_traits, func.op->traits);
+  loom_module_update_op_direct_summaries(module, func.op, old_traits,
+                                         func.op->traits);
 }
 
 loom_string_id_t loom_func_like_repr_contract(loom_func_like_t func) {
@@ -2892,7 +2894,7 @@ iree_status_t loom_builder_finalize_op(loom_builder_t* builder, loom_op_t* op) {
   if (vtable && iree_any_bit_set(vtable->traits, LOOM_TRAIT_SYMBOL_DEFINE)) {
     loom_module_link_symbol_defining_op(builder->module, op, vtable);
   }
-  loom_module_record_op_effects(builder->module, op);
+  loom_module_record_op_summaries(builder->module, op);
   // Notify the rewriter (or other listener) that the op's direct fields are
   // fully wired. Callers may populate nested regions after their parent
   // builder returns.
@@ -2981,7 +2983,7 @@ static iree_status_t loom_op_replace_attr_value_refs(loom_module_t* module,
     IREE_RETURN_IF_ERROR(
         loom_module_note_attribute_value_refs(module, replacement));
     loom_op_refresh_effective_traits(module, op);
-    loom_module_update_op_direct_effects(op, old_traits, op->traits);
+    loom_module_update_op_direct_summaries(module, op, old_traits, op->traits);
   }
   return iree_ok_status();
 }
@@ -3171,8 +3173,8 @@ iree_status_t loom_value_replace_uses_if(loom_module_t* module,
   return iree_ok_status();
 }
 
-// Clears cached effect summaries before rebuilding use/def state.
-static void loom_region_reset_effect_summaries(loom_region_t* region) {
+// Clears cached semantic summaries before rebuilding use/def state.
+static void loom_region_reset_summaries(loom_region_t* region) {
   if (!region) return;
   region->read_effect_count = 0;
   region->write_effect_count = 0;
@@ -3182,17 +3184,18 @@ static void loom_region_reset_effect_summaries(loom_region_t* region) {
     block->parent_region = region;
     loom_op_t* op = NULL;
     loom_block_for_each_op(block, op) {
-      op->flags &= ~LOOM_OP_FLAG_EFFECTS_COUNTED;
+      op->flags &= ~LOOM_OP_FLAG_SUMMARIES_COUNTED;
       loom_region_t** regions = loom_op_regions(op);
       for (uint8_t i = 0; i < op->region_count; ++i) {
-        loom_region_reset_effect_summaries(regions[i]);
+        loom_region_reset_summaries(regions[i]);
       }
     }
   }
 }
 
 // Walks all blocks in a region recursively, adding uses, setting def pointers,
-// setting parent pointers, and recording direct effect summaries for each op.
+// setting parent pointers, and recording direct semantic summaries for each
+// op.
 static iree_status_t loom_region_compute_uses(loom_module_t* module,
                                               loom_region_t* region,
                                               loom_op_t* parent_op) {
@@ -3213,7 +3216,7 @@ static iree_status_t loom_region_compute_uses(loom_module_t* module,
       // Set parent pointers.
       op->parent_op = parent_op;
       op->parent_block = block;
-      loom_module_record_op_effects(module, op);
+      loom_module_record_op_summaries(module, op);
       IREE_RETURN_IF_ERROR(
           loom_module_note_op_attribute_value_refs(module, op));
       // Register operand uses.
@@ -3251,7 +3254,8 @@ static iree_status_t loom_region_compute_uses(loom_module_t* module,
 }
 
 iree_status_t loom_module_compute_uses(loom_module_t* module) {
-  loom_region_reset_effect_summaries(module->body);
+  loom_region_reset_summaries(module->body);
+  module->poison_op_count = 0;
   // Clear all use and def data on every value.
   for (iree_host_size_t i = 0; i < module->values.count; ++i) {
     loom_value_t* value = loom_module_value(module, (loom_value_id_t)i);

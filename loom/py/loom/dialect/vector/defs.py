@@ -64,6 +64,7 @@ from loom.dsl import (
     INDEX,
     INTEGER_ELEMENT,
     INVOLUTION,
+    POISON,
     PURE,
     REFINABLE_RESULT_TYPE_REFS,
     SAFE_TO_SPECULATE,
@@ -490,7 +491,7 @@ vector_poison = Op(
     ),
     results=[Result("result", VECTOR)],
     verify="loom_vector_poison_verify",
-    traits=[PURE, REFINABLE_RESULT_TYPE_REFS],
+    traits=[PURE, POISON, REFINABLE_RESULT_TYPE_REFS],
     format=[COLON, ResultType("result")],
     examples=[
         "%p = vector.poison : vector<4xf32>",

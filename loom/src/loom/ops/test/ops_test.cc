@@ -420,7 +420,7 @@ TEST_F(BuilderTest, NestedWriteEffectSummaryPropagatesToAncestors) {
   IREE_ASSERT_OK(loom_op_erase(module_, map_op));
   EXPECT_EQ(map_body->write_effect_count, 0u);
   EXPECT_EQ(module_->body->write_effect_count, 0u);
-  EXPECT_EQ(write_op->flags & LOOM_OP_FLAG_EFFECTS_COUNTED, 0u);
+  EXPECT_EQ(write_op->flags & LOOM_OP_FLAG_SUMMARIES_COUNTED, 0u);
 }
 
 TEST_F(BuilderTest, VariadicOperands) {

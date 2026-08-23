@@ -710,23 +710,22 @@ iree_status_t loom_block_insert_before_op(loom_module_t* module,
 iree_status_t loom_block_insert_op(loom_module_t* module, loom_block_t* block,
                                    iree_host_size_t index, loom_op_t* op);
 
-// Records |op|'s direct effects in the transitive summaries on its containing
-// region and ancestor regions. The op must be fully constructed: operands,
-// results, attributes, and instance flags must already carry their final
-// initial values.
-void loom_module_record_op_effects(loom_module_t* module, loom_op_t* op);
+// Records |op|'s direct semantic summaries on its containing and ancestor
+// regions. The op must be fully constructed: operands, results, attributes,
+// and instance flags must already carry their final initial values.
+void loom_module_record_op_summaries(loom_module_t* module, loom_op_t* op);
 
-// Removes |op|'s previously recorded direct effects and all nested op effects
-// from the transitive summaries on their containing regions and ancestor
-// regions.
-void loom_module_drop_op_effects(loom_module_t* module, loom_op_t* op);
+// Removes |op|'s previously recorded direct summaries and all nested op
+// summaries from their region inventories.
+void loom_module_drop_op_summaries(loom_module_t* module, loom_op_t* op);
 
-// Updates transitive summaries after an already-counted op changes the direct
+// Updates maintained summaries after an already-counted op changes the direct
 // effective traits reported by its attributes or instance flags. Child region
 // summaries are unchanged by this helper.
-void loom_module_update_op_direct_effects(loom_op_t* op,
-                                          loom_trait_flags_t old_traits,
-                                          loom_trait_flags_t new_traits);
+void loom_module_update_op_direct_summaries(loom_module_t* module,
+                                            loom_op_t* op,
+                                            loom_trait_flags_t old_traits,
+                                            loom_trait_flags_t new_traits);
 
 // Unlinks a live op from its parent block while preserving the op object for
 // arena lifetime and diagnostics. The op's parent_block remains set so dead-op

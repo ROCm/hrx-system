@@ -18,6 +18,7 @@ from loom.dsl import (
     DISTRIBUTION_TRANSFER,
     FLOAT,
     INTEGER,
+    POISON,
     PURE,
     SCALAR,
     AttrDef,
@@ -216,7 +217,7 @@ scalar_poison = Op(
         "store, return, kernel boundary, or target-lowering boundary."
     ),
     results=[Result("result", SCALAR)],
-    traits=[PURE],
+    traits=[PURE, POISON],
     format=[COLON, ResultType("result")],
     examples=["%p = scalar.poison : f32"],
 )

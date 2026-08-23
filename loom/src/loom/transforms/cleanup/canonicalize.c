@@ -194,6 +194,7 @@ static bool loom_canonicalize_can_replace_results_with_poison(
 static iree_status_t loom_canonicalize_try_propagate_poison(
     loom_rewriter_t* rewriter, loom_op_t* op, bool* out_propagated) {
   *out_propagated = false;
+  if (!loom_module_has_poison(rewriter->module)) return iree_ok_status();
   loom_trait_flags_t traits = loom_op_effective_traits(rewriter->module, op);
   if (!iree_any_bit_set(traits, LOOM_TRAIT_PURE)) return iree_ok_status();
   if (loom_traits_are_convergent(traits)) return iree_ok_status();

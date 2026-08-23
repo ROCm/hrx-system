@@ -686,9 +686,9 @@ static bool loom_rewriter_op_is_ancestor_of(const loom_op_t* ancestor,
   return false;
 }
 
-static void loom_rewriter_record_subtree_effects(loom_module_t* module,
-                                                 loom_op_t* op) {
-  loom_module_record_op_effects(module, op);
+static void loom_rewriter_record_subtree_summaries(loom_module_t* module,
+                                                   loom_op_t* op) {
+  loom_module_record_op_summaries(module, op);
   loom_region_t** regions = loom_op_regions(op);
   for (uint8_t region_index = 0; region_index < op->region_count;
        ++region_index) {
@@ -698,7 +698,7 @@ static void loom_rewriter_record_subtree_effects(loom_module_t* module,
     loom_region_for_each_block(region, block) {
       loom_op_t* child_op = NULL;
       loom_block_for_each_op(block, child_op) {
-        loom_rewriter_record_subtree_effects(module, child_op);
+        loom_rewriter_record_subtree_summaries(module, child_op);
       }
     }
   }
@@ -740,11 +740,11 @@ iree_status_t loom_rewriter_move_before(loom_rewriter_t* rewriter,
     iree_status_t restore_status = loom_block_insert_before_op(
         module, original_block, original_next_op, op);
     if (iree_status_is_ok(restore_status)) {
-      loom_rewriter_record_subtree_effects(module, op);
+      loom_rewriter_record_subtree_summaries(module, op);
     }
     return iree_status_join(status, restore_status);
   }
-  loom_rewriter_record_subtree_effects(module, op);
+  loom_rewriter_record_subtree_summaries(module, op);
 
   IREE_RETURN_IF_ERROR(loom_rewriter_add_to_worklist(rewriter, op));
   IREE_RETURN_IF_ERROR(
@@ -860,7 +860,8 @@ iree_status_t loom_rewriter_set_attr(loom_rewriter_t* rewriter, loom_op_t* op,
   IREE_RETURN_IF_ERROR(
       loom_module_note_op_attribute_value_refs(rewriter->module, op));
   loom_op_refresh_effective_traits(rewriter->module, op);
-  loom_module_update_op_direct_effects(op, old_traits, op->traits);
+  loom_module_update_op_direct_summaries(rewriter->module, op, old_traits,
+                                         op->traits);
   IREE_RETURN_IF_ERROR(
       loom_rewriter_recompute_op_facts(rewriter, op, /*flags=*/0));
   IREE_RETURN_IF_ERROR(
@@ -904,7 +905,8 @@ iree_status_t loom_rewriter_set_instance_flags(loom_rewriter_t* rewriter,
   loom_trait_flags_t old_traits = op->traits;
   op->instance_flags = flags;
   loom_op_refresh_effective_traits(rewriter->module, op);
-  loom_module_update_op_direct_effects(op, old_traits, op->traits);
+  loom_module_update_op_direct_summaries(rewriter->module, op, old_traits,
+                                         op->traits);
   IREE_RETURN_IF_ERROR(
       loom_rewriter_recompute_op_facts(rewriter, op, /*flags=*/0));
   IREE_RETURN_IF_ERROR(

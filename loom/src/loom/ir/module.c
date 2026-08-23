@@ -402,10 +402,10 @@ static iree_status_t loom_module_initialize_block(loom_module_t* module,
 }
 
 //===----------------------------------------------------------------------===//
-// Region effect summaries
+// Region semantic summaries
 //===----------------------------------------------------------------------===//
 
-static void loom_region_adjust_effect_count(uint32_t* count, int32_t delta) {
+static void loom_region_adjust_summary_count(uint32_t* count, int32_t delta) {
   if (delta < 0) {
     uint32_t decrement = (uint32_t)(-delta);
     IREE_ASSERT(*count >= decrement);
@@ -415,24 +415,24 @@ static void loom_region_adjust_effect_count(uint32_t* count, int32_t delta) {
   }
 }
 
-static void loom_region_adjust_effect_counts(loom_region_t* region,
-                                             int32_t read_delta,
-                                             int32_t write_delta,
-                                             int32_t convergent_delta) {
+static void loom_region_adjust_summary_counts(loom_region_t* region,
+                                              int32_t read_delta,
+                                              int32_t write_delta,
+                                              int32_t convergent_delta) {
   if (read_delta == 0 && write_delta == 0 && convergent_delta == 0) return;
   if (read_delta != 0) {
-    loom_region_adjust_effect_count(&region->read_effect_count, read_delta);
+    loom_region_adjust_summary_count(&region->read_effect_count, read_delta);
   }
   if (write_delta != 0) {
-    loom_region_adjust_effect_count(&region->write_effect_count, write_delta);
+    loom_region_adjust_summary_count(&region->write_effect_count, write_delta);
   }
   if (convergent_delta != 0) {
-    loom_region_adjust_effect_count(&region->convergent_effect_count,
-                                    convergent_delta);
+    loom_region_adjust_summary_count(&region->convergent_effect_count,
+                                     convergent_delta);
   }
 }
 
-static void loom_module_adjust_op_ancestor_effect_counts(
+static void loom_module_adjust_op_ancestor_summary_counts(
     loom_op_t* op, int32_t read_delta, int32_t write_delta,
     int32_t convergent_delta) {
   if (read_delta == 0 && write_delta == 0 && convergent_delta == 0) return;
@@ -440,8 +440,8 @@ static void loom_module_adjust_op_ancestor_effect_counts(
       op->parent_block ? op->parent_block->parent_region : NULL;
   loom_op_t* parent_op = op->parent_op;
   while (region) {
-    loom_region_adjust_effect_counts(region, read_delta, write_delta,
-                                     convergent_delta);
+    loom_region_adjust_summary_counts(region, read_delta, write_delta,
+                                      convergent_delta);
     if (!parent_op) break;
     region =
         parent_op->parent_block ? parent_op->parent_block->parent_region : NULL;
@@ -449,30 +449,44 @@ static void loom_module_adjust_op_ancestor_effect_counts(
   }
 }
 
-static void loom_module_adjust_op_direct_effect_counts(
-    loom_op_t* op, loom_trait_flags_t traits, int32_t direction) {
+static void loom_module_adjust_poison_op_count(loom_module_t* module,
+                                               int32_t delta) {
+  if (delta < 0) {
+    IREE_ASSERT_GT(module->poison_op_count, 0u);
+    --module->poison_op_count;
+  } else if (delta > 0) {
+    ++module->poison_op_count;
+  }
+}
+
+static void loom_module_adjust_op_direct_summaries(loom_module_t* module,
+                                                   loom_op_t* op,
+                                                   loom_trait_flags_t traits,
+                                                   int32_t direction) {
   int32_t read_delta = loom_traits_may_read(traits) ? direction : 0;
   int32_t write_delta = loom_traits_may_write(traits) ? direction : 0;
   int32_t convergent_delta = loom_traits_are_convergent(traits) ? direction : 0;
-  loom_module_adjust_op_ancestor_effect_counts(op, read_delta, write_delta,
-                                               convergent_delta);
+  loom_module_adjust_op_ancestor_summary_counts(op, read_delta, write_delta,
+                                                convergent_delta);
+  if (loom_traits_are_poison(traits)) {
+    loom_module_adjust_poison_op_count(module, direction);
+  }
 }
 
-void loom_module_record_op_effects(loom_module_t* module, loom_op_t* op) {
-  (void)module;
-  if (!op || iree_any_bit_set(
-                 op->flags, LOOM_OP_FLAG_DEAD | LOOM_OP_FLAG_EFFECTS_COUNTED)) {
+void loom_module_record_op_summaries(loom_module_t* module, loom_op_t* op) {
+  if (!op || iree_any_bit_set(op->flags, LOOM_OP_FLAG_DEAD |
+                                             LOOM_OP_FLAG_SUMMARIES_COUNTED)) {
     return;
   }
-  loom_module_adjust_op_direct_effect_counts(op, op->traits, +1);
-  op->flags |= LOOM_OP_FLAG_EFFECTS_COUNTED;
+  loom_module_adjust_op_direct_summaries(module, op, op->traits, +1);
+  op->flags |= LOOM_OP_FLAG_SUMMARIES_COUNTED;
 }
 
-void loom_module_drop_op_effects(loom_module_t* module, loom_op_t* op) {
+void loom_module_drop_op_summaries(loom_module_t* module, loom_op_t* op) {
   if (!op) return;
-  if (iree_any_bit_set(op->flags, LOOM_OP_FLAG_EFFECTS_COUNTED)) {
-    loom_module_adjust_op_direct_effect_counts(op, op->traits, -1);
-    op->flags &= ~LOOM_OP_FLAG_EFFECTS_COUNTED;
+  if (iree_any_bit_set(op->flags, LOOM_OP_FLAG_SUMMARIES_COUNTED)) {
+    loom_module_adjust_op_direct_summaries(module, op, op->traits, -1);
+    op->flags &= ~LOOM_OP_FLAG_SUMMARIES_COUNTED;
   }
   loom_region_t** regions = loom_op_regions(op);
   for (uint8_t i = 0; i < op->region_count; ++i) {
@@ -482,16 +496,17 @@ void loom_module_drop_op_effects(loom_module_t* module, loom_op_t* op) {
     loom_region_for_each_block(region, block) {
       loom_op_t* child_op = NULL;
       loom_block_for_each_op(block, child_op) {
-        loom_module_drop_op_effects(module, child_op);
+        loom_module_drop_op_summaries(module, child_op);
       }
     }
   }
 }
 
-void loom_module_update_op_direct_effects(loom_op_t* op,
-                                          loom_trait_flags_t old_traits,
-                                          loom_trait_flags_t new_traits) {
-  if (!op || !iree_all_bits_set(op->flags, LOOM_OP_FLAG_EFFECTS_COUNTED)) {
+void loom_module_update_op_direct_summaries(loom_module_t* module,
+                                            loom_op_t* op,
+                                            loom_trait_flags_t old_traits,
+                                            loom_trait_flags_t new_traits) {
+  if (!op || !iree_all_bits_set(op->flags, LOOM_OP_FLAG_SUMMARIES_COUNTED)) {
     return;
   }
   int32_t old_read = loom_traits_may_read(old_traits) ? 1 : 0;
@@ -500,9 +515,12 @@ void loom_module_update_op_direct_effects(loom_op_t* op,
   int32_t new_read = loom_traits_may_read(new_traits) ? 1 : 0;
   int32_t new_write = loom_traits_may_write(new_traits) ? 1 : 0;
   int32_t new_convergent = loom_traits_are_convergent(new_traits) ? 1 : 0;
-  loom_module_adjust_op_ancestor_effect_counts(op, new_read - old_read,
-                                               new_write - old_write,
-                                               new_convergent - old_convergent);
+  loom_module_adjust_op_ancestor_summary_counts(
+      op, new_read - old_read, new_write - old_write,
+      new_convergent - old_convergent);
+  const int32_t poison_delta = (loom_traits_are_poison(new_traits) ? 1 : 0) -
+                               (loom_traits_are_poison(old_traits) ? 1 : 0);
+  loom_module_adjust_poison_op_count(module, poison_delta);
 }
 
 static iree_status_t loom_region_blocks_ensure_capacity(loom_module_t* module,
@@ -5577,7 +5595,7 @@ iree_status_t loom_block_insert_op(loom_module_t* module, loom_block_t* block,
 void loom_block_unlink_op(loom_module_t* module, loom_op_t* op) {
   loom_block_t* block = op->parent_block;
   if (!block || iree_any_bit_set(op->flags, LOOM_OP_FLAG_DEAD)) return;
-  loom_module_drop_op_effects(module, op);
+  loom_module_drop_op_summaries(module, op);
 
   if (op->prev_op) {
     op->prev_op->next_op = op->next_op;
