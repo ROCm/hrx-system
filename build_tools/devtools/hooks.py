@@ -19,7 +19,9 @@ from build_tools.devtools.environment import REPO_ROOT, ToolEnvironment
 
 def lefthook_cli_compatibility_probe(tool_env: ToolEnvironment) -> CommandStep:
     # Select a deliberately absent command so Lefthook parses the real
-    # invocation and repository config without executing presubmit work.
+    # invocation and repository config without executing presubmit work. The
+    # hook's mutation policy belongs to commands that actually run, not this
+    # read-only setup probe.
     return CommandStep(
         [
             tool_env.tool("lefthook"),
@@ -31,6 +33,7 @@ def lefthook_cli_compatibility_probe(tool_env: ToolEnvironment) -> CommandStep:
             "__iree_cli_compatibility_probe__",
             "--no-auto-install",
             "--no-tty",
+            "--no-fail-on-changes",
         ],
         cwd=REPO_ROOT,
         env=tool_env.path_env(),
