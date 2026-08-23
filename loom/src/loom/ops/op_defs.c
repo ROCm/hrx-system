@@ -758,6 +758,23 @@ void loom_func_like_set_target(loom_module_t* module, loom_func_like_t func,
                                          func.op->traits);
 }
 
+void loom_func_like_set_retained(loom_module_t* module, loom_func_like_t func,
+                                 bool retained) {
+  IREE_ASSERT_ARGUMENT(module);
+  IREE_ASSERT_ARGUMENT(func.op);
+  IREE_ASSERT_ARGUMENT(func.vtable);
+  const loom_op_vtable_t* op_vtable = loom_op_vtable(module, func.op);
+  IREE_ASSERT_ARGUMENT(op_vtable);
+  IREE_ASSERT_ARGUMENT(op_vtable->symbol_def);
+  IREE_ASSERT(op_vtable->symbol_def->retain_attr_index_plus_one);
+  const uint8_t retain_attr_index =
+      op_vtable->symbol_def->retain_attr_index_plus_one - 1;
+  IREE_ASSERT_LT(retain_attr_index, func.op->attribute_count);
+  loom_op_attrs(func.op)[retain_attr_index] =
+      retained ? loom_attr_enum(1) : loom_attr_absent();
+  loom_module_link_symbol_defining_op(module, func.op, op_vtable);
+}
+
 loom_string_id_t loom_func_like_repr_contract(loom_func_like_t func) {
   if (!func.vtable ||
       func.vtable->repr_contract_attr_index == LOOM_ATTR_INDEX_NONE) {

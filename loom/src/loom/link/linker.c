@@ -1794,15 +1794,7 @@ static void loom_linker_retain_function_root(loom_linker_t* linker,
   loom_op_t* op = symbol->defining_op;
   loom_func_like_t function = loom_func_like_cast(linker->target_module, op);
   if (!loom_func_like_isa(function)) return;
-
-  const loom_op_vtable_t* vtable = loom_op_vtable(linker->target_module, op);
-  IREE_ASSERT(vtable->symbol_def);
-  IREE_ASSERT(vtable->symbol_def->retain_attr_index_plus_one);
-  const uint8_t retain_attr_index =
-      vtable->symbol_def->retain_attr_index_plus_one - 1;
-  IREE_ASSERT_LT(retain_attr_index, op->attribute_count);
-  loom_op_attrs(op)[retain_attr_index] = loom_attr_enum(1);
-  loom_module_link_symbol_defining_op(linker->target_module, op, vtable);
+  loom_func_like_set_retained(linker->target_module, function, true);
 }
 
 iree_status_t loom_linker_add_module(loom_linker_t* linker,

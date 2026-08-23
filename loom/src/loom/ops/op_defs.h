@@ -1295,6 +1295,13 @@ loom_symbol_ref_t loom_func_like_target(loom_func_like_t func);
 void loom_func_like_set_target(loom_module_t* module, loom_func_like_t func,
                                loom_symbol_ref_t target);
 
+// Sets whether |func| survives symbol pruning as a module-boundary root.
+//
+// The function must define a symbol with a retain attribute. This updates both
+// the operation contract and the module's maintained symbol flags.
+void loom_func_like_set_retained(loom_module_t* module, loom_func_like_t func,
+                                 bool retained);
+
 // Returns the authored representation-contract key for a func-like op, or
 // LOOM_STRING_ID_INVALID when none is present.
 loom_string_id_t loom_func_like_repr_contract(loom_func_like_t func);
