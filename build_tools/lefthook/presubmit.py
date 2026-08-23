@@ -14,6 +14,7 @@ presubmit entry points. Project-specific test policy stays in each project.
 from __future__ import annotations
 
 import argparse
+import collections
 import concurrent.futures
 import contextlib
 import io
@@ -144,6 +145,7 @@ WATCHWORD_PATTERNS = (
     re.compile("TODO before " + "submit", re.IGNORECASE),
 )
 FAILURE_OUTPUT_LINE_LIMIT = 240
+FAILURE_OUTPUT_TAIL_CHARACTER_LIMIT = 64 * 1024
 
 
 def git_worktree_dir() -> Path:
@@ -518,13 +520,53 @@ def run_command(command: list[str], description: str, verbose: bool) -> bool:
 class CommandBatchResult:
     command: list[str]
     returncode: int
-    output: str
+    output_tail: str
+    omitted_output_character_count: int
+
+
+class BoundedOutputTail:
+    def __init__(self, character_limit: int):
+        if character_limit <= 0:
+            raise ValueError("output tail character limit must be positive")
+        self.character_limit = character_limit
+        self.chunks: collections.deque[str] = collections.deque()
+        self.character_count = 0
+        self.omitted_character_count = 0
+
+    def append(self, chunk: str) -> None:
+        if not chunk:
+            return
+        if len(chunk) >= self.character_limit:
+            self.omitted_character_count += (
+                self.character_count + len(chunk) - self.character_limit
+            )
+            self.chunks.clear()
+            self.chunks.append(chunk[-self.character_limit :])
+            self.character_count = self.character_limit
+            return
+
+        self.chunks.append(chunk)
+        self.character_count += len(chunk)
+        while self.character_count > self.character_limit:
+            overflow = self.character_count - self.character_limit
+            first_chunk = self.chunks[0]
+            if len(first_chunk) <= overflow:
+                self.chunks.popleft()
+                self.character_count -= len(first_chunk)
+                self.omitted_character_count += len(first_chunk)
+            else:
+                self.chunks[0] = first_chunk[overflow:]
+                self.character_count -= overflow
+                self.omitted_character_count += overflow
+
+    def text(self) -> str:
+        return "".join(self.chunks)
 
 
 def run_command_batch(
     command: list[str], output_lock: threading.Lock | None = None
 ) -> CommandBatchResult:
-    output_lines = []
+    output_tail = BoundedOutputTail(FAILURE_OUTPUT_TAIL_CHARACTER_LIMIT)
     with subprocess.Popen(
         command,
         cwd=REPO_ROOT,
@@ -545,12 +587,13 @@ def run_command_batch(
                 with output_lock:
                     sys.stdout.write(line)
                     sys.stdout.flush()
-            output_lines.append(line)
+            output_tail.append(line)
         returncode = process.wait()
     return CommandBatchResult(
         command=command,
         returncode=returncode,
-        output="".join(output_lines),
+        output_tail=output_tail.text(),
+        omitted_output_character_count=output_tail.omitted_character_count,
     )
 
 
@@ -596,9 +639,16 @@ def run_parallel_commands(
     for result in failed_results:
         failure_output_parts.append("command:")
         failure_output_parts.append("  " + command_text(result.command))
-        if result.output:
+        if result.omitted_output_character_count or result.output_tail:
             failure_output_parts.append("output:")
-            failure_output_parts.append(result.output.rstrip())
+            if result.omitted_output_character_count:
+                failure_output_parts.append(
+                    "[... omitted "
+                    f"{result.omitted_output_character_count} earlier output "
+                    "characters; full output was streamed above ...]"
+                )
+            if result.output_tail:
+                failure_output_parts.append(result.output_tail.rstrip())
     print_step_failure(
         description,
         elapsed_seconds,
