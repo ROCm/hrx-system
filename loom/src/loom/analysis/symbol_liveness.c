@@ -111,18 +111,23 @@ static iree_status_t loom_symbol_liveness_mark_concrete_symbol_id(
 
 static iree_status_t loom_symbol_liveness_seed_roots(
     loom_symbol_liveness_state_t* state) {
-  if (!state->options.root_query) return iree_ok_status();
-  const loom_symbol_t* symbol = NULL;
-  loom_module_for_each_symbol(state->module, symbol) {
-    if (!symbol->defining_op) continue;
-    loom_symbol_id_t symbol_id =
-        (loom_symbol_id_t)(symbol - state->module->symbols.entries);
-    if (!state->options.root_query(state->options.root_query_user_data,
-                                   state->module, symbol_id, symbol)) {
-      continue;
+  for (iree_host_size_t i = 0; i < state->options.root_symbol_ids.count; ++i) {
+    IREE_RETURN_IF_ERROR(loom_symbol_liveness_mark_concrete_symbol_id(
+        state, state->options.root_symbol_ids.values[i]));
+  }
+  if (state->options.root_query) {
+    const loom_symbol_t* symbol = NULL;
+    loom_module_for_each_symbol(state->module, symbol) {
+      if (!symbol->defining_op) continue;
+      loom_symbol_id_t symbol_id =
+          (loom_symbol_id_t)(symbol - state->module->symbols.entries);
+      if (!state->options.root_query(state->options.root_query_user_data,
+                                     state->module, symbol_id, symbol)) {
+        continue;
+      }
+      IREE_RETURN_IF_ERROR(
+          loom_symbol_liveness_mark_concrete_symbol_id(state, symbol_id));
     }
-    IREE_RETURN_IF_ERROR(
-        loom_symbol_liveness_mark_concrete_symbol_id(state, symbol_id));
   }
   return iree_ok_status();
 }
