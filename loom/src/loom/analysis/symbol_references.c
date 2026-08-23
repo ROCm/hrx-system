@@ -576,9 +576,10 @@ static iree_status_t loom_symbol_reference_visit_region(
     loom_block_for_each_op(block, op) {
       const loom_op_vtable_t* vtable = loom_op_vtable(builder->module, op);
       loom_symbol_id_t nested_source_symbol_id = source_symbol_id;
-      loom_symbol_ref_t op_symbol_ref = loom_symbol_ref_null();
-      if (loom_op_defining_symbol_ref(builder->module, op, &op_symbol_ref)) {
-        nested_source_symbol_id = op_symbol_ref.symbol_id;
+      const loom_symbol_id_t op_symbol_id =
+          loom_op_defining_symbol_id(builder->module, op, vtable);
+      if (op_symbol_id != LOOM_SYMBOL_ID_INVALID) {
+        nested_source_symbol_id = op_symbol_id;
       }
       if (loom_template_apply_isa(op)) {
         IREE_RETURN_IF_ERROR(loom_symbol_reference_append_template_demand(

@@ -49,9 +49,11 @@ iree_status_t loom_target_function_version_snapshot_build(
     if (function_version == NULL) continue;
 
     const loom_func_like_t function = function_version->base.function;
-    loom_symbol_ref_t function_ref = loom_symbol_ref_null();
+    const loom_symbol_ref_t function_ref = loom_func_like_callee(function);
     if (!loom_func_like_isa(function) || function.vtable == NULL ||
-        !loom_op_defining_symbol_ref(module, function.op, &function_ref)) {
+        !loom_symbol_ref_is_valid(function_ref) ||
+        function_ref.module_id != 0 ||
+        function_ref.symbol_id >= module->symbols.count) {
       return iree_make_status(
           IREE_STATUS_FAILED_PRECONDITION,
           "target function version %zu does not name a module-local function "
