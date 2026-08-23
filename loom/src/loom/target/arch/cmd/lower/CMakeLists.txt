@@ -57,6 +57,8 @@ loom_cc_library(
   DEPS
     iree::base
     iree::base::internal::arena
+    loom::analysis::symbol_liveness
+    loom::analysis::symbol_references
     loom::ir
     loom::link::linker
     loom::ops::buffer
@@ -185,6 +187,7 @@ loom_cc_library(
     ::transients
     iree::base
     iree::base::internal::arena
+    loom::analysis::symbol_references
     loom::error::emitter
     loom::error::error_defs
     loom::ir

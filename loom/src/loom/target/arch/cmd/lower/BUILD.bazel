@@ -53,6 +53,8 @@ loom_cc_library(
     srcs = ["kernel_unit.c"],
     hdrs = ["kernel_unit.h"],
     deps = [
+        "//loom/src/loom/analysis:symbol_liveness",
+        "//loom/src/loom/analysis:symbol_references",
         "//loom/src/loom/ir",
         "//loom/src/loom/link:linker",
         "//loom/src/loom/ops:op_defs",
@@ -167,6 +169,7 @@ loom_cc_library(
         ":program_composition",
         ":schedule",
         ":transients",
+        "//loom/src/loom/analysis:symbol_references",
         "//loom/src/loom/error:emitter",
         "//loom/src/loom/error:error_defs",
         "//loom/src/loom/ir",

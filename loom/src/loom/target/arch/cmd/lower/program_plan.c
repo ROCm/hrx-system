@@ -273,6 +273,7 @@ static iree_status_t loom_cmd_program_plan_build_lower_plan(
     const loom_value_fact_table_t* source_facts,
     const loom_cmd_launch_graph_t* launch_graph,
     const loom_cmd_launch_resolution_t* launch_resolution,
+    const loom_cmd_kernel_unit_source_t* kernel_sources,
     loom_cmd_dependency_source_t* dependency_sources,
     iree_arena_allocator_t* scratch_arena, iree_arena_block_pool_t* block_pool,
     loom_cmd_parameter_requirement_table_t* out_parameters,
@@ -315,10 +316,8 @@ static iree_status_t loom_cmd_program_plan_build_lower_plan(
       loom_cmd_kernel_unit_t* new_unit =
           &plan->dependency_units[dependency_index];
       IREE_RETURN_IF_ERROR(loom_cmd_kernel_unit_materialize(
-          preparation_module,
-          launch_resolution->definitions->entries[definition_ordinal],
-          source_launch, source_facts, block_pool, plan->host_allocator,
-          new_unit));
+          &kernel_sources[definition_ordinal], source_launch, source_facts,
+          block_pool, plan->host_allocator, new_unit));
       dependency_sources[dependency_index] = (loom_cmd_dependency_source_t){
           .launch_op = source_launch,
           .definition_ordinal = definition_ordinal,
@@ -561,6 +560,25 @@ iree_status_t loom_cmd_program_plan_prepare(
         &launch_definitions, &valid);
   }
 
+  loom_cmd_kernel_unit_source_t* kernel_sources = NULL;
+  loom_symbol_reference_table_t preparation_references = {0};
+  if (valid && iree_status_is_ok(status) && launch_definitions.count > 0) {
+    status = iree_arena_allocate_array(&scratch_arena, launch_definitions.count,
+                                       sizeof(*kernel_sources),
+                                       (void**)&kernel_sources);
+  }
+  if (valid && iree_status_is_ok(status) && launch_definitions.count > 0) {
+    status = loom_symbol_reference_table_build(
+        preparation_module, &scratch_arena, &preparation_references);
+  }
+  for (uint32_t i = 0;
+       valid && i < launch_definitions.count && iree_status_is_ok(status);
+       ++i) {
+    status = loom_cmd_kernel_unit_source_prepare(
+        preparation_module, launch_definitions.entries[i],
+        &preparation_references, &scratch_arena, &kernel_sources[i]);
+  }
+
   loom_value_fact_table_t source_facts = {0};
   if (valid && iree_status_is_ok(status)) {
     status = loom_value_fact_table_initialize(&source_facts, &scratch_arena,
@@ -625,9 +643,9 @@ iree_status_t loom_cmd_program_plan_prepare(
     status = loom_cmd_program_plan_build_lower_plan(
         &plan, preparation_module, root->program_op, &root->schedule,
         &source_facts, &root->launch_graph, &root->launch_resolution,
-        dependency_sources, &scratch_arena, block_pool, &root->parameters,
-        &root->transient, &root->lower_plan, &root->dependency_unit_indices,
-        &root->dependency_count);
+        kernel_sources, dependency_sources, &scratch_arena, block_pool,
+        &root->parameters, &root->transient, &root->lower_plan,
+        &root->dependency_unit_indices, &root->dependency_count);
   }
   for (iree_host_size_t i = 0;
        valid && i < source_program_count && iree_status_is_ok(status); ++i) {

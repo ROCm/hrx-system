@@ -88,12 +88,18 @@ class CmdProgramPlanTest : public ::testing::Test {
     return module_ptr;
   }
 
-  loom_op_t* FindSymbol(loom_module_t* module, iree_string_view_t name) {
+  loom_op_t* LookupSymbol(loom_module_t* module, iree_string_view_t name) {
     const loom_string_id_t name_id = loom_module_lookup_string(module, name);
-    IREE_ASSERT_NE(name_id, LOOM_STRING_ID_INVALID);
+    if (name_id == LOOM_STRING_ID_INVALID) return nullptr;
     const loom_symbol_id_t symbol_id = loom_module_find_symbol(module, name_id);
-    IREE_ASSERT_NE(symbol_id, LOOM_SYMBOL_ID_INVALID);
+    if (symbol_id == LOOM_SYMBOL_ID_INVALID) return nullptr;
     return module->symbols.entries[symbol_id].defining_op;
+  }
+
+  loom_op_t* FindSymbol(loom_module_t* module, iree_string_view_t name) {
+    loom_op_t* op = LookupSymbol(module, name);
+    IREE_ASSERT_NE(op, nullptr);
+    return op;
   }
 
   // Shared arena block pool backing source and prepared modules.
@@ -269,6 +275,72 @@ command.program.def public @parameterized() launch(%parameters: buffer, %target:
   EXPECT_EQ(root.transient.binding_index, UINT32_MAX);
   EXPECT_EQ(root.transient.required_byte_length, 0u);
   EXPECT_EQ(root.transient.minimum_alignment, 0u);
+
+  loom_cmd_program_plan_deinitialize(&plan);
+}
+
+TEST_F(CmdProgramPlanTest, PreservesKernelDependencyClosure) {
+  ModulePtr source_module = ParseAndVerify(R"(
+template.decl @test.live(%value: i32) -> (i32)
+template.decl @test.dead(%value: i32) -> (i32)
+
+template.def<@test.live> device @live_provider(%value: i32) -> (i32) {
+  template.return %value : i32
+}
+
+template.def<@test.dead> device @dead_provider(%value: i32) -> (i32) {
+  template.return %value : i32
+}
+
+func.def pure @helper(%value: i32) -> (i32) {
+  %result = template.apply<@test.live>(%value) pure : (i32) -> (i32)
+  func.return %result : i32
+}
+
+func.def pure @dead_helper(%value: i32) -> (i32) {
+  %result = template.apply<@test.dead>(%value) pure : (i32) -> (i32)
+  func.return %result : i32
+}
+
+kernel.def @dispatch() {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch() {
+  %value = scalar.constant 1 : i32
+  %result = func.call @helper(%value) : (i32) -> (i32)
+  kernel.return
+}
+
+command.program.def public @root() launch() {
+  kernel.launch @dispatch() : ()
+  command.return
+}
+)");
+  ASSERT_NE(source_module, nullptr);
+  const loom_op_t* source_programs[] = {
+      FindSymbol(source_module.get(), IREE_SV("root")),
+  };
+
+  loom_cmd_program_plan_t plan = {};
+  bool valid = false;
+  IREE_ASSERT_OK(loom_cmd_program_plan_prepare(
+      source_module.get(), source_programs, IREE_ARRAYSIZE(source_programs),
+      loom_pass_builtin_registry(),
+      /*diagnostic_emitter=*/{}, &block_pool_, &valid, &plan,
+      iree_allocator_system()));
+  ASSERT_TRUE(valid);
+  source_module.reset();
+
+  ASSERT_EQ(plan.dependency_count, 1u);
+  loom_module_t* unit_module = plan.dependency_units[0].module;
+  ASSERT_NE(unit_module, nullptr);
+  EXPECT_NE(LookupSymbol(unit_module, IREE_SV("dispatch")), nullptr);
+  EXPECT_NE(LookupSymbol(unit_module, IREE_SV("helper")), nullptr);
+  EXPECT_NE(LookupSymbol(unit_module, IREE_SV("test.live")), nullptr);
+  EXPECT_NE(LookupSymbol(unit_module, IREE_SV("live_provider")), nullptr);
+  EXPECT_EQ(LookupSymbol(unit_module, IREE_SV("dead_helper")), nullptr);
+  EXPECT_EQ(LookupSymbol(unit_module, IREE_SV("test.dead")), nullptr);
+  EXPECT_EQ(LookupSymbol(unit_module, IREE_SV("dead_provider")), nullptr);
 
   loom_cmd_program_plan_deinitialize(&plan);
 }

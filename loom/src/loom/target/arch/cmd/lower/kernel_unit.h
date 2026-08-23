@@ -11,6 +11,7 @@
 
 #include "iree/base/api.h"
 #include "iree/base/internal/arena.h"
+#include "loom/analysis/symbol_references.h"
 #include "loom/ir/ir.h"
 #include "loom/util/fact_table.h"
 
@@ -51,6 +52,42 @@ typedef struct loom_cmd_kernel_unit_t {
   const uint16_t* source_argument_ordinals;
 } loom_cmd_kernel_unit_t;
 
+// Exact dependency-closed source projection for one kernel definition.
+//
+// The source module must remain immutable while this projection is used. All
+// projection storage belongs to the arena passed to
+// loom_cmd_kernel_unit_source_prepare.
+typedef struct loom_cmd_kernel_unit_source_t {
+  // Borrowed immutable source module.
+  const loom_module_t* module;
+
+  // Kernel definition selected from module.
+  loom_op_t* kernel_op;
+
+  // Exact module-local symbol projection.
+  struct {
+    // Strictly increasing source symbol ordinals.
+    const iree_host_size_t* ordinals;
+
+    // Number of entries in ordinals.
+    iree_host_size_t count;
+
+    // Entry in ordinals that identifies kernel_op.
+    iree_host_size_t kernel_selection_ordinal;
+  } symbols;
+} loom_cmd_kernel_unit_source_t;
+
+// Prepares the exact source projection for one kernel definition.
+//
+// |references| must describe the same immutable source module. Ordinary symbol
+// dependencies and providers for reachable template-family demands are
+// included in the projection. No source IR is cloned or retained by the
+// result.
+iree_status_t loom_cmd_kernel_unit_source_prepare(
+    const loom_module_t* source_module, loom_op_t* source_kernel_op,
+    const loom_symbol_reference_table_t* references,
+    iree_arena_allocator_t* arena, loom_cmd_kernel_unit_source_t* out_source);
+
 // Returns true when two launches of the same resolved kernel definition have
 // equivalent kernel-unit boundaries.
 //
@@ -63,7 +100,7 @@ bool loom_cmd_kernel_unit_boundaries_equivalent(
     const loom_op_t* rhs_launch_op,
     const loom_value_fact_table_t* source_facts);
 
-// Materializes one compiler-owned kernel unit from |source_kernel_op| and
+// Materializes one compiler-owned kernel unit from |source| and
 // |source_launch_op|.
 //
 // |source_facts| must describe the function containing the launch and remain
@@ -76,7 +113,7 @@ bool loom_cmd_kernel_unit_boundaries_equivalent(
 // On success |out_unit| owns its module and must be deinitialized. On failure
 // |out_unit| is empty and the source module is unchanged.
 iree_status_t loom_cmd_kernel_unit_materialize(
-    const loom_module_t* source_module, loom_op_t* source_kernel_op,
+    const loom_cmd_kernel_unit_source_t* source,
     const loom_op_t* source_launch_op,
     const loom_value_fact_table_t* source_facts,
     iree_arena_block_pool_t* block_pool, iree_allocator_t allocator,
