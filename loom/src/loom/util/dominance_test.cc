@@ -131,6 +131,12 @@ class DominanceTest : public ::testing::Test {
         loom_dominance_info_initialize(module_, &dom_arena_, &dom_info_));
   }
 
+  void finalize_region() {
+    IREE_ASSERT_OK(loom_module_compute_uses(module_));
+    IREE_ASSERT_OK(loom_dominance_info_initialize_region(
+        module_, body_, &dom_arena_, &dom_info_));
+  }
+
   iree_arena_block_pool_t block_pool_;
   loom_context_t context_;
   loom_module_t* module_ = nullptr;
@@ -482,7 +488,7 @@ TEST_F(DominanceTest, SiblingAfterRegionDoesNotDominateNested) {
   EXPECT_TRUE(loom_dominates_op(&dom_info_, map_op, inner));
 }
 
-TEST_F(DominanceTest, CfgDiamondDominanceUsesPredecessorGraph) {
+TEST_F(DominanceTest, ScopedCfgDiamondDominanceUsesPredecessorGraph) {
   body_->flags |= LOOM_REGION_INSTANCE_FLAG_CFG;
   loom_type_t i32 = loom_type_scalar(LOOM_SCALAR_TYPE_I32);
   loom_block_t* entry = loom_region_entry_block(body_);
@@ -504,7 +510,7 @@ TEST_F(DominanceTest, CfgDiamondDominanceUsesPredecessorGraph) {
 
   set_block(merge_block);
   loom_op_t* merge_value = build_constant(i32, 3);
-  finalize();
+  finalize_region();
 
   EXPECT_TRUE(loom_dominates_op(&dom_info_, entry_value, then_value));
   EXPECT_TRUE(loom_dominates_op(&dom_info_, entry_value, else_value));

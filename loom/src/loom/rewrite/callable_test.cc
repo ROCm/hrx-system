@@ -71,6 +71,13 @@ class CallableInlineTest : public ::testing::Test {
     loom_module_value(module_, value_id)->name_id = name_id;
   }
 
+  loom_availability_analysis_t InitializeAvailability() {
+    loom_availability_analysis_t availability = {};
+    IREE_CHECK_OK(loom_availability_analysis_initialize(
+        module_, &rewriter_arena_, &availability));
+    return availability;
+  }
+
   loom_builder_t BodyBuilder(loom_op_t* func_op) {
     loom_func_like_t func = loom_func_like_cast(module_, func_op);
     loom_builder_t builder = {};
@@ -374,8 +381,9 @@ TEST_F(CallableInlineTest, ConsumingInlineMovesBodyAndErasesCallee) {
   loom_rewriter_t rewriter = {};
   IREE_ASSERT_OK(
       loom_rewriter_initialize(&rewriter, module_, &rewriter_arena_));
-  IREE_ASSERT_OK(
-      loom_callable_inline_consuming_call(&rewriter, call_op, callee));
+  loom_availability_analysis_t availability = InitializeAvailability();
+  IREE_ASSERT_OK(loom_callable_inline_consuming_call(&rewriter, &availability,
+                                                     call_op, callee));
   loom_rewriter_deinitialize(&rewriter);
 
   EXPECT_TRUE(iree_any_bit_set(call_op->flags, LOOM_OP_FLAG_DEAD));

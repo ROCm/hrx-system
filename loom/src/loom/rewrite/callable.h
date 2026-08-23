@@ -14,6 +14,7 @@
 #define LOOM_REWRITE_CALLABLE_H_
 
 #include "iree/base/api.h"
+#include "loom/analysis/availability.h"
 #include "loom/ops/op_defs.h"
 #include "loom/rewrite/remap.h"
 #include "loom/rewrite/rewriter.h"
@@ -48,13 +49,14 @@ iree_status_t loom_callable_inline_direct_call(loom_rewriter_t* rewriter,
 // reference plan proving that the callee is private and that the selected call
 // will be the final live reference outside of the callee's own defining
 // attribute. This helper does not rediscover that global ownership by scanning
-// the module. The callee body must satisfy the same single-block terminator
-// shape as clone inlining. On success body ops are moved before the call, call
-// results are replaced by remapped terminator operands, the call is erased, and
-// the consumed callee op is erased.
-iree_status_t loom_callable_inline_consuming_call(loom_rewriter_t* rewriter,
-                                                  loom_op_t* call_op,
-                                                  loom_func_like_t callee);
+// the module. |availability| must cover the caller region and remain valid
+// across the topology-preserving body move. The callee body must satisfy the
+// same single-block terminator shape as clone inlining. On success body ops are
+// moved before the call, call results are replaced by remapped terminator
+// operands, the call is erased, and the consumed callee op is erased.
+iree_status_t loom_callable_inline_consuming_call(
+    loom_rewriter_t* rewriter, const loom_availability_analysis_t* availability,
+    loom_op_t* call_op, loom_func_like_t callee);
 
 // Clones one same-module function-like definition as |target_ref|.
 //

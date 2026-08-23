@@ -1075,8 +1075,9 @@ static iree_status_t loom_ir_move_block_captures_are_available(
 }
 
 iree_status_t loom_ir_move_block_ops_before(
-    loom_rewriter_t* rewriter, loom_block_t* source_block, loom_op_t* before_op,
-    loom_ir_remap_t* remap, const loom_ir_move_block_options_t* options) {
+    loom_rewriter_t* rewriter, const loom_availability_analysis_t* availability,
+    loom_block_t* source_block, loom_op_t* before_op, loom_ir_remap_t* remap,
+    const loom_ir_move_block_options_t* options) {
   if (remap->source_module != rewriter->module ||
       remap->target_module != rewriter->module) {
     return iree_make_status(
@@ -1096,11 +1097,8 @@ iree_status_t loom_ir_move_block_ops_before(
   }
 
   bool omit_terminators = options ? options->omit_terminators : false;
-  loom_availability_analysis_t availability = {0};
-  IREE_RETURN_IF_ERROR(loom_availability_analysis_initialize(
-      rewriter->module, rewriter->arena, &availability));
   loom_ir_move_availability_t query = {
-      .analysis = &availability,
+      .analysis = availability,
       .remap = remap,
       .source_block = source_block,
       .before_op = before_op,

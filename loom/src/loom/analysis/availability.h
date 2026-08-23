@@ -48,6 +48,14 @@ iree_status_t loom_availability_analysis_initialize(
     const loom_module_t* module, iree_arena_allocator_t* arena,
     loom_availability_analysis_t* out_analysis);
 
+// Initializes availability analysis for |region| and its nested region tree.
+// All queried insertion points and CFG dominance relationships must be inside
+// that tree. Moving operations while preserving region block topology leaves
+// the analysis valid.
+iree_status_t loom_availability_analysis_initialize_region(
+    const loom_module_t* module, const loom_region_t* region,
+    iree_arena_allocator_t* arena, loom_availability_analysis_t* out_analysis);
+
 // Returns true if |value_id| can be referenced by an op inserted immediately
 // before |before_op|. If |moving_root_op| is non-NULL, values defined inside
 // that subtree are also accepted because they move with the candidate.

@@ -13,10 +13,21 @@
 iree_status_t loom_availability_analysis_initialize(
     const loom_module_t* module, iree_arena_allocator_t* arena,
     loom_availability_analysis_t* out_analysis) {
+  if (!module) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "availability analysis requires a module");
+  }
+  return loom_availability_analysis_initialize_region(module, module->body,
+                                                      arena, out_analysis);
+}
+
+iree_status_t loom_availability_analysis_initialize_region(
+    const loom_module_t* module, const loom_region_t* region,
+    iree_arena_allocator_t* arena, loom_availability_analysis_t* out_analysis) {
   out_analysis->module = module;
   out_analysis->arena = arena;
-  IREE_RETURN_IF_ERROR(
-      loom_dominance_info_initialize(module, arena, &out_analysis->dominance));
+  IREE_RETURN_IF_ERROR(loom_dominance_info_initialize_region(
+      module, region, arena, &out_analysis->dominance));
   return iree_ok_status();
 }
 

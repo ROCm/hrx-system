@@ -32,6 +32,7 @@ loom_cc_library(
     srcs = ["loop_fusion.c"],
     hdrs = ["loop_fusion.h"],
     deps = [
+        "//loom/src/loom/analysis:availability",
         "//loom/src/loom/analysis:loop_domain",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:op_defs",

@@ -8,6 +8,7 @@
 
 #include <string.h>
 
+#include "loom/analysis/availability.h"
 #include "loom/analysis/scc.h"
 #include "loom/analysis/symbol_references.h"
 #include "loom/error/error_catalog.h"
@@ -766,7 +767,8 @@ static bool loom_inline_symbol_can_transfer(const loom_inline_state_t* state,
 }
 
 static iree_status_t loom_inline_select_transfer_actions(
-    loom_inline_state_t* state) {
+    loom_inline_state_t* state, uint32_t* out_transfer_count) {
+  *out_transfer_count = 0;
   uint32_t* final_entry_by_symbol = NULL;
   if (state->module->symbols.count > 0) {
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
@@ -802,6 +804,7 @@ static iree_status_t loom_inline_select_transfer_actions(
     }
     if (final_entry_by_symbol[entry->target_symbol_id] == entry_index) {
       entry->action = LOOM_INLINE_PLAN_ACTION_TRANSFER;
+      ++*out_transfer_count;
     } else {
       entry->action = LOOM_INLINE_PLAN_ACTION_CLONE;
     }
@@ -811,6 +814,7 @@ static iree_status_t loom_inline_select_transfer_actions(
 
 static iree_status_t loom_inline_execute_entry(
     loom_inline_state_t* state, loom_rewriter_t* rewriter,
+    const loom_availability_analysis_t* transfer_availability,
     loom_inline_plan_entry_t* entry) {
   switch (entry->action) {
     case LOOM_INLINE_PLAN_ACTION_CLONE: {
@@ -821,8 +825,9 @@ static iree_status_t loom_inline_execute_entry(
       return iree_ok_status();
     }
     case LOOM_INLINE_PLAN_ACTION_TRANSFER: {
+      IREE_ASSERT(transfer_availability);
       IREE_RETURN_IF_ERROR(loom_callable_inline_consuming_call(
-          rewriter, entry->call_op, entry->callee));
+          rewriter, transfer_availability, entry->call_op, entry->callee));
       loom_pass_mark_changed(state->pass);
       ++state->statistics->calls_transferred;
       ++state->statistics->symbols_transferred;
@@ -833,12 +838,20 @@ static iree_status_t loom_inline_execute_entry(
   }
 }
 
-static iree_status_t loom_inline_execute_plan(loom_inline_state_t* state) {
+static iree_status_t loom_inline_execute_plan(loom_inline_state_t* state,
+                                              uint32_t transfer_count) {
   loom_rewriter_t rewriter = {0};
   IREE_RETURN_IF_ERROR(
       loom_rewriter_initialize(&rewriter, state->module, state->pass->arena));
 
-  iree_status_t status = iree_ok_status();
+  loom_availability_analysis_t transfer_availability = {0};
+  iree_status_t status =
+      transfer_count == 0
+          ? iree_ok_status()
+          : loom_availability_analysis_initialize(
+                state->module, state->pass->arena, &transfer_availability);
+  const loom_availability_analysis_t* transfer_availability_ptr =
+      transfer_count > 0 ? &transfer_availability : NULL;
   for (iree_host_size_t component_index = 0;
        iree_status_is_ok(status) && component_index < state->sccs.count;
        ++component_index) {
@@ -848,7 +861,8 @@ static iree_status_t loom_inline_execute_plan(loom_inline_state_t* state) {
          entry_index != LOOM_INLINE_PLAN_ENTRY_INVALID;
          entry_index = state->entries[entry_index].next_required_in_component) {
       loom_inline_plan_entry_t* entry = &state->entries[entry_index];
-      status = loom_inline_execute_entry(state, &rewriter, entry);
+      status = loom_inline_execute_entry(state, &rewriter,
+                                         transfer_availability_ptr, entry);
     }
   }
 
@@ -882,8 +896,10 @@ iree_status_t loom_inline_callables_run(loom_pass_t* pass,
   }
 
   loom_inline_assign_execution_order(&state);
-  IREE_RETURN_IF_ERROR(loom_inline_select_transfer_actions(&state));
-  IREE_RETURN_IF_ERROR(loom_inline_execute_plan(&state));
+  uint32_t transfer_count = 0;
+  IREE_RETURN_IF_ERROR(
+      loom_inline_select_transfer_actions(&state, &transfer_count));
+  IREE_RETURN_IF_ERROR(loom_inline_execute_plan(&state, transfer_count));
   if (!pass->changed) {
     return iree_ok_status();
   }

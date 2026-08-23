@@ -6,6 +6,7 @@
 
 #include "loom/transforms/cfg/branch_fusion.h"
 
+#include "loom/analysis/availability.h"
 #include "loom/ir/module.h"
 #include "loom/ops/op_defs.h"
 #include "loom/ops/scf/ops.h"
@@ -108,9 +109,28 @@ typedef struct loom_branch_fusion_context_t {
   loom_rewriter_t* rewriter;
   // Per-candidate transient arena for remaps and temporary value arrays.
   iree_arena_allocator_t* fusion_arena;
+  // Lazily prepared analysis shared by topology-preserving body moves.
+  struct {
+    // Function body containing every fusion candidate.
+    loom_region_t* scope;
+    // Availability and CFG dominance state for scope.
+    loom_availability_analysis_t analysis;
+    // True after analysis has been initialized.
+    bool initialized;
+  } availability;
   // Region DFS stack for function traversal.
   loom_branch_fusion_region_stack_t region_stack;
 } loom_branch_fusion_context_t;
+
+static iree_status_t loom_branch_fusion_prepare_availability(
+    loom_branch_fusion_context_t* context) {
+  if (context->availability.initialized) return iree_ok_status();
+  IREE_RETURN_IF_ERROR(loom_availability_analysis_initialize_region(
+      context->module, context->availability.scope, context->pass->arena,
+      &context->availability.analysis));
+  context->availability.initialized = true;
+  return iree_ok_status();
+}
 
 //===----------------------------------------------------------------------===//
 // Structural queries
@@ -350,8 +370,9 @@ static iree_status_t loom_branch_fusion_move_body_before_terminator(
   loom_ir_move_block_options_t options = {
       .omit_terminators = true,
   };
-  return loom_ir_move_block_ops_before(context->rewriter, source_block,
-                                       fused_terminator, remap, &options);
+  return loom_ir_move_block_ops_before(
+      context->rewriter, &context->availability.analysis, source_block,
+      fused_terminator, remap, &options);
 }
 
 static iree_status_t loom_branch_fusion_resolve_terminator_values(
@@ -452,6 +473,7 @@ static iree_status_t loom_branch_fusion_fuse_pair(
   *out_fused_if = NULL;
   iree_arena_allocator_t* scratch_arena = context->fusion_arena;
   iree_arena_reset(scratch_arena);
+  IREE_RETURN_IF_ERROR(loom_branch_fusion_prepare_availability(context));
 
   loom_type_t* placeholder_types = NULL;
   uint16_t result_count = 0;
@@ -618,6 +640,10 @@ iree_status_t loom_branch_fusion_run(loom_pass_t* pass, loom_module_t* module,
       .module = module,
       .rewriter = &rewriter,
       .fusion_arena = &fusion_arena,
+      .availability =
+          {
+              .scope = loom_func_like_body(function),
+          },
   };
   iree_status_t status = loom_branch_fusion_region_stack_initialize(
       pass->arena, &context.region_stack);

@@ -450,9 +450,9 @@ iree_status_t loom_callable_inline_call(loom_rewriter_t* rewriter,
       rewriter, call_op, replacements, call_results.count);
 }
 
-iree_status_t loom_callable_inline_consuming_call(loom_rewriter_t* rewriter,
-                                                  loom_op_t* call_op,
-                                                  loom_func_like_t callee) {
+iree_status_t loom_callable_inline_consuming_call(
+    loom_rewriter_t* rewriter, const loom_availability_analysis_t* availability,
+    loom_op_t* call_op, loom_func_like_t callee) {
   if (!call_op->parent_block ||
       iree_any_bit_set(call_op->flags, LOOM_OP_FLAG_DEAD)) {
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
@@ -494,7 +494,7 @@ iree_status_t loom_callable_inline_consuming_call(loom_rewriter_t* rewriter,
       .omit_terminators = true,
   };
   IREE_RETURN_IF_ERROR(loom_ir_move_block_ops_before(
-      rewriter, entry_block, call_op, &remap, &move_options));
+      rewriter, availability, entry_block, call_op, &remap, &move_options));
   IREE_RETURN_IF_ERROR(loom_callable_preserve_consuming_call_result_names(
       rewriter, call, replacements, call_results.count));
   IREE_RETURN_IF_ERROR(loom_rewriter_replace_all_uses_and_erase(
