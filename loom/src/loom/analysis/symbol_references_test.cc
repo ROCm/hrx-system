@@ -457,6 +457,43 @@ func.def @typed(%arg: test.matrix<bf16, scope = subgroup, rows = 16, target = @d
   }
 }
 
+TEST_F(SymbolReferencesTest, ValueTypeOccurrencesBelongToDefinitions) {
+  ModulePtr module = ParseModule(R"(
+test.record @target
+
+func.decl @decl(%arg: test.matrix<bf16, scope = subgroup, rows = 16, target = @target>)
+
+func.def @typed(%arg: test.matrix<bf16, scope = subgroup, rows = 16, target = @target>) {
+  test.use %arg : test.matrix<bf16, scope = subgroup, rows = 16, target = @target>
+  test.use %arg : test.matrix<bf16, scope = subgroup, rows = 16, target = @target>
+  func.return
+}
+)");
+
+  const loom_symbol_id_t target = FindSymbol(module.get(), IREE_SV("target"));
+  const loom_symbol_id_t decl = FindSymbol(module.get(), IREE_SV("decl"));
+  const loom_symbol_id_t typed = FindSymbol(module.get(), IREE_SV("typed"));
+  const loom_symbol_reference_table_t table = BuildTable(module.get());
+
+  EXPECT_NE(FindOccurrence(table, decl, target,
+                           LOOM_SYMBOL_REFERENCE_OCCURRENCE_VALUE_TYPE),
+            nullptr);
+
+  uint32_t occurrence_count = 0;
+  loom_symbol_reference_occurrence_id_t occurrence_id =
+      table.symbols[typed].first_outgoing_occurrence_id;
+  while (occurrence_id != LOOM_SYMBOL_REFERENCE_OCCURRENCE_ID_INVALID) {
+    const loom_symbol_reference_occurrence_t* occurrence =
+        &table.occurrences[occurrence_id];
+    if (occurrence->target_symbol_id == target &&
+        occurrence->kind == LOOM_SYMBOL_REFERENCE_OCCURRENCE_VALUE_TYPE) {
+      ++occurrence_count;
+    }
+    occurrence_id = occurrence->next_outgoing_occurrence_id;
+  }
+  EXPECT_EQ(occurrence_count, 1u);
+}
+
 TEST_F(SymbolReferencesTest,
        SymbolArraysIndexEveryOccurrenceWithoutAvailabilityEdges) {
   ModulePtr module = ParseModule(R"(

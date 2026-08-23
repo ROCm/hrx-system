@@ -9,9 +9,10 @@
 // This analysis is the canonical symbol-use substrate for module-level
 // analyses. It records occurrences from the symbol whose definition owns
 // an operation to each module-local symbol referenced by that operation, nested
-// attributes, static encoding attributes, and value types. The table is
-// intentionally rebuilt from immutable IR instead of maintained on every IR
-// mutation path; callers that rewrite symbols should rebuild after mutation.
+// attributes, static encoding attributes, and each SSA value definition's
+// type. The table is intentionally rebuilt from immutable IR instead of
+// maintained on every IR mutation path; callers that rewrite symbols should
+// rebuild after mutation.
 
 #ifndef LOOM_ANALYSIS_SYMBOL_REFERENCES_H_
 #define LOOM_ANALYSIS_SYMBOL_REFERENCES_H_
