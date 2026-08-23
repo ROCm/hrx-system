@@ -7,8 +7,10 @@
 #include "loom/link/index_materializer.h"
 
 #include <algorithm>
+#include <array>
 #include <memory>
 #include <string>
+#include <tuple>
 #include <vector>
 
 #include "iree/base/internal/arena.h"
@@ -21,6 +23,8 @@
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
 #include "loom/link/module_index.h"
+#include "loom/link/provider_resolver.h"
+#include "loom/ops/module/ops.h"
 #include "loom/ops/op_defs.h"
 #include "loom/ops/op_registry.h"
 #include "loom/verify/verify.h"
@@ -34,6 +38,12 @@ struct IndexDeleter {
   }
 };
 using IndexPtr = std::unique_ptr<loom_link_module_index_t, IndexDeleter>;
+
+enum class ProviderForm {
+  kMaterialized,
+  kText,
+  kBytecode,
+};
 
 class LinkIndexMaterializerTest : public ::testing::Test {
  protected:
@@ -117,6 +127,52 @@ class LinkIndexMaterializerTest : public ::testing::Test {
     return provider_ordinal;
   }
 
+  iree_host_size_t AddText(loom_link_module_index_t* index,
+                           iree_string_view_t source, iree_string_view_t name,
+                           loom_link_provider_role_t role) {
+    const loom_link_module_index_add_options_t options = {
+        /*.provider_name=*/name,
+        /*.role=*/role,
+    };
+    loom_text_parse_options_t parse_options = {};
+    parse_options.diagnostic_sink.fn = loom_diagnostic_stderr_sink;
+    parse_options.max_errors = 20;
+    iree_host_size_t provider_ordinal = LOOM_LINK_MODULE_INDEX_INVALID_ORDINAL;
+    IREE_CHECK_OK(loom_link_module_index_add_text(
+        index, source, name, &parse_options, &options, &provider_ordinal));
+    return provider_ordinal;
+  }
+
+  iree_host_size_t AddProvider(loom_link_module_index_t* index,
+                               ProviderForm form, iree_string_view_t source,
+                               const loom_module_t* module,
+                               const std::vector<uint8_t>& bytecode,
+                               iree_string_view_t name,
+                               loom_link_provider_role_t role) {
+    switch (form) {
+      case ProviderForm::kMaterialized:
+        return AddMaterialized(index, module, name, role);
+      case ProviderForm::kText:
+        return AddText(index, source, name, role);
+      case ProviderForm::kBytecode:
+        return AddBytecode(index, bytecode, name, role);
+    }
+    IREE_ASSERT_UNREACHABLE("unknown provider form");
+    IREE_BUILTIN_UNREACHABLE();
+  }
+
+  iree_status_t TryMaterializeWithOptions(
+      const loom_link_module_index_t* index,
+      const loom_link_plan_options_t* plan_options,
+      loom_link_index_materialization_t* out_materialization) {
+    loom_link_plan_materialization_environment_t environment = {};
+    environment.context = &context_;
+    environment.block_pool = &block_pool_;
+    environment.allocator = iree_allocator_system();
+    return loom_link_index_materialize(index, plan_options, &environment,
+                                       IREE_SV("linked"), out_materialization);
+  }
+
   iree_status_t TryMaterialize(
       const loom_link_module_index_t* index, iree_string_view_t root,
       loom_link_plan_mode_t mode,
@@ -130,12 +186,7 @@ class LinkIndexMaterializerTest : public ::testing::Test {
         /*.values=*/roots,
     };
     plan_options.unresolved_policy = unresolved_policy;
-    loom_link_plan_materialization_environment_t environment = {};
-    environment.context = &context_;
-    environment.block_pool = &block_pool_;
-    environment.allocator = iree_allocator_system();
-    return loom_link_index_materialize(index, &plan_options, &environment,
-                                       IREE_SV("linked"), out_materialization);
+    return TryMaterializeWithOptions(index, &plan_options, out_materialization);
   }
 
   loom_link_index_materialization_t MaterializeWithPolicy(
@@ -162,6 +213,77 @@ class LinkIndexMaterializerTest : public ::testing::Test {
       }
     }
     return nullptr;
+  }
+
+  const loom_link_module_index_symbol_t* FindIndexedProviderSymbol(
+      const loom_link_module_index_t* index, iree_host_size_t provider_ordinal,
+      iree_string_view_t name) {
+    const loom_link_module_index_provider_t* provider =
+        loom_link_module_index_provider_at(index, provider_ordinal);
+    if (!provider) return nullptr;
+    for (iree_host_size_t module_offset = 0;
+         module_offset < provider->module_count; ++module_offset) {
+      const loom_link_module_index_module_t* module =
+          loom_link_module_index_module_at(
+              index, provider->module_start_ordinal + module_offset);
+      for (iree_host_size_t symbol_offset = 0;
+           symbol_offset < module->symbol_count; ++symbol_offset) {
+        const loom_link_module_index_symbol_t* symbol =
+            loom_link_module_index_symbol_at(
+                index, module->symbol_start_ordinal + symbol_offset);
+        if (iree_string_view_equal(symbol->name, name)) return symbol;
+      }
+    }
+    return nullptr;
+  }
+
+  std::string OptionalString(const loom_module_t* module,
+                             loom_string_id_t string_id) {
+    if (string_id == LOOM_STRING_ID_INVALID) return {};
+    const iree_string_view_t value = module->strings.entries[string_id];
+    return std::string(value.data, value.size);
+  }
+
+  using LinkedSymbolShape = std::tuple<std::string, loom_symbol_flags_t, bool,
+                                       std::string, std::string, std::string>;
+
+  std::vector<LinkedSymbolShape> CaptureSymbolShapes(
+      const loom_module_t* module) {
+    std::vector<LinkedSymbolShape> shapes;
+    shapes.reserve(module->symbols.count);
+    for (iree_host_size_t i = 0; i < module->symbols.count; ++i) {
+      const loom_symbol_t* symbol = &module->symbols.entries[i];
+      const iree_string_view_t name = module->strings.entries[symbol->name_id];
+      std::string import_module;
+      std::string import_symbol;
+      std::string export_symbol;
+      const loom_func_like_t function =
+          loom_func_like_cast(module, symbol->defining_op);
+      if (loom_func_like_isa(function)) {
+        import_module =
+            OptionalString(module, loom_func_like_import_module(function));
+        import_symbol =
+            OptionalString(module, loom_func_like_import_symbol(function));
+        export_symbol =
+            OptionalString(module, loom_func_like_export_symbol(function));
+      }
+      shapes.emplace_back(
+          std::string(name.data, name.size), symbol->flags,
+          loom_symbol_definition_is_declaration(symbol->definition),
+          std::move(import_module), std::move(import_symbol),
+          std::move(export_symbol));
+    }
+    std::sort(shapes.begin(), shapes.end());
+    return shapes;
+  }
+
+  iree_host_size_t CountProviderImports(const loom_module_t* module) {
+    iree_host_size_t count = 0;
+    const loom_op_t* op = nullptr;
+    loom_block_for_each_op(loom_region_const_entry_block(module->body), op) {
+      if (loom_module_import_isa(op)) ++count;
+    }
+    return count;
   }
 
   void Verify(const loom_module_t* module) {
@@ -714,6 +836,305 @@ check.benchmark<@case> @benchmark
   EXPECT_FALSE(iree_any_bit_set(check_case->flags, LOOM_SYMBOL_FLAG_PUBLIC));
 
   loom_link_index_materialization_deinitialize(&materialization);
+}
+
+TEST_F(LinkIndexMaterializerTest,
+       SealedProductsAreEquivalentAcrossProviderRepresentations) {
+  const iree_string_view_t requester_source = IREE_SV(R"(
+module.import "chosen" [@api, @provided]
+
+func.decl public export("request_api") @api(%x: i32) -> (i32)
+func.decl @provided(%x: i32) -> (i32)
+func.decl @partial(%x: i32) -> (i32)
+
+func.def @local(%x: i32) -> (i32) {
+  func.return %x : i32
+}
+
+func.def @private_root(%x: i32) -> (i32) {
+  func.return %x : i32
+}
+
+func.def public export("request_entry") @entry(%x: i32) -> (i32) {
+  %local = func.call @local(%x) : (i32) -> (i32)
+  %provided = func.call @provided(%local) : (i32) -> (i32)
+  %partial = func.call @partial(%provided) : (i32) -> (i32)
+  %api = func.call @api(%partial) : (i32) -> (i32)
+  func.return %api : i32
+}
+)");
+  const iree_string_view_t chosen_source = IREE_SV(R"(
+func.def public export("provider_api") @api(%x: i32) -> (i32) {
+  func.return %x : i32
+}
+
+func.def public export("provider_selected") @provided(%x: i32) -> (i32) {
+  func.return %x : i32
+}
+
+func.def public export("provider_unused") @unused(%x: i32) -> (i32) {
+  func.return %x : i32
+}
+)");
+  const iree_string_view_t wrong_source = IREE_SV(R"(
+func.def public export("wrong_api") @api(%x: i32) -> (i32) {
+  func.return %x : i32
+}
+
+func.def public export("wrong_selected") @provided(%x: i32) -> (i32) {
+  func.return %x : i32
+}
+
+func.def public export("wrong_only") @wrong_only(%x: i32) -> (i32) {
+  func.return %x : i32
+}
+)");
+  const iree_string_view_t partial_source = IREE_SV(R"(
+module.import "external-runtime" [@external]
+
+func.decl @external(%x: i32) -> (i32)
+
+func.def public export("partial_api") @partial(%x: i32) -> (i32) {
+  %result = func.call @external(%x) : (i32) -> (i32)
+  func.return %result : i32
+}
+
+func.def public export("partial_unused") @partial_unused(%x: i32) -> (i32) {
+  func.return %x : i32
+}
+)");
+
+  loom_module_t* requester = Parse(requester_source, IREE_SV("requester.loom"));
+  loom_module_t* chosen = Parse(chosen_source, IREE_SV("chosen.loom"));
+  loom_module_t* wrong = Parse(wrong_source, IREE_SV("wrong.loom"));
+  loom_module_t* partial = Parse(partial_source, IREE_SV("partial.loom"));
+  const std::vector<uint8_t> requester_bytecode = WriteModule(requester);
+  const std::vector<uint8_t> chosen_bytecode = WriteModule(chosen);
+  const std::vector<uint8_t> wrong_bytecode = WriteModule(wrong);
+
+  IndexPtr partial_index = CreateIndex();
+  AddMaterialized(partial_index.get(), partial, IREE_SV("partial-source"),
+                  LOOM_LINK_PROVIDER_ROLE_INPUT);
+  loom_link_index_materialization_t partial_materialization =
+      MaterializeWithPolicy(partial_index.get(), IREE_SV("@partial"),
+                            LOOM_LINK_PLAN_UNRESOLVED_ALLOW);
+  Verify(partial_materialization.module);
+  ASSERT_EQ(loom_link_plan_symbol_count(partial_materialization.plan), 2u);
+  ASSERT_EQ(partial_materialization.module->symbols.count, 2u);
+  ASSERT_EQ(CountProviderImports(partial_materialization.module), 1u);
+  const std::vector<uint8_t> partial_bytecode =
+      WriteModule(partial_materialization.module);
+  loom_link_index_materialization_deinitialize(&partial_materialization);
+
+  enum ProviderId {
+    kRequester,
+    kChosen,
+    kWrong,
+    kPartial,
+  };
+  struct Variant {
+    const char* name;
+    ProviderForm requester_form;
+    ProviderForm chosen_form;
+    ProviderForm wrong_form;
+    std::array<ProviderId, 4> insertion_order;
+  };
+  const Variant variants[] = {
+      {
+          "materialized-requester",
+          ProviderForm::kMaterialized,
+          ProviderForm::kText,
+          ProviderForm::kBytecode,
+          {kRequester, kWrong, kChosen, kPartial},
+      },
+      {
+          "text-requester",
+          ProviderForm::kText,
+          ProviderForm::kBytecode,
+          ProviderForm::kMaterialized,
+          {kChosen, kPartial, kRequester, kWrong},
+      },
+      {
+          "bytecode-requester",
+          ProviderForm::kBytecode,
+          ProviderForm::kMaterialized,
+          ProviderForm::kText,
+          {kPartial, kWrong, kChosen, kRequester},
+      },
+  };
+
+  std::vector<LinkedSymbolShape> reference_symbols;
+  for (const Variant& variant : variants) {
+    SCOPED_TRACE(variant.name);
+    IndexPtr index = CreateIndex();
+    iree_host_size_t requester_provider =
+        LOOM_LINK_MODULE_INDEX_INVALID_ORDINAL;
+    iree_host_size_t chosen_provider = LOOM_LINK_MODULE_INDEX_INVALID_ORDINAL;
+    iree_host_size_t wrong_provider = LOOM_LINK_MODULE_INDEX_INVALID_ORDINAL;
+    iree_host_size_t partial_provider = LOOM_LINK_MODULE_INDEX_INVALID_ORDINAL;
+    for (ProviderId provider : variant.insertion_order) {
+      switch (provider) {
+        case kRequester:
+          requester_provider =
+              AddProvider(index.get(), variant.requester_form, requester_source,
+                          requester, requester_bytecode, IREE_SV("requester"),
+                          LOOM_LINK_PROVIDER_ROLE_INPUT);
+          break;
+        case kChosen:
+          chosen_provider =
+              AddProvider(index.get(), variant.chosen_form, chosen_source,
+                          chosen, chosen_bytecode, IREE_SV("chosen"),
+                          LOOM_LINK_PROVIDER_ROLE_LIBRARY);
+          break;
+        case kWrong:
+          wrong_provider =
+              AddProvider(index.get(), variant.wrong_form, wrong_source, wrong,
+                          wrong_bytecode, IREE_SV("wrong"),
+                          LOOM_LINK_PROVIDER_ROLE_LIBRARY);
+          break;
+        case kPartial:
+          partial_provider = AddBytecode(index.get(), partial_bytecode,
+                                         IREE_SV("partial.loombc"),
+                                         LOOM_LINK_PROVIDER_ROLE_LIBRARY);
+          break;
+      }
+    }
+    ASSERT_NE(requester_provider, LOOM_LINK_MODULE_INDEX_INVALID_ORDINAL);
+    ASSERT_NE(chosen_provider, LOOM_LINK_MODULE_INDEX_INVALID_ORDINAL);
+    ASSERT_NE(wrong_provider, LOOM_LINK_MODULE_INDEX_INVALID_ORDINAL);
+    ASSERT_NE(partial_provider, LOOM_LINK_MODULE_INDEX_INVALID_ORDINAL);
+
+    loom_link_provider_binding_t bindings[] = {
+        {IREE_SV("chosen"), chosen_provider},
+    };
+    loom_link_provider_resolver_t resolver = {};
+    IREE_ASSERT_OK(loom_link_provider_resolver_prepare(
+        loom_link_module_index_provider_count(index.get()), bindings,
+        IREE_ARRAYSIZE(bindings), &resolver));
+    const iree_string_view_t explicit_roots[] = {
+        IREE_SV("@private_root"),
+    };
+    loom_link_plan_options_t options = {
+        /*.mode=*/LOOM_LINK_PLAN_SELECTIVE,
+        /*.root_symbols=*/
+        {
+            /*.count=*/IREE_ARRAYSIZE(explicit_roots),
+            /*.values=*/explicit_roots,
+        },
+        /*.include_input_exports=*/true,
+        /*.unresolved_policy=*/LOOM_LINK_PLAN_UNRESOLVED_ALLOW,
+    };
+    options.provider_resolver = &resolver;
+    loom_link_index_materialization_t materialization = {};
+    IREE_ASSERT_OK(
+        TryMaterializeWithOptions(index.get(), &options, &materialization));
+    Verify(materialization.module);
+
+    EXPECT_EQ(loom_link_plan_symbol_count(materialization.plan), 10u);
+    EXPECT_EQ(materialization.module->symbols.count, 7u);
+    const auto expect_selected = [&](iree_host_size_t provider,
+                                     iree_string_view_t name, bool expected) {
+      const loom_link_module_index_symbol_t* symbol =
+          FindIndexedProviderSymbol(index.get(), provider, name);
+      ASSERT_NE(symbol, nullptr);
+      EXPECT_EQ(
+          loom_link_plan_contains_symbol(materialization.plan, symbol->ordinal),
+          expected);
+    };
+    expect_selected(chosen_provider, IREE_SV("api"), true);
+    expect_selected(chosen_provider, IREE_SV("provided"), true);
+    expect_selected(chosen_provider, IREE_SV("unused"), false);
+    expect_selected(wrong_provider, IREE_SV("api"), false);
+    expect_selected(wrong_provider, IREE_SV("provided"), false);
+    expect_selected(wrong_provider, IREE_SV("wrong_only"), false);
+    expect_selected(partial_provider, IREE_SV("partial"), true);
+    expect_selected(partial_provider, IREE_SV("external"), true);
+    EXPECT_EQ(FindIndexedProviderSymbol(index.get(), partial_provider,
+                                        IREE_SV("partial_unused")),
+              nullptr);
+
+    const loom_symbol_t* entry =
+        FindSymbol(materialization.module, IREE_SV("entry"));
+    const loom_symbol_t* api =
+        FindSymbol(materialization.module, IREE_SV("api"));
+    const loom_symbol_t* private_root =
+        FindSymbol(materialization.module, IREE_SV("private_root"));
+    const loom_symbol_t* local =
+        FindSymbol(materialization.module, IREE_SV("local"));
+    const loom_symbol_t* provided =
+        FindSymbol(materialization.module, IREE_SV("provided"));
+    const loom_symbol_t* linked_partial =
+        FindSymbol(materialization.module, IREE_SV("partial"));
+    const loom_symbol_t* external =
+        FindSymbol(materialization.module, IREE_SV("external"));
+    ASSERT_NE(entry, nullptr);
+    ASSERT_NE(api, nullptr);
+    ASSERT_NE(private_root, nullptr);
+    ASSERT_NE(local, nullptr);
+    ASSERT_NE(provided, nullptr);
+    ASSERT_NE(linked_partial, nullptr);
+    ASSERT_NE(external, nullptr);
+    EXPECT_TRUE(iree_all_bits_set(
+        entry->flags, LOOM_SYMBOL_FLAG_PUBLIC | LOOM_SYMBOL_FLAG_RETAIN));
+    EXPECT_TRUE(iree_all_bits_set(
+        api->flags, LOOM_SYMBOL_FLAG_PUBLIC | LOOM_SYMBOL_FLAG_RETAIN));
+    EXPECT_TRUE(iree_any_bit_set(private_root->flags, LOOM_SYMBOL_FLAG_RETAIN));
+    EXPECT_FALSE(
+        iree_any_bit_set(private_root->flags, LOOM_SYMBOL_FLAG_PUBLIC));
+    EXPECT_FALSE(
+        iree_any_bit_set(local->flags | provided->flags | linked_partial->flags,
+                         LOOM_SYMBOL_FLAG_PUBLIC | LOOM_SYMBOL_FLAG_RETAIN));
+    EXPECT_TRUE(loom_symbol_definition_is_declaration(external->definition));
+    EXPECT_FALSE(iree_any_bit_set(
+        external->flags, LOOM_SYMBOL_FLAG_PUBLIC | LOOM_SYMBOL_FLAG_RETAIN));
+    EXPECT_EQ(FindSymbol(materialization.module, IREE_SV("unused")), nullptr);
+    EXPECT_EQ(FindSymbol(materialization.module, IREE_SV("wrong_only")),
+              nullptr);
+    EXPECT_EQ(FindSymbol(materialization.module, IREE_SV("partial_unused")),
+              nullptr);
+
+    const loom_func_like_t entry_function =
+        loom_func_like_cast(materialization.module, entry->defining_op);
+    const loom_func_like_t api_function =
+        loom_func_like_cast(materialization.module, api->defining_op);
+    ASSERT_TRUE(loom_func_like_isa(entry_function));
+    ASSERT_TRUE(loom_func_like_isa(api_function));
+    EXPECT_EQ(OptionalString(materialization.module,
+                             loom_func_like_export_symbol(entry_function)),
+              "request_entry");
+    EXPECT_EQ(OptionalString(materialization.module,
+                             loom_func_like_export_symbol(api_function)),
+              "request_api");
+
+    const loom_op_t* retained_import = nullptr;
+    const loom_op_t* op = nullptr;
+    loom_block_for_each_op(
+        loom_region_const_entry_block(materialization.module->body), op) {
+      if (!loom_module_import_isa(op)) continue;
+      ASSERT_EQ(retained_import, nullptr);
+      retained_import = op;
+    }
+    ASSERT_NE(retained_import, nullptr);
+    EXPECT_EQ(OptionalString(materialization.module,
+                             loom_module_import_provider(retained_import)),
+              "external-runtime");
+    const loom_symbol_ref_array_t import_symbols =
+        loom_module_import_symbols(retained_import);
+    ASSERT_EQ(import_symbols.count, 1u);
+    EXPECT_EQ(
+        import_symbols.values[0].symbol_id,
+        (loom_symbol_id_t)(external - materialization.module->symbols.entries));
+
+    const std::vector<LinkedSymbolShape> product_symbols =
+        CaptureSymbolShapes(materialization.module);
+    if (!reference_symbols.empty()) {
+      EXPECT_EQ(product_symbols, reference_symbols);
+    } else {
+      reference_symbols = product_symbols;
+    }
+
+    loom_link_index_materialization_deinitialize(&materialization);
+  }
 }
 
 }  // namespace
