@@ -22,13 +22,6 @@ package(
 
 _WASM_CHECK_VISIBILITY = ["//loom/src/loom/tools/loom-check:__pkg__"]
 
-# The pinned WASI SDK repository only publishes host tools for Linux and macOS.
-_WASI_SDK_HOST_COMPATIBLE = select({
-    "@platforms//os:linux": [],
-    "@platforms//os:macos": [],
-    "//conditions:default": ["@platforms//:incompatible"],
-})
-
 #===------------------------------------------------------------------------===#
 # Wasm emission
 #===------------------------------------------------------------------------===#
@@ -146,6 +139,5 @@ loom_check_test_suite(
     env = {
         "LOOM_WASM_LLVM_OBJDUMP": "$(rootpath @wasi_sdk//:llvm-objdump)",
     },
-    target_compatible_with = _WASI_SDK_HOST_COMPATIBLE,
     test_name_prefix_to_strip = "test/",
 )
