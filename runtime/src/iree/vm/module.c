@@ -608,10 +608,10 @@ IREE_API_EXPORT iree_status_t iree_vm_module_lookup_export(
       return iree_ok_status();
     }
   }
-  const iree_host_size_t display_size = iree_min(name.size, 128);
   return iree_make_status(IREE_STATUS_NOT_FOUND, "export '%.*s%s' not found",
-                          (int)display_size, name.data ? name.data : "",
-                          display_size == name.size ? "" : "...");
+                          (int)iree_min(name.size, 128),
+                          name.data ? name.data : "",
+                          name.size <= 128 ? "" : "...");
 }
 
 IREE_API_EXPORT iree_status_t iree_vm_module_query_import_group(

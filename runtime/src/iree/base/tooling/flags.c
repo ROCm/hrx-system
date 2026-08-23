@@ -582,7 +582,7 @@ static iree_status_t iree_flags_parse_file(iree_string_view_t file_path) {
       "while trying to parse flagfile");
 
   // Run through the file line-by-line.
-  int line_number = 0;
+  int line_number IREE_ATTRIBUTE_UNUSED = 0;
   iree_string_view_t contents =
       iree_make_string_view((const char*)file_contents->buffer.data,
                             file_contents->buffer.data_length);

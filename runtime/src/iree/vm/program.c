@@ -576,16 +576,16 @@ IREE_API_EXPORT iree_status_t iree_vm_program_create(
   iree_status_t status = iree_ok_status();
   for (iree_host_size_t i = 0; i < module_count && iree_status_is_ok(status);
        ++i) {
+    iree_vm_module_t* module = program->linked_modules[i].module;
     if (i != 0 && iree_string_view_equal(
                       program->linked_modules[i - 1].module->descriptor->name,
-                      program->linked_modules[i].module->descriptor->name)) {
-      const iree_string_view_t duplicate_name =
-          program->linked_modules[i].module->descriptor->name;
-      status = iree_make_status(IREE_STATUS_ALREADY_EXISTS,
-                                "program contains duplicate module name '%.*s'",
-                                (int)iree_min(duplicate_name.size, 128),
-                                duplicate_name.data);
-    } else if (program->linked_modules[i].module == modules.executable) {
+                      module->descriptor->name)) {
+      status =
+          iree_make_status(IREE_STATUS_ALREADY_EXISTS,
+                           "program contains duplicate module name '%.*s'",
+                           (int)iree_min(module->descriptor->name.size, 128),
+                           module->descriptor->name.data);
+    } else if (module == modules.executable) {
       program->executable_module_ordinal = (uint16_t)i;
     }
   }
