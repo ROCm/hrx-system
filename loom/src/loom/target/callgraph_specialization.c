@@ -13,6 +13,7 @@
 #include "loom/analysis/symbol_facts.h"
 #include "loom/analysis/symbol_references.h"
 #include "loom/error/error_catalog.h"
+#include "loom/ir/context.h"
 #include "loom/ir/module.h"
 #include "loom/ops/func_symbol_facts.h"
 #include "loom/ops/op_defs.h"
@@ -882,12 +883,16 @@ static iree_status_t loom_target_callgraph_retarget_call(
       (loom_target_callgraph_retarget_walk_t*)user_data;
   loom_target_callgraph_state_t* state = walk->state;
 
-  loom_symbol_ref_t nested_symbol_ref = loom_symbol_ref_null();
-  if (loom_op_defining_symbol_ref(state->module, op, &nested_symbol_ref)) {
+  const loom_op_vtable_t* vtable = loom_op_vtable(state->module, op);
+  if (loom_op_defining_symbol_id(state->module, op, vtable) !=
+      LOOM_SYMBOL_ID_INVALID) {
     *out_result = LOOM_WALK_SKIP;
     return iree_ok_status();
   }
-  loom_call_like_t call = loom_call_like_cast(state->module, op);
+  const loom_call_like_t call = {
+      .op = vtable && vtable->call_like ? op : NULL,
+      .vtable = vtable ? vtable->call_like : NULL,
+  };
   if (!loom_call_like_isa(call) ||
       loom_call_like_kind(call) != LOOM_CALL_LIKE_KIND_SEMANTIC) {
     return iree_ok_status();

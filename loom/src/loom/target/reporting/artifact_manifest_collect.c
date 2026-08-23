@@ -11,6 +11,7 @@
 #include <string.h>
 
 #include "loom/ir/attribute.h"
+#include "loom/ir/context.h"
 #include "loom/ops/low/kernel.h"
 #include "loom/ops/low/ops.h"
 #include "loom/ops/op_defs.h"
@@ -774,13 +775,12 @@ static iree_status_t loom_target_artifact_manifest_collect_globals(
       loom_region_const_entry_block(module->body);
   const loom_op_t* op = NULL;
   loom_block_for_each_op(module_block, op) {
-    loom_symbol_ref_t symbol_ref = loom_symbol_ref_null();
-    if (!loom_op_defining_symbol_ref(module, op, &symbol_ref)) {
-      continue;
-    }
-    if (!global_marks[symbol_ref.symbol_id]) continue;
+    const loom_symbol_id_t symbol_id =
+        loom_op_defining_symbol_id(module, op, loom_op_vtable(module, op));
+    if (symbol_id == LOOM_SYMBOL_ID_INVALID) continue;
+    if (!global_marks[symbol_id]) continue;
     const iree_string_view_t name = loom_target_artifact_manifest_module_string(
-        module, module->symbols.entries[symbol_ref.symbol_id].name_id);
+        module, module->symbols.entries[symbol_id].name_id);
     globals[global_index++] = (loom_target_artifact_manifest_global_t){
         .name = name,
         .source_name = name,

@@ -9,6 +9,7 @@
 #include "loom/analysis/symbol_facts.h"
 #include "loom/codegen/low/verify.h"
 #include "loom/error/error_catalog.h"
+#include "loom/ir/context.h"
 #include "loom/ir/module.h"
 #include "loom/ops/func_symbol_facts.h"
 #include "loom/ops/op_defs.h"
@@ -523,15 +524,14 @@ iree_status_t loom_target_entry_select_all_entries(
       loom_region_const_entry_block(module->body);
   const loom_op_t* op = NULL;
   loom_block_for_each_op(module_block, op) {
-    loom_symbol_ref_t symbol_ref = loom_symbol_ref_null();
-    if (!loom_op_defining_symbol_ref(module, op, &symbol_ref)) {
-      continue;
-    }
+    const loom_symbol_id_t symbol_id =
+        loom_op_defining_symbol_id(module, op, loom_op_vtable(module, op));
+    if (symbol_id == LOOM_SYMBOL_ID_INVALID) continue;
     bool compatible = false;
     loom_target_entry_t candidate = {0};
     IREE_RETURN_IF_ERROR(loom_target_entry_try_entry(
-        module, &fact_table, &function_versions, symbol_ref.symbol_id,
-        predicate, diagnostic_emitter, entry_kind, /*require_export=*/true,
+        module, &fact_table, &function_versions, symbol_id, predicate,
+        diagnostic_emitter, entry_kind, /*require_export=*/true,
         /*require_compatible=*/false, &compatible, &candidate));
     if (!compatible) {
       continue;

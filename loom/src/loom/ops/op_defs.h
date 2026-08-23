@@ -969,12 +969,12 @@ loom_op_semantics_t loom_dialect_semantics_lookup(
 const loom_region_descriptor_t* loom_op_vtable_region_descriptor(
     const loom_op_vtable_t* vtable, uint8_t region_index);
 
-// Returns the module-local symbol reference defined by |op|. Returns false for
-// non-symbol ops, malformed symbol attributes, cross-module refs, or refs
-// outside the module symbol table.
-bool loom_op_defining_symbol_ref(const loom_module_t* module,
-                                 const loom_op_t* op,
-                                 loom_symbol_ref_t* out_ref);
+// Returns the module-local symbol ID defined by |op| using its already-resolved
+// |vtable| metadata. Returns LOOM_SYMBOL_ID_INVALID for non-symbol ops,
+// cross-module refs, or refs outside the module symbol table.
+loom_symbol_id_t loom_op_defining_symbol_id(const loom_module_t* module,
+                                            const loom_op_t* op,
+                                            const loom_op_vtable_t* vtable);
 
 // Returns true when operand descriptors name independent operand segments
 // stored over the op's flat operand array.
