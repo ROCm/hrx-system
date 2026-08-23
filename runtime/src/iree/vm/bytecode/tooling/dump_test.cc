@@ -47,33 +47,8 @@ iree_status_t DumpImage(const std::vector<uint8_t>& image, StringSink* sink) {
       {AppendToString, sink}, iree_allocator_system());
 }
 
-uint8_t* FindSectionPayload(std::vector<uint8_t>* image,
-                            uint16_t section_type) {
-  auto* header =
-      reinterpret_cast<iree_vm_bytecode_v0_image_header_t*>(image->data());
-  auto* rows = reinterpret_cast<iree_vm_bytecode_v0_section_directory_row_t*>(
-      header + 1);
-  size_t offset = sizeof(*header) + header->section_count_u16 * sizeof(*rows);
-  for (uint16_t i = 0; i < header->section_count_u16; ++i) {
-    offset = (offset + IREE_VM_BYTECODE_SECTION_ALIGNMENT - 1) &
-             ~(IREE_VM_BYTECODE_SECTION_ALIGNMENT - 1);
-    if (rows[i].section_type_u16 == section_type) {
-      return image->data() + offset;
-    }
-    offset += static_cast<size_t>(rows[i].byte_length_u64);
-  }
-  return nullptr;
-}
-
 uint8_t* FindFirstInstruction(std::vector<uint8_t>* image) {
-  uint8_t* section =
-      FindSectionPayload(image, IREE_VM_BYTECODE_SECTION_FUNCTIONS);
-  if (!section) return nullptr;
-  const auto* header =
-      reinterpret_cast<const iree_vm_bytecode_v0_functions_header_t*>(section);
-  return section + sizeof(*header) +
-         header->function_count_u32 *
-             sizeof(iree_vm_bytecode_v0_function_row_t);
+  return FindFunctionImage(image, 0).bytecode;
 }
 
 TEST(VMBytecodeDumpTest, DumpsCompleteOwnershipModuleDeterministically) {

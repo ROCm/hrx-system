@@ -8,6 +8,7 @@ load("//build_tools/bazel:cmake.bzl", "iree_cmake_extra_content")
 load("//build_tools/bazel:generate.bzl", "iree_generated_files")
 load("//runtime/build_tools/bazel:cc.bzl", "iree_runtime_cc_library")
 load("//runtime/build_tools/bazel:cc_benchmark.bzl", "iree_runtime_cc_benchmark")
+load("//runtime/build_tools/bazel:cc_fuzz.bzl", "iree_runtime_cc_fuzz")
 load("//runtime/build_tools/bazel:cc_test.bzl", "iree_runtime_cc_test")
 
 package(
@@ -163,6 +164,23 @@ iree_runtime_cc_test(
         ":dump",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
+        "//runtime/src/iree/vm/bytecode/wire",
+    ],
+)
+
+iree_runtime_cc_fuzz(
+    name = "instruction_fuzz",
+    srcs = [
+        "instruction_fuzz.cc",
+        "module_test_data.cc",
+        "module_test_data.h",
+    ],
+    deps = [
+        ":bytecode",
+        ":dump",
+        ":inspection",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/vm",
         "//runtime/src/iree/vm/bytecode/wire",
     ],
 )

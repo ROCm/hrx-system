@@ -10,7 +10,24 @@
 #include <cstdint>
 #include <vector>
 
+#include "iree/vm/bytecode/wire/module_format.h"
+
 namespace iree::vm::bytecode::testing {
+
+// Mutable view into one function in a known-good test image.
+struct MutableFunctionImage {
+  // Mutable function-table row.
+  iree_vm_bytecode_v0_function_row_t* row;
+  // First instruction byte for |row|.
+  uint8_t* bytecode;
+};
+
+// Finds one section payload in |image| or returns null when absent.
+uint8_t* FindSectionPayload(std::vector<uint8_t>* image, uint16_t section_type);
+
+// Finds function |ordinal| in |image| or returns an empty view when absent.
+MutableFunctionImage FindFunctionImage(std::vector<uint8_t>* image,
+                                       uint32_t ordinal);
 
 // Builds the exact B0 ownership and reflection fixture.
 std::vector<uint8_t> BuildOwnershipModuleImage();

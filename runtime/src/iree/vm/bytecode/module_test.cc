@@ -67,46 +67,6 @@ std::string_view ToStringView(iree_string_view_t value) {
   return std::string_view(value.data, value.size);
 }
 
-uint8_t* FindSectionPayload(std::vector<uint8_t>* image,
-                            uint16_t section_type) {
-  auto* header =
-      reinterpret_cast<iree_vm_bytecode_v0_image_header_t*>(image->data());
-  auto* rows = reinterpret_cast<iree_vm_bytecode_v0_section_directory_row_t*>(
-      header + 1);
-  size_t offset = sizeof(*header) + header->section_count_u16 * sizeof(*rows);
-  for (uint16_t i = 0; i < header->section_count_u16; ++i) {
-    offset = (offset + IREE_VM_BYTECODE_SECTION_ALIGNMENT - 1) &
-             ~(IREE_VM_BYTECODE_SECTION_ALIGNMENT - 1);
-    if (rows[i].section_type_u16 == section_type) {
-      return image->data() + offset;
-    }
-    offset += static_cast<size_t>(rows[i].byte_length_u64);
-  }
-  return nullptr;
-}
-
-struct FunctionImageView {
-  // Mutable function row in the Functions section.
-  iree_vm_bytecode_v0_function_row_t* row;
-  // First instruction byte for |row|.
-  uint8_t* bytecode;
-};
-
-FunctionImageView FindFunctionImage(std::vector<uint8_t>* image,
-                                    uint32_t ordinal) {
-  uint8_t* section =
-      FindSectionPayload(image, IREE_VM_BYTECODE_SECTION_FUNCTIONS);
-  if (section == nullptr) return {};
-  auto* header =
-      reinterpret_cast<iree_vm_bytecode_v0_functions_header_t*>(section);
-  if (ordinal >= header->function_count_u32) return {};
-  auto* rows = reinterpret_cast<iree_vm_bytecode_v0_function_row_t*>(
-      section + sizeof(*header));
-  uint8_t* bytecode_data =
-      reinterpret_cast<uint8_t*>(rows + header->function_count_u32);
-  return {&rows[ordinal], bytecode_data + rows[ordinal].bytecode_offset_u32};
-}
-
 TEST(VMBytecodeModuleTest, RejectsBeforeTakingImageStorageOwnership) {
   std::vector<uint8_t> image = BuildOwnershipModuleImage();
   uint8_t* functions =
@@ -433,7 +393,7 @@ TEST(VMBytecodeModuleTest, PreservesIntegerSourcesAcrossDestinationAliasing) {
                           uint8_t rhs_or_zero, int32_t argument,
                           int32_t expected) {
     std::vector<uint8_t> image = BuildOwnershipModuleImage();
-    const FunctionImageView function = FindFunctionImage(&image, 1);
+    const MutableFunctionImage function = FindFunctionImage(&image, 1);
     ASSERT_NE(function.row, nullptr);
     constexpr uint32_t kArithmeticInstructionOffset = 8;
     function.bytecode[kArithmeticInstructionOffset + 0] = opcode;
@@ -552,7 +512,7 @@ TEST(VMBytecodeModuleTest, RejectsMalformedScalarStateInstructions) {
   };
   for (const ByteMutation& mutation : mutations) {
     std::vector<uint8_t> image = BuildScalarStateModuleImage();
-    const FunctionImageView function =
+    const MutableFunctionImage function =
         FindFunctionImage(&image, mutation.function_ordinal);
     ASSERT_NE(function.row, nullptr);
     ASSERT_LT(mutation.byte_offset, function.row->bytecode_length_u32);
@@ -580,7 +540,7 @@ TEST(VMBytecodeModuleTest, RejectsMalformedScalarStateInstructions) {
   };
   for (const ValueFormatMutation& mutation : value_format_mutations) {
     std::vector<uint8_t> image = BuildScalarStateModuleImage();
-    const FunctionImageView function = FindFunctionImage(&image, 1);
+    const MutableFunctionImage function = FindFunctionImage(&image, 1);
     ASSERT_NE(function.row, nullptr);
     constexpr uint32_t kFirstBodyInstructionOffset = 4;
     function.bytecode[kFirstBodyInstructionOffset] = mutation.opcode;
