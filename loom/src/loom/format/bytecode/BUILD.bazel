@@ -225,9 +225,9 @@ loom_cc_library(
     hdrs = ["writer.h"],
     deps = [
         ":format",
-        ":varint",
         "//loom/src/loom/analysis:symbol_references",
         "//loom/src/loom/format:low_repr",
+        "//loom/src/loom/format/bytecode/writer:encoder",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:op_defs",
         "//loom/src/loom/ops/module",
