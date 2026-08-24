@@ -426,22 +426,31 @@ template.def<@demo.contract> @provider(%x: i32) -> (i32) {
     ASSERT_NE(provider, nullptr);
     ASSERT_NE(family_declaration, nullptr);
     auto has_dependency = [&](const loom_link_module_index_symbol_t* source,
-                              const loom_link_module_index_symbol_t* target) {
+                              const loom_link_module_index_symbol_t* target,
+                              uint8_t expected_source_root) {
       for (iree_host_size_t i = 0; i < source->dependencies.count; ++i) {
-        if (indexed_module->dependencies
-                .values[source->dependencies.first + i] ==
+        const iree_host_size_t dependency_index =
+            source->dependencies.first + i;
+        if (indexed_module->dependencies.values[dependency_index] ==
             target->module_symbol_ordinal) {
+          EXPECT_EQ(indexed_module->dependencies
+                        .source_root_region_indices_plus_one[dependency_index],
+                    expected_source_root);
           return true;
         }
       }
       return false;
     };
     ASSERT_EQ(entry->dependencies.count, 2u);
-    EXPECT_TRUE(has_dependency(entry, helper));
-    EXPECT_TRUE(has_dependency(entry, family_declaration));
+    EXPECT_TRUE(has_dependency(entry, helper, 1u));
+    EXPECT_TRUE(has_dependency(entry, family_declaration, 1u));
     ASSERT_EQ(provider->dependencies.count, 1u);
-    EXPECT_TRUE(has_dependency(provider, family_declaration));
+    EXPECT_TRUE(has_dependency(provider, family_declaration, 0u));
     ASSERT_EQ(entry->template_demands.count, 1u);
+    EXPECT_EQ(
+        indexed_module->template_demands
+            .source_root_region_indices_plus_one[entry->template_demands.first],
+        1u);
 
     ASSERT_EQ(loom_link_module_index_template_family_count(index), 1u);
     const loom_link_template_family_ordinal_t family_ordinal =
@@ -460,6 +469,79 @@ template.def<@demo.contract> @provider(%x: i32) -> (i32) {
     EXPECT_EQ(family->providers.last_symbol_ordinal, provider->ordinal);
     EXPECT_EQ(provider->next.template_provider_ordinal,
               LOOM_LINK_MODULE_INDEX_INVALID_ORDINAL);
+  };
+
+  loom_link_module_index_add_options_t options = {
+      /*.provider_name=*/IREE_SV("library"),
+      /*.role=*/LOOM_LINK_PROVIDER_ROLE_LIBRARY,
+  };
+  IndexPtr materialized_index = CreateIndex();
+  IREE_ASSERT_OK(loom_link_module_index_add_materialized(
+      materialized_index.get(), module, &options,
+      /*out_provider_ordinal=*/nullptr));
+  verify_index(materialized_index.get());
+
+  IndexPtr bytecode_index = CreateIndex();
+  IREE_ASSERT_OK(loom_link_module_index_add_bytecode(
+      bytecode_index.get(),
+      iree_make_const_byte_span(bytes.data(), bytes.size()),
+      IREE_SV("library.loombc"), /*index_options=*/nullptr, &options,
+      /*out_provider_ordinal=*/nullptr));
+  verify_index(bytecode_index.get());
+}
+
+TEST_F(ModuleIndexTest, ProjectsMultiRootReferenceOriginsAcrossProviders) {
+  loom_module_t* module = Parse(IREE_SV(R"(
+test.record @config_dependency
+test.record @implementation_dependency
+
+test.split_func @split_root() {
+  test.symbol_array_attrs [@config_dependency] using []
+  test.yield
+} launch {
+  test.symbol_array_attrs [@implementation_dependency] using []
+  test.yield
+}
+)"));
+  std::vector<uint8_t> bytes = WriteModule(module);
+
+  auto verify_index = [&](const loom_link_module_index_t* index) {
+    const loom_link_module_index_module_t* indexed_module =
+        loom_link_module_index_module_at(index, 0);
+    ASSERT_NE(indexed_module, nullptr);
+    const loom_link_module_index_symbol_t* split_root =
+        loom_link_module_index_lookup_private(index, indexed_module,
+                                              IREE_SV("split_root"));
+    const loom_link_module_index_symbol_t* config_dependency =
+        loom_link_module_index_lookup_private(index, indexed_module,
+                                              IREE_SV("config_dependency"));
+    const loom_link_module_index_symbol_t* implementation_dependency =
+        loom_link_module_index_lookup_private(
+            index, indexed_module, IREE_SV("implementation_dependency"));
+    ASSERT_NE(split_root, nullptr);
+    ASSERT_NE(config_dependency, nullptr);
+    ASSERT_NE(implementation_dependency, nullptr);
+    ASSERT_EQ(split_root->dependencies.count, 2u);
+
+    bool found_config_dependency = false;
+    bool found_implementation_dependency = false;
+    for (uint32_t i = 0; i < split_root->dependencies.count; ++i) {
+      const uint32_t occurrence_index = split_root->dependencies.first + i;
+      const uint32_t target =
+          indexed_module->dependencies.values[occurrence_index];
+      const uint8_t origin =
+          indexed_module->dependencies
+              .source_root_region_indices_plus_one[occurrence_index];
+      if (target == config_dependency->module_symbol_ordinal) {
+        EXPECT_EQ(origin, 1u);
+        found_config_dependency = true;
+      } else if (target == implementation_dependency->module_symbol_ordinal) {
+        EXPECT_EQ(origin, 2u);
+        found_implementation_dependency = true;
+      }
+    }
+    EXPECT_TRUE(found_config_dependency);
+    EXPECT_TRUE(found_implementation_dependency);
   };
 
   loom_link_module_index_add_options_t options = {

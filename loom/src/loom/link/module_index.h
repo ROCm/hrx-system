@@ -168,6 +168,9 @@ typedef struct loom_link_module_index_module_t {
     // Module-local target symbol ordinals in deterministic occurrence order.
     // Targets may repeat within a source row.
     const uint32_t* values;
+    // Source root region indices plus one parallel to values. Zero identifies
+    // a source symbol contract or a module-root occurrence.
+    const uint8_t* source_root_region_indices_plus_one;
   } dependencies;
   // Abstract template-family demand occurrences owned by this module.
   struct {
@@ -176,6 +179,8 @@ typedef struct loom_link_module_index_module_t {
     // Dense index family ordinals in deterministic demand order. Ordinals may
     // repeat within a source row.
     const loom_link_template_family_ordinal_t* values;
+    // Source root region indices plus one parallel to values.
+    const uint8_t* source_root_region_indices_plus_one;
   } template_demands;
   // Compile-time provider imports and their symbol-to-import projection.
   struct {

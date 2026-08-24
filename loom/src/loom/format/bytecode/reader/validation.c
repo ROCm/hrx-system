@@ -392,12 +392,12 @@ static inline iree_status_t loom_bytecode_reader_begin_symbol_references(
   iree_host_size_t minimum_encoded_bytes = 0;
   if (!iree_host_size_checked_mul_add(1, (iree_host_size_t)symbol_count, 2,
                                       &minimum_encoded_bytes) ||
-      !iree_host_size_checked_add(minimum_encoded_bytes,
-                                  (iree_host_size_t)dependency_count,
-                                  &minimum_encoded_bytes) ||
-      !iree_host_size_checked_add(minimum_encoded_bytes,
-                                  (iree_host_size_t)template_demand_count,
-                                  &minimum_encoded_bytes)) {
+      !iree_host_size_checked_mul_add(minimum_encoded_bytes,
+                                      (iree_host_size_t)dependency_count, 2,
+                                      &minimum_encoded_bytes) ||
+      !iree_host_size_checked_mul_add(minimum_encoded_bytes,
+                                      (iree_host_size_t)template_demand_count,
+                                      2, &minimum_encoded_bytes)) {
     return loom_bytecode_reader_emit_invalid_field(
         &reader->decoder, IREE_SV("SYMBOL_REFERENCES"), IREE_SV("header"), 0,
         IREE_SV("record_counts"), table.header_offset,
@@ -422,7 +422,21 @@ static inline iree_status_t loom_bytecode_reader_decode_dependency(
     loom_bytecode_module_reader_t* reader,
     loom_bytecode_symbol_reference_table_t* table,
     iree_string_view_t record_name, iree_host_size_t record_index,
+    uint8_t source_root_region_count,
+    uint8_t* out_source_root_region_index_plus_one,
     uint32_t* out_symbol_index) {
+  const uint64_t source_root_region_offset =
+      loom_bytecode_reader_cursor_absolute_position(&table->cursor);
+  uint64_t source_root_region_index_plus_one = 0;
+  IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_uvarint(
+      &reader->decoder, &table->cursor, &source_root_region_index_plus_one));
+  if (source_root_region_index_plus_one > source_root_region_count) {
+    return loom_bytecode_reader_emit_invalid_field(
+        &reader->decoder, IREE_SV("SYMBOL_REFERENCES"), record_name,
+        record_index, IREE_SV("source_root_region_index_plus_one"),
+        source_root_region_offset,
+        IREE_SV("reference_source_root_region_index_is_out_of_range"));
+  }
   const uint64_t dependency_offset =
       loom_bytecode_reader_cursor_absolute_position(&table->cursor);
   uint64_t dependency = 0;
@@ -434,6 +448,8 @@ static inline iree_status_t loom_bytecode_reader_decode_dependency(
         record_index, IREE_SV("target_symbol_index"), dependency_offset,
         IREE_SV("dependency_symbol_index_is_out_of_range"));
   }
+  *out_source_root_region_index_plus_one =
+      (uint8_t)source_root_region_index_plus_one;
   *out_symbol_index = (uint32_t)dependency;
   return iree_ok_status();
 }
@@ -441,10 +457,23 @@ static inline iree_status_t loom_bytecode_reader_decode_dependency(
 static inline iree_status_t loom_bytecode_reader_decode_template_demand(
     loom_bytecode_module_reader_t* reader,
     loom_bytecode_symbol_reference_table_t* table,
-    iree_host_size_t demand_index, uint32_t* out_family_symbol_ordinal) {
+    iree_host_size_t demand_index, uint8_t source_root_region_count,
+    uint8_t* out_source_root_region_index_plus_one,
+    uint32_t* out_family_symbol_ordinal) {
   return loom_bytecode_reader_decode_dependency(
       reader, table, IREE_SV("template_demand"), demand_index,
+      source_root_region_count, out_source_root_region_index_plus_one,
       out_family_symbol_ordinal);
+}
+
+static uint8_t loom_bytecode_reader_symbol_root_region_count(
+    const loom_bytecode_module_reader_t* reader,
+    iree_host_size_t symbol_index) {
+  const uint32_t defining_op_ordinal =
+      reader->view.symbols.defining_op_ordinals[symbol_index];
+  if (defining_op_ordinal == UINT32_MAX) return 0;
+  IREE_ASSERT_LT(defining_op_ordinal, reader->view.ops.count);
+  return reader->view.ops.values[defining_op_ordinal]->region_count;
 }
 
 static inline iree_status_t loom_bytecode_reader_finish_symbol_references(
@@ -491,14 +520,19 @@ static iree_status_t loom_bytecode_reader_read_symbol_references(
   iree_host_size_t dependency_index = 0;
   for (iree_host_size_t i = 0; i < (iree_host_size_t)module_dependency_count;
        ++i, ++dependency_index) {
+    uint8_t source_root_region_index_plus_one = 0;
     uint32_t dependency = 0;
     IREE_RETURN_IF_ERROR(loom_bytecode_reader_decode_dependency(
-        reader, &table, IREE_SV("module_dependency"), i, &dependency));
+        reader, &table, IREE_SV("module_dependency"), i,
+        /*source_root_region_count=*/0, &source_root_region_index_plus_one,
+        &dependency));
   }
 
   iree_host_size_t template_demand_index = 0;
   for (iree_host_size_t symbol_index = 0; symbol_index < table.symbol_count;
        ++symbol_index) {
+    const uint8_t source_root_region_count =
+        loom_bytecode_reader_symbol_root_region_count(reader, symbol_index);
     const uint64_t dependency_count_offset =
         loom_bytecode_reader_cursor_absolute_position(&table.cursor);
     uint64_t dependency_count = 0;
@@ -512,9 +546,11 @@ static iree_status_t loom_bytecode_reader_read_symbol_references(
     }
     for (iree_host_size_t i = 0; i < (iree_host_size_t)dependency_count;
          ++i, ++dependency_index) {
+      uint8_t source_root_region_index_plus_one = 0;
       uint32_t dependency = 0;
       IREE_RETURN_IF_ERROR(loom_bytecode_reader_decode_dependency(
-          reader, &table, IREE_SV("dependency"), i, &dependency));
+          reader, &table, IREE_SV("dependency"), i, source_root_region_count,
+          &source_root_region_index_plus_one, &dependency));
     }
 
     const uint64_t template_demand_count_offset =
@@ -532,9 +568,11 @@ static iree_status_t loom_bytecode_reader_read_symbol_references(
     }
     for (iree_host_size_t i = 0; i < (iree_host_size_t)template_demand_count;
          ++i, ++template_demand_index) {
+      uint8_t source_root_region_index_plus_one = 0;
       uint32_t family_symbol_ordinal = 0;
       IREE_RETURN_IF_ERROR(loom_bytecode_reader_decode_template_demand(
-          reader, &table, template_demand_index, &family_symbol_ordinal));
+          reader, &table, template_demand_index, source_root_region_count,
+          &source_root_region_index_plus_one, &family_symbol_ordinal));
     }
   }
 
@@ -1060,12 +1098,21 @@ static iree_status_t loom_bytecode_reader_index_symbol_references(
         retained_arena, table.dependency_count,
         sizeof(*metadata->dependency_symbol_indices),
         (void**)&metadata->dependency_symbol_indices));
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        retained_arena, table.dependency_count,
+        sizeof(*metadata->dependency_source_root_region_indices_plus_one),
+        (void**)&metadata->dependency_source_root_region_indices_plus_one));
   }
   if (table.template_demand_count > 0) {
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
         retained_arena, table.template_demand_count,
         sizeof(*metadata->template_demand_family_symbol_ordinals),
         (void**)&metadata->template_demand_family_symbol_ordinals));
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        retained_arena, table.template_demand_count,
+        sizeof(*metadata->template_demand_source_root_region_indices_plus_one),
+        (void**)&metadata
+            ->template_demand_source_root_region_indices_plus_one));
   }
 
   const uint64_t module_dependency_count_offset =
@@ -1086,12 +1133,17 @@ static iree_status_t loom_bytecode_reader_index_symbol_references(
        ++i, ++dependency_index) {
     IREE_RETURN_IF_ERROR(loom_bytecode_reader_decode_dependency(
         reader, &table, IREE_SV("module_dependency"), i,
+        /*source_root_region_count=*/0,
+        &metadata
+             ->dependency_source_root_region_indices_plus_one[dependency_index],
         &metadata->dependency_symbol_indices[dependency_index]));
   }
 
   iree_host_size_t template_demand_index = 0;
   for (iree_host_size_t symbol_index = 0; symbol_index < table.symbol_count;
        ++symbol_index) {
+    const uint8_t source_root_region_count =
+        loom_bytecode_reader_symbol_root_region_count(reader, symbol_index);
     const uint64_t dependency_count_offset =
         loom_bytecode_reader_cursor_absolute_position(&table.cursor);
     uint64_t dependency_count = 0;
@@ -1110,7 +1162,9 @@ static iree_status_t loom_bytecode_reader_index_symbol_references(
     for (iree_host_size_t i = 0; i < (iree_host_size_t)dependency_count;
          ++i, ++dependency_index) {
       IREE_RETURN_IF_ERROR(loom_bytecode_reader_decode_dependency(
-          reader, &table, IREE_SV("dependency"), i,
+          reader, &table, IREE_SV("dependency"), i, source_root_region_count,
+          &metadata->dependency_source_root_region_indices_plus_one
+               [dependency_index],
           &metadata->dependency_symbol_indices[dependency_index]));
     }
 
@@ -1132,7 +1186,9 @@ static iree_status_t loom_bytecode_reader_index_symbol_references(
     for (iree_host_size_t i = 0; i < (iree_host_size_t)template_demand_count;
          ++i, ++template_demand_index) {
       IREE_RETURN_IF_ERROR(loom_bytecode_reader_decode_template_demand(
-          reader, &table, template_demand_index,
+          reader, &table, template_demand_index, source_root_region_count,
+          &metadata->template_demand_source_root_region_indices_plus_one
+               [template_demand_index],
           &metadata->template_demand_family_symbol_ordinals
                [template_demand_index]));
     }

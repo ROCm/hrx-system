@@ -62,7 +62,7 @@
 //
 //   offset  size  field
 //   0       4     magic: "LOOM" (0x4C 0x4F 0x4F 0x4D)
-//   4       1     format_version (currently 30)
+//   4       1     format_version (LOOM_BYTECODE_FORMAT_VERSION)
 //   5       1     location_mode (see loom_bytecode_location_mode_t)
 //   6       2     module_count
 //   8       4     file_string_pool_length (bytes)
@@ -85,7 +85,7 @@ extern "C" {
 
 #define LOOM_BYTECODE_MAGIC "LOOM"
 #define LOOM_BYTECODE_MAGIC_LENGTH 4
-#define LOOM_BYTECODE_FORMAT_VERSION 30
+#define LOOM_BYTECODE_FORMAT_VERSION 31
 
 #define LOOM_BYTECODE_SOURCE_TRIVIA_LEADING_BLANK_LINE (1u << 0)
 #define LOOM_BYTECODE_SOURCE_TRIVIA_COMMENT_COUNT_SHIFT 1
@@ -721,13 +721,13 @@ typedef enum loom_bytecode_section_kind_e {
 // ==========================================================================
 //
 // Canonical dependency metadata used to plan a selected symbol closure without
-// reading IR bodies. Dependency targets are direct SYMBOLS ordinals. Abstract
-// provider demands are STRINGS IDs naming template.apply contract keys.
+// reading IR bodies. Dependency targets and abstract provider demands are
+// direct SYMBOLS ordinals.
 //
 // Availability-only references, including module.import anchors, are excluded.
 // Those remain represented solely by PROVIDER_IMPORTS. Rows preserve every
 // dependency occurrence and contract demand in deterministic analysis order;
-// repeated targets and keys are valid. Closure planners use dense selection
+// repeated targets and families are valid. Closure planners use dense selection
 // bitmaps to coalesce repeated work while traversing only reached rows.
 //
 // The module dependency row contains references owned by module-level records,
@@ -741,14 +741,17 @@ typedef enum loom_bytecode_section_kind_e {
 //   [total_template_demand_count: varint]
 //   [module_dependency_count: varint]
 //   For each module dependency:
+//     [source_root_region_index_plus_one: varint] (must be zero)
 //     [target_symbol_index: varint]
 //   For each symbol in SYMBOLS ordinal order:
 //     [dependency_count: varint]
 //     For each dependency:
+//       [source_root_region_index_plus_one: varint]
 //       [target_symbol_index: varint]
 //     [template_demand_count: varint]
 //     For each abstract provider demand:
-//       [contract_string_id: varint]
+//       [source_root_region_index_plus_one: varint]
+//       [family_symbol_index: varint]
 
 // ==========================================================================
 // IR section
