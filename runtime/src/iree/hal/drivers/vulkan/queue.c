@@ -3429,16 +3429,8 @@ static void iree_hal_vulkan_queue_profile_record_device_tick_range(
   if (!clock_alignment) return;
 
   iree_slim_mutex_lock(&clock_alignment->mutex);
-  if (clock_alignment->has_event_ticks) {
-    clock_alignment->minimum_event_tick =
-        iree_min(clock_alignment->minimum_event_tick, start_tick);
-    clock_alignment->maximum_event_tick =
-        iree_max(clock_alignment->maximum_event_tick, end_tick);
-  } else {
-    clock_alignment->minimum_event_tick = start_tick;
-    clock_alignment->maximum_event_tick = end_tick;
-    clock_alignment->has_event_ticks = true;
-  }
+  iree_hal_profile_clock_alignment_record_event_range(&clock_alignment->state,
+                                                      start_tick, end_tick);
   iree_slim_mutex_unlock(&clock_alignment->mutex);
 }
 
@@ -3458,6 +3450,13 @@ static iree_status_t iree_hal_vulkan_queue_profile_read_native_timestamps(
     return iree_status_from_vk_result(__FILE__, __LINE__, result,
                                       "vkGetQueryPoolResults");
   }
+
+  // Aggregate the submission's timestamp envelope locally. Profiling batches
+  // may contain many dispatches, and publishing once avoids serializing every
+  // event on the logical-device clock-alignment mutex.
+  uint64_t minimum_event_tick = UINT64_MAX;
+  uint64_t maximum_event_tick = 0;
+  bool has_event_ticks = false;
   if (submission->profile.queue_start_query !=
       IREE_HAL_VULKAN_PROFILE_QUERY_ABSENT) {
     const uint64_t start_tick =
@@ -3469,8 +3468,9 @@ static iree_status_t iree_hal_vulkan_queue_profile_read_native_timestamps(
           IREE_STATUS_DATA_LOSS,
           "Vulkan queue device profiling timestamp range is not monotonic");
     }
-    iree_hal_vulkan_queue_profile_record_device_tick_range(queue, start_tick,
-                                                           end_tick);
+    minimum_event_tick = start_tick;
+    maximum_event_tick = end_tick;
+    has_event_ticks = true;
   }
   for (uint32_t i = 0; i < submission->profile.dispatch_query_count; ++i) {
     const uint32_t query_index =
@@ -3482,8 +3482,13 @@ static iree_status_t iree_hal_vulkan_queue_profile_read_native_timestamps(
           IREE_STATUS_DATA_LOSS,
           "Vulkan dispatch profiling timestamp range is not monotonic");
     }
-    iree_hal_vulkan_queue_profile_record_device_tick_range(queue, start_tick,
-                                                           end_tick);
+    minimum_event_tick = iree_min(minimum_event_tick, start_tick);
+    maximum_event_tick = iree_max(maximum_event_tick, end_tick);
+    has_event_ticks = true;
+  }
+  if (has_event_ticks) {
+    iree_hal_vulkan_queue_profile_record_device_tick_range(
+        queue, minimum_event_tick, maximum_event_tick);
   }
   return iree_ok_status();
 }
