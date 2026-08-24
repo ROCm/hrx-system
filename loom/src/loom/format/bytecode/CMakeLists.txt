@@ -261,6 +261,7 @@ loom_cc_library(
     iree::base::internal::arena
     iree::io::stream
     loom::analysis::symbol_references
+    loom::format::bytecode::writer::attribute
     loom::format::bytecode::writer::catalog
     loom::format::bytecode::writer::encoder
     loom::format::bytecode::writer::numbering

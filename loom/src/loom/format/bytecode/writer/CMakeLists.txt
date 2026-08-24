@@ -11,6 +11,20 @@ iree_add_all_subdirs()
 
 loom_cc_library(
   NAME
+    attribute
+  HDRS
+    "attribute.h"
+  SRCS
+    "attribute.c"
+  DEPS
+    ::encoder
+    ::numbering
+    iree::base
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
     catalog
   HDRS
     "catalog.h"
