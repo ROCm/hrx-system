@@ -2168,11 +2168,12 @@ static iree_status_t iree_hal_vulkan_allocator_import_buffer(
   iree_hal_buffer_params_t compat_params = *params;
   iree_hal_vulkan_allocator_normalize_host_allocation_import_params(
       &compat_params);
+  iree_hal_buffer_params_t query_params = compat_params;
   iree_hal_buffer_compatibility_t compatibility =
       IREE_HAL_BUFFER_COMPATIBILITY_NONE;
   if (iree_status_is_ok(status)) {
     compatibility = iree_hal_vulkan_allocator_query_buffer_compatibility(
-        base_allocator, &compat_params, &allocation_size);
+        base_allocator, &query_params, &allocation_size);
     if (!iree_all_bits_set(compatibility,
                            IREE_HAL_BUFFER_COMPATIBILITY_IMPORTABLE)) {
 #if IREE_STATUS_MODE
@@ -2244,7 +2245,10 @@ static iree_status_t iree_hal_vulkan_allocator_import_buffer(
     status = iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
         "allocator cannot find a Vulkan memory type compatible with the "
-        "imported host pointer");
+        "imported host pointer; buffer memory type bits=0x%08" PRIx32
+        ", host pointer memory type bits=0x%08" PRIx32,
+        memory_requirements.memoryTypeBits,
+        host_pointer_properties.memoryTypeBits);
   }
 
   VkDeviceMemory device_memory = VK_NULL_HANDLE;
