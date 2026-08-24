@@ -223,6 +223,22 @@ iree_runtime_cc_test(
 )
 
 iree_runtime_cc_test(
+    name = "module_call_test",
+    srcs = [
+        "module_call_test.cc",
+        "module_test_data.cc",
+        "module_test_data.h",
+    ],
+    deps = [
+        ":bytecode",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+        "//runtime/src/iree/vm",
+        "//runtime/src/iree/vm/bytecode/wire",
+    ],
+)
+
+iree_runtime_cc_test(
     name = "dump_test",
     srcs = [
         "module_test_data.cc",

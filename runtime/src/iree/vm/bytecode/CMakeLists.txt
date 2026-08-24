@@ -189,6 +189,21 @@ iree_cc_test(
 
 iree_cc_test(
   NAME
+    module_call_test
+  SRCS
+    "module_call_test.cc"
+    "module_test_data.cc"
+    "module_test_data.h"
+  DEPS
+    ::bytecode
+    iree::testing::gtest
+    iree::testing::gtest_main
+    iree::vm
+    iree::vm::bytecode::wire
+)
+
+iree_cc_test(
+  NAME
     dump_test
   SRCS
     "module_test_data.cc"
