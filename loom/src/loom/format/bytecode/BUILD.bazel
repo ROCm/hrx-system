@@ -226,12 +226,12 @@ loom_cc_library(
     deps = [
         ":format",
         "//loom/src/loom/format:low_repr",
-        "//loom/src/loom/format/bytecode/writer:attribute",
         "//loom/src/loom/format/bytecode/writer:body",
         "//loom/src/loom/format/bytecode/writer:catalog",
         "//loom/src/loom/format/bytecode/writer:encoder",
         "//loom/src/loom/format/bytecode/writer:numbering",
         "//loom/src/loom/format/bytecode/writer:symbol",
+        "//loom/src/loom/format/bytecode/writer:tables",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:op_defs",
         "//runtime/src/iree/base",

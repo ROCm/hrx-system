@@ -111,4 +111,21 @@ loom_cc_library(
   PUBLIC
 )
 
+loom_cc_library(
+  NAME
+    tables
+  HDRS
+    "tables.h"
+  SRCS
+    "tables.c"
+  DEPS
+    ::attribute
+    ::encoder
+    ::numbering
+    iree::base
+    loom::ir
+    loom::ops::op_defs
+  PUBLIC
+)
+
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###
