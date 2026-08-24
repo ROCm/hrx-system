@@ -2759,6 +2759,14 @@ CUDAAPI CUresult cuStreamWaitEvent(CUstream hStream, CUevent hEvent,
                                    unsigned int Flags) {
   IREE_TRACE_ZONE_BEGIN(z0);
 
+  // The wait forwards this flag as its answer to whether a capture-time wait
+  // becomes an explicit node, so an unrecognized value would silently pass for
+  // CU_EVENT_WAIT_DEFAULT and record the wrong graph.
+  if (Flags != CU_EVENT_WAIT_DEFAULT && Flags != CU_EVENT_WAIT_EXTERNAL) {
+    IREE_TRACE_ZONE_END(z0);
+    return CUDA_ERROR_INVALID_VALUE;
+  }
+
   // Resolve NULL stream to default stream.
   if (!hStream) {
     iree_hal_streaming_context_t* context =
@@ -2772,7 +2780,7 @@ CUDAAPI CUresult cuStreamWaitEvent(CUstream hStream, CUevent hEvent,
 
   iree_status_t status = iree_hal_streaming_stream_wait_event(
       (iree_hal_streaming_stream_t*)hStream,
-      (iree_hal_streaming_event_t*)hEvent);
+      (iree_hal_streaming_event_t*)hEvent, Flags == CU_EVENT_WAIT_EXTERNAL);
   CUresult result = iree_status_to_cu_result(status);
   IREE_TRACE_ZONE_END(z0);
   return result;
