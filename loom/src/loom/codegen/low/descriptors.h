@@ -435,6 +435,8 @@ typedef uint16_t loom_low_descriptor_flags_t;
 #define LOOM_LOW_DESCRIPTOR_FLAG_EARLY_CLOBBER ((uint16_t)1u << 5)
 // Descriptor ends in a variadic packet operand row.
 #define LOOM_LOW_DESCRIPTOR_FLAG_VARIADIC_OPERANDS ((uint16_t)1u << 6)
+// Descriptor results carry a distinct semantic identity per execution.
+#define LOOM_LOW_DESCRIPTOR_FLAG_UNIQUE_IDENTITY ((uint16_t)1u << 7)
 
 // Target-neutral semantic classes attached to generated low descriptors.
 // Multiple classes may be present when a packet contributes to several

@@ -1168,6 +1168,14 @@ TEST(LowDescriptorsTest, RejectsUnknownDescriptorFlagBits) {
                         loom_low_descriptor_set_verify(&tables.set));
 }
 
+TEST(LowDescriptorsTest, AcceptsUniqueIdentityDescriptorFlag) {
+  TestTables tables;
+  InitializeTestTables(&tables);
+  tables.descriptors[1].flags |= LOOM_LOW_DESCRIPTOR_FLAG_UNIQUE_IDENTITY;
+
+  IREE_ASSERT_OK(loom_low_descriptor_set_verify(&tables.set));
+}
+
 TEST(LowDescriptorsTest, RejectsUnknownOperandFlagBits) {
   TestTables tables;
   InitializeTestTables(&tables);
