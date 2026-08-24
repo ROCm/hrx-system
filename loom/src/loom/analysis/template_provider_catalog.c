@@ -12,7 +12,6 @@
 #include "loom/ops/op_defs.h"
 #include "loom/ops/target/facts.h"
 #include "loom/rewrite/remap.h"
-#include "loom/util/adaptive_sort.h"
 
 #define LOOM_TEMPLATE_PROVIDER_INDEX_INVALID ((uint32_t)UINT32_MAX)
 
@@ -40,33 +39,10 @@ static bool loom_template_provider_symbol_is_live_provider(
          !iree_any_bit_set(symbol->defining_op->flags, LOOM_OP_FLAG_DEAD);
 }
 
-static bool loom_template_provider_summary_less(
-    const loom_template_provider_summary_t* left,
-    const loom_template_provider_summary_t* right) {
-  if (left->family.symbol_id != right->family.symbol_id) {
-    return left->family.symbol_id < right->family.symbol_id;
-  }
-  if (left->priority != right->priority) {
-    return left->priority > right->priority;
-  }
-  if (left->kind != right->kind) {
-    return left->kind < right->kind;
-  }
-  if (left->origin_ordinal != right->origin_ordinal) {
-    return left->origin_ordinal < right->origin_ordinal;
-  }
-  if (left->symbol.symbol_id != right->symbol.symbol_id) {
-    return left->symbol.symbol_id < right->symbol.symbol_id;
-  }
-  return iree_string_view_compare(left->name, right->name) < 0;
-}
-
-LOOM_DEFINE_ADAPTIVE_SORT(loom_template_provider_summary_sort,
-                          loom_template_provider_summary_t,
-                          loom_template_provider_summary_less)
-
 static iree_status_t loom_template_provider_catalog_count_local(
-    const loom_module_t* module, iree_host_size_t* out_provider_count) {
+    const loom_module_t* module,
+    loom_template_provider_catalog_bucket_t* buckets,
+    iree_host_size_t* out_provider_count) {
   *out_provider_count = 0;
   if (module->symbols.count > UINT32_MAX) {
     return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
@@ -79,6 +55,24 @@ static iree_status_t loom_template_provider_catalog_count_local(
     if (!loom_template_provider_symbol_is_live_provider(symbol, &kind)) {
       continue;
     }
+
+    loom_func_like_t function =
+        loom_func_like_cast(module, symbol->defining_op);
+    if (!loom_func_like_isa(function)) {
+      IREE_ASSERT_UNREACHABLE("template provider symbol is not function-like");
+      IREE_BUILTIN_UNREACHABLE();
+    }
+    const loom_symbol_ref_t family = loom_func_like_template_family(function);
+    IREE_ASSERT(loom_symbol_ref_is_valid(family));
+    IREE_ASSERT(family.module_id == 0);
+    IREE_ASSERT(family.symbol_id < module->symbols.count);
+    loom_template_provider_catalog_bucket_t* bucket =
+        &buckets[family.symbol_id];
+    if (bucket->provider_count == UINT32_MAX) {
+      return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                              "template family provider count overflow");
+    }
+    ++bucket->provider_count;
     ++*out_provider_count;
   }
   return iree_ok_status();
@@ -171,9 +165,9 @@ static iree_status_t loom_template_provider_catalog_target_facts(
 static iree_status_t loom_template_provider_catalog_populate_local(
     loom_template_provider_catalog_t* catalog, const loom_module_t* module,
     loom_symbol_fact_table_t* fact_table,
-    loom_template_provider_summary_t* providers) {
-  iree_host_size_t provider_index = 0;
-  for (iree_host_size_t i = 0; i < module->symbols.count; ++i) {
+    loom_template_provider_summary_t* providers,
+    loom_template_provider_catalog_bucket_t* buckets) {
+  for (iree_host_size_t i = module->symbols.count; i-- > 0;) {
     const loom_symbol_t* symbol = &module->symbols.entries[i];
     loom_template_provider_kind_t kind = LOOM_TEMPLATE_PROVIDER_KIND_NONE;
     if (!loom_template_provider_symbol_is_live_provider(symbol, &kind)) {
@@ -190,7 +184,13 @@ static iree_status_t loom_template_provider_catalog_populate_local(
       IREE_BUILTIN_UNREACHABLE();
     }
 
-    loom_template_provider_summary_t* provider = &providers[provider_index];
+    loom_template_provider_catalog_bucket_t* bucket =
+        &buckets[facts->template_family.symbol_id];
+    IREE_ASSERT(bucket->first_provider_index !=
+                LOOM_TEMPLATE_PROVIDER_INDEX_INVALID);
+    IREE_ASSERT(bucket->first_provider_index > 0);
+    loom_template_provider_summary_t* provider =
+        &providers[--bucket->first_provider_index];
     *provider = (loom_template_provider_summary_t){
         .module = module,
         .kind = kind,
@@ -217,11 +217,6 @@ static iree_status_t loom_template_provider_catalog_populate_local(
         catalog, module, facts, provider));
     IREE_RETURN_IF_ERROR(loom_template_provider_catalog_target_facts(
         module, fact_table, facts->target_symbol, &provider->target_facts));
-    ++provider_index;
-  }
-  catalog->provider_count = provider_index;
-  if (provider_index > 1) {
-    loom_template_provider_summary_sort(providers, provider_index);
   }
   return iree_ok_status();
 }
@@ -236,20 +231,25 @@ static void loom_template_provider_catalog_initialize_buckets(
   }
 }
 
-static iree_status_t loom_template_provider_catalog_build_buckets(
+static iree_status_t loom_template_provider_catalog_prepare_buckets(
     loom_template_provider_catalog_t* catalog,
     loom_template_provider_catalog_bucket_t* buckets) {
-  const loom_template_provider_summary_t* providers = catalog->providers;
-  for (iree_host_size_t i = 0; i < catalog->provider_count; ++i) {
-    const loom_symbol_id_t family_symbol_id = providers[i].family.symbol_id;
-    IREE_ASSERT(family_symbol_id < catalog->bucket_count);
-    loom_template_provider_catalog_bucket_t* bucket =
-        &buckets[family_symbol_id];
-    if (bucket->first_provider_index == LOOM_TEMPLATE_PROVIDER_INDEX_INVALID) {
-      bucket->first_provider_index = (uint32_t)i;
+  uint32_t provider_end = 0;
+  for (iree_host_size_t i = 0; i < catalog->bucket_count; ++i) {
+    loom_template_provider_catalog_bucket_t* bucket = &buckets[i];
+    if (bucket->provider_count == 0) {
+      continue;
     }
-    ++bucket->provider_count;
+    if (bucket->provider_count > UINT32_MAX - provider_end) {
+      return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                              "template provider catalog exceeds uint32_t "
+                              "index range");
+    }
+    provider_end += bucket->provider_count;
+    // Reverse population decrements this family end into its stable start.
+    bucket->first_provider_index = provider_end;
   }
+  IREE_ASSERT(provider_end == catalog->provider_count);
   return iree_ok_status();
 }
 
@@ -291,24 +291,6 @@ iree_status_t loom_template_provider_catalog_build(
         "external provider count is non-zero but values is NULL");
   }
 
-  iree_host_size_t local_provider_count = 0;
-  IREE_RETURN_IF_ERROR(loom_template_provider_catalog_count_local(
-      module, &local_provider_count));
-  iree_host_size_t provider_count = 0;
-  if (!iree_host_size_checked_add(local_provider_count, external_provider_count,
-                                  &provider_count)) {
-    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                            "template provider count overflow");
-  }
-
-  loom_template_provider_summary_t* providers = NULL;
-  if (provider_count > 0) {
-    IREE_RETURN_IF_ERROR(
-        iree_arena_allocate_array(catalog->arena, provider_count,
-                                  sizeof(*providers), (void**)&providers));
-  }
-  catalog->providers = providers;
-
   loom_template_provider_catalog_bucket_t* buckets = NULL;
   if (catalog->bucket_count > 0) {
     IREE_RETURN_IF_ERROR(
@@ -319,17 +301,51 @@ iree_status_t loom_template_provider_catalog_build(
   }
   catalog->buckets_by_symbol_id = buckets;
 
-  IREE_RETURN_IF_ERROR(loom_template_provider_catalog_populate_local(
-      catalog, module, fact_table, providers));
-  if (external_provider_count != 0) {
-    for (iree_host_size_t i = 0; i < external_provider_count; ++i) {
-      providers[local_provider_count + i] = external_providers[i];
+  iree_host_size_t local_provider_count = 0;
+  IREE_RETURN_IF_ERROR(loom_template_provider_catalog_count_local(
+      module, buckets, &local_provider_count));
+  for (iree_host_size_t i = 0; i < external_provider_count; ++i) {
+    const loom_symbol_ref_t family = external_providers[i].family;
+    IREE_ASSERT(loom_symbol_ref_is_valid(family));
+    IREE_ASSERT(family.module_id == 0);
+    IREE_ASSERT(family.symbol_id < catalog->bucket_count);
+    loom_template_provider_catalog_bucket_t* bucket =
+        &buckets[family.symbol_id];
+    if (bucket->provider_count == UINT32_MAX) {
+      return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                              "template family provider count overflow");
     }
-    catalog->provider_count = provider_count;
-    loom_template_provider_summary_sort(providers, provider_count);
+    ++bucket->provider_count;
   }
+
+  iree_host_size_t provider_count = 0;
+  if (!iree_host_size_checked_add(local_provider_count, external_provider_count,
+                                  &provider_count) ||
+      provider_count > UINT32_MAX) {
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "template provider count overflow");
+  }
+  catalog->provider_count = provider_count;
   IREE_RETURN_IF_ERROR(
-      loom_template_provider_catalog_build_buckets(catalog, buckets));
+      loom_template_provider_catalog_prepare_buckets(catalog, buckets));
+
+  loom_template_provider_summary_t* providers = NULL;
+  if (provider_count > 0) {
+    IREE_RETURN_IF_ERROR(
+        iree_arena_allocate_array(catalog->arena, provider_count,
+                                  sizeof(*providers), (void**)&providers));
+  }
+  catalog->providers = providers;
+
+  for (iree_host_size_t i = external_provider_count; i-- > 0;) {
+    const loom_template_provider_summary_t* external = &external_providers[i];
+    loom_template_provider_catalog_bucket_t* bucket =
+        &buckets[external->family.symbol_id];
+    IREE_ASSERT(bucket->first_provider_index > 0);
+    providers[--bucket->first_provider_index] = *external;
+  }
+  IREE_RETURN_IF_ERROR(loom_template_provider_catalog_populate_local(
+      catalog, module, fact_table, providers, buckets));
   return iree_ok_status();
 }
 

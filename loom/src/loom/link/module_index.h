@@ -263,6 +263,8 @@ typedef struct loom_link_module_index_template_family_t {
     iree_host_size_t first_symbol_ordinal;
     // Last symbol ordinal, or INVALID_ORDINAL.
     iree_host_size_t last_symbol_ordinal;
+    // Number of provider symbols in the chain.
+    iree_host_size_t count;
   } providers;
 } loom_link_module_index_template_family_t;
 

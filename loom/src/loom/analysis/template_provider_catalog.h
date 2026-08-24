@@ -90,7 +90,7 @@ typedef struct loom_template_provider_summary_t {
   // Borrowed provider symbol name.
   iree_string_view_t name;
 
-  // Provider priority. Larger values sort before smaller values.
+  // Provider priority used to rank applicable implementations.
   int64_t priority;
 
   // Borrowed argument type list in signature order, or NULL when empty.
@@ -117,7 +117,7 @@ typedef struct loom_template_provider_summary_t {
 
 // Borrowed provider result range.
 typedef struct loom_template_provider_slice_t {
-  // Borrowed provider summaries in deterministic selection order.
+  // Borrowed provider summaries in stable source order.
   const loom_template_provider_summary_t* providers;
 
   // Number of provider summaries.
@@ -147,7 +147,7 @@ typedef struct loom_template_provider_catalog_t {
   // Arena used for provider and bucket storage.
   iree_arena_allocator_t* arena;
 
-  // Provider summaries sorted by family symbol and provider ordering.
+  // Provider summaries grouped by family in stable source order.
   const loom_template_provider_summary_t* providers;
 
   // Number of provider summaries.

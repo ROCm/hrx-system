@@ -430,12 +430,10 @@ static iree_status_t loom_link_template_candidate_remap_symbol(
       projection, source_symbol, out_target_ref);
 }
 
-static iree_status_t loom_link_template_candidate_count(
+static iree_status_t loom_link_template_candidate_capacity(
     const loom_link_template_candidate_loader_t* loader,
-    const loom_link_plan_t* plan,
-    loom_link_template_provider_membership_t selected_providers,
-    iree_host_size_t* out_count) {
-  *out_count = 0;
+    const loom_link_plan_t* plan, iree_host_size_t* out_capacity) {
+  *out_capacity = 0;
   const iree_host_size_t family_count =
       loom_link_plan_demanded_template_family_count(plan);
   for (iree_host_size_t i = 0; i < family_count; ++i) {
@@ -445,22 +443,13 @@ static iree_status_t loom_link_template_candidate_count(
         loom_link_module_index_template_family_at(loader->index,
                                                   family_ordinal);
     IREE_ASSERT(family != NULL);
-    iree_host_size_t provider_ordinal = family->providers.first_symbol_ordinal;
-    while (provider_ordinal != LOOM_LINK_MODULE_INDEX_INVALID_ORDINAL) {
-      if (!loom_link_template_provider_membership_contains(selected_providers,
-                                                           provider_ordinal)) {
-        iree_host_size_t count = 0;
-        if (!iree_host_size_checked_add(*out_count, 1, &count)) {
-          return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                                  "template candidate count overflow");
-        }
-        *out_count = count;
-      }
-      const loom_link_module_index_symbol_t* provider =
-          loom_link_module_index_symbol_at(loader->index, provider_ordinal);
-      IREE_ASSERT(provider != NULL);
-      provider_ordinal = provider->next.template_provider_ordinal;
+    iree_host_size_t capacity = 0;
+    if (!iree_host_size_checked_add(*out_capacity, family->providers.count,
+                                    &capacity)) {
+      return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                              "template candidate capacity overflow");
     }
+    *out_capacity = capacity;
   }
   return iree_ok_status();
 }
@@ -527,8 +516,8 @@ iree_status_t loom_link_template_candidate_loader_project(
               loom_link_module_index_symbol_count(loader->index));
 
   iree_host_size_t candidate_capacity = 0;
-  IREE_RETURN_IF_ERROR(loom_link_template_candidate_count(
-      loader, plan, selected_providers, &candidate_capacity));
+  IREE_RETURN_IF_ERROR(
+      loom_link_template_candidate_capacity(loader, plan, &candidate_capacity));
   if (candidate_capacity == 0) {
     return iree_ok_status();
   }
@@ -582,7 +571,7 @@ iree_status_t loom_link_template_candidate_loader_project(
       provider_ordinal = provider->next.template_provider_ordinal;
     }
   }
-  IREE_ASSERT(candidate_count == candidate_capacity);
+  IREE_ASSERT(candidate_count <= candidate_capacity);
   *out_candidates = (loom_template_provider_slice_t){
       .providers = candidates,
       .count = candidate_count,

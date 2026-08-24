@@ -118,6 +118,16 @@ class TemplateProviderCatalogTest : public ::testing::Test {
         &catalog_, {/*.module_id=*/0, /*.symbol_id=*/FindSymbol(module, name)});
   }
 
+  const loom_template_provider_summary_t* FindProvider(
+      loom_template_provider_slice_t providers, iree_string_view_t name) {
+    for (iree_host_size_t i = 0; i < providers.count; ++i) {
+      if (iree_string_view_equal(providers.providers[i].name, name)) {
+        return &providers.providers[i];
+      }
+    }
+    return nullptr;
+  }
+
   void AddUkernelProvider(loom_module_t* module, iree_string_view_t family,
                           iree_string_view_t name, int64_t priority) {
     const loom_symbol_ref_t family_ref = {
@@ -151,7 +161,7 @@ class TemplateProviderCatalogTest : public ::testing::Test {
   loom_template_provider_catalog_t catalog_;
 };
 
-TEST_F(TemplateProviderCatalogTest, GroupsProvidersByFamilyAndPriority) {
+TEST_F(TemplateProviderCatalogTest, GroupsProvidersByFamily) {
   ModulePtr module = ParseModule(R"(
 template.decl @qwen.q4.matmul(%arg0: i32) -> (i32)
 template.decl @other.contract(%arg0: i32) -> (i32)
@@ -171,31 +181,36 @@ template.def<@qwen.q4.matmul> public priority(10) @fast(%arg0: i32) -> (i32) {
   loom_template_provider_slice_t qwen =
       RebuildAndLookup(module.get(), IREE_SV("qwen.q4.matmul"));
   ASSERT_EQ(qwen.count, 3u);
-  EXPECT_TRUE(iree_string_view_equal(qwen.providers[0].name, IREE_SV("fast")));
-  EXPECT_EQ(qwen.providers[0].kind, LOOM_TEMPLATE_PROVIDER_KIND_DEF);
-  EXPECT_EQ(qwen.providers[0].func_facts->visibility,
-            LOOM_TEMPLATE_VISIBILITY_PUBLIC);
-  EXPECT_TRUE(qwen.providers[0].has_body);
-  EXPECT_EQ(qwen.providers[0].func_facts->calling_convention, 0);
-  EXPECT_EQ(qwen.providers[0].func_facts->purity, 0);
-  EXPECT_EQ(qwen.providers[0].func_facts->temperature, 0);
-  EXPECT_EQ(qwen.providers[0].func_facts->inline_policy, 0);
-  EXPECT_EQ(qwen.providers[0].priority, 10);
-  ASSERT_EQ(qwen.providers[0].argument_count, 1u);
-  ASSERT_EQ(qwen.providers[0].result_count, 1u);
-  EXPECT_TRUE(loom_type_equal(qwen.providers[0].argument_types[0],
+  const loom_template_provider_summary_t* fast =
+      FindProvider(qwen, IREE_SV("fast"));
+  ASSERT_NE(fast, nullptr);
+  EXPECT_EQ(fast->kind, LOOM_TEMPLATE_PROVIDER_KIND_DEF);
+  EXPECT_EQ(fast->func_facts->visibility, LOOM_TEMPLATE_VISIBILITY_PUBLIC);
+  EXPECT_TRUE(fast->has_body);
+  EXPECT_EQ(fast->func_facts->calling_convention, 0);
+  EXPECT_EQ(fast->func_facts->purity, 0);
+  EXPECT_EQ(fast->func_facts->temperature, 0);
+  EXPECT_EQ(fast->func_facts->inline_policy, 0);
+  EXPECT_EQ(fast->priority, 10);
+  ASSERT_EQ(fast->argument_count, 1u);
+  ASSERT_EQ(fast->result_count, 1u);
+  EXPECT_TRUE(loom_type_equal(fast->argument_types[0],
                               loom_type_scalar(LOOM_SCALAR_TYPE_I32)));
-  EXPECT_TRUE(loom_type_equal(qwen.providers[0].result_types[0],
+  EXPECT_TRUE(loom_type_equal(fast->result_types[0],
                               loom_type_scalar(LOOM_SCALAR_TYPE_I32)));
-  EXPECT_TRUE(
-      iree_string_view_equal(qwen.providers[1].name, IREE_SV("asm_impl")));
-  EXPECT_EQ(qwen.providers[1].kind, LOOM_TEMPLATE_PROVIDER_KIND_UKERNEL);
-  EXPECT_NE(qwen.providers[1].func_facts->visibility,
-            LOOM_TEMPLATE_VISIBILITY_PUBLIC);
-  EXPECT_FALSE(qwen.providers[1].has_body);
-  EXPECT_EQ(qwen.providers[1].priority, 5);
-  EXPECT_TRUE(iree_string_view_equal(qwen.providers[2].name, IREE_SV("slow")));
-  EXPECT_EQ(qwen.providers[2].priority, 1);
+
+  const loom_template_provider_summary_t* asm_impl =
+      FindProvider(qwen, IREE_SV("asm_impl"));
+  ASSERT_NE(asm_impl, nullptr);
+  EXPECT_EQ(asm_impl->kind, LOOM_TEMPLATE_PROVIDER_KIND_UKERNEL);
+  EXPECT_NE(asm_impl->func_facts->visibility, LOOM_TEMPLATE_VISIBILITY_PUBLIC);
+  EXPECT_FALSE(asm_impl->has_body);
+  EXPECT_EQ(asm_impl->priority, 5);
+
+  const loom_template_provider_summary_t* slow =
+      FindProvider(qwen, IREE_SV("slow"));
+  ASSERT_NE(slow, nullptr);
+  EXPECT_EQ(slow->priority, 1);
 
   loom_template_provider_slice_t other = loom_template_provider_catalog_lookup(
       &catalog_,
@@ -227,8 +242,7 @@ template.def<@demo.contract> priority(3) @removed(%arg0: i32) -> (i32) {
   loom_template_provider_slice_t initial =
       RebuildAndLookup(module.get(), IREE_SV("demo.contract"));
   ASSERT_EQ(initial.count, 2u);
-  EXPECT_TRUE(
-      iree_string_view_equal(initial.providers[0].name, IREE_SV("removed")));
+  EXPECT_NE(FindProvider(initial, IREE_SV("removed")), nullptr);
 
   loom_symbol_id_t removed_id = FindSymbol(module.get(), IREE_SV("removed"));
   loom_op_t* removed_op = module->symbols.entries[removed_id].defining_op;
@@ -263,11 +277,11 @@ template.def<@demo.contract> priority(2) @base(%arg0: i32) -> (i32) {
   loom_template_provider_slice_t rebuilt =
       RebuildAndLookup(module.get(), IREE_SV("demo.contract"));
   ASSERT_EQ(rebuilt.count, 2u);
-  EXPECT_TRUE(
-      iree_string_view_equal(rebuilt.providers[0].name, IREE_SV("added")));
-  EXPECT_EQ(rebuilt.providers[0].kind, LOOM_TEMPLATE_PROVIDER_KIND_UKERNEL);
-  EXPECT_TRUE(
-      iree_string_view_equal(rebuilt.providers[1].name, IREE_SV("base")));
+  const loom_template_provider_summary_t* added =
+      FindProvider(rebuilt, IREE_SV("added"));
+  ASSERT_NE(added, nullptr);
+  EXPECT_EQ(added->kind, LOOM_TEMPLATE_PROVIDER_KIND_UKERNEL);
+  EXPECT_NE(FindProvider(rebuilt, IREE_SV("base")), nullptr);
 }
 
 TEST_F(TemplateProviderCatalogTest, CapturesProviderIdentityAndConditions) {

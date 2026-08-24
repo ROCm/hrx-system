@@ -1014,12 +1014,16 @@ static iree_status_t loom_template_selection_analyze_apply(
         state, context, apply_op, &apply_target, &application_facts));
   }
 
-  const int64_t highest_provider_priority = providers.providers[0].priority;
   loom_template_provider_classification_t family_classification = {0};
   loom_template_applicability_classify_contract(
       state->module, apply_op, &family_contract, &apply_target,
       &application_facts, &family_classification);
   if (family_classification.feasibility == LOOM_TEMPLATE_PROVIDER_REJECT) {
+    int64_t highest_provider_priority = INT64_MIN;
+    for (iree_host_size_t i = 0; i < providers.count; ++i) {
+      highest_provider_priority =
+          iree_max(highest_provider_priority, providers.providers[i].priority);
+    }
     entry->blocker_contract = LOOM_TEMPLATE_CONTRACT_FAMILY;
     const loom_template_selection_blocker_t blocker =
         family_classification.target_feasibility ==
@@ -1035,6 +1039,11 @@ static iree_status_t loom_template_selection_analyze_apply(
         highest_provider_priority);
   }
   if (family_classification.feasibility == LOOM_TEMPLATE_PROVIDER_MAYBE) {
+    int64_t highest_provider_priority = INT64_MIN;
+    for (iree_host_size_t i = 0; i < providers.count; ++i) {
+      highest_provider_priority =
+          iree_max(highest_provider_priority, providers.providers[i].priority);
+    }
     entry->blocker_contract = LOOM_TEMPLATE_CONTRACT_FAMILY;
     entry->unresolved_reason = family_classification.unresolved_reason;
     entry->unresolved_target_condition =
@@ -1054,6 +1063,7 @@ static iree_status_t loom_template_selection_analyze_apply(
 
   bool has_match = false;
   bool has_maybe = false;
+  int64_t highest_provider_priority = INT64_MIN;
   int64_t best_match_priority = INT64_MIN;
   int64_t highest_maybe_priority = INT64_MIN;
   uint32_t best_match_count = 0;
@@ -1066,6 +1076,8 @@ static iree_status_t loom_template_selection_analyze_apply(
 
   for (iree_host_size_t i = 0; i < providers.count; ++i) {
     const loom_template_provider_summary_t* provider = &providers.providers[i];
+    highest_provider_priority =
+        iree_max(highest_provider_priority, provider->priority);
     loom_template_provider_classification_t classification = {0};
     loom_template_applicability_classify_provider(
         state->module, apply_op, provider, &apply_target, &application_facts,
