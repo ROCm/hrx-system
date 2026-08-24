@@ -14,6 +14,7 @@
 #include "iree/vm/bytecode/module.h"
 #include "iree/vm/bytecode/module_test_data.h"
 #include "iree/vm/bytecode/wire/core/control.h"
+#include "iree/vm/bytecode/wire/core/function.h"
 #include "iree/vm/bytecode/wire/core/opcodes.h"
 #include "iree/vm/bytecode/wire/core/selectors.h"
 #include "iree/vm/process.h"
@@ -261,6 +262,32 @@ TEST(VMBytecodeModuleCallTest,
       iree_vm_invoke(harness.invocation, call_direct,
                      iree_vm_variant_span_from_array(arguments),
                      iree_vm_variant_span_from_array(results)));
+  ExpectVariantEqual(results[0], sentinel);
+}
+
+TEST(VMBytecodeModuleCallTest, RejectsMismatchedIndirectTargetContract) {
+  std::vector<uint8_t> image = BuildCallModuleImage();
+  const MutableFunctionImage function = FindFunctionImage(&image, 2);
+  ASSERT_NE(function.row, nullptr);
+  auto* address = reinterpret_cast<iree_vm_isa_func_address_record_t*>(
+      function.bytecode + 4);
+  address->target_ordinal_u16 = 3;
+  address->callable_type_ordinal_u16 = 1;
+
+  CallExecutionHarness harness(std::move(image));
+  IREE_ASSERT_OK(harness.Initialize(IREE_SV("call")));
+  iree_vm_function_t call_indirect = iree_vm_function_null();
+  IREE_ASSERT_OK(harness.LookupFunction(
+      IREE_SV("call"), IREE_SV("call_indirect"), &call_indirect));
+  iree_vm_variant_t arguments[] = {iree_vm_variant_from_i32(41)};
+  const iree_vm_variant_t sentinel = iree_vm_variant_from_i64(0x1234);
+  iree_vm_variant_t results[] = {sentinel};
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      iree_vm_invoke(harness.invocation, call_indirect,
+                     iree_vm_variant_span_from_array(arguments),
+                     iree_vm_variant_span_from_array(results)));
+  EXPECT_TRUE(iree_vm_variant_is_empty(arguments[0]));
   ExpectVariantEqual(results[0], sentinel);
 }
 
