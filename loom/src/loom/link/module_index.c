@@ -1201,7 +1201,7 @@ static iree_status_t loom_link_index_project_bytecode_provider_imports(
 // Public API
 //===----------------------------------------------------------------------===//
 
-iree_status_t loom_link_module_index_create(
+iree_status_t loom_link_module_index_allocate(
     loom_context_t* context, iree_arena_block_pool_t* block_pool,
     iree_allocator_t allocator, loom_link_module_index_t** out_index) {
   IREE_ASSERT_ARGUMENT(context);

@@ -44,13 +44,13 @@ typedef struct iree_hal_replay_file_record_metadata_t {
   uint32_t status_code;
 } iree_hal_replay_file_record_metadata_t;
 
-// Creates a writer that writes an IREE HAL replay file to |file_handle|.
+// Allocates a writer that writes an IREE HAL replay file to |file_handle|.
 //
 // The returned writer opens a writable stream at offset zero and immediately
 // writes a placeholder file header. Callers must close the writer with
 // iree_hal_replay_file_writer_close before freeing it so the final file length
 // is written into the header.
-IREE_API_EXPORT iree_status_t iree_hal_replay_file_writer_create(
+IREE_API_EXPORT iree_status_t iree_hal_replay_file_writer_allocate(
     iree_io_file_handle_t* file_handle, iree_allocator_t host_allocator,
     iree_hal_replay_file_writer_t** out_writer);
 

@@ -421,7 +421,7 @@ static iree_status_t loom_link_cli_build_index(
   *out_index = (loom_link_cli_index_t){0};
   loom_link_module_index_t* index = NULL;
   IREE_RETURN_IF_ERROR(
-      loom_link_module_index_create(context, block_pool, allocator, &index));
+      loom_link_module_index_allocate(context, block_pool, allocator, &index));
 
   const iree_host_size_t provider_binding_count = input_count;
   loom_link_provider_binding_t* provider_bindings = NULL;

@@ -47,7 +47,7 @@ static std::vector<uint8_t> MakeReplayFileStorage() {
       &file_handle));
 
   iree_hal_replay_file_writer_t* writer = nullptr;
-  IREE_CHECK_OK(iree_hal_replay_file_writer_create(
+  IREE_CHECK_OK(iree_hal_replay_file_writer_allocate(
       file_handle, iree_allocator_system(), &writer));
   iree_io_file_handle_release(file_handle);
 
@@ -95,7 +95,7 @@ class ReplayFileBuilder {
         iree_make_byte_span(storage_.data(), storage_.size()),
         iree_io_file_handle_release_callback_null(), iree_allocator_system(),
         &file_handle));
-    IREE_CHECK_OK(iree_hal_replay_file_writer_create(
+    IREE_CHECK_OK(iree_hal_replay_file_writer_allocate(
         file_handle, iree_allocator_system(), &writer_));
     iree_io_file_handle_release(file_handle);
   }
@@ -305,7 +305,7 @@ static std::vector<uint8_t> MakeScopeReplayFileStorage() {
       &file_handle));
 
   iree_hal_replay_file_writer_t* writer = nullptr;
-  IREE_CHECK_OK(iree_hal_replay_file_writer_create(
+  IREE_CHECK_OK(iree_hal_replay_file_writer_allocate(
       file_handle, iree_allocator_system(), &writer));
   iree_io_file_handle_release(file_handle);
 
@@ -352,7 +352,7 @@ static std::vector<uint8_t> MakeExecutableLoadReplayFileStorage() {
       &file_handle));
 
   iree_hal_replay_file_writer_t* writer = nullptr;
-  IREE_CHECK_OK(iree_hal_replay_file_writer_create(
+  IREE_CHECK_OK(iree_hal_replay_file_writer_allocate(
       file_handle, iree_allocator_system(), &writer));
   iree_io_file_handle_release(file_handle);
 
@@ -515,7 +515,7 @@ TEST(ReplayDumpTest, EmitsBufferRangeDataRanges) {
       &file_handle));
 
   iree_hal_replay_file_writer_t* writer = nullptr;
-  IREE_ASSERT_OK(iree_hal_replay_file_writer_create(
+  IREE_ASSERT_OK(iree_hal_replay_file_writer_allocate(
       file_handle, iree_allocator_system(), &writer));
   iree_io_file_handle_release(file_handle);
 
@@ -562,7 +562,7 @@ TEST(ReplayDumpTest, EmitsQueueAllocaSemaphoreRanges) {
       &file_handle));
 
   iree_hal_replay_file_writer_t* writer = nullptr;
-  IREE_ASSERT_OK(iree_hal_replay_file_writer_create(
+  IREE_ASSERT_OK(iree_hal_replay_file_writer_allocate(
       file_handle, iree_allocator_system(), &writer));
   iree_io_file_handle_release(file_handle);
 
@@ -624,7 +624,7 @@ TEST(ReplayDumpTest, EmitsQueueExecuteTables) {
       &file_handle));
 
   iree_hal_replay_file_writer_t* writer = nullptr;
-  IREE_ASSERT_OK(iree_hal_replay_file_writer_create(
+  IREE_ASSERT_OK(iree_hal_replay_file_writer_allocate(
       file_handle, iree_allocator_system(), &writer));
   iree_io_file_handle_release(file_handle);
 
@@ -697,7 +697,7 @@ TEST(ReplayDumpTest, EmitsExecutionBarrierRanges) {
       &file_handle));
 
   iree_hal_replay_file_writer_t* writer = nullptr;
-  IREE_ASSERT_OK(iree_hal_replay_file_writer_create(
+  IREE_ASSERT_OK(iree_hal_replay_file_writer_allocate(
       file_handle, iree_allocator_system(), &writer));
   iree_io_file_handle_release(file_handle);
 
@@ -758,7 +758,7 @@ TEST(ReplayDumpTest, EmitsFilePayloads) {
       &file_handle));
 
   iree_hal_replay_file_writer_t* writer = nullptr;
-  IREE_ASSERT_OK(iree_hal_replay_file_writer_create(
+  IREE_ASSERT_OK(iree_hal_replay_file_writer_allocate(
       file_handle, iree_allocator_system(), &writer));
   iree_io_file_handle_release(file_handle);
 
@@ -903,7 +903,7 @@ TEST(ReplayDumpTest, EmitsQueueTransferRanges) {
       &file_handle));
 
   iree_hal_replay_file_writer_t* writer = nullptr;
-  IREE_ASSERT_OK(iree_hal_replay_file_writer_create(
+  IREE_ASSERT_OK(iree_hal_replay_file_writer_allocate(
       file_handle, iree_allocator_system(), &writer));
   iree_io_file_handle_release(file_handle);
 
@@ -972,7 +972,7 @@ TEST(ReplayDumpTest, EmitsCommandBufferTransferRanges) {
       &file_handle));
 
   iree_hal_replay_file_writer_t* writer = nullptr;
-  IREE_ASSERT_OK(iree_hal_replay_file_writer_create(
+  IREE_ASSERT_OK(iree_hal_replay_file_writer_allocate(
       file_handle, iree_allocator_system(), &writer));
   iree_io_file_handle_release(file_handle);
 

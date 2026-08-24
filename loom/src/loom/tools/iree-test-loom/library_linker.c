@@ -54,7 +54,7 @@ iree_status_t iree_test_loom_link_libraries(
   const loom_linker_options_t linker_options = {
       .module_name = IREE_SV("linked"),
   };
-  iree_status_t status = loom_linker_create(
+  iree_status_t status = loom_linker_allocate(
       loom_run_session_context(session), &linker_options,
       loom_run_session_block_pool(session), session->host_allocator, &linker);
   if (iree_status_is_ok(status)) {

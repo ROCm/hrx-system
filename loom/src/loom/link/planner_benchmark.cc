@@ -91,8 +91,8 @@ class PlannerCatalogFixture {
 
   loom_link_module_index_t* BuildIndex() {
     loom_link_module_index_t* index = nullptr;
-    CheckStatus(loom_link_module_index_create(&context_, &block_pool_,
-                                              iree_allocator_system(), &index));
+    CheckStatus(loom_link_module_index_allocate(
+        &context_, &block_pool_, iree_allocator_system(), &index));
     const loom_link_module_index_add_options_t options = {
         /*.provider_name=*/IREE_SV("catalog"),
         /*.role=*/LOOM_LINK_PROVIDER_ROLE_LIBRARY,
@@ -106,8 +106,8 @@ class PlannerCatalogFixture {
 
   loom_link_module_index_t* BuildDuplicateIndex(uint32_t provider_count) {
     loom_link_module_index_t* index = nullptr;
-    CheckStatus(loom_link_module_index_create(&context_, &block_pool_,
-                                              iree_allocator_system(), &index));
+    CheckStatus(loom_link_module_index_allocate(
+        &context_, &block_pool_, iree_allocator_system(), &index));
     for (uint32_t i = 0; i < provider_count; ++i) {
       const loom_link_module_index_add_options_t options = {
           /*.provider_name=*/IREE_SV("duplicate-provider"),
@@ -125,8 +125,8 @@ class PlannerCatalogFixture {
   loom_link_module_index_t* BuildUnrelatedProviderIndex(
       uint32_t library_provider_count) {
     loom_link_module_index_t* index = nullptr;
-    CheckStatus(loom_link_module_index_create(&context_, &block_pool_,
-                                              iree_allocator_system(), &index));
+    CheckStatus(loom_link_module_index_allocate(
+        &context_, &block_pool_, iree_allocator_system(), &index));
     benchmark_modules_.reserve(benchmark_modules_.size() +
                                library_provider_count);
     for (uint32_t i = 0; i < library_provider_count; ++i) {
@@ -390,8 +390,8 @@ class ImportedCandidateFixture {
   loom_link_module_index_t* BuildIndex(
       iree_host_size_t* out_chosen_provider_ordinal) {
     loom_link_module_index_t* index = nullptr;
-    CheckStatus(loom_link_module_index_create(&context_, &block_pool_,
-                                              iree_allocator_system(), &index));
+    CheckStatus(loom_link_module_index_allocate(
+        &context_, &block_pool_, iree_allocator_system(), &index));
     const loom_link_module_index_add_options_t importer_options = {
         /*.provider_name=*/IREE_SV("importer"),
         /*.role=*/LOOM_LINK_PROVIDER_ROLE_INPUT,
@@ -858,9 +858,9 @@ static void BM_Link_ImportedCandidateEndToEnd(benchmark::State& state) {
         },
     };
     loom_linker_t* linker = nullptr;
-    CheckStatus(loom_linker_create(fixture.context(), &linker_options,
-                                   fixture.block_pool(),
-                                   iree_allocator_system(), &linker));
+    CheckStatus(loom_linker_allocate(fixture.context(), &linker_options,
+                                     fixture.block_pool(),
+                                     iree_allocator_system(), &linker));
     for (iree_host_size_t i = 0; i < module_projection.modules.count; ++i) {
       const loom_link_plan_module_selection_t& selection =
           module_projection.modules.values[i];
@@ -1103,9 +1103,9 @@ static void BenchmarkExactLink(benchmark::State& state,
   for (auto _ : state) {
     state.PauseTiming();
     loom_linker_t* linker = nullptr;
-    CheckStatus(loom_linker_create(fixture.module()->context, &linker_options,
-                                   fixture.block_pool(),
-                                   iree_allocator_system(), &linker));
+    CheckStatus(loom_linker_allocate(fixture.module()->context, &linker_options,
+                                     fixture.block_pool(),
+                                     iree_allocator_system(), &linker));
     state.ResumeTiming();
     CheckStatus(loom_linker_add_module_symbols(
         linker, fixture.module(), source_symbols,
@@ -1137,9 +1137,9 @@ static void BM_LinkExactDense_Catalog(benchmark::State& state) {
   for (auto _ : state) {
     state.PauseTiming();
     loom_linker_t* linker = nullptr;
-    CheckStatus(loom_linker_create(fixture.module()->context, &linker_options,
-                                   fixture.block_pool(),
-                                   iree_allocator_system(), &linker));
+    CheckStatus(loom_linker_allocate(fixture.module()->context, &linker_options,
+                                     fixture.block_pool(),
+                                     iree_allocator_system(), &linker));
     state.ResumeTiming();
     CheckStatus(loom_linker_add_exact_module(
         linker, fixture.module(), loom_linker_source_symbol_output_list_empty(),
@@ -1270,9 +1270,9 @@ static void BenchmarkSelectiveMaterializeAndLink(
   for (auto _ : state) {
     state.PauseTiming();
     loom_linker_t* linker = nullptr;
-    CheckStatus(loom_linker_create(fixture.module()->context, &linker_options,
-                                   fixture.block_pool(),
-                                   iree_allocator_system(), &linker));
+    CheckStatus(loom_linker_allocate(fixture.module()->context, &linker_options,
+                                     fixture.block_pool(),
+                                     iree_allocator_system(), &linker));
     state.ResumeTiming();
     loom_bytecode_read_result_t read_result = {};
     loom_module_t* selected_module = nullptr;

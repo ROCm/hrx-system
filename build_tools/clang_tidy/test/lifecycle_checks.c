@@ -44,6 +44,56 @@ void iree_clang_tidy_heap_resource_free(
   (void)resource;
 }
 
+iree_status_t iree_clang_tidy_mismatched_storage_create(
+    iree_clang_tidy_heap_resource_t** out_resource) {
+  (void)out_resource;
+  return iree_ok_status();
+}
+
+void iree_clang_tidy_mismatched_storage_free(
+    iree_clang_tidy_heap_resource_t* resource) {
+  (void)resource;
+}
+
+iree_status_t iree_clang_tidy_mismatched_object_allocate(
+    iree_clang_tidy_heap_resource_t** out_resource) {
+  (void)out_resource;
+  return iree_ok_status();
+}
+
+void iree_clang_tidy_mismatched_object_destroy(
+    iree_clang_tidy_heap_resource_t* resource) {
+  (void)resource;
+}
+
+iree_status_t iree_clang_tidy_heap_object_create(
+    iree_clang_tidy_heap_resource_t** out_resource) {
+  (void)out_resource;
+  return iree_ok_status();
+}
+
+void iree_clang_tidy_heap_object_destroy(
+    iree_clang_tidy_heap_resource_t* resource) {
+  (void)resource;
+}
+
+iree_status_t iree_clang_tidy_vtable_resource_allocate(
+    iree_clang_tidy_heap_resource_t** out_resource) {
+  (void)out_resource;
+  return iree_ok_status();
+}
+
+static void iree_clang_tidy_vtable_resource_destroy(
+    iree_clang_tidy_heap_resource_t* resource) {
+  (void)resource;
+}
+
+void iree_clang_tidy_vtable_resource_exercise(void) {
+  iree_clang_tidy_heap_resource_t* resource = 0;
+  (void)iree_clang_tidy_vtable_resource_allocate(&resource);
+  iree_clang_tidy_vtable_resource_destroy(resource);
+}
+
 iree_status_t iree_clang_tidy_arena_bitset_allocate(
     int word_count, iree_clang_tidy_in_place_resource_t* out_bitset) {
   out_bitset->value = word_count;

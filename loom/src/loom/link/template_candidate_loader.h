@@ -29,18 +29,18 @@ typedef struct loom_link_template_provider_membership_t {
   iree_host_size_t symbol_count;
 } loom_link_template_provider_membership_t;
 
-// Creates a lazy candidate-header loader over |index|.
+// Allocates a lazy candidate-header loader over |index|.
 //
 // The loader borrows |index| and |environment| for its lifetime. Materialized
 // source modules are summarized once. Bytecode provider headers and the shared
 // table entries they reach are decoded at most once and implementation bodies
 // are never read.
-iree_status_t loom_link_template_candidate_loader_create(
+iree_status_t loom_link_template_candidate_loader_allocate(
     const loom_link_module_index_t* index,
     const loom_link_plan_materialization_environment_t* environment,
     loom_link_template_candidate_loader_t** out_loader);
 
-// Releases |loader| and all persistent source-summary caches.
+// Frees |loader| and all persistent source-summary caches.
 void loom_link_template_candidate_loader_free(
     loom_link_template_candidate_loader_t* loader);
 

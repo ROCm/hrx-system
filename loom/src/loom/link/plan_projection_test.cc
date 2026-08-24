@@ -88,7 +88,7 @@ class LinkPlanProjectionTest : public ::testing::Test {
 
   ModuleIndexPtr CreateIndex() {
     loom_link_module_index_t* index = nullptr;
-    IREE_CHECK_OK(loom_link_module_index_create(
+    IREE_CHECK_OK(loom_link_module_index_allocate(
         &context_, &block_pool_, iree_allocator_system(), &index));
     return ModuleIndexPtr(index);
   }

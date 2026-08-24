@@ -135,7 +135,7 @@ template.def<@demo.dynamic> priority(7) @identity(%m: index, %arg: tensor<[%m]xf
       /*.diagnostic_sink=*/{AcceptDiagnostic, nullptr},
   };
   loom_bytecode_symbol_header_reader_t* reader = nullptr;
-  IREE_ASSERT_OK(loom_bytecode_symbol_header_reader_create(
+  IREE_ASSERT_OK(loom_bytecode_symbol_header_reader_allocate(
       iree_make_const_byte_span(bytecode.data(), bytecode.size()),
       IREE_SV("provider.loombc"), &context_, &block_pool_, module_metadata,
       &reader_options, iree_allocator_system(), &reader));

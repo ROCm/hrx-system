@@ -43,7 +43,7 @@ class KernelConfigFixture {
     loom_module_t* source_module = Parse(BuildSource());
     bytecode_ = Write(source_module);
     loom_module_free(source_module);
-    CheckStatus(loom_link_module_index_create(
+    CheckStatus(loom_link_module_index_allocate(
         &context_, &block_pool_, iree_allocator_system(), &index_));
     CheckStatus(loom_link_module_index_add_bytecode(
         index_, iree_make_const_byte_span(bytecode_.data(), bytecode_.size()),

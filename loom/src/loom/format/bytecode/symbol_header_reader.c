@@ -76,7 +76,7 @@ static iree_status_t loom_bytecode_symbol_header_reader_allocate_module(
   return iree_ok_status();
 }
 
-iree_status_t loom_bytecode_symbol_header_reader_create(
+iree_status_t loom_bytecode_symbol_header_reader_allocate(
     iree_const_byte_span_t bytecode, iree_string_view_t filename,
     loom_context_t* context, iree_arena_block_pool_t* block_pool,
     const loom_bytecode_module_metadata_t* metadata,

@@ -620,7 +620,7 @@ loomc_status_t loomc_link_index_builder_create(
                                  &builder->result);
   }
   if (loomc_status_is_ok(status)) {
-    status = loomc_status_from_iree(loom_link_module_index_create(
+    status = loomc_status_from_iree(loom_link_module_index_allocate(
         loomc_context_loom_context(context), builder->block_pool,
         loomc_link_index_iree_allocator(allocator), &builder->index));
   }

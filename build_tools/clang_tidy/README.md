@@ -384,6 +384,14 @@ Without an explicit `storage` or `*_storage` parameter, a pointer-to-pointer
 output reads like a callee-owned object factory and should use
 `create/destroy/retain/release` or `allocate/free` naming instead.
 
+Callee-owned pointer factories must use one complete lifecycle vocabulary.
+`create/free` obscures whether the result is a storage resource or an object,
+as does `allocate/destroy`. When the matching cleanup function is visible,
+`iree-lifecycle-naming` diagnoses both mismatches and requires either
+`allocate/free` or `create/destroy` consistently. Private destroy callbacks
+used by polymorphic implementations are not public lifecycle pairs and do not
+participate in this check.
+
 ### `iree-refcount-lifecycle`
 
 `iree-refcount-lifecycle` treats `iree_atomic_ref_count_t` as an object

@@ -30,13 +30,13 @@ typedef struct loom_bytecode_symbol_header_reader_options_t {
   loom_low_repr_environment_t low_repr_environment;
 } loom_bytecode_symbol_header_reader_options_t;
 
-// Creates a lazy reader over one validated bytecode module.
+// Allocates a lazy reader over one validated bytecode module.
 //
 // The reader borrows |bytecode|, |filename|, |context|, |block_pool|, and
 // |metadata| for its lifetime. Its metadata module contains one placeholder
 // symbol per source symbol in exact source-ordinal order. Shared tables and
 // function signatures are projected only when requested.
-iree_status_t loom_bytecode_symbol_header_reader_create(
+iree_status_t loom_bytecode_symbol_header_reader_allocate(
     iree_const_byte_span_t bytecode, iree_string_view_t filename,
     loom_context_t* context, iree_arena_block_pool_t* block_pool,
     const loom_bytecode_module_metadata_t* metadata,
@@ -44,7 +44,7 @@ iree_status_t loom_bytecode_symbol_header_reader_create(
     iree_allocator_t allocator,
     loom_bytecode_symbol_header_reader_t** out_reader);
 
-// Releases |reader| and its projected metadata module.
+// Frees |reader| and its projected metadata module.
 void loom_bytecode_symbol_header_reader_free(
     loom_bytecode_symbol_header_reader_t* reader);
 

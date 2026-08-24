@@ -252,16 +252,16 @@ typedef struct loom_link_module_index_template_family_t {
   } providers;
 } loom_link_module_index_template_family_t;
 
-// Creates an empty module index over |context|.
+// Allocates an empty module index over |context|.
 //
 // |block_pool| is used for transient text/bytecode parsing scratch and for
 // text-provider module storage. The caller must keep materialized modules and
 // bytecode buffers alive until the index is released.
-iree_status_t loom_link_module_index_create(
+iree_status_t loom_link_module_index_allocate(
     loom_context_t* context, iree_arena_block_pool_t* block_pool,
     iree_allocator_t allocator, loom_link_module_index_t** out_index);
 
-// Releases |index| and any text-provider modules it owns.
+// Frees |index| and any text-provider modules it owns.
 void loom_link_module_index_free(loom_link_module_index_t* index);
 
 // Adds one caller-owned materialized module to |index|.
