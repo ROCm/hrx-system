@@ -177,6 +177,7 @@ IREE_API_EXPORT iree_status_t iree_vm_invocation_push_frame(
   frame->linked_module = start_params->execution.linked_module;
   frame->cleanup = cleanup;
   frame->function_ordinal = start_params->function_ordinal;
+  frame->may_yield = invocation->executing_may_yield;
   invocation->stack_cursor = (uint8_t*)payload_address + layout.storage_size;
   invocation->top_frame = frame;
   *out_frame = frame;
@@ -742,7 +743,84 @@ static bool iree_vm_invocation_execution_is_current(
   return execution->process_storage == process_storage.data;
 }
 
-iree_status_t iree_vm_invocation_dispatch_start(
+iree_status_t iree_vm_invocation_request_call(
+    iree_vm_invocation_t* invocation,
+    const iree_vm_linked_module_t* linked_module, uint16_t function_ordinal,
+    bool may_yield, const iree_vm_call_packet_t* call,
+    iree_vm_execution_outcome_t* out_outcome) {
+  if (!invocation || !linked_module || !call || !out_outcome ||
+      invocation->state != IREE_VM_INVOCATION_STATE_RUNNING ||
+      !invocation->executing_linked_module) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "invalid child call request");
+  }
+  if (invocation->has_call_request) {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "module callback already requested a child call");
+  }
+  if (may_yield && !invocation->executing_may_yield) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "non-yielding module callback requested a yielding child");
+  }
+  invocation->call_request = (iree_vm_call_request_t){
+      .linked_module = linked_module,
+      .packet = *call,
+      .function_ordinal = function_ordinal,
+      .may_yield = may_yield,
+  };
+  invocation->has_call_request = true;
+  *out_outcome = IREE_VM_EXECUTION_OUTCOME_SUSPENDED;
+  return iree_ok_status();
+}
+
+static IREE_ATTRIBUTE_NOINLINE iree_status_t
+iree_vm_invocation_validate_dispatch_outcome_slow(
+    const iree_vm_invocation_t* invocation, uint8_t* checkpoint_cursor,
+    const iree_vm_frame_t* checkpoint_frame, bool may_yield,
+    iree_vm_execution_outcome_t outcome) {
+  const bool is_at_checkpoint = invocation->stack_cursor == checkpoint_cursor &&
+                                invocation->top_frame == checkpoint_frame;
+  const bool has_continuation = invocation->stack_cursor > checkpoint_cursor &&
+                                invocation->top_frame != checkpoint_frame;
+  if (!is_at_checkpoint && !has_continuation) {
+    return iree_make_status(IREE_STATUS_INTERNAL,
+                            "module callback corrupted its frame boundary");
+  }
+  if (outcome == IREE_VM_EXECUTION_OUTCOME_COMPLETED) {
+    if (invocation->has_call_request) {
+      return iree_make_status(
+          IREE_STATUS_INTERNAL,
+          "completed module callback left a child call request");
+    }
+    if (!is_at_checkpoint) {
+      return iree_make_status(
+          IREE_STATUS_INTERNAL,
+          "completed module callback did not restore its frame boundary");
+    }
+    return iree_ok_status();
+  }
+  if (outcome != IREE_VM_EXECUTION_OUTCOME_SUSPENDED) {
+    return iree_make_status(IREE_STATUS_INTERNAL,
+                            "module callback returned an invalid outcome");
+  }
+  if (invocation->has_call_request) {
+    return iree_ok_status();
+  }
+  if (!has_continuation) {
+    return iree_make_status(
+        IREE_STATUS_INTERNAL,
+        "suspended module callback did not preserve a continuation");
+  }
+  if (!may_yield) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "module callback suspended through a non-yielding contract");
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t iree_vm_invocation_dispatch_start(
     iree_vm_invocation_t* invocation,
     const iree_vm_linked_module_t* linked_module, uint16_t function_ordinal,
     bool may_yield, const iree_vm_call_packet_t* call,
@@ -761,43 +839,25 @@ iree_status_t iree_vm_invocation_dispatch_start(
       .function_ordinal = function_ordinal,
       .call = *call,
   };
-  const iree_vm_linked_module_t* previous_executing_module =
-      invocation->executing_linked_module;
-  const uint16_t previous_executing_function =
-      invocation->executing_function_ordinal;
   invocation->executing_linked_module = linked_module;
   invocation->executing_function_ordinal = function_ordinal;
+  invocation->executing_may_yield = may_yield;
   iree_vm_execution_outcome_t module_outcome = UINT32_MAX;
   iree_status_t status = linked_module->module->vtable->function_start(
       linked_module->module, &params, &module_outcome);
-  invocation->executing_linked_module = previous_executing_module;
-  invocation->executing_function_ordinal = previous_executing_function;
+  invocation->executing_linked_module = NULL;
 
-  if (iree_status_is_ok(status)) {
-    if (module_outcome == IREE_VM_EXECUTION_OUTCOME_COMPLETED) {
-      if (invocation->stack_cursor != checkpoint_cursor ||
-          invocation->top_frame != checkpoint_frame) {
-        status = iree_make_status(
-            IREE_STATUS_INTERNAL,
-            "completed module call did not restore its frame boundary");
-      }
-    } else if (module_outcome == IREE_VM_EXECUTION_OUTCOME_SUSPENDED) {
-      if (invocation->stack_cursor <= checkpoint_cursor ||
-          invocation->top_frame == checkpoint_frame) {
-        status = iree_make_status(
-            IREE_STATUS_INTERNAL,
-            "suspended module call did not preserve a continuation");
-      } else if (!may_yield) {
-        status = iree_make_status(
-            IREE_STATUS_FAILED_PRECONDITION,
-            "module call suspended through a non-yielding contract");
-      }
-    } else {
-      status = iree_make_status(IREE_STATUS_INTERNAL,
-                                "module call returned an invalid outcome");
-    }
+  if (iree_status_is_ok(status) &&
+      IREE_UNLIKELY(module_outcome != IREE_VM_EXECUTION_OUTCOME_COMPLETED ||
+                    invocation->stack_cursor != checkpoint_cursor ||
+                    invocation->top_frame != checkpoint_frame ||
+                    invocation->has_call_request)) {
+    status = iree_vm_invocation_validate_dispatch_outcome_slow(
+        invocation, checkpoint_cursor, checkpoint_frame, may_yield,
+        module_outcome);
   }
   if (!iree_status_is_ok(status)) {
+    invocation->has_call_request = false;
     iree_vm_invocation_unwind_to(invocation, checkpoint_cursor);
     return status;
   }
@@ -811,6 +871,7 @@ static iree_status_t iree_vm_invocation_dispatch_resume(
   uint8_t* checkpoint_cursor = frame->allocation_begin;
   iree_vm_frame_t* checkpoint_frame = frame->parent;
   const iree_vm_linked_module_t* linked_module = frame->linked_module;
+  const bool may_yield = frame->may_yield;
   const iree_byte_span_t process_storage =
       iree_vm_process_module_state(invocation->process, linked_module);
   const iree_vm_module_function_resume_params_t params = {
@@ -822,41 +883,78 @@ static iree_status_t iree_vm_invocation_dispatch_resume(
           },
       .frame = frame,
   };
-  const iree_vm_linked_module_t* previous_executing_module =
-      invocation->executing_linked_module;
-  const uint16_t previous_executing_function =
-      invocation->executing_function_ordinal;
   invocation->executing_linked_module = linked_module;
   invocation->executing_function_ordinal = frame->function_ordinal;
+  invocation->executing_may_yield = may_yield;
   iree_vm_execution_outcome_t module_outcome = UINT32_MAX;
   iree_status_t status = linked_module->module->vtable->function_resume(
       linked_module->module, &params, &module_outcome);
-  invocation->executing_linked_module = previous_executing_module;
-  invocation->executing_function_ordinal = previous_executing_function;
+  invocation->executing_linked_module = NULL;
 
-  if (iree_status_is_ok(status)) {
-    if (module_outcome == IREE_VM_EXECUTION_OUTCOME_COMPLETED) {
-      if (invocation->stack_cursor != checkpoint_cursor ||
-          invocation->top_frame != checkpoint_frame) {
-        status = iree_make_status(
-            IREE_STATUS_INTERNAL,
-            "completed module resume did not restore its frame boundary");
-      }
-    } else if (module_outcome == IREE_VM_EXECUTION_OUTCOME_SUSPENDED) {
-      if (invocation->stack_cursor <= checkpoint_cursor ||
-          invocation->top_frame == checkpoint_frame) {
-        status = iree_make_status(
-            IREE_STATUS_INTERNAL,
-            "suspended module resume did not preserve a continuation");
-      }
-    } else {
-      status = iree_make_status(IREE_STATUS_INTERNAL,
-                                "module resume returned an invalid outcome");
-    }
+  if (iree_status_is_ok(status) &&
+      IREE_UNLIKELY(module_outcome != IREE_VM_EXECUTION_OUTCOME_COMPLETED ||
+                    invocation->stack_cursor != checkpoint_cursor ||
+                    invocation->top_frame != checkpoint_frame ||
+                    invocation->has_call_request)) {
+    status = iree_vm_invocation_validate_dispatch_outcome_slow(
+        invocation, checkpoint_cursor, checkpoint_frame, may_yield,
+        module_outcome);
   }
-  if (!iree_status_is_ok(status)) return status;
+  if (!iree_status_is_ok(status)) {
+    invocation->has_call_request = false;
+    iree_vm_invocation_unwind_to(invocation, checkpoint_cursor);
+    return status;
+  }
   *out_outcome = module_outcome;
   return iree_ok_status();
+}
+
+static IREE_ATTRIBUTE_NOINLINE iree_status_t
+iree_vm_invocation_publish_suspension(
+    iree_vm_invocation_t* invocation,
+    iree_vm_execution_outcome_t* out_outcome) {
+  if (invocation->has_external_borrowed_arguments) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "invocation suspended while external borrowed refs were live");
+  }
+  invocation->state = IREE_VM_INVOCATION_STATE_SUSPENDED;
+  *out_outcome = IREE_VM_EXECUTION_OUTCOME_SUSPENDED;
+  return iree_ok_status();
+}
+
+static IREE_ATTRIBUTE_NOINLINE iree_status_t
+iree_vm_invocation_drive_continuations(
+    iree_vm_invocation_t* invocation,
+    iree_vm_execution_outcome_t* out_outcome) {
+  while (true) {
+    iree_vm_execution_outcome_t outcome = UINT32_MAX;
+    iree_status_t status = iree_ok_status();
+    if (invocation->has_call_request) {
+      const iree_vm_linked_module_t* linked_module =
+          invocation->call_request.linked_module;
+      const uint16_t function_ordinal =
+          invocation->call_request.function_ordinal;
+      const bool may_yield = invocation->call_request.may_yield;
+      const iree_vm_call_packet_t* packet = &invocation->call_request.packet;
+      invocation->has_call_request = false;
+      status = iree_vm_invocation_dispatch_start(invocation, linked_module,
+                                                 function_ordinal, may_yield,
+                                                 packet, &outcome);
+    } else if (invocation->top_frame) {
+      status = iree_vm_invocation_dispatch_resume(
+          invocation, invocation->top_frame, &outcome);
+    } else {
+      *out_outcome = IREE_VM_EXECUTION_OUTCOME_COMPLETED;
+      return iree_ok_status();
+    }
+    if (!iree_status_is_ok(status)) return status;
+    if (outcome == IREE_VM_EXECUTION_OUTCOME_COMPLETED ||
+        invocation->has_call_request) {
+      continue;
+    }
+    return iree_vm_invocation_publish_suspension(invocation, out_outcome);
+  }
 }
 
 iree_status_t iree_vm_invocation_drive_start(
@@ -868,55 +966,51 @@ iree_status_t iree_vm_invocation_drive_start(
       iree_vm_program_target_function_ordinal(invocation->root_target_bits);
   const iree_vm_linked_module_t* linked_module =
       &invocation->process->program->linked_modules[module_ordinal];
-  iree_vm_execution_outcome_t outcome = UINT32_MAX;
   const iree_fpu_state_t fpu_state =
       iree_fpu_state_push(iree_vm_invocation_fpu_state_flags);
+  iree_vm_execution_outcome_t outcome = UINT32_MAX;
   iree_status_t status = iree_vm_invocation_dispatch_start(
       invocation, linked_module, function_ordinal,
       iree_vm_program_target_may_yield(invocation->root_target_bits),
       &invocation->root_call.packet, &outcome);
-  iree_fpu_state_pop(fpu_state);
-  if (!iree_status_is_ok(status)) return status;
-  if (outcome == IREE_VM_EXECUTION_OUTCOME_SUSPENDED) {
-    if (invocation->has_external_borrowed_arguments) {
-      return iree_make_status(
-          IREE_STATUS_FAILED_PRECONDITION,
-          "invocation suspended while external borrowed refs were live");
+  if (iree_status_is_ok(status)) {
+    if (outcome == IREE_VM_EXECUTION_OUTCOME_COMPLETED) {
+      *out_outcome = outcome;
+    } else if (invocation->has_call_request) {
+      status = iree_vm_invocation_drive_continuations(invocation, out_outcome);
+    } else {
+      status = iree_vm_invocation_publish_suspension(invocation, out_outcome);
     }
-    invocation->state = IREE_VM_INVOCATION_STATE_SUSPENDED;
   }
-  *out_outcome = outcome;
-  return iree_ok_status();
+  iree_fpu_state_pop(fpu_state);
+  return status;
 }
 
 iree_status_t iree_vm_invocation_drive_resume(
     iree_vm_invocation_t* invocation,
     iree_vm_execution_outcome_t* out_outcome) {
   invocation->state = IREE_VM_INVOCATION_STATE_RUNNING;
+  if (!invocation->top_frame) {
+    return iree_make_status(IREE_STATUS_INTERNAL,
+                            "suspended invocation has no continuation");
+  }
   const iree_fpu_state_t fpu_state =
       iree_fpu_state_push(iree_vm_invocation_fpu_state_flags);
-  iree_status_t status = iree_ok_status();
-  while (invocation->top_frame && iree_status_is_ok(status)) {
-    iree_vm_execution_outcome_t outcome = UINT32_MAX;
-    status = iree_vm_invocation_dispatch_resume(
-        invocation, invocation->top_frame, &outcome);
-    if (iree_status_is_ok(status) &&
-        outcome == IREE_VM_EXECUTION_OUTCOME_SUSPENDED) {
-      if (invocation->has_external_borrowed_arguments) {
-        status = iree_make_status(
-            IREE_STATUS_FAILED_PRECONDITION,
-            "invocation suspended while external borrowed refs were live");
-        continue;
-      }
-      invocation->state = IREE_VM_INVOCATION_STATE_SUSPENDED;
+  iree_vm_execution_outcome_t outcome = UINT32_MAX;
+  iree_status_t status = iree_vm_invocation_dispatch_resume(
+      invocation, invocation->top_frame, &outcome);
+  if (iree_status_is_ok(status)) {
+    if (invocation->has_call_request ||
+        (outcome == IREE_VM_EXECUTION_OUTCOME_COMPLETED &&
+         invocation->top_frame)) {
+      status = iree_vm_invocation_drive_continuations(invocation, out_outcome);
+    } else if (outcome == IREE_VM_EXECUTION_OUTCOME_COMPLETED) {
       *out_outcome = outcome;
-      break;
+    } else {
+      status = iree_vm_invocation_publish_suspension(invocation, out_outcome);
     }
   }
   iree_fpu_state_pop(fpu_state);
-  if (iree_status_is_ok(status) && !invocation->top_frame) {
-    *out_outcome = IREE_VM_EXECUTION_OUTCOME_COMPLETED;
-  }
   return status;
 }
 
@@ -957,7 +1051,7 @@ iree_vm_invocation_call_local(const iree_vm_module_execution_t* execution,
         IREE_STATUS_INVALID_ARGUMENT,
         "local function behavior exceeds its callable contract");
   }
-  return iree_vm_invocation_dispatch_start(
+  return iree_vm_invocation_request_call(
       execution->invocation, execution->linked_module,
       local_function.function_ordinal, may_yield, call, out_outcome);
 }
@@ -986,7 +1080,7 @@ IREE_API_EXPORT iree_status_t iree_vm_invocation_call_import(
     return iree_make_status(IREE_STATUS_INTERNAL,
                             "resolved import target is invalid");
   }
-  return iree_vm_invocation_dispatch_start(
+  return iree_vm_invocation_request_call(
       execution->invocation, target_module, function_ordinal,
       iree_vm_program_target_may_yield(target_bits), call, out_outcome);
 }
@@ -1015,7 +1109,7 @@ IREE_API_EXPORT iree_status_t iree_vm_invocation_call_function_ref(
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "function-ref target is invalid");
   }
-  return iree_vm_invocation_dispatch_start(
+  return iree_vm_invocation_request_call(
       execution->invocation, target_module, function_ordinal,
       iree_vm_program_target_may_yield(function_ref.target_bits), call,
       out_outcome);
@@ -1226,6 +1320,7 @@ void iree_vm_invocation_abort(iree_vm_invocation_t* invocation) {
   iree_atomic_store(&invocation->cancel_reason,
                     IREE_VM_INVOCATION_CANCEL_REASON_IDLE,
                     iree_memory_order_release);
+  invocation->has_call_request = false;
   iree_vm_invocation_unwind_to(invocation,
                                invocation->root_call.allocation_begin);
   iree_vm_invocation_finish(invocation);

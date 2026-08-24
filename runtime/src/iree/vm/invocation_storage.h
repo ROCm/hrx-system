@@ -37,6 +37,17 @@ typedef struct iree_vm_root_call_t {
   uint8_t* allocation_begin;
 } iree_vm_root_call_t;
 
+typedef struct iree_vm_call_request_t {
+  // Resolved child module.
+  const iree_vm_linked_module_t* linked_module;
+  // Stable physical banks copied from the requesting callback.
+  iree_vm_call_packet_t packet;
+  // Module-local child function ordinal.
+  uint16_t function_ordinal;
+  // True when the child is permitted to yield.
+  bool may_yield;
+} iree_vm_call_request_t;
+
 struct iree_vm_frame_t {
   // Stack cursor restored when this frame is removed.
   uint8_t* allocation_begin;
@@ -50,6 +61,8 @@ struct iree_vm_frame_t {
   iree_vm_frame_cleanup_fn_t cleanup;
   // Module-local function ordinal.
   uint16_t function_ordinal;
+  // True when the framed function is permitted to yield.
+  bool may_yield;
 };
 
 struct iree_vm_invocation_t {
@@ -81,12 +94,18 @@ struct iree_vm_invocation_t {
   iree_atomic_int32_t cancel_reason;
   // Module-local function whose callback is currently executing.
   uint16_t executing_function_ordinal;
+  // True when the currently executing function is permitted to yield.
+  bool executing_may_yield;
   // Current exclusive-driver state.
   iree_vm_invocation_state_t state;
   // Current root operation kind.
   iree_vm_invocation_operation_t operation;
   // True when root staging contains a nonnull external borrowed ref.
   bool has_external_borrowed_arguments;
+  // True when |call_request| contains a callback-requested child call.
+  bool has_call_request;
+  // Cold child-call payload accessed only when |has_call_request| is true.
+  iree_vm_call_request_t call_request;
 };
 
 // Aligns one invocation-storage address without truncation.
@@ -156,10 +175,11 @@ iree_status_t iree_vm_invocation_drive_start(
 iree_status_t iree_vm_invocation_drive_resume(
     iree_vm_invocation_t* invocation, iree_vm_execution_outcome_t* out_outcome);
 
-// Enters one already resolved target without repeating the public module-call
-// boundary checks. Built-in providers may use this only after proving the
-// target identity, callable contract, and current invocation state.
-iree_status_t iree_vm_invocation_dispatch_start(
+// Requests one already resolved child call without entering another provider.
+// Built-in providers may use this only after proving the target identity and
+// callable contract. On success |out_outcome| is SUSPENDED so the current
+// callback returns control to the iterative invocation driver.
+iree_status_t iree_vm_invocation_request_call(
     iree_vm_invocation_t* invocation,
     const iree_vm_linked_module_t* linked_module, uint16_t function_ordinal,
     bool may_yield, const iree_vm_call_packet_t* call,

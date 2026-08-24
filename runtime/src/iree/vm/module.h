@@ -581,14 +581,17 @@ typedef struct iree_vm_module_function_resume_params_t {
 
 // Execution callbacks publish |out_outcome| only on OK. OK+COMPLETED means the
 // logical function has no remaining frame and every exact result is
-// initialized. OK+SUSPENDED means all state needed by a later resume is in
-// durable frames or provider operations. A non-OK return leaves |out_outcome|
-// untouched, quiesces callback sources owned by the module, and may leave
-// frames for the invocation core's exact terminal unwind. Status is never a
-// suspension or control-flow token. The invocation core enters callbacks with
-// masked floating-point traps, nearest-even rounding, and gradual underflow.
-// Implementations preserve those control modes across every callback; sticky
-// floating-point exception flags are outside the module ABI contract.
+// initialized. OK+SUSPENDED means either that all state needed by a later
+// resume is in durable frames or provider operations, or that the callback
+// requested a child call and returned control to the invocation driver. The
+// driver drains requested calls before reporting suspension to the host. A
+// non-OK return leaves |out_outcome| untouched, quiesces callback sources owned
+// by the module, and may leave frames for the invocation core's exact terminal
+// unwind. Status is never a suspension or control-flow token. The invocation
+// core enters callbacks with masked floating-point traps, nearest-even
+// rounding, and gradual underflow. Implementations preserve those control
+// modes across every callback; sticky floating-point exception flags are
+// outside the module ABI contract.
 
 // Starts one valid module-local function.
 typedef iree_status_t(IREE_API_PTR* iree_vm_module_function_start_fn_t)(
@@ -776,21 +779,29 @@ iree_vm_invocation_wake_callback(iree_vm_invocation_t* invocation);
 IREE_API_EXPORT iree_vm_cancel_reason_t
 iree_vm_invocation_cancel_reason(const iree_vm_invocation_t* invocation);
 
-// Calls one function in the current linked module. The correlated local
+// Requests one function in the current linked module. The correlated local
 // descriptor is trusted provider data validated before target entry.
+//
+// This never enters the target inline. On success it publishes SUSPENDED and
+// the current callback must return that outcome. The invocation driver starts
+// the child and immediately resumes any preserved caller frame when the child
+// completes without yielding to the host.
 IREE_API_EXPORT iree_status_t
 iree_vm_invocation_call_local(const iree_vm_module_execution_t* execution,
                               iree_vm_module_local_function_t local_function,
                               const iree_vm_call_packet_t* call,
                               iree_vm_execution_outcome_t* out_outcome);
 
-// Calls one exact target in the current linked module's resolved import table.
+// Requests one exact target in the current linked module's resolved import
+// table with the same deferred-entry contract as
+// |iree_vm_invocation_call_local|.
 IREE_API_EXPORT iree_status_t iree_vm_invocation_call_import(
     const iree_vm_module_execution_t* execution, uint16_t import_ordinal,
     const iree_vm_call_packet_t* call,
     iree_vm_execution_outcome_t* out_outcome);
 
-// Calls one program-bound function through an expected local callable type.
+// Requests one program-bound function through an expected local callable type
+// with the same deferred-entry contract as |iree_vm_invocation_call_local|.
 IREE_API_EXPORT iree_status_t iree_vm_invocation_call_function_ref(
     const iree_vm_module_execution_t* execution,
     iree_vm_function_ref_t function_ref,

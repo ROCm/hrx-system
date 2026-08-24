@@ -289,7 +289,7 @@ static iree_status_t iree_vm_bytecode_call_start_preflighted(
   };
 
   iree_vm_execution_outcome_t outcome = UINT32_MAX;
-  iree_status_t status = iree_vm_invocation_dispatch_start(
+  iree_status_t status = iree_vm_invocation_request_call(
       execution->invocation, target->linked_module, target->function_ordinal,
       target->may_yield, &call, &outcome);
   if (!iree_status_is_ok(status)) {

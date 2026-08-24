@@ -22,6 +22,7 @@ namespace iree::vm::bytecode::testing {
 namespace {
 
 constexpr iree_host_size_t kInvocationStorageSize = 16 * 1024;
+constexpr iree_host_size_t kDeepInvocationStorageSize = 1024 * 1024;
 
 struct CallExecutionHarness {
   // Immutable storage backing the loaded bytecode module.
@@ -235,7 +236,8 @@ TEST(VMBytecodeModuleCallTest, ExecutesDirectIndirectAndSuspendingCalls) {
   expect_suspending_result(IREE_SV("call_yield_indirect"), 44, 45);
 }
 
-TEST(VMBytecodeModuleCallTest, BoundsRecursiveCallsByInvocationStorage) {
+TEST(VMBytecodeModuleCallTest,
+     TrampolinesRecursiveCallsUntilInvocationStorageExhausts) {
   std::vector<uint8_t> image = BuildCallModuleImage();
   const MutableFunctionImage function = FindFunctionImage(&image, 0);
   ASSERT_NE(function.row, nullptr);
@@ -246,7 +248,8 @@ TEST(VMBytecodeModuleCallTest, BoundsRecursiveCallsByInvocationStorage) {
   std::memcpy(function.bytecode + 4, &call, sizeof(call));
 
   CallExecutionHarness harness(std::move(image));
-  IREE_ASSERT_OK(harness.Initialize(IREE_SV("call")));
+  IREE_ASSERT_OK(
+      harness.Initialize(IREE_SV("call"), kDeepInvocationStorageSize));
   iree_vm_function_t call_direct = iree_vm_function_null();
   IREE_ASSERT_OK(harness.LookupFunction(IREE_SV("call"), IREE_SV("call_direct"),
                                         &call_direct));
