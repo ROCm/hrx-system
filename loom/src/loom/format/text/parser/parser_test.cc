@@ -1950,6 +1950,13 @@ TEST_F(ParserTest, DescriptorBackedTypesRoundTripAndPreserveParameters) {
   loom_module_free(module);
 }
 
+TEST_F(ParserTest, DescriptorBackedTypesRetainNestedParserScratch) {
+  const char* source =
+      "%first = test.constant 0 : test.array<(i32) -> (i32)>\n"
+      "%second = test.constant 0 : test.array<(i64) -> (i64)>\n";
+  EXPECT_EQ(RoundTrip(source), source);
+}
+
 TEST_F(ParserTest, DescriptorBackedTypeRoundTripsCompactShape) {
   const char* source =
       "%matrix = test.constant 0 : "

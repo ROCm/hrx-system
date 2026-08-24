@@ -50,6 +50,9 @@ typedef struct loom_parser_t {
   // Parser-owned reusable type-list scratch frames.
   loom_parser_type_list_t* type_list_free_list;
 
+  // Parser-owned reusable descriptor-backed type parameter slot frames.
+  loom_parser_type_parameter_slots_t* type_parameter_slots_free_list;
+
   loom_alias_table_t aliases;
   loom_symbol_map_t symbol_lookup;
   loom_diagnostic_sink_t diagnostic_sink;

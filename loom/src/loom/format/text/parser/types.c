@@ -293,6 +293,67 @@ static iree_status_t loom_parser_type_list_append(
 }
 
 //===----------------------------------------------------------------------===//
+// Descriptor-backed type parameter parsing
+//===----------------------------------------------------------------------===//
+
+// Allocates a parser-owned FAM parameter slot frame with at least
+// |minimum_capacity| entries.
+static iree_status_t loom_parser_allocate_type_parameter_slots(
+    loom_parser_t* parser, iree_host_size_t minimum_capacity,
+    loom_parser_type_parameter_slots_t** out_slots) {
+  iree_host_size_t capacity = LOOM_PARSER_TYPE_PARAMETER_SLOTS_MIN_CAPACITY;
+  if (capacity < minimum_capacity) capacity = minimum_capacity;
+
+  iree_host_size_t allocation_size = 0;
+  IREE_RETURN_IF_ERROR(IREE_STRUCT_LAYOUT(
+      sizeof(loom_parser_type_parameter_slots_t), &allocation_size,
+      IREE_STRUCT_FIELD_FAM(capacity, loom_attribute_t)));
+
+  loom_parser_type_parameter_slots_t* slots = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate(&parser->parser_arena,
+                                           allocation_size, (void**)&slots));
+  slots->next_free = NULL;
+  slots->capacity = capacity;
+  *out_slots = slots;
+  return iree_ok_status();
+}
+
+// Leases a parameter slot frame with sufficient capacity for one active
+// descriptor-backed type parse. Frames remain valid until parser teardown so
+// nested type parsers may safely retain their own reusable scratch objects.
+static iree_status_t loom_parser_acquire_type_parameter_slots(
+    loom_parser_t* parser, iree_host_size_t minimum_capacity,
+    loom_parser_type_parameter_slots_t** out_slots) {
+  loom_parser_type_parameter_slots_t** free_link =
+      &parser->type_parameter_slots_free_list;
+  while (*free_link && (*free_link)->capacity < minimum_capacity) {
+    free_link = &(*free_link)->next_free;
+  }
+
+  loom_parser_type_parameter_slots_t* slots = *free_link;
+  if (slots) {
+    *free_link = slots->next_free;
+    slots->next_free = NULL;
+  } else {
+    IREE_RETURN_IF_ERROR(loom_parser_allocate_type_parameter_slots(
+        parser, minimum_capacity, &slots));
+  }
+
+  memset(slots->slots, 0, minimum_capacity * sizeof(loom_attribute_t));
+  *out_slots = slots;
+  return iree_ok_status();
+}
+
+// Returns a parameter slot frame to the parser while preserving its capacity
+// for a later sibling type parse.
+static void loom_parser_release_type_parameter_slots(
+    loom_parser_t* parser, loom_parser_type_parameter_slots_t* slots) {
+  if (!slots) return;
+  slots->next_free = parser->type_parameter_slots_free_list;
+  parser->type_parameter_slots_free_list = slots;
+}
+
+//===----------------------------------------------------------------------===//
 // Type reference resolution
 //===----------------------------------------------------------------------===//
 
@@ -1116,24 +1177,17 @@ static iree_status_t loom_parse_parameterized_type(
   }
 
   const uint8_t parameter_count = parameterized->parameter_count;
-  const iree_arena_checkpoint_t checkpoint =
-      iree_arena_checkpoint_save(&parser->parser_arena);
-  loom_attribute_t* parameter_slots = NULL;
-  iree_status_t status = iree_ok_status();
-  if (parameter_count > 0) {
-    status = iree_arena_allocate_array(&parser->parser_arena, parameter_count,
-                                       sizeof(*parameter_slots),
-                                       (void**)&parameter_slots);
-    if (iree_status_is_ok(status)) {
-      memset(parameter_slots, 0,
-             (iree_host_size_t)parameter_count * sizeof(*parameter_slots));
-    }
+  if (parameter_count == 0) {
+    return loom_parse_parameterized_type_contents(
+        parser, descriptor, mode, /*parameter_slots=*/NULL, out_type);
   }
-  if (iree_status_is_ok(status)) {
-    status = loom_parse_parameterized_type_contents(parser, descriptor, mode,
-                                                    parameter_slots, out_type);
-  }
-  iree_arena_checkpoint_restore(&checkpoint);
+
+  loom_parser_type_parameter_slots_t* parameter_slots = NULL;
+  IREE_RETURN_IF_ERROR(loom_parser_acquire_type_parameter_slots(
+      parser, parameter_count, &parameter_slots));
+  iree_status_t status = loom_parse_parameterized_type_contents(
+      parser, descriptor, mode, parameter_slots->slots, out_type);
+  loom_parser_release_type_parameter_slots(parser, parameter_slots);
   return status;
 }
 
