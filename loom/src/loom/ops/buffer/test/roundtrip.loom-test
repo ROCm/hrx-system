@@ -9,3 +9,12 @@ func.def @query_buffer_length(%buffer: buffer) -> (offset) {
   %byte_length = buffer.length %buffer
   func.return %byte_length : offset
 }
+
+// ====
+
+func.def @bulk_byte_operations(%source: buffer, %target: buffer, %source_offset: offset, %target_offset: offset, %byte_length: offset, %pattern: bf16) -> (i32) {
+  buffer.copy %source[%source_offset], %target[%target_offset], %byte_length
+  buffer.fill %pattern, %target[%target_offset], %byte_length : bf16
+  %order = buffer.compare %source[%source_offset], %target[%target_offset], %byte_length
+  func.return %order : i32
+}

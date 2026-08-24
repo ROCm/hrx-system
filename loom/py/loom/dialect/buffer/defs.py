@@ -35,7 +35,9 @@ from loom.dsl import (
     ATTR_TYPE_I64,
     ATTR_TYPE_I64_ARRAY,
     BUFFER,
+    BYTE_PATTERN_SCALAR,
     FACT_IDENTITY,
+    I32,
     OFFSET,
     PURE,
     REFINABLE_RESULT_TYPE_REFS,
@@ -47,9 +49,11 @@ from loom.dsl import (
     Op,
     Operand,
     OpPhase,
+    Reads,
     Result,
     SameType,
     VariadicValuesMatch,
+    Writes,
 )
 
 # ============================================================================
@@ -404,6 +408,129 @@ buffer_length = Op(
 )
 
 # ============================================================================
+# buffer.copy — copy a non-overlapping byte range
+# ============================================================================
+
+buffer_copy = Op(
+    name="buffer.copy",
+    group=buffer_ops,
+    doc=(
+        "Copy an exact non-overlapping byte range between buffer roots. "
+        "Source and target ranges must not overlap; programs may not depend "
+        "on an overlap-safe target implementation. A zero byte length "
+        "performs no byte access."
+    ),
+    operands=[
+        Operand("source", BUFFER, doc="Buffer root read by the copy."),
+        Operand("source_offset", OFFSET, doc="Source byte offset."),
+        Operand("target", BUFFER, doc="Buffer root written by the copy."),
+        Operand("target_offset", OFFSET, doc="Target byte offset."),
+        Operand("byte_length", OFFSET, doc="Number of bytes to copy."),
+    ],
+    effects=[Reads("source"), Writes("target")],
+    format=[
+        Ref("source"),
+        GLUE,
+        LBRACKET,
+        Ref("source_offset"),
+        RBRACKET,
+        COMMA,
+        Ref("target"),
+        GLUE,
+        LBRACKET,
+        Ref("target_offset"),
+        RBRACKET,
+        COMMA,
+        Ref("byte_length"),
+    ],
+    examples=[
+        "buffer.copy %source[%source_offset], %target[%target_offset], %byte_length",
+    ],
+)
+
+# ============================================================================
+# buffer.fill — repeat a raw scalar byte pattern
+# ============================================================================
+
+buffer_fill = Op(
+    name="buffer.fill",
+    group=buffer_ops,
+    doc=(
+        "Repeat the raw little-endian bytes of an 8-, 16-, 32-, or 64-bit "
+        "integer or floating-point scalar across an exact writable byte "
+        "range. A final partial repetition writes the low-address prefix of "
+        "the pattern bytes. A zero byte length performs no byte access."
+    ),
+    operands=[
+        Operand(
+            "pattern",
+            BYTE_PATTERN_SCALAR,
+            doc="Raw scalar bit pattern to repeat.",
+        ),
+        Operand("target", BUFFER, doc="Buffer root receiving the pattern."),
+        Operand("target_offset", OFFSET, doc="Target byte offset."),
+        Operand("byte_length", OFFSET, doc="Number of bytes to fill."),
+    ],
+    effects=[Writes("target")],
+    format=[
+        Ref("pattern"),
+        COMMA,
+        Ref("target"),
+        GLUE,
+        LBRACKET,
+        Ref("target_offset"),
+        RBRACKET,
+        COMMA,
+        Ref("byte_length"),
+        COLON,
+        TypeOf("pattern"),
+    ],
+    examples=[
+        "buffer.fill %pattern, %target[%target_offset], %byte_length : bf16",
+    ],
+)
+
+# ============================================================================
+# buffer.compare — lexicographically compare byte ranges
+# ============================================================================
+
+buffer_compare = Op(
+    name="buffer.compare",
+    group=buffer_ops,
+    doc=("Lexicographically compare equal-length ranges as unsigned bytes and return canonical i32 -1, 0, or +1. A zero byte length returns zero and performs no byte access."),
+    operands=[
+        Operand("lhs", BUFFER, doc="Left buffer root."),
+        Operand("lhs_offset", OFFSET, doc="Left byte offset."),
+        Operand("rhs", BUFFER, doc="Right buffer root."),
+        Operand("rhs_offset", OFFSET, doc="Right byte offset."),
+        Operand("byte_length", OFFSET, doc="Number of bytes to compare."),
+    ],
+    results=[
+        Result("order", I32, doc="Canonical signed ordering result."),
+    ],
+    effects=[Reads("lhs"), Reads("rhs")],
+    facts="loom_buffer_compare_facts",
+    format=[
+        Ref("lhs"),
+        GLUE,
+        LBRACKET,
+        Ref("lhs_offset"),
+        RBRACKET,
+        COMMA,
+        Ref("rhs"),
+        GLUE,
+        LBRACKET,
+        Ref("rhs_offset"),
+        RBRACKET,
+        COMMA,
+        Ref("byte_length"),
+    ],
+    examples=[
+        "%order = buffer.compare %lhs[%lhs_offset], %rhs[%rhs_offset], %byte_length",
+    ],
+)
+
+# ============================================================================
 # Registry
 # ============================================================================
 
@@ -416,4 +543,7 @@ ALL_BUFFER_OPS: tuple[Op, ...] = (
     buffer_view,
     buffer_pack,
     buffer_length,
+    buffer_copy,
+    buffer_fill,
+    buffer_compare,
 )

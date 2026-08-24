@@ -28,7 +28,10 @@ enum {
   LOOM_OP_BUFFER_VIEW = LOOM_OP_KIND(LOOM_DIALECT_BUFFER, 5),
   LOOM_OP_BUFFER_PACK = LOOM_OP_KIND(LOOM_DIALECT_BUFFER, 6),
   LOOM_OP_BUFFER_LENGTH = LOOM_OP_KIND(LOOM_DIALECT_BUFFER, 7),
-  LOOM_OP_BUFFER_COUNT_ = 8,
+  LOOM_OP_BUFFER_COPY = LOOM_OP_KIND(LOOM_DIALECT_BUFFER, 8),
+  LOOM_OP_BUFFER_FILL = LOOM_OP_KIND(LOOM_DIALECT_BUFFER, 9),
+  LOOM_OP_BUFFER_COMPARE = LOOM_OP_KIND(LOOM_DIALECT_BUFFER, 10),
+  LOOM_OP_BUFFER_COUNT_ = 11,
 };
 
 // LOOM_OP_BUFFER_ALLOCA: Create a fixed-frame scratch buffer root in an allocatable memory space. Each execution produces a distinct storage identity; identical allocas must not be commoned. The byte length is the requested physical byte count for the execution. Targets requiring a static frame reserve its proven finite non-negative maximum. base_alignment is the minimum byte alignment of the root storage base. Target lowering determines which allocatable spaces are legal for the containing program kind.
@@ -200,6 +203,64 @@ iree_status_t loom_buffer_length_build(
     loom_location_id_t location,
     loom_op_t** out_op);
 iree_status_t loom_buffer_length_facts(
+    loom_fact_context_t* context,
+    const loom_module_t* module, const loom_op_t* op,
+    const loom_value_facts_t* operand_facts,
+    loom_value_facts_t* result_facts);
+
+// LOOM_OP_BUFFER_COPY: Copy an exact non-overlapping byte range between buffer roots. Source and target ranges must not overlap; programs may not depend on an overlap-safe target implementation. A zero byte length performs no byte access.
+// buffer.copy %source[%source_offset], %target[%target_offset], %byte_length
+LOOM_DEFINE_ISA(loom_buffer_copy_isa, LOOM_OP_BUFFER_COPY)
+LOOM_DEFINE_OPERAND(loom_buffer_copy_source, 0)
+LOOM_DEFINE_OPERAND(loom_buffer_copy_source_offset, 1)
+LOOM_DEFINE_OPERAND(loom_buffer_copy_target, 2)
+LOOM_DEFINE_OPERAND(loom_buffer_copy_target_offset, 3)
+LOOM_DEFINE_OPERAND(loom_buffer_copy_byte_length, 4)
+iree_status_t loom_buffer_copy_build(
+    loom_builder_t* builder,
+    loom_value_id_t source,
+    loom_value_id_t source_offset,
+    loom_value_id_t target,
+    loom_value_id_t target_offset,
+    loom_value_id_t byte_length,
+    loom_location_id_t location,
+    loom_op_t** out_op);
+
+// LOOM_OP_BUFFER_FILL: Repeat the raw little-endian bytes of an 8-, 16-, 32-, or 64-bit integer or floating-point scalar across an exact writable byte range. A final partial repetition writes the low-address prefix of the pattern bytes. A zero byte length performs no byte access.
+// buffer.fill %pattern, %target[%target_offset], %byte_length : bf16
+LOOM_DEFINE_ISA(loom_buffer_fill_isa, LOOM_OP_BUFFER_FILL)
+LOOM_DEFINE_OPERAND(loom_buffer_fill_pattern, 0)
+LOOM_DEFINE_OPERAND(loom_buffer_fill_target, 1)
+LOOM_DEFINE_OPERAND(loom_buffer_fill_target_offset, 2)
+LOOM_DEFINE_OPERAND(loom_buffer_fill_byte_length, 3)
+iree_status_t loom_buffer_fill_build(
+    loom_builder_t* builder,
+    loom_value_id_t pattern,
+    loom_value_id_t target,
+    loom_value_id_t target_offset,
+    loom_value_id_t byte_length,
+    loom_location_id_t location,
+    loom_op_t** out_op);
+
+// LOOM_OP_BUFFER_COMPARE: Lexicographically compare equal-length ranges as unsigned bytes and return canonical i32 -1, 0, or +1. A zero byte length returns zero and performs no byte access.
+// %order = buffer.compare %lhs[%lhs_offset], %rhs[%rhs_offset], %byte_length
+LOOM_DEFINE_ISA(loom_buffer_compare_isa, LOOM_OP_BUFFER_COMPARE)
+LOOM_DEFINE_OPERAND(loom_buffer_compare_lhs, 0)
+LOOM_DEFINE_OPERAND(loom_buffer_compare_lhs_offset, 1)
+LOOM_DEFINE_OPERAND(loom_buffer_compare_rhs, 2)
+LOOM_DEFINE_OPERAND(loom_buffer_compare_rhs_offset, 3)
+LOOM_DEFINE_OPERAND(loom_buffer_compare_byte_length, 4)
+LOOM_DEFINE_RESULT(loom_buffer_compare_order, 0)
+iree_status_t loom_buffer_compare_build(
+    loom_builder_t* builder,
+    loom_value_id_t lhs,
+    loom_value_id_t lhs_offset,
+    loom_value_id_t rhs,
+    loom_value_id_t rhs_offset,
+    loom_value_id_t byte_length,
+    loom_location_id_t location,
+    loom_op_t** out_op);
+iree_status_t loom_buffer_compare_facts(
     loom_fact_context_t* context,
     const loom_module_t* module, const loom_op_t* op,
     const loom_value_facts_t* operand_facts,

@@ -97,3 +97,35 @@ class BufferBuilder(DialectBuilder):
         result_names: Sequence[str] | None = ...,
         location_id: int | None = ...,
     ) -> ValueRef: ...
+    def copy(
+        self,
+        *,
+        source: ValueRef,
+        source_offset: ValueRef,
+        target: ValueRef,
+        target_offset: ValueRef,
+        byte_length: ValueRef,
+        location_id: int | None = ...,
+    ) -> None: ...
+    def fill(
+        self,
+        *,
+        pattern: ValueRef,
+        target: ValueRef,
+        target_offset: ValueRef,
+        byte_length: ValueRef,
+        location_id: int | None = ...,
+    ) -> None: ...
+    def compare(
+        self,
+        *,
+        lhs: ValueRef,
+        lhs_offset: ValueRef,
+        rhs: ValueRef,
+        rhs_offset: ValueRef,
+        byte_length: ValueRef,
+        name: str | None = ...,
+        names: Sequence[str] | None = ...,
+        result_names: Sequence[str] | None = ...,
+        location_id: int | None = ...,
+    ) -> ValueRef: ...

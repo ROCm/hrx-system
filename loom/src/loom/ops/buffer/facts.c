@@ -317,3 +317,16 @@ iree_status_t loom_buffer_length_facts(loom_fact_context_t* context,
       loom_value_facts_make(0, extent.range_hi, extent.known_divisor);
   return iree_ok_status();
 }
+
+iree_status_t loom_buffer_compare_facts(loom_fact_context_t* context,
+                                        const loom_module_t* module,
+                                        const loom_op_t* op,
+                                        const loom_value_facts_t* operand_facts,
+                                        loom_value_facts_t* result_facts) {
+  (void)context;
+  (void)module;
+  (void)op;
+  (void)operand_facts;
+  result_facts[0] = loom_value_facts_make(-1, 1, 1);
+  return iree_ok_status();
+}
