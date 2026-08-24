@@ -40,11 +40,47 @@ loom_bytecode_symbol_attribute_validator(
   };
 }
 
+static iree_status_t loom_bytecode_symbol_retain_attribute_metadata(
+    iree_arena_allocator_t* retained_arena, uint64_t attribute_count,
+    loom_bytecode_symbol_metadata_t* symbol_metadata,
+    loom_bytecode_symbol_attribute_metadata_t** out_attributes) {
+  *out_attributes = NULL;
+  if (retained_arena == NULL || attribute_count == 0) {
+    return iree_ok_status();
+  }
+  IREE_ASSERT(attribute_count <= UINT8_MAX);
+  loom_bytecode_symbol_attribute_metadata_t* attributes = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      retained_arena, (iree_host_size_t)attribute_count, sizeof(*attributes),
+      (void**)&attributes));
+  symbol_metadata->attributes = attributes;
+  symbol_metadata->attribute_count = (uint8_t)attribute_count;
+  *out_attributes = attributes;
+  return iree_ok_status();
+}
+
+static void loom_bytecode_symbol_record_attribute_metadata(
+    loom_bytecode_symbol_attribute_metadata_t* attributes,
+    uint64_t attribute_ordinal, uint8_t attribute_index,
+    loom_bytecode_attr_kind_t kind, uint64_t value_offset,
+    const loom_bytecode_reader_cursor_t* cursor) {
+  if (attributes == NULL) return;
+  attributes[attribute_ordinal] = (loom_bytecode_symbol_attribute_metadata_t){
+      .value_offset = value_offset,
+      .value_length =
+          loom_bytecode_reader_cursor_absolute_position(cursor) - value_offset,
+      .attribute_index = attribute_index,
+      .kind = kind,
+  };
+}
+
 static iree_status_t loom_bytecode_reader_skip_func_payload_attrs(
     loom_bytecode_symbol_validator_t* reader,
     loom_bytecode_reader_cursor_t* cursor, uint64_t symbol_index,
     const loom_op_vtable_t* vtable, const loom_func_like_vtable_t* func_like,
-    const loom_bytecode_attribute_ssa_validation_scope_t* ssa_scope) {
+    const loom_bytecode_attribute_ssa_validation_scope_t* ssa_scope,
+    iree_arena_allocator_t* retained_arena,
+    loom_bytecode_symbol_metadata_t* symbol_metadata) {
   uint64_t attr_count = 0;
   uint64_t attr_count_offset =
       loom_bytecode_reader_cursor_absolute_position(cursor);
@@ -56,6 +92,9 @@ static iree_status_t loom_bytecode_reader_skip_func_payload_attrs(
         IREE_SV("attr_count"), attr_count_offset,
         IREE_SV("present_function_attribute_count_exceeds_op_attribute_slots"));
   }
+  loom_bytecode_symbol_attribute_metadata_t* retained_attributes = NULL;
+  IREE_RETURN_IF_ERROR(loom_bytecode_symbol_retain_attribute_metadata(
+      retained_arena, attr_count, symbol_metadata, &retained_attributes));
   uint64_t seen_attr_bits[4] = {0};
   loom_bytecode_attribute_validator_t attribute_validator =
       loom_bytecode_symbol_attribute_validator(reader);
@@ -95,9 +134,13 @@ static iree_status_t loom_bytecode_reader_skip_func_payload_attrs(
     loom_bytecode_attr_kind_t value_kind = LOOM_BYTECODE_ATTR_I64;
     IREE_RETURN_IF_ERROR(loom_bytecode_attribute_read_kind(
         &reader->decoder, cursor, &value_kind));
+    const uint64_t value_offset =
+        loom_bytecode_reader_cursor_absolute_position(cursor);
     IREE_RETURN_IF_ERROR(loom_bytecode_attribute_validate_ssa(
         &attribute_validator, cursor, &vtable->attr_descriptors[attr_index],
         value_kind, reader->view.types.count, ssa_scope));
+    loom_bytecode_symbol_record_attribute_metadata(
+        retained_attributes, i, attr_index, value_kind, value_offset, cursor);
   }
   return iree_ok_status();
 }
@@ -261,7 +304,8 @@ static iree_status_t loom_bytecode_reader_decode_region_payloads(
 static iree_status_t loom_bytecode_reader_skip_global_payload(
     loom_bytecode_symbol_validator_t* reader,
     loom_bytecode_reader_cursor_t* cursor, uint64_t symbol_index,
-    uint16_t symbol_flags, loom_bytecode_symbol_metadata_t* symbol_metadata) {
+    uint16_t symbol_flags, iree_arena_allocator_t* retained_arena,
+    loom_bytecode_symbol_metadata_t* symbol_metadata) {
   uint64_t op_ref_offset =
       loom_bytecode_reader_cursor_absolute_position(cursor);
   uint64_t op_table_index_plus1 = 0;
@@ -324,6 +368,9 @@ static iree_status_t loom_bytecode_reader_skip_global_payload(
         IREE_SV("attr_count"), attr_count_offset,
         IREE_SV("present_global_attribute_count_exceeds_op_attribute_slots"));
   }
+  loom_bytecode_symbol_attribute_metadata_t* retained_attributes = NULL;
+  IREE_RETURN_IF_ERROR(loom_bytecode_symbol_retain_attribute_metadata(
+      retained_arena, attr_count, symbol_metadata, &retained_attributes));
   uint64_t seen_attr_bits[4] = {0};
   loom_bytecode_attribute_validator_t attribute_validator =
       loom_bytecode_symbol_attribute_validator(reader);
@@ -368,9 +415,13 @@ static iree_status_t loom_bytecode_reader_skip_global_payload(
     loom_bytecode_attr_kind_t value_kind = LOOM_BYTECODE_ATTR_I64;
     IREE_RETURN_IF_ERROR(loom_bytecode_attribute_read_kind(
         &reader->decoder, cursor, &value_kind));
+    const uint64_t value_offset =
+        loom_bytecode_reader_cursor_absolute_position(cursor);
     IREE_RETURN_IF_ERROR(loom_bytecode_attribute_validate_ssa(
         &attribute_validator, cursor, &vtable->attr_descriptors[attr_index],
         value_kind, reader->view.types.count, &attribute_ssa_scope));
+    loom_bytecode_symbol_record_attribute_metadata(
+        retained_attributes, i, attr_index, value_kind, value_offset, cursor);
   }
   return iree_ok_status();
 }
@@ -382,6 +433,7 @@ static iree_status_t loom_bytecode_reader_skip_record_payload(
     uint16_t symbol_flags, iree_host_size_t total_region_payload_count,
     iree_host_size_t* region_payload_index,
     loom_bytecode_region_payload_metadata_t* region_payloads,
+    iree_arena_allocator_t* retained_arena,
     loom_bytecode_symbol_metadata_t* symbol_metadata) {
   uint64_t op_ref_offset =
       loom_bytecode_reader_cursor_absolute_position(cursor);
@@ -415,6 +467,9 @@ static iree_status_t loom_bytecode_reader_skip_record_payload(
         IREE_SV("attr_count"), attr_count_offset,
         IREE_SV("present_record_attribute_count_exceeds_op_attribute_slots"));
   }
+  loom_bytecode_symbol_attribute_metadata_t* retained_attributes = NULL;
+  IREE_RETURN_IF_ERROR(loom_bytecode_symbol_retain_attribute_metadata(
+      retained_arena, attr_count, symbol_metadata, &retained_attributes));
   uint64_t seen_attr_bits[4] = {0};
   loom_bytecode_attribute_validator_t attribute_validator =
       loom_bytecode_symbol_attribute_validator(reader);
@@ -454,9 +509,13 @@ static iree_status_t loom_bytecode_reader_skip_record_payload(
     loom_bytecode_attr_kind_t value_kind = LOOM_BYTECODE_ATTR_I64;
     IREE_RETURN_IF_ERROR(loom_bytecode_attribute_read_kind(
         &reader->decoder, cursor, &value_kind));
+    const uint64_t value_offset =
+        loom_bytecode_reader_cursor_absolute_position(cursor);
     IREE_RETURN_IF_ERROR(loom_bytecode_attribute_validate_named(
         &attribute_validator, cursor, &vtable->attr_descriptors[attr_index],
         value_kind, reader->view.types.count));
+    loom_bytecode_symbol_record_attribute_metadata(
+        retained_attributes, i, attr_index, value_kind, value_offset, cursor);
   }
 
   return loom_bytecode_reader_decode_region_payloads(
@@ -481,6 +540,9 @@ typedef struct loom_bytecode_symbol_table_t {
   // Retained payload metadata destination, or NULL during validation-only
   // reads.
   loom_bytecode_region_payload_metadata_t* region_payloads;
+  // Arena owning retained symbol metadata, or NULL during validation-only
+  // reads.
+  iree_arena_allocator_t* retained_arena;
   // Import offset-table state.
   struct {
     // Number of entries.
@@ -896,13 +958,13 @@ loom_bytecode_symbol_decode(loom_bytecode_symbol_validator_t* reader,
         .symbol_name = unused_name,
         .value_count = workload_arg_count + arg_count + result_count,
     };
-    uint16_t predicate_count = 0;
-    IREE_RETURN_IF_ERROR(loom_bytecode_attribute_validate_predicate_list_ssa(
+    IREE_RETURN_IF_ERROR(loom_bytecode_attribute_retain_predicate_list_ssa(
         &attribute_validator, &table->cursor, &attribute_ssa_scope,
-        &predicate_count));
+        table->retained_arena, &symbol_metadata->predicates,
+        &symbol_metadata->predicate_count));
     const bool has_predicates =
         iree_any_bit_set(flags, LOOM_BYTECODE_SYMBOL_FLAG_PREDICATES);
-    if (!has_predicates && predicate_count != 0) {
+    if (!has_predicates && symbol_metadata->predicate_count != 0) {
       return loom_bytecode_reader_emit_invalid_field(
           &reader->decoder, IREE_SV("SYMBOLS"), IREE_SV("symbol"), symbol_index,
           IREE_SV("predicates"),
@@ -939,19 +1001,20 @@ loom_bytecode_symbol_decode(loom_bytecode_symbol_validator_t* reader,
     }
     IREE_RETURN_IF_ERROR(loom_bytecode_reader_skip_func_payload_attrs(
         reader, &table->cursor, symbol_index, unused_vtable, func_like,
-        &attribute_ssa_scope));
+        &attribute_ssa_scope, table->retained_arena, symbol_metadata));
     IREE_RETURN_IF_ERROR(loom_bytecode_reader_decode_region_payloads(
         reader, &table->cursor, table->ir_section, symbol_index, unused_vtable,
         table->region_payload_count, &table->region_payload_index,
         table->region_payloads, symbol_metadata));
   } else if (kind == LOOM_BYTECODE_SYMBOL_GLOBAL) {
     IREE_RETURN_IF_ERROR(loom_bytecode_reader_skip_global_payload(
-        reader, &table->cursor, symbol_index, flags, symbol_metadata));
+        reader, &table->cursor, symbol_index, flags, table->retained_arena,
+        symbol_metadata));
   } else if (kind == LOOM_BYTECODE_SYMBOL_RECORD) {
     IREE_RETURN_IF_ERROR(loom_bytecode_reader_skip_record_payload(
         reader, &table->cursor, table->ir_section, symbol_index, flags,
         table->region_payload_count, &table->region_payload_index,
-        table->region_payloads, symbol_metadata));
+        table->region_payloads, table->retained_arena, symbol_metadata));
   }
 
   uint64_t next_entry_offset =
@@ -1042,6 +1105,7 @@ iree_status_t loom_bytecode_symbols_index(
                                   (void**)&out_metadata->region_payloads));
     table.region_payloads = out_metadata->region_payloads;
   }
+  table.retained_arena = retained_arena;
   if (out_metadata->strings.count > 0) {
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
         retained_arena, out_metadata->strings.count,

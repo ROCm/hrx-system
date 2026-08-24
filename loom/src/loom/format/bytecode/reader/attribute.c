@@ -234,14 +234,21 @@ iree_status_t loom_bytecode_attribute_read_signed_enum_set(
   return iree_ok_status();
 }
 
-static iree_status_t loom_bytecode_attribute_validate_predicate_list(
+static iree_status_t loom_bytecode_attribute_retain_predicate_list(
     loom_bytecode_attribute_validator_t* validator,
     loom_bytecode_reader_cursor_t* cursor,
     const loom_bytecode_attribute_validation_scope_t* scope,
-    uint16_t* out_predicate_count) {
+    iree_arena_allocator_t* retained_arena,
+    const loom_predicate_t** out_predicates, uint16_t* out_predicate_count) {
   uint16_t predicate_count = 0;
   IREE_RETURN_IF_ERROR(loom_bytecode_attribute_read_predicate_count(
       validator->decoder, cursor, &predicate_count));
+  loom_predicate_t* predicates = NULL;
+  if (retained_arena != NULL && predicate_count != 0) {
+    IREE_RETURN_IF_ERROR(
+        iree_arena_allocate_array(retained_arena, predicate_count,
+                                  sizeof(*predicates), (void**)&predicates));
+  }
   for (uint16_t predicate_index = 0; predicate_index < predicate_count;
        ++predicate_index) {
     loom_bytecode_wire_predicate_t predicate;
@@ -262,8 +269,11 @@ static iree_status_t loom_bytecode_attribute_validate_predicate_list(
             validator->decoder, scope->ssa.symbol_name,
             predicate.argument_offsets[i]);
       }
+      predicate.value.args[i] = (int64_t)value_number;
     }
+    if (predicates != NULL) predicates[predicate_index] = predicate.value;
   }
+  if (out_predicates != NULL) *out_predicates = predicates;
   *out_predicate_count = predicate_count;
   return iree_ok_status();
 }
@@ -425,8 +435,9 @@ static iree_status_t loom_bytecode_attribute_validate_at_depth(
     }
     case LOOM_BYTECODE_ATTR_PREDICATE_LIST: {
       uint16_t unused_predicate_count = 0;
-      return loom_bytecode_attribute_validate_predicate_list(
-          validator, cursor, scope, &unused_predicate_count);
+      return loom_bytecode_attribute_retain_predicate_list(
+          validator, cursor, scope, /*retained_arena=*/NULL,
+          /*out_predicates=*/NULL, &unused_predicate_count);
     }
     case LOOM_BYTECODE_ATTR_DICT: {
       if (aggregate_depth >= LOOM_ATTR_AGGREGATE_MAX_NESTING_DEPTH) {
@@ -651,8 +662,24 @@ iree_status_t loom_bytecode_attribute_validate_predicate_list_ssa(
       .value_domain = LOOM_BYTECODE_ATTRIBUTE_VALUE_DOMAIN_SSA,
       .ssa = *ssa_scope,
   };
-  return loom_bytecode_attribute_validate_predicate_list(
-      validator, cursor, &scope, out_predicate_count);
+  return loom_bytecode_attribute_retain_predicate_list(
+      validator, cursor, &scope, /*retained_arena=*/NULL,
+      /*out_predicates=*/NULL, out_predicate_count);
+}
+
+iree_status_t loom_bytecode_attribute_retain_predicate_list_ssa(
+    loom_bytecode_attribute_validator_t* validator,
+    loom_bytecode_reader_cursor_t* cursor,
+    const loom_bytecode_attribute_ssa_validation_scope_t* ssa_scope,
+    iree_arena_allocator_t* retained_arena,
+    const loom_predicate_t** out_predicates, uint16_t* out_predicate_count) {
+  const loom_bytecode_attribute_validation_scope_t scope = {
+      .value_domain = LOOM_BYTECODE_ATTRIBUTE_VALUE_DOMAIN_SSA,
+      .ssa = *ssa_scope,
+  };
+  return loom_bytecode_attribute_retain_predicate_list(
+      validator, cursor, &scope, retained_arena, out_predicates,
+      out_predicate_count);
 }
 
 static loom_bytecode_attribute_validator_t

@@ -83,6 +83,18 @@ typedef struct loom_bytecode_region_payload_metadata_t {
   uint8_t region_index;
 } loom_bytecode_region_payload_metadata_t;
 
+// Validated function/global/record attribute payload in one symbol entry.
+typedef struct loom_bytecode_symbol_attribute_metadata_t {
+  // Absolute file byte offset of the attribute value payload after its kind.
+  uint64_t value_offset;
+  // Byte length of the attribute value payload.
+  uint64_t value_length;
+  // Descriptor slot on the defining operation.
+  uint8_t attribute_index;
+  // Validated wire attribute kind.
+  loom_bytecode_attr_kind_t kind;
+} loom_bytecode_symbol_attribute_metadata_t;
+
 // Validated symbol record exposed by the bytecode index.
 typedef struct loom_bytecode_symbol_metadata_t {
   // Absolute file byte offset of the symbol entry.
@@ -137,11 +149,31 @@ typedef struct loom_bytecode_symbol_metadata_t {
   uint32_t template_family_symbol_ordinal;
   // Concrete provider priority value, or zero when not applicable.
   uint64_t priority;
+  // Arena-owned predicates retaining signature-local VALUE ordinals.
+  const loom_predicate_t* predicates;
+  // Number of retained predicate entries.
+  uint16_t predicate_count;
+  // Arena-owned seekable function/global/record attribute payloads.
+  const loom_bytecode_symbol_attribute_metadata_t* attributes;
+  // Number of seekable attribute payloads.
+  uint8_t attribute_count;
   // First entry in the module's root-region payload array.
   uint32_t first_region_payload_index;
   // Number of independently bounded root-region payloads.
   uint8_t region_payload_count;
 } loom_bytecode_symbol_metadata_t;
+
+// Looks up one authored attribute payload by defining-op descriptor slot.
+static inline const loom_bytecode_symbol_attribute_metadata_t*
+loom_bytecode_symbol_metadata_lookup_attribute(
+    const loom_bytecode_symbol_metadata_t* metadata, uint8_t attribute_index) {
+  for (uint8_t i = 0; i < metadata->attribute_count; ++i) {
+    if (metadata->attributes[i].attribute_index == attribute_index) {
+      return &metadata->attributes[i];
+    }
+  }
+  return NULL;
+}
 
 // One compile-time provider import and its slice in the module anchor array.
 typedef struct loom_bytecode_provider_import_metadata_t {

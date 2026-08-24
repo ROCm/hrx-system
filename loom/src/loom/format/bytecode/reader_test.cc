@@ -3772,6 +3772,70 @@ TEST_F(ReaderTest, MetadataRejectsPredicateSsaReferenceOutOfRange) {
   loom_module_free(module);
 }
 
+TEST_F(ReaderTest, IndexRetainsSignatureLocalPredicates) {
+  loom_module_t* module = CreatePredicateFunctionModule();
+  auto bytes = WriteModule(module);
+
+  iree_arena_allocator_t metadata_arena;
+  iree_arena_initialize(&block_pool_, &metadata_arena);
+  loom_bytecode_file_metadata_t metadata = {0};
+  std::vector<std::string> error_ids;
+  loom_bytecode_read_result_t result =
+      ReadIndex(bytes, &metadata_arena, &metadata, &error_ids);
+
+  EXPECT_EQ(result.error_count, 0u);
+  EXPECT_TRUE(error_ids.empty());
+  ASSERT_EQ(metadata.module_count, 1u);
+  ASSERT_EQ(metadata.modules[0].symbol_count, 1u);
+  const loom_bytecode_symbol_metadata_t& symbol =
+      metadata.modules[0].symbols[0];
+  ASSERT_EQ(symbol.predicate_count, 2u);
+  ASSERT_NE(symbol.predicates, nullptr);
+  EXPECT_EQ(symbol.predicates[0].kind, LOOM_PREDICATE_MUL);
+  EXPECT_EQ(symbol.predicates[0].arg_tags[0], LOOM_PRED_ARG_VALUE);
+  EXPECT_EQ(symbol.predicates[0].args[0], 0);
+  EXPECT_EQ(symbol.predicates[0].arg_tags[1], LOOM_PRED_ARG_CONST);
+  EXPECT_EQ(symbol.predicates[0].args[1], 16);
+  EXPECT_EQ(symbol.predicates[1].kind, LOOM_PREDICATE_RANGE);
+  EXPECT_EQ(symbol.predicates[1].arg_tags[0], LOOM_PRED_ARG_VALUE);
+  EXPECT_EQ(symbol.predicates[1].args[0], 0);
+  EXPECT_EQ(symbol.predicates[1].args[1], 32);
+  EXPECT_EQ(symbol.predicates[1].args[2], 512);
+
+  iree_arena_deinitialize(&metadata_arena);
+  loom_module_free(module);
+}
+
+TEST_F(ReaderTest, IndexRetainsSeekableSymbolAttributes) {
+  loom_module_t* module = CreateGlobalModule();
+  auto bytes = WriteModule(module);
+
+  iree_arena_allocator_t metadata_arena;
+  iree_arena_initialize(&block_pool_, &metadata_arena);
+  loom_bytecode_file_metadata_t metadata = {0};
+  std::vector<std::string> error_ids;
+  loom_bytecode_read_result_t result =
+      ReadIndex(bytes, &metadata_arena, &metadata, &error_ids);
+
+  EXPECT_EQ(result.error_count, 0u);
+  EXPECT_TRUE(error_ids.empty());
+  ASSERT_EQ(metadata.module_count, 1u);
+  ASSERT_EQ(metadata.modules[0].symbol_count, 1u);
+  const loom_bytecode_symbol_metadata_t& symbol =
+      metadata.modules[0].symbols[0];
+  const loom_bytecode_symbol_attribute_metadata_t* initializer =
+      loom_bytecode_symbol_metadata_lookup_attribute(&symbol,
+                                                     /*attribute_index=*/2);
+  ASSERT_NE(initializer, nullptr);
+  EXPECT_EQ(initializer->kind, LOOM_BYTECODE_ATTR_I64);
+  EXPECT_EQ(initializer->value_length, 1u);
+  ASSERT_LT(initializer->value_offset, bytes.size());
+  EXPECT_EQ(bytes[initializer->value_offset], 84u);
+
+  iree_arena_deinitialize(&metadata_arena);
+  loom_module_free(module);
+}
+
 TEST_F(ReaderTest, RetainedFunctionSurvivesModuleRead) {
   loom_module_t* module = CreateRetainedFunctionModule();
   auto bytes = WriteModule(module);
