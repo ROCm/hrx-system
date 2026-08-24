@@ -382,6 +382,7 @@ static bool loom_low_lower_op_is_structural(const loom_module_t* module,
     case LOOM_OP_CFG_COND_BR:
     case LOOM_OP_CFG_SWITCH:
     case LOOM_OP_FUNC_CALL:
+    case LOOM_OP_FUNC_CALL_INDIRECT:
     case LOOM_OP_FUNC_RETURN:
     case LOOM_OP_KERNEL_RETURN:
     case LOOM_OP_SCF_FOR:
@@ -790,6 +791,9 @@ static void loom_low_lower_mark_structural_storage_demands(
     case LOOM_OP_FUNC_CALL:
       loom_low_lower_mark_value_slice_storage_required(
           context, loom_func_call_operands(source_op));
+      return;
+    case LOOM_OP_FUNC_CALL_INDIRECT:
+      loom_low_lower_require_source_operands_storage(context, source_op);
       return;
     case LOOM_OP_FUNC_RETURN:
       loom_low_lower_mark_value_slice_storage_required(
@@ -2637,6 +2641,25 @@ static iree_status_t loom_low_lower_bind_identity_results(
   return iree_ok_status();
 }
 
+static iree_status_t loom_low_lower_func_ref_cast(
+    loom_low_lower_context_t* context, const loom_op_t* source_op) {
+  const loom_value_id_t source_id = loom_func_ref_cast_source(source_op);
+  const loom_value_id_t result_id = loom_func_ref_cast_result(source_op);
+  loom_value_id_t low_source_id = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(
+      loom_low_lower_lookup_value(context, source_id, &low_source_id));
+  loom_type_t low_result_type = loom_type_none();
+  IREE_RETURN_IF_ERROR(loom_low_lower_map_value(context, source_op, result_id,
+                                                &low_result_type));
+
+  loom_op_t* low_op = NULL;
+  IREE_RETURN_IF_ERROR(loom_low_func_ref_cast_build(
+      &context->builder, low_source_id, low_result_type, source_op->location,
+      &low_op));
+  return loom_low_lower_bind_value(context, result_id,
+                                   loom_low_func_ref_cast_result(low_op));
+}
+
 static iree_status_t loom_low_lower_emit_region_ops(
     loom_low_lower_context_t* context, loom_region_t* source_region,
     bool map_source_blocks);
@@ -2861,6 +2884,9 @@ static iree_status_t loom_low_lower_structural_op(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     bool* out_handled) {
   *out_handled = true;
+  if (loom_func_ref_cast_isa(source_op)) {
+    return loom_low_lower_func_ref_cast(context, source_op);
+  }
   const loom_trait_flags_t traits =
       loom_op_effective_traits(context->module, source_op);
   if (loom_traits_are_fact_identity(traits)) {
@@ -2921,6 +2947,43 @@ static iree_status_t loom_low_lower_structural_op(
           &context->builder, build_flags, purity,
           loom_func_call_callee(source_op), low_operands, operands.count,
           result_types, source_op->result_count,
+          /*tied_results=*/NULL, /*tied_result_count=*/0, source_op->location,
+          &low_call_op));
+
+      const loom_value_id_t* low_results = loom_op_const_results(low_call_op);
+      for (uint16_t i = 0; i < source_op->result_count; ++i) {
+        IREE_RETURN_IF_ERROR(loom_low_lower_bind_value(
+            context, source_results[i], low_results[i]));
+      }
+      return iree_ok_status();
+    }
+    case LOOM_OP_FUNC_CALL_INDIRECT: {
+      loom_value_id_t* low_operands = NULL;
+      IREE_RETURN_IF_ERROR(loom_low_lower_remap_values(
+          context, source_op, loom_op_const_operands(source_op),
+          source_op->operand_count, &low_operands));
+
+      const loom_value_id_t* source_results = loom_op_const_results(source_op);
+      loom_type_t* result_types = NULL;
+      bool has_unmapped_result = false;
+      if (source_op->result_count != 0) {
+        IREE_RETURN_IF_ERROR(loom_low_lower_allocate_emission_array(
+            context, source_op->result_count, sizeof(*result_types),
+            (void**)&result_types));
+        for (uint16_t i = 0; i < source_op->result_count; ++i) {
+          IREE_RETURN_IF_ERROR(loom_low_lower_check_mapped_value(
+              context, source_op, source_results[i], &result_types[i]));
+          has_unmapped_result |= loom_low_lower_type_is_none(result_types[i]);
+        }
+      }
+      if (has_unmapped_result) {
+        return iree_ok_status();
+      }
+
+      loom_op_t* low_call_op = NULL;
+      IREE_RETURN_IF_ERROR(loom_low_func_call_indirect_build(
+          &context->builder, low_operands[0], low_operands + 1,
+          source_op->operand_count - 1, result_types, source_op->result_count,
           /*tied_results=*/NULL, /*tied_result_count=*/0, source_op->location,
           &low_call_op));
 

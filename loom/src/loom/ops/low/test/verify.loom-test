@@ -245,6 +245,65 @@ low.func.def target<test.low.core>(@test_target) @low_call(%lhs: reg<test.i32>, 
 
 test.target<low_core> @test_target
 
+low.func.def target<test.low.core>(@test_target) @low_indirect_call(%target: reg<test.ptr : func.ref<(i32) -> (i32)>>, %value: reg<test.i32 : i32>) -> (reg<test.i32 : i32>) {
+  %result = low.func.call.indirect %target(%value) : (reg<test.i32 : i32>) -> (reg<test.i32 : i32>)
+  low.return %result : reg<test.i32 : i32>
+}
+
+// ====
+
+test.target<low_core> @test_target
+
+low.func.def target<test.low.core>(@test_target) @low_indirect_requires_typed_target(%target: reg<test.ptr>) {
+  // ERROR@+1: TYPE/003 "target" "reg<test.ptr>" "register carrying func.ref"
+  low.func.call.indirect %target() : ()
+  low.return
+}
+
+// ====
+
+test.target<low_core> @test_target
+
+low.func.def target<test.low.core>(@test_target) @low_indirect_checks_argument_type(%target: reg<test.ptr : func.ref<(i32) -> ()>>, %value: reg<test.f32 : f32>) {
+  // ERROR@+1: TYPE/001 {field_a="operand 0", type_a="f32", field_b="function argument 0", type_b="i32"}
+  low.func.call.indirect %target(%value) : (reg<test.f32 : f32>)
+  low.return
+}
+
+// ====
+
+test.target<low_core> @test_target
+
+low.func.def target<test.low.core>(@test_target) @low_indirect_checks_result_count(%target: reg<test.ptr : func.ref<() -> (i32)>>) {
+  // ERROR@+1: STRUCTURE/002 {op_name="low.func.call.indirect", actual_count="0", expected_count="1"}
+  low.func.call.indirect %target() : ()
+  low.return
+}
+
+// ====
+
+test.target<low_core> @test_target
+
+low.func.def target<test.low.core>(@test_target) @low_ref_cast_requires_sync_source(%source: reg<test.ptr : func.ref<yieldable (i32) -> (i32)>>) {
+  // ERROR@+1: TYPE/017 {op_name="low.func.ref.cast", source_type="reg<test.ptr : func.ref<yieldable (i32) -> (i32)>>", result_type="reg<test.ptr : func.ref<yieldable (i32) -> (i32)>>"}
+  %result = low.func.ref.cast %source : reg<test.ptr : func.ref<yieldable (i32) -> (i32)>> to reg<test.ptr : func.ref<yieldable (i32) -> (i32)>>
+  low.return
+}
+
+// ====
+
+test.target<low_core> @test_target
+
+low.func.def target<test.low.core>(@test_target) @low_ref_cast_requires_matching_signature(%source: reg<test.ptr : func.ref<(i32) -> (i32)>>) {
+  // ERROR@+1: TYPE/017 {op_name="low.func.ref.cast", source_type="reg<test.ptr : func.ref<(i32) -> (i32)>>", result_type="reg<test.ptr : func.ref<yieldable (i64) -> (i32)>>"}
+  %result = low.func.ref.cast %source : reg<test.ptr : func.ref<(i32) -> (i32)>> to reg<test.ptr : func.ref<yieldable (i64) -> (i32)>>
+  low.return
+}
+
+// ====
+
+test.target<low_core> @test_target
+
 low.func.decl target<test.low.core>(@test_target) @extern_add()
 
 func.def @low_call_outside_low_body() {

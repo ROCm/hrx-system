@@ -10,6 +10,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from loom.builtin_types import ALL_BUILTIN_TYPES
+from loom.dialect.func import ALL_FUNC_TYPES
 from loom.dialect.low import ALL_LOW_OPS
 from loom.format.text.parser import NameScope, Parser
 from loom.format.text.printer import Printer
@@ -24,14 +25,14 @@ _TEST_PTR_REGISTER_CLASS_ID = next(i for i, register_class in enumerate(TEST_LOW
 def _parser() -> Parser:
     parser = Parser()
     parser.register_ops(ALL_LOW_OPS)
-    parser.register_types(ALL_BUILTIN_TYPES)
+    parser.register_types((*ALL_BUILTIN_TYPES, *ALL_FUNC_TYPES))
     return parser
 
 
 def _printer() -> Printer:
     printer = Printer()
     printer.register_ops(ALL_LOW_OPS)
-    printer.register_types(ALL_BUILTIN_TYPES)
+    printer.register_types((*ALL_BUILTIN_TYPES, *ALL_FUNC_TYPES))
     return printer
 
 

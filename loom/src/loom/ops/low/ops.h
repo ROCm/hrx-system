@@ -25,31 +25,33 @@ enum {
   LOOM_OP_LOW_FUNC_DECL = LOOM_OP_KIND(LOOM_DIALECT_LOW, 2),
   LOOM_OP_LOW_RETURN = LOOM_OP_KIND(LOOM_DIALECT_LOW, 3),
   LOOM_OP_LOW_FUNC_CALL = LOOM_OP_KIND(LOOM_DIALECT_LOW, 4),
-  LOOM_OP_LOW_OP = LOOM_OP_KIND(LOOM_DIALECT_LOW, 5),
-  LOOM_OP_LOW_CONST = LOOM_OP_KIND(LOOM_DIALECT_LOW, 6),
-  LOOM_OP_LOW_COPY = LOOM_OP_KIND(LOOM_DIALECT_LOW, 7),
-  LOOM_OP_LOW_MOVE = LOOM_OP_KIND(LOOM_DIALECT_LOW, 8),
-  LOOM_OP_LOW_SLICE = LOOM_OP_KIND(LOOM_DIALECT_LOW, 9),
-  LOOM_OP_LOW_CONCAT = LOOM_OP_KIND(LOOM_DIALECT_LOW, 10),
-  LOOM_OP_LOW_INVOKE = LOOM_OP_KIND(LOOM_DIALECT_LOW, 11),
-  LOOM_OP_LOW_STORAGE_RESERVE = LOOM_OP_KIND(LOOM_DIALECT_LOW, 12),
-  LOOM_OP_LOW_STORAGE_VIEW = LOOM_OP_KIND(LOOM_DIALECT_LOW, 13),
-  LOOM_OP_LOW_SPILL = LOOM_OP_KIND(LOOM_DIALECT_LOW, 14),
-  LOOM_OP_LOW_RELOAD = LOOM_OP_KIND(LOOM_DIALECT_LOW, 15),
-  LOOM_OP_LOW_STORAGE_ADDRESS = LOOM_OP_KIND(LOOM_DIALECT_LOW, 16),
-  LOOM_OP_LOW_BR = LOOM_OP_KIND(LOOM_DIALECT_LOW, 17),
-  LOOM_OP_LOW_COND_BR = LOOM_OP_KIND(LOOM_DIALECT_LOW, 18),
-  LOOM_OP_LOW_RESOURCE = LOOM_OP_KIND(LOOM_DIALECT_LOW, 19),
-  LOOM_OP_LOW_LIVE_IN = LOOM_OP_KIND(LOOM_DIALECT_LOW, 20),
-  LOOM_OP_LOW_SCF_YIELD = LOOM_OP_KIND(LOOM_DIALECT_LOW, 21),
-  LOOM_OP_LOW_SCF_CONDITION = LOOM_OP_KIND(LOOM_DIALECT_LOW, 22),
-  LOOM_OP_LOW_SCF_IF = LOOM_OP_KIND(LOOM_DIALECT_LOW, 23),
-  LOOM_OP_LOW_SCF_FOR = LOOM_OP_KIND(LOOM_DIALECT_LOW, 24),
-  LOOM_OP_LOW_SCF_WHILE = LOOM_OP_KIND(LOOM_DIALECT_LOW, 25),
-  LOOM_OP_LOW_SCHEDULE_FENCE = LOOM_OP_KIND(LOOM_DIALECT_LOW, 26),
-  LOOM_OP_LOW_ASSUME = LOOM_OP_KIND(LOOM_DIALECT_LOW, 27),
-  LOOM_OP_LOW_SWITCH = LOOM_OP_KIND(LOOM_DIALECT_LOW, 28),
-  LOOM_OP_LOW_COUNT_ = 29,
+  LOOM_OP_LOW_FUNC_CALL_INDIRECT = LOOM_OP_KIND(LOOM_DIALECT_LOW, 5),
+  LOOM_OP_LOW_FUNC_REF_CAST = LOOM_OP_KIND(LOOM_DIALECT_LOW, 6),
+  LOOM_OP_LOW_OP = LOOM_OP_KIND(LOOM_DIALECT_LOW, 7),
+  LOOM_OP_LOW_CONST = LOOM_OP_KIND(LOOM_DIALECT_LOW, 8),
+  LOOM_OP_LOW_COPY = LOOM_OP_KIND(LOOM_DIALECT_LOW, 9),
+  LOOM_OP_LOW_MOVE = LOOM_OP_KIND(LOOM_DIALECT_LOW, 10),
+  LOOM_OP_LOW_SLICE = LOOM_OP_KIND(LOOM_DIALECT_LOW, 11),
+  LOOM_OP_LOW_CONCAT = LOOM_OP_KIND(LOOM_DIALECT_LOW, 12),
+  LOOM_OP_LOW_INVOKE = LOOM_OP_KIND(LOOM_DIALECT_LOW, 13),
+  LOOM_OP_LOW_STORAGE_RESERVE = LOOM_OP_KIND(LOOM_DIALECT_LOW, 14),
+  LOOM_OP_LOW_STORAGE_VIEW = LOOM_OP_KIND(LOOM_DIALECT_LOW, 15),
+  LOOM_OP_LOW_SPILL = LOOM_OP_KIND(LOOM_DIALECT_LOW, 16),
+  LOOM_OP_LOW_RELOAD = LOOM_OP_KIND(LOOM_DIALECT_LOW, 17),
+  LOOM_OP_LOW_STORAGE_ADDRESS = LOOM_OP_KIND(LOOM_DIALECT_LOW, 18),
+  LOOM_OP_LOW_BR = LOOM_OP_KIND(LOOM_DIALECT_LOW, 19),
+  LOOM_OP_LOW_COND_BR = LOOM_OP_KIND(LOOM_DIALECT_LOW, 20),
+  LOOM_OP_LOW_RESOURCE = LOOM_OP_KIND(LOOM_DIALECT_LOW, 21),
+  LOOM_OP_LOW_LIVE_IN = LOOM_OP_KIND(LOOM_DIALECT_LOW, 22),
+  LOOM_OP_LOW_SCF_YIELD = LOOM_OP_KIND(LOOM_DIALECT_LOW, 23),
+  LOOM_OP_LOW_SCF_CONDITION = LOOM_OP_KIND(LOOM_DIALECT_LOW, 24),
+  LOOM_OP_LOW_SCF_IF = LOOM_OP_KIND(LOOM_DIALECT_LOW, 25),
+  LOOM_OP_LOW_SCF_FOR = LOOM_OP_KIND(LOOM_DIALECT_LOW, 26),
+  LOOM_OP_LOW_SCF_WHILE = LOOM_OP_KIND(LOOM_DIALECT_LOW, 27),
+  LOOM_OP_LOW_SCHEDULE_FENCE = LOOM_OP_KIND(LOOM_DIALECT_LOW, 28),
+  LOOM_OP_LOW_ASSUME = LOOM_OP_KIND(LOOM_DIALECT_LOW, 29),
+  LOOM_OP_LOW_SWITCH = LOOM_OP_KIND(LOOM_DIALECT_LOW, 30),
+  LOOM_OP_LOW_COUNT_ = 31,
 };
 
 // Function visibility. Absent (0) means private (module-internal).
@@ -388,6 +390,42 @@ iree_status_t loom_low_func_call_build(
     loom_op_t** out_op);
 loom_trait_flags_t loom_low_func_call_effective_traits(const loom_op_t* op);
 iree_status_t loom_low_func_call_verify(
+    const loom_module_t* module, const loom_op_t* op,
+    iree_diagnostic_emitter_t emitter);
+
+// LOOM_OP_LOW_FUNC_CALL_INDIRECT: Indirect call through a low function register with an exact structural signature.
+// %result = low.func.call.indirect %target(%value) : (reg<test.i32>) -> (reg<test.i32>)
+LOOM_DEFINE_ISA(loom_low_func_call_indirect_isa, LOOM_OP_LOW_FUNC_CALL_INDIRECT)
+LOOM_DEFINE_OPERAND(loom_low_func_call_indirect_target, 0)
+LOOM_DEFINE_VARIADIC_OPERANDS(loom_low_func_call_indirect_operands, 1)
+LOOM_DEFINE_VARIADIC_RESULTS(loom_low_func_call_indirect_results, 0)
+iree_status_t loom_low_func_call_indirect_build(
+    loom_builder_t* builder,
+    loom_may_consume loom_value_id_t target,
+    loom_may_consume const loom_value_id_t* operands,
+    iree_host_size_t operands_count,
+    const loom_type_t* result_types,
+    iree_host_size_t result_count,
+    const loom_tied_result_t* tied_results,
+    iree_host_size_t tied_result_count,
+    loom_location_id_t location,
+    loom_op_t** out_op);
+iree_status_t loom_low_func_call_indirect_verify(
+    const loom_module_t* module, const loom_op_t* op,
+    iree_diagnostic_emitter_t emitter);
+
+// LOOM_OP_LOW_FUNC_REF_CAST: Widen a synchronous function-reference register to a yieldable reference with the same structural signature. The result aliases the source's exact physical storage and emits no target instruction.
+// %yieldable = low.func.ref.cast %sync : reg<test.ptr : func.ref<(i32) -> (i32)>> to reg<test.ptr : func.ref<yieldable (i32) -> (i32)>>
+LOOM_DEFINE_ISA(loom_low_func_ref_cast_isa, LOOM_OP_LOW_FUNC_REF_CAST)
+LOOM_DEFINE_OPERAND(loom_low_func_ref_cast_source, 0)
+LOOM_DEFINE_RESULT(loom_low_func_ref_cast_result, 0)
+iree_status_t loom_low_func_ref_cast_build(
+    loom_builder_t* builder,
+    loom_may_consume loom_value_id_t source,
+    loom_type_t result_type,
+    loom_location_id_t location,
+    loom_op_t** out_op);
+iree_status_t loom_low_func_ref_cast_verify(
     const loom_module_t* module, const loom_op_t* op,
     iree_diagnostic_emitter_t emitter);
 

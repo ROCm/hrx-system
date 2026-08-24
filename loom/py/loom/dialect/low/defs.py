@@ -717,6 +717,70 @@ low_func_call = Op(
 )
 
 # ============================================================================
+# low.func.call.indirect — indirect low function call
+# ============================================================================
+
+low_func_call_indirect = Op(
+    "low.func.call.indirect",
+    group=low_ops,
+    builder_name="func_call_indirect",
+    doc="Indirect call through a low function register with an exact structural signature.",
+    operands=[
+        Operand("target", REGISTER),
+        Operand("operands", REGISTER, variadic=True),
+    ],
+    results=[Result("results", REGISTER, variadic=True)],
+    traits=[UNKNOWN_EFFECTS],
+    verify="loom_low_func_call_indirect_verify",
+    format=[
+        Ref("target"),
+        GLUE,
+        LPAREN,
+        Refs("operands"),
+        RPAREN,
+        COLON,
+        LPAREN,
+        TypesOf("operands"),
+        RPAREN,
+        OptionalGroup(
+            [ARROW, ResultTypeList("results")],
+            anchor="results",
+        ),
+    ],
+    examples=[
+        "%result = low.func.call.indirect %target(%value) : (reg<test.i32>) -> (reg<test.i32>)",
+    ],
+)
+
+# ============================================================================
+# low.func.ref.cast — zero-cost function-reference permission widening
+# ============================================================================
+
+low_func_ref_cast = Op(
+    "low.func.ref.cast",
+    group=low_ops,
+    builder_name="func_ref_cast",
+    doc=(
+        "Widen a synchronous function-reference register to a yieldable "
+        "reference with the same structural signature. The result aliases "
+        "the source's exact physical storage and emits no target instruction."
+    ),
+    operands=[Operand("source", REGISTER)],
+    results=[Result("result", REGISTER)],
+    constraints=[SameRegisterClass("source", "result")],
+    traits=[PURE, FACT_IDENTITY, STORAGE_RELATION, COMPILE_TIME_ONLY],
+    verify="loom_low_func_ref_cast_verify",
+    format=[
+        Ref("source"),
+        COLON,
+        TypeOf("source"),
+        kw("to"),
+        ResultType("result"),
+    ],
+    examples=["%yieldable = low.func.ref.cast %sync : reg<test.ptr : func.ref<(i32) -> (i32)>> to reg<test.ptr : func.ref<yieldable (i32) -> (i32)>>"],
+)
+
+# ============================================================================
 # low.br — low unconditional branch
 # ============================================================================
 
@@ -1701,6 +1765,8 @@ ALL_LOW_OPS: tuple[Op, ...] = (
     low_func_decl,
     low_return,
     low_func_call,
+    low_func_call_indirect,
+    low_func_ref_cast,
     low_op,
     low_const,
     low_copy,
