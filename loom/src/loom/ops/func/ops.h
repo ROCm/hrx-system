@@ -24,13 +24,15 @@ enum {
   LOOM_OP_FUNC_DEF = LOOM_OP_KIND(LOOM_DIALECT_FUNC, 0),
   LOOM_OP_FUNC_DECL = LOOM_OP_KIND(LOOM_DIALECT_FUNC, 1),
   LOOM_OP_FUNC_CALL = LOOM_OP_KIND(LOOM_DIALECT_FUNC, 2),
-  LOOM_OP_FUNC_RETURN = LOOM_OP_KIND(LOOM_DIALECT_FUNC, 3),
-  LOOM_OP_FUNC_FAIL = LOOM_OP_KIND(LOOM_DIALECT_FUNC, 4),
-  LOOM_OP_FUNC_NULL = LOOM_OP_KIND(LOOM_DIALECT_FUNC, 5),
-  LOOM_OP_FUNC_COMPARE_NULL = LOOM_OP_KIND(LOOM_DIALECT_FUNC, 6),
-  LOOM_OP_FUNC_ADDRESS = LOOM_OP_KIND(LOOM_DIALECT_FUNC, 7),
-  LOOM_OP_FUNC_IMPORT_RESOLVED = LOOM_OP_KIND(LOOM_DIALECT_FUNC, 8),
-  LOOM_OP_FUNC_COUNT_ = 9,
+  LOOM_OP_FUNC_CALL_INDIRECT = LOOM_OP_KIND(LOOM_DIALECT_FUNC, 3),
+  LOOM_OP_FUNC_RETURN = LOOM_OP_KIND(LOOM_DIALECT_FUNC, 4),
+  LOOM_OP_FUNC_FAIL = LOOM_OP_KIND(LOOM_DIALECT_FUNC, 5),
+  LOOM_OP_FUNC_NULL = LOOM_OP_KIND(LOOM_DIALECT_FUNC, 6),
+  LOOM_OP_FUNC_COMPARE_NULL = LOOM_OP_KIND(LOOM_DIALECT_FUNC, 7),
+  LOOM_OP_FUNC_ADDRESS = LOOM_OP_KIND(LOOM_DIALECT_FUNC, 8),
+  LOOM_OP_FUNC_REF_CAST = LOOM_OP_KIND(LOOM_DIALECT_FUNC, 9),
+  LOOM_OP_FUNC_IMPORT_RESOLVED = LOOM_OP_KIND(LOOM_DIALECT_FUNC, 10),
+  LOOM_OP_FUNC_COUNT_ = 11,
 };
 
 // Function visibility. Absent (0) means private (module-internal).
@@ -266,6 +268,27 @@ iree_status_t loom_func_call_verify(
     const loom_module_t* module, const loom_op_t* op,
     iree_diagnostic_emitter_t emitter);
 
+// LOOM_OP_FUNC_CALL_INDIRECT: Call a first-class function value with an exact structural signature.
+// %result = func.call.indirect %target(%value) : (i32) -> (i32)
+LOOM_DEFINE_ISA(loom_func_call_indirect_isa, LOOM_OP_FUNC_CALL_INDIRECT)
+LOOM_DEFINE_OPERAND(loom_func_call_indirect_target, 0)
+LOOM_DEFINE_VARIADIC_OPERANDS(loom_func_call_indirect_operands, 1)
+LOOM_DEFINE_VARIADIC_RESULTS(loom_func_call_indirect_results, 0)
+iree_status_t loom_func_call_indirect_build(
+    loom_builder_t* builder,
+    loom_may_consume loom_value_id_t target,
+    loom_may_consume const loom_value_id_t* operands,
+    iree_host_size_t operands_count,
+    const loom_type_t* result_types,
+    iree_host_size_t result_count,
+    const loom_tied_result_t* tied_results,
+    iree_host_size_t tied_result_count,
+    loom_location_id_t location,
+    loom_op_t** out_op);
+iree_status_t loom_func_call_indirect_verify(
+    const loom_module_t* module, const loom_op_t* op,
+    iree_diagnostic_emitter_t emitter);
+
 // LOOM_OP_FUNC_RETURN: Return values from function body. Types must match enclosing function's result types.
 // func.return
 LOOM_DEFINE_ISA(loom_func_return_isa, LOOM_OP_FUNC_RETURN)
@@ -290,7 +313,7 @@ iree_status_t loom_func_fail_build(
     loom_op_t** out_op);
 
 // LOOM_OP_FUNC_NULL: Produce a null first-class function value of the declared type.
-// %null = func.null : (i32) -> (i32)
+// %null = func.null : func.ref<(i32) -> (i32)>
 LOOM_DEFINE_ISA(loom_func_null_isa, LOOM_OP_FUNC_NULL)
 LOOM_DEFINE_RESULT(loom_func_null_result, 0)
 iree_status_t loom_func_null_build(
@@ -303,7 +326,7 @@ iree_status_t loom_func_null_verify(
     iree_diagnostic_emitter_t emitter);
 
 // LOOM_OP_FUNC_COMPARE_NULL: Return true when a first-class function value is null.
-// %is_null = func.compare.null %function : (i32) -> (i32)
+// %is_null = func.compare.null %function : func.ref<(i32) -> (i32)>
 LOOM_DEFINE_ISA(loom_func_compare_null_isa, LOOM_OP_FUNC_COMPARE_NULL)
 LOOM_DEFINE_OPERAND(loom_func_compare_null_function, 0)
 LOOM_DEFINE_RESULT(loom_func_compare_null_result, 0)
@@ -317,7 +340,7 @@ iree_status_t loom_func_compare_null_verify(
     iree_diagnostic_emitter_t emitter);
 
 // LOOM_OP_FUNC_ADDRESS: Produce a first-class function value addressing a callable symbol.
-// %function = func.address @callee : (i32) -> (i32)
+// %function = func.address @callee : func.ref<(i32) -> (i32)>
 LOOM_DEFINE_ISA(loom_func_address_isa, LOOM_OP_FUNC_ADDRESS)
 LOOM_DEFINE_RESULT(loom_func_address_result, 0)
 LOOM_DEFINE_ATTR_SYMBOL(loom_func_address_callee, 0)
@@ -328,6 +351,21 @@ iree_status_t loom_func_address_build(
     loom_location_id_t location,
     loom_op_t** out_op);
 iree_status_t loom_func_address_verify(
+    const loom_module_t* module, const loom_op_t* op,
+    iree_diagnostic_emitter_t emitter);
+
+// LOOM_OP_FUNC_REF_CAST: Widen a synchronous function reference to a yieldable reference with the same structural signature. The result aliases the same function value and only forgets the synchronous-call guarantee.
+// %yieldable = func.ref.cast %sync : func.ref<(i32) -> (i32)> to func.ref<yieldable (i32) -> (i32)>
+LOOM_DEFINE_ISA(loom_func_ref_cast_isa, LOOM_OP_FUNC_REF_CAST)
+LOOM_DEFINE_OPERAND(loom_func_ref_cast_source, 0)
+LOOM_DEFINE_RESULT(loom_func_ref_cast_result, 0)
+iree_status_t loom_func_ref_cast_build(
+    loom_builder_t* builder,
+    loom_may_consume loom_value_id_t source,
+    loom_type_t result_type,
+    loom_location_id_t location,
+    loom_op_t** out_op);
+iree_status_t loom_func_ref_cast_verify(
     const loom_module_t* module, const loom_op_t* op,
     iree_diagnostic_emitter_t emitter);
 

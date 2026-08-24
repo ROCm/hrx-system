@@ -22,7 +22,7 @@ from loom.dialect.check import ALL_CHECK_OPS
 from loom.dialect.command import ALL_COMMAND_OPS
 from loom.dialect.config import ALL_CONFIG_OPS
 from loom.dialect.encoding import ALL_ENCODING_OPS
-from loom.dialect.func import ALL_FUNC_OPS
+from loom.dialect.func import ALL_FUNC_OPS, ALL_FUNC_TYPES
 from loom.dialect.globals import ALL_GLOBAL_OPS
 from loom.dialect.hal import ALL_HAL_TYPES
 from loom.dialect.index import ALL_INDEX_OPS
@@ -64,6 +64,7 @@ ALL_OPS = (
 
 ALL_TYPES = (
     *ALL_BUILTIN_TYPES,
+    *ALL_FUNC_TYPES,
     *ALL_HAL_TYPES,
     *ALL_KERNEL_TYPES,
 )
@@ -94,6 +95,7 @@ def test_loom_grammar_uses_generated_op_and_type_metadata() -> None:
     assert "program\\\\.launch" in serialized
     type_pattern = grammar["repository"]["types"]["patterns"][0]["match"]  # type: ignore[index]
     assert "hal\\.buffer" in type_pattern
+    assert "func\\.ref" in type_pattern
     assert "tile" in serialized
 
 

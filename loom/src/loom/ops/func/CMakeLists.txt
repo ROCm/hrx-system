@@ -16,6 +16,7 @@ loom_generated_cc_library(
     loom::py::loom::gen::ops::c_tables_func_generator
   SRCS
     "canonicalize.c"
+    "reference.c"
     "verify.c"
   GENERATED_SRC_FLAGS
     "--builders"
@@ -25,6 +26,7 @@ loom_generated_cc_library(
     "tables.c"
   HDRS
     "ops.h"
+    "reference.h"
   ARGS
     "--dialect=func"
   DEPS
@@ -34,6 +36,7 @@ loom_generated_cc_library(
     loom::ops::func_symbol_facts
     loom::ops::function_contract_verify
     loom::ops::op_defs
+    loom::ops::type_registry
     loom::rewrite::rewriter
     loom::target::types
 )

@@ -855,11 +855,13 @@ def default_ops() -> tuple[Op, ...]:
 
 def default_types() -> tuple[TypeDef, ...]:
     """Return every type in the default Loom Python type registry."""
+    from loom.dialect.func import ALL_FUNC_TYPES
     from loom.dialect.hal import ALL_HAL_TYPES
     from loom.dialect.kernel import ALL_KERNEL_TYPES
 
     return (
         *ALL_BUILTIN_TYPES,
+        *ALL_FUNC_TYPES,
         *ALL_HAL_TYPES,
         *ALL_KERNEL_TYPES,
     )

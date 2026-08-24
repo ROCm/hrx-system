@@ -10,6 +10,16 @@ func.def @call_identity(%x: f32) -> (f32) {
   func.return %r : f32
 }
 
+func.def @call_indirect(%target: func.ref<yieldable (i32) -> (i32)>, %value: i32) -> (i32) {
+  %result = func.call.indirect %target(%value) : (i32) -> (i32)
+  func.return %result : i32
+}
+
+func.def @widen_ref(%target: func.ref<(i32) -> (i32)>) -> (func.ref<yieldable (i32) -> (i32)>) {
+  %yieldable = func.ref.cast %target : func.ref<(i32) -> (i32)> to func.ref<yieldable (i32) -> (i32)>
+  func.return %yieldable : func.ref<yieldable (i32) -> (i32)>
+}
+
 // ====
 
 // Inline policy and temperature modifiers on function definitions and calls.

@@ -10,7 +10,7 @@ from collections.abc import Sequence
 
 import pytest
 
-from loom.dialect.func import ALL_FUNC_OPS
+from loom.dialect.func import ALL_FUNC_OPS, ALL_FUNC_TYPES
 from loom.dsl import Op
 from loom.format.bytecode.reader import read_module
 from loom.format.bytecode.writer import write_module
@@ -34,7 +34,7 @@ def _parse_module(text: str) -> Module:
     parser = Parser()
     parser.register_ops(_all_roundtrip_ops())
     parser.register_parameterized_attrs(ALL_TARGET_PARAMETERIZED_ATTRS)
-    parser.register_types(ALL_BUILTIN_TYPES)
+    parser.register_types((*ALL_BUILTIN_TYPES, *ALL_FUNC_TYPES))
     return parser.parse(text)
 
 
@@ -45,7 +45,7 @@ def _print_module(module: Module) -> str:
 
     printer = Printer()
     printer.register_ops(_all_roundtrip_ops())
-    printer.register_types(ALL_BUILTIN_TYPES)
+    printer.register_types((*ALL_BUILTIN_TYPES, *ALL_FUNC_TYPES))
     return printer.print_module(module)
 
 
@@ -268,16 +268,24 @@ class TestFuncCallRoundTrip:
 
 
 class TestFunctionValueRoundTrip:
+    def test_function_reference_types(self) -> None:
+        _roundtrip(_module_text("func.decl @refs(%sync: func.ref<(i32) -> (i32)>, %yieldable: func.ref<yieldable (i32) -> (i32)>)"))
+
+    def test_function_reference_types_survive_bytecode(self) -> None:
+        text = _module_text("func.decl @refs(%sync: func.ref<(i32) -> (i32)>, %yieldable: func.ref<yieldable (i32) -> (i32)>)")
+        loaded = read_module(write_module(_parse_module(text)))
+        assert _print_module(loaded) == text
+
     def test_function_carrier_operations(self) -> None:
         _roundtrip(
             _module_text(
                 'func.decl optional import("runtime", "callback") @callback(%x: i32) -> (i32)',
                 "",
-                "func.def @probe() -> ((i32) -> (i32), i1, i1) {",
-                "  %function = func.address @callback : (i32) -> (i32)",
+                "func.def @probe() -> (func.ref<(i32) -> (i32)>, i1, i1) {",
+                "  %function = func.address @callback : func.ref<(i32) -> (i32)>",
                 "  %available = func.import.resolved @callback",
-                "  %is_null = func.compare.null %function : (i32) -> (i32)",
-                "  func.return %function, %available, %is_null : (i32) -> (i32), i1, i1",
+                "  %is_null = func.compare.null %function : func.ref<(i32) -> (i32)>",
+                "  func.return %function, %available, %is_null : func.ref<(i32) -> (i32)>, i1, i1",
                 "}",
             )
         )
@@ -285,9 +293,19 @@ class TestFunctionValueRoundTrip:
     def test_typed_null(self) -> None:
         _roundtrip(
             _module_text(
-                "func.def @null() -> ((i32) -> (i32)) {",
-                "  %function = func.null : (i32) -> (i32)",
-                "  func.return %function : (i32) -> (i32)",
+                "func.def @null() -> (func.ref<(i32) -> (i32)>) {",
+                "  %function = func.null : func.ref<(i32) -> (i32)>",
+                "  func.return %function : func.ref<(i32) -> (i32)>",
+                "}",
+            )
+        )
+
+    def test_explicit_yieldability_widening(self) -> None:
+        _roundtrip(
+            _module_text(
+                "func.def @widen(%sync: func.ref<(i32) -> (i32)>) -> (func.ref<yieldable (i32) -> (i32)>) {",
+                "  %yieldable = func.ref.cast %sync : func.ref<(i32) -> (i32)> to func.ref<yieldable (i32) -> (i32)>",
+                "  func.return %yieldable : func.ref<yieldable (i32) -> (i32)>",
                 "}",
             )
         )

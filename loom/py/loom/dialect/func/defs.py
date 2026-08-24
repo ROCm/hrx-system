@@ -4,20 +4,22 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-"""Func dialect op definitions.
+"""Func dialect type and op definitions.
 
-Nine ops for runtime program structure and first-class function values:
+Eleven ops for runtime program structure and first-class function values:
 
 Top-level (module-level symbols):
   func.def       — Function definition (has body, callable by name).
   func.decl      — External function declaration (no body, callable by name).
 Body ops:
   func.call      — Runtime function call.
+  func.call.indirect — Runtime call through a first-class function value.
   func.return    — Return values from function body.
   func.fail      — Terminate with an explicit program status.
   func.null      — Null first-class function value.
   func.compare.null — Test a first-class function value for null.
   func.address   — Address a local or imported function.
+  func.ref.cast  — Widen a synchronous function reference to yieldable.
   func.import.resolved — Test whether an optional import resolved.
 """
 
@@ -35,6 +37,7 @@ from loom.assembly import (
     FormatElement,
     FuncArgs,
     OptionalGroup,
+    Param,
     PredicateList,
     Ref,
     Refs,
@@ -59,6 +62,7 @@ from loom.dsl import (
     SYMBOL_DEFINE,
     TERMINATOR,
     UNKNOWN_EFFECTS,
+    VALUE_ALIAS,
     AttrDef,
     CallLikeInterface,
     CallLikeKind,
@@ -75,6 +79,7 @@ from loom.dsl import (
     SymbolDefinition,
     SymbolDefinitionFlag,
     SymbolReference,
+    TypeDef,
 )
 
 # ============================================================================
@@ -141,6 +146,46 @@ ImportPolicy = EnumDef(
         ),
     ],
     doc="Import resolution policy. Absent (0) means required.",
+)
+
+Yieldability = EnumDef(
+    "Yieldability",
+    [
+        # Value 0 is reserved for the default synchronous contract.
+        EnumCase(
+            "yieldable",
+            1,
+            doc="Permit the referenced function to suspend and later resume.",
+        ),
+    ],
+    doc="Function-reference yieldability. Absent (0) guarantees synchronous execution.",
+)
+
+func_ref_type = TypeDef(
+    "func.ref",
+    params=[
+        AttrDef(
+            "yieldability",
+            "enum",
+            enum_def=Yieldability,
+            optional=True,
+            doc="Optional permission for the referenced function to yield.",
+        ),
+        AttrDef(
+            "signature",
+            "type",
+            doc="Exact structural argument and result signature.",
+        ),
+    ],
+    format=[
+        OptionalGroup([Param("yieldability")], anchor="yieldability"),
+        Param("signature"),
+    ],
+    doc=(
+        "First-class function reference. A synchronous reference guarantees "
+        "that calls return without yielding; a yieldable reference permits "
+        "suspension. The nested function type is the exact callable signature."
+    ),
 )
 
 StatusCode = EnumDef(
@@ -458,7 +503,7 @@ func_null = Op(
     traits=[PURE],
     verify="loom_func_null_verify",
     format=[COLON, ResultType("result")],
-    examples=["%null = func.null : (i32) -> (i32)"],
+    examples=["%null = func.null : func.ref<(i32) -> (i32)>"],
 )
 
 func_compare_null = Op(
@@ -471,7 +516,7 @@ func_compare_null = Op(
     traits=[PURE],
     verify="loom_func_compare_null_verify",
     format=[Ref("function"), COLON, TypeOf("function")],
-    examples=["%is_null = func.compare.null %function : (i32) -> (i32)"],
+    examples=["%is_null = func.compare.null %function : func.ref<(i32) -> (i32)>"],
 )
 
 func_address = Op(
@@ -490,7 +535,34 @@ func_address = Op(
     traits=[PURE],
     verify="loom_func_address_verify",
     format=[SymbolRef("callee"), COLON, ResultType("result")],
-    examples=["%function = func.address @callee : (i32) -> (i32)"],
+    examples=[
+        "%function = func.address @callee : func.ref<(i32) -> (i32)>",
+        "%function = func.address @callee : func.ref<yieldable (i32) -> (i32)>",
+    ],
+)
+
+func_ref_cast = Op(
+    "func.ref.cast",
+    group=func_ops,
+    builder_name="ref_cast",
+    phase=OpPhase.EXECUTABLE,
+    doc=(
+        "Widen a synchronous function reference to a yieldable reference with "
+        "the same structural signature. The result aliases the same function "
+        "value and only forgets the synchronous-call guarantee."
+    ),
+    operands=[Operand("source", ANY)],
+    results=[Result("result", ANY)],
+    traits=[PURE, VALUE_ALIAS],
+    verify="loom_func_ref_cast_verify",
+    format=[
+        Ref("source"),
+        COLON,
+        TypeOf("source"),
+        kw("to"),
+        ResultType("result"),
+    ],
+    examples=["%yieldable = func.ref.cast %sync : func.ref<(i32) -> (i32)> to func.ref<yieldable (i32) -> (i32)>"],
 )
 
 func_import_resolved = Op(
@@ -578,6 +650,43 @@ func_call = Op(
 )
 
 # ============================================================================
+# func.call.indirect — first-class function call
+# ============================================================================
+
+func_call_indirect = Op(
+    "func.call.indirect",
+    group=func_ops,
+    builder_name="call_indirect",
+    phase=OpPhase.EXECUTABLE,
+    doc="Call a first-class function value with an exact structural signature.",
+    operands=[
+        Operand("target", ANY),
+        Operand("operands", ANY, variadic=True),
+    ],
+    results=[Result("results", ANY, variadic=True)],
+    traits=[UNKNOWN_EFFECTS],
+    verify="loom_func_call_indirect_verify",
+    format=[
+        Ref("target"),
+        GLUE,
+        LPAREN,
+        Refs("operands"),
+        RPAREN,
+        COLON,
+        LPAREN,
+        TypesOf("operands"),
+        RPAREN,
+        OptionalGroup(
+            [ARROW, ResultTypeList("results")],
+            anchor="results",
+        ),
+    ],
+    examples=[
+        "%result = func.call.indirect %target(%value) : (i32) -> (i32)",
+    ],
+)
+
+# ============================================================================
 # func.return — return from function body
 # ============================================================================
 
@@ -644,10 +753,14 @@ ALL_FUNC_OPS: tuple[Op, ...] = (
     func_def,
     func_decl,
     func_call,
+    func_call_indirect,
     func_return,
     func_fail,
     func_null,
     func_compare_null,
     func_address,
+    func_ref_cast,
     func_import_resolved,
 )
+
+ALL_FUNC_TYPES: tuple[TypeDef, ...] = (func_ref_type,)

@@ -76,6 +76,17 @@ class FuncBuilder(DialectBuilder):
         result_names: Sequence[str] | None = ...,
         location_id: int | None = ...,
     ) -> list[ValueRef]: ...
+    def call_indirect(
+        self,
+        *,
+        target: ValueRef,
+        operands: list[ValueRef] = ...,
+        results: list[Type | TiedResultSpec],
+        name: str | None = ...,
+        names: Sequence[str] | None = ...,
+        result_names: Sequence[str] | None = ...,
+        location_id: int | None = ...,
+    ) -> list[ValueRef]: ...
     def return_(
         self,
         *,
@@ -111,6 +122,16 @@ class FuncBuilder(DialectBuilder):
         self,
         *,
         callee: str,
+        results: list[Type | TiedResultSpec],
+        name: str | None = ...,
+        names: Sequence[str] | None = ...,
+        result_names: Sequence[str] | None = ...,
+        location_id: int | None = ...,
+    ) -> ValueRef: ...
+    def ref_cast(
+        self,
+        *,
+        source: ValueRef,
         results: list[Type | TiedResultSpec],
         name: str | None = ...,
         names: Sequence[str] | None = ...,

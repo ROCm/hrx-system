@@ -5,6 +5,118 @@ func.def @semantic() {
   func.return
 }
 
+// First-class calls use the target func.ref type as their complete contract.
+func.def @indirect(%target: func.ref<(i32) -> (i32)>, %value: i32) -> (i32) {
+  %result = func.call.indirect %target(%value) : (i32) -> (i32)
+  func.return %result : i32
+}
+
+// ====
+
+func.def @null_rejects_raw_function_type() {
+  // ERROR@+1: TYPE/004 "result" "(i32) -> (i32)" "func.ref with a function signature"
+  %null = func.null : (i32) -> (i32)
+  func.return
+}
+
+// ====
+
+func.def @null_rejects_non_function_signature() {
+  // ERROR@+1: TYPE/004 "result" "func.ref<yieldable i32>" "func.ref with a function signature"
+  %null = func.null : func.ref<yieldable i32>
+  func.return
+}
+
+// ====
+
+func.def @compare_null_rejects_raw_function_type(%target: (i32) -> (i32)) {
+  // ERROR@+1: TYPE/003 "function reference" "(i32) -> (i32)" "func.ref with a function signature"
+  %is_null = func.compare.null %target : (i32) -> (i32)
+  func.return
+}
+
+// ====
+
+func.decl @address_target(%value: i32) -> (i32)
+
+func.def @address_rejects_raw_function_type() {
+  // ERROR@+1: TYPE/004 "result" "(i32) -> (i32)" "func.ref with a function signature"
+  %target = func.address @address_target : (i32) -> (i32)
+  func.return
+}
+
+// ====
+
+func.def @indirect_requires_function_target(%target: i32) {
+  // ERROR@+1: TYPE/003 "function reference" "i32" "func.ref with a function signature"
+  func.call.indirect %target() : ()
+  func.return
+}
+
+// ====
+
+func.def @indirect_checks_argument_count(%target: func.ref<(i32, i32) -> ()>, %value: i32) {
+  // ERROR@+1: STRUCTURE/001 {op_name="func.call.indirect", actual_count="1", expected_count="2"}
+  func.call.indirect %target(%value) : (i32)
+  func.return
+}
+
+// ====
+
+func.def @indirect_checks_result_count(%target: func.ref<() -> (i32)>) {
+  // ERROR@+1: STRUCTURE/002 {op_name="func.call.indirect", actual_count="0", expected_count="1"}
+  func.call.indirect %target() : ()
+  func.return
+}
+
+// ====
+
+func.def @indirect_checks_argument_type(%target: func.ref<(i32) -> ()>, %value: f32) {
+  // ERROR@+1: TYPE/001 {field_a="operand 0", type_a="f32", field_b="function argument 0", type_b="i32"}
+  func.call.indirect %target(%value) : (f32)
+  func.return
+}
+
+// ====
+
+func.def @indirect_checks_result_type(%target: func.ref<() -> (i32)>) {
+  // ERROR@+1: TYPE/001 {field_a="result 0", type_a="f32", field_b="function result 0", type_b="i32"}
+  %result = func.call.indirect %target() : () -> (f32)
+  func.return
+}
+
+// ====
+
+func.def @cast_requires_sync_source(%target: func.ref<yieldable (i32) -> (i32)>) {
+  // ERROR@+1: TYPE/003 "source" "func.ref<yieldable (i32) -> (i32)>" "synchronous func.ref"
+  %result = func.ref.cast %target : func.ref<yieldable (i32) -> (i32)> to func.ref<yieldable (i32) -> (i32)>
+  func.return
+}
+
+// ====
+
+func.def @cast_requires_yieldable_result(%target: func.ref<(i32) -> (i32)>) {
+  // ERROR@+1: TYPE/004 "result" "func.ref<(i32) -> (i32)>" "yieldable func.ref"
+  %result = func.ref.cast %target : func.ref<(i32) -> (i32)> to func.ref<(i32) -> (i32)>
+  func.return
+}
+
+// ====
+
+func.def @cast_requires_matching_signature(%target: func.ref<(i32) -> (i32)>) {
+  // ERROR@+1: TYPE/001 {field_a="source", type_a="func.ref<(i32) -> (i32)>", field_b="result", type_b="func.ref<yieldable (f32) -> (i32)>"}
+  %result = func.ref.cast %target : func.ref<(i32) -> (i32)> to func.ref<yieldable (f32) -> (i32)>
+  func.return
+}
+
+// ====
+
+func.def @cast_preserves_nested_yieldability(%target: func.ref<(func.ref<(i32) -> (i32)>) -> ()>) {
+  // ERROR@+1: TYPE/001
+  %result = func.ref.cast %target : func.ref<(func.ref<(i32) -> (i32)>) -> ()> to func.ref<yieldable (func.ref<yieldable (i32) -> (i32)>) -> ()>
+  func.return
+}
+
 // ====
 
 kernel.decl @launch_only() launch()
