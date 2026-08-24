@@ -56,6 +56,9 @@ iree_runtime_cc_library(
     hdrs = [
         "api.h",
         "atomic.h",
+        "barrier.h",
+        "buffer.h",
+        "byte_transfer.h",
         "command_buffer.h",
         "debug_utils.h",
         "device_options.h",
@@ -101,6 +104,28 @@ iree_runtime_cc_test(
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
         "//third_party:vulkan_headers",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "buffer_test",
+    srcs = ["buffer_test.cc"],
+    deps = [
+        ":headers",
+        ":vulkan",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "byte_transfer_test",
+    srcs = ["byte_transfer_test.cc"],
+    deps = [
+        ":headers",
+        ":vulkan",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
     ],
 )
 
@@ -204,6 +229,8 @@ iree_runtime_cc_library(
         "buffer.h",
         "builtins.c",
         "builtins.h",
+        "byte_transfer.c",
+        "byte_transfer.h",
         "command_buffer.c",
         "command_buffer.h",
         "debug_utils.c",

@@ -1275,7 +1275,8 @@ static VkBufferUsageFlags iree_hal_vulkan_buffer_usage_from_hal(
   if (iree_all_bits_set(
           allocator->enabled_features,
           IREE_HAL_VULKAN_FEATURE_ENABLE_BUFFER_DEVICE_ADDRESSES) &&
-      iree_any_bit_set(hal_usage, IREE_HAL_BUFFER_USAGE_DISPATCH)) {
+      iree_any_bit_set(hal_usage, IREE_HAL_BUFFER_USAGE_DISPATCH |
+                                      IREE_HAL_BUFFER_USAGE_TRANSFER)) {
     usage |= VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
   }
   return usage;
@@ -1377,7 +1378,8 @@ static bool iree_hal_vulkan_allocator_uses_buffer_device_address(
   return iree_all_bits_set(
              allocator->enabled_features,
              IREE_HAL_VULKAN_FEATURE_ENABLE_BUFFER_DEVICE_ADDRESSES) &&
-         iree_any_bit_set(hal_usage, IREE_HAL_BUFFER_USAGE_DISPATCH);
+         iree_any_bit_set(hal_usage, IREE_HAL_BUFFER_USAGE_DISPATCH |
+                                         IREE_HAL_BUFFER_USAGE_TRANSFER);
 }
 
 static VkMemoryAllocateFlags iree_hal_vulkan_allocator_memory_allocate_flags(

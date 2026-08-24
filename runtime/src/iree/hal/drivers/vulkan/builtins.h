@@ -10,6 +10,7 @@
 #include "iree/base/api.h"
 #include "iree/hal/api.h"
 #include "iree/hal/drivers/vulkan/atomic.h"
+#include "iree/hal/drivers/vulkan/byte_transfer.h"
 #include "iree/hal/drivers/vulkan/util/libvulkan.h"
 
 #ifdef __cplusplus
@@ -41,6 +42,9 @@ typedef struct iree_hal_vulkan_builtins_t {
 
   // Compute pipeline patching partial dwords for unaligned updates.
   VkPipeline update_pipeline;
+
+  // BDA compute pipelines implementing byte-granular fills and copies.
+  iree_hal_vulkan_byte_transfer_pipelines_t byte_transfer_pipelines;
 
   // BDA pipelines implementing atomic wait, store, and RMW operations.
   iree_hal_vulkan_atomic_pipelines_t atomic_pipelines;

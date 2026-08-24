@@ -64,6 +64,9 @@ iree_cc_library(
   HDRS
     "api.h"
     "atomic.h"
+    "barrier.h"
+    "buffer.h"
+    "byte_transfer.h"
     "command_buffer.h"
     "debug_utils.h"
     "device_options.h"
@@ -117,6 +120,38 @@ iree_cc_test(
     iree::testing::gtest
     iree::testing::gtest_main
     iree::third_party::vulkan_headers
+  LABELS
+    "iree-build-requirement=runtime.hal.vulkan"
+)
+endif()
+
+if(IREE_HAL_DRIVER_VULKAN)
+iree_cc_test(
+  NAME
+    buffer_test
+  SRCS
+    "buffer_test.cc"
+  DEPS
+    ::headers
+    ::vulkan
+    iree::testing::gtest
+    iree::testing::gtest_main
+  LABELS
+    "iree-build-requirement=runtime.hal.vulkan"
+)
+endif()
+
+if(IREE_HAL_DRIVER_VULKAN)
+iree_cc_test(
+  NAME
+    byte_transfer_test
+  SRCS
+    "byte_transfer_test.cc"
+  DEPS
+    ::headers
+    ::vulkan
+    iree::testing::gtest
+    iree::testing::gtest_main
   LABELS
     "iree-build-requirement=runtime.hal.vulkan"
 )
@@ -259,6 +294,8 @@ iree_cc_library(
     "buffer.h"
     "builtins.c"
     "builtins.h"
+    "byte_transfer.c"
+    "byte_transfer.h"
     "command_buffer.c"
     "command_buffer.h"
     "debug_utils.c"

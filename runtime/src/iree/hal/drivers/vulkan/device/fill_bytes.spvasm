@@ -1,0 +1,192 @@
+; Copyright 2026 The IREE Authors
+;
+; Licensed under the Apache License v2.0 with LLVM Exceptions.
+; See https://llvm.org/LICENSE.txt for license information.
+; SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+;
+; SPIR-V
+; Version: 1.6
+; Generator: Khronos Glslang Reference Front End; 11
+; Bound: 184
+; Schema: 0
+               OpCapability Shader
+               OpCapability PhysicalStorageBufferAddresses
+          %1 = OpExtInstImport "GLSL.std.450"
+               OpMemoryModel PhysicalStorageBuffer64 GLSL450
+               OpEntryPoint GLCompute %main "main" %params %gl_GlobalInvocationID
+               OpExecutionMode %main LocalSize 64 1 1
+               OpSource GLSL 460
+               OpSourceExtension "GL_EXT_buffer_reference"
+               OpSourceExtension "GL_EXT_scalar_block_layout"
+               OpName %main "main"
+               OpName %Parameters "Parameters"
+               OpMemberName %Parameters 0 "target"
+               OpMemberName %Parameters 1 "fill_pattern"
+               OpMemberName %Parameters 2 "fill_pattern_width"
+               OpMemberName %Parameters 3 "target_byte_offset"
+               OpMemberName %Parameters 4 "byte_length"
+               OpMemberName %Parameters 5 "target_word_count"
+               OpMemberName %Parameters 6 "first_target_word"
+               OpMemberName %Parameters 7 "pattern_byte_offset"
+               OpName %WordBuffer "WordBuffer"
+               OpMemberName %WordBuffer 0 "words"
+               OpName %params "params"
+               OpName %gl_GlobalInvocationID "gl_GlobalInvocationID"
+               OpDecorate %Parameters Block
+               OpMemberDecorate %Parameters 0 Offset 0
+               OpMemberDecorate %Parameters 1 Offset 8
+               OpMemberDecorate %Parameters 2 Offset 12
+               OpMemberDecorate %Parameters 3 Offset 16
+               OpMemberDecorate %Parameters 4 Offset 20
+               OpMemberDecorate %Parameters 5 Offset 24
+               OpMemberDecorate %Parameters 6 Offset 28
+               OpMemberDecorate %Parameters 7 Offset 32
+               OpDecorate %_runtimearr_uint ArrayStride 4
+               OpDecorate %WordBuffer Block
+               OpMemberDecorate %WordBuffer 0 Offset 0
+               OpDecorate %gl_GlobalInvocationID BuiltIn GlobalInvocationId
+       %void = OpTypeVoid
+          %3 = OpTypeFunction %void
+       %uint = OpTypeInt 32 0
+               OpTypeForwardPointer %_ptr_PhysicalStorageBuffer_WordBuffer PhysicalStorageBuffer
+ %Parameters = OpTypeStruct %_ptr_PhysicalStorageBuffer_WordBuffer %uint %uint %uint %uint %uint %uint %uint
+%_runtimearr_uint = OpTypeRuntimeArray %uint
+ %WordBuffer = OpTypeStruct %_runtimearr_uint
+%_ptr_PhysicalStorageBuffer_WordBuffer = OpTypePointer PhysicalStorageBuffer %WordBuffer
+%_ptr_PushConstant_Parameters = OpTypePointer PushConstant %Parameters
+     %params = OpVariable %_ptr_PushConstant_Parameters PushConstant
+        %int = OpTypeInt 32 1
+      %int_6 = OpConstant %int 6
+%_ptr_PushConstant_uint = OpTypePointer PushConstant %uint
+     %v3uint = OpTypeVector %uint 3
+%_ptr_Input_v3uint = OpTypePointer Input %v3uint
+%gl_GlobalInvocationID = OpVariable %_ptr_Input_v3uint Input
+     %uint_0 = OpConstant %uint 0
+%_ptr_Input_uint = OpTypePointer Input %uint
+      %int_5 = OpConstant %int 5
+       %bool = OpTypeBool
+      %int_3 = OpConstant %int 3
+     %uint_4 = OpConstant %uint 4
+      %int_4 = OpConstant %int 4
+      %int_7 = OpConstant %int 7
+      %int_2 = OpConstant %int 2
+      %int_1 = OpConstant %int 1
+     %uint_8 = OpConstant %uint 8
+   %uint_255 = OpConstant %uint 255
+%uint_4294967295 = OpConstant %uint 4294967295
+      %int_0 = OpConstant %int 0
+%_ptr_PushConstant__ptr_PhysicalStorageBuffer_WordBuffer = OpTypePointer PushConstant %_ptr_PhysicalStorageBuffer_WordBuffer
+%_ptr_PhysicalStorageBuffer_uint = OpTypePointer PhysicalStorageBuffer %uint
+     %uint_1 = OpConstant %uint 1
+       %main = OpFunction %void None %3
+          %5 = OpLabel
+               OpSelectionMerge %163 None
+               OpSwitch %uint_0 %164
+        %164 = OpLabel
+         %18 = OpAccessChain %_ptr_PushConstant_uint %params %int_6
+         %19 = OpLoad %uint %18
+         %25 = OpAccessChain %_ptr_Input_uint %gl_GlobalInvocationID %uint_0
+         %26 = OpLoad %uint %25
+         %27 = OpIAdd %uint %19 %26
+         %30 = OpAccessChain %_ptr_PushConstant_uint %params %int_5
+         %31 = OpLoad %uint %30
+         %33 = OpUGreaterThanEqual %bool %27 %31
+               OpSelectionMerge %35 None
+               OpBranchConditional %33 %34 %35
+         %34 = OpLabel
+               OpBranch %163
+         %35 = OpLabel
+         %39 = OpIEqual %bool %27 %uint_0
+               OpSelectionMerge %42 None
+               OpBranchConditional %39 %41 %46
+         %46 = OpLabel
+               OpBranch %42
+         %41 = OpLabel
+         %44 = OpAccessChain %_ptr_PushConstant_uint %params %int_3
+         %45 = OpLoad %uint %44
+               OpBranch %42
+         %42 = OpLabel
+        %171 = OpPhi %uint %45 %41 %uint_0 %46
+         %51 = OpIMul %uint %27 %uint_4
+         %53 = OpIAdd %uint %51 %171
+         %54 = OpAccessChain %_ptr_PushConstant_uint %params %int_3
+         %55 = OpLoad %uint %54
+         %56 = OpISub %uint %53 %55
+               OpBranch %61
+         %61 = OpLabel
+        %183 = OpPhi %uint %uint_0 %42 %107 %62
+        %176 = OpPhi %uint %uint_0 %42 %102 %62
+        %174 = OpPhi %uint %56 %42 %111 %62
+        %173 = OpPhi %uint %171 %42 %109 %62
+               OpLoopMerge %63 %62 None
+               OpBranch %65
+         %65 = OpLabel
+         %67 = OpULessThan %bool %173 %uint_4
+               OpSelectionMerge %69 None
+               OpBranchConditional %67 %68 %69
+         %68 = OpLabel
+         %72 = OpAccessChain %_ptr_PushConstant_uint %params %int_4
+         %73 = OpLoad %uint %72
+         %74 = OpULessThan %bool %174 %73
+               OpBranch %69
+         %69 = OpLabel
+         %75 = OpPhi %bool %67 %65 %74 %68
+               OpBranchConditional %75 %62 %63
+         %62 = OpLabel
+         %78 = OpAccessChain %_ptr_PushConstant_uint %params %int_7
+         %79 = OpLoad %uint %78
+         %81 = OpIAdd %uint %79 %174
+         %83 = OpAccessChain %_ptr_PushConstant_uint %params %int_2
+         %84 = OpLoad %uint %83
+         %85 = OpUMod %uint %81 %84
+         %88 = OpAccessChain %_ptr_PushConstant_uint %params %int_1
+         %89 = OpLoad %uint %88
+         %92 = OpIMul %uint %85 %uint_8
+         %93 = OpShiftRightLogical %uint %89 %92
+         %95 = OpBitwiseAnd %uint %93 %uint_255
+         %98 = OpIMul %uint %173 %uint_8
+        %100 = OpShiftLeftLogical %uint %uint_255 %98
+        %102 = OpBitwiseOr %uint %176 %100
+        %105 = OpShiftLeftLogical %uint %95 %98
+        %107 = OpBitwiseOr %uint %183 %105
+        %109 = OpIAdd %uint %173 %int_1
+        %111 = OpIAdd %uint %174 %int_1
+               OpBranch %61
+         %63 = OpLabel
+        %114 = OpIEqual %bool %176 %uint_4294967295
+               OpSelectionMerge %116 None
+               OpBranchConditional %114 %115 %116
+        %115 = OpLabel
+        %119 = OpAccessChain %_ptr_PushConstant__ptr_PhysicalStorageBuffer_WordBuffer %params %int_0
+        %120 = OpLoad %_ptr_PhysicalStorageBuffer_WordBuffer %119
+        %124 = OpAccessChain %_ptr_PhysicalStorageBuffer_uint %120 %int_0 %27
+               OpStore %124 %183 Aligned 4
+               OpBranch %163
+        %116 = OpLabel
+        %127 = OpAccessChain %_ptr_PushConstant__ptr_PhysicalStorageBuffer_WordBuffer %params %int_0
+        %128 = OpLoad %_ptr_PhysicalStorageBuffer_WordBuffer %127
+        %130 = OpAccessChain %_ptr_PhysicalStorageBuffer_uint %128 %int_0 %27
+        %132 = OpAtomicLoad %uint %130 %uint_1 %uint_0
+               OpBranch %133
+        %133 = OpLabel
+        %179 = OpPhi %uint %132 %116 %153 %136
+               OpLoopMerge %157 %136 None
+               OpBranch %134
+        %134 = OpLabel
+        %140 = OpNot %uint %176
+        %141 = OpBitwiseAnd %uint %179 %140
+        %144 = OpBitwiseAnd %uint %183 %176
+        %145 = OpBitwiseOr %uint %141 %144
+        %153 = OpAtomicCompareExchange %uint %130 %uint_1 %uint_0 %uint_0 %145 %179
+        %156 = OpIEqual %bool %153 %179
+               OpSelectionMerge %158 None
+               OpBranchConditional %156 %157 %158
+        %157 = OpLabel
+               OpBranch %163
+        %158 = OpLabel
+               OpBranch %136
+        %136 = OpLabel
+               OpBranch %133
+        %163 = OpLabel
+               OpReturn
+               OpFunctionEnd

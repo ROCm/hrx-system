@@ -195,6 +195,11 @@ iree_status_t iree_hal_vulkan_builtins_initialize(
         &out_builtins->update_pipeline);
   }
   if (iree_status_is_ok(status)) {
+    status = iree_hal_vulkan_byte_transfer_pipelines_initialize(
+        syms, logical_device, physical_device,
+        &out_builtins->byte_transfer_pipelines);
+  }
+  if (iree_status_is_ok(status)) {
     status = iree_hal_vulkan_atomic_pipelines_initialize(
         syms, logical_device, enabled_features,
         &out_builtins->atomic_pipelines);
@@ -209,6 +214,8 @@ void iree_hal_vulkan_builtins_deinitialize(
     iree_hal_vulkan_builtins_t* builtins) {
   if (!builtins || !builtins->logical_device) return;
   iree_hal_vulkan_atomic_pipelines_deinitialize(&builtins->atomic_pipelines);
+  iree_hal_vulkan_byte_transfer_pipelines_deinitialize(
+      &builtins->byte_transfer_pipelines);
   if (builtins->update_pipeline) {
     iree_vkDestroyPipeline(IREE_VULKAN_DEVICE(&builtins->syms),
                            builtins->logical_device, builtins->update_pipeline,

@@ -573,8 +573,16 @@ iree_status_t iree_hal_vulkan_sparse_buffer_device_address(
   }
   iree_hal_vulkan_sparse_buffer_t* vulkan_buffer =
       iree_hal_vulkan_sparse_buffer_cast(allocated_buffer);
-  *out_device_address =
-      vulkan_buffer->device_address + iree_hal_buffer_byte_offset(buffer);
+  if (vulkan_buffer->device_address == 0) {
+    *out_device_address = 0;
+    return iree_ok_status();
+  }
+  const iree_device_size_t byte_offset = iree_hal_buffer_byte_offset(buffer);
+  if (byte_offset > UINT64_MAX - vulkan_buffer->device_address) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "Vulkan sparse buffer device address overflows");
+  }
+  *out_device_address = vulkan_buffer->device_address + byte_offset;
   return iree_ok_status();
 }
 

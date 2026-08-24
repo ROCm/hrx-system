@@ -347,6 +347,55 @@ iree_status_t iree_hal_vulkan_buffer_resolve_backing_offset(
   return iree_ok_status();
 }
 
+iree_hal_vulkan_buffer_range_alignment_t
+iree_hal_vulkan_buffer_range_dword_alignment(
+    iree_hal_buffer_t* buffer, iree_device_size_t local_byte_offset,
+    iree_device_size_t local_byte_length) {
+  const iree_device_size_t dword_size = sizeof(uint32_t);
+  const iree_device_size_t buffer_byte_length =
+      iree_hal_buffer_byte_length(buffer);
+  if (local_byte_offset > buffer_byte_length) {
+    return IREE_HAL_VULKAN_BUFFER_RANGE_ALIGNMENT_UNKNOWN;
+  }
+  if (local_byte_length == IREE_HAL_WHOLE_BUFFER) {
+    local_byte_length = buffer_byte_length - local_byte_offset;
+  } else if (local_byte_length > buffer_byte_length - local_byte_offset) {
+    return IREE_HAL_VULKAN_BUFFER_RANGE_ALIGNMENT_UNKNOWN;
+  }
+  if (local_byte_length == 0) {
+    return IREE_HAL_VULKAN_BUFFER_RANGE_ALIGNMENT_ALIGNED;
+  }
+
+  iree_hal_buffer_t* backing_buffer = buffer;
+  iree_hal_buffer_t* allocated_buffer =
+      iree_hal_buffer_allocated_buffer(buffer);
+  if (iree_hal_local_transient_buffer_isa(allocated_buffer)) {
+    backing_buffer =
+        iree_hal_local_transient_buffer_backing_buffer(allocated_buffer);
+    if (!backing_buffer) {
+      return IREE_HAL_VULKAN_BUFFER_RANGE_ALIGNMENT_UNKNOWN;
+    }
+  }
+
+  iree_device_size_t offset_remainder = local_byte_offset % dword_size;
+  offset_remainder += iree_hal_buffer_byte_offset(backing_buffer) % dword_size;
+  allocated_buffer = iree_hal_buffer_allocated_buffer(backing_buffer);
+  if (iree_hal_vulkan_buffer_isa(allocated_buffer)) {
+    const iree_hal_vulkan_buffer_t* vulkan_buffer =
+        iree_hal_vulkan_buffer_cast(allocated_buffer);
+    offset_remainder += vulkan_buffer->handle_offset % dword_size;
+  } else if (!iree_hal_vulkan_sparse_buffer_isa(allocated_buffer)) {
+    return IREE_HAL_VULKAN_BUFFER_RANGE_ALIGNMENT_UNKNOWN;
+  }
+  if (backing_buffer != buffer) {
+    offset_remainder += iree_hal_buffer_byte_offset(buffer) % dword_size;
+  }
+  return offset_remainder % dword_size == 0 &&
+                 local_byte_length % dword_size == 0
+             ? IREE_HAL_VULKAN_BUFFER_RANGE_ALIGNMENT_ALIGNED
+             : IREE_HAL_VULKAN_BUFFER_RANGE_ALIGNMENT_UNALIGNED;
+}
+
 iree_status_t iree_hal_vulkan_buffer_handle(iree_hal_buffer_t* buffer,
                                             VkDeviceMemory* out_memory,
                                             VkBuffer* out_handle) {
@@ -392,9 +441,17 @@ iree_status_t iree_hal_vulkan_buffer_device_address(
   }
   iree_hal_vulkan_buffer_t* vulkan_buffer =
       iree_hal_vulkan_buffer_cast(allocated_buffer);
+  if (vulkan_buffer->device_address == 0) {
+    *out_device_address = 0;
+    return iree_ok_status();
+  }
   iree_device_size_t byte_offset = 0;
   IREE_RETURN_IF_ERROR(iree_hal_vulkan_buffer_resolve_backing_offset(
       buffer, backing_buffer, /*local_byte_offset=*/0, &byte_offset));
+  if (byte_offset > UINT64_MAX - vulkan_buffer->device_address) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "Vulkan buffer device address overflows");
+  }
   *out_device_address = vulkan_buffer->device_address + byte_offset;
   return iree_ok_status();
 }
