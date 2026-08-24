@@ -42,15 +42,27 @@ static iree_status_t loom_dominance_info_build_region(
 iree_status_t loom_dominance_info_initialize(const loom_module_t* module,
                                              iree_arena_allocator_t* arena,
                                              loom_dominance_info_t* out_info) {
-  if (!module || !arena || !out_info) {
+  if (!module) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
-        "dominance analysis requires a module, arena, and output info");
+        "dominance analysis requires a module, region, arena, and output info");
+  }
+  return loom_dominance_info_initialize_region(module, module->body, arena,
+                                               out_info);
+}
+
+iree_status_t loom_dominance_info_initialize_region(
+    const loom_module_t* module, const loom_region_t* region,
+    iree_arena_allocator_t* arena, loom_dominance_info_t* out_info) {
+  if (!module || !region || !arena || !out_info) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "dominance analysis requires a module, region, arena, and output info");
   }
   memset(out_info, 0, sizeof(*out_info));
   out_info->module = module;
   out_info->arena = arena;
-  return loom_dominance_info_build_region(out_info, module->body);
+  return loom_dominance_info_build_region(out_info, region);
 }
 
 //===----------------------------------------------------------------------===//

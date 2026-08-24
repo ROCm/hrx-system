@@ -10,6 +10,7 @@
 
 #include "loom/ir/context.h"
 #include "loom/ir/parameterized_type.h"
+#include "loom/ir/structural_hash.h"
 
 //===----------------------------------------------------------------------===//
 // Hash function
@@ -29,21 +30,6 @@ static uint32_t loom_hash_bytes_extend(uint32_t hash, const void* data,
 // FNV-1a hash over a byte array.
 static uint32_t loom_hash_bytes(const void* data, iree_host_size_t length) {
   return loom_hash_bytes_extend(2166136261u, data, length);
-}
-
-// Extends an FNV-1a hash with one uint16_t.
-static uint32_t loom_hash_u16_extend(uint32_t hash, uint16_t value) {
-  return loom_hash_bytes_extend(hash, &value, sizeof(value));
-}
-
-// Extends an FNV-1a hash with one uint32_t.
-static uint32_t loom_hash_u32_extend(uint32_t hash, uint32_t value) {
-  return loom_hash_bytes_extend(hash, &value, sizeof(value));
-}
-
-// Extends an FNV-1a hash with one uint64_t.
-static uint32_t loom_hash_u64_extend(uint32_t hash, uint64_t value) {
-  return loom_hash_bytes_extend(hash, &value, sizeof(value));
 }
 
 static uint32_t loom_hash_string_view(iree_string_view_t string) {
@@ -402,10 +388,10 @@ static iree_status_t loom_module_initialize_block(loom_module_t* module,
 }
 
 //===----------------------------------------------------------------------===//
-// Region effect summaries
+// Region semantic summaries
 //===----------------------------------------------------------------------===//
 
-static void loom_region_adjust_effect_count(uint32_t* count, int32_t delta) {
+static void loom_region_adjust_summary_count(uint32_t* count, int32_t delta) {
   if (delta < 0) {
     uint32_t decrement = (uint32_t)(-delta);
     IREE_ASSERT(*count >= decrement);
@@ -415,24 +401,24 @@ static void loom_region_adjust_effect_count(uint32_t* count, int32_t delta) {
   }
 }
 
-static void loom_region_adjust_effect_counts(loom_region_t* region,
-                                             int32_t read_delta,
-                                             int32_t write_delta,
-                                             int32_t convergent_delta) {
+static void loom_region_adjust_summary_counts(loom_region_t* region,
+                                              int32_t read_delta,
+                                              int32_t write_delta,
+                                              int32_t convergent_delta) {
   if (read_delta == 0 && write_delta == 0 && convergent_delta == 0) return;
   if (read_delta != 0) {
-    loom_region_adjust_effect_count(&region->read_effect_count, read_delta);
+    loom_region_adjust_summary_count(&region->read_effect_count, read_delta);
   }
   if (write_delta != 0) {
-    loom_region_adjust_effect_count(&region->write_effect_count, write_delta);
+    loom_region_adjust_summary_count(&region->write_effect_count, write_delta);
   }
   if (convergent_delta != 0) {
-    loom_region_adjust_effect_count(&region->convergent_effect_count,
-                                    convergent_delta);
+    loom_region_adjust_summary_count(&region->convergent_effect_count,
+                                     convergent_delta);
   }
 }
 
-static void loom_module_adjust_op_ancestor_effect_counts(
+static void loom_module_adjust_op_ancestor_summary_counts(
     loom_op_t* op, int32_t read_delta, int32_t write_delta,
     int32_t convergent_delta) {
   if (read_delta == 0 && write_delta == 0 && convergent_delta == 0) return;
@@ -440,8 +426,8 @@ static void loom_module_adjust_op_ancestor_effect_counts(
       op->parent_block ? op->parent_block->parent_region : NULL;
   loom_op_t* parent_op = op->parent_op;
   while (region) {
-    loom_region_adjust_effect_counts(region, read_delta, write_delta,
-                                     convergent_delta);
+    loom_region_adjust_summary_counts(region, read_delta, write_delta,
+                                      convergent_delta);
     if (!parent_op) break;
     region =
         parent_op->parent_block ? parent_op->parent_block->parent_region : NULL;
@@ -449,30 +435,44 @@ static void loom_module_adjust_op_ancestor_effect_counts(
   }
 }
 
-static void loom_module_adjust_op_direct_effect_counts(
-    loom_op_t* op, loom_trait_flags_t traits, int32_t direction) {
+static void loom_module_adjust_poison_op_count(loom_module_t* module,
+                                               int32_t delta) {
+  if (delta < 0) {
+    IREE_ASSERT_GT(module->poison_op_count, 0u);
+    --module->poison_op_count;
+  } else if (delta > 0) {
+    ++module->poison_op_count;
+  }
+}
+
+static void loom_module_adjust_op_direct_summaries(loom_module_t* module,
+                                                   loom_op_t* op,
+                                                   loom_trait_flags_t traits,
+                                                   int32_t direction) {
   int32_t read_delta = loom_traits_may_read(traits) ? direction : 0;
   int32_t write_delta = loom_traits_may_write(traits) ? direction : 0;
   int32_t convergent_delta = loom_traits_are_convergent(traits) ? direction : 0;
-  loom_module_adjust_op_ancestor_effect_counts(op, read_delta, write_delta,
-                                               convergent_delta);
+  loom_module_adjust_op_ancestor_summary_counts(op, read_delta, write_delta,
+                                                convergent_delta);
+  if (loom_traits_are_poison(traits)) {
+    loom_module_adjust_poison_op_count(module, direction);
+  }
 }
 
-void loom_module_record_op_effects(loom_module_t* module, loom_op_t* op) {
-  (void)module;
-  if (!op || iree_any_bit_set(
-                 op->flags, LOOM_OP_FLAG_DEAD | LOOM_OP_FLAG_EFFECTS_COUNTED)) {
+void loom_module_record_op_summaries(loom_module_t* module, loom_op_t* op) {
+  if (!op || iree_any_bit_set(op->flags, LOOM_OP_FLAG_DEAD |
+                                             LOOM_OP_FLAG_SUMMARIES_COUNTED)) {
     return;
   }
-  loom_module_adjust_op_direct_effect_counts(op, op->traits, +1);
-  op->flags |= LOOM_OP_FLAG_EFFECTS_COUNTED;
+  loom_module_adjust_op_direct_summaries(module, op, op->traits, +1);
+  op->flags |= LOOM_OP_FLAG_SUMMARIES_COUNTED;
 }
 
-void loom_module_drop_op_effects(loom_module_t* module, loom_op_t* op) {
+void loom_module_drop_op_summaries(loom_module_t* module, loom_op_t* op) {
   if (!op) return;
-  if (iree_any_bit_set(op->flags, LOOM_OP_FLAG_EFFECTS_COUNTED)) {
-    loom_module_adjust_op_direct_effect_counts(op, op->traits, -1);
-    op->flags &= ~LOOM_OP_FLAG_EFFECTS_COUNTED;
+  if (iree_any_bit_set(op->flags, LOOM_OP_FLAG_SUMMARIES_COUNTED)) {
+    loom_module_adjust_op_direct_summaries(module, op, op->traits, -1);
+    op->flags &= ~LOOM_OP_FLAG_SUMMARIES_COUNTED;
   }
   loom_region_t** regions = loom_op_regions(op);
   for (uint8_t i = 0; i < op->region_count; ++i) {
@@ -482,16 +482,17 @@ void loom_module_drop_op_effects(loom_module_t* module, loom_op_t* op) {
     loom_region_for_each_block(region, block) {
       loom_op_t* child_op = NULL;
       loom_block_for_each_op(block, child_op) {
-        loom_module_drop_op_effects(module, child_op);
+        loom_module_drop_op_summaries(module, child_op);
       }
     }
   }
 }
 
-void loom_module_update_op_direct_effects(loom_op_t* op,
-                                          loom_trait_flags_t old_traits,
-                                          loom_trait_flags_t new_traits) {
-  if (!op || !iree_all_bits_set(op->flags, LOOM_OP_FLAG_EFFECTS_COUNTED)) {
+void loom_module_update_op_direct_summaries(loom_module_t* module,
+                                            loom_op_t* op,
+                                            loom_trait_flags_t old_traits,
+                                            loom_trait_flags_t new_traits) {
+  if (!op || !iree_all_bits_set(op->flags, LOOM_OP_FLAG_SUMMARIES_COUNTED)) {
     return;
   }
   int32_t old_read = loom_traits_may_read(old_traits) ? 1 : 0;
@@ -500,9 +501,12 @@ void loom_module_update_op_direct_effects(loom_op_t* op,
   int32_t new_read = loom_traits_may_read(new_traits) ? 1 : 0;
   int32_t new_write = loom_traits_may_write(new_traits) ? 1 : 0;
   int32_t new_convergent = loom_traits_are_convergent(new_traits) ? 1 : 0;
-  loom_module_adjust_op_ancestor_effect_counts(op, new_read - old_read,
-                                               new_write - old_write,
-                                               new_convergent - old_convergent);
+  loom_module_adjust_op_ancestor_summary_counts(
+      op, new_read - old_read, new_write - old_write,
+      new_convergent - old_convergent);
+  const int32_t poison_delta = (loom_traits_are_poison(new_traits) ? 1 : 0) -
+                               (loom_traits_are_poison(old_traits) ? 1 : 0);
+  loom_module_adjust_poison_op_count(module, poison_delta);
 }
 
 static iree_status_t loom_region_blocks_ensure_capacity(loom_module_t* module,
@@ -1869,6 +1873,8 @@ static iree_status_t loom_type_use_prepare_callback(loom_value_id_t value_id,
 static iree_status_t loom_type_use_prepare_for_type(
     loom_module_t* module, loom_type_t type,
     iree_host_size_t* out_reference_count) {
+  *out_reference_count = 0;
+  if (!loom_type_may_reference_values(type)) return iree_ok_status();
   loom_type_use_prepare_t prepare = {
       .module = module,
       .reference_count = 0,
@@ -3658,6 +3664,35 @@ typedef iree_status_t (*loom_module_type_clone_fn_t)(loom_module_t* module,
                                                      const void* clone_context,
                                                      loom_type_t* out_type);
 
+static bool loom_type_has_same_storage(loom_type_t lhs, loom_type_t rhs) {
+  return lhs.header == rhs.header && lhs.encoding_id == rhs.encoding_id &&
+         lhs.encoding_flags == rhs.encoding_flags &&
+         lhs.dims[0] == rhs.dims[0] && lhs.dims[1] == rhs.dims[1];
+}
+
+static void loom_module_note_recent_exact_type(loom_module_t* module,
+                                               loom_type_id_t type_id) {
+  IREE_ASSERT(type_id < module->types.count);
+  const uint32_t ordinal = type_id + 1;
+  if (module->recent_exact_type_ordinals[0] == ordinal) return;
+  module->recent_exact_type_ordinals[1] = module->recent_exact_type_ordinals[0];
+  module->recent_exact_type_ordinals[0] = ordinal;
+}
+
+static loom_type_id_t loom_module_find_recent_exact_type(
+    const loom_module_t* module, loom_type_t type) {
+  for (iree_host_size_t i = 0;
+       i < IREE_ARRAYSIZE(module->recent_exact_type_ordinals); ++i) {
+    const uint32_t ordinal = module->recent_exact_type_ordinals[i];
+    if (ordinal == 0) continue;
+    const loom_type_id_t type_id = ordinal - 1;
+    if (loom_type_has_same_storage(module->types.entries[type_id], type)) {
+      return type_id;
+    }
+  }
+  return LOOM_TYPE_ID_INVALID;
+}
+
 static void loom_module_note_recent_register_type(loom_module_t* module,
                                                   loom_type_id_t type_id) {
   IREE_ASSERT(type_id < module->types.count);
@@ -3669,26 +3704,6 @@ static void loom_module_note_recent_register_type(loom_module_t* module,
   module->recent_register_type_ordinals[1] =
       module->recent_register_type_ordinals[0];
   module->recent_register_type_ordinals[0] = ordinal;
-}
-
-static bool loom_type_has_same_storage(loom_type_t lhs, loom_type_t rhs) {
-  return lhs.header == rhs.header && lhs.encoding_id == rhs.encoding_id &&
-         lhs.encoding_flags == rhs.encoding_flags &&
-         lhs.dims[0] == rhs.dims[0] && lhs.dims[1] == rhs.dims[1];
-}
-
-static loom_type_id_t loom_module_find_recent_register_type_exact(
-    const loom_module_t* module, loom_type_t type) {
-  for (iree_host_size_t i = 0;
-       i < IREE_ARRAYSIZE(module->recent_register_type_ordinals); ++i) {
-    const uint32_t ordinal = module->recent_register_type_ordinals[i];
-    if (ordinal == 0) continue;
-    const loom_type_id_t type_id = ordinal - 1;
-    if (loom_type_has_same_storage(module->types.entries[type_id], type)) {
-      return type_id;
-    }
-  }
-  return LOOM_TYPE_ID_INVALID;
 }
 
 static loom_type_id_t loom_module_find_recent_register_type_structural(
@@ -3824,21 +3839,22 @@ static uint32_t loom_function_type_hash(const loom_type_t* arg_types,
                                         uint16_t arg_count,
                                         const loom_type_t* result_types,
                                         uint16_t result_count) {
-  uint32_t hash = 2166136261u;
+  uint32_t hash = loom_structural_hash_initialize();
   uint32_t header = loom_type_make_raw_header(LOOM_TYPE_FUNCTION, 0, 0, 0);
-  hash = loom_hash_u32_extend(hash, header);
-  hash = loom_hash_u16_extend(hash, 0);
-  hash = loom_hash_u16_extend(hash, 0);
-  hash = loom_hash_u16_extend(hash, arg_count);
-  hash = loom_hash_u16_extend(hash, result_count);
-  hash = loom_hash_u16_extend(hash, (uint16_t)(arg_count + result_count));
+  hash = loom_structural_hash_mix_u32(hash, header);
+  hash = loom_structural_hash_mix_u16(hash, 0);
+  hash = loom_structural_hash_mix_u16(hash, 0);
+  hash = loom_structural_hash_mix_u16(hash, arg_count);
+  hash = loom_structural_hash_mix_u16(hash, result_count);
+  hash =
+      loom_structural_hash_mix_u16(hash, (uint16_t)(arg_count + result_count));
   for (uint16_t i = 0; i < arg_count; ++i) {
-    hash = loom_hash_u32_extend(hash, loom_type_hash(arg_types[i]));
+    hash = loom_structural_hash_mix_u32(hash, loom_type_hash(arg_types[i]));
   }
   for (uint16_t i = 0; i < result_count; ++i) {
-    hash = loom_hash_u32_extend(hash, loom_type_hash(result_types[i]));
+    hash = loom_structural_hash_mix_u32(hash, loom_type_hash(result_types[i]));
   }
-  return hash;
+  return loom_structural_hash_finalize(hash);
 }
 
 // Computes loom_type_hash() without recursively hashing canonical immediate
@@ -3847,40 +3863,44 @@ static uint32_t loom_function_type_hash(const loom_type_t* arg_types,
 static uint32_t loom_topological_type_hash(
     const loom_topological_type_context_t* context) {
   const loom_type_t type = context->type;
-  uint32_t hash = 2166136261u;
-  hash = loom_hash_u32_extend(hash, type.header);
-  hash = loom_hash_u16_extend(hash, type.encoding_id);
-  hash = loom_hash_u16_extend(hash, type.encoding_flags);
+  uint32_t hash = loom_structural_hash_initialize();
+  hash = loom_structural_hash_mix_u32(hash, type.header);
+  hash = loom_structural_hash_mix_u16(hash, type.encoding_id);
+  hash = loom_structural_hash_mix_u16(hash, type.encoding_flags);
 
   switch (loom_type_kind(type)) {
     case LOOM_TYPE_FUNCTION: {
       const loom_func_type_data_t* data = loom_type_func_data(type);
-      hash = loom_hash_u16_extend(hash, data->arg_count);
-      hash = loom_hash_u16_extend(hash, data->result_count);
-      hash = loom_hash_u16_extend(hash, (uint16_t)context->dependency_count);
+      hash = loom_structural_hash_mix_u16(hash, data->arg_count);
+      hash = loom_structural_hash_mix_u16(hash, data->result_count);
+      hash = loom_structural_hash_mix_u16(hash,
+                                          (uint16_t)context->dependency_count);
       for (iree_host_size_t i = 0; i < context->dependency_count; ++i) {
-        hash = loom_hash_u32_extend(
+        hash = loom_structural_hash_mix_u32(
             hash, context->module->types.hashes[context->dependency_ids[i]]);
       }
-      return hash;
+      return loom_structural_hash_finalize(hash);
     }
     case LOOM_TYPE_DIALECT:
-      hash = loom_hash_u32_extend(hash, loom_type_dialect_name_id(type));
-      hash = loom_hash_u16_extend(hash, (uint16_t)context->dependency_count);
+      hash =
+          loom_structural_hash_mix_u32(hash, loom_type_dialect_name_id(type));
+      hash = loom_structural_hash_mix_u16(hash,
+                                          (uint16_t)context->dependency_count);
       for (iree_host_size_t i = 0; i < context->dependency_count; ++i) {
-        hash = loom_hash_u32_extend(
+        hash = loom_structural_hash_mix_u32(
             hash, context->module->types.hashes[context->dependency_ids[i]]);
       }
-      return hash;
+      return loom_structural_hash_finalize(hash);
     case LOOM_TYPE_REGISTER: {
       if (context->dependency_count == 0) {
         return loom_type_hash(type);
       }
       const loom_register_type_data_t* data = loom_type_register_data(type);
-      hash = loom_hash_u64_extend(hash, data->carrier_payload0);
-      hash = loom_hash_u64_extend(hash, data->carrier_payload1);
-      return loom_hash_u32_extend(
+      hash = loom_structural_hash_mix_u64(hash, data->carrier_payload0);
+      hash = loom_structural_hash_mix_u64(hash, data->carrier_payload1);
+      hash = loom_structural_hash_mix_u32(
           hash, context->module->types.hashes[context->dependency_ids[0]]);
+      return loom_structural_hash_finalize(hash);
     }
     default:
       return loom_type_hash(type);
@@ -4157,6 +4177,7 @@ static iree_status_t loom_module_intern_type_impl(
   if (existing_index != UINT32_MAX) {
     *out_interned_type = module->types.entries[existing_index];
     if (out_type_id) *out_type_id = (loom_type_id_t)existing_index;
+    loom_module_note_recent_exact_type(module, (loom_type_id_t)existing_index);
     return iree_ok_status();
   }
   if (out_miss) *out_miss = true;
@@ -4187,6 +4208,7 @@ static iree_status_t loom_module_intern_type_impl(
   if (result_index != new_index) {
     *out_interned_type = module->types.entries[result_index];
     if (out_type_id) *out_type_id = (loom_type_id_t)result_index;
+    loom_module_note_recent_exact_type(module, (loom_type_id_t)result_index);
     return iree_ok_status();
   }
 
@@ -4195,6 +4217,7 @@ static iree_status_t loom_module_intern_type_impl(
   module->types.count++;
   *out_interned_type = type;
   if (out_type_id) *out_type_id = (loom_type_id_t)new_index;
+  loom_module_note_recent_exact_type(module, (loom_type_id_t)new_index);
   return iree_ok_status();
 }
 
@@ -4282,14 +4305,12 @@ static iree_status_t loom_module_intern_type_with_dependencies(
     loom_module_t* module, loom_type_t type, loom_type_t* out_interned_type,
     loom_type_id_t* out_type_id) {
   type = loom_module_canonicalize_shaped_type_attachment(module, type);
-  if (loom_type_is_register(type) && loom_type_register_has_value_type(type)) {
-    const loom_type_id_t recent_type_id =
-        loom_module_find_recent_register_type_exact(module, type);
-    if (recent_type_id != LOOM_TYPE_ID_INVALID) {
-      *out_interned_type = module->types.entries[recent_type_id];
-      if (out_type_id) *out_type_id = recent_type_id;
-      return iree_ok_status();
-    }
+  const loom_type_id_t recent_type_id =
+      loom_module_find_recent_exact_type(module, type);
+  if (recent_type_id != LOOM_TYPE_ID_INVALID) {
+    *out_interned_type = module->types.entries[recent_type_id];
+    if (out_type_id) *out_type_id = recent_type_id;
+    return iree_ok_status();
   }
   switch (loom_type_kind(type)) {
     case LOOM_TYPE_TILE:
@@ -4530,6 +4551,7 @@ iree_status_t loom_module_intern_register_type(loom_module_t* module,
     *out_interned_type = module->types.entries[type_id];
   }
   loom_module_note_recent_register_type(module, type_id);
+  loom_module_note_recent_exact_type(module, type_id);
   return iree_ok_status();
 }
 
@@ -5564,7 +5586,7 @@ iree_status_t loom_block_insert_op(loom_module_t* module, loom_block_t* block,
 void loom_block_unlink_op(loom_module_t* module, loom_op_t* op) {
   loom_block_t* block = op->parent_block;
   if (!block || iree_any_bit_set(op->flags, LOOM_OP_FLAG_DEAD)) return;
-  loom_module_drop_op_effects(module, op);
+  loom_module_drop_op_summaries(module, op);
 
   if (op->prev_op) {
     op->prev_op->next_op = op->next_op;

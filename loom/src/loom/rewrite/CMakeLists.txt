@@ -119,6 +119,7 @@ loom_cc_test(
     iree::base::internal::arena
     iree::testing::gtest
     iree::testing::gtest_main
+    loom::analysis::availability
     loom::ir
     loom::ops::op_defs
     loom::ops::test
@@ -171,6 +172,7 @@ loom_cc_library(
     ::remap
     ::rewriter
     iree::base
+    loom::analysis::availability
     loom::ir
     loom::ops::func
     loom::ops::op_defs

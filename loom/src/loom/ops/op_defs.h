@@ -969,12 +969,12 @@ loom_op_semantics_t loom_dialect_semantics_lookup(
 const loom_region_descriptor_t* loom_op_vtable_region_descriptor(
     const loom_op_vtable_t* vtable, uint8_t region_index);
 
-// Returns the module-local symbol reference defined by |op|. Returns false for
-// non-symbol ops, malformed symbol attributes, cross-module refs, or refs
-// outside the module symbol table.
-bool loom_op_defining_symbol_ref(const loom_module_t* module,
-                                 const loom_op_t* op,
-                                 loom_symbol_ref_t* out_ref);
+// Returns the module-local symbol ID defined by |op| using its already-resolved
+// |vtable| metadata. Returns LOOM_SYMBOL_ID_INVALID for non-symbol ops,
+// cross-module refs, or refs outside the module symbol table.
+loom_symbol_id_t loom_op_defining_symbol_id(const loom_module_t* module,
+                                            const loom_op_t* op,
+                                            const loom_op_vtable_t* vtable);
 
 // Returns true when operand descriptors name independent operand segments
 // stored over the op's flat operand array.
@@ -1294,6 +1294,13 @@ loom_symbol_ref_t loom_func_like_target(loom_func_like_t func);
 // remain responsible for invalidating any higher-level analyses.
 void loom_func_like_set_target(loom_module_t* module, loom_func_like_t func,
                                loom_symbol_ref_t target);
+
+// Sets whether |func| survives symbol pruning as a module-boundary root.
+//
+// The function must define a symbol with a retain attribute. This updates both
+// the operation contract and the module's maintained symbol flags.
+void loom_func_like_set_retained(loom_module_t* module, loom_func_like_t func,
+                                 bool retained);
 
 // Returns the authored representation-contract key for a func-like op, or
 // LOOM_STRING_ID_INVALID when none is present.

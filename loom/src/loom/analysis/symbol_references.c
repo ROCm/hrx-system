@@ -43,6 +43,21 @@ typedef struct loom_symbol_reference_builder_t {
     // Dense bitset indexed by module symbol ID for demanded families.
     uint64_t* family_bits;
   } template_demands;
+
+  // Mutable template-provider storage indexed by implemented family.
+  struct {
+    // Provider entries.
+    loom_template_provider_reference_t* values;
+
+    // Number of live entries.
+    iree_host_size_t count;
+
+    // Number of allocated entries.
+    iree_host_size_t capacity;
+
+    // First provider record for each module-local family symbol.
+    loom_template_provider_reference_id_t* first_by_family_symbol_id;
+  } template_providers;
 } loom_symbol_reference_builder_t;
 
 static void loom_symbol_reference_initialize_symbol_occurrences(
@@ -211,6 +226,99 @@ static iree_status_t loom_symbol_reference_append_template_demand(
   builder->template_demands.family_bits[family.symbol_id >> 6] |=
       UINT64_C(1) << (family.symbol_id & 63u);
   return iree_ok_status();
+}
+
+static iree_status_t loom_symbol_reference_append_template_provider(
+    loom_symbol_reference_builder_t* builder, loom_symbol_id_t symbol_id,
+    const loom_symbol_t* symbol) {
+  if (!loom_symbol_implements(symbol,
+                              LOOM_SYMBOL_INTERFACE_TEMPLATE_PROVIDER)) {
+    return iree_ok_status();
+  }
+  const loom_func_like_t provider =
+      loom_func_like_cast(builder->module, symbol->defining_op);
+  IREE_ASSERT(loom_func_like_isa(provider));
+  const loom_symbol_ref_t family = loom_func_like_template_family(provider);
+  if (!loom_symbol_ref_is_valid(family) || family.module_id != 0 ||
+      family.symbol_id >= builder->module->symbols.count) {
+    return iree_ok_status();
+  }
+
+  if (!builder->template_providers.first_by_family_symbol_id) {
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        builder->arena, builder->module->symbols.count,
+        sizeof(*builder->template_providers.first_by_family_symbol_id),
+        (void**)&builder->template_providers.first_by_family_symbol_id));
+    for (iree_host_size_t i = 0; i < builder->module->symbols.count; ++i) {
+      builder->template_providers.first_by_family_symbol_id[i] =
+          LOOM_TEMPLATE_PROVIDER_REFERENCE_ID_INVALID;
+    }
+  }
+  if (builder->template_providers.count >= UINT32_MAX) {
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "symbol reference table exceeds %u template "
+                            "providers",
+                            (unsigned)(UINT32_MAX - 1));
+  }
+  if (builder->template_providers.count >=
+      builder->template_providers.capacity) {
+    IREE_RETURN_IF_ERROR(
+        iree_arena_grow_array(builder->arena, builder->template_providers.count,
+                              builder->template_providers.count + 1,
+                              sizeof(*builder->template_providers.values),
+                              &builder->template_providers.capacity,
+                              (void**)&builder->template_providers.values));
+  }
+
+  const loom_template_provider_reference_id_t provider_id =
+      (loom_template_provider_reference_id_t)
+          builder->template_providers.count++;
+  builder->template_providers.values[provider_id] =
+      (loom_template_provider_reference_t){
+          .symbol_id = symbol_id,
+          .next_family_provider_id =
+              builder->template_providers
+                  .first_by_family_symbol_id[family.symbol_id],
+      };
+  builder->template_providers.first_by_family_symbol_id[family.symbol_id] =
+      provider_id;
+  return iree_ok_status();
+}
+
+static_assert(LOOM_TYPE_COUNT_ == 15,
+              "update symbol-bearing type classification for new kinds");
+
+static bool loom_symbol_reference_type_may_contain_ref(loom_type_t type) {
+  if (!loom_type_kind_is_valid(loom_type_kind(type))) return false;
+  if (loom_type_has_static_encoding(type)) return true;
+  switch (loom_type_kind(type)) {
+    case LOOM_TYPE_FUNCTION:
+    case LOOM_TYPE_DIALECT:
+    case LOOM_TYPE_PARAMETERIZED:
+    case LOOM_TYPE_REGISTER:
+      return true;
+    default:
+      return false;
+  }
+}
+
+static_assert(LOOM_ATTR_COUNT_ == 21,
+              "update symbol-bearing attr classification for new kinds");
+
+static bool loom_symbol_reference_attr_may_contain_ref(loom_attribute_t attr) {
+  switch ((loom_attr_kind_t)attr.kind) {
+    case LOOM_ATTR_SYMBOL:
+    case LOOM_ATTR_SYMBOL_ARRAY:
+    case LOOM_ATTR_SYMBOL_SET:
+    case LOOM_ATTR_TYPE:
+    case LOOM_ATTR_ENCODING:
+    case LOOM_ATTR_DICT:
+    case LOOM_ATTR_PARAMETERIZED:
+    case LOOM_ATTR_PARAMETERIZED_ARRAY:
+      return true;
+    default:
+      return false;
+  }
 }
 
 static iree_status_t loom_symbol_reference_visit_type(
@@ -463,20 +571,28 @@ static iree_status_t loom_symbol_reference_visit_value_type(
       value_id >= builder->module->values.count) {
     return iree_ok_status();
   }
+  const loom_type_t type = loom_module_value_type(builder->module, value_id);
+  if (!loom_symbol_reference_type_may_contain_ref(type)) {
+    return iree_ok_status();
+  }
   return loom_symbol_reference_visit_type(
-      builder, source_symbol_id,
-      loom_module_value_type(builder->module, value_id),
+      builder, source_symbol_id, type,
       LOOM_SYMBOL_REFERENCE_OCCURRENCE_VALUE_TYPE,
       LOOM_SYMBOL_REFERENCE_ATTR_INDEX_NONE, user_op);
 }
 
-static iree_status_t loom_symbol_reference_visit_op_value_types(
+static iree_status_t loom_symbol_reference_visit_op_defined_value_types(
     loom_symbol_reference_builder_t* builder, loom_symbol_id_t source_symbol_id,
-    const loom_op_t* op) {
-  const loom_value_id_t* operands = loom_op_operands(op);
-  for (uint16_t i = 0; i < op->operand_count; ++i) {
-    IREE_RETURN_IF_ERROR(loom_symbol_reference_visit_value_type(
-        builder, source_symbol_id, operands[i], op));
+    const loom_op_t* op, const loom_op_vtable_t* vtable) {
+  if (vtable && vtable->func_like &&
+      vtable->func_like->args_operand_field_index != LOOM_OPERAND_INDEX_NONE) {
+    // Operand-backed signatures define every operand. Kernel declarations may
+    // divide those definitions between ABI and workload operand fields.
+    const loom_value_id_t* operands = loom_op_operands(op);
+    for (uint16_t i = 0; i < op->operand_count; ++i) {
+      IREE_RETURN_IF_ERROR(loom_symbol_reference_visit_value_type(
+          builder, source_symbol_id, operands[i], op));
+    }
   }
   const loom_value_id_t* results = loom_op_results(op);
   for (uint16_t i = 0; i < op->result_count; ++i) {
@@ -506,6 +622,7 @@ static iree_status_t loom_symbol_reference_visit_op_attrs(
         i == vtable->symbol_def->name_attr_index) {
       continue;
     }
+    if (!loom_symbol_reference_attr_may_contain_ref(attrs[i])) continue;
     const loom_attr_descriptor_t* descriptor = NULL;
     if (vtable && vtable->attr_descriptors && i < vtable->attribute_count) {
       descriptor = &vtable->attr_descriptors[i];
@@ -531,16 +648,20 @@ static iree_status_t loom_symbol_reference_visit_region(
     loom_block_for_each_op(block, op) {
       const loom_op_vtable_t* vtable = loom_op_vtable(builder->module, op);
       loom_symbol_id_t nested_source_symbol_id = source_symbol_id;
-      loom_symbol_ref_t op_symbol_ref = loom_symbol_ref_null();
-      if (loom_op_defining_symbol_ref(builder->module, op, &op_symbol_ref)) {
-        nested_source_symbol_id = op_symbol_ref.symbol_id;
+      const loom_symbol_id_t op_symbol_id =
+          loom_op_defining_symbol_id(builder->module, op, vtable);
+      if (op_symbol_id != LOOM_SYMBOL_ID_INVALID) {
+        nested_source_symbol_id = op_symbol_id;
+        IREE_RETURN_IF_ERROR(loom_symbol_reference_append_template_provider(
+            builder, op_symbol_id,
+            &builder->module->symbols.entries[op_symbol_id]));
       }
       if (loom_template_apply_isa(op)) {
         IREE_RETURN_IF_ERROR(loom_symbol_reference_append_template_demand(
             builder, nested_source_symbol_id, op));
       }
-      IREE_RETURN_IF_ERROR(loom_symbol_reference_visit_op_value_types(
-          builder, nested_source_symbol_id, op));
+      IREE_RETURN_IF_ERROR(loom_symbol_reference_visit_op_defined_value_types(
+          builder, nested_source_symbol_id, op, vtable));
       IREE_RETURN_IF_ERROR(loom_symbol_reference_visit_op_attrs(
           builder, nested_source_symbol_id, op, vtable));
       loom_region_t** regions = loom_op_regions(op);
@@ -601,6 +722,13 @@ iree_status_t loom_symbol_reference_table_build(
               .values = builder.template_demands.values,
               .count = builder.template_demands.count,
               .family_bits = builder.template_demands.family_bits,
+          },
+      .template_providers =
+          {
+              .values = builder.template_providers.values,
+              .count = builder.template_providers.count,
+              .first_by_family_symbol_id =
+                  builder.template_providers.first_by_family_symbol_id,
           },
   };
   return iree_ok_status();

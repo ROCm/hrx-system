@@ -9,9 +9,10 @@
 // This analysis is the canonical symbol-use substrate for module-level
 // analyses. It records occurrences from the symbol whose definition owns
 // an operation to each module-local symbol referenced by that operation, nested
-// attributes, static encoding attributes, and value types. The table is
-// intentionally rebuilt from immutable IR instead of maintained on every IR
-// mutation path; callers that rewrite symbols should rebuild after mutation.
+// attributes, static encoding attributes, and each SSA value definition's
+// type. The table is intentionally rebuilt from immutable IR instead of
+// maintained on every IR mutation path; callers that rewrite symbols should
+// rebuild after mutation.
 
 #ifndef LOOM_ANALYSIS_SYMBOL_REFERENCES_H_
 #define LOOM_ANALYSIS_SYMBOL_REFERENCES_H_
@@ -34,6 +35,11 @@ typedef uint32_t loom_symbol_reference_occurrence_id_t;
 // Index into a symbol reference table's template-demand array.
 typedef uint32_t loom_template_demand_id_t;
 #define LOOM_TEMPLATE_DEMAND_ID_INVALID ((loom_template_demand_id_t)UINT32_MAX)
+
+// Index into a symbol reference table's template-provider array.
+typedef uint32_t loom_template_provider_reference_id_t;
+#define LOOM_TEMPLATE_PROVIDER_REFERENCE_ID_INVALID \
+  ((loom_template_provider_reference_id_t)UINT32_MAX)
 
 // Sentinel for occurrences not attached to a concrete op attribute.
 #define LOOM_SYMBOL_REFERENCE_ATTR_INDEX_NONE ((uint16_t)UINT16_MAX)
@@ -105,6 +111,18 @@ typedef struct loom_template_demand_t {
 static_assert(sizeof(loom_template_demand_t) == 16,
               "template demands must remain 16 bytes");
 
+// One available template provider indexed by its implemented family.
+typedef struct loom_template_provider_reference_t {
+  // Module-local provider symbol.
+  loom_symbol_id_t symbol_id;
+
+  // Next provider implementing the same family.
+  loom_template_provider_reference_id_t next_family_provider_id;
+} loom_template_provider_reference_t;
+
+static_assert(sizeof(loom_template_provider_reference_t) == 8,
+              "template provider references must remain 8 bytes");
+
 // Incoming/outgoing occurrence-list heads for one symbol.
 typedef struct loom_symbol_reference_symbol_occurrences_t {
   // First occurrence whose source_symbol_id is this symbol.
@@ -147,6 +165,18 @@ typedef struct loom_symbol_reference_table_t {
     // when the module contains no template demands.
     const uint64_t* family_bits;
   } template_demands;
+
+  // Available template providers indexed by implemented family.
+  struct {
+    // Provider records owned by the caller-provided arena.
+    const loom_template_provider_reference_t* values;
+
+    // Number of entries in values.
+    iree_host_size_t count;
+
+    // First provider record for each module-local family symbol.
+    const loom_template_provider_reference_id_t* first_by_family_symbol_id;
+  } template_providers;
 } loom_symbol_reference_table_t;
 
 // Returns true when at least one template.apply demands |family_symbol_id|.

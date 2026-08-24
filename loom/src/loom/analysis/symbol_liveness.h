@@ -96,6 +96,16 @@ typedef struct loom_symbol_liveness_options_t {
 
   // Number of contributor entries.
   iree_host_size_t contributor_count;
+
+  // Explicit module-local roots that seed liveness without a symbol-table
+  // classification pass.
+  struct {
+    // Borrowed module-local symbol ids.
+    const loom_symbol_id_t* values;
+
+    // Number of entries in values.
+    iree_host_size_t count;
+  } root_symbol_ids;
 } loom_symbol_liveness_options_t;
 
 // Immutable liveness result for one module snapshot.

@@ -3109,10 +3109,10 @@ TEST_F(ReaderTest, PreservesPhysicalSymbolDefinitionOrder) {
   loom_block_unlink_op(module, function_op);
   IREE_ASSERT_OK(
       loom_block_insert_before_op(module, module_block, a_op, function_op));
-  loom_module_record_op_effects(module, function_op);
+  loom_module_record_op_summaries(module, function_op);
   loom_block_unlink_op(module, b_op);
   IREE_ASSERT_OK(loom_block_insert_before_op(module, module_block, a_op, b_op));
-  loom_module_record_op_effects(module, b_op);
+  loom_module_record_op_summaries(module, b_op);
 
   loom_builder_t builder;
   loom_builder_initialize(module, &module->arena, module_block, &builder);

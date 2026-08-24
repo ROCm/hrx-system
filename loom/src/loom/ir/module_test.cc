@@ -1292,17 +1292,20 @@ TEST_F(ModuleTest, TypeUseTableTracksDynamicDims) {
   loom_value_id_t dim_id = LOOM_VALUE_ID_INVALID;
   IREE_ASSERT_OK(loom_module_define_value(
       module, loom_type_scalar(LOOM_SCALAR_TYPE_INDEX), &dim_id));
+  EXPECT_FALSE(loom_module_has_active_type_uses(module));
   loom_type_t vector_type = loom_type_shaped_1d(
       LOOM_TYPE_VECTOR, LOOM_SCALAR_TYPE_F32, loom_dim_pack_dynamic(dim_id), 0);
   loom_value_id_t vector_id = LOOM_VALUE_ID_INVALID;
   IREE_ASSERT_OK(loom_module_define_value(module, vector_type, &vector_id));
 
   EXPECT_TRUE(loom_module_value_has_type_uses(module, dim_id));
+  EXPECT_TRUE(loom_module_has_active_type_uses(module));
   IREE_ASSERT_OK(loom_module_set_value_type(
       module, vector_id,
       loom_type_shaped_1d(LOOM_TYPE_VECTOR, LOOM_SCALAR_TYPE_F32,
                           loom_dim_pack_static(4), 0)));
   EXPECT_FALSE(loom_module_value_has_type_uses(module, dim_id));
+  EXPECT_FALSE(loom_module_has_active_type_uses(module));
 
   loom_module_free(module);
 }

@@ -620,11 +620,12 @@ enum loom_op_flag_bits_e {
   // overwritten on the next driver invocation.
   LOOM_OP_FLAG_ON_WORKLIST = 1u << 1,
 
-  // The operation's direct effects have been added to the transitive counters
-  // on its containing region and ancestor regions. Nested operations carry
-  // their own counted flags. Set when an op is finalized or use-def data is
-  // recomputed, and cleared when the op is erased.
-  LOOM_OP_FLAG_EFFECTS_COUNTED = 1u << 2,
+  // The operation's direct semantic summaries have been recorded. This covers
+  // transitive region-effect counters and module-wide semantic inventories.
+  // Nested operations carry their own counted flags. Set when an op is
+  // finalized or use-def data is recomputed, and cleared when the op is
+  // erased.
+  LOOM_OP_FLAG_SUMMARIES_COUNTED = 1u << 2,
 
   // At least one empty source line preceded the operation. Text printers
   // canonicalize any authored run to exactly one empty line. This is
@@ -739,6 +740,10 @@ enum loom_trait_bits_e {
   // schedule composition. The op independently declares its exact or unknown
   // effects; this trait classifies those effects instead of replacing them.
   LOOM_TRAIT_COMMAND_EFFECT = 1u << 27,
+  // Op materializes a poison value. Poison represents an invalid observation
+  // sentinel that propagates through ordinary pure computation until erased
+  // or rejected at an observation boundary.
+  LOOM_TRAIT_POISON = 1u << 28,
 };
 typedef uint32_t loom_trait_flags_t;
 
@@ -807,6 +812,11 @@ static inline bool loom_traits_are_safe_to_speculate(
 // execution site. This is independent of ordinary memory effects.
 static inline bool loom_traits_are_convergent(loom_trait_flags_t traits) {
   return (traits & LOOM_TRAIT_CONVERGENT) != 0;
+}
+
+// Returns true when the op materializes a poison value.
+static inline bool loom_traits_are_poison(loom_trait_flags_t traits) {
+  return (traits & LOOM_TRAIT_POISON) != 0;
 }
 
 // Returns true when result types carry op-owned SSA references that local
@@ -2372,10 +2382,22 @@ typedef struct loom_module_t {
   loom_intern_table_t type_intern;
   loom_intern_table_t encoding_intern;
 
+  // One-based IDs of the two most-recent exact type candidates, newest first.
+  // Zero denotes an empty slot and keeps zero-initialized modules inert.
+  uint32_t recent_exact_type_ordinals[2];
+
   // One-based IDs of the two most-recent typed-register types, newest first.
   // Zero denotes an empty slot and keeps zero-initialized modules inert.
   uint32_t recent_register_type_ordinals[2];
+
+  // Number of live poison-materializing operations in the module.
+  uint32_t poison_op_count;
 } loom_module_t;
+
+// Returns true when the module contains any live poison materializer.
+static inline bool loom_module_has_poison(const loom_module_t* module) {
+  return module && module->poison_op_count != 0;
+}
 
 // Returns a pointer to a value by ID.
 static inline loom_value_t* loom_module_value(const loom_module_t* module,

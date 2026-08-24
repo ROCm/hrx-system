@@ -73,6 +73,13 @@ class MaterializeTest : public ::testing::Test {
     return remap;
   }
 
+  loom_availability_analysis_t InitializeAvailability() {
+    loom_availability_analysis_t availability = {};
+    IREE_CHECK_OK(loom_availability_analysis_initialize(source_, &remap_arena_,
+                                                        &availability));
+    return availability;
+  }
+
   iree_arena_block_pool_t block_pool_;
   loom_context_t context_;
   loom_module_t* source_ = nullptr;
@@ -603,8 +610,10 @@ TEST_F(MaterializeTest, MovesBlockOpsAndRemapsCapturedBlockArgs) {
   loom_ir_move_block_options_t options = {
       /*.omit_terminators=*/true,
   };
-  IREE_ASSERT_OK(loom_ir_move_block_ops_before(
-      &rewriter, loom_region_entry_block(body), sentinel_op, &remap, &options));
+  loom_availability_analysis_t availability = InitializeAvailability();
+  IREE_ASSERT_OK(loom_ir_move_block_ops_before(&rewriter, &availability,
+                                               loom_region_entry_block(body),
+                                               sentinel_op, &remap, &options));
 
   EXPECT_EQ(neg_op->parent_block, loom_module_block(source_));
   EXPECT_EQ(neg_op->parent_op, nullptr);
@@ -663,8 +672,10 @@ TEST_F(MaterializeTest, MovesBlockOpsAndRemapsDynamicResultTypes) {
   loom_ir_remap_t remap =
       InitializeSameModuleRemap(/*allow_unmapped_values=*/true);
   IREE_ASSERT_OK(loom_ir_remap_map_value(&remap, source_dim, target_dim));
+  loom_availability_analysis_t availability = InitializeAvailability();
   IREE_ASSERT_OK(loom_ir_move_block_ops_before(
-      &rewriter, source_block, sentinel_op, &remap, /*options=*/nullptr));
+      &rewriter, &availability, source_block, sentinel_op, &remap,
+      /*options=*/nullptr));
 
   EXPECT_EQ(source_block->op_count, 0u);
   EXPECT_EQ(input_op->parent_block, loom_module_block(source_));
@@ -717,8 +728,10 @@ TEST_F(MaterializeTest, MovesBlockOpsAndRemapsPredicateAttrs) {
   loom_ir_remap_t remap =
       InitializeSameModuleRemap(/*allow_unmapped_values=*/true);
   IREE_ASSERT_OK(loom_ir_remap_map_value(&remap, source_dim, target_dim));
+  loom_availability_analysis_t availability = InitializeAvailability();
   IREE_ASSERT_OK(loom_ir_move_block_ops_before(
-      &rewriter, source_block, sentinel_op, &remap, /*options=*/nullptr));
+      &rewriter, &availability, source_block, sentinel_op, &remap,
+      /*options=*/nullptr));
 
   EXPECT_EQ(source_block->op_count, 0u);
   EXPECT_EQ(assume_op->parent_block, loom_module_block(source_));
@@ -768,10 +781,11 @@ TEST_F(MaterializeTest, RejectsMoveWithUnavailableRemappedCaptures) {
   IREE_ASSERT_OK(loom_rewriter_initialize(&rewriter, source_, &remap_arena_));
   loom_ir_remap_t remap =
       InitializeSameModuleRemap(/*allow_unmapped_values=*/true);
+  loom_availability_analysis_t availability = InitializeAvailability();
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_FAILED_PRECONDITION,
-      loom_ir_move_block_ops_before(&rewriter, source_block, sentinel_op,
-                                    &remap, /*options=*/nullptr));
+      loom_ir_move_block_ops_before(&rewriter, &availability, source_block,
+                                    sentinel_op, &remap, /*options=*/nullptr));
 
   EXPECT_EQ(source_block->op_count, 2u);
   EXPECT_EQ(input_op->parent_block, source_block);

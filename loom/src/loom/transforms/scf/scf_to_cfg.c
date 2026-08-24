@@ -205,9 +205,9 @@ static iree_status_t loom_scf_to_cfg_initialize_remap(
                                   remap);
 }
 
-static void loom_scf_to_cfg_record_subtree_effects(loom_module_t* module,
-                                                   loom_op_t* op) {
-  loom_module_record_op_effects(module, op);
+static void loom_scf_to_cfg_record_subtree_summaries(loom_module_t* module,
+                                                     loom_op_t* op) {
+  loom_module_record_op_summaries(module, op);
   loom_region_t** regions = loom_op_regions(op);
   for (uint8_t region_index = 0; region_index < op->region_count;
        ++region_index) {
@@ -217,7 +217,7 @@ static void loom_scf_to_cfg_record_subtree_effects(loom_module_t* module,
     loom_region_for_each_block(region, block) {
       loom_op_t* child_op = NULL;
       loom_block_for_each_op(block, child_op) {
-        loom_scf_to_cfg_record_subtree_effects(module, child_op);
+        loom_scf_to_cfg_record_subtree_summaries(module, child_op);
       }
     }
   }
@@ -231,7 +231,7 @@ static iree_status_t loom_scf_to_cfg_move_op_to_block_end(
   op->parent_block = NULL;
   op->parent_op = parent_op;
   IREE_RETURN_IF_ERROR(loom_block_append_op(module, target_block, op));
-  loom_scf_to_cfg_record_subtree_effects(module, op);
+  loom_scf_to_cfg_record_subtree_summaries(module, op);
   IREE_RETURN_IF_ERROR(loom_rewriter_add_to_worklist(state->rewriter, op));
   state->rewriter->flags |= LOOM_REWRITER_FLAG_CHANGED;
   return iree_ok_status();

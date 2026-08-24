@@ -291,6 +291,27 @@ func.def public @entry(%arg: i32) -> (i32) {
     EXPECT_EQ(demand.apply_op->kind, LOOM_OP_TEMPLATE_APPLY);
     EXPECT_EQ(demand.next_source_demand_id, LOOM_TEMPLATE_DEMAND_ID_INVALID);
   }
+
+  ASSERT_EQ(table.template_providers.count, 2u);
+  ASSERT_NE(table.template_providers.first_by_family_symbol_id, nullptr);
+  loom_template_provider_reference_id_t provider_id =
+      table.template_providers
+          .first_by_family_symbol_id[undemanded_family_symbol_id];
+  ASSERT_NE(provider_id, LOOM_TEMPLATE_PROVIDER_REFERENCE_ID_INVALID);
+  EXPECT_EQ(table.template_providers.values[provider_id].symbol_id,
+            outer_provider);
+  EXPECT_EQ(
+      table.template_providers.values[provider_id].next_family_provider_id,
+      LOOM_TEMPLATE_PROVIDER_REFERENCE_ID_INVALID);
+
+  provider_id =
+      table.template_providers.first_by_family_symbol_id[family_symbol_id];
+  ASSERT_NE(provider_id, LOOM_TEMPLATE_PROVIDER_REFERENCE_ID_INVALID);
+  EXPECT_EQ(table.template_providers.values[provider_id].symbol_id,
+            FindSymbol(module.get(), IREE_SV("demo_provider")));
+  EXPECT_EQ(
+      table.template_providers.values[provider_id].next_family_provider_id,
+      LOOM_TEMPLATE_PROVIDER_REFERENCE_ID_INVALID);
 }
 
 TEST_F(SymbolReferencesTest, OpenParameterizedArraysAreNotSymbolReferences) {
@@ -455,6 +476,43 @@ func.def @typed(%arg: test.matrix<bf16, scope = subgroup, rows = 16, target = @d
   for (iree_host_size_t i = 0; i < sccs.count; ++i) {
     EXPECT_FALSE(sccs.values[i].is_cycle);
   }
+}
+
+TEST_F(SymbolReferencesTest, ValueTypeOccurrencesBelongToDefinitions) {
+  ModulePtr module = ParseModule(R"(
+test.record @target
+
+func.decl @decl(%arg: test.matrix<bf16, scope = subgroup, rows = 16, target = @target>)
+
+func.def @typed(%arg: test.matrix<bf16, scope = subgroup, rows = 16, target = @target>) {
+  test.use %arg : test.matrix<bf16, scope = subgroup, rows = 16, target = @target>
+  test.use %arg : test.matrix<bf16, scope = subgroup, rows = 16, target = @target>
+  func.return
+}
+)");
+
+  const loom_symbol_id_t target = FindSymbol(module.get(), IREE_SV("target"));
+  const loom_symbol_id_t decl = FindSymbol(module.get(), IREE_SV("decl"));
+  const loom_symbol_id_t typed = FindSymbol(module.get(), IREE_SV("typed"));
+  const loom_symbol_reference_table_t table = BuildTable(module.get());
+
+  EXPECT_NE(FindOccurrence(table, decl, target,
+                           LOOM_SYMBOL_REFERENCE_OCCURRENCE_VALUE_TYPE),
+            nullptr);
+
+  uint32_t occurrence_count = 0;
+  loom_symbol_reference_occurrence_id_t occurrence_id =
+      table.symbols[typed].first_outgoing_occurrence_id;
+  while (occurrence_id != LOOM_SYMBOL_REFERENCE_OCCURRENCE_ID_INVALID) {
+    const loom_symbol_reference_occurrence_t* occurrence =
+        &table.occurrences[occurrence_id];
+    if (occurrence->target_symbol_id == target &&
+        occurrence->kind == LOOM_SYMBOL_REFERENCE_OCCURRENCE_VALUE_TYPE) {
+      ++occurrence_count;
+    }
+    occurrence_id = occurrence->next_outgoing_occurrence_id;
+  }
+  EXPECT_EQ(occurrence_count, 1u);
 }
 
 TEST_F(SymbolReferencesTest,

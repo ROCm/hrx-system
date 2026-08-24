@@ -36,6 +36,7 @@ loom_cc_library(
     "loop_fusion.c"
   DEPS
     iree::base
+    loom::analysis::availability
     loom::analysis::loop_domain
     loom::ir
     loom::ops::op_defs

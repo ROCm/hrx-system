@@ -874,17 +874,16 @@ static iree_status_t loom_bytecode_numbering_initialize_symbol_order(
       loom_region_const_entry_block(module->body);
   const loom_op_t* op = NULL;
   loom_block_for_each_op(module_block, op) {
-    loom_symbol_ref_t symbol_ref = loom_symbol_ref_null();
-    if (!loom_op_defining_symbol_ref(module, op, &symbol_ref)) {
+    const loom_symbol_id_t symbol_id =
+        loom_op_defining_symbol_id(module, op, loom_op_vtable(module, op));
+    if (symbol_id == LOOM_SYMBOL_ID_INVALID) continue;
+    if (module->symbols.entries[symbol_id].defining_op != op) {
       continue;
     }
-    if (module->symbols.entries[symbol_ref.symbol_id].defining_op != op) {
-      continue;
-    }
-    IREE_ASSERT_EQ(numbering->symbol_order.wire_ordinals[symbol_ref.symbol_id],
+    IREE_ASSERT_EQ(numbering->symbol_order.wire_ordinals[symbol_id],
                    LOOM_SYMBOL_ID_INVALID);
-    numbering->symbol_order.module_ids[wire_ordinal] = symbol_ref.symbol_id;
-    numbering->symbol_order.wire_ordinals[symbol_ref.symbol_id] = wire_ordinal;
+    numbering->symbol_order.module_ids[wire_ordinal] = symbol_id;
+    numbering->symbol_order.wire_ordinals[symbol_id] = wire_ordinal;
     ++wire_ordinal;
   }
 

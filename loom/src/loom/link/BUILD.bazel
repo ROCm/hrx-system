@@ -52,6 +52,7 @@ loom_cc_library(
         "//loom/src/loom/ops/template",
         "//loom/src/loom/rewrite:materialize",
         "//loom/src/loom/rewrite:remap",
+        "//loom/src/loom/util:adaptive_sort",
         "//loom/src/loom/util:walk",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",

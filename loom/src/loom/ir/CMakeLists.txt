@@ -56,6 +56,7 @@ loom_cc_library(
     "parameterized_type.h"
     "scalar_type.h"
     "semantics.h"
+    "structural_hash.h"
     "type_constraint.h"
     "type_descriptor.h"
     "types.h"
@@ -213,6 +214,19 @@ loom_cc_benchmark(
     "symbol_map_benchmark.cc"
   DEPS
     ::symbol_map
+    iree::base
+    iree::base::internal::arena
+    iree::testing::benchmark_main
+  TESTONLY
+)
+
+loom_cc_benchmark(
+  NAME
+    type_intern_benchmark
+  SRCS
+    "type_intern_benchmark.cc"
+  DEPS
+    ::ir
     iree::base
     iree::base::internal::arena
     iree::testing::benchmark_main

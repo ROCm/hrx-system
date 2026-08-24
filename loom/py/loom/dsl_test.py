@@ -71,6 +71,7 @@ from loom.dsl import (
     MODULE_SCOPE,
     NON_DETERMINISTIC,
     OFFSET,
+    POISON,
     POOL,
     PURE,
     REFINABLE_RESULT_TYPE_REFS,
@@ -2655,6 +2656,72 @@ class TestEffects:
     def test_command_effect_requires_observable_effects(self) -> None:
         with _raises(ValueError, match="COMMAND_EFFECT requires"):
             Op("test.bad", traits=[COMMAND_EFFECT])
+
+    def test_constant_like_requires_pure_source_shape(self) -> None:
+        with _raises(ValueError, match="CONSTANT_LIKE requires PURE"):
+            Op(
+                "test.bad",
+                results=[Result("result", INTEGER)],
+                traits=[CONSTANT_LIKE],
+            )
+        with _raises(ValueError, match="no operands or regions.*one result"):
+            Op(
+                "test.bad",
+                operands=[Operand("input", INTEGER)],
+                results=[Result("result", INTEGER)],
+                traits=[PURE, CONSTANT_LIKE],
+            )
+        with _raises(ValueError, match="no operands or regions.*one result"):
+            Op(
+                "test.bad",
+                results=[Result("result", INTEGER)],
+                regions=[RegionDef("body")],
+                traits=[PURE, CONSTANT_LIKE],
+            )
+        with _raises(ValueError, match="no operands or regions.*one result"):
+            Op("test.bad", traits=[PURE, CONSTANT_LIKE])
+        with _raises(ValueError, match="no operands or regions.*one result"):
+            Op(
+                "test.bad",
+                results=[Result("results", INTEGER, variadic=True)],
+                traits=[PURE, CONSTANT_LIKE],
+            )
+
+    def test_poison_requires_pure_source_shape(self) -> None:
+        with _raises(ValueError, match="POISON requires PURE"):
+            Op(
+                "test.bad",
+                results=[Result("result", INTEGER)],
+                traits=[POISON],
+            )
+        with _raises(ValueError, match="cannot also be CONSTANT_LIKE"):
+            Op(
+                "test.bad",
+                results=[Result("result", INTEGER)],
+                traits=[PURE, CONSTANT_LIKE, POISON],
+            )
+        with _raises(ValueError, match="no operands or regions.*one result"):
+            Op(
+                "test.bad",
+                operands=[Operand("input", INTEGER)],
+                results=[Result("result", INTEGER)],
+                traits=[PURE, POISON],
+            )
+        with _raises(ValueError, match="no operands or regions.*one result"):
+            Op(
+                "test.bad",
+                results=[Result("result", INTEGER)],
+                regions=[RegionDef("body")],
+                traits=[PURE, POISON],
+            )
+        with _raises(ValueError, match="no operands or regions.*one result"):
+            Op("test.bad", traits=[PURE, POISON])
+        with _raises(ValueError, match="no operands or regions.*one result"):
+            Op(
+                "test.bad",
+                results=[Result("results", INTEGER, variadic=True)],
+                traits=[PURE, POISON],
+            )
 
     def test_allocating_result(self) -> None:
         op = Op(

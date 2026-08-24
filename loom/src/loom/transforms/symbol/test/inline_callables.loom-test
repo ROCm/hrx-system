@@ -204,6 +204,31 @@ func.def public @entry_b(%arg: i32) -> (i32) {
 
 // ====
 
+// RUN: pass inline-callables
+
+func.def public inline @public_double(%value: i32) -> (i32) {
+  %doubled = test.addi %value, %value : i32
+  func.return %doubled : i32
+}
+
+func.def public @public_caller(%arg: i32) -> (i32) {
+  %result = func.call @public_double(%arg) : (i32) -> (i32)
+  func.return %result : i32
+}
+
+// ----
+func.def public inline @public_double(%value: i32) -> (i32) {
+  %doubled = test.addi %value, %value : i32
+  func.return %doubled : i32
+}
+
+func.def public @public_caller(%arg: i32) -> (i32) {
+  %doubled = test.addi %arg, %arg : i32
+  func.return %doubled : i32
+}
+
+// ====
+
 // RUN: with-locations pass inline-callables
 
 func.def inline @sanitizer_site_source(%value: i32) -> (i32) {

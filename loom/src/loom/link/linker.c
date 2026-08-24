@@ -22,6 +22,7 @@
 #include "loom/ops/template/ops.h"
 #include "loom/rewrite/materialize.h"
 #include "loom/rewrite/remap.h"
+#include "loom/util/adaptive_sort.h"
 #include "loom/util/walk.h"
 
 typedef struct loom_link_func_contract_attr_t {
@@ -98,6 +99,26 @@ typedef struct loom_linker_exact_selection_t {
   // True when the selection is the complete dense source-symbol domain.
   bool dense;
 } loom_linker_exact_selection_t;
+
+// One selected source symbol definition ordered for materialization.
+typedef struct loom_linker_exact_symbol_op_t {
+  // Source operation defining the selected symbol.
+  const loom_op_t* source_op;
+  // Module-local source symbol ordinal.
+  uint16_t source_symbol_id;
+  // Entry in the exact selection and target-symbol projection.
+  iree_host_size_t selection_ordinal;
+} loom_linker_exact_symbol_op_t;
+
+static bool loom_linker_exact_symbol_op_less(
+    const loom_linker_exact_symbol_op_t* lhs,
+    const loom_linker_exact_symbol_op_t* rhs) {
+  return lhs->source_op->block_ordinal < rhs->source_op->block_ordinal;
+}
+
+LOOM_DEFINE_ADAPTIVE_SORT(loom_linker_sort_exact_symbol_ops,
+                          loom_linker_exact_symbol_op_t,
+                          loom_linker_exact_symbol_op_less)
 
 typedef struct loom_linker_source_t {
   // Owning linker.
@@ -1794,15 +1815,7 @@ static void loom_linker_retain_function_root(loom_linker_t* linker,
   loom_op_t* op = symbol->defining_op;
   loom_func_like_t function = loom_func_like_cast(linker->target_module, op);
   if (!loom_func_like_isa(function)) return;
-
-  const loom_op_vtable_t* vtable = loom_op_vtable(linker->target_module, op);
-  IREE_ASSERT(vtable->symbol_def);
-  IREE_ASSERT(vtable->symbol_def->retain_attr_index_plus_one);
-  const uint8_t retain_attr_index =
-      vtable->symbol_def->retain_attr_index_plus_one - 1;
-  IREE_ASSERT_LT(retain_attr_index, op->attribute_count);
-  loom_op_attrs(op)[retain_attr_index] = loom_attr_enum(1);
-  loom_module_link_symbol_defining_op(linker->target_module, op, vtable);
+  loom_func_like_set_retained(linker->target_module, function, true);
 }
 
 iree_status_t loom_linker_add_module(loom_linker_t* linker,
@@ -1918,30 +1931,51 @@ static iree_status_t loom_linker_add_exact_selection(
         &source, source_symbol_id, &source.target_symbols[i], &target_ref);
   }
 
-  const loom_block_t* source_block =
-      loom_region_const_entry_block(source_module->body);
-  for (const loom_op_t* source_op = source_block->first_op;
-       source_op && iree_status_is_ok(status); source_op = source_op->next_op) {
-    loom_symbol_ref_t source_ref = loom_symbol_ref_null();
-    if (!loom_link_op_symbol_ref(source_module, source_op, &source_ref)) {
-      if (selection.dense && !loom_module_import_isa(source_op)) {
+  if (selection.dense) {
+    const loom_block_t* source_block =
+        loom_region_const_entry_block(source_module->body);
+    for (const loom_op_t* source_op = source_block->first_op;
+         source_op && iree_status_is_ok(status);
+         source_op = source_op->next_op) {
+      loom_symbol_ref_t source_ref = loom_symbol_ref_null();
+      if (loom_link_op_symbol_ref(source_module, source_op, &source_ref)) {
+        status = loom_linker_clone_or_merge_symbol_op(
+            &source, source_ref.symbol_id,
+            source.target_symbols[source_ref.symbol_id]);
+      } else if (!loom_module_import_isa(source_op)) {
         loom_op_t* cloned_op = NULL;
         status = loom_linker_clone_source_op(&source, source_op,
                                              /*before_op=*/NULL, &cloned_op);
       }
-      continue;
     }
-    iree_host_size_t selection_ordinal = source_ref.symbol_id;
-    if (!selection.dense) {
-      selection_ordinal =
-          loom_linker_find_exact_source_symbol(&source, source_ref.symbol_id);
-      if (selection_ordinal == IREE_HOST_SIZE_MAX) {
-        continue;
-      }
+  } else {
+    loom_linker_exact_symbol_op_t* selected_ops = NULL;
+    if (iree_status_is_ok(status) && selection.count > 0) {
+      status = iree_arena_allocate_array(&source_arena, selection.count,
+                                         sizeof(*selected_ops),
+                                         (void**)&selected_ops);
     }
-    status = loom_linker_clone_or_merge_symbol_op(
-        &source, source_ref.symbol_id,
-        source.target_symbols[selection_ordinal]);
+    iree_host_size_t selected_op_count = 0;
+    for (iree_host_size_t i = 0;
+         i < selection.count && iree_status_is_ok(status); ++i) {
+      const uint16_t source_symbol_id = (uint16_t)selection.ordinals[i];
+      const loom_op_t* source_op =
+          source_module->symbols.entries[source_symbol_id].defining_op;
+      if (!source_op) continue;
+      selected_ops[selected_op_count++] = (loom_linker_exact_symbol_op_t){
+          .source_op = source_op,
+          .source_symbol_id = source_symbol_id,
+          .selection_ordinal = i,
+      };
+    }
+    loom_linker_sort_exact_symbol_ops(selected_ops, selected_op_count);
+    for (iree_host_size_t i = 0;
+         i < selected_op_count && iree_status_is_ok(status); ++i) {
+      const loom_linker_exact_symbol_op_t* selected_op = &selected_ops[i];
+      status = loom_linker_clone_or_merge_symbol_op(
+          &source, selected_op->source_symbol_id,
+          source.target_symbols[selected_op->selection_ordinal]);
+    }
   }
 
   iree_host_size_t max_anchor_count = 0;

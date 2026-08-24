@@ -60,6 +60,7 @@ loom_cc_library(
     loom::ops::template
     loom::rewrite::materialize
     loom::rewrite::remap
+    loom::util::adaptive_sort
     loom::util::walk
   PUBLIC
 )

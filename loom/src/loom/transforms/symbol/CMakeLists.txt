@@ -78,6 +78,7 @@ loom_cc_library(
     "inline_callables.c"
   DEPS
     iree::base
+    loom::analysis::availability
     loom::analysis::scc
     loom::analysis::symbol_references
     loom::error::error_defs

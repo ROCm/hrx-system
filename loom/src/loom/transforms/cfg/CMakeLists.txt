@@ -18,6 +18,7 @@ loom_cc_library(
     "branch_fusion.c"
   DEPS
     iree::base
+    loom::analysis::availability
     loom::ir
     loom::ops::op_defs
     loom::ops::scf

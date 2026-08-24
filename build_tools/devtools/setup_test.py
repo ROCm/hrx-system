@@ -91,6 +91,7 @@ class SetupPlanTest(unittest.TestCase):
             self.assertNotIn("--files", probe.argv)
             self.assertEqual(probe.argv[probe.argv.index("--file") + 1], "dev.py")
             self.assertIn("__iree_cli_compatibility_probe__", probe.argv)
+            self.assertIn("--no-fail-on-changes", probe.argv)
 
     def test_windows_venv_does_not_install_unusable_semgrep_package(self):
         with tempfile.TemporaryDirectory() as temporary_directory:

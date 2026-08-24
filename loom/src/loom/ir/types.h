@@ -727,21 +727,22 @@ static inline bool loom_type_encoding_equals(loom_type_t a, loom_type_t b) {
 // encoding_id == 0 (valid value_id), so we also check encoding_flags. Returns
 // false for non-shaped types.
 static inline bool loom_type_has_encoding(loom_type_t type) {
-  return loom_type_can_have_encoding(type) &&
-         (type.encoding_id != 0 || type.encoding_flags != 0);
+  return (type.encoding_id != 0 || type.encoding_flags != 0) &&
+         loom_type_can_have_encoding(type);
 }
 
 // Returns true if the encoding is an SSA value reference rather than
 // a static encoding table index. Returns false for non-shaped types.
 static inline bool loom_type_has_ssa_encoding(loom_type_t type) {
-  return loom_type_can_have_encoding(type) &&
-         (type.encoding_flags & LOOM_ENCODING_FLAG_SSA) != 0;
+  return (type.encoding_flags & LOOM_ENCODING_FLAG_SSA) != 0 &&
+         loom_type_can_have_encoding(type);
 }
 
 // Returns true if the shaped type has a static (non-SSA) encoding.
 static inline bool loom_type_has_static_encoding(loom_type_t type) {
-  return loom_type_can_have_encoding(type) && type.encoding_id != 0 &&
-         !loom_type_has_ssa_encoding(type);
+  return type.encoding_id != 0 &&
+         (type.encoding_flags & LOOM_ENCODING_FLAG_SSA) == 0 &&
+         loom_type_can_have_encoding(type);
 }
 
 // Returns the SSA value_id for a dynamic encoding. Only valid when
