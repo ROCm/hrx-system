@@ -1,0 +1,118 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_library")
+
+package(
+    default_visibility = ["//visibility:private"],
+    features = ["layering_check"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+loom_cc_library(
+    name = "attribute",
+    srcs = ["attribute.c"],
+    hdrs = ["attribute.h"],
+    visibility = ["//loom/src/loom/format/bytecode:__pkg__"],
+    deps = [
+        ":encoder",
+        ":numbering",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "body",
+    srcs = ["body.c"],
+    hdrs = ["body.h"],
+    visibility = ["//loom/src/loom/format/bytecode:__pkg__"],
+    deps = [
+        ":attribute",
+        ":encoder",
+        ":numbering",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_defs",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
+    name = "catalog",
+    srcs = ["catalog.c"],
+    hdrs = ["catalog.h"],
+    visibility = ["//loom/src/loom/format/bytecode:__pkg__"],
+    deps = [
+        "//loom/src/loom/format:low_repr",
+        "//loom/src/loom/format/bytecode:format",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_defs",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
+    name = "encoder",
+    srcs = ["encoder.c"],
+    hdrs = ["encoder.h"],
+    visibility = ["//loom/src/loom/format/bytecode:__pkg__"],
+    deps = [
+        "//loom/src/loom/format/bytecode:format",
+        "//loom/src/loom/format/bytecode:varint",
+        "//loom/src/loom/ir",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/io:stream",
+    ],
+)
+
+loom_cc_library(
+    name = "numbering",
+    srcs = ["numbering.c"],
+    hdrs = ["numbering.h"],
+    visibility = ["//loom/src/loom/format/bytecode:__pkg__"],
+    deps = [
+        ":catalog",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_defs",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
+    name = "symbol",
+    srcs = ["symbol.c"],
+    hdrs = ["symbol.h"],
+    visibility = ["//loom/src/loom/format/bytecode:__pkg__"],
+    deps = [
+        ":attribute",
+        ":body",
+        ":encoder",
+        ":numbering",
+        "//loom/src/loom/analysis:symbol_references",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops/module",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
+    name = "tables",
+    srcs = ["tables.c"],
+    hdrs = ["tables.h"],
+    visibility = ["//loom/src/loom/format/bytecode:__pkg__"],
+    deps = [
+        ":attribute",
+        ":encoder",
+        ":numbering",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_defs",
+        "//runtime/src/iree/base",
+    ],
+)

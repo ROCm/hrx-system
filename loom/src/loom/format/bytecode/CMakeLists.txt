@@ -257,14 +257,17 @@ loom_cc_library(
     "writer.c"
   DEPS
     ::format
-    ::varint
     iree::base
     iree::base::internal::arena
     iree::io::stream
-    loom::analysis::symbol_references
+    loom::format::bytecode::writer::body
+    loom::format::bytecode::writer::catalog
+    loom::format::bytecode::writer::encoder
+    loom::format::bytecode::writer::numbering
+    loom::format::bytecode::writer::symbol
+    loom::format::bytecode::writer::tables
     loom::format::low_repr
     loom::ir
-    loom::ops::module
     loom::ops::op_defs
   PUBLIC
 )
