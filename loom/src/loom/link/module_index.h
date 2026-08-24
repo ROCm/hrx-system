@@ -99,8 +99,8 @@ enum loom_link_symbol_flag_bits_e {
   LOOM_LINK_SYMBOL_FLAG_EXPORT = 1u << 2,
   // Symbol declares an externally supplied object or compile-time contract.
   LOOM_LINK_SYMBOL_FLAG_DECLARATION = 1u << 3,
-  // Symbol has materializable IR owned by its provider.
-  LOOM_LINK_SYMBOL_FLAG_HAS_BODY = 1u << 4,
+  // Symbol is a concrete definition owned by its provider.
+  LOOM_LINK_SYMBOL_FLAG_CONCRETE_DEFINITION = 1u << 4,
   // Symbol implements the config symbol interface.
   LOOM_LINK_SYMBOL_FLAG_CONFIG = 1u << 5,
   // Symbol exists only for test or benchmark tooling.

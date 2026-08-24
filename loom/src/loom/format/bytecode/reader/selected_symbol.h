@@ -20,8 +20,10 @@ extern "C" {
 typedef struct loom_bytecode_selected_symbol_t {
   // Module-local source SYMBOLS ordinal.
   uint32_t source_ordinal;
-  // Decoded body allocation summary, or zero when the symbol has no body.
-  loom_bytecode_body_summary_t body_summary;
+  // Arena-owned summaries in source region-payload order.
+  loom_bytecode_region_summary_t* region_summaries;
+  // Number of entries in region_summaries.
+  uint8_t region_summary_count;
 } loom_bytecode_selected_symbol_t;
 
 // State required to materialize an exact prepared source-symbol sequence.
@@ -60,7 +62,7 @@ iree_status_t loom_bytecode_selected_symbols_materialize(
     const loom_bytecode_selected_symbol_t* selected_symbols,
     iree_host_size_t selected_symbol_count);
 
-// Decodes one function-like symbol header without reading its body bytes.
+// Decodes one function-like symbol header without reading root-region bytes.
 //
 // Shared types, attributes, and external symbol references are projected
 // through materializer->tables. The source symbol itself must be resolvable by

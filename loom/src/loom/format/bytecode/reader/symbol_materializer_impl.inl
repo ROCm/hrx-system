@@ -305,16 +305,31 @@ static iree_status_t loom_bytecode_reader_materialize_function_header(
     func_attrs[func_like->priority_attr_index] = loom_attr_i64(priority);
   }
 
-  uint8_t has_body = 0;
-  IREE_RETURN_IF_ERROR(
-      loom_bytecode_reader_read_u8(&reader->decoder, cursor, &has_body));
-  uint64_t ir_offset = 0;
-  uint32_t ir_length = 0;
-  if (has_body) {
-    IREE_RETURN_IF_ERROR(
-        loom_bytecode_reader_read_u64_le(&reader->decoder, cursor, &ir_offset));
-    IREE_RETURN_IF_ERROR(
-        loom_bytecode_reader_read_u32_le(&reader->decoder, cursor, &ir_length));
+  uint64_t region_payload_count = 0;
+  IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_uvarint(
+      &reader->decoder, cursor, &region_payload_count));
+  loom_bytecode_region_payload_metadata_t* region_payloads = NULL;
+  uint8_t body_region_payload_ordinal_plus_one = 0;
+  uint8_t kernel_workload_region_payload_ordinal_plus_one = 0;
+  if (region_payload_count > 0) {
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        reader->arena, (iree_host_size_t)region_payload_count,
+        sizeof(*region_payloads), (void**)&region_payloads));
+    for (uint64_t i = 0; i < region_payload_count; ++i) {
+      IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_u8(
+          &reader->decoder, cursor, &region_payloads[i].region_index));
+      IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_u64_le(
+          &reader->decoder, cursor, &region_payloads[i].offset));
+      IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_u32_le(
+          &reader->decoder, cursor, &region_payloads[i].length));
+      if (region_payloads[i].region_index == func_like->body_region_index) {
+        body_region_payload_ordinal_plus_one = (uint8_t)(i + 1);
+      }
+      if (vtable->symbol_def->kernel_workload_region_index_plus_one ==
+          region_payloads[i].region_index + 1) {
+        kernel_workload_region_payload_ordinal_plus_one = (uint8_t)(i + 1);
+      }
+    }
   }
 
   *out_header = (loom_bytecode_function_header_t){
@@ -334,9 +349,12 @@ static iree_status_t loom_bytecode_reader_materialize_function_header(
       .signature_values = signature_values,
       .tied_results = tied_results,
       .attributes = func_attrs,
-      .has_body = has_body != 0,
-      .body_offset = ir_offset,
-      .body_length = ir_length,
+      .region_payloads = region_payloads,
+      .region_payload_count = (uint8_t)region_payload_count,
+      .body_region_payload_ordinal_plus_one =
+          body_region_payload_ordinal_plus_one,
+      .kernel_workload_region_payload_ordinal_plus_one =
+          kernel_workload_region_payload_ordinal_plus_one,
   };
   return iree_ok_status();
 }
@@ -362,7 +380,7 @@ loom_bytecode_reader_materialize_function_symbol(
   const uint16_t tied_result_count = header.tied_result_count;
   loom_value_id_t* signature_values = header.signature_values;
   const loom_low_repr_descriptor_set_t* low_descriptor_set = NULL;
-  if (header.has_body) {
+  if (header.region_payload_count > 0) {
     IREE_RETURN_IF_ERROR(
         loom_bytecode_reader_resolve_function_low_descriptor_set(
             reader, header.symbol_id, func_like, header.attributes,
@@ -405,7 +423,8 @@ loom_bytecode_reader_materialize_function_symbol(
         loom_bytecode_reader_cursor_absolute_position(cursor),
         IREE_SV("declaration_signature_exceeds_operand_count_field_width"));
   }
-  const uint8_t region_count = header.has_body ? vtable->region_count : 0;
+  const uint8_t region_count =
+      header.region_payload_count > 0 ? vtable->region_count : 0;
   loom_op_t* op = NULL;
   if (operand_segment_count > 0) {
     IREE_RETURN_IF_ERROR(loom_builder_allocate_segmented_op(
@@ -452,31 +471,31 @@ loom_bytecode_reader_materialize_function_symbol(
     memcpy(loom_op_tied_results(op), header.tied_results,
            tied_result_count * sizeof(loom_tied_result_t));
   }
-  if (header.has_body) {
-    loom_bytecode_predefined_region_values_t predefined_regions[2];
-    uint8_t predefined_region_count = 0;
-    if (func_like->body_region_index != LOOM_REGION_INDEX_NONE) {
-      predefined_regions[predefined_region_count++] =
-          (loom_bytecode_predefined_region_values_t){
-              .region_index = func_like->body_region_index,
-              .values =
-                  arg_count ? signature_values + workload_arg_count : NULL,
-              .count = (uint16_t)arg_count,
-          };
+  for (uint8_t i = 0; i < header.region_payload_count; ++i) {
+    const loom_bytecode_region_payload_metadata_t* payload =
+        &header.region_payloads[i];
+    loom_bytecode_region_materialization_flags_t materialization_flags = 0;
+    const loom_value_id_t* predefined_values = NULL;
+    uint16_t predefined_value_count = 0;
+    if (payload->region_index == func_like->body_region_index) {
+      materialization_flags |=
+          LOOM_BYTECODE_REGION_MATERIALIZATION_FLAG_BIND_ENTRY_ARGUMENTS;
+      predefined_values =
+          arg_count ? signature_values + workload_arg_count : NULL;
+      predefined_value_count = (uint16_t)arg_count;
+    } else if (vtable->symbol_def->kernel_workload_region_index_plus_one &&
+               payload->region_index ==
+                   vtable->symbol_def->kernel_workload_region_index_plus_one -
+                       1) {
+      materialization_flags |=
+          LOOM_BYTECODE_REGION_MATERIALIZATION_FLAG_BIND_ENTRY_ARGUMENTS;
+      predefined_values = workload_arg_count ? signature_values : NULL;
+      predefined_value_count = (uint16_t)workload_arg_count;
     }
-    if (vtable->symbol_def->kernel_workload_region_index_plus_one) {
-      predefined_regions[predefined_region_count++] =
-          (loom_bytecode_predefined_region_values_t){
-              .region_index =
-                  vtable->symbol_def->kernel_workload_region_index_plus_one - 1,
-              .values = workload_arg_count ? signature_values : NULL,
-              .count = (uint16_t)workload_arg_count,
-          };
-    }
-    IREE_RETURN_IF_ERROR(loom_bytecode_symbol_policy_materialize_body(
-        reader, header.name, body_source, symbol_ordinal, header.body_offset,
-        header.body_length, builder, op, func_like->body_region_index,
-        predefined_regions, predefined_region_count, low_descriptor_set));
+    IREE_RETURN_IF_ERROR(loom_bytecode_symbol_policy_materialize_region(
+        reader, header.name, body_source, symbol_ordinal, i, payload, builder,
+        op, materialization_flags, predefined_values, predefined_value_count,
+        low_descriptor_set));
   }
   IREE_RETURN_IF_ERROR(loom_builder_finalize_op(builder, op));
   if (header.source_trivia.comment_count > 0) {
@@ -704,21 +723,26 @@ loom_bytecode_reader_materialize_record_symbol(
             reader, cursor, descriptor, value_kind, &attrs[attr_index]));
   }
 
-  uint8_t has_body = 0;
-  IREE_RETURN_IF_ERROR(
-      loom_bytecode_reader_read_u8(&reader->decoder, cursor, &has_body));
-
-  uint64_t ir_offset = 0;
-  uint32_t ir_length = 0;
-  if (has_body) {
-    IREE_RETURN_IF_ERROR(
-        loom_bytecode_reader_read_u64_le(&reader->decoder, cursor, &ir_offset));
-    IREE_RETURN_IF_ERROR(
-        loom_bytecode_reader_read_u32_le(&reader->decoder, cursor, &ir_length));
+  uint64_t region_payload_count = 0;
+  IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_uvarint(
+      &reader->decoder, cursor, &region_payload_count));
+  loom_bytecode_region_payload_metadata_t* region_payloads = NULL;
+  if (region_payload_count > 0) {
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        reader->arena, (iree_host_size_t)region_payload_count,
+        sizeof(*region_payloads), (void**)&region_payloads));
+    for (uint64_t i = 0; i < region_payload_count; ++i) {
+      IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_u8(
+          &reader->decoder, cursor, &region_payloads[i].region_index));
+      IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_u64_le(
+          &reader->decoder, cursor, &region_payloads[i].offset));
+      IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_u32_le(
+          &reader->decoder, cursor, &region_payloads[i].length));
+    }
   }
 
   loom_op_t* op = NULL;
-  uint8_t region_count = has_body ? vtable->region_count : 0;
+  uint8_t region_count = region_payload_count > 0 ? vtable->region_count : 0;
   IREE_RETURN_IF_ERROR(loom_builder_allocate_op(
       builder, op_kind, 0, 0, region_count, 0, vtable->attribute_count,
       LOOM_LOCATION_NONE, &op));
@@ -729,13 +753,14 @@ loom_bytecode_reader_materialize_record_symbol(
     memcpy(loom_op_attrs(op), attrs,
            vtable->attribute_count * sizeof(loom_attribute_t));
   }
-  if (has_body) {
-    const iree_string_view_t symbol_name =
-        loom_bytecode_symbol_policy_source_string(reader, (uint32_t)name_id);
-    IREE_RETURN_IF_ERROR(loom_bytecode_symbol_policy_materialize_body(
-        reader, symbol_name, body_source, symbol_index, ir_offset, ir_length,
-        builder, op, LOOM_REGION_INDEX_NONE, /*predefined_regions=*/NULL,
-        /*predefined_region_count=*/0, /*low_descriptor_set=*/NULL));
+  const iree_string_view_t symbol_name =
+      loom_bytecode_symbol_policy_source_string(reader, (uint32_t)name_id);
+  for (uint8_t i = 0; i < (uint8_t)region_payload_count; ++i) {
+    IREE_RETURN_IF_ERROR(loom_bytecode_symbol_policy_materialize_region(
+        reader, symbol_name, body_source, symbol_index, i,
+        &region_payloads[i], builder, op, /*flags=*/0,
+        /*predefined_values=*/NULL,
+        /*predefined_value_count=*/0, /*low_descriptor_set=*/NULL));
   }
   IREE_RETURN_IF_ERROR(loom_builder_finalize_op(builder, op));
   if (source_trivia.comment_count > 0) {

@@ -173,7 +173,7 @@ iree_status_t loom_bytecode_symbol_header_reader_materialize_bodyless_symbol(
   }
   const loom_bytecode_symbol_metadata_t* metadata =
       &reader->metadata->symbols[source_symbol_ordinal];
-  if (metadata->has_body) {
+  if (metadata->region_payload_count > 0) {
     return iree_make_status(
         IREE_STATUS_FAILED_PRECONDITION,
         "source symbol '@%.*s' has a body unavailable to the metadata reader",

@@ -166,6 +166,7 @@ loom_cc_test(
         "//loom/src/loom/ops:type_registry",
         "//loom/src/loom/ops/func",
         "//loom/src/loom/ops/global",
+        "//loom/src/loom/ops/kernel",
         "//loom/src/loom/ops/module",
         "//loom/src/loom/ops/template",
         "//loom/src/loom/ops/test",

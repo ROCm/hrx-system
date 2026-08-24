@@ -327,8 +327,8 @@ static loomc_link_symbol_flags_t loomc_link_symbol_flags_from_loom(
   if (iree_all_bits_set(flags, LOOM_LINK_SYMBOL_FLAG_DECLARATION)) {
     result |= LOOMC_LINK_SYMBOL_FLAG_DECLARATION;
   }
-  if (iree_all_bits_set(flags, LOOM_LINK_SYMBOL_FLAG_HAS_BODY)) {
-    result |= LOOMC_LINK_SYMBOL_FLAG_HAS_BODY;
+  if (iree_all_bits_set(flags, LOOM_LINK_SYMBOL_FLAG_CONCRETE_DEFINITION)) {
+    result |= LOOMC_LINK_SYMBOL_FLAG_CONCRETE_DEFINITION;
   }
   if (iree_all_bits_set(flags, LOOM_LINK_SYMBOL_FLAG_CONFIG)) {
     result |= LOOMC_LINK_SYMBOL_FLAG_CONFIG;

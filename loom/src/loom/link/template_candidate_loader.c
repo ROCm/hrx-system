@@ -268,7 +268,7 @@ static iree_status_t loom_link_template_candidate_build_bytecode_summary(
   *summary = (loom_template_provider_summary_t){
       .module = module,
       .kind = loom_link_template_candidate_kind(source_symbol->kind),
-      .has_body = header.has_body,
+      .has_body = header.body_region_payload_ordinal_plus_one != 0,
       .symbol = {0, header.symbol_id},
       .target_symbol = loom_symbol_ref_null(),
       .origin_ordinal = source_symbol->ordinal,

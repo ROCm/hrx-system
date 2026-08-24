@@ -507,9 +507,9 @@ static iree_status_t loom_link_cli_append_symbol_flags(
     IREE_RETURN_IF_ERROR(loom_link_cli_append_flag(builder, &needs_separator,
                                                    IREE_SV("declaration")));
   }
-  if (iree_any_bit_set(flags, LOOM_LINK_SYMBOL_FLAG_HAS_BODY)) {
-    IREE_RETURN_IF_ERROR(
-        loom_link_cli_append_flag(builder, &needs_separator, IREE_SV("body")));
+  if (iree_any_bit_set(flags, LOOM_LINK_SYMBOL_FLAG_CONCRETE_DEFINITION)) {
+    IREE_RETURN_IF_ERROR(loom_link_cli_append_flag(builder, &needs_separator,
+                                                   IREE_SV("definition")));
   }
   if (iree_any_bit_set(flags, LOOM_LINK_SYMBOL_FLAG_CONFIG)) {
     IREE_RETURN_IF_ERROR(loom_link_cli_append_flag(builder, &needs_separator,

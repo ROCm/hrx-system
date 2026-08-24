@@ -234,7 +234,8 @@ static bool loom_link_plan_symbol_is_concrete_global(
                                           LOOM_LINK_SYMBOL_FLAG_CONFIG)) {
     return false;
   }
-  return iree_any_bit_set(symbol->flags, LOOM_LINK_SYMBOL_FLAG_HAS_BODY);
+  return iree_any_bit_set(symbol->flags,
+                          LOOM_LINK_SYMBOL_FLAG_CONCRETE_DEFINITION);
 }
 
 static bool loom_link_plan_symbol_is_declaration_like(
@@ -250,7 +251,8 @@ static bool loom_link_plan_symbol_satisfies_declaration(
     return false;
   }
   return !loom_link_plan_symbol_is_declaration_like(candidate) &&
-         iree_any_bit_set(candidate->flags, LOOM_LINK_SYMBOL_FLAG_HAS_BODY);
+         iree_any_bit_set(candidate->flags,
+                          LOOM_LINK_SYMBOL_FLAG_CONCRETE_DEFINITION);
 }
 
 static const loom_link_module_index_symbol_t*

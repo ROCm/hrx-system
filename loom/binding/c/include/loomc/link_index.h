@@ -135,8 +135,8 @@ typedef enum loomc_link_symbol_flag_bits_e {
   /// Symbol is declaration-like and may be superseded by a concrete definition.
   LOOMC_LINK_SYMBOL_FLAG_DECLARATION = 1u << 3,
 
-  /// Symbol has materializable IR owned by its provider.
-  LOOMC_LINK_SYMBOL_FLAG_HAS_BODY = 1u << 4,
+  /// Symbol is a concrete definition owned by its provider.
+  LOOMC_LINK_SYMBOL_FLAG_CONCRETE_DEFINITION = 1u << 4,
 
   /// Symbol implements the config symbol interface.
   LOOMC_LINK_SYMBOL_FLAG_CONFIG = 1u << 5,

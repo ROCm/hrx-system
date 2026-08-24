@@ -455,7 +455,7 @@ template.def<@demo.contract> @provider(%x: i32) -> (i32) {
     EXPECT_TRUE(iree_all_bits_set(family_declaration->flags,
                                   LOOM_LINK_SYMBOL_FLAG_DECLARATION));
     EXPECT_FALSE(iree_any_bit_set(family_declaration->flags,
-                                  LOOM_LINK_SYMBOL_FLAG_HAS_BODY));
+                                  LOOM_LINK_SYMBOL_FLAG_CONCRETE_DEFINITION));
     EXPECT_EQ(family->providers.first_symbol_ordinal, provider->ordinal);
     EXPECT_EQ(family->providers.last_symbol_ordinal, provider->ordinal);
     EXPECT_EQ(provider->next.template_provider_ordinal,
@@ -612,6 +612,8 @@ check.benchmark<@kernel_case> @kernel_bench {}
   ASSERT_NE(materialized_case, nullptr);
   EXPECT_TRUE(iree_all_bits_set(materialized_case->flags,
                                 LOOM_LINK_SYMBOL_FLAG_TEST_ONLY));
+  EXPECT_TRUE(iree_all_bits_set(materialized_case->flags,
+                                LOOM_LINK_SYMBOL_FLAG_CONCRETE_DEFINITION));
 
   std::vector<uint8_t> bytes = WriteModule(module);
 
@@ -627,8 +629,8 @@ check.benchmark<@kernel_case> @kernel_bench {}
   ASSERT_NE(check_case, nullptr);
   EXPECT_TRUE(
       iree_all_bits_set(check_case->flags, LOOM_LINK_SYMBOL_FLAG_TEST_ONLY));
-  EXPECT_TRUE(
-      iree_all_bits_set(check_case->flags, LOOM_LINK_SYMBOL_FLAG_HAS_BODY));
+  EXPECT_TRUE(iree_all_bits_set(check_case->flags,
+                                LOOM_LINK_SYMBOL_FLAG_CONCRETE_DEFINITION));
 
   const loom_link_module_index_module_t* indexed_module =
       loom_link_module_index_module_at(index.get(), 0);

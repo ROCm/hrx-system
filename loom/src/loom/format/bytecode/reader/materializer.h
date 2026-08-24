@@ -31,7 +31,7 @@ typedef struct loom_bytecode_module_materializer_t {
   loom_context_t* context;
   // Resettable storage for transient materialization state.
   iree_arena_allocator_t* scratch_arena;
-  // Block source for the output module and body-local arenas.
+  // Block source for the output module and root-region-local arenas.
   iree_arena_block_pool_t* block_pool;
   // Validated scratch-lived module facts.
   const loom_bytecode_reader_module_view_t* module_view;

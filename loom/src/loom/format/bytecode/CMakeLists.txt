@@ -195,6 +195,7 @@ loom_cc_test(
     loom::ir
     loom::ops::func
     loom::ops::global
+    loom::ops::kernel
     loom::ops::module
     loom::ops::template
     loom::ops::test

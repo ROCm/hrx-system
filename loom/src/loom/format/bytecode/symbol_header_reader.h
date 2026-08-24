@@ -55,7 +55,7 @@ void loom_bytecode_symbol_header_reader_free(
 loom_module_t* loom_bytecode_symbol_header_reader_module(
     const loom_bytecode_symbol_header_reader_t* reader);
 
-// Decodes one function-like symbol header without reading its body bytes.
+// Decodes one function-like symbol header without reading root-region bytes.
 //
 // Arrays and IR identities in |out_header| belong to |reader| and remain valid
 // until the reader is freed. Callers cache the returned header rather than

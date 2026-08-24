@@ -180,7 +180,7 @@ BYTECODE_IR_KIND_BY_TYPE_KIND: dict[int, TypeKind] = {
 
 # File magic and version.
 MAGIC = b"LOOM"
-FORMAT_VERSION = 29
+FORMAT_VERSION = 30
 PRODUCER = "loom-py"
 
 SOURCE_TRIVIA_LEADING_BLANK_LINE = 1
@@ -626,8 +626,8 @@ class BytecodeWriter:
             self._ctx.intern_string(key)
             self._number_attr_value(value, self._attr_def_for_op_attr(op.name, key))
 
-        for region_index in self._root_region_write_order(op):
-            self._number_region(op.regions[region_index])
+        for region in op.regions:
+            self._number_region(region)
 
     def _func_body_region_index(self, op: Operation) -> int | None:
         """Return op's FuncLike body region index, if it has one."""
@@ -680,29 +680,6 @@ class BytecodeWriter:
         if not region.blocks:
             return []
         return list(region.blocks[0].arg_ids)
-
-    def _root_region_write_order(self, op: Operation) -> list[int]:
-        """Return root region indices in deterministic bytecode order.
-
-        The FuncLike body region is serialized first so its entry arguments
-        occupy the first function-local value numbers. The payload still writes
-        each root region's declared index, so the reader reconstructs the
-        operation's region slots instead of relying on serialized order.
-        """
-        if not op.regions:
-            return []
-        body_region_index = self._func_body_region_index(op)
-        ordered: list[int] = []
-        if body_region_index is not None:
-            if body_region_index >= len(op.regions):
-                raise ValueError(
-                    f"func-like op {op.name!r} has root regions but is missing "
-                    "its FuncLike body region"
-                )
-            ordered.append(body_region_index)
-        seen = set(ordered)
-        ordered.extend(i for i in range(len(op.regions)) if i not in seen)
-        return ordered
 
     def _shared_func_metadata_attr_keys(self, op: Operation) -> frozenset[str]:
         """Return func-like attrs encoded by fixed symbol metadata fields."""
@@ -1014,9 +991,9 @@ class BytecodeWriter:
             sections[SECTION_LOCATIONS] = self._write_locations()
         if self._module.file_header:
             sections[SECTION_SOURCE_TRIVIA] = self._write_source_trivia_section()
-        ir_bytes, ir_offsets = self._write_ir()
+        ir_bytes, ir_regions = self._write_ir()
         sections[SECTION_IR] = ir_bytes
-        sections[SECTION_SYMBOLS] = self._write_symbols(ir_offsets)
+        sections[SECTION_SYMBOLS] = self._write_symbols(ir_regions)
         sections[SECTION_PROVIDER_IMPORTS] = self._write_provider_imports()
         sections[SECTION_SYMBOL_REFERENCES] = self._write_symbol_references()
         return self._assemble(sections, self._module_allocation_counts())
@@ -1237,47 +1214,41 @@ class BytecodeWriter:
                 buf.write_bytes(loc.data)
         return buf.get_bytes()
 
-    def _write_ir(self) -> tuple[bytes, dict[int, tuple[int, int]]]:
-        """Write the IR section (function bodies).
+    def _write_ir(self) -> tuple[bytes, dict[int, list[tuple[int, int, int]]]]:
+        """Write independently bounded root-region payloads.
 
-        Returns (ir_bytes, ir_offsets) where ir_offsets maps symbol
-        index to (offset, length) within the IR section.
+        Returns the IR bytes and symbol-indexed lists of
+        (region_index, offset, length) records.
         """
         buf = ByteBuffer()
-        ir_offsets: dict[int, tuple[int, int]] = {}
+        ir_regions: dict[int, list[tuple[int, int, int]]] = {}
 
         for symbol_index, symbol in enumerate(self._module.symbols):
             if symbol.op is not None and symbol.op.regions:
-                start = buf.position
-                self._write_op_region_payload(buf, symbol.op)
-                length = buf.position - start
-                ir_offsets[symbol_index] = (start, length)
+                payloads: list[tuple[int, int, int]] = []
+                for region_index, region in enumerate(symbol.op.regions):
+                    start = buf.position
+                    self._write_root_region_payload(buf, region)
+                    payloads.append((region_index, start, buf.position - start))
+                ir_regions[symbol_index] = payloads
 
-        return buf.get_bytes(), ir_offsets
+        return buf.get_bytes(), ir_regions
 
-    def _write_op_region_payload(self, buf: ByteBuffer, op: Operation) -> None:
-        """Write a symbol op's root regions with value numbering."""
-        root_region_indices = self._root_region_write_order(op)
-        assert root_region_indices, "cannot write region payload for bodyless op"
-
+    def _write_root_region_payload(self, buf: ByteBuffer, region: Region) -> None:
+        """Write one root region with an independent SSA namespace."""
         value_numbers: dict[int, int] = {}
-        for region_index in root_region_indices:
-            self._assign_value_numbers(op.regions[region_index], value_numbers)
-
-        value_count, region_count, block_count, op_count = self._count_region_forest(
-            op, root_region_indices
+        self._assign_value_numbers(region, value_numbers)
+        value_count, region_count, block_count, op_count = self._count_region_tree(
+            region
         )
         buf.write_varint(value_count)
         buf.write_varint(region_count)
         buf.write_varint(block_count)
         buf.write_varint(op_count)
-        buf.write_varint(len(root_region_indices))
-        for region_index in root_region_indices:
-            buf.write_varint(region_index)
-            self._write_region(buf, op.regions[region_index], value_numbers)
+        self._write_region(buf, region, value_numbers)
 
     def _assign_value_numbers(self, region: Region, numbers: dict[int, int]) -> None:
-        """Assign sequential value numbers within a function."""
+        """Assign sequential value numbers within one root region."""
         for block in region.blocks:
             for arg_id in block.arg_ids:
                 if arg_id not in numbers:
@@ -2037,7 +2008,9 @@ class BytecodeWriter:
         buf.write_varint(template_family_symbol_ordinal)
         buf.write_varint(priority)
 
-    def _write_symbols(self, ir_offsets: dict[int, tuple[int, int]]) -> bytes:
+    def _write_symbols(
+        self, ir_regions: dict[int, list[tuple[int, int, int]]]
+    ) -> bytes:
         """Write the SYMBOLS section.
 
         Section layout: symbol_count, import_count, export_count,
@@ -2062,6 +2035,7 @@ class BytecodeWriter:
         buf.write_varint(len(symbols))
         buf.write_varint(len(import_indices))
         buf.write_varint(len(export_indices))
+        buf.write_varint(sum(len(payloads) for payloads in ir_regions.values()))
 
         # Reserve space for offset tables (patched after writing entries).
         import_table_offset = buf.position
@@ -2209,11 +2183,10 @@ class BytecodeWriter:
                         self._attr_def_for_op_attr(op.name, key),
                     )
 
-                # Body reference.
-                has_body = symbol_index in ir_offsets
-                buf.write_u8(1 if has_body else 0)
-                if has_body:
-                    offset, length = ir_offsets[symbol_index]
+                payloads = ir_regions.get(symbol_index, ())
+                buf.write_varint(len(payloads))
+                for region_index, offset, length in payloads:
+                    buf.write_u8(region_index)
                     buf.write_u64_le(offset)
                     buf.write_u32_le(length)
             elif symbol.kind == SymbolKind.GLOBAL and symbol.op is not None:
@@ -2283,18 +2256,12 @@ class BytecodeWriter:
                         value,
                         attr_def=self._attr_def_for_op_attr(op.name, key),
                     )
-                has_body = bool(op.regions)
-                buf.write_u8(1 if has_body else 0)
-                if has_body:
-                    try:
-                        ir_offset, ir_length = ir_offsets[symbol_index]
-                    except KeyError as exc:
-                        raise ValueError(
-                            f"record symbol {symbol.name!r} has a body region "
-                            "but no serialized IR offset"
-                        ) from exc
-                    buf.write_u64_le(ir_offset)
-                    buf.write_u32_le(ir_length)
+                payloads = ir_regions.get(symbol_index, ())
+                buf.write_varint(len(payloads))
+                for region_index, offset, length in payloads:
+                    buf.write_u8(region_index)
+                    buf.write_u64_le(offset)
+                    buf.write_u32_le(length)
             else:
                 raise ValueError(
                     f"symbol {symbol.name!r} of kind {symbol.kind.name} "

@@ -121,10 +121,15 @@ template.def<@demo.dynamic> priority(7) @identity(%m: index, %arg: tensor<[%m]xf
   }
   ASSERT_NE(family_ordinal, UINT32_MAX);
   ASSERT_NE(provider_metadata, nullptr);
-  ASSERT_TRUE(provider_metadata->has_body);
-  ASSERT_GT(provider_metadata->body_length, 0u);
-  std::fill_n(bytecode.data() + provider_metadata->body_absolute_offset,
-              provider_metadata->body_length, UINT8_C(0xFF));
+  ASSERT_GT(provider_metadata->region_payload_count, 0u);
+  const loom_bytecode_region_payload_metadata_t* provider_payloads =
+      &module_metadata
+           ->region_payloads[provider_metadata->first_region_payload_index];
+  for (uint8_t i = 0; i < provider_metadata->region_payload_count; ++i) {
+    ASSERT_GT(provider_payloads[i].length, 0u);
+    std::fill_n(bytecode.data() + provider_payloads[i].absolute_offset,
+                provider_payloads[i].length, UINT8_C(0xFF));
+  }
 
   const loom_bytecode_symbol_header_reader_options_t reader_options = {
       /*.diagnostic_sink=*/{AcceptDiagnostic, nullptr},
@@ -140,9 +145,18 @@ template.def<@demo.dynamic> priority(7) @identity(%m: index, %arg: tensor<[%m]xf
   loom_bytecode_function_header_t header;
   IREE_ASSERT_OK(loom_bytecode_symbol_header_reader_read_function(
       reader, provider_ordinal, &header));
-  EXPECT_TRUE(header.has_body);
-  EXPECT_EQ(header.body_offset, provider_metadata->body_offset);
-  EXPECT_EQ(header.body_length, provider_metadata->body_length);
+  ASSERT_EQ(header.region_payload_count,
+            provider_metadata->region_payload_count);
+  EXPECT_EQ(header.body_region_payload_ordinal_plus_one,
+            provider_metadata->body_region_payload_ordinal_plus_one);
+  EXPECT_EQ(header.kernel_workload_region_payload_ordinal_plus_one,
+            provider_metadata->kernel_workload_region_payload_ordinal_plus_one);
+  for (uint8_t i = 0; i < header.region_payload_count; ++i) {
+    EXPECT_EQ(header.region_payloads[i].region_index,
+              provider_payloads[i].region_index);
+    EXPECT_EQ(header.region_payloads[i].offset, provider_payloads[i].offset);
+    EXPECT_EQ(header.region_payloads[i].length, provider_payloads[i].length);
+  }
   EXPECT_TRUE(iree_string_view_equal(header.name, IREE_SV("identity")));
   EXPECT_EQ(header.argument_count, 2u);
   EXPECT_EQ(header.result_count, 1u);

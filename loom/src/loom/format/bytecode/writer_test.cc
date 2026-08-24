@@ -858,12 +858,15 @@ TEST_F(WriterTest, FunctionSymbolKindUsesDenseWireEnum) {
   uint64_t symbol_count = 0;
   uint64_t import_count = 0;
   uint64_t export_count = 0;
+  uint64_t root_region_payload_count = 0;
   IREE_ASSERT_OK(loom_uvarint_decode(&cursor, &symbol_count));
   IREE_ASSERT_OK(loom_uvarint_decode(&cursor, &import_count));
   IREE_ASSERT_OK(loom_uvarint_decode(&cursor, &export_count));
+  IREE_ASSERT_OK(loom_uvarint_decode(&cursor, &root_region_payload_count));
   ASSERT_EQ(symbol_count, 1u);
   ASSERT_EQ(import_count, 0u);
   ASSERT_EQ(export_count, 1u);
+  ASSERT_EQ(root_region_payload_count, 1u);
 
   iree_const_byte_span_t export_table = iree_const_byte_span_empty();
   IREE_ASSERT_OK(loom_bytecode_cursor_read_span(&cursor, 8, &export_table));
@@ -963,12 +966,6 @@ TEST_F(WriterTest, FunctionBodySummaryAndOpTableRefsUseNewWireShape) {
   EXPECT_EQ(block_count, 1u);
   EXPECT_EQ(op_count, 1u);
 
-  uint64_t root_region_count = 0;
-  IREE_ASSERT_OK(loom_uvarint_decode(&cursor, &root_region_count));
-  ASSERT_EQ(root_region_count, 1u);
-  uint64_t root_region_index = 0;
-  IREE_ASSERT_OK(loom_uvarint_decode(&cursor, &root_region_index));
-  ASSERT_EQ(root_region_index, 0u);
   uint64_t root_source_flags = 0;
   IREE_ASSERT_OK(loom_uvarint_decode(&cursor, &root_source_flags));
   ASSERT_EQ(root_source_flags, 0u);
@@ -1088,12 +1085,6 @@ TEST_F(WriterTest, FunctionBodySuccessorsUseRegionBlockOrdinals) {
   EXPECT_EQ(block_count, 2u);
   EXPECT_EQ(op_count, 1u);
 
-  uint64_t root_region_count = 0;
-  IREE_ASSERT_OK(loom_uvarint_decode(&cursor, &root_region_count));
-  ASSERT_EQ(root_region_count, 1u);
-  uint64_t root_region_index = 0;
-  IREE_ASSERT_OK(loom_uvarint_decode(&cursor, &root_region_index));
-  ASSERT_EQ(root_region_index, 0u);
   uint64_t root_source_flags = 0;
   IREE_ASSERT_OK(loom_uvarint_decode(&cursor, &root_source_flags));
   ASSERT_EQ(root_source_flags, 0u);
@@ -1461,6 +1452,7 @@ TEST_F(WriterTest, GlobalSymbolWritesDefiningOpPayload) {
   ASSERT_EQ(symbol_count, 1u);
   uint64_t import_count = ReadUVarint(bytes, &offset);
   uint64_t export_count = ReadUVarint(bytes, &offset);
+  ReadUVarint(bytes, &offset);  // root_region_payload_count
   offset += (import_count + export_count) * sizeof(uint64_t);
   ReadUVarint(bytes, &offset);  // name_id
   EXPECT_EQ(bytes[offset++], LOOM_BYTECODE_SYMBOL_GLOBAL);
@@ -1525,6 +1517,7 @@ TEST_F(WriterTest, GlobalSymbolWritesDeclarationLocalValues) {
   ASSERT_EQ(symbol_count, 1u);
   uint64_t import_count = ReadUVarint(bytes, &offset);
   uint64_t export_count = ReadUVarint(bytes, &offset);
+  ReadUVarint(bytes, &offset);  // root_region_payload_count
   offset += (import_count + export_count) * sizeof(uint64_t);
   ReadUVarint(bytes, &offset);  // name_id
   EXPECT_EQ(bytes[offset++], LOOM_BYTECODE_SYMBOL_GLOBAL);
