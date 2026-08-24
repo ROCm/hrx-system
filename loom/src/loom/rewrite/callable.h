@@ -69,14 +69,6 @@ iree_status_t loom_callable_clone_definition(
     loom_symbol_ref_t target_ref, loom_func_like_t* out_cloned,
     iree_arena_allocator_t* scratch_arena);
 
-// Options for importing one function-like definition across modules.
-typedef struct loom_callable_import_options_t {
-  // Optional policy for non-callee symbol references in the imported body.
-  // The imported callee's own defining symbol is handled by the import helper.
-  // If NULL, any other symbol reference in the source definition is rejected.
-  loom_ir_remap_symbol_callback_t external_symbol_remap;
-} loom_callable_import_options_t;
-
 // Result handles produced by callable outlining.
 typedef struct loom_callable_outline_result_t {
   // Function-like definition that owns the outlined body.
@@ -84,18 +76,6 @@ typedef struct loom_callable_outline_result_t {
   // Call op inserted at the original range position.
   loom_op_t* call_op;
 } loom_callable_outline_result_t;
-
-// Clones |source| from |source_module| into |builder|'s target module.
-//
-// The source callee symbol is recreated in the target module with the same name
-// and bound to the cloned function-like op. Target name collisions are rejected
-// instead of renamed implicitly. References to other source symbols require an
-// explicit external symbol remap policy in |options|; without one, the import
-// fails before mutating the target module.
-iree_status_t loom_callable_import_definition(
-    loom_builder_t* builder, const loom_module_t* source_module,
-    loom_func_like_t source, const loom_callable_import_options_t* options,
-    loom_func_like_t* out_imported, iree_arena_allocator_t* scratch_arena);
 
 // Outlines a contiguous same-block op range into a new private func.def.
 //
