@@ -1420,6 +1420,66 @@ def _buffer_view_rule() -> ValueAliasRule:
     )
 
 
+def _buffer_load_i8_u_rule() -> DescriptorRule:
+    load_descriptor = _descriptor("llvmir.load.indexed.i8")
+    extend_descriptor = _descriptor("llvmir.zext.i8.i32")
+    return DescriptorRule(
+        source_op=buffer.buffer_load_i8_u,
+        descriptor=load_descriptor,
+        guards=(
+            Guard.value_type("byte_offset", _OFFSET),
+            Guard.value_type("result", _I32),
+        ),
+        emit=(
+            _op_emit(
+                descriptor=load_descriptor,
+                operands={
+                    "ptr": ValueRef.operand("source"),
+                    "index": ValueRef.operand("byte_offset"),
+                },
+                results={"dst": ValueRef.temporary("byte")},
+                result_types={"dst": _I8},
+                immediates={"byte_offset": 0, "byte_stride": 1},
+            ),
+            _op_emit(
+                descriptor=extend_descriptor,
+                operands={"value": ValueRef.temporary("byte")},
+                results={"dst": ValueRef.result("result")},
+            ),
+        ),
+    )
+
+
+def _buffer_store_i8_rule() -> DescriptorRule:
+    truncate_descriptor = _descriptor("llvmir.trunc.i32.i8")
+    store_descriptor = _descriptor("llvmir.store.indexed.i8")
+    return DescriptorRule(
+        source_op=buffer.buffer_store_i8,
+        descriptor=store_descriptor,
+        guards=(
+            Guard.value_type("value", _I32),
+            Guard.value_type("byte_offset", _OFFSET),
+        ),
+        emit=(
+            _op_emit(
+                descriptor=truncate_descriptor,
+                operands={"value": ValueRef.operand("value")},
+                results={"dst": ValueRef.temporary("byte")},
+                result_types={"dst": _I8},
+            ),
+            _op_emit(
+                descriptor=store_descriptor,
+                operands={
+                    "value": ValueRef.temporary("byte"),
+                    "ptr": ValueRef.operand("target"),
+                    "index": ValueRef.operand("byte_offset"),
+                },
+                immediates={"byte_offset": 0, "byte_stride": 1},
+            ),
+        ),
+    )
+
+
 def _buffer_alloca_rule(memory_space: str) -> DescriptorRule:
     descriptor = _descriptor(f"llvmir.alloca.{memory_space}.i8")
     return DescriptorRule(
@@ -2992,6 +3052,8 @@ LLVMIR_GENERIC_CORE_CONTRACT_FRAGMENT = ContractFragment(
         _buffer_alloca_rule("private"),
         _buffer_alloca_rule("workgroup"),
         _buffer_view_rule(),
+        _buffer_load_i8_u_rule(),
+        _buffer_store_i8_rule(),
         *_scalar_arithmetic_rules(),
         *_scalar_bitwise_rules(),
         _binary_rule(index.index_add, _INDEX, "llvmir.add.i64"),

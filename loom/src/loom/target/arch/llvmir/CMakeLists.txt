@@ -91,6 +91,7 @@ loom_check_test_suite(
     loom_check_file_test
   SRCS
     "test/ops/roundtrip.loom-test"
+    "test/source_low/buffer_raw.loom-test"
     "test/source_low/corpus/async_empty.loom-test"
     "test/source_low/corpus/async_gather.loom-test"
     "test/source_low/corpus/index_addressing.loom-test"
