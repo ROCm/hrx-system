@@ -2525,6 +2525,55 @@ static iree_status_t loom_low_lower_emit_argument_resource_imports(
   return status;
 }
 
+// Separates the target ABI live-in from the semantic function argument. The
+// transfer normally coalesces to the same storage and emits nothing. When an
+// internal call needs the ABI location while the argument remains live,
+// allocation can place the semantic identity elsewhere and materialize the
+// exact-state move at entry.
+static iree_status_t loom_low_lower_emit_direct_argument_transfers(
+    loom_low_lower_context_t* context) {
+  if (!iree_any_bit_set(context->policy->flags,
+                        LOOM_LOW_LOWER_POLICY_FLAG_EXPLICIT_ABI_TRANSFERS)) {
+    return iree_ok_status();
+  }
+  uint16_t argument_count = 0;
+  const loom_value_id_t* source_arguments =
+      loom_func_like_arg_ids(context->source_function, &argument_count);
+  if (argument_count == 0) return iree_ok_status();
+
+  loom_region_t* low_body = loom_low_lower_low_body(context);
+  loom_builder_ip_t saved_ip = loom_builder_enter_region(
+      &context->builder, context->low_func_op, low_body);
+  loom_builder_set_block(&context->builder, loom_region_entry_block(low_body));
+  iree_status_t status = iree_ok_status();
+  for (uint16_t i = 0; i < argument_count && iree_status_is_ok(status); ++i) {
+    if (context->lowering.argument_map[i].kind !=
+        LOOM_LOW_LOWER_ABI_ARGUMENT_DIRECT) {
+      continue;
+    }
+    loom_value_id_t abi_value = LOOM_VALUE_ID_INVALID;
+    status =
+        loom_low_lower_lookup_value(context, source_arguments[i], &abi_value);
+    if (!iree_status_is_ok(status)) break;
+    loom_op_t* move_op = NULL;
+    status =
+        loom_low_move_build(&context->builder, abi_value, /*detached=*/false,
+                            loom_module_value_type(context->module, abi_value),
+                            context->source_function.op->location, &move_op);
+    if (!iree_status_is_ok(status)) break;
+
+    const loom_value_ordinal_t source_ordinal =
+        loom_low_lowering_frame_value_ordinal(&context->lowering,
+                                              source_arguments[i]);
+    const loom_value_id_t semantic_value = loom_low_move_result(move_op);
+    context->lowering.value_map[source_ordinal] = semantic_value;
+    status = loom_low_lower_copy_value_name(context, source_arguments[i],
+                                            semantic_value);
+  }
+  loom_builder_restore(&context->builder, saved_ip);
+  return status;
+}
+
 static iree_status_t loom_low_lower_emit_preamble(
     loom_low_lower_context_t* context) {
   if (context->policy->emit_preamble.fn == NULL) {
@@ -2880,6 +2929,34 @@ static iree_status_t loom_low_lower_emit_scf_while(
   return status;
 }
 
+// Moves each call result out of its ABI transfer identity before binding it to
+// the source result. This leaves the call result available for target-fixed
+// placement while preserving exact reference ownership in the semantic value.
+static iree_status_t loom_low_lower_bind_call_results(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    const loom_op_t* low_call_op) {
+  const loom_value_id_t* source_results = loom_op_const_results(source_op);
+  const loom_value_id_t* low_results = loom_op_const_results(low_call_op);
+  if (!iree_any_bit_set(context->policy->flags,
+                        LOOM_LOW_LOWER_POLICY_FLAG_EXPLICIT_ABI_TRANSFERS)) {
+    for (uint16_t i = 0; i < source_op->result_count; ++i) {
+      IREE_RETURN_IF_ERROR(loom_low_lower_bind_value(context, source_results[i],
+                                                     low_results[i]));
+    }
+    return iree_ok_status();
+  }
+  for (uint16_t i = 0; i < source_op->result_count; ++i) {
+    loom_op_t* move_op = NULL;
+    IREE_RETURN_IF_ERROR(loom_low_move_build(
+        &context->builder, low_results[i], /*detached=*/false,
+        loom_module_value_type(context->module, low_results[i]),
+        source_op->location, &move_op));
+    IREE_RETURN_IF_ERROR(loom_low_lower_bind_value(
+        context, source_results[i], loom_low_move_result(move_op)));
+  }
+  return iree_ok_status();
+}
+
 static iree_status_t loom_low_lower_structural_op(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     bool* out_handled) {
@@ -2949,13 +3026,7 @@ static iree_status_t loom_low_lower_structural_op(
           result_types, source_op->result_count,
           /*tied_results=*/NULL, /*tied_result_count=*/0, source_op->location,
           &low_call_op));
-
-      const loom_value_id_t* low_results = loom_op_const_results(low_call_op);
-      for (uint16_t i = 0; i < source_op->result_count; ++i) {
-        IREE_RETURN_IF_ERROR(loom_low_lower_bind_value(
-            context, source_results[i], low_results[i]));
-      }
-      return iree_ok_status();
+      return loom_low_lower_bind_call_results(context, source_op, low_call_op);
     }
     case LOOM_OP_FUNC_CALL_INDIRECT: {
       loom_value_id_t* low_operands = NULL;
@@ -2986,13 +3057,7 @@ static iree_status_t loom_low_lower_structural_op(
           source_op->operand_count - 1, result_types, source_op->result_count,
           /*tied_results=*/NULL, /*tied_result_count=*/0, source_op->location,
           &low_call_op));
-
-      const loom_value_id_t* low_results = loom_op_const_results(low_call_op);
-      for (uint16_t i = 0; i < source_op->result_count; ++i) {
-        IREE_RETURN_IF_ERROR(loom_low_lower_bind_value(
-            context, source_results[i], low_results[i]));
-      }
-      return iree_ok_status();
+      return loom_low_lower_bind_call_results(context, source_op, low_call_op);
     }
     case LOOM_OP_KERNEL_RETURN: {
       loom_op_t* low_return_op = NULL;
@@ -3844,6 +3909,11 @@ iree_status_t loom_low_lower_function(loom_module_t* module,
     if (iree_status_is_ok(status) && context.result->error_count == 0) {
       loom_low_lower_emission_scope_begin(&context);
       status = loom_low_lower_emit_argument_resource_imports(&context);
+      loom_low_lower_emission_scope_end(&context);
+    }
+    if (iree_status_is_ok(status) && context.result->error_count == 0) {
+      loom_low_lower_emission_scope_begin(&context);
+      status = loom_low_lower_emit_direct_argument_transfers(&context);
       loom_low_lower_emission_scope_end(&context);
     }
     if (iree_status_is_ok(status) && context.result->error_count == 0) {

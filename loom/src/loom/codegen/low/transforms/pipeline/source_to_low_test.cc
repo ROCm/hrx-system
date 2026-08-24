@@ -440,6 +440,84 @@ TEST_F(LowLowerPassTest, ModuleInternalVersionLowersWithoutArtifactAbi) {
   iree_arena_deinitialize(&arena);
 }
 
+TEST_F(LowLowerPassTest, ExplicitAbiTransfersSeparateCallBoundaries) {
+  ModulePtr module = Parse(
+      IREE_SV("test.target<low_core> @test_target\n"
+              "func.def target(@test_target) @swap(%lhs: i32, %rhs: i32) -> "
+              "(i32, i32) {\n"
+              "  func.return %rhs, %lhs : i32, i32\n"
+              "}\n"
+              "func.def target(@test_target) @caller(%lhs: i32, %rhs: i32) -> "
+              "(i32, i32) {\n"
+              "  %first, %second = func.call @swap(%lhs, %rhs) : (i32, i32) -> "
+              "(i32, i32)\n"
+              "  func.return %first, %second : i32, i32\n"
+              "}\n"));
+
+  loom_low_lower_policy_t policy = *loom_test_low_lower_policy();
+  policy.flags |= LOOM_LOW_LOWER_POLICY_FLAG_EXPLICIT_ABI_TRANSFERS;
+  const loom_low_lower_policy_registry_entry_t entries[] = {
+      {
+          /*.contract_set_key=*/IREE_SVL("test.low.core"),
+          /*.policy=*/&policy,
+      },
+  };
+  loom_low_lower_policy_registry_t policy_registry = {};
+  loom_low_lower_policy_registry_initialize_from_entries(
+      &policy_registry, entries, IREE_ARRAYSIZE(entries));
+
+  iree_arena_allocator_t arena;
+  iree_arena_initialize(&block_pool_, &arena);
+  loom_symbol_fact_table_t symbol_facts = {};
+  loom_symbol_fact_table_initialize(&symbol_facts, &arena);
+  const loom_symbol_ref_t target_ref =
+      FindSymbolRef(module.get(), IREE_SV("test_target"));
+  const loom_symbol_facts_base_t* base_target_facts = nullptr;
+  IREE_ASSERT_OK(loom_symbol_fact_table_lookup_ref(
+      &symbol_facts, module.get(), target_ref, &base_target_facts));
+  const loom_target_symbol_facts_t* target_facts =
+      loom_target_symbol_facts_cast(base_target_facts);
+  ASSERT_NE(target_facts, nullptr);
+  const loom_symbol_ref_t function_ref =
+      FindSymbolRef(module.get(), IREE_SV("caller"));
+  loom_target_function_version_t function_version = {};
+  function_version.base.type = &loom_target_function_version_type;
+  function_version.base.function = loom_func_like_cast(
+      module.get(),
+      module->symbols.entries[function_ref.symbol_id].defining_op);
+  function_version.function_target_facts = target_facts->projection;
+  loom_function_version_t* function_version_values[] = {
+      &function_version.base,
+  };
+  const loom_function_version_list_t function_versions = {
+      /*.values=*/function_version_values,
+      /*.count=*/IREE_ARRAYSIZE(function_version_values),
+  };
+  DiagnosticEmissionCollector collector;
+  IREE_ASSERT_OK(RunSourceToLow(&policy_registry, module.get(), &collector,
+                                &function_versions));
+  ASSERT_EQ(collector.count, 0)
+      << (collector.last_error ? loom_error_def_id(collector.last_error) : "");
+
+  const loom_func_like_t function = function_version.base.function;
+  ASSERT_TRUE(loom_low_func_def_isa(function.op));
+  const loom_region_t* body = loom_func_like_body(function);
+  ASSERT_NE(body, nullptr);
+  iree_host_size_t copy_count = 0;
+  iree_host_size_t move_count = 0;
+  for (uint16_t block_index = 0; block_index < body->block_count;
+       ++block_index) {
+    const loom_op_t* op = nullptr;
+    loom_block_for_each_op(body->blocks[block_index], op) {
+      copy_count += loom_low_copy_isa(op) ? 1 : 0;
+      move_count += loom_low_move_isa(op) ? 1 : 0;
+    }
+  }
+  EXPECT_EQ(copy_count, 0u);
+  EXPECT_EQ(move_count, 4u);
+  iree_arena_deinitialize(&arena);
+}
+
 TEST_F(LowLowerPassTest,
        InvocationBoundTargetlessFunctionRunsLowPassesWithoutWitness) {
   ModulePtr module = Parse(IREE_SV(

@@ -762,6 +762,12 @@ enum loom_low_lower_policy_flag_bits_e {
   // The policy lowers source module imports even when no physical target code
   // import kind applies.
   LOOM_LOW_LOWER_POLICY_FLAG_MODULE_IMPORTS = 1u << 0,
+  // Materializes distinct low transfer values for direct function arguments
+  // and call results. Policies whose physical ABI constrains call values
+  // enable this so allocation can place semantic values independently of ABI
+  // locations. Call and return operands use the policy's structural operand
+  // materializer.
+  LOOM_LOW_LOWER_POLICY_FLAG_EXPLICIT_ABI_TRANSFERS = 1u << 1,
 };
 
 typedef struct loom_low_lower_policy_t {
