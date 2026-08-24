@@ -114,8 +114,7 @@ func.def public @entry(%value: i32) -> (i32) {
     environment.allocator = iree_allocator_system();
     loom_link_index_materialization_t materialization = {};
     CheckStatus(loom_link_index_materialize(
-        index_, &options, &environment, IREE_SV("linked"), options.root_symbols,
-        &materialization));
+        index_, &options, &environment, IREE_SV("linked"), &materialization));
     if (!loom_link_plan_contains_symbol(materialization.plan,
                                         selected_provider_ordinal_)) {
       std::abort();

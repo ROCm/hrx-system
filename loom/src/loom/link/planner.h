@@ -27,7 +27,7 @@ typedef struct loom_link_plan_t loom_link_plan_t;
 typedef enum loom_link_plan_mode_e {
   // Select every non-stripped symbol in stable provider order.
   LOOM_LINK_PLAN_ARCHIVE = 0,
-  // Select explicit roots or exported roots and their reachable closure.
+  // Select explicit roots or exported input roots and their reachable closure.
   LOOM_LINK_PLAN_SELECTIVE = 1,
 } loom_link_plan_mode_t;
 
@@ -71,8 +71,8 @@ typedef struct loom_link_plan_options_t {
   loom_link_plan_mode_t mode;
   // Explicit roots for SELECTIVE mode. Names may include a leading '@'.
   iree_string_view_list_t root_symbols;
-  // Select all exported symbols as roots in SELECTIVE mode.
-  bool include_exported_roots;
+  // Select exported INPUT-provider symbols as roots in SELECTIVE mode.
+  bool include_input_exports;
   // Unresolved reference handling. Zero defaults to ERROR.
   loom_link_plan_unresolved_policy_t unresolved_policy;
   // Test-only symbol handling. Zero defaults to KEEP.

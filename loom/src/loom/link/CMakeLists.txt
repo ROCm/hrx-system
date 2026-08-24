@@ -265,6 +265,7 @@ loom_cc_test(
     ::index_materializer
     ::module_index
     ::planner
+    ::provider_resolver
     iree::base::internal::arena
     iree::io::stream
     iree::testing::gtest
@@ -273,6 +274,8 @@ loom_cc_test(
     loom::format::text::parser
     loom::format::text::printer
     loom::ir
+    loom::ops::module
+    loom::ops::op_defs
     loom::ops::op_registry
     loom::verify
 )

@@ -112,11 +112,19 @@ static iree_status_t loom_link_plan_materialize_module(
     loom_linker_source_provider_import_list_t provider_imports,
     const loom_link_plan_materialization_environment_t* environment,
     iree_host_size_t* source_symbol_ordinals,
+    loom_linker_symbol_output_t* source_symbol_outputs,
     loom_symbol_ref_t* module_target_symbols, loom_symbol_ref_t* target_symbols,
     loom_symbol_ref_t* target_template_families, loom_linker_t* linker) {
   for (iree_host_size_t i = 0; i < selection->symbols.count; ++i) {
     source_symbol_ordinals[i] =
         selection->symbols.values[i].source_symbol->module_symbol_ordinal;
+    if (source_symbol_outputs) {
+      source_symbol_outputs[i] =
+          selection->symbols.values[i].plan_symbol->reason ==
+                  LOOM_LINK_PLAN_LIVE_ROOT
+              ? LOOM_LINKER_SYMBOL_OUTPUT_ROOT
+              : LOOM_LINKER_SYMBOL_OUTPUT_DEPENDENCY;
+    }
     module_target_symbols[i] = loom_symbol_ref_null();
   }
   const loom_linker_source_symbol_list_t source_symbols = {
@@ -127,19 +135,23 @@ static iree_status_t loom_link_plan_materialize_module(
       .count = selection->symbols.count,
       .values = module_target_symbols,
   };
+  const loom_linker_source_symbol_output_list_t source_outputs = {
+      .count = source_symbol_outputs ? selection->symbols.count : 0,
+      .values = source_symbol_outputs,
+  };
 
   const loom_link_module_index_module_t* module = selection->source_module;
   const bool complete_module = selection->symbols.count == module->symbol_count;
   iree_status_t status = iree_ok_status();
   if (module->materialized_module != NULL) {
     if (complete_module) {
-      status =
-          loom_linker_add_exact_module(linker, module->materialized_module,
-                                       provider_imports, out_target_symbols);
+      status = loom_linker_add_exact_module(linker, module->materialized_module,
+                                            source_outputs, provider_imports,
+                                            out_target_symbols);
     } else {
       status = loom_linker_add_module_symbols(
-          linker, module->materialized_module, source_symbols, provider_imports,
-          out_target_symbols);
+          linker, module->materialized_module, source_symbols, source_outputs,
+          provider_imports, out_target_symbols);
     }
   } else {
     const loom_link_module_index_provider_t* provider =
@@ -154,8 +166,9 @@ static iree_status_t loom_link_plan_materialize_module(
         },
         environment, complete_module, &materialized_module);
     if (iree_status_is_ok(status)) {
-      status = loom_linker_add_exact_module(
-          linker, materialized_module, provider_imports, out_target_symbols);
+      status = loom_linker_add_exact_module(linker, materialized_module,
+                                            source_outputs, provider_imports,
+                                            out_target_symbols);
     }
     loom_module_free(materialized_module);
   }
@@ -172,7 +185,8 @@ static iree_status_t loom_link_plan_materialize_modules(
     const loom_link_plan_module_projection_t* projection,
     const loom_link_plan_linker_import_projection_t* provider_imports,
     const loom_link_plan_materialization_environment_t* environment,
-    iree_arena_allocator_t* arena, loom_symbol_ref_t* target_symbols,
+    bool sealed_output, iree_arena_allocator_t* arena,
+    loom_symbol_ref_t* target_symbols,
     loom_symbol_ref_t* target_template_families, loom_linker_t* linker) {
   iree_host_size_t max_module_symbol_count = 0;
   for (iree_host_size_t i = 0; i < projection->modules.count; ++i) {
@@ -180,6 +194,7 @@ static iree_status_t loom_link_plan_materialize_modules(
         max_module_symbol_count, projection->modules.values[i].symbols.count);
   }
   iree_host_size_t* source_symbol_ordinals = NULL;
+  loom_linker_symbol_output_t* source_symbol_outputs = NULL;
   loom_symbol_ref_t* module_target_symbols = NULL;
   if (max_module_symbol_count != 0) {
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
@@ -188,6 +203,11 @@ static iree_status_t loom_link_plan_materialize_modules(
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
         arena, max_module_symbol_count, sizeof(*module_target_symbols),
         (void**)&module_target_symbols));
+    if (sealed_output) {
+      IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+          arena, max_module_symbol_count, sizeof(*source_symbol_outputs),
+          (void**)&source_symbol_outputs));
+    }
   }
 
   iree_status_t status = iree_ok_status();
@@ -196,8 +216,8 @@ static iree_status_t loom_link_plan_materialize_modules(
     status = loom_link_plan_materialize_module(
         index, &projection->modules.values[i],
         provider_imports->modules.values[i], environment,
-        source_symbol_ordinals, module_target_symbols, target_symbols,
-        target_template_families, linker);
+        source_symbol_ordinals, source_symbol_outputs, module_target_symbols,
+        target_symbols, target_template_families, linker);
   }
   return status;
 }
@@ -205,8 +225,7 @@ static iree_status_t loom_link_plan_materialize_modules(
 iree_status_t loom_link_plan_materialize(
     const loom_link_plan_t* plan,
     const loom_link_plan_materialization_environment_t* environment,
-    iree_string_view_t module_name, iree_string_view_list_t output_roots,
-    iree_arena_allocator_t* arena,
+    iree_string_view_t module_name, iree_arena_allocator_t* arena,
     loom_link_plan_materialization_t* out_materialization) {
   IREE_ASSERT_ARGUMENT(plan);
   IREE_ASSERT_ARGUMENT(environment);
@@ -249,6 +268,10 @@ iree_status_t loom_link_plan_materialize(
 
   const loom_linker_options_t linker_options = {
       .module_name = module_name,
+      .planned_symbol_capacity =
+          loom_link_plan_mode(plan) == LOOM_LINK_PLAN_SELECTIVE
+              ? loom_link_plan_symbol_count(plan)
+              : 0,
       .provider_imports =
           {
               .count = provider_import_projection.provider_imports.count,
@@ -264,10 +287,8 @@ iree_status_t loom_link_plan_materialize(
   loom_module_t* output_module = NULL;
   iree_status_t status = loom_link_plan_materialize_modules(
       index, &module_projection, &provider_import_projection, environment,
-      arena, target_symbols, target_template_families, linker);
-  if (iree_status_is_ok(status) && output_roots.count != 0) {
-    status = loom_linker_finalize_roots(linker, output_roots);
-  }
+      loom_link_plan_mode(plan) == LOOM_LINK_PLAN_SELECTIVE, arena,
+      target_symbols, target_template_families, linker);
   if (iree_status_is_ok(status)) {
     status = loom_linker_finish(linker, &output_module);
   }

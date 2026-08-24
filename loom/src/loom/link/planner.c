@@ -708,16 +708,13 @@ static iree_status_t loom_link_plan_select_root(
       /*out_plan_ordinal=*/NULL);
 }
 
-static iree_status_t loom_link_plan_select_exported_roots(
+static iree_status_t loom_link_plan_select_input_exports(
     loom_link_plan_t* plan, const loom_link_plan_options_t* options) {
-  const iree_host_size_t symbol_count =
-      loom_link_module_index_symbol_count(plan->index);
-  for (iree_host_size_t i = 0; i < symbol_count; ++i) {
+  const loom_link_module_index_symbol_ordinal_list_t input_exports =
+      loom_link_module_index_input_exports(plan->index);
+  for (iree_host_size_t i = 0; i < input_exports.count; ++i) {
     const loom_link_module_index_symbol_t* symbol =
-        loom_link_module_index_symbol_at(plan->index, i);
-    if (!iree_any_bit_set(symbol->flags, LOOM_LINK_SYMBOL_FLAG_EXPORT)) {
-      continue;
-    }
+        loom_link_module_index_symbol_at(plan->index, input_exports.values[i]);
     iree_host_size_t root_plan_ordinal = LOOM_LINK_MODULE_INDEX_INVALID_ORDINAL;
     IREE_RETURN_IF_ERROR(loom_link_plan_select_required_symbol(
         plan, options, symbol, LOOM_LINK_PLAN_LIVE_ROOT,
@@ -733,8 +730,8 @@ static iree_status_t loom_link_plan_select_exported_roots(
 
 static iree_status_t loom_link_plan_select_roots(
     loom_link_plan_t* plan, const loom_link_plan_options_t* options) {
-  if (options && options->include_exported_roots) {
-    IREE_RETURN_IF_ERROR(loom_link_plan_select_exported_roots(plan, options));
+  if (options && options->include_input_exports) {
+    IREE_RETURN_IF_ERROR(loom_link_plan_select_input_exports(plan, options));
   }
   const iree_host_size_t root_count = options ? options->root_symbols.count : 0;
   if (root_count > 0 && (!options || !options->root_symbols.values)) {

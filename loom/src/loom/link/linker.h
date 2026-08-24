@@ -42,6 +42,9 @@ typedef struct loom_linker_t loom_linker_t;
 typedef struct loom_linker_options_t {
   // Name assigned to the linked output module. Defaults to "linked".
   iree_string_view_t module_name;
+  // Maximum number of target symbols carrying selective-plan state.
+  // Zero keeps archive/direct links allocation-free for this state.
+  iree_host_size_t planned_symbol_capacity;
   // Exact capacity reserved for provider imports projected by link planning.
   struct {
     // Maximum number of projected provider-import rows.
@@ -58,6 +61,30 @@ typedef struct loom_linker_add_options_t {
   // output roots until passed to loom_linker_finalize_roots.
   iree_string_view_list_t root_symbols;
 } loom_linker_add_options_t;
+
+// Requested outward disposition of one planned source symbol.
+typedef uint8_t loom_linker_symbol_output_t;
+enum loom_linker_symbol_output_e {
+  // Preserve the authored visibility, export, import, and retention contract.
+  LOOM_LINKER_SYMBOL_OUTPUT_AUTHORED = 0,
+  // Internalize the symbol as an implementation dependency.
+  LOOM_LINKER_SYMBOL_OUTPUT_DEPENDENCY = 1,
+  // Preserve the requester-facing contract and retain the resulting symbol.
+  LOOM_LINKER_SYMBOL_OUTPUT_ROOT = 2,
+};
+
+// Output dispositions parallel to an exact source symbol selection.
+typedef struct loom_linker_source_symbol_output_list_t {
+  // Number of output dispositions.
+  iree_host_size_t count;
+  // Dispositions in source-selection order.
+  const loom_linker_symbol_output_t* values;
+} loom_linker_source_symbol_output_list_t;
+
+static inline loom_linker_source_symbol_output_list_t
+loom_linker_source_symbol_output_list_empty(void) {
+  return (loom_linker_source_symbol_output_list_t){0};
+}
 
 // Exact module-local source symbol ordinals selected by a link plan.
 typedef struct loom_linker_source_symbol_list_t {
@@ -148,6 +175,10 @@ iree_status_t loom_linker_add_module(loom_linker_t* linker,
 // closure: references from selected IR to omitted source symbols fail rather
 // than triggering reachability discovery. |provider_imports| names retained
 // availability rows in the same source ordinal domain. When
+// |source_outputs| is non-empty it must have one entry per selected source
+// symbol. Authored disposition preserves the source linkage surface;
+// dependency disposition internalizes it; root disposition preserves and
+// retains the requester-facing surface. When
 // |out_target_symbols| is non-empty it must have one entry per selected source
 // symbol and receives the corresponding stable linked-module references. The
 // linker retains no pointers into any source or output storage after this call
@@ -155,6 +186,7 @@ iree_status_t loom_linker_add_module(loom_linker_t* linker,
 iree_status_t loom_linker_add_module_symbols(
     loom_linker_t* linker, const loom_module_t* source_module,
     loom_linker_source_symbol_list_t source_symbols,
+    loom_linker_source_symbol_output_list_t source_outputs,
     loom_linker_source_provider_import_list_t provider_imports,
     loom_linker_target_symbol_list_t out_target_symbols);
 
@@ -166,12 +198,15 @@ iree_status_t loom_linker_add_module_symbols(
 // exact target-symbol projection. Non-symbol module metadata is also cloned,
 // except that authored module.import operations are replaced by the exact
 // |provider_imports| projection. |provider_imports| must use the compact
-// module's dense symbol ordinal domain. When |out_target_symbols| is non-empty
-// it must have one entry per source symbol and receives the corresponding
-// stable linked-module references. The linker retains no pointers into any
-// source or output storage after this call returns.
+// module's dense symbol ordinal domain. |source_outputs| follows the same
+// contract as loom_linker_add_module_symbols and uses dense symbol order. When
+// |out_target_symbols| is non-empty it must have one entry per source symbol
+// and receives the corresponding stable linked-module references. The linker
+// retains no pointers into any source or output storage after this call
+// returns.
 iree_status_t loom_linker_add_exact_module(
     loom_linker_t* linker, const loom_module_t* source_module,
+    loom_linker_source_symbol_output_list_t source_outputs,
     loom_linker_source_provider_import_list_t provider_imports,
     loom_linker_target_symbol_list_t out_target_symbols);
 

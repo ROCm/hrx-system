@@ -24,7 +24,7 @@ def loom_link_module(
         mode = "archive",
         output = None,
         output_format = "text",
-        include_exported_roots = False,
+        include_input_exports = False,
         strip_check = False,
         require_resolved_config = False,
         tags = [],
@@ -41,7 +41,7 @@ def loom_link_module(
       mode: Linker planning mode: archive, link, or selective.
       output: Generated module filename. Defaults to <name>.loom or .loombc.
       output_format: Generated representation: text or bc.
-      include_exported_roots: Whether exported symbols are implicit roots.
+      include_input_exports: Whether exported input symbols are implicit roots.
       strip_check: Whether check.case and check.benchmark symbols are removed.
       require_resolved_config: Whether unresolved config.decl symbols fail.
       tags: Additional tags for the generator action.
@@ -66,8 +66,8 @@ def loom_link_module(
     args.extend(["--library=$(location %s)" % library for library in libraries])
     args.extend(["--root=%s" % root for root in roots])
     args.extend(["--config=%s" % config for config in configs])
-    if include_exported_roots:
-        args.append("--include-exported-roots=true")
+    if include_input_exports:
+        args.append("--include-input-exports=true")
     if strip_check:
         args.append("--strip-check=true")
     if require_resolved_config:

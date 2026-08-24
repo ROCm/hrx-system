@@ -71,13 +71,14 @@ typedef struct loom_link_plan_materialization_t {
 // Materializes |plan| through the incremental linker.
 //
 // Bytecode bodies are decoded only for symbols selected by the plan. The
+// plan's root/dependency reasons authoritatively determine the output surface;
+// no second root list is resolved during materialization. The
 // returned target-symbol projection preserves exact indexed source identity
 // across private names and duplicate global declarations.
 iree_status_t loom_link_plan_materialize(
     const loom_link_plan_t* plan,
     const loom_link_plan_materialization_environment_t* environment,
-    iree_string_view_t module_name, iree_string_view_list_t output_roots,
-    iree_arena_allocator_t* arena,
+    iree_string_view_t module_name, iree_arena_allocator_t* arena,
     loom_link_plan_materialization_t* out_materialization);
 
 #ifdef __cplusplus

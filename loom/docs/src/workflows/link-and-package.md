@@ -97,8 +97,9 @@ selection. In either mode, unrelated private symbols can disappear as soon as
 the chosen boundary no longer needs them.
 
 Repeated `--root=@symbol` options select several roots from one catalog. Add
-`--include-exported-roots` when the module's exported symbols should join the
-explicit root set.
+`--include-input-exports` when exported symbols from the requester inputs
+should join the explicit root set. Library exports remain resolution candidates
+and never become roots merely because they are public in their source archive.
 
 Configuration bindings are applied to the composed analysis module before each
 reachability and template-selection step. This lets newly reachable code expose

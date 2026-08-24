@@ -65,6 +65,15 @@ struct loom_link_module_index_t {
     // Allocated record capacity.
     iree_host_size_t capacity;
   } symbols;
+  // Exported INPUT-provider symbols in stable provider order.
+  struct {
+    // Growable index-wide symbol ordinal storage.
+    iree_host_size_t* values;
+    // Number of indexed INPUT exports.
+    iree_host_size_t count;
+    // Allocated ordinal capacity.
+    iree_host_size_t capacity;
+  } input_exports;
   // Open-addressed map from every symbol name to its same-name group.
   struct {
     // Hash table storage.
@@ -182,6 +191,16 @@ static iree_status_t loom_link_index_reserve_symbols(
   return iree_allocator_grow_array(
       index->allocator, count, sizeof(*index->symbols.values),
       &index->symbols.capacity, (void**)&index->symbols.values);
+}
+
+static iree_status_t loom_link_index_reserve_input_exports(
+    loom_link_module_index_t* index, iree_host_size_t count) {
+  if (count <= index->input_exports.capacity) {
+    return iree_ok_status();
+  }
+  return iree_allocator_grow_array(
+      index->allocator, count, sizeof(*index->input_exports.values),
+      &index->input_exports.capacity, (void**)&index->input_exports.values);
 }
 
 static iree_status_t loom_link_index_reserve_template_families(
@@ -526,6 +545,21 @@ static iree_status_t loom_link_index_append_symbol(
                             "link symbol count overflow");
   }
   IREE_RETURN_IF_ERROR(loom_link_index_reserve_symbols(index, symbol_count));
+  const loom_link_module_index_provider_t* provider =
+      &index->providers.values[module->provider_ordinal];
+  const bool is_input_export =
+      provider->role == LOOM_LINK_PROVIDER_ROLE_INPUT &&
+      iree_any_bit_set(flags, LOOM_LINK_SYMBOL_FLAG_EXPORT);
+  iree_host_size_t input_export_count = index->input_exports.count;
+  if (is_input_export) {
+    if (!iree_host_size_checked_add(input_export_count, 1,
+                                    &input_export_count)) {
+      return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                              "link input export count overflow");
+    }
+    IREE_RETURN_IF_ERROR(
+        loom_link_index_reserve_input_exports(index, input_export_count));
+  }
   loom_link_module_index_symbol_t* symbol =
       &index->symbols.values[symbol_ordinal];
   *symbol = (loom_link_module_index_symbol_t){
@@ -549,6 +583,9 @@ static iree_status_t loom_link_index_append_symbol(
   index->symbols.count = symbol_count;
   IREE_RETURN_IF_ERROR(
       loom_link_index_insert_symbol_name(index, symbol_ordinal));
+  if (is_input_export) {
+    index->input_exports.values[index->input_exports.count++] = symbol_ordinal;
+  }
   return iree_ok_status();
 }
 
@@ -1193,6 +1230,7 @@ void loom_link_module_index_free(loom_link_module_index_t* index) {
   }
   iree_allocator_free(index->allocator, index->template_families.values);
   iree_allocator_free(index->allocator, index->names.values);
+  iree_allocator_free(index->allocator, index->input_exports.values);
   iree_allocator_free(index->allocator, index->symbols.values);
   iree_allocator_free(index->allocator, index->modules.values);
   iree_allocator_free(index->allocator, index->providers.values);
@@ -1391,6 +1429,15 @@ const loom_link_module_index_symbol_t* loom_link_module_index_symbol_at(
     return NULL;
   }
   return &index->symbols.values[ordinal];
+}
+
+loom_link_module_index_symbol_ordinal_list_t
+loom_link_module_index_input_exports(const loom_link_module_index_t* index) {
+  return index ? (loom_link_module_index_symbol_ordinal_list_t){
+                     .values = index->input_exports.values,
+                     .count = index->input_exports.count,
+                 }
+               : (loom_link_module_index_symbol_ordinal_list_t){0};
 }
 
 const loom_link_module_index_provider_t* loom_link_module_index_symbol_provider(

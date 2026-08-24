@@ -112,6 +112,7 @@ _CASE_SYMBOL_DEF = SymbolDefinition(
     name="check case",
     interfaces=["record"],
     bytecode_kind="LOOM_SYMBOL_RECORD",
+    visibility="visibility",
     flags=[SymbolDefinitionFlag.TEST_ONLY],
 )
 

@@ -59,6 +59,14 @@ typedef struct loom_link_module_index_provider_import_list_t {
   iree_host_size_t count;
 } loom_link_module_index_provider_import_list_t;
 
+// Borrowed index-wide symbol ordinal list.
+typedef struct loom_link_module_index_symbol_ordinal_list_t {
+  // Index-wide symbol ordinals in stable provider order.
+  const iree_host_size_t* values;
+  // Number of symbol ordinals.
+  iree_host_size_t count;
+} loom_link_module_index_symbol_ordinal_list_t;
+
 typedef enum loom_link_provider_kind_e {
   // Provider wraps one caller-owned in-memory module.
   LOOM_LINK_PROVIDER_MATERIALIZED = 0,
@@ -306,6 +314,13 @@ iree_host_size_t loom_link_module_index_symbol_count(
 // Returns symbol |ordinal|, or NULL if out of range.
 const loom_link_module_index_symbol_t* loom_link_module_index_symbol_at(
     const loom_link_module_index_t* index, iree_host_size_t ordinal);
+
+// Returns exported symbols owned by INPUT providers.
+//
+// The list is projected during provider indexing. Querying it performs no
+// provider, module, or symbol traversal.
+loom_link_module_index_symbol_ordinal_list_t
+loom_link_module_index_input_exports(const loom_link_module_index_t* index);
 
 // Returns the provider that supplied |symbol|, or NULL if its ordinal is stale.
 const loom_link_module_index_provider_t* loom_link_module_index_symbol_provider(

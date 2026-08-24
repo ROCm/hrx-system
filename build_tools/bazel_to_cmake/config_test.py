@@ -283,7 +283,7 @@ loom_link_module(
     mode = "selective",
     output = "linked.loombc",
     output_format = "bc",
-    include_exported_roots = True,
+    include_input_exports = True,
     strip_check = True,
     require_resolved_config = True,
 )
@@ -308,7 +308,7 @@ iree_executable_test(
         self.assertIn('    "selective"', cmake)
         self.assertIn('    "linked.loombc"', cmake)
         self.assertIn('    "bc"', cmake)
-        self.assertIn("  INCLUDE_EXPORTED_ROOTS", cmake)
+        self.assertIn("  INCLUDE_INPUT_EXPORTS", cmake)
         self.assertIn("  STRIP_CHECK", cmake)
         self.assertIn("  REQUIRE_RESOLVED_CONFIG", cmake)
         self.assertIn('"{{${CMAKE_CURRENT_BINARY_DIR}/linked.loombc}}"', cmake)

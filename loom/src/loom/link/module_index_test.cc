@@ -244,6 +244,10 @@ func.def public @entry(%x: i32) -> (i32) {
       loom_link_module_index_symbol_provider(index.get(), selected);
   ASSERT_NE(selected_provider, nullptr);
   EXPECT_EQ(StringViewToString(selected_provider->name), "input");
+  const loom_link_module_index_symbol_ordinal_list_t input_exports =
+      loom_link_module_index_input_exports(index.get());
+  ASSERT_EQ(input_exports.count, 1u);
+  EXPECT_EQ(input_exports.values[0], selected->ordinal);
 
   const loom_link_module_index_symbol_t* duplicate =
       loom_link_module_index_next_global_duplicate(index.get(), selected);

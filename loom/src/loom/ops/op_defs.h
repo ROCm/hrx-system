@@ -808,20 +808,22 @@ enum loom_symbol_definition_flag_bits_e {
 typedef struct loom_symbol_definition_descriptor_t {
   // Human-readable symbol class used in diagnostics.
   loom_bstring_t name;
-  // Attribute index of the symbol identity field on the defining op.
-  uint8_t name_attr_index;
-  // Attribute index plus one for the optional retain marker, or 0 if absent.
-  uint8_t retain_attr_index_plus_one;
+  // Structural symbol interfaces implemented by this definition.
+  loom_symbol_interface_flags_t interfaces;
   // Definition roles such as declaration status.
   loom_symbol_definition_flags_t flags;
+  // Attribute index of the symbol identity field on the defining op.
+  uint8_t name_attr_index;
+  // Attribute index plus one for optional public visibility, or 0 if absent.
+  uint8_t visibility_attr_index_plus_one;
+  // Attribute index plus one for the optional retain marker, or 0 if absent.
+  uint8_t retain_attr_index_plus_one;
   // Result index plus one for a typed-value contract, or 0 if absent.
   uint8_t value_contract_result_index_plus_one;
   // Attribute index plus one for an exact contract value, or 0 if absent.
   uint8_t value_contract_value_attr_index_plus_one;
   // Attribute index plus one for contract predicates, or 0 if absent.
   uint8_t value_contract_predicates_attr_index_plus_one;
-  // Structural symbol interfaces implemented by this definition.
-  loom_symbol_interface_flags_t interfaces;
   // Existing bytecode payload kind, or LOOM_SYMBOL_NONE if not serializable
   // through the current SYMBOLS section.
   loom_symbol_kind_t bytecode_kind;
@@ -868,6 +870,13 @@ static inline bool loom_symbol_definition_is_test_only(
     const loom_symbol_definition_descriptor_t* descriptor) {
   return descriptor && iree_any_bit_set(descriptor->flags,
                                         LOOM_SYMBOL_DEFINITION_FLAG_TEST_ONLY);
+}
+
+static inline uint8_t loom_symbol_definition_visibility_attr_index(
+    const loom_symbol_definition_descriptor_t* descriptor) {
+  return descriptor && descriptor->visibility_attr_index_plus_one
+             ? descriptor->visibility_attr_index_plus_one - 1
+             : LOOM_ATTR_INDEX_NONE;
 }
 
 static inline bool loom_symbol_definition_has_value_contract(

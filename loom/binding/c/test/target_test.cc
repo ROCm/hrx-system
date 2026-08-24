@@ -1194,7 +1194,7 @@ TEST(TargetTest, RejectsSpecializationOptionsDuringLink) {
       /*.module_name=*/loomc_make_cstring_view("linked_jit_module"),
       /*.root_symbols=*/nullptr,
       /*.root_symbol_count=*/0,
-      /*.flags=*/LOOMC_LINK_FLAG_INCLUDE_EXPORTED_ROOTS,
+      /*.flags=*/LOOMC_LINK_FLAG_INCLUDE_INPUT_EXPORTS,
   };
 
   WorkspacePtr workspace = CreateWorkspace();

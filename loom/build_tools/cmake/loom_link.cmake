@@ -27,7 +27,7 @@ endfunction()
 function(loom_link_module)
   cmake_parse_arguments(
     _RULE
-    "INCLUDE_EXPORTED_ROOTS;STRIP_CHECK;REQUIRE_RESOLVED_CONFIG"
+    "INCLUDE_INPUT_EXPORTS;STRIP_CHECK;REQUIRE_RESOLVED_CONFIG"
     "NAME;MODE;OUTPUT;OUTPUT_FORMAT"
     "SRCS;LIBRARIES;ROOTS;CONFIGS"
     ${ARGN}
@@ -70,8 +70,8 @@ function(loom_link_module)
   foreach(_CONFIG IN LISTS _RULE_CONFIGS)
     list(APPEND _ARGS "--config=${_CONFIG}")
   endforeach()
-  if(_RULE_INCLUDE_EXPORTED_ROOTS)
-    list(APPEND _ARGS "--include-exported-roots=true")
+  if(_RULE_INCLUDE_INPUT_EXPORTS)
+    list(APPEND _ARGS "--include-input-exports=true")
   endif()
   if(_RULE_STRIP_CHECK)
     list(APPEND _ARGS "--strip-check=true")

@@ -39,7 +39,7 @@
 
 IREE_FLAG(string, mode, "auto",
           "Planning mode: auto, archive, link, or selective. Auto selects "
-          "link mode when roots or exported roots are requested.");
+          "link mode when roots or exported input symbols are requested.");
 IREE_FLAG(string, from, "auto",
           "Input format for every input: auto, text, bc, or bytecode.");
 IREE_FLAG(string, to, "text", "Output format: text, bc, or bytecode.");
@@ -60,8 +60,8 @@ IREE_FLAG_LIST_NAMED(
     string, config_file, "config-file",
     "JSON/JSONC config object file. Repeat for multiple files. Nested object "
     "keys are flattened with '.' separators.");
-IREE_FLAG_NAMED(bool, include_exported_roots, "include-exported-roots", false,
-                "In link/selective mode, add exported symbols as roots.");
+IREE_FLAG_NAMED(bool, include_input_exports, "include-input-exports", false,
+                "In link/selective mode, add exported input symbols as roots.");
 IREE_FLAG_NAMED(bool, strip_check, "strip-check", false,
                 "Strip test/benchmark-only symbols before output.");
 IREE_FLAG_NAMED(
@@ -192,18 +192,18 @@ static iree_status_t loom_link_cli_parse_mode(iree_string_view_t value,
 
 static iree_status_t loom_link_cli_resolve_plan_mode(
     loom_link_cli_mode_t cli_mode, const iree_flag_string_list_t roots,
-    bool include_exported_roots, loom_link_plan_mode_t* out_mode) {
+    bool include_input_exports, loom_link_plan_mode_t* out_mode) {
   if (cli_mode == LOOM_LINK_CLI_MODE_AUTO) {
-    *out_mode = (roots.count > 0 || include_exported_roots)
+    *out_mode = (roots.count > 0 || include_input_exports)
                     ? LOOM_LINK_PLAN_SELECTIVE
                     : LOOM_LINK_PLAN_ARCHIVE;
     return iree_ok_status();
   }
   if (cli_mode == LOOM_LINK_CLI_MODE_ARCHIVE) {
-    if (roots.count > 0 || include_exported_roots) {
+    if (roots.count > 0 || include_input_exports) {
       return iree_make_status(
           IREE_STATUS_INVALID_ARGUMENT,
-          "archive mode does not accept --root or --include-exported-roots");
+          "archive mode does not accept --root or --include-input-exports");
     }
     *out_mode = LOOM_LINK_PLAN_ARCHIVE;
     return iree_ok_status();
@@ -841,7 +841,7 @@ static void loom_link_cli_print_agents_markdown(FILE* stream) {
       "\n"
       "`--mode=archive` preserves every non-stripped symbol in input order.\n"
       "`--mode=link` or `--mode=selective` keeps explicit `--root=@symbol`\n"
-      "values, optional `--include-exported-roots`, and reachable "
+      "values, optional `--include-input-exports`, and reachable "
       "dependencies.\n"
       "`--strip-check` removes symbols marked as test/benchmark-only from\n"
       "runtime artifacts.\n"
@@ -886,7 +886,7 @@ int main(int argc, char** argv) {
       "Every supplied path is also its exact module.import provider key.\n"
       "Archive mode keeps every non-stripped symbol in stable input order. "
       "Link "
-      "mode keeps explicit roots or exported roots and their reachable "
+      "mode keeps explicit roots or exported input symbols and their reachable "
       "dependencies.\n"
       "Use --strip-check to remove symbols marked as test/benchmark-only from "
       "runtime artifacts. Use --allow-unresolved to emit a reusable partial "
@@ -936,7 +936,7 @@ int main(int argc, char** argv) {
   }
   if (iree_status_is_ok(status)) {
     status = loom_link_cli_resolve_plan_mode(
-        cli_mode, roots, FLAG_include_exported_roots, &plan_mode);
+        cli_mode, roots, FLAG_include_input_exports, &plan_mode);
   }
   if (iree_status_is_ok(status) && FLAG_print_config_schema &&
       (FLAG_print_plan || FLAG_list_symbols)) {
@@ -984,7 +984,7 @@ int main(int argc, char** argv) {
   loom_link_plan_options_t plan_options = {
       .mode = plan_mode,
       .root_symbols = roots,
-      .include_exported_roots = FLAG_include_exported_roots,
+      .include_input_exports = FLAG_include_input_exports,
       .unresolved_policy = FLAG_allow_unresolved
                                ? LOOM_LINK_PLAN_UNRESOLVED_ALLOW
                                : LOOM_LINK_PLAN_UNRESOLVED_ERROR,
@@ -1015,14 +1015,9 @@ int main(int argc, char** argv) {
         .allocator = allocator,
     };
     if (iree_status_is_ok(status)) {
-      status =
-          loom_link_index_materialize(link_index.module_index, &plan_options,
-                                      &environment, IREE_SV("linked"),
-                                      (iree_string_view_list_t){
-                                          .count = roots.count,
-                                          .values = roots.values,
-                                      },
-                                      &materialization);
+      status = loom_link_index_materialize(link_index.module_index,
+                                           &plan_options, &environment,
+                                           IREE_SV("linked"), &materialization);
     }
   }
   if (iree_status_is_ok(status) && FLAG_print_plan) {

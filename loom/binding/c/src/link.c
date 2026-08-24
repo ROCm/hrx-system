@@ -24,7 +24,7 @@
 #include "workspace.h"
 
 enum {
-  LOOMC_LINK_KNOWN_FLAGS = LOOMC_LINK_FLAG_INCLUDE_EXPORTED_ROOTS |
+  LOOMC_LINK_KNOWN_FLAGS = LOOMC_LINK_FLAG_INCLUDE_INPUT_EXPORTS |
                            LOOMC_LINK_FLAG_ALLOW_UNRESOLVED_SYMBOLS |
                            LOOMC_LINK_FLAG_STRIP_TEST_SYMBOLS,
 };
@@ -219,7 +219,7 @@ static void loomc_link_materialization_context_initialize(
 static bool loomc_link_options_selective(const loomc_link_options_t* options) {
   return options->root_symbol_count != 0 ||
          loomc_link_any_flag_set(options->flags,
-                                 LOOMC_LINK_FLAG_INCLUDE_EXPORTED_ROOTS);
+                                 LOOMC_LINK_FLAG_INCLUDE_INPUT_EXPORTS);
 }
 
 static iree_string_view_t loomc_link_module_name(
@@ -344,8 +344,8 @@ loomc_status_t loomc_link_module(loomc_linker_t* linker,
               .count = options->root_symbol_count,
               .values = root_symbols,
           },
-      .include_exported_roots = loomc_link_any_flag_set(
-          options->flags, LOOMC_LINK_FLAG_INCLUDE_EXPORTED_ROOTS),
+      .include_input_exports = loomc_link_any_flag_set(
+          options->flags, LOOMC_LINK_FLAG_INCLUDE_INPUT_EXPORTS),
       .unresolved_policy =
           loomc_link_any_flag_set(options->flags,
                                   LOOMC_LINK_FLAG_ALLOW_UNRESOLVED_SYMBOLS)
@@ -373,15 +373,11 @@ loomc_status_t loomc_link_module(loomc_linker_t* linker,
       .user_data = &materialization_context,
       .allocator = loomc_link_iree_allocator(linker->allocator),
   };
-  const iree_string_view_list_t output_roots = {
-      .count = options->root_symbol_count,
-      .values = root_symbols,
-  };
   loomc_host_size_t before_diagnostics = loomc_result_diagnostic_count(result);
   if (loomc_status_is_ok(status) && loomc_result_succeeded(result)) {
     iree_status_t operation_status = loom_link_index_materialize(
         loomc_link_index_module_index(options->link_index), &plan_options,
-        &environment, loomc_link_module_name(linker, options), output_roots,
+        &environment, loomc_link_module_name(linker, options),
         &index_materialization);
     status = loomc_link_translate_operation_status(
         result, before_diagnostics, loomc_make_cstring_view("LINK/MATERIALIZE"),
