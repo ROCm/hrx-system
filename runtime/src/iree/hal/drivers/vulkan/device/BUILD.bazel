@@ -23,13 +23,6 @@ _KERNELS = [
     "update_unaligned",
 ]
 
-_VULKAN_1_3_KERNELS = [
-    "atomic_32",
-    "atomic_64",
-    "copy_bytes",
-    "fill_bytes",
-]
-
 iree_c_embed_data(
     name = "kernels",
     srcs = ["%s.spv" % name for name in _KERNELS],
@@ -59,7 +52,7 @@ iree_runtime_cc_library(
         testonly = True,
         src = "%s.spvasm" % name,
         out = "%s_generated.spv" % name,
-        target_env = "vulkan1.3" if name in _VULKAN_1_3_KERNELS else "spv1.0",
+        target_env = "vulkan1.3",
     )
     for name in _KERNELS
 ]

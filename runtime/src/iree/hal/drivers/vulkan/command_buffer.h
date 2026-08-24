@@ -45,32 +45,14 @@ bool iree_hal_vulkan_command_buffer_is_empty(
 bool iree_hal_vulkan_command_buffer_has_native_commands(
     iree_hal_command_buffer_t* command_buffer);
 
+// Returns true if |command_buffer| contains a transfer whose native resources
+// must be resolved and recorded for each issue.
+bool iree_hal_vulkan_command_buffer_requires_per_issue_recording(
+    iree_hal_command_buffer_t* command_buffer);
+
 // Returns the number of dispatch commands recorded in |command_buffer|.
 iree_host_size_t iree_hal_vulkan_command_buffer_dispatch_count(
     iree_hal_command_buffer_t* command_buffer);
-
-// Descriptor pool capacity required to replay a command buffer once into a
-// native VkCommandBuffer.
-typedef struct iree_hal_vulkan_command_buffer_descriptor_requirements_t {
-  // Number of descriptor sets required.
-  uint32_t set_count;
-
-  // Number of sampler descriptors required.
-  uint32_t sampler_count;
-
-  // Number of uniform-buffer descriptors required.
-  uint32_t uniform_buffer_count;
-
-  // Number of storage-buffer descriptors required.
-  uint32_t storage_buffer_count;
-} iree_hal_vulkan_command_buffer_descriptor_requirements_t;
-
-// Returns descriptor pool capacity required to replay |command_buffer| once
-// into a native VkCommandBuffer.
-iree_status_t
-iree_hal_vulkan_command_buffer_native_descriptor_pool_requirements(
-    iree_hal_command_buffer_t* command_buffer,
-    iree_hal_vulkan_command_buffer_descriptor_requirements_t* out_requirements);
 
 // Host-published BDA storage used while replaying a command buffer once into a
 // native VkCommandBuffer.
@@ -209,10 +191,6 @@ typedef struct iree_hal_vulkan_command_buffer_profile_marker_t {
 // timestamped inside |native_command_buffer| around the requested queue payload
 // and dispatch commands.
 //
-// Descriptor sets are allocated from |descriptor_pool|. The caller must keep
-// that pool alive until |native_command_buffer| is no longer executing. When
-// the command buffer has no descriptor requirements this may be VK_NULL_HANDLE.
-//
 // BDA replay data is allocated from |bda_publication|. The caller must keep the
 // publication alive until |native_command_buffer| is no longer executing. When
 // the command buffer requires no BDA publication this may be NULL.
@@ -225,7 +203,7 @@ iree_status_t iree_hal_vulkan_command_buffer_record_native(
     const iree_hal_vulkan_debug_utils_t* debug_utils,
     const iree_hal_vulkan_builtins_t* builtins,
     VkCommandBuffer native_command_buffer,
-    VkCommandBufferUsageFlags usage_flags, VkDescriptorPool descriptor_pool,
+    VkCommandBufferUsageFlags usage_flags,
     iree_hal_buffer_binding_table_t binding_table,
     const iree_hal_vulkan_command_buffer_bda_publication_t* bda_publication,
     iree_hal_vulkan_command_buffer_bda_binding_cache_t* bda_binding_cache,

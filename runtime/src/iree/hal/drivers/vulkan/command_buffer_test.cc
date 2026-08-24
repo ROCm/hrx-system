@@ -266,7 +266,7 @@ TEST_F(VulkanCommandBufferTest, ReplaysDebugGroupsAsDebugUtilsLabels) {
 
   IREE_ASSERT_OK(iree_hal_vulkan_command_buffer_record_native(
       command_buffer.get(), &syms, logical_device, &debug_utils, &builtins,
-      native_command_buffer, /*usage_flags=*/0, VK_NULL_HANDLE, binding_table,
+      native_command_buffer, /*usage_flags=*/0, binding_table,
       /*bda_publication=*/nullptr, /*bda_binding_cache=*/nullptr,
       /*profile_marker=*/nullptr, iree_allocator_system()));
 
@@ -284,6 +284,24 @@ TEST_F(VulkanCommandBufferTest, ReplaysDebugGroupsAsDebugUtilsLabels) {
   EXPECT_FLOAT_EQ(48.0f / 255.0f, capture.color[2]);
   EXPECT_FLOAT_EQ(64.0f / 255.0f, capture.color[3]);
   g_native_replay_capture = nullptr;
+}
+
+TEST_F(VulkanCommandBufferTest, IndirectTransferRequiresPerIssueRecording) {
+  CommandBufferPtr command_buffer = CreateCommandBuffer(
+      /*binding_capacity=*/1, IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT);
+  ASSERT_NE(command_buffer, nullptr);
+
+  constexpr uint8_t kPattern = 0xA5;
+  IREE_ASSERT_OK(iree_hal_command_buffer_begin(command_buffer.get()));
+  IREE_ASSERT_OK(iree_hal_command_buffer_fill_buffer(
+      command_buffer.get(),
+      iree_hal_make_indirect_buffer_ref(/*buffer_slot=*/0, /*offset=*/0,
+                                        /*length=*/4),
+      &kPattern, sizeof(kPattern), IREE_HAL_FILL_FLAG_NONE));
+  IREE_ASSERT_OK(iree_hal_command_buffer_end(command_buffer.get()));
+
+  EXPECT_TRUE(iree_hal_vulkan_command_buffer_requires_per_issue_recording(
+      command_buffer.get()));
 }
 
 TEST_F(VulkanCommandBufferTest, SystemScopeUsesHostMemoryDomain) {
@@ -318,7 +336,7 @@ TEST_F(VulkanCommandBufferTest, SystemScopeUsesHostMemoryDomain) {
 
   IREE_ASSERT_OK(iree_hal_vulkan_command_buffer_record_native(
       command_buffer.get(), &syms, logical_device, &debug_utils, &builtins,
-      native_command_buffer, /*usage_flags=*/0, VK_NULL_HANDLE, binding_table,
+      native_command_buffer, /*usage_flags=*/0, binding_table,
       /*bda_publication=*/nullptr, /*bda_binding_cache=*/nullptr,
       /*profile_marker=*/nullptr, iree_allocator_system()));
 
@@ -487,9 +505,8 @@ TEST_F(VulkanCommandBufferTest,
 
     IREE_ASSERT_OK(iree_hal_vulkan_command_buffer_record_native(
         command_buffer.get(), &syms, logical_device, &debug_utils, &builtins,
-        native_command_buffer, /*usage_flags=*/0, VK_NULL_HANDLE, binding_table,
-        &publication, &binding_cache, /*profile_marker=*/nullptr,
-        iree_allocator_system()));
+        native_command_buffer, /*usage_flags=*/0, binding_table, &publication,
+        &binding_cache, /*profile_marker=*/nullptr, iree_allocator_system()));
 
     EXPECT_EQ(published_target_address, 0x1004u);
     ASSERT_EQ(capture.pipeline_barrier_count, 3);

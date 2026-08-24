@@ -726,15 +726,6 @@ TEST_P(BdaSpirvTest, CommandBufferCachesBdaPublicationRequirements) {
       iree_hal_vulkan_command_buffer_has_native_commands(command_buffer));
   EXPECT_EQ(iree_hal_vulkan_command_buffer_dispatch_count(command_buffer), 2u);
 
-  iree_hal_vulkan_command_buffer_descriptor_requirements_t requirements = {0};
-  IREE_ASSERT_OK(
-      iree_hal_vulkan_command_buffer_native_descriptor_pool_requirements(
-          command_buffer, &requirements));
-  EXPECT_EQ(requirements.set_count, 0u);
-  EXPECT_EQ(requirements.sampler_count, 0u);
-  EXPECT_EQ(requirements.uniform_buffer_count, 0u);
-  EXPECT_EQ(requirements.storage_buffer_count, 0u);
-
   iree_device_size_t bda_publication_length = 0;
   IREE_ASSERT_OK(iree_hal_vulkan_command_buffer_native_bda_publication_length(
       command_buffer, &bda_publication_length));

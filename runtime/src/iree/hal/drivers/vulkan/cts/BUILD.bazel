@@ -403,22 +403,6 @@ iree_runtime_cc_test(
 )
 
 iree_runtime_cc_test(
-    name = "queue_descriptor_cache_tests",
-    srcs = [
-        "queue_descriptor_cache_test.cc",
-        "//runtime/src/iree/hal/cts/util:test_main.cc",
-    ],
-    deps = [
-        ":backends",
-        "//runtime/src/iree/base/tooling:flags",
-        "//runtime/src/iree/hal",
-        "//runtime/src/iree/hal/cts/util:registry",
-        "//runtime/src/iree/hal/cts/util:test_base",
-        "//runtime/src/iree/testing:gtest",
-    ],
-)
-
-iree_runtime_cc_test(
     name = "semaphore_submission_tests",
     srcs = ["//runtime/src/iree/hal/cts/util:test_main.cc"],
     deps = [

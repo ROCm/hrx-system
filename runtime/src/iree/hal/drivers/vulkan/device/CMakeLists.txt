@@ -115,7 +115,7 @@ iree_spirv_asm_module(
   OUT
     "fill_unaligned_generated.spv"
   TARGET_ENV
-    "spv1.0"
+    "vulkan1.3"
   TESTONLY
   PUBLIC
 )
@@ -130,7 +130,7 @@ iree_spirv_asm_module(
   OUT
     "update_unaligned_generated.spv"
   TARGET_ENV
-    "spv1.0"
+    "vulkan1.3"
   TESTONLY
   PUBLIC
 )

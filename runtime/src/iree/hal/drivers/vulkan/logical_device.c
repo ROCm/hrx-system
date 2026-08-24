@@ -642,8 +642,6 @@ static void iree_hal_vulkan_native_replay_cache_stats_accumulate(
       target->publication_skip_count, source->publication_skip_count);
   target->publication_update_count = iree_hal_vulkan_stats_saturating_add(
       target->publication_update_count, source->publication_update_count);
-  target->descriptor_bypass_count = iree_hal_vulkan_stats_saturating_add(
-      target->descriptor_bypass_count, source->descriptor_bypass_count);
   target->profile_bypass_count = iree_hal_vulkan_stats_saturating_add(
       target->profile_bypass_count, source->profile_bypass_count);
   target->one_shot_bypass_count = iree_hal_vulkan_stats_saturating_add(

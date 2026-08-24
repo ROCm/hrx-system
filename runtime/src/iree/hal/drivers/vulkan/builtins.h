@@ -28,20 +28,14 @@ typedef struct iree_hal_vulkan_builtins_t {
   // Vulkan logical device owning all built-in handles.
   VkDevice logical_device;
 
-  // Required descriptor offset alignment for storage buffer descriptors.
-  VkDeviceSize min_storage_buffer_offset_alignment;
-
-  // Descriptor set layout for built-in storage-buffer operands.
-  VkDescriptorSetLayout storage_buffer_descriptor_set_layout;
-
-  // Pipeline layout for built-in storage-buffer patch pipelines.
-  VkPipelineLayout storage_buffer_pipeline_layout;
+  // Push-constant-only layout shared by the edge-patch pipelines.
+  VkPipelineLayout edge_patch_pipeline_layout;
 
   // Compute pipeline patching partial dwords for unaligned fills.
-  VkPipeline fill_pipeline;
+  VkPipeline fill_edge_pipeline;
 
   // Compute pipeline patching partial dwords for unaligned updates.
-  VkPipeline update_pipeline;
+  VkPipeline update_edge_pipeline;
 
   // BDA compute pipelines implementing byte-granular fills and copies.
   iree_hal_vulkan_byte_transfer_pipelines_t byte_transfer_pipelines;
@@ -66,45 +60,22 @@ void iree_hal_vulkan_builtins_deinitialize(
 // The aligned interior, if any, remains the caller's responsibility and should
 // use vkCmdFillBuffer. Edge dwords are patched atomically so concurrent fills
 // of disjoint byte ranges cannot conflict through implementation widening.
-// |target_offset| is relative to |target_buffer|.
-iree_status_t iree_hal_vulkan_builtins_record_fill_unaligned(
+// |target_address| identifies the first byte of the complete fill range.
+iree_status_t iree_hal_vulkan_builtins_record_fill_edges(
     const iree_hal_vulkan_builtins_t* builtins, VkCommandBuffer command_buffer,
-    VkDescriptorPool descriptor_pool, VkBuffer target_buffer,
-    VkDeviceSize target_offset, VkDeviceSize length, const uint8_t* pattern,
+    VkDeviceAddress target_address, VkDeviceSize length, const uint8_t* pattern,
     iree_host_size_t pattern_length);
-
-// Returns the descriptor set count required for an unaligned fill patch.
-uint32_t iree_hal_vulkan_builtins_fill_unaligned_descriptor_set_count(
-    VkDeviceSize target_offset, VkDeviceSize length);
-
-// Records shader patches for the unaligned edges using pre-leased descriptors.
-iree_status_t iree_hal_vulkan_builtins_record_fill_unaligned_descriptor_sets(
-    const iree_hal_vulkan_builtins_t* builtins, VkCommandBuffer command_buffer,
-    const VkDescriptorSet* descriptor_sets, uint32_t descriptor_set_count,
-    VkBuffer target_buffer, VkDeviceSize target_offset, VkDeviceSize length,
-    const uint8_t* pattern, iree_host_size_t pattern_length);
-
-// Returns the descriptor set count required for an unaligned update patch.
-uint32_t iree_hal_vulkan_builtins_update_unaligned_descriptor_set_count(
-    VkDeviceSize target_offset, VkDeviceSize length);
 
 // Records shader patches for the unaligned edges of a buffer update.
 //
 // The aligned interior, if any, remains the caller's responsibility and should
 // use vkCmdUpdateBuffer in aligned chunks. Edge dwords are patched atomically
 // so concurrent updates of disjoint byte ranges cannot conflict through
-// implementation widening. |target_offset| is relative to |target_buffer|.
-iree_status_t iree_hal_vulkan_builtins_record_update_unaligned(
+// implementation widening. |target_address| identifies the first byte of the
+// complete update range.
+iree_status_t iree_hal_vulkan_builtins_record_update_edges(
     const iree_hal_vulkan_builtins_t* builtins, VkCommandBuffer command_buffer,
-    VkDescriptorPool descriptor_pool, VkBuffer target_buffer,
-    VkDeviceSize target_offset, VkDeviceSize length, const uint8_t* source_data,
-    iree_host_size_t source_data_length);
-
-// Records shader patches for the unaligned edges of a buffer update.
-iree_status_t iree_hal_vulkan_builtins_record_update_unaligned_descriptor_sets(
-    const iree_hal_vulkan_builtins_t* builtins, VkCommandBuffer command_buffer,
-    const VkDescriptorSet* descriptor_sets, uint32_t descriptor_set_count,
-    VkBuffer target_buffer, VkDeviceSize target_offset, VkDeviceSize length,
+    VkDeviceAddress target_address, VkDeviceSize length,
     const uint8_t* source_data, iree_host_size_t source_data_length);
 
 #ifdef __cplusplus

@@ -728,29 +728,6 @@ endif()
 if(IREE_HAL_DRIVER_VULKAN)
 iree_cc_test(
   NAME
-    queue_descriptor_cache_tests
-  SRCS
-    "${PROJECT_SOURCE_DIR}/runtime/src/iree/hal/cts/util/test_main.cc"
-    "queue_descriptor_cache_test.cc"
-  DEPS
-    ::backends
-    iree::base::tooling::flags
-    iree::hal
-    iree::hal::cts::util::registry
-    iree::hal::cts::util::test_base
-    iree::testing::gtest
-  LABELS
-    "iree-build-requirement=runtime.hal.vulkan"
-    "iree-run-requirement=runtime.resource.vulkan_device"
-    "runtime-resource=vulkan-device"
-  RESOURCE_GROUP
-    iree-hal-drivers-vulkan-tests
-)
-endif()
-
-if(IREE_HAL_DRIVER_VULKAN)
-iree_cc_test(
-  NAME
     semaphore_submission_tests
   SRCS
     "${PROJECT_SOURCE_DIR}/runtime/src/iree/hal/cts/util/test_main.cc"

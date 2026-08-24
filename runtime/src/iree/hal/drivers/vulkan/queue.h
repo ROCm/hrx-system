@@ -29,7 +29,6 @@ extern "C" {
 #endif  // __cplusplus
 
 #define IREE_HAL_VULKAN_QUEUE_FRONTIER_CAPACITY 64
-#define IREE_HAL_VULKAN_QUEUE_DESCRIPTOR_BLOCK_CAPACITY 4096
 #define IREE_HAL_VULKAN_QUEUE_STAGING_SLOT_COUNT 16
 #define IREE_HAL_VULKAN_QUEUE_STAGING_SLOT_SIZE (1ull << 20)
 
@@ -40,10 +39,6 @@ typedef struct iree_hal_vulkan_queue_pending_submission_t
     iree_hal_vulkan_queue_pending_submission_t;
 typedef struct iree_hal_vulkan_queue_command_buffer_block_t
     iree_hal_vulkan_queue_command_buffer_block_t;
-typedef struct iree_hal_vulkan_queue_descriptor_block_t
-    iree_hal_vulkan_queue_descriptor_block_t;
-typedef struct iree_hal_vulkan_queue_native_descriptor_block_t
-    iree_hal_vulkan_queue_native_descriptor_block_t;
 typedef struct iree_hal_vulkan_queue_bda_publication_block_t
     iree_hal_vulkan_queue_bda_publication_block_t;
 typedef struct iree_hal_vulkan_queue_timestamp_query_block_t
@@ -257,36 +252,6 @@ typedef struct iree_hal_vulkan_queue_t {
   // Tail of deferred submissions whose software waits have resolved.
   iree_hal_vulkan_queue_pending_submission_t* ready_tail;
 
-  // Queue-owned descriptor cache for built-in command packets.
-  struct {
-    // First descriptor block owned by this queue.
-    iree_hal_vulkan_queue_descriptor_block_t* head;
-
-    // Last descriptor block owned by this queue.
-    iree_hal_vulkan_queue_descriptor_block_t* tail;
-
-    // Next descriptor block considered for acquisition.
-    iree_hal_vulkan_queue_descriptor_block_t* cursor;
-
-    // Number of descriptor blocks currently owned by this queue.
-    uint32_t block_count;
-  } descriptor_cache;
-
-  // Queue-owned descriptor pool cache for native command recording.
-  struct {
-    // First native descriptor block owned by this queue.
-    iree_hal_vulkan_queue_native_descriptor_block_t* head;
-
-    // Last native descriptor block owned by this queue.
-    iree_hal_vulkan_queue_native_descriptor_block_t* tail;
-
-    // Next native descriptor block considered for acquisition.
-    iree_hal_vulkan_queue_native_descriptor_block_t* cursor;
-
-    // Number of native descriptor blocks currently owned by this queue.
-    uint32_t block_count;
-  } native_descriptor_cache;
-
   // Queue-owned BDA binding-table publication cache.
   struct {
     // First BDA publication block owned by this queue.
@@ -363,9 +328,6 @@ typedef struct iree_hal_vulkan_queue_t {
 
     // Cached replay hits that republished changed BDA table bytes.
     uint64_t publication_update_count;
-
-    // Cached replay acquisitions bypassed because descriptors were required.
-    uint64_t descriptor_bypass_count;
 
     // Cached replay acquisitions bypassed because profiling was active.
     uint64_t profile_bypass_count;
