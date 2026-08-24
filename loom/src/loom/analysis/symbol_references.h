@@ -77,6 +77,8 @@ typedef struct loom_symbol_reference_occurrence_t {
   loom_symbol_reference_occurrence_kind_t kind;
   // Compile-time graph role declared by the owning attribute schema.
   loom_symbol_reference_role_t role;
+  // Root region slot on the source symbol plus one, or zero for its contract.
+  uint8_t source_root_region_index_plus_one;
   // Attribute index on user_op when the occurrence came from an op attribute.
   uint16_t attr_index;
   // Operation that owns the occurrence, or NULL for module-root records.
@@ -106,10 +108,12 @@ typedef struct loom_template_demand_t {
   loom_symbol_id_t family_symbol_id;
   // Symbol whose definition owns the application.
   loom_symbol_id_t source_symbol_id;
+  // Root region slot on source_symbol_id plus one, or zero for its contract.
+  uint8_t source_root_region_index_plus_one;
 } loom_template_demand_t;
 
-static_assert(sizeof(loom_template_demand_t) == 16,
-              "template demands must remain 16 bytes");
+static_assert(sizeof(loom_template_demand_t) == 24,
+              "template demands must remain 24 bytes");
 
 // One available template provider indexed by its implemented family.
 typedef struct loom_template_provider_reference_t {

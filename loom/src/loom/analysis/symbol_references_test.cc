@@ -238,8 +238,73 @@ func.def @entry() -> (index) {
   ASSERT_NE(call_occurrence->user_op, nullptr);
   EXPECT_EQ(call_occurrence->user_op->kind, LOOM_OP_FUNC_CALL);
 
+  EXPECT_EQ(read_occurrence->source_root_region_index_plus_one, 1u);
+  EXPECT_EQ(write_occurrence->source_root_region_index_plus_one, 1u);
+  EXPECT_EQ(call_occurrence->source_root_region_index_plus_one, 1u);
+
   EXPECT_EQ(table.symbols[state].incoming_count, 2u);
   EXPECT_EQ(table.symbols[reader].incoming_count, 1u);
+}
+
+TEST_F(SymbolReferencesTest, OccurrencesRetainContractAndRootRegionOrigins) {
+  ModulePtr module = ParseModule(R"(
+target.generic<reference> @header_target
+func.decl @body_dependency()
+
+func.def target(@header_target) @single_root() {
+  func.call @body_dependency() : () -> ()
+  func.return
+}
+
+test.record @config_dependency
+test.record @implementation_dependency
+test.split_func @split_root() {
+  test.symbol_array_attrs [@config_dependency] using []
+  test.yield
+} launch {
+  test.symbol_array_attrs [@implementation_dependency] using []
+  test.yield
+}
+)");
+
+  const loom_symbol_id_t header_target =
+      FindSymbol(module.get(), IREE_SV("header_target"));
+  const loom_symbol_id_t body_dependency =
+      FindSymbol(module.get(), IREE_SV("body_dependency"));
+  const loom_symbol_id_t single_root =
+      FindSymbol(module.get(), IREE_SV("single_root"));
+  const loom_symbol_id_t config_dependency =
+      FindSymbol(module.get(), IREE_SV("config_dependency"));
+  const loom_symbol_id_t implementation_dependency =
+      FindSymbol(module.get(), IREE_SV("implementation_dependency"));
+  const loom_symbol_id_t split_root =
+      FindSymbol(module.get(), IREE_SV("split_root"));
+
+  const loom_symbol_reference_table_t table = BuildTable(module.get());
+
+  const loom_symbol_reference_occurrence_t* header_occurrence =
+      FindOccurrence(table, single_root, header_target,
+                     LOOM_SYMBOL_REFERENCE_OCCURRENCE_SYMBOL_ATTR);
+  ASSERT_NE(header_occurrence, nullptr);
+  EXPECT_EQ(header_occurrence->source_root_region_index_plus_one, 0u);
+
+  const loom_symbol_reference_occurrence_t* body_occurrence =
+      FindOccurrence(table, single_root, body_dependency,
+                     LOOM_SYMBOL_REFERENCE_OCCURRENCE_CALL);
+  ASSERT_NE(body_occurrence, nullptr);
+  EXPECT_EQ(body_occurrence->source_root_region_index_plus_one, 1u);
+
+  const loom_symbol_reference_occurrence_t* config_occurrence =
+      FindOccurrence(table, split_root, config_dependency,
+                     LOOM_SYMBOL_REFERENCE_OCCURRENCE_SYMBOL_ATTR);
+  ASSERT_NE(config_occurrence, nullptr);
+  EXPECT_EQ(config_occurrence->source_root_region_index_plus_one, 1u);
+
+  const loom_symbol_reference_occurrence_t* implementation_occurrence =
+      FindOccurrence(table, split_root, implementation_dependency,
+                     LOOM_SYMBOL_REFERENCE_OCCURRENCE_SYMBOL_ATTR);
+  ASSERT_NE(implementation_occurrence, nullptr);
+  EXPECT_EQ(implementation_occurrence->source_root_region_index_plus_one, 2u);
 }
 
 TEST_F(SymbolReferencesTest, TemplateDemandsRetainOwningSymbol) {
@@ -286,6 +351,7 @@ func.def public @entry(%arg: i32) -> (i32) {
     const loom_template_demand_t& demand =
         table.template_demands.values[demand_id];
     EXPECT_EQ(demand.source_symbol_id, source_symbol_id);
+    EXPECT_EQ(demand.source_root_region_index_plus_one, 1u);
     EXPECT_EQ(demand.family_symbol_id, family_symbol_id);
     ASSERT_NE(demand.apply_op, nullptr);
     EXPECT_EQ(demand.apply_op->kind, LOOM_OP_TEMPLATE_APPLY);

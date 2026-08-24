@@ -63,6 +63,7 @@ from loom.format.bytecode.writer import (
     LOCATION_MODE_NO_LOCATIONS,
     LOCATION_MODE_SOURCE_LOCATIONS,
     SECTION_LOCATIONS,
+    SECTION_SYMBOL_REFERENCES,
     write_module,
 )
 from loom.format.text.parser import Parser
@@ -164,6 +165,23 @@ def _section_kinds(data: bytes | bytearray) -> list[int]:
         section_kinds.append(struct.unpack_from("<H", data, offset)[0])
         offset += 32
     return section_kinds
+
+
+def _section_payload(data: bytes, section_kind: int) -> bytes:
+    module_offset, _module_length = _module_range(data)
+    offset = module_offset
+    section_count, offset = decode_varint(data, offset)
+    for _ in range(4):
+        _count, offset = decode_varint(data, offset)
+    for _ in range(section_count):
+        kind = struct.unpack_from("<H", data, offset)[0]
+        section_offset = struct.unpack_from("<Q", data, offset + 8)[0]
+        section_length = struct.unpack_from("<Q", data, offset + 16)[0]
+        if kind == section_kind:
+            absolute_offset = module_offset + section_offset
+            return data[absolute_offset : absolute_offset + section_length]
+        offset += 32
+    raise AssertionError(f"missing section kind {section_kind}")
 
 
 def _test_ptr_register_type(
@@ -555,6 +573,54 @@ class TestFileHeader:
         m1 = _make_func_module()
         m2 = _make_func_module()
         assert write_module(m1) == write_module(m2)
+
+
+class TestSymbolReferencesSection:
+    def test_records_retain_contract_and_root_region_origins(self) -> None:
+        module = _text_parser().parse(
+            "test.record @config_dependency\n"
+            "test.record @implementation_dependency\n"
+            "template.decl @demo.contract() -> (index)\n"
+            "test.split_func @split_root() {\n"
+            "  test.symbol_array_attrs [@config_dependency] using []\n"
+            "  test.yield\n"
+            "} launch {\n"
+            "  test.symbol_array_attrs [@implementation_dependency] using []\n"
+            "  %result = template.apply<@demo.contract>() : () -> (index)\n"
+            "  test.yield\n"
+            "}\n"
+        )
+        data = _section_payload(write_module(module), SECTION_SYMBOL_REFERENCES)
+        offset = 0
+        symbol_count, offset = decode_varint(data, offset)
+        dependency_count, offset = decode_varint(data, offset)
+        template_demand_count, offset = decode_varint(data, offset)
+        module_dependency_count, offset = decode_varint(data, offset)
+        assert (symbol_count, dependency_count, template_demand_count) == (4, 3, 1)
+        assert module_dependency_count == 0
+
+        rows: list[tuple[list[tuple[int, int]], list[tuple[int, int]]]] = []
+        for _ in range(symbol_count):
+            row_dependency_count, offset = decode_varint(data, offset)
+            dependencies = []
+            for _ in range(row_dependency_count):
+                source_root, offset = decode_varint(data, offset)
+                target_symbol, offset = decode_varint(data, offset)
+                dependencies.append((source_root, target_symbol))
+            row_template_demand_count, offset = decode_varint(data, offset)
+            template_demands = []
+            for _ in range(row_template_demand_count):
+                source_root, offset = decode_varint(data, offset)
+                family_symbol, offset = decode_varint(data, offset)
+                template_demands.append((source_root, family_symbol))
+            rows.append((dependencies, template_demands))
+
+        assert rows[:3] == [([], []), ([], []), ([], [])]
+        assert rows[3] == (
+            [(2, 2), (2, 1), (1, 0)],
+            [(2, 2)],
+        )
+        assert offset == len(data)
 
 
 class TestModuleDirectory:

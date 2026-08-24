@@ -337,6 +337,121 @@ func.def @unused_private(%x: i32) -> (i32) {
   EXPECT_EQ(planned_helper->cause_ordinal, planned_entry->ordinal);
 }
 
+TEST_F(LinkPlannerTest,
+       FacetRootsFilterAndUpgradeMultiRegionClosureAcrossProviders) {
+  loom_module_t* module = Parse(IREE_SV(R"(
+test.record @config_dependency
+test.record @implementation_dependency
+
+test.split_func @split_root() {
+  test.symbol_array_attrs [@config_dependency] using []
+  test.yield
+} launch {
+  test.symbol_array_attrs [@implementation_dependency] using []
+  test.yield
+}
+)"));
+  const std::vector<uint8_t> bytecode = WriteModule(module);
+
+  auto verify_index = [&](const loom_link_module_index_t* index) {
+    auto find_plan_facet = [](const loom_link_plan_t* plan,
+                              iree_host_size_t symbol_ordinal,
+                              uint8_t source_root_region_index_plus_one) {
+      for (iree_host_size_t i = 0; i < loom_link_plan_facet_count(plan); ++i) {
+        const loom_link_plan_facet_t* facet = loom_link_plan_facet_at(plan, i);
+        if (facet->symbol_ordinal == symbol_ordinal &&
+            facet->source_root_region_index_plus_one ==
+                source_root_region_index_plus_one) {
+          return facet;
+        }
+      }
+      return static_cast<const loom_link_plan_facet_t*>(nullptr);
+    };
+    const loom_link_module_index_module_t* indexed_module =
+        loom_link_module_index_module_at(index, 0);
+    ASSERT_NE(indexed_module, nullptr);
+    const loom_link_module_index_symbol_t* root =
+        loom_link_module_index_lookup_private(index, indexed_module,
+                                              IREE_SV("split_root"));
+    const loom_link_module_index_symbol_t* config_dependency =
+        loom_link_module_index_lookup_private(index, indexed_module,
+                                              IREE_SV("config_dependency"));
+    const loom_link_module_index_symbol_t* implementation_dependency =
+        loom_link_module_index_lookup_private(
+            index, indexed_module, IREE_SV("implementation_dependency"));
+    ASSERT_NE(root, nullptr);
+    ASSERT_NE(config_dependency, nullptr);
+    ASSERT_NE(implementation_dependency, nullptr);
+
+    const loom_link_plan_root_facet_t config_root = {
+        /*.symbol_ordinal=*/root->ordinal,
+        /*.source_root_region_index_plus_one=*/1,
+    };
+    loom_link_plan_options_t config_options = {};
+    config_options.mode = LOOM_LINK_PLAN_SELECTIVE;
+    config_options.root_facets = {1, &config_root};
+    PlanPtr config_plan = BuildPlan(index, &config_options);
+    EXPECT_TRUE(ContainsSymbol(config_plan.get(), root));
+    EXPECT_TRUE(ContainsSymbol(config_plan.get(), config_dependency));
+    EXPECT_FALSE(ContainsSymbol(config_plan.get(), implementation_dependency));
+    EXPECT_TRUE(
+        loom_link_plan_contains_facet(config_plan.get(), root->ordinal, 0));
+    EXPECT_TRUE(
+        loom_link_plan_contains_facet(config_plan.get(), root->ordinal, 1));
+    EXPECT_FALSE(
+        loom_link_plan_contains_facet(config_plan.get(), root->ordinal, 2));
+    const loom_link_plan_facet_t* config_root_facet =
+        find_plan_facet(config_plan.get(), root->ordinal, 1);
+    const loom_link_plan_facet_t* config_dependency_facet =
+        find_plan_facet(config_plan.get(), config_dependency->ordinal, 0);
+    ASSERT_NE(config_root_facet, nullptr);
+    ASSERT_NE(config_dependency_facet, nullptr);
+    EXPECT_EQ(config_dependency_facet->cause_ordinal,
+              config_root_facet->ordinal);
+
+    const loom_link_plan_root_facet_t upgraded_roots[] = {
+        config_root,
+        {
+            /*.symbol_ordinal=*/root->ordinal,
+            /*.source_root_region_index_plus_one=*/2,
+        },
+    };
+    loom_link_plan_options_t upgraded_options = {};
+    upgraded_options.mode = LOOM_LINK_PLAN_SELECTIVE;
+    upgraded_options.root_facets = {IREE_ARRAYSIZE(upgraded_roots),
+                                    upgraded_roots};
+    PlanPtr upgraded_plan = BuildPlan(index, &upgraded_options);
+    EXPECT_TRUE(ContainsSymbol(upgraded_plan.get(), root));
+    EXPECT_TRUE(ContainsSymbol(upgraded_plan.get(), config_dependency));
+    EXPECT_TRUE(ContainsSymbol(upgraded_plan.get(), implementation_dependency));
+    EXPECT_TRUE(
+        loom_link_plan_contains_facet(upgraded_plan.get(), root->ordinal, 0));
+    EXPECT_TRUE(
+        loom_link_plan_contains_facet(upgraded_plan.get(), root->ordinal, 1));
+    EXPECT_TRUE(
+        loom_link_plan_contains_facet(upgraded_plan.get(), root->ordinal, 2));
+    const loom_link_plan_facet_t* implementation_root_facet =
+        find_plan_facet(upgraded_plan.get(), root->ordinal, 2);
+    const loom_link_plan_facet_t* implementation_dependency_facet =
+        find_plan_facet(upgraded_plan.get(), implementation_dependency->ordinal,
+                        0);
+    ASSERT_NE(implementation_root_facet, nullptr);
+    ASSERT_NE(implementation_dependency_facet, nullptr);
+    EXPECT_EQ(implementation_dependency_facet->cause_ordinal,
+              implementation_root_facet->ordinal);
+  };
+
+  IndexPtr materialized_index = CreateIndex();
+  AddMaterialized(materialized_index.get(), module, IREE_SV("materialized"),
+                  LOOM_LINK_PROVIDER_ROLE_INPUT);
+  verify_index(materialized_index.get());
+
+  IndexPtr bytecode_index = CreateIndex();
+  AddBytecode(bytecode_index.get(), bytecode, IREE_SV("module.loombc"),
+              LOOM_LINK_PROVIDER_ROLE_INPUT);
+  verify_index(bytecode_index.get());
+}
+
 TEST_F(LinkPlannerTest, SelectiveRootIgnoresModuleAvailabilityReferences) {
   loom_module_t* module = Parse(IREE_SV(R"(
 test.record @available

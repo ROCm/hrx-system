@@ -522,6 +522,44 @@ class TestMalformedSymbolReferences:
         with pytest.raises(BytecodeError, match="declared records exceed"):
             read_module(bytes(data))
 
+    def test_dependency_source_root_must_belong_to_owning_symbol(self) -> None:
+        module = Module(name="test")
+        _make_func(module, "target", [], is_declaration=True)
+        _make_func(
+            module,
+            "caller",
+            [],
+            ops=[
+                Operation(
+                    name="func.call",
+                    attributes={"callee": SymbolName("target")},
+                ),
+                Operation(name="test.yield"),
+            ],
+        )
+        data = bytearray(write_module(module))
+        module_offset, _module_length = _module_range(data)
+        _entry_offset, section_offset, _section_length = _find_section_entry(
+            data, SECTION_SYMBOL_REFERENCES
+        )
+        offset = module_offset + section_offset
+        symbol_count, offset = decode_varint(data, offset)
+        dependency_count, offset = decode_varint(data, offset)
+        template_demand_count, offset = decode_varint(data, offset)
+        module_dependency_count, offset = decode_varint(data, offset)
+        assert (symbol_count, dependency_count, template_demand_count) == (2, 1, 0)
+        assert module_dependency_count == 0
+        target_dependency_count, offset = decode_varint(data, offset)
+        target_demand_count, offset = decode_varint(data, offset)
+        caller_dependency_count, offset = decode_varint(data, offset)
+        assert (target_dependency_count, target_demand_count) == (0, 0)
+        assert caller_dependency_count == 1
+        assert data[offset] == 1
+        data[offset] = 2
+
+        with pytest.raises(BytecodeError, match="source root region index"):
+            read_module(bytes(data))
+
 
 class TestMalformedLocationMode:
     def test_full_locations_mode_is_rejected_until_implemented(self) -> None:

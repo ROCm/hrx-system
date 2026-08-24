@@ -170,6 +170,7 @@ static iree_status_t loom_bytecode_reader_decode_region_payloads(
     iree_host_size_t* payload_index,
     loom_bytecode_region_payload_metadata_t* payloads,
     loom_bytecode_symbol_metadata_t* symbol_metadata) {
+  symbol_metadata->root_region_count = vtable->region_count;
   const uint64_t count_offset =
       loom_bytecode_reader_cursor_absolute_position(cursor);
   uint64_t payload_count = 0;

@@ -39,6 +39,40 @@ typedef struct loom_link_kernel_config_symbol_resolver_t {
   loom_module_t* output_module;
 } loom_link_kernel_config_symbol_resolver_t;
 
+iree_status_t loom_link_plan_build_kernel_configuration(
+    const loom_link_module_index_t* index,
+    iree_host_size_t kernel_symbol_ordinal, iree_allocator_t allocator,
+    loom_link_plan_t** out_plan) {
+  IREE_ASSERT_ARGUMENT(index);
+  IREE_ASSERT_ARGUMENT(out_plan);
+  *out_plan = NULL;
+  const loom_link_module_index_symbol_t* kernel =
+      loom_link_module_index_symbol_at(index, kernel_symbol_ordinal);
+  if (kernel == NULL) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "kernel symbol ordinal is out of range");
+  }
+  const loom_link_symbol_facet_schema_t schema = kernel->facets.schema;
+  if (!iree_any_bit_set(schema.interfaces, LOOM_SYMBOL_INTERFACE_KERNEL)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "selected symbol is not a kernel");
+  }
+  if (schema.kernel_configuration_region_index_plus_one == 0) {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "selected kernel has no configuration root");
+  }
+  const loom_link_plan_root_facet_t root = {
+      .symbol_ordinal = kernel_symbol_ordinal,
+      .source_root_region_index_plus_one =
+          schema.kernel_configuration_region_index_plus_one,
+  };
+  loom_link_plan_options_t options = {0};
+  options.mode = LOOM_LINK_PLAN_SELECTIVE;
+  options.root_facets.count = 1;
+  options.root_facets.values = &root;
+  return loom_link_plan_build(index, &options, allocator, out_plan);
+}
+
 static loom_diagnostic_sink_t loom_link_kernel_config_diagnostic_sink(
     const loom_link_plan_materialization_environment_t* environment,
     const loom_link_module_index_provider_t* provider) {
@@ -62,6 +96,14 @@ static iree_status_t loom_link_kernel_config_resolve_source(
   if (!loom_link_plan_contains_symbol(plan, kernel_symbol_ordinal)) {
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                             "kernel symbol is not selected by the link plan");
+  }
+  if (!loom_link_plan_contains_facet(
+          plan, kernel_symbol_ordinal,
+          indexed_symbol->facets.schema
+              .kernel_configuration_region_index_plus_one)) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "kernel configuration is not selected by the link plan");
   }
   const loom_link_module_index_provider_t* provider =
       loom_link_module_index_symbol_provider(index, indexed_symbol);

@@ -128,6 +128,8 @@ typedef struct loom_bytecode_symbol_metadata_t {
   // Workload/configuration entry in this symbol's payload list plus one, or
   // zero when absent.
   uint8_t kernel_workload_region_payload_ordinal_plus_one;
+  // Number of root region slots declared by the defining operation.
+  uint8_t root_region_count;
   // Global declaration-local value count, or zero for non-global symbols.
   uint64_t local_value_count;
   // Source SYMBOLS ordinal naming the provider's template family, or
@@ -263,6 +265,10 @@ typedef struct loom_bytecode_module_metadata_t {
   // The module-root slice begins at zero; symbol slices are described by
   // symbol_references. Targets may repeat within a slice.
   uint32_t* dependency_symbol_indices;
+  // Arena-owned source root region indices plus one parallel to
+  // dependency_symbol_indices. Zero identifies a source symbol contract or
+  // module-root occurrence.
+  uint8_t* dependency_source_root_region_indices_plus_one;
   // One dependency and template-demand slice per SYMBOLS ordinal.
   loom_bytecode_symbol_reference_metadata_t* symbol_references;
   // Total number of template-family demand occurrences.
@@ -270,6 +276,9 @@ typedef struct loom_bytecode_module_metadata_t {
   // Arena-owned family SYMBOLS ordinals in deterministic demand order and
   // sliced by symbol_references. Ordinals may repeat within a slice.
   uint32_t* template_demand_family_symbol_ordinals;
+  // Arena-owned source root region indices plus one parallel to
+  // template_demand_family_symbol_ordinals.
+  uint8_t* template_demand_source_root_region_indices_plus_one;
 } loom_bytecode_module_metadata_t;
 
 // Resolves a source STRINGS ordinal to its module-local SYMBOLS ordinal.

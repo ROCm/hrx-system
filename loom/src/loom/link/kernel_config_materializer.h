@@ -25,6 +25,17 @@ typedef struct loom_link_kernel_config_materialization_t {
   loom_symbol_ref_t configuration_function;
 } loom_link_kernel_config_materialization_t;
 
+// Builds a selective plan rooted at one kernel contract and configuration
+// facet. The implementation facet and its exclusive closure remain unselected.
+//
+// |kernel_symbol_ordinal| is an index-wide identity for a kernel definition
+// with an independently bounded configuration root. Materialized, text, and
+// bytecode providers use the same indexed facet schema.
+iree_status_t loom_link_plan_build_kernel_configuration(
+    const loom_link_module_index_t* index,
+    iree_host_size_t kernel_symbol_ordinal, iree_allocator_t allocator,
+    loom_link_plan_t** out_plan);
+
 // Materializes the contract and launch configuration of one selected bytecode
 // kernel without reading its implementation root region.
 //

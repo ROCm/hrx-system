@@ -193,6 +193,7 @@ class BytecodeReader:
         self._module_op_count = 0
         self._wire_symbol_names: list[str] = []
         self._wire_symbol_kinds: list[int] = []
+        self._wire_symbol_root_region_counts: list[int] = []
 
     def read(self) -> Module:
         """Read and return the module."""
@@ -1046,6 +1047,7 @@ class BytecodeReader:
                 source_module = self._strings[source_module_id]
                 source_symbol = self._strings[source_symbol_id]
 
+            root_region_count = 0
             if kind <= 4:  # Function and template signature symbol kinds.
                 op_table_index_plus1, offset = decode_varint(sym_data, offset)
                 if op_table_index_plus1 == 0:
@@ -1163,6 +1165,7 @@ class BytecodeReader:
                     )
                 )
                 decoded_region_payload_count += region_payload_count
+                root_region_count = len(regions)
 
                 # Build the attributes dict for this func-like op.
                 symbol_field = self._symbol_field_for_op(op_name)
@@ -1307,15 +1310,17 @@ class BytecodeReader:
                 )
                 module.add_symbol(symbol)
             elif kind == SymbolKind.RECORD.value:
-                offset, region_payload_count = self._read_record_symbol_payload(
-                    sym_data,
-                    offset,
-                    ir_data,
-                    module,
-                    name,
-                    flags,
-                    source_module,
-                    source_symbol,
+                offset, region_payload_count, root_region_count = (
+                    self._read_record_symbol_payload(
+                        sym_data,
+                        offset,
+                        ir_data,
+                        module,
+                        name,
+                        flags,
+                        source_module,
+                        source_symbol,
+                    )
                 )
                 decoded_region_payload_count += region_payload_count
             elif kind == SYMBOL_KIND_ANCHOR:
@@ -1323,6 +1328,7 @@ class BytecodeReader:
                     raise BytecodeError("provider anchor must be private and unflagged")
             else:
                 raise BytecodeError(f"unsupported symbol kind: {kind}")
+            self._wire_symbol_root_region_counts.append(root_region_count)
 
         for (
             symbol,
@@ -1425,7 +1431,10 @@ class BytecodeReader:
         if symbol_count != len(self._wire_symbol_names):
             raise BytecodeError("SYMBOL_REFERENCES row count does not match SYMBOLS")
         minimum_encoded_bytes = (
-            1 + symbol_count * 2 + total_dependency_count + total_template_demand_count
+            1
+            + symbol_count * 2
+            + total_dependency_count * 2
+            + total_template_demand_count * 2
         )
         if minimum_encoded_bytes > len(data) - offset:
             raise BytecodeError(
@@ -1437,22 +1446,34 @@ class BytecodeReader:
         if module_dependency_count > total_dependency_count:
             raise BytecodeError("module dependency count exceeds declared total")
 
-        def read_dependencies(count: int, offset: int) -> int:
+        def read_dependencies(
+            count: int, offset: int, source_root_region_count: int
+        ) -> int:
             nonlocal decoded_dependency_count
             for _ in range(count):
+                source_root_region_index_plus_one, offset = decode_varint(data, offset)
+                if source_root_region_index_plus_one > source_root_region_count:
+                    raise BytecodeError(
+                        "dependency source root region index is out of range"
+                    )
                 dependency, offset = decode_varint(data, offset)
                 if dependency >= symbol_count:
                     raise BytecodeError("dependency symbol index is out of range")
                 decoded_dependency_count += 1
             return offset
 
-        offset = read_dependencies(module_dependency_count, offset)
+        offset = read_dependencies(module_dependency_count, offset, 0)
         decoded_template_demand_count = 0
-        for _ in range(symbol_count):
+        for symbol_index in range(symbol_count):
+            source_root_region_count = self._wire_symbol_root_region_counts[
+                symbol_index
+            ]
             dependency_count, offset = decode_varint(data, offset)
             if dependency_count > total_dependency_count - decoded_dependency_count:
                 raise BytecodeError("symbol dependency count exceeds declared total")
-            offset = read_dependencies(dependency_count, offset)
+            offset = read_dependencies(
+                dependency_count, offset, source_root_region_count
+            )
 
             template_demand_count, offset = decode_varint(data, offset)
             if (
@@ -1463,6 +1484,11 @@ class BytecodeReader:
                     "symbol contract demand count exceeds declared total"
                 )
             for _ in range(template_demand_count):
+                source_root_region_index_plus_one, offset = decode_varint(data, offset)
+                if source_root_region_index_plus_one > source_root_region_count:
+                    raise BytecodeError(
+                        "template demand source root region index is out of range"
+                    )
                 family_symbol_ordinal, offset = decode_varint(data, offset)
                 if family_symbol_ordinal >= symbol_count:
                     raise BytecodeError(
@@ -1487,7 +1513,7 @@ class BytecodeReader:
         flags: int,
         source_module: str,
         source_symbol: str,
-    ) -> tuple[int, int]:
+    ) -> tuple[int, int, int]:
         """Read one RECORD symbol payload and append it to ``module``."""
         op_table_index_plus1, offset = decode_varint(sym_data, offset)
         if op_table_index_plus1 == 0:
@@ -1535,7 +1561,7 @@ class BytecodeReader:
             source_symbol=source_symbol,
         )
         module.add_symbol(symbol)
-        return offset, region_payload_count
+        return offset, region_payload_count, len(record_regions)
 
     def _validate_symbol_header(self, flags: int, kind: int, visibility: int) -> None:
         """Validate the common symbol record header."""

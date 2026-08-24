@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import struct
 from collections.abc import Iterable, Mapping
+from dataclasses import dataclass
 from typing import Any, ClassVar, cast
 
 from loom.dsl import FuncLikeInterface, SymbolReferenceRole
@@ -180,7 +181,7 @@ BYTECODE_IR_KIND_BY_TYPE_KIND: dict[int, TypeKind] = {
 
 # File magic and version.
 MAGIC = b"LOOM"
-FORMAT_VERSION = 30
+FORMAT_VERSION = 31
 PRODUCER = "loom-py"
 
 SOURCE_TRIVIA_LEADING_BLANK_LINE = 1
@@ -272,6 +273,22 @@ class NumberingContext:
 # ============================================================================
 
 
+@dataclass(frozen=True, slots=True)
+class _SymbolReferenceSourceScope:
+    """Symbol and independently serializable root that own a reference."""
+
+    symbol_index: int | None = None
+    root_region_index_plus_one: int = 0
+
+
+@dataclass(frozen=True, slots=True)
+class _SymbolReferenceRecord:
+    """Wire symbol reference with its source contract or root region."""
+
+    source_root_region_index_plus_one: int
+    target_symbol_index: int
+
+
 class _SymbolReferenceProjectionBuilder:
     """Builds wire-symbol dependency and abstract-provider rows."""
 
@@ -280,49 +297,56 @@ class _SymbolReferenceProjectionBuilder:
         module: Module,
         wire_symbol_indices: dict[str, int],
         op_decls_by_name: Mapping[str, Any],
-        numbering: NumberingContext,
     ) -> None:
         self._module = module
         self._wire_symbol_indices = wire_symbol_indices
         self._op_decls_by_name = op_decls_by_name
-        self._numbering = numbering
-        self._module_dependencies: list[int] = []
-        self._symbol_dependencies: list[list[int]] = [[] for _ in wire_symbol_indices]
-        self._symbol_template_demands: list[list[int]] = [
+        self._module_dependencies: list[_SymbolReferenceRecord] = []
+        self._symbol_dependencies: list[list[_SymbolReferenceRecord]] = [
+            [] for _ in wire_symbol_indices
+        ]
+        self._symbol_template_demands: list[list[_SymbolReferenceRecord]] = [
             [] for _ in wire_symbol_indices
         ]
 
     def build(
         self,
     ) -> tuple[
-        tuple[int, ...],
-        tuple[tuple[int, ...], ...],
-        tuple[tuple[int, ...], ...],
+        tuple[_SymbolReferenceRecord, ...],
+        tuple[tuple[_SymbolReferenceRecord, ...], ...],
+        tuple[tuple[_SymbolReferenceRecord, ...], ...],
     ]:
         """Builds rows in the linked-list order used by the C analysis."""
+        module_scope = _SymbolReferenceSourceScope()
         for operation in self._module.body.ops:
-            self._visit_operation(None, operation)
+            self._visit_operation(module_scope, operation)
         for encoding in self._module.encodings:
-            self._visit_encoding(None, encoding)
+            self._visit_encoding(module_scope, encoding)
         return (
             tuple(reversed(self._module_dependencies)),
             tuple(tuple(reversed(row)) for row in self._symbol_dependencies),
             tuple(tuple(reversed(row)) for row in self._symbol_template_demands),
         )
 
-    def _add_dependency(self, source_symbol_index: int | None, name: str) -> None:
+    def _add_dependency(
+        self, source_scope: _SymbolReferenceSourceScope, name: str
+    ) -> None:
         try:
             target_symbol_index = self._wire_symbol_indices[name]
         except KeyError as exc:
             raise ValueError(f"unresolved symbol dependency {name!r}") from exc
-        if source_symbol_index is None:
-            self._module_dependencies.append(target_symbol_index)
+        record = _SymbolReferenceRecord(
+            source_root_region_index_plus_one=source_scope.root_region_index_plus_one,
+            target_symbol_index=target_symbol_index,
+        )
+        if source_scope.symbol_index is None:
+            self._module_dependencies.append(record)
         else:
-            self._symbol_dependencies[source_symbol_index].append(target_symbol_index)
+            self._symbol_dependencies[source_scope.symbol_index].append(record)
 
     def _visit_attr(
         self,
-        source_symbol_index: int | None,
+        source_scope: _SymbolReferenceSourceScope,
         value: Any,
         attr_def: Any | None = None,
     ) -> None:
@@ -334,92 +358,104 @@ class _SymbolReferenceProjectionBuilder:
         )
         if attr_type == "symbol" or isinstance(value, SymbolName):
             if not is_availability:
-                self._add_dependency(source_symbol_index, str(value))
+                self._add_dependency(source_scope, str(value))
             return
         if attr_type == "symbol_array" or isinstance(value, SymbolNameArray):
             if not is_availability:
                 for name in value:
-                    self._add_dependency(source_symbol_index, str(name))
+                    self._add_dependency(source_scope, str(name))
             return
         if attr_type == "symbol_set" or isinstance(value, SymbolNameSet):
             if not is_availability:
                 for name in value:
-                    self._add_dependency(source_symbol_index, str(name))
+                    self._add_dependency(source_scope, str(name))
             return
         if isinstance(value, _IR_TYPE_CLASSES):
-            self._visit_type(source_symbol_index, cast(Type, value))
+            self._visit_type(source_scope, cast(Type, value))
             return
         if isinstance(value, EncodingInstance):
-            self._visit_encoding(source_symbol_index, value)
+            self._visit_encoding(source_scope, value)
             return
         if isinstance(value, ParameterizedAttr):
             for parameter, slot in zip(
                 value.definition.parameters, value.slots, strict=True
             ):
                 if slot is not None:
-                    self._visit_attr(source_symbol_index, slot, parameter)
+                    self._visit_attr(source_scope, slot, parameter)
             return
         if isinstance(value, ParameterizedAttrArray):
             for element in value:
-                self._visit_attr(source_symbol_index, element)
+                self._visit_attr(source_scope, element)
             return
         if isinstance(value, Mapping):
             for nested_value in value.values():
-                self._visit_attr(source_symbol_index, nested_value)
+                self._visit_attr(source_scope, nested_value)
             return
         if isinstance(value, list | tuple):
             for nested_value in value:
-                self._visit_attr(source_symbol_index, nested_value)
+                self._visit_attr(source_scope, nested_value)
 
     def _visit_encoding(
-        self, source_symbol_index: int | None, encoding: EncodingInstance
+        self,
+        source_scope: _SymbolReferenceSourceScope,
+        encoding: EncodingInstance,
     ) -> None:
         for _, parameter_value in encoding.params:
-            self._visit_attr(source_symbol_index, parameter_value)
+            self._visit_attr(source_scope, parameter_value)
 
-    def _visit_type(self, source_symbol_index: int | None, ir_type: Type) -> None:
+    def _visit_type(
+        self, source_scope: _SymbolReferenceSourceScope, ir_type: Type
+    ) -> None:
         match ir_type:
             case ShapedType(element_type=element_type, encoding=encoding):
-                self._visit_type(source_symbol_index, element_type)
+                self._visit_type(source_scope, element_type)
                 if isinstance(encoding, EncodingInstance):
-                    self._visit_encoding(source_symbol_index, encoding)
+                    self._visit_encoding(source_scope, encoding)
             case FunctionType(arg_types=args, result_types=results):
                 for nested_type in (*args, *results):
-                    self._visit_type(source_symbol_index, nested_type)
+                    self._visit_type(source_scope, nested_type)
             case DialectType(params=parameters):
                 for nested_type in parameters:
-                    self._visit_type(source_symbol_index, nested_type)
+                    self._visit_type(source_scope, nested_type)
             case ParameterizedType(definition=definition, slots=slots):
                 for parameter, value in zip(definition.params, slots, strict=True):
                     if value is not None:
-                        self._visit_attr(source_symbol_index, value, parameter)
+                        self._visit_attr(source_scope, value, parameter)
             case RegisterType(value_type=value_type) if value_type is not None:
-                self._visit_type(source_symbol_index, value_type)
+                self._visit_type(source_scope, value_type)
             case _:
                 pass
 
-    def _visit_value(self, source_symbol_index: int | None, value_id: int) -> None:
+    def _visit_value(
+        self, source_scope: _SymbolReferenceSourceScope, value_id: int
+    ) -> None:
         if 0 <= value_id < len(self._module.values):
-            self._visit_type(source_symbol_index, self._module.values[value_id].type)
+            self._visit_type(source_scope, self._module.values[value_id].type)
 
-    def _visit_region(self, source_symbol_index: int | None, region: Region) -> None:
+    def _visit_region(
+        self, source_scope: _SymbolReferenceSourceScope, region: Region
+    ) -> None:
         for block in region.blocks:
             for argument_id in block.arg_ids:
-                self._visit_value(source_symbol_index, argument_id)
+                self._visit_value(source_scope, argument_id)
             for operation in block.ops:
-                self._visit_operation(source_symbol_index, operation)
+                self._visit_operation(source_scope, operation)
 
     def _visit_operation(
-        self, source_symbol_index: int | None, operation: Operation
+        self, source_scope: _SymbolReferenceSourceScope, operation: Operation
     ) -> None:
         op_decl = self._op_decls_by_name.get(operation.name)
         symbol_def = getattr(op_decl, "symbol_def", None)
-        nested_source_symbol_index = source_symbol_index
+        nested_source_scope = source_scope
+        defines_symbol = False
         if symbol_def is not None:
             symbol_name = operation.attributes.get(symbol_def.field)
             if isinstance(symbol_name, str):
                 try:
-                    nested_source_symbol_index = self._wire_symbol_indices[symbol_name]
+                    nested_source_scope = _SymbolReferenceSourceScope(
+                        symbol_index=self._wire_symbol_indices[symbol_name]
+                    )
+                    defines_symbol = True
                 except KeyError as exc:
                     raise ValueError(
                         f"symbol-defining operation {operation.name!r} names "
@@ -428,7 +464,7 @@ class _SymbolReferenceProjectionBuilder:
 
         if operation.name == "template.apply":
             family = operation.attributes.get("family")
-            if nested_source_symbol_index is None:
+            if nested_source_scope.symbol_index is None:
                 raise ValueError("template.apply is not owned by a module symbol")
             if not isinstance(family, str):
                 raise ValueError("template.apply family must be a symbol")
@@ -438,22 +474,33 @@ class _SymbolReferenceProjectionBuilder:
                 raise ValueError(
                     f"template.apply references unknown family {family!r}"
                 ) from exc
-            self._symbol_template_demands[nested_source_symbol_index].append(
-                family_symbol_ordinal
+            self._symbol_template_demands[nested_source_scope.symbol_index].append(
+                _SymbolReferenceRecord(
+                    source_root_region_index_plus_one=(
+                        nested_source_scope.root_region_index_plus_one
+                    ),
+                    target_symbol_index=family_symbol_ordinal,
+                )
             )
 
         for value_id in (*operation.operands, *operation.results):
-            self._visit_value(nested_source_symbol_index, value_id)
+            self._visit_value(nested_source_scope, value_id)
         for key, value in operation.attributes.items():
             if symbol_def is not None and key == symbol_def.field:
                 continue
             self._visit_attr(
-                nested_source_symbol_index,
+                nested_source_scope,
                 value,
                 attr_def_for_op(self._op_decls_by_name, operation.name, key),
             )
-        for region in operation.regions:
-            self._visit_region(nested_source_symbol_index, region)
+        for region_index, region in enumerate(operation.regions):
+            child_source_scope = nested_source_scope
+            if defines_symbol:
+                child_source_scope = _SymbolReferenceSourceScope(
+                    symbol_index=nested_source_scope.symbol_index,
+                    root_region_index_plus_one=region_index + 1,
+                )
+            self._visit_region(child_source_scope, region)
 
 
 # ============================================================================
@@ -506,7 +553,6 @@ class BytecodeWriter:
             self._module,
             self._wire_symbol_indices,
             self._op_decls_by_name,
-            self._ctx,
         ).build()
 
     # --- Pass 1: Numbering ---
@@ -2314,19 +2360,22 @@ class BytecodeWriter:
         buf.write_varint(total_dependency_count)
         buf.write_varint(total_template_demand_count)
         buf.write_varint(len(self._module_dependencies))
-        for target_symbol_index in self._module_dependencies:
-            buf.write_varint(target_symbol_index)
+        for dependency in self._module_dependencies:
+            buf.write_varint(dependency.source_root_region_index_plus_one)
+            buf.write_varint(dependency.target_symbol_index)
         for dependencies, template_demands in zip(
             self._symbol_dependencies,
             self._symbol_template_demands,
             strict=True,
         ):
             buf.write_varint(len(dependencies))
-            for target_symbol_index in dependencies:
-                buf.write_varint(target_symbol_index)
+            for dependency in dependencies:
+                buf.write_varint(dependency.source_root_region_index_plus_one)
+                buf.write_varint(dependency.target_symbol_index)
             buf.write_varint(len(template_demands))
-            for family_symbol_ordinal in template_demands:
-                buf.write_varint(family_symbol_ordinal)
+            for demand in template_demands:
+                buf.write_varint(demand.source_root_region_index_plus_one)
+                buf.write_varint(demand.target_symbol_index)
         return buf.get_bytes()
 
     # --- File assembly ---

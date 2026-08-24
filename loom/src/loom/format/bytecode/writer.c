@@ -4591,6 +4591,8 @@ static iree_status_t loom_bytecode_write_dependency_row(
         &table->occurrences[occurrence_id];
     if (loom_symbol_reference_occurrence_is_dependency(occurrence)) {
       IREE_RETURN_IF_ERROR(loom_bytecode_page_writer_write_uvarint(
+          page_writer, occurrence->source_root_region_index_plus_one));
+      IREE_RETURN_IF_ERROR(loom_bytecode_page_writer_write_uvarint(
           page_writer, loom_bytecode_wire_symbol_ordinal(
                            numbering, occurrence->target_symbol_id)));
     }
@@ -4631,6 +4633,8 @@ static iree_status_t loom_bytecode_write_symbol_references_section(
     while (demand_id != LOOM_TEMPLATE_DEMAND_ID_INVALID) {
       const loom_template_demand_t* demand =
           &table->template_demands.values[demand_id];
+      IREE_RETURN_IF_ERROR(loom_bytecode_page_writer_write_uvarint(
+          page_writer, demand->source_root_region_index_plus_one));
       IREE_RETURN_IF_ERROR(loom_bytecode_page_writer_write_uvarint(
           page_writer, loom_bytecode_wire_symbol_ordinal(
                            numbering, demand->family_symbol_id)));

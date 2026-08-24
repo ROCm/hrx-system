@@ -139,10 +139,16 @@ class ReaderTest : public ::testing::Test {
     size_t total_template_demand_count = 0;
     // Byte offsets of module-root dependency target ordinals.
     std::vector<size_t> module_dependencies;
+    // Byte offsets of module-root dependency source origins.
+    std::vector<size_t> module_dependency_origins;
     // Byte offsets of dependency target ordinals by source symbol.
     std::vector<std::vector<size_t>> symbol_dependencies;
+    // Byte offsets of dependency source origins by source symbol.
+    std::vector<std::vector<size_t>> symbol_dependency_origins;
     // Byte offsets of template-family symbol ordinals by source symbol.
     std::vector<std::vector<size_t>> symbol_template_demands;
+    // Byte offsets of template-demand source origins by source symbol.
+    std::vector<std::vector<size_t>> symbol_template_demand_origins;
   };
 
   void SetUp() override {
@@ -2130,19 +2136,29 @@ class ReaderTest : public ::testing::Test {
 
     const uint64_t module_dependency_count = ReadUVarint(bytes, &offset);
     layout.module_dependencies.reserve((size_t)module_dependency_count);
+    layout.module_dependency_origins.reserve((size_t)module_dependency_count);
     for (uint64_t i = 0; i < module_dependency_count; ++i) {
+      layout.module_dependency_origins.push_back(offset);
+      ReadUVarint(bytes, &offset);
       layout.module_dependencies.push_back(offset);
       ReadUVarint(bytes, &offset);
     }
 
     layout.symbol_dependencies.reserve((size_t)symbol_count);
+    layout.symbol_dependency_origins.reserve((size_t)symbol_count);
     layout.symbol_template_demands.reserve((size_t)symbol_count);
+    layout.symbol_template_demand_origins.reserve((size_t)symbol_count);
     for (uint64_t i = 0; i < symbol_count; ++i) {
       const uint64_t dependency_count = ReadUVarint(bytes, &offset);
       std::vector<size_t>& dependency_offsets =
           layout.symbol_dependencies.emplace_back();
+      std::vector<size_t>& dependency_origin_offsets =
+          layout.symbol_dependency_origins.emplace_back();
       dependency_offsets.reserve((size_t)dependency_count);
+      dependency_origin_offsets.reserve((size_t)dependency_count);
       for (uint64_t j = 0; j < dependency_count; ++j) {
+        dependency_origin_offsets.push_back(offset);
+        ReadUVarint(bytes, &offset);
         dependency_offsets.push_back(offset);
         ReadUVarint(bytes, &offset);
       }
@@ -2150,8 +2166,13 @@ class ReaderTest : public ::testing::Test {
       const uint64_t template_demand_count = ReadUVarint(bytes, &offset);
       std::vector<size_t>& family_ordinal_offsets =
           layout.symbol_template_demands.emplace_back();
+      std::vector<size_t>& demand_origin_offsets =
+          layout.symbol_template_demand_origins.emplace_back();
       family_ordinal_offsets.reserve((size_t)template_demand_count);
+      demand_origin_offsets.reserve((size_t)template_demand_count);
       for (uint64_t j = 0; j < template_demand_count; ++j) {
+        demand_origin_offsets.push_back(offset);
+        ReadUVarint(bytes, &offset);
         family_ordinal_offsets.push_back(offset);
         ReadUVarint(bytes, &offset);
       }
@@ -3262,9 +3283,13 @@ TEST_F(ReaderTest, IndexesRawDependencyOccurrencesBySourceSymbol) {
   EXPECT_EQ(module_metadata.module_dependency_count, 0u);
   ASSERT_EQ(module_metadata.dependency_count, 3u);
   ASSERT_NE(module_metadata.dependency_symbol_indices, nullptr);
+  ASSERT_NE(module_metadata.dependency_source_root_region_indices_plus_one,
+            nullptr);
   ASSERT_NE(module_metadata.symbol_references, nullptr);
   EXPECT_EQ(module_metadata.template_demand_count, 0u);
   EXPECT_EQ(module_metadata.template_demand_family_symbol_ordinals, nullptr);
+  EXPECT_EQ(module_metadata.template_demand_source_root_region_indices_plus_one,
+            nullptr);
 
   EXPECT_EQ(module_metadata.symbol_references[0].dependency_count, 0u);
   EXPECT_EQ(module_metadata.symbol_references[1].dependency_count, 0u);
@@ -3273,6 +3298,12 @@ TEST_F(ReaderTest, IndexesRawDependencyOccurrencesBySourceSymbol) {
   EXPECT_EQ(module_metadata.dependency_symbol_indices[0], 1u);
   EXPECT_EQ(module_metadata.dependency_symbol_indices[1], 0u);
   EXPECT_EQ(module_metadata.dependency_symbol_indices[2], 1u);
+  EXPECT_EQ(module_metadata.dependency_source_root_region_indices_plus_one[0],
+            1u);
+  EXPECT_EQ(module_metadata.dependency_source_root_region_indices_plus_one[1],
+            1u);
+  EXPECT_EQ(module_metadata.dependency_source_root_region_indices_plus_one[2],
+            1u);
 
   iree_arena_deinitialize(&metadata_arena);
   loom_module_free(module);
@@ -3298,8 +3329,12 @@ TEST_F(ReaderTest, IndexesEveryAbstractProviderDemand) {
   EXPECT_EQ(module_metadata.summary.template_demand_count, 2u);
   ASSERT_EQ(module_metadata.dependency_count, 2u);
   ASSERT_NE(module_metadata.dependency_symbol_indices, nullptr);
+  ASSERT_NE(module_metadata.dependency_source_root_region_indices_plus_one,
+            nullptr);
   ASSERT_EQ(module_metadata.template_demand_count, 2u);
   ASSERT_NE(module_metadata.template_demand_family_symbol_ordinals, nullptr);
+  ASSERT_NE(module_metadata.template_demand_source_root_region_indices_plus_one,
+            nullptr);
   ASSERT_NE(module_metadata.symbol_references, nullptr);
   EXPECT_EQ(module_metadata.symbol_references[1].first_template_demand_index,
             0u);
@@ -3310,6 +3345,16 @@ TEST_F(ReaderTest, IndexesEveryAbstractProviderDemand) {
   EXPECT_EQ(module_metadata.dependency_symbol_indices[1], 0u);
   EXPECT_EQ(module_metadata.template_demand_family_symbol_ordinals[0], 0u);
   EXPECT_EQ(module_metadata.template_demand_family_symbol_ordinals[1], 0u);
+  EXPECT_EQ(module_metadata.dependency_source_root_region_indices_plus_one[0],
+            1u);
+  EXPECT_EQ(module_metadata.dependency_source_root_region_indices_plus_one[1],
+            1u);
+  EXPECT_EQ(
+      module_metadata.template_demand_source_root_region_indices_plus_one[0],
+      1u);
+  EXPECT_EQ(
+      module_metadata.template_demand_source_root_region_indices_plus_one[1],
+      1u);
 
   iree_arena_deinitialize(&metadata_arena);
   loom_module_free(module);
@@ -3463,9 +3508,15 @@ TEST_F(ReaderTest, PreservesPhysicalSymbolDefinitionOrder) {
   const uint32_t* dependency_symbol_indices =
       module_metadata.dependency_symbol_indices +
       function_references.first_dependency_index;
+  const uint8_t* dependency_origins =
+      module_metadata.dependency_source_root_region_indices_plus_one +
+      function_references.first_dependency_index;
   EXPECT_EQ(dependency_symbol_indices[0], 1u);
   EXPECT_EQ(dependency_symbol_indices[1], 2u);
   EXPECT_EQ(dependency_symbol_indices[2], 1u);
+  EXPECT_EQ(dependency_origins[0], 1u);
+  EXPECT_EQ(dependency_origins[1], 1u);
+  EXPECT_EQ(dependency_origins[2], 1u);
   iree_arena_deinitialize(&metadata_arena);
 
   loom_module_t* read_module = nullptr;
@@ -5376,6 +5427,21 @@ TEST_F(ReaderTest, RejectsSymbolReferenceTargetOutsideSymbolTable) {
   loom_module_free(module);
 }
 
+TEST_F(ReaderTest, RejectsSymbolReferenceOriginOutsideSourceRoots) {
+  loom_module_t* module = CreateSymbolArrayModule();
+  auto bytes = WriteModule(module);
+  SymbolReferenceLayout layout = ReadSymbolReferenceLayout(bytes);
+  ASSERT_EQ(layout.symbol_dependency_origins.size(), 3u);
+  ASSERT_EQ(layout.symbol_dependency_origins[2].size(), 3u);
+  const size_t origin_offset = layout.symbol_dependency_origins[2][0];
+  ASSERT_LT(origin_offset, bytes.size());
+  bytes[origin_offset] = 2;
+
+  ExpectReadError(bytes, "ERR_BYTECODE_006");
+
+  loom_module_free(module);
+}
+
 TEST_F(ReaderTest, RejectsSymbolReferenceCountBeyondSectionPayload) {
   loom_module_t* module = CreateSymbolArrayModule();
   auto bytes = WriteModule(module);
@@ -5398,6 +5464,21 @@ TEST_F(ReaderTest, RejectsTemplateDemandFamilyOutsideSymbolTable) {
   const size_t family_ordinal_offset = layout.symbol_template_demands[1][0];
   ASSERT_LT(family_ordinal_offset, bytes.size());
   bytes[family_ordinal_offset] = 0x7F;
+
+  ExpectReadError(bytes, "ERR_BYTECODE_006");
+
+  loom_module_free(module);
+}
+
+TEST_F(ReaderTest, RejectsTemplateDemandOriginOutsideSourceRoots) {
+  loom_module_t* module = CreateTemplateDemandModule();
+  auto bytes = WriteModule(module);
+  SymbolReferenceLayout layout = ReadSymbolReferenceLayout(bytes);
+  ASSERT_EQ(layout.symbol_template_demand_origins.size(), 2u);
+  ASSERT_EQ(layout.symbol_template_demand_origins[1].size(), 2u);
+  const size_t origin_offset = layout.symbol_template_demand_origins[1][0];
+  ASSERT_LT(origin_offset, bytes.size());
+  bytes[origin_offset] = 2;
 
   ExpectReadError(bytes, "ERR_BYTECODE_006");
 
