@@ -339,20 +339,19 @@ iree_status_t loom_bytecode_write_attr_value(
 
 iree_status_t loom_bytecode_write_scoped_enum(
     loom_bytecode_page_writer_t* writer, loom_bytecode_numbering_t* numbering,
-    const loom_bytecode_value_numbering_t* value_numbering,
     loom_attribute_t attr) {
   if (attr.kind != LOOM_ATTR_SCOPED_ENUM) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "scoped enum field has attribute kind %u",
                             (unsigned)attr.kind);
   }
-  if (!value_numbering || !value_numbering->low_descriptor_set) {
+  if (!numbering->active_low_descriptor_set) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
         "scoped enum attribute is outside a representation contract");
   }
   const iree_string_view_t key = loom_low_repr_descriptor_key(
-      &numbering->low_repr_environment, value_numbering->low_descriptor_set,
+      &numbering->low_repr_environment, numbering->active_low_descriptor_set,
       loom_attr_as_scoped_enum(attr));
   if (iree_string_view_is_empty(key)) {
     return iree_make_status(

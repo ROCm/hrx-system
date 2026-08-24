@@ -40,8 +40,6 @@ typedef struct loom_bytecode_value_numbering_t {
   iree_host_size_t capacity;
   // Next body-local value number to assign.
   uint32_t next_number;
-  // Representation contract selected for the containing function.
-  const loom_low_repr_descriptor_set_t* low_descriptor_set;
 } loom_bytecode_value_numbering_t;
 
 // Declaration-local value closure used by a global symbol payload.

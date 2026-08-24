@@ -395,8 +395,8 @@ static iree_status_t loom_bytecode_write_operation(
     // Value.
     const loom_attr_descriptor_t* descriptor = &vtable->attr_descriptors[i];
     if (descriptor->attr_kind == LOOM_ATTR_SCOPED_ENUM) {
-      IREE_RETURN_IF_ERROR(loom_bytecode_write_scoped_enum(
-          writer, numbering, value_numbering, attrs[i]));
+      IREE_RETURN_IF_ERROR(
+          loom_bytecode_write_scoped_enum(writer, numbering, attrs[i]));
     } else {
       IREE_RETURN_IF_ERROR(loom_bytecode_write_attr_value(
           writer, numbering, value_numbering, attrs[i], descriptor));
@@ -538,7 +538,6 @@ iree_status_t loom_bytecode_write_ir_section(
       // Intern function signature and regions (matching Python walk order).
       numbering->active_low_descriptor_set = low_descriptor_set;
       IREE_RETURN_IF_ERROR(loom_bytecode_number_function(numbering, func_like));
-      numbering->active_low_descriptor_set = NULL;
     } else if (is_record && symbol->defining_op->region_count == 1) {
       root_region_count = loom_bytecode_count_root_regions(symbol->defining_op);
       if (root_region_count == 0) {
@@ -566,7 +565,6 @@ iree_status_t loom_bytecode_write_ir_section(
       loom_bytecode_value_numbering_t value_numbering;
       loom_bytecode_value_numbering_initialize(&value_numbering, module,
                                                numbering->arena);
-      value_numbering.low_descriptor_set = low_descriptor_set;
       IREE_RETURN_IF_ERROR(loom_bytecode_value_numbering_ensure_capacity(
           &value_numbering, region_counts.value_count));
       IREE_RETURN_IF_ERROR(loom_bytecode_value_numbering_assign_region(
@@ -599,6 +597,7 @@ iree_status_t loom_bytecode_write_ir_section(
           };
     }
     IREE_ASSERT(region_list->count == root_region_count);
+    numbering->active_low_descriptor_set = NULL;
   }
 
   return iree_ok_status();

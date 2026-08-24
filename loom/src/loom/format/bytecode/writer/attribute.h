@@ -25,7 +25,6 @@ iree_status_t loom_bytecode_write_attr_value(
 // Writes a scoped enum using the active Low representation contract.
 iree_status_t loom_bytecode_write_scoped_enum(
     loom_bytecode_page_writer_t* writer, loom_bytecode_numbering_t* numbering,
-    const loom_bytecode_value_numbering_t* value_numbering,
     loom_attribute_t attr);
 
 // Appends one tagged attribute to a buffered bytecode section.
