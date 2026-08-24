@@ -338,7 +338,8 @@ class Tokenizer:
         nested angle brackets (for encodings like
         #encoding.operand<element_format=i8, payload_elements=32,
         payload_packing=dense_lanes>>)
-        and ignores brackets inside string literals.
+        and ignores brackets inside string literals and the '>' in function
+        type arrows.
         Returns the text between the brackets (exclusive).
         """
         start = self._position
@@ -354,7 +355,9 @@ class Tokenizer:
                 continue
             if character == "<":
                 depth += 1
-            elif character == ">":
+            elif character == ">" and (
+                self._position == start or self._source[self._position - 1] != "-"
+            ):
                 depth -= 1
                 if depth == 0:
                     interior = self._source[start : self._position]
