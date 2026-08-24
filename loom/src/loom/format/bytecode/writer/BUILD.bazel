@@ -13,6 +13,21 @@ package(
 )
 
 loom_cc_library(
+    name = "catalog",
+    srcs = ["catalog.c"],
+    hdrs = ["catalog.h"],
+    visibility = ["//loom/src/loom/format/bytecode:__pkg__"],
+    deps = [
+        "//loom/src/loom/format:low_repr",
+        "//loom/src/loom/format/bytecode:format",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_defs",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
     name = "encoder",
     srcs = ["encoder.c"],
     hdrs = ["encoder.h"],

@@ -11,6 +11,23 @@ iree_add_all_subdirs()
 
 loom_cc_library(
   NAME
+    catalog
+  HDRS
+    "catalog.h"
+  SRCS
+    "catalog.c"
+  DEPS
+    iree::base
+    iree::base::internal::arena
+    loom::format::bytecode::format
+    loom::format::low_repr
+    loom::ir
+    loom::ops::op_defs
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
     encoder
   HDRS
     "encoder.h"
