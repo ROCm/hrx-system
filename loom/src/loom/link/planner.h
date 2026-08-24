@@ -182,6 +182,11 @@ const loom_link_plan_facet_t* loom_link_plan_facet_at(
 iree_host_size_t loom_link_plan_demanded_template_family_count(
     const loom_link_plan_t* plan);
 
+// Returns the number of reachable template-demand occurrences. Repeated
+// demands for the same family remain distinct.
+iree_host_size_t loom_link_plan_template_demand_occurrence_count(
+    const loom_link_plan_t* plan);
+
 // Returns demanded template-family ordinal |ordinal|, or INVALID when out of
 // range. Each family appears once in first-reachable order.
 loom_link_template_family_ordinal_t loom_link_plan_demanded_template_family_at(

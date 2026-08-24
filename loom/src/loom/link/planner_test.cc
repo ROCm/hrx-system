@@ -1400,6 +1400,8 @@ func.def @helper(%x: i32) -> (i32) {
   EXPECT_FALSE(ContainsSymbol(first_plan.get(), helper));
   ASSERT_EQ(loom_link_plan_demanded_template_family_count(first_plan.get()),
             3u);
+  EXPECT_EQ(loom_link_plan_template_demand_occurrence_count(first_plan.get()),
+            4u);
   const std::string first_family =
       StringViewToString(DemandedTemplateFamily(first_plan.get(), 0)->name);
   const std::string second_family =
@@ -1429,6 +1431,8 @@ func.def @helper(%x: i32) -> (i32) {
   EXPECT_EQ(loom_link_plan_symbol_count(complete_plan.get()), 10u);
   EXPECT_EQ(loom_link_plan_demanded_template_family_count(complete_plan.get()),
             3u);
+  EXPECT_EQ(
+      loom_link_plan_template_demand_occurrence_count(complete_plan.get()), 4u);
 }
 
 TEST_F(LinkPlannerTest, SelectedProviderOrdinalsAreValidated) {

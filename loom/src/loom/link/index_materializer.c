@@ -194,6 +194,8 @@ static iree_status_t loom_link_index_materialize_selective(
 
   loom_link_plan_t* stable_plan = NULL;
   loom_module_t* stable_module = NULL;
+  iree_host_size_t queried_template_demand_count = 0;
+  bool has_queried_template_demands = false;
   while (iree_status_is_ok(status) && stable_plan == NULL) {
     loom_link_plan_t* plan = NULL;
     status = loom_link_index_build_plan(index, plan_options, &selected,
@@ -202,6 +204,16 @@ static iree_status_t loom_link_index_materialize_selective(
       break;
     }
     if (loom_link_plan_demanded_template_family_count(plan) == 0) {
+      stable_plan = plan;
+      break;
+    }
+    const iree_host_size_t template_demand_count =
+        loom_link_plan_template_demand_occurrence_count(plan);
+    // The prior query considered every provider for every demanded family.
+    // When the selected closure adds no application sites, neither its
+    // applications nor its provider universe changed and selection is stable.
+    if (has_queried_template_demands &&
+        template_demand_count == queried_template_demand_count) {
       stable_plan = plan;
       break;
     }
@@ -229,6 +241,8 @@ static iree_status_t loom_link_index_materialize_selective(
       break;
     }
     if (changed) {
+      queried_template_demand_count = template_demand_count;
+      has_queried_template_demands = true;
       loom_link_plan_free(plan);
     } else {
       stable_plan = plan;
