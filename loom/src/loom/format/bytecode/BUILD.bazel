@@ -153,6 +153,25 @@ loom_cc_library(
     ],
 )
 
+loom_cc_library(
+    name = "function_projection_reader",
+    srcs = ["function_projection_reader.c"],
+    hdrs = ["function_projection_reader.h"],
+    deps = [
+        ":function_header",
+        ":index",
+        "//loom/src/loom/format:low_repr",
+        "//loom/src/loom/format/bytecode/reader:decoder",
+        "//loom/src/loom/format/bytecode/reader:selected_body",
+        "//loom/src/loom/format/bytecode/reader:selected_symbol",
+        "//loom/src/loom/format/bytecode/reader:selected_tables",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_defs",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
 loom_cc_test(
     name = "reader_test",
     srcs = ["reader_test.cc"],

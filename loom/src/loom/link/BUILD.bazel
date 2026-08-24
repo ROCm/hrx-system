@@ -188,6 +188,52 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "kernel_config_materializer",
+    srcs = ["kernel_config_materializer.c"],
+    hdrs = ["kernel_config_materializer.h"],
+    deps = [
+        ":plan_materializer",
+        "//loom/src/loom/format/bytecode:function_projection_reader",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops:type_registry",
+        "//loom/src/loom/ops/func",
+        "//loom/src/loom/ops/kernel",
+        "//loom/src/loom/ops/target",
+        "//loom/src/loom/rewrite:remap",
+        "//loom/src/loom/rewrite:rewriter",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_test(
+    name = "kernel_config_materializer_test",
+    srcs = ["kernel_config_materializer_test.cc"],
+    deps = [
+        ":kernel_config_materializer",
+        ":module_index",
+        ":plan_materializer",
+        ":planner",
+        "//loom/src/loom/format/bytecode:reader",
+        "//loom/src/loom/format/bytecode:writer",
+        "//loom/src/loom/format/text:parser",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_registry",
+        "//loom/src/loom/ops/func",
+        "//loom/src/loom/ops/index",
+        "//loom/src/loom/ops/kernel",
+        "//loom/src/loom/ops/target",
+        "//loom/src/loom/verify",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/io:stream",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
     name = "template_candidate_loader",
     srcs = ["template_candidate_loader.c"],
     hdrs = ["template_candidate_loader.h"],
@@ -299,6 +345,24 @@ loom_cc_benchmark(
     srcs = ["index_materializer_benchmark.cc"],
     deps = [
         ":index_materializer",
+        ":module_index",
+        ":planner",
+        "//loom/src/loom/format/bytecode:writer",
+        "//loom/src/loom/format/text:parser",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_registry",
+        "//loom/src/loom/verify",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/io:stream",
+        "//runtime/src/iree/testing:benchmark_main",
+    ],
+)
+
+loom_cc_benchmark(
+    name = "kernel_config_materializer_benchmark",
+    srcs = ["kernel_config_materializer_benchmark.cc"],
+    deps = [
+        ":kernel_config_materializer",
         ":module_index",
         ":planner",
         "//loom/src/loom/format/bytecode:writer",
