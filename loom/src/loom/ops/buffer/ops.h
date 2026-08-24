@@ -28,10 +28,12 @@ enum {
   LOOM_OP_BUFFER_VIEW = LOOM_OP_KIND(LOOM_DIALECT_BUFFER, 5),
   LOOM_OP_BUFFER_PACK = LOOM_OP_KIND(LOOM_DIALECT_BUFFER, 6),
   LOOM_OP_BUFFER_LENGTH = LOOM_OP_KIND(LOOM_DIALECT_BUFFER, 7),
-  LOOM_OP_BUFFER_COPY = LOOM_OP_KIND(LOOM_DIALECT_BUFFER, 8),
-  LOOM_OP_BUFFER_FILL = LOOM_OP_KIND(LOOM_DIALECT_BUFFER, 9),
-  LOOM_OP_BUFFER_COMPARE = LOOM_OP_KIND(LOOM_DIALECT_BUFFER, 10),
-  LOOM_OP_BUFFER_COUNT_ = 11,
+  LOOM_OP_BUFFER_LOAD_I8_U = LOOM_OP_KIND(LOOM_DIALECT_BUFFER, 8),
+  LOOM_OP_BUFFER_STORE_I8 = LOOM_OP_KIND(LOOM_DIALECT_BUFFER, 9),
+  LOOM_OP_BUFFER_COPY = LOOM_OP_KIND(LOOM_DIALECT_BUFFER, 10),
+  LOOM_OP_BUFFER_FILL = LOOM_OP_KIND(LOOM_DIALECT_BUFFER, 11),
+  LOOM_OP_BUFFER_COMPARE = LOOM_OP_KIND(LOOM_DIALECT_BUFFER, 12),
+  LOOM_OP_BUFFER_COUNT_ = 13,
 };
 
 // LOOM_OP_BUFFER_ALLOCA: Create a fixed-frame scratch buffer root in an allocatable memory space. Each execution produces a distinct storage identity; identical allocas must not be commoned. The byte length is the requested physical byte count for the execution. Targets requiring a static frame reserve its proven finite non-negative maximum. base_alignment is the minimum byte alignment of the root storage base. Target lowering determines which allocatable spaces are legal for the containing program kind.
@@ -207,6 +209,38 @@ iree_status_t loom_buffer_length_facts(
     const loom_module_t* module, const loom_op_t* op,
     const loom_value_facts_t* operand_facts,
     loom_value_facts_t* result_facts);
+
+// LOOM_OP_BUFFER_LOAD_I8_U: Load one unsigned byte from a buffer root and zero-extend it to the canonical i32 carrier. The byte offset must identify an accessible byte in the buffer.
+// %byte = buffer.load.i8.u %source[%byte_offset]
+LOOM_DEFINE_ISA(loom_buffer_load_i8_u_isa, LOOM_OP_BUFFER_LOAD_I8_U)
+LOOM_DEFINE_OPERAND(loom_buffer_load_i8_u_source, 0)
+LOOM_DEFINE_OPERAND(loom_buffer_load_i8_u_byte_offset, 1)
+LOOM_DEFINE_RESULT(loom_buffer_load_i8_u_result, 0)
+iree_status_t loom_buffer_load_i8_u_build(
+    loom_builder_t* builder,
+    loom_value_id_t source,
+    loom_value_id_t byte_offset,
+    loom_location_id_t location,
+    loom_op_t** out_op);
+iree_status_t loom_buffer_load_i8_u_facts(
+    loom_fact_context_t* context,
+    const loom_module_t* module, const loom_op_t* op,
+    const loom_value_facts_t* operand_facts,
+    loom_value_facts_t* result_facts);
+
+// LOOM_OP_BUFFER_STORE_I8: Store the low eight bits of an i32 carrier to one byte in a buffer root. The byte offset must identify an accessible byte in the buffer.
+// buffer.store.i8 %byte, %target[%byte_offset]
+LOOM_DEFINE_ISA(loom_buffer_store_i8_isa, LOOM_OP_BUFFER_STORE_I8)
+LOOM_DEFINE_OPERAND(loom_buffer_store_i8_value, 0)
+LOOM_DEFINE_OPERAND(loom_buffer_store_i8_target, 1)
+LOOM_DEFINE_OPERAND(loom_buffer_store_i8_byte_offset, 2)
+iree_status_t loom_buffer_store_i8_build(
+    loom_builder_t* builder,
+    loom_value_id_t value,
+    loom_value_id_t target,
+    loom_value_id_t byte_offset,
+    loom_location_id_t location,
+    loom_op_t** out_op);
 
 // LOOM_OP_BUFFER_COPY: Copy an exact non-overlapping byte range between buffer roots. Source and target ranges must not overlap; programs may not depend on an overlap-safe target implementation. A zero byte length performs no byte access.
 // buffer.copy %source[%source_offset], %target[%target_offset], %byte_length

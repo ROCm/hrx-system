@@ -97,6 +97,24 @@ class BufferBuilder(DialectBuilder):
         result_names: Sequence[str] | None = ...,
         location_id: int | None = ...,
     ) -> ValueRef: ...
+    def load_i8_u(
+        self,
+        *,
+        source: ValueRef,
+        byte_offset: ValueRef,
+        name: str | None = ...,
+        names: Sequence[str] | None = ...,
+        result_names: Sequence[str] | None = ...,
+        location_id: int | None = ...,
+    ) -> ValueRef: ...
+    def store_i8(
+        self,
+        *,
+        value: ValueRef,
+        target: ValueRef,
+        byte_offset: ValueRef,
+        location_id: int | None = ...,
+    ) -> None: ...
     def copy(
         self,
         *,

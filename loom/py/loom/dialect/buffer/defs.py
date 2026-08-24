@@ -408,6 +408,61 @@ buffer_length = Op(
 )
 
 # ============================================================================
+# buffer.load.i8.u/buffer.store.i8 — canonical raw byte access
+# ============================================================================
+
+buffer_load_i8_u = Op(
+    name="buffer.load.i8.u",
+    group=buffer_ops,
+    builder_name="load_i8_u",
+    doc=("Load one unsigned byte from a buffer root and zero-extend it to the canonical i32 carrier. The byte offset must identify an accessible byte in the buffer."),
+    operands=[
+        Operand("source", BUFFER, doc="Buffer root read by the load."),
+        Operand("byte_offset", OFFSET, doc="Byte offset into the source buffer."),
+    ],
+    results=[
+        Result("result", I32, doc="Loaded unsigned byte zero-extended to i32."),
+    ],
+    effects=[Reads("source")],
+    facts="loom_buffer_load_i8_u_facts",
+    format=[
+        Ref("source"),
+        GLUE,
+        LBRACKET,
+        Ref("byte_offset"),
+        RBRACKET,
+    ],
+    examples=[
+        "%byte = buffer.load.i8.u %source[%byte_offset]",
+    ],
+)
+
+buffer_store_i8 = Op(
+    name="buffer.store.i8",
+    group=buffer_ops,
+    builder_name="store_i8",
+    doc=("Store the low eight bits of an i32 carrier to one byte in a buffer root. The byte offset must identify an accessible byte in the buffer."),
+    operands=[
+        Operand("value", I32, doc="i32 carrier whose low eight bits are stored."),
+        Operand("target", BUFFER, doc="Buffer root written by the store."),
+        Operand("byte_offset", OFFSET, doc="Byte offset into the target buffer."),
+    ],
+    effects=[Writes("target")],
+    format=[
+        Ref("value"),
+        COMMA,
+        Ref("target"),
+        GLUE,
+        LBRACKET,
+        Ref("byte_offset"),
+        RBRACKET,
+    ],
+    examples=[
+        "buffer.store.i8 %byte, %target[%byte_offset]",
+    ],
+)
+
+# ============================================================================
 # buffer.copy — copy a non-overlapping byte range
 # ============================================================================
 
@@ -543,6 +598,8 @@ ALL_BUFFER_OPS: tuple[Op, ...] = (
     buffer_view,
     buffer_pack,
     buffer_length,
+    buffer_load_i8_u,
+    buffer_store_i8,
     buffer_copy,
     buffer_fill,
     buffer_compare,
