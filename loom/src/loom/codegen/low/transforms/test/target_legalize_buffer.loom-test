@@ -1,0 +1,164 @@
+// RUN: pass target-legalize{mode=final,policy=reference-only}
+
+test.target<low_core> @test_target
+
+func.def target(@test_target) @copy(%source: buffer, %source_offset: offset, %target: buffer, %target_offset: offset, %byte_length: offset) {
+  buffer.copy %source[%source_offset], %target[%target_offset], %byte_length
+  func.return
+}
+
+func.def target(@test_target) @fill_i8(%pattern: i8, %target: buffer, %target_offset: offset, %byte_length: offset) {
+  buffer.fill %pattern, %target[%target_offset], %byte_length : i8
+  func.return
+}
+
+func.def target(@test_target) @fill_i16(%pattern: i16, %target: buffer, %target_offset: offset, %byte_length: offset) {
+  buffer.fill %pattern, %target[%target_offset], %byte_length : i16
+  func.return
+}
+
+func.def target(@test_target) @fill_i32(%pattern: i32, %target: buffer, %target_offset: offset, %byte_length: offset) {
+  buffer.fill %pattern, %target[%target_offset], %byte_length : i32
+  func.return
+}
+
+func.def target(@test_target) @fill_f32(%pattern: f32, %target: buffer, %target_offset: offset, %byte_length: offset) {
+  buffer.fill %pattern, %target[%target_offset], %byte_length : f32
+  func.return
+}
+
+func.def target(@test_target) @fill_bf16(%pattern: bf16, %target: buffer, %target_offset: offset, %byte_length: offset) {
+  buffer.fill %pattern, %target[%target_offset], %byte_length : bf16
+  func.return
+}
+
+func.def target(@test_target) @compare(%lhs: buffer, %lhs_offset: offset, %rhs: buffer, %rhs_offset: offset, %byte_length: offset) -> (i32) {
+  %order = buffer.compare %lhs[%lhs_offset], %rhs[%rhs_offset], %byte_length
+  func.return %order : i32
+}
+
+// ----
+test.target<low_core> @test_target
+
+func.def target(@test_target) @copy(%source: buffer, %source_offset: offset, %target: buffer, %target_offset: offset, %byte_length: offset) {
+  %32 = index.constant 0 : offset
+  %33 = index.constant 1 : offset
+  scf.for %34 = [%32 to %byte_length step %33] {
+    %35 = index.add %source_offset, %34 : offset
+    %36 = buffer.load.i8.u %source[%35]
+    %37 = index.add %target_offset, %34 : offset
+    buffer.store.i8 %36, %target[%37]
+  }
+  func.return
+}
+
+func.def target(@test_target) @fill_i8(%pattern: i8, %target: buffer, %target_offset: offset, %byte_length: offset) {
+  %38 = scalar.extui %pattern : i8 to i32
+  %39 = index.constant 0 : offset
+  %40 = index.constant 1 : offset
+  scf.for %41 = [%39 to %byte_length step %40] {
+    %42 = index.add %target_offset, %41 : offset
+    buffer.store.i8 %38, %target[%42]
+  }
+  func.return
+}
+
+func.def target(@test_target) @fill_i16(%pattern: i16, %target: buffer, %target_offset: offset, %byte_length: offset) {
+  %43 = scalar.extui %pattern : i16 to i32
+  %44 = scalar.constant 16 : i32
+  %45 = scalar.shli %43, %44 : i32
+  %46 = scalar.ori %43, %45 : i32
+  %47 = index.constant 0 : offset
+  %48 = index.constant 1 : offset
+  %49 = scalar.constant 8 : i32
+  %50 = scalar.constant 24 : i32
+  %53 = scf.for %51 = [%47 to %byte_length step %48](%52 = %46 : i32) -> (i32) {
+    %54 = index.add %target_offset, %51 : offset
+    buffer.store.i8 %52, %target[%54]
+    %55 = scalar.shrui %52, %49 : i32
+    %56 = scalar.shli %52, %50 : i32
+    %57 = scalar.ori %55, %56 : i32
+    scf.yield %57 : i32
+  }
+  func.return
+}
+
+func.def target(@test_target) @fill_i32(%pattern: i32, %target: buffer, %target_offset: offset, %byte_length: offset) {
+  %58 = index.constant 0 : offset
+  %59 = index.constant 1 : offset
+  %60 = scalar.constant 8 : i32
+  %61 = scalar.constant 24 : i32
+  %64 = scf.for %62 = [%58 to %byte_length step %59](%63 = %pattern : i32) -> (i32) {
+    %65 = index.add %target_offset, %62 : offset
+    buffer.store.i8 %63, %target[%65]
+    %66 = scalar.shrui %63, %60 : i32
+    %67 = scalar.shli %63, %61 : i32
+    %68 = scalar.ori %66, %67 : i32
+    scf.yield %68 : i32
+  }
+  func.return
+}
+
+func.def target(@test_target) @fill_f32(%pattern: f32, %target: buffer, %target_offset: offset, %byte_length: offset) {
+  %69 = scalar.bitcast %pattern : f32 to i32
+  %70 = index.constant 0 : offset
+  %71 = index.constant 1 : offset
+  %72 = scalar.constant 8 : i32
+  %73 = scalar.constant 24 : i32
+  %76 = scf.for %74 = [%70 to %byte_length step %71](%75 = %69 : i32) -> (i32) {
+    %77 = index.add %target_offset, %74 : offset
+    buffer.store.i8 %75, %target[%77]
+    %78 = scalar.shrui %75, %72 : i32
+    %79 = scalar.shli %75, %73 : i32
+    %80 = scalar.ori %78, %79 : i32
+    scf.yield %80 : i32
+  }
+  func.return
+}
+
+func.def target(@test_target) @fill_bf16(%pattern: bf16, %target: buffer, %target_offset: offset, %byte_length: offset) {
+  %81 = scalar.bitcast %pattern : bf16 to i16
+  %82 = scalar.extui %81 : i16 to i32
+  %83 = scalar.constant 16 : i32
+  %84 = scalar.shli %82, %83 : i32
+  %85 = scalar.ori %82, %84 : i32
+  %86 = index.constant 0 : offset
+  %87 = index.constant 1 : offset
+  %88 = scalar.constant 8 : i32
+  %89 = scalar.constant 24 : i32
+  %92 = scf.for %90 = [%86 to %byte_length step %87](%91 = %85 : i32) -> (i32) {
+    %93 = index.add %target_offset, %90 : offset
+    buffer.store.i8 %91, %target[%93]
+    %94 = scalar.shrui %91, %88 : i32
+    %95 = scalar.shli %91, %89 : i32
+    %96 = scalar.ori %94, %95 : i32
+    scf.yield %96 : i32
+  }
+  func.return
+}
+
+func.def target(@test_target) @compare(%lhs: buffer, %lhs_offset: offset, %rhs: buffer, %rhs_offset: offset, %byte_length: offset) -> (i32) {
+  %97 = index.constant 0 : offset
+  %98 = index.constant 1 : offset
+  %99 = scalar.constant 0 : i32
+  %100 = scalar.constant -1 : i32
+  %101 = scalar.constant 1 : i32
+  %106, %order = scf.while(%102 = %97 : offset, %103 = %99 : i32) -> (offset, i32) {
+    %108 = index.cmp ult, %102, %byte_length : offset
+    %109 = scalar.cmpi eq, %103, %99 : i32
+    %110 = scalar.andi %108, %109 : i1
+    scf.condition %110, %102, %103 : i1, offset, i32
+  } do(%104: offset, %105: i32) {
+    %111 = index.add %lhs_offset, %104 : offset
+    %112 = buffer.load.i8.u %lhs[%111]
+    %113 = index.add %rhs_offset, %104 : offset
+    %114 = buffer.load.i8.u %rhs[%113]
+    %115 = scalar.cmpi eq, %112, %114 : i32
+    %116 = scalar.cmpi ult, %112, %114 : i32
+    %117 = scf.select %116, %100, %101 : i32
+    %118 = scf.select %115, %99, %117 : i32
+    %119 = index.add %104, %98 : offset
+    scf.yield %119, %118 : offset, i32
+  }
+  func.return %order : i32
+}
