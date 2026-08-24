@@ -153,31 +153,35 @@ static iree_status_t loom_bytecode_symbol_policy_materialize_attribute_ssa(
       materializer->view.types.count, ssa_scope);
 }
 
-static iree_status_t loom_bytecode_symbol_policy_materialize_body(
+static iree_status_t loom_bytecode_symbol_policy_materialize_region(
     loom_bytecode_symbol_policy_materializer_t* materializer,
     iree_string_view_t symbol_name,
     const loom_bytecode_symbol_policy_body_source_t* body_source,
-    iree_host_size_t symbol_ordinal, uint64_t ir_offset, uint32_t ir_length,
-    loom_builder_t* builder, loom_op_t* parent_op, uint8_t first_region_index,
-    const loom_bytecode_predefined_region_values_t* predefined_regions,
-    uint8_t predefined_region_count,
+    iree_host_size_t symbol_ordinal, uint8_t region_payload_ordinal,
+    const loom_bytecode_region_payload_metadata_t* payload,
+    loom_builder_t* builder, loom_op_t* parent_op,
+    loom_bytecode_region_materialization_flags_t flags,
+    const loom_value_id_t* predefined_values, uint16_t predefined_value_count,
     const loom_low_repr_descriptor_set_t* low_descriptor_set) {
   (void)symbol_ordinal;
+  (void)region_payload_ordinal;
   IREE_RETURN_IF_ERROR(loom_bytecode_reader_validate_range(
-      &materializer->decoder, IREE_SV("IR body"), ir_offset, ir_length,
-      body_source ? body_source->length : 0));
-  const iree_const_byte_span_t body_bytes = iree_make_const_byte_span(
-      body_source->bytes.data + (iree_host_size_t)ir_offset, ir_length);
-  const uint64_t body_absolute_offset =
-      body_source->absolute_offset + ir_offset;
-  loom_bytecode_body_summary_t summary;
-  IREE_RETURN_IF_ERROR(loom_bytecode_body_summary_read(
-      &materializer->decoder, symbol_name, body_bytes, body_absolute_offset,
-      &summary));
-  return loom_bytecode_body_materialize_symbol_regions(
-      &materializer->body_materializer, symbol_name, body_bytes,
-      body_absolute_offset, &summary, builder, parent_op, first_region_index,
-      predefined_regions, predefined_region_count, low_descriptor_set);
+      &materializer->decoder, IREE_SV("IR root region"), payload->offset,
+      payload->length, body_source ? body_source->length : 0));
+  const iree_const_byte_span_t payload_bytes = iree_make_const_byte_span(
+      body_source->bytes.data + (iree_host_size_t)payload->offset,
+      payload->length);
+  const uint64_t payload_absolute_offset =
+      body_source->absolute_offset + payload->offset;
+  loom_bytecode_region_summary_t summary;
+  IREE_RETURN_IF_ERROR(loom_bytecode_region_summary_read(
+      &materializer->decoder, symbol_name, payload_bytes,
+      payload_absolute_offset, &summary));
+  return loom_bytecode_body_materialize_region(
+      &materializer->body_materializer, symbol_name, payload_bytes,
+      payload_absolute_offset, &summary, builder, parent_op,
+      payload->region_index, flags, predefined_values, predefined_value_count,
+      low_descriptor_set);
 }
 
 void loom_bytecode_symbol_materializer_initialize(
@@ -245,12 +249,16 @@ static iree_status_t loom_bytecode_reader_symbol_cursor_to_entries(
   uint64_t count = 0;
   uint64_t import_count = 0;
   uint64_t export_count = 0;
+  uint64_t region_payload_count = 0;
   IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_uvarint(&materializer->decoder,
                                                          cursor, &count));
   IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_uvarint(
       &materializer->decoder, cursor, &import_count));
   IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_uvarint(
       &materializer->decoder, cursor, &export_count));
+  IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_uvarint(
+      &materializer->decoder, cursor, &region_payload_count));
+  (void)region_payload_count;
   for (uint64_t i = 0; i < import_count + export_count; ++i) {
     uint64_t unused_offset = 0;
     IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_u64_le(

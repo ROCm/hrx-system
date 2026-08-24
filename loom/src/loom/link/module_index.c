@@ -627,7 +627,7 @@ static loom_link_symbol_flags_t loom_link_materialized_symbol_flags(
     flags |= LOOM_LINK_SYMBOL_FLAG_DECLARATION;
   }
   if (loom_link_symbol_is_concrete_definition(symbol)) {
-    flags |= LOOM_LINK_SYMBOL_FLAG_HAS_BODY;
+    flags |= LOOM_LINK_SYMBOL_FLAG_CONCRETE_DEFINITION;
   }
   if (loom_symbol_implements(symbol, LOOM_SYMBOL_INTERFACE_CONFIG)) {
     flags |= LOOM_LINK_SYMBOL_FLAG_CONFIG;
@@ -694,13 +694,14 @@ static loom_link_symbol_flags_t loom_link_bytecode_symbol_flags(
   if (is_public && !is_import) {
     flags |= LOOM_LINK_SYMBOL_FLAG_EXPORT;
   }
-  if (symbol->kind == LOOM_BYTECODE_SYMBOL_ANCHOR ||
-      iree_any_bit_set(symbol->flags, LOOM_BYTECODE_SYMBOL_FLAG_DECLARATION) ||
-      is_import) {
+  const bool is_declaration =
+      symbol->kind == LOOM_BYTECODE_SYMBOL_ANCHOR ||
+      iree_any_bit_set(symbol->flags, LOOM_BYTECODE_SYMBOL_FLAG_DECLARATION);
+  if (is_declaration || is_import) {
     flags |= LOOM_LINK_SYMBOL_FLAG_DECLARATION;
   }
-  if (symbol->has_body) {
-    flags |= LOOM_LINK_SYMBOL_FLAG_HAS_BODY;
+  if (!is_declaration) {
+    flags |= LOOM_LINK_SYMBOL_FLAG_CONCRETE_DEFINITION;
   }
   if (iree_any_bit_set(symbol->interfaces, LOOM_SYMBOL_INTERFACE_CONFIG)) {
     flags |= LOOM_LINK_SYMBOL_FLAG_CONFIG;
@@ -1200,7 +1201,7 @@ static iree_status_t loom_link_index_project_bytecode_provider_imports(
 // Public API
 //===----------------------------------------------------------------------===//
 
-iree_status_t loom_link_module_index_create(
+iree_status_t loom_link_module_index_allocate(
     loom_context_t* context, iree_arena_block_pool_t* block_pool,
     iree_allocator_t allocator, loom_link_module_index_t** out_index) {
   IREE_ASSERT_ARGUMENT(context);

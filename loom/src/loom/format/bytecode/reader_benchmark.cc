@@ -358,8 +358,8 @@ static CatalogMetadataStats InspectCatalogMetadata(
       /*.body_op_count=*/module.summary.op_count,
       /*.symbol_count=*/module.symbol_count,
   };
-  for (iree_host_size_t i = 0; i < module.symbol_count; ++i) {
-    stats.body_bytes += module.symbols[i].body_length;
+  for (iree_host_size_t i = 0; i < module.region_payload_count; ++i) {
+    stats.body_bytes += module.region_payloads[i].length;
   }
   iree_arena_deinitialize(&metadata_arena);
   return stats;
@@ -499,8 +499,12 @@ static SelectedMaterializationStats InspectSelectedMaterialization(
   };
   for (iree_host_size_t ordinal : ordinals) {
     const loom_bytecode_symbol_metadata_t& symbol = metadata.symbols[ordinal];
-    if (symbol.has_body) {
-      stats.body_bytes += symbol.body_length;
+    if (symbol.region_payload_count > 0) {
+      for (uint8_t i = 0; i < symbol.region_payload_count; ++i) {
+        stats.body_bytes +=
+            metadata.region_payloads[symbol.first_region_payload_index + i]
+                .length;
+      }
       ++stats.body_count;
     }
   }

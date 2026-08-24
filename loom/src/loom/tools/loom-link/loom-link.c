@@ -421,7 +421,7 @@ static iree_status_t loom_link_cli_build_index(
   *out_index = (loom_link_cli_index_t){0};
   loom_link_module_index_t* index = NULL;
   IREE_RETURN_IF_ERROR(
-      loom_link_module_index_create(context, block_pool, allocator, &index));
+      loom_link_module_index_allocate(context, block_pool, allocator, &index));
 
   const iree_host_size_t provider_binding_count = input_count;
   loom_link_provider_binding_t* provider_bindings = NULL;
@@ -507,9 +507,9 @@ static iree_status_t loom_link_cli_append_symbol_flags(
     IREE_RETURN_IF_ERROR(loom_link_cli_append_flag(builder, &needs_separator,
                                                    IREE_SV("declaration")));
   }
-  if (iree_any_bit_set(flags, LOOM_LINK_SYMBOL_FLAG_HAS_BODY)) {
-    IREE_RETURN_IF_ERROR(
-        loom_link_cli_append_flag(builder, &needs_separator, IREE_SV("body")));
+  if (iree_any_bit_set(flags, LOOM_LINK_SYMBOL_FLAG_CONCRETE_DEFINITION)) {
+    IREE_RETURN_IF_ERROR(loom_link_cli_append_flag(builder, &needs_separator,
+                                                   IREE_SV("definition")));
   }
   if (iree_any_bit_set(flags, LOOM_LINK_SYMBOL_FLAG_CONFIG)) {
     IREE_RETURN_IF_ERROR(loom_link_cli_append_flag(builder, &needs_separator,

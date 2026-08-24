@@ -177,6 +177,28 @@ loom_cc_library(
   PUBLIC
 )
 
+loom_cc_library(
+  NAME
+    function_projection_reader
+  HDRS
+    "function_projection_reader.h"
+  SRCS
+    "function_projection_reader.c"
+  DEPS
+    ::function_header
+    ::index
+    iree::base
+    iree::base::internal::arena
+    loom::format::bytecode::reader::decoder
+    loom::format::bytecode::reader::selected_body
+    loom::format::bytecode::reader::selected_symbol
+    loom::format::bytecode::reader::selected_tables
+    loom::format::low_repr
+    loom::ir
+    loom::ops::op_defs
+  PUBLIC
+)
+
 loom_cc_test(
   NAME
     reader_test
@@ -195,6 +217,7 @@ loom_cc_test(
     loom::ir
     loom::ops::func
     loom::ops::global
+    loom::ops::kernel
     loom::ops::module
     loom::ops::template
     loom::ops::test

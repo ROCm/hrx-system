@@ -55,7 +55,7 @@ func.def public @entry(%value: i32) -> (i32) {
         ParseModule(BuildLibrarySource(), IREE_SV("library.loom"));
     library_bytecode_ = WriteModule(library_module_);
 
-    CheckStatus(loom_link_module_index_create(
+    CheckStatus(loom_link_module_index_allocate(
         &context_, &block_pool_, iree_allocator_system(), &index_));
     const loom_link_module_index_add_options_t root_options = {
         /*.provider_name=*/IREE_SV("root"),

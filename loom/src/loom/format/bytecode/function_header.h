@@ -16,6 +16,9 @@
 extern "C" {
 #endif
 
+typedef struct loom_bytecode_region_payload_metadata_t
+    loom_bytecode_region_payload_metadata_t;
+
 // Common prefix decoded before dispatching one symbol entry.
 typedef struct loom_bytecode_symbol_entry_header_t {
   // Source STRINGS ordinal naming the symbol.
@@ -34,11 +37,11 @@ typedef struct loom_bytecode_symbol_entry_header_t {
   loom_string_id_t import_symbol_id;
 } loom_bytecode_symbol_entry_header_t;
 
-// Materialized function-like metadata preceding an optional body reference.
+// Materialized function-like metadata preceding root-region references.
 //
 // Arrays and attributes borrow the active materializer arena. Signature values,
 // types, strings, and symbol refs belong to the materializer's output module.
-// The body bytes are not read while producing this header.
+// Root-region payload bytes are not read while producing this header.
 typedef struct loom_bytecode_function_header_t {
   // Source symbol ordinal being decoded.
   iree_host_size_t source_symbol_ordinal;
@@ -72,12 +75,15 @@ typedef struct loom_bytecode_function_header_t {
   loom_tied_result_t* tied_results;
   // Complete reconstructed operation attribute array.
   loom_attribute_t* attributes;
-  // True when the entry references an implementation body.
-  bool has_body;
-  // IR-section-relative body offset when has_body is true.
-  uint64_t body_offset;
-  // Body byte length when has_body is true.
-  uint32_t body_length;
+  // Independently bounded root-region payloads in declared slot order.
+  loom_bytecode_region_payload_metadata_t* region_payloads;
+  // Number of entries in region_payloads.
+  uint8_t region_payload_count;
+  // Body entry in region_payloads plus one, or zero when absent.
+  uint8_t body_region_payload_ordinal_plus_one;
+  // Workload/configuration entry in region_payloads plus one, or zero when
+  // absent.
+  uint8_t kernel_workload_region_payload_ordinal_plus_one;
 } loom_bytecode_function_header_t;
 
 #ifdef __cplusplus

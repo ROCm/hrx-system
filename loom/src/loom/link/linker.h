@@ -137,18 +137,18 @@ loom_linker_source_provider_import_list_empty(void) {
   return (loom_linker_source_provider_import_list_t){0};
 }
 
-// Creates an incremental linker over |context|.
+// Allocates an incremental linker over |context|.
 //
 // The linker owns a fresh target module allocated from |block_pool|. The
 // returned linker must be released with loom_linker_free(), even after a
 // successful finish, so its scratch state can be returned to the block pool.
-iree_status_t loom_linker_create(loom_context_t* context,
-                                 const loom_linker_options_t* options,
-                                 iree_arena_block_pool_t* block_pool,
-                                 iree_allocator_t allocator,
-                                 loom_linker_t** out_linker);
+iree_status_t loom_linker_allocate(loom_context_t* context,
+                                   const loom_linker_options_t* options,
+                                   iree_arena_block_pool_t* block_pool,
+                                   iree_allocator_t allocator,
+                                   loom_linker_t** out_linker);
 
-// Releases |linker| and any unfinished target module it still owns.
+// Frees |linker| and any unfinished target module it still owns.
 void loom_linker_free(loom_linker_t* linker);
 
 // Adds one materialized source module to |linker|.

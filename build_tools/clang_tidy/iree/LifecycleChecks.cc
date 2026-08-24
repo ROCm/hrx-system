@@ -112,18 +112,19 @@ bool FirstParameterHasRecordType(const FunctionDecl* Function,
   return ParameterRecord && ParameterRecord == RecordDefinition(Record);
 }
 
-const FunctionDecl* MatchingDeinitializeFunction(const FunctionDecl* Function,
-                                                 const RecordDecl* Record) {
+const FunctionDecl* MatchingCleanupFunction(const FunctionDecl* Function,
+                                            const RecordDecl* Record,
+                                            StringRef AcquisitionSuffix,
+                                            StringRef CleanupSuffix) {
   StringRef FunctionName = SimpleFunctionName(Function);
-  if (!Function || !Record || !FunctionName.ends_with("_allocate")) {
+  if (!Function || !Record || !FunctionName.ends_with(AcquisitionSuffix)) {
     return nullptr;
   }
-  std::string DeinitializeName =
-      (FunctionName.drop_back(StringRef("_allocate").size()) + "_deinitialize")
-          .str();
+  std::string CleanupName =
+      (FunctionName.drop_back(AcquisitionSuffix.size()) + CleanupSuffix).str();
   for (const Decl* Declaration : Function->getDeclContext()->decls()) {
     const auto* Candidate = dyn_cast<FunctionDecl>(Declaration);
-    if (!Candidate || SimpleFunctionName(Candidate) != DeinitializeName ||
+    if (!Candidate || SimpleFunctionName(Candidate) != CleanupName ||
         !Candidate->getReturnType()->isVoidType()) {
       continue;
     }
@@ -132,6 +133,12 @@ const FunctionDecl* MatchingDeinitializeFunction(const FunctionDecl* Function,
     }
   }
   return nullptr;
+}
+
+const FunctionDecl* MatchingDeinitializeFunction(const FunctionDecl* Function,
+                                                 const RecordDecl* Record) {
+  return MatchingCleanupFunction(Function, Record, "_allocate",
+                                 "_deinitialize");
 }
 
 struct CallerOwnedAllocateOutParameter {
@@ -170,6 +177,46 @@ const ParmVarDecl* InitializePublishedOutParameterWithoutStorage(
     }
   }
   return nullptr;
+}
+
+struct FactoryCleanupMismatch {
+  // Pointer-publishing factory output with the mixed lifecycle pair.
+  const ParmVarDecl* Parameter = nullptr;
+  // Externally visible same-stem cleanup using the conflicting suffix.
+  const FunctionDecl* CleanupFunction = nullptr;
+};
+
+std::optional<FactoryCleanupMismatch> FactoryCleanupMismatchFor(
+    const FunctionDecl* Function) {
+  if (!Function || Function->getFormalLinkage() != Linkage::External) {
+    return std::nullopt;
+  }
+  StringRef FunctionName = SimpleFunctionName(Function);
+  StringRef AcquisitionSuffix;
+  StringRef CleanupSuffix;
+  if (FunctionName.ends_with("_create")) {
+    AcquisitionSuffix = "_create";
+    CleanupSuffix = "_free";
+  } else if (FunctionName.ends_with("_allocate")) {
+    AcquisitionSuffix = "_allocate";
+    CleanupSuffix = "_destroy";
+  } else {
+    return std::nullopt;
+  }
+
+  for (const ParmVarDecl* Parameter : Function->parameters()) {
+    const RecordDecl* Record = PublishedOutParameterRecord(Parameter);
+    const FunctionDecl* CleanupFunction = MatchingCleanupFunction(
+        Function, Record, AcquisitionSuffix, CleanupSuffix);
+    if (CleanupFunction &&
+        CleanupFunction->getFormalLinkage() == Linkage::External) {
+      return FactoryCleanupMismatch{
+          .Parameter = Parameter,
+          .CleanupFunction = CleanupFunction,
+      };
+    }
+  }
+  return std::nullopt;
 }
 
 }  // namespace
@@ -211,15 +258,28 @@ void LifecycleNamingCheck::check(
 
   const ParmVarDecl* PublishedOutParameter =
       InitializePublishedOutParameterWithoutStorage(Function);
-  if (!PublishedOutParameter) {
+  if (PublishedOutParameter) {
+    SourceLocation Location =
+        SourceManager.getExpansionLoc(PublishedOutParameter->getLocation());
+    diag(Location,
+         "pointer-to-pointer output %0 from %1 uses initialize naming without "
+         "an explicit storage parameter")
+        << PublishedOutParameter->getName() << SimpleFunctionName(Function);
+    return;
+  }
+
+  std::optional<FactoryCleanupMismatch> Mismatch =
+      FactoryCleanupMismatchFor(Function);
+  if (!Mismatch) {
     return;
   }
   SourceLocation Location =
-      SourceManager.getExpansionLoc(PublishedOutParameter->getLocation());
+      SourceManager.getExpansionLoc(Mismatch->Parameter->getLocation());
   diag(Location,
-       "pointer-to-pointer output %0 from %1 uses initialize naming without "
-       "an explicit storage parameter")
-      << PublishedOutParameter->getName() << SimpleFunctionName(Function);
+       "callee-owned output %0 from %1 has mismatched cleanup %2; use "
+       "allocate/free or create/destroy naming consistently")
+      << Mismatch->Parameter->getName() << SimpleFunctionName(Function)
+      << SimpleFunctionName(Mismatch->CleanupFunction);
 }
 
 }  // namespace clang::tidy::iree

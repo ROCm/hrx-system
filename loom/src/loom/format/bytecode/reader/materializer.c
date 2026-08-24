@@ -27,7 +27,7 @@ typedef struct loom_bytecode_module_materialization_t {
   loom_bytecode_reader_decoder_t decoder;
   // Immutable validated module facts consumed by every table materializer.
   loom_bytecode_reader_module_view_t view;
-  // Block source for the output module and body-local arenas.
+  // Block source for the output module and root-region-local arenas.
   iree_arena_block_pool_t* block_pool;
   // Host allocator owning the output module.
   iree_allocator_t host_allocator;

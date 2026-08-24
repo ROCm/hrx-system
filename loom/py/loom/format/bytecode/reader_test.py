@@ -278,8 +278,6 @@ def _root_region_source_flags_offset(data: bytes | bytearray) -> int:
     offset = body_offset
     for _ in range(4):
         _count, offset = decode_varint(data, offset)
-    _root_region_count, offset = decode_varint(data, offset)
-    _root_region_index, offset = decode_varint(data, offset)
     return offset
 
 
@@ -322,6 +320,7 @@ def _first_symbol_flags_offset(data: bytes | bytearray) -> int:
     assert symbol_count > 0
     import_count, offset = decode_varint(data, offset)
     export_count, offset = decode_varint(data, offset)
+    _root_region_payload_count, offset = decode_varint(data, offset)
     offset += (import_count + export_count) * 8
     _name_id, offset = decode_varint(data, offset)
     return offset + 2
@@ -621,7 +620,7 @@ class TestMalformedIrSection:
         op_count_offset = body_offset + 3
         data[op_count_offset] = 0
 
-        with pytest.raises(BytecodeError, match="symbol region allocation summary"):
+        with pytest.raises(BytecodeError, match="root region allocation summary"):
             read_module(bytes(data))
 
 

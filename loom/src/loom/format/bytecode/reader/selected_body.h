@@ -4,7 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-// Reached-only function-local IR body materialization.
+// Reached-only root-region IR materialization.
 
 #ifndef LOOM_FORMAT_BYTECODE_READER_SELECTED_BODY_H_
 #define LOOM_FORMAT_BYTECODE_READER_SELECTED_BODY_H_
@@ -20,7 +20,7 @@ extern "C" {
 typedef struct loom_bytecode_selected_body_materializer_t {
   // Reached-only source-to-output table materializer.
   loom_bytecode_selected_table_materializer_t* tables;
-  // Block source for function-local scratch arenas.
+  // Block source for root-region-local scratch arenas.
   iree_arena_block_pool_t* block_pool;
   // Stable-key codec supplied by the embedding compiler.
   const loom_low_repr_environment_t* low_repr_environment;
@@ -73,14 +73,15 @@ iree_status_t loom_bytecode_selected_value_scope_materialize_definition(
     loom_bytecode_selected_value_scope_t* value_scope,
     loom_bytecode_reader_cursor_t* cursor, loom_value_id_t* out_value_id);
 
-// Materializes one selected bounded symbol IR payload into |parent_op| regions.
-iree_status_t loom_bytecode_selected_body_materialize_symbol_regions(
+// Materializes one selected bounded root-region payload into |parent_op|.
+iree_status_t loom_bytecode_selected_body_materialize_region(
     loom_bytecode_selected_body_materializer_t* materializer,
-    iree_string_view_t symbol_name, iree_const_byte_span_t body_bytes,
-    uint64_t body_absolute_offset, const loom_bytecode_body_summary_t* summary,
-    loom_builder_t* builder, loom_op_t* parent_op, uint8_t first_region_index,
-    const loom_bytecode_predefined_region_values_t* predefined_regions,
-    uint8_t predefined_region_count,
+    iree_string_view_t symbol_name, iree_const_byte_span_t payload_bytes,
+    uint64_t payload_absolute_offset,
+    const loom_bytecode_region_summary_t* summary, loom_builder_t* builder,
+    loom_op_t* parent_op, uint8_t region_index,
+    loom_bytecode_region_materialization_flags_t flags,
+    const loom_value_id_t* predefined_values, uint16_t predefined_value_count,
     const loom_low_repr_descriptor_set_t* low_descriptor_set);
 
 #ifdef __cplusplus

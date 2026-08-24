@@ -62,7 +62,7 @@
 //
 //   offset  size  field
 //   0       4     magic: "LOOM" (0x4C 0x4F 0x4F 0x4D)
-//   4       1     format_version (currently 29)
+//   4       1     format_version (currently 30)
 //   5       1     location_mode (see loom_bytecode_location_mode_t)
 //   6       2     module_count
 //   8       4     file_string_pool_length (bytes)
@@ -85,7 +85,7 @@ extern "C" {
 
 #define LOOM_BYTECODE_MAGIC "LOOM"
 #define LOOM_BYTECODE_MAGIC_LENGTH 4
-#define LOOM_BYTECODE_FORMAT_VERSION 29
+#define LOOM_BYTECODE_FORMAT_VERSION 30
 
 #define LOOM_BYTECODE_SOURCE_TRIVIA_LEADING_BLANK_LINE (1u << 0)
 #define LOOM_BYTECODE_SOURCE_TRIVIA_COMMENT_COUNT_SHIFT 1
@@ -174,15 +174,15 @@ typedef uint16_t loom_bytecode_module_flags_t;
 //
 //   [section_count: varint]
 //   [value_count: varint]   Total SSA value definitions serialized by symbols
-//                           and function bodies. Readers may reserve this
-//                           capacity before constructing body IR.
-//   [region_count: varint]  Total serialized function-body regions.
-//   [block_count: varint]   Total serialized function-body blocks.
-//   [op_count: varint]      Total serialized function-body operations.
+//                           and root-region payloads. Readers may reserve this
+//                           capacity before constructing IR.
+//   [region_count: varint]  Total serialized regions.
+//   [block_count: varint]   Total serialized blocks.
+//   [op_count: varint]      Total serialized operations.
 //
 // The allocation counts are construction hints and validation upper bounds for
 // this module. They avoid reader scan-ahead just to size tables, but the reader
-// still validates the actual parsed counts against the section/body payloads.
+// still validates the actual parsed counts against the section/region payloads.
 //
 // Section directory entry:
 //
@@ -507,6 +507,7 @@ typedef enum loom_bytecode_section_kind_e {
 //   [symbol_count: varint]
 //   [import_count: varint]
 //   [export_count: varint]
+//   [root_region_payload_count: varint]
 //   // Import offset table: byte offsets to import symbol entries.
 //   For each import (import_count times):
 //     [symbol_entry_offset: uint64]
@@ -621,13 +622,14 @@ typedef enum loom_bytecode_section_kind_e {
 //       [value_kind: byte]
 //       [value_data: ...]
 //
-//     // IR root-region payload reference. A has_body byte precedes the
-//     // offset/length pair so that declarations-only modules and stripped
-//     // modules can omit IR references even for nominally-bodied kinds.
-//     [has_body: byte]
-//     (if has_body:
+//     // Independently bounded root-region payloads in declared region-slot
+//     // order. Definitions may therefore project one structural region
+//     // without reading or validating bytes owned by another region.
+//     [root_region_payload_count: varint]
+//     For each root region payload:
+//       [region_index: byte]
 //       [ir_offset: u64]    (from IR section start)
-//       [ir_length: u32])
+//       [ir_length: u32]
 //
 //   For GLOBAL symbols:
 //     [def_op_table_index_plus1: varint]
@@ -679,10 +681,11 @@ typedef enum loom_bytecode_section_kind_e {
 //       [key_id: varint]
 //       [value_kind: byte]
 //       [value_data: ...]
-//     [has_body: byte]
-//     (if has_body:
+//     [root_region_payload_count: varint]
+//     For each root region payload:
+//       [region_index: byte]
 //       [ir_offset: u64]    (from IR section start)
-//       [ir_length: u32])
+//       [ir_length: u32]
 
 // ==========================================================================
 // PROVIDER_IMPORTS section
@@ -751,12 +754,13 @@ typedef enum loom_bytecode_section_kind_e {
 // IR section
 // ==========================================================================
 //
-// Symbol region payloads: the actual operations, blocks, and regions attached
-// to function-like or record symbols. Each symbol's IR is a contiguous byte
-// range addressable by (ir_offset, ir_length) from its symbol table entry. This
-// enables function-level lazy loading.
+// Root-region payloads: the actual operations, blocks, and nested regions
+// attached to one declared region slot of a function-like or record symbol.
+// Every root region is an independent byte range named by its symbol-table
+// entry. This permits structural projections such as a kernel launch
+// configuration to remain body-blind to the kernel implementation region.
 //
-// Within a symbol's IR:
+// Within one root-region payload:
 //
 // Value definition groups are reserved before their individual definitions are
 // decoded. Dynamic dim and SSA encoding bindings may therefore reference any
@@ -765,20 +769,14 @@ typedef enum loom_bytecode_section_kind_e {
 // and predicate value args still reference only values defined by earlier
 // definition groups.
 //
-//   [value_count: varint]   Symbol-local SSA values defined by block args
+//   [value_count: varint]   Region-local SSA values defined by block args
 //                           and operation results in this payload.
 //   [region_count: varint]  Regions in this payload, including nested regions.
 //   [block_count: varint]   Blocks in this payload, including nested regions.
 //   [op_count: varint]      Live operations in this payload, including nested
 //                           regions.
-//   [root_region_count: varint]
-//   For each root region:
-//     [region_index: varint]  Declared op region slot. Function-like payloads
-//                             serialize the FuncLike body region first when one
-//                             exists, then all other materialized root regions
-//                             in slot order.
-//     [source_flags: varint]  loom_region_source_flags_t presentation bits.
-//     [block_count: varint]
+//   [source_flags: varint]  loom_region_source_flags_t presentation bits.
+//   [block_count: varint]
 //   For each block:
 //     [has_label: byte]
 //     (if has_label: [label_id: varint])

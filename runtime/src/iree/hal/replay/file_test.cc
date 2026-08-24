@@ -42,7 +42,7 @@ TEST(ReplayFileWriterTest, WritesReplayRecordsAndRanges) {
       &file_handle));
 
   iree_hal_replay_file_writer_t* writer = nullptr;
-  IREE_ASSERT_OK(iree_hal_replay_file_writer_create(
+  IREE_ASSERT_OK(iree_hal_replay_file_writer_allocate(
       file_handle, iree_allocator_system(), &writer));
   iree_io_file_handle_release(file_handle);
 
@@ -150,7 +150,7 @@ TEST(ReplayFileWriterTest, RejectsAppendAfterClose) {
       &file_handle));
 
   iree_hal_replay_file_writer_t* writer = nullptr;
-  IREE_ASSERT_OK(iree_hal_replay_file_writer_create(
+  IREE_ASSERT_OK(iree_hal_replay_file_writer_allocate(
       file_handle, iree_allocator_system(), &writer));
   iree_io_file_handle_release(file_handle);
   IREE_ASSERT_OK(iree_hal_replay_file_writer_close(writer));
@@ -173,7 +173,7 @@ TEST(ReplayFileWriterTest, RejectsReservedRecordType) {
       &file_handle));
 
   iree_hal_replay_file_writer_t* writer = nullptr;
-  IREE_ASSERT_OK(iree_hal_replay_file_writer_create(
+  IREE_ASSERT_OK(iree_hal_replay_file_writer_allocate(
       file_handle, iree_allocator_system(), &writer));
   iree_io_file_handle_release(file_handle);
 

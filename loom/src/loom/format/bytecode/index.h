@@ -71,6 +71,18 @@ typedef struct loom_bytecode_op_metadata_t {
   iree_string_view_t name;
 } loom_bytecode_op_metadata_t;
 
+// Validated independently bounded root-region payload.
+typedef struct loom_bytecode_region_payload_metadata_t {
+  // IR-section-relative payload byte offset.
+  uint64_t offset;
+  // Absolute file byte offset of the payload.
+  uint64_t absolute_offset;
+  // Byte length of the payload.
+  uint32_t length;
+  // Declared region slot on the defining symbol operation.
+  uint8_t region_index;
+} loom_bytecode_region_payload_metadata_t;
+
 // Validated symbol record exposed by the bytecode index.
 typedef struct loom_bytecode_symbol_metadata_t {
   // Absolute file byte offset of the symbol entry.
@@ -107,6 +119,15 @@ typedef struct loom_bytecode_symbol_metadata_t {
   uint16_t result_count;
   // Function-like tied result count.
   uint16_t tied_result_count;
+  // FuncLike body region index plus one, or zero when absent.
+  uint8_t body_region_index_plus_one;
+  // Body entry in this symbol's payload list plus one, or zero when absent.
+  uint8_t body_region_payload_ordinal_plus_one;
+  // Kernel workload/configuration region index plus one, or zero when absent.
+  uint8_t kernel_workload_region_index_plus_one;
+  // Workload/configuration entry in this symbol's payload list plus one, or
+  // zero when absent.
+  uint8_t kernel_workload_region_payload_ordinal_plus_one;
   // Global declaration-local value count, or zero for non-global symbols.
   uint64_t local_value_count;
   // Source SYMBOLS ordinal naming the provider's template family, or
@@ -114,14 +135,10 @@ typedef struct loom_bytecode_symbol_metadata_t {
   uint32_t template_family_symbol_ordinal;
   // Concrete provider priority value, or zero when not applicable.
   uint64_t priority;
-  // True when the symbol carries an IR body reference.
-  bool has_body;
-  // IR-section-relative body byte offset when has_body is true.
-  uint64_t body_offset;
-  // Absolute file byte offset of the body when has_body is true.
-  uint64_t body_absolute_offset;
-  // Byte length of the body when has_body is true.
-  uint32_t body_length;
+  // First entry in the module's root-region payload array.
+  uint32_t first_region_payload_index;
+  // Number of independently bounded root-region payloads.
+  uint8_t region_payload_count;
 } loom_bytecode_symbol_metadata_t;
 
 // One compile-time provider import and its slice in the module anchor array.
@@ -214,6 +231,10 @@ typedef struct loom_bytecode_module_metadata_t {
   iree_host_size_t symbol_count;
   // Arena-owned symbol metadata array.
   loom_bytecode_symbol_metadata_t* symbols;
+  // Number of independently bounded root-region payloads.
+  iree_host_size_t region_payload_count;
+  // Arena-owned payload metadata in symbol and declared region-slot order.
+  loom_bytecode_region_payload_metadata_t* region_payloads;
   // Dense STRINGS ordinal to SYMBOLS ordinal projection. Entries without a
   // symbol contain UINT32_MAX.
   uint32_t* symbol_ordinal_by_string_index;

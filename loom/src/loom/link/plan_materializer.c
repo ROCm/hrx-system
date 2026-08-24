@@ -280,9 +280,9 @@ iree_status_t loom_link_plan_materialize(
           },
   };
   loom_linker_t* linker = NULL;
-  IREE_RETURN_IF_ERROR(loom_linker_create(environment->context, &linker_options,
-                                          environment->block_pool,
-                                          environment->allocator, &linker));
+  IREE_RETURN_IF_ERROR(loom_linker_allocate(
+      environment->context, &linker_options, environment->block_pool,
+      environment->allocator, &linker));
 
   loom_module_t* output_module = NULL;
   iree_status_t status = loom_link_plan_materialize_modules(

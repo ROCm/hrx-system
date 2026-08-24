@@ -93,7 +93,7 @@ class LinkIndexMaterializerTest : public ::testing::Test {
 
   IndexPtr CreateIndex() {
     loom_link_module_index_t* index = nullptr;
-    IREE_CHECK_OK(loom_link_module_index_create(
+    IREE_CHECK_OK(loom_link_module_index_allocate(
         &context_, &block_pool_, iree_allocator_system(), &index));
     return IndexPtr(index);
   }
@@ -344,9 +344,14 @@ template.def<@demo.choose> priority(1) @slow(%x: i32) -> (i32) {
     }
   }
   ASSERT_NE(slow_metadata, nullptr);
-  ASSERT_TRUE(slow_metadata->has_body);
-  std::fill_n(library_bytecode.data() + slow_metadata->body_absolute_offset,
-              slow_metadata->body_length, UINT8_C(0xFF));
+  ASSERT_GT(slow_metadata->region_payload_count, 0u);
+  for (uint8_t i = 0; i < slow_metadata->region_payload_count; ++i) {
+    const loom_bytecode_region_payload_metadata_t* payload =
+        &metadata
+             ->region_payloads[slow_metadata->first_region_payload_index + i];
+    std::fill_n(library_bytecode.data() + payload->absolute_offset,
+                payload->length, UINT8_C(0xFF));
+  }
 
   loom_link_index_materialization_t materialization =
       Materialize(index.get(), IREE_SV("@entry"));
@@ -414,10 +419,14 @@ template.def<@demo.choose> @implementation(%x: i32) -> (i32) {
     }
   }
   ASSERT_NE(implementation_metadata, nullptr);
-  ASSERT_TRUE(implementation_metadata->has_body);
-  std::fill_n(
-      library_bytecode.data() + implementation_metadata->body_absolute_offset,
-      implementation_metadata->body_length, UINT8_C(0xFF));
+  ASSERT_GT(implementation_metadata->region_payload_count, 0u);
+  for (uint8_t i = 0; i < implementation_metadata->region_payload_count; ++i) {
+    const loom_bytecode_region_payload_metadata_t* payload =
+        &metadata->region_payloads
+             [implementation_metadata->first_region_payload_index + i];
+    std::fill_n(library_bytecode.data() + payload->absolute_offset,
+                payload->length, UINT8_C(0xFF));
+  }
 
   loom_link_index_materialization_t materialization = MaterializeWithPolicy(
       index.get(), IREE_SV("@entry"), LOOM_LINK_PLAN_UNRESOLVED_ALLOW);

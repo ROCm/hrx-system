@@ -25,7 +25,7 @@ typedef struct loom_bytecode_selected_module_materializer_t {
   loom_context_t* context;
   // Resettable storage for preparation and transient materialization state.
   iree_arena_allocator_t* scratch_arena;
-  // Block source for the output module and body-local arenas.
+  // Block source for the output module and root-region-local arenas.
   iree_arena_block_pool_t* block_pool;
   // Validated retained metadata for the selected source module.
   const loom_bytecode_module_metadata_t* metadata;

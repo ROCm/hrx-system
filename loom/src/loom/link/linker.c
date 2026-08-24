@@ -2024,11 +2024,11 @@ static iree_status_t loom_linker_validate_source_provider_imports(
   return iree_ok_status();
 }
 
-iree_status_t loom_linker_create(loom_context_t* context,
-                                 const loom_linker_options_t* options,
-                                 iree_arena_block_pool_t* block_pool,
-                                 iree_allocator_t allocator,
-                                 loom_linker_t** out_linker) {
+iree_status_t loom_linker_allocate(loom_context_t* context,
+                                   const loom_linker_options_t* options,
+                                   iree_arena_block_pool_t* block_pool,
+                                   iree_allocator_t allocator,
+                                   loom_linker_t** out_linker) {
   *out_linker = NULL;
   if (!context) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -2501,13 +2501,13 @@ iree_status_t loom_link_materialized_modules(
   IREE_RETURN_IF_ERROR(loom_link_validate_options(options));
 
   loom_linker_t* linker = NULL;
-  iree_status_t status =
-      loom_linker_create(source_modules[0]->context,
-                         &(loom_linker_options_t){
-                             .module_name = options ? options->module_name
-                                                    : iree_string_view_empty(),
-                         },
-                         block_pool, allocator, &linker);
+  iree_status_t status = loom_linker_allocate(
+      source_modules[0]->context,
+      &(loom_linker_options_t){
+          .module_name =
+              options ? options->module_name : iree_string_view_empty(),
+      },
+      block_pool, allocator, &linker);
 
   const iree_host_size_t root_symbol_count =
       options ? options->root_symbols.count : 0;

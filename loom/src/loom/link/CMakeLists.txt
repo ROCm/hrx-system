@@ -213,6 +213,56 @@ loom_cc_library(
 
 loom_cc_library(
   NAME
+    kernel_config_materializer
+  HDRS
+    "kernel_config_materializer.h"
+  SRCS
+    "kernel_config_materializer.c"
+  DEPS
+    ::plan_materializer
+    iree::base
+    iree::base::internal::arena
+    loom::format::bytecode::function_projection_reader
+    loom::ir
+    loom::ops::func
+    loom::ops::kernel
+    loom::ops::op_defs
+    loom::ops::target
+    loom::ops::type_registry
+    loom::rewrite::remap
+    loom::rewrite::rewriter
+  PUBLIC
+)
+
+loom_cc_test(
+  NAME
+    kernel_config_materializer_test
+  SRCS
+    "kernel_config_materializer_test.cc"
+  DEPS
+    ::kernel_config_materializer
+    ::module_index
+    ::plan_materializer
+    ::planner
+    iree::base
+    iree::base::internal::arena
+    iree::io::stream
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::format::bytecode::reader
+    loom::format::bytecode::writer
+    loom::format::text::parser
+    loom::ir
+    loom::ops::func
+    loom::ops::index
+    loom::ops::kernel
+    loom::ops::op_registry
+    loom::ops::target
+    loom::verify
+)
+
+loom_cc_library(
+  NAME
     template_candidate_loader
   HDRS
     "template_candidate_loader.h"
@@ -334,6 +384,26 @@ loom_cc_benchmark(
     "index_materializer_benchmark.cc"
   DEPS
     ::index_materializer
+    ::module_index
+    ::planner
+    iree::base::internal::arena
+    iree::io::stream
+    iree::testing::benchmark_main
+    loom::format::bytecode::writer
+    loom::format::text::parser
+    loom::ir
+    loom::ops::op_registry
+    loom::verify
+  TESTONLY
+)
+
+loom_cc_benchmark(
+  NAME
+    kernel_config_materializer_benchmark
+  SRCS
+    "kernel_config_materializer_benchmark.cc"
+  DEPS
+    ::kernel_config_materializer
     ::module_index
     ::planner
     iree::base::internal::arena

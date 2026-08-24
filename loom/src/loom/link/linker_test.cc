@@ -130,8 +130,8 @@ class LinkerTest : public ::testing::Test {
     options.module_name = IREE_SV("linked");
     options.provider_imports.count = provider_import_count;
     options.provider_imports.anchor_count = provider_import_anchor_count;
-    IREE_CHECK_OK(loom_linker_create(&context_, &options, &block_pool_,
-                                     iree_allocator_system(), &linker));
+    IREE_CHECK_OK(loom_linker_allocate(&context_, &options, &block_pool_,
+                                       iree_allocator_system(), &linker));
     return linker;
   }
 
@@ -1130,8 +1130,8 @@ TEST_F(LinkerTest, IncrementalLinkDoesNotReferenceReleasedSourceModules) {
   loom_linker_options_t linker_options = {
       /*.module_name=*/IREE_SV("linked"),
   };
-  IREE_ASSERT_OK(loom_linker_create(&context_, &linker_options, &block_pool_,
-                                    iree_allocator_system(), &linker));
+  IREE_ASSERT_OK(loom_linker_allocate(&context_, &linker_options, &block_pool_,
+                                      iree_allocator_system(), &linker));
 
   iree_string_view_t roots[] = {IREE_SV("@caller")};
   loom_linker_add_options_t add_options = {

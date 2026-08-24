@@ -33,6 +33,14 @@ class LifecycleChecksTest(clang_tidy_test.ClangTidyAssertions):
                 "pointer-to-pointer output out_resource from "
                 "iree_clang_tidy_view_initialize uses initialize naming "
                 "without an explicit storage parameter",
+                "callee-owned output out_resource from "
+                "iree_clang_tidy_mismatched_storage_create has mismatched "
+                "cleanup iree_clang_tidy_mismatched_storage_free; use "
+                "allocate/free or create/destroy naming consistently",
+                "callee-owned output out_resource from "
+                "iree_clang_tidy_mismatched_object_allocate has mismatched "
+                "cleanup iree_clang_tidy_mismatched_object_destroy; use "
+                "allocate/free or create/destroy naming consistently",
                 "[iree-lifecycle-naming]",
             ],
         )
@@ -41,6 +49,8 @@ class LifecycleChecksTest(clang_tidy_test.ClangTidyAssertions):
             [
                 "iree_clang_tidy_in_place_resource_initialize",
                 "iree_clang_tidy_heap_resource_allocate",
+                "iree_clang_tidy_heap_object_create",
+                "iree_clang_tidy_vtable_resource_allocate",
                 "iree_clang_tidy_arena_bitset_allocate",
                 "iree_clang_tidy_other_resource_deinitialize",
                 "iree_clang_tidy_view_with_storage_initialize",

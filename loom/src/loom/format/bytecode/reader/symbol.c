@@ -162,6 +162,101 @@ static iree_status_t loom_bytecode_reader_skip_value_def(
                                                   &unused_encoding_ref);
 }
 
+static iree_status_t loom_bytecode_reader_decode_region_payloads(
+    loom_bytecode_symbol_validator_t* reader,
+    loom_bytecode_reader_cursor_t* cursor,
+    const loom_bytecode_reader_section_t* ir_section, uint64_t symbol_index,
+    const loom_op_vtable_t* vtable, iree_host_size_t total_payload_count,
+    iree_host_size_t* payload_index,
+    loom_bytecode_region_payload_metadata_t* payloads,
+    loom_bytecode_symbol_metadata_t* symbol_metadata) {
+  const uint64_t count_offset =
+      loom_bytecode_reader_cursor_absolute_position(cursor);
+  uint64_t payload_count = 0;
+  IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_uvarint_inline(
+      &reader->decoder, cursor, &payload_count));
+  if (payload_count > vtable->region_count ||
+      payload_count > total_payload_count - *payload_index) {
+    return loom_bytecode_reader_emit_invalid_field(
+        &reader->decoder, IREE_SV("SYMBOLS"), IREE_SV("symbol"), symbol_index,
+        IREE_SV("root_region_payload_count"), count_offset,
+        IREE_SV("root_region_payload_count_exceeds_declared_slots_or_total"));
+  }
+
+  symbol_metadata->first_region_payload_index = (uint32_t)*payload_index;
+  symbol_metadata->region_payload_count = (uint8_t)payload_count;
+  uint8_t next_region_index = 0;
+  for (uint64_t i = 0; i < payload_count; ++i) {
+    const uint64_t region_index_offset =
+        loom_bytecode_reader_cursor_absolute_position(cursor);
+    uint8_t region_index = 0;
+    IREE_RETURN_IF_ERROR(
+        loom_bytecode_reader_read_u8(&reader->decoder, cursor, &region_index));
+    if (region_index < next_region_index ||
+        region_index >= vtable->region_count) {
+      return loom_bytecode_reader_emit_invalid_field(
+          &reader->decoder, IREE_SV("SYMBOLS"), IREE_SV("symbol"), symbol_index,
+          IREE_SV("region_index"), region_index_offset,
+          IREE_SV("root_region_payload_indices_must_be_strictly_ordered"));
+    }
+    while (next_region_index < region_index) {
+      if (!iree_any_bit_set(vtable->region_descriptors[next_region_index].flags,
+                            LOOM_REGION_OPTIONAL)) {
+        return loom_bytecode_reader_emit_invalid_field(
+            &reader->decoder, IREE_SV("SYMBOLS"), IREE_SV("symbol"),
+            symbol_index, IREE_SV("region_index"), region_index_offset,
+            IREE_SV("required_root_region_payload_is_missing"));
+      }
+      ++next_region_index;
+    }
+    next_region_index = (uint8_t)(region_index + 1);
+
+    uint64_t ir_offset = 0;
+    uint32_t ir_length = 0;
+    IREE_RETURN_IF_ERROR(
+        loom_bytecode_reader_read_u64_le(&reader->decoder, cursor, &ir_offset));
+    IREE_RETURN_IF_ERROR(
+        loom_bytecode_reader_read_u32_le(&reader->decoder, cursor, &ir_length));
+    if (ir_length == 0) {
+      return loom_bytecode_reader_emit_invalid_field(
+          &reader->decoder, IREE_SV("SYMBOLS"), IREE_SV("symbol"), symbol_index,
+          IREE_SV("ir_length"), region_index_offset,
+          IREE_SV("root_region_payload_must_not_be_empty"));
+    }
+    IREE_RETURN_IF_ERROR(loom_bytecode_reader_validate_range(
+        &reader->decoder, IREE_SV("IR root region"), ir_offset, ir_length,
+        ir_section->length));
+    if (payloads) {
+      payloads[*payload_index] = (loom_bytecode_region_payload_metadata_t){
+          .region_index = region_index,
+          .offset = ir_offset,
+          .absolute_offset = ir_section->absolute_offset + ir_offset,
+          .length = ir_length,
+      };
+    }
+    if (symbol_metadata->body_region_index_plus_one == region_index + 1) {
+      symbol_metadata->body_region_payload_ordinal_plus_one = (uint8_t)(i + 1);
+    }
+    if (symbol_metadata->kernel_workload_region_index_plus_one ==
+        region_index + 1) {
+      symbol_metadata->kernel_workload_region_payload_ordinal_plus_one =
+          (uint8_t)(i + 1);
+    }
+    ++*payload_index;
+  }
+  while (next_region_index < vtable->region_count) {
+    if (!iree_any_bit_set(vtable->region_descriptors[next_region_index].flags,
+                          LOOM_REGION_OPTIONAL)) {
+      return loom_bytecode_reader_emit_invalid_field(
+          &reader->decoder, IREE_SV("SYMBOLS"), IREE_SV("symbol"), symbol_index,
+          IREE_SV("root_region_payload_count"), count_offset,
+          IREE_SV("required_root_region_payload_is_missing"));
+    }
+    ++next_region_index;
+  }
+  return iree_ok_status();
+}
+
 static iree_status_t loom_bytecode_reader_skip_global_payload(
     loom_bytecode_symbol_validator_t* reader,
     loom_bytecode_reader_cursor_t* cursor, uint64_t symbol_index,
@@ -283,7 +378,10 @@ static iree_status_t loom_bytecode_reader_skip_record_payload(
     loom_bytecode_symbol_validator_t* reader,
     loom_bytecode_reader_cursor_t* cursor,
     const loom_bytecode_reader_section_t* ir_section, uint64_t symbol_index,
-    uint16_t symbol_flags, loom_bytecode_symbol_metadata_t* symbol_metadata) {
+    uint16_t symbol_flags, iree_host_size_t total_region_payload_count,
+    iree_host_size_t* region_payload_index,
+    loom_bytecode_region_payload_metadata_t* region_payloads,
+    loom_bytecode_symbol_metadata_t* symbol_metadata) {
   uint64_t op_ref_offset =
       loom_bytecode_reader_cursor_absolute_position(cursor);
   uint64_t op_table_index_plus1 = 0;
@@ -360,38 +458,10 @@ static iree_status_t loom_bytecode_reader_skip_record_payload(
         value_kind, reader->view.types.count));
   }
 
-  uint8_t has_body = 0;
-  uint64_t has_body_offset =
-      loom_bytecode_reader_cursor_absolute_position(cursor);
-  IREE_RETURN_IF_ERROR(
-      loom_bytecode_reader_read_u8(&reader->decoder, cursor, &has_body));
-  if (has_body > 1) {
-    return loom_bytecode_reader_emit_enum_value(
-        &reader->decoder, IREE_SV("has_body"), has_body, 2, has_body_offset);
-  }
-  if ((vtable->region_count == 1) != (has_body != 0)) {
-    return loom_bytecode_reader_emit_invalid_field(
-        &reader->decoder, IREE_SV("SYMBOLS"), IREE_SV("symbol"), symbol_index,
-        IREE_SV("has_body"), has_body_offset,
-        IREE_SV("record_body_presence_must_match_the_defining_op_region"));
-  }
-  if (has_body) {
-    uint64_t ir_offset = 0;
-    uint32_t ir_length = 0;
-    IREE_RETURN_IF_ERROR(
-        loom_bytecode_reader_read_u64_le(&reader->decoder, cursor, &ir_offset));
-    IREE_RETURN_IF_ERROR(
-        loom_bytecode_reader_read_u32_le(&reader->decoder, cursor, &ir_length));
-    IREE_RETURN_IF_ERROR(loom_bytecode_reader_validate_range(
-        &reader->decoder, IREE_SV("IR body"), ir_offset, ir_length,
-        ir_section->length));
-    symbol_metadata->has_body = true;
-    symbol_metadata->body_offset = ir_offset;
-    symbol_metadata->body_absolute_offset =
-        ir_section->absolute_offset + ir_offset;
-    symbol_metadata->body_length = ir_length;
-  }
-  return iree_ok_status();
+  return loom_bytecode_reader_decode_region_payloads(
+      reader, cursor, ir_section, symbol_index, vtable,
+      total_region_payload_count, region_payload_index, region_payloads,
+      symbol_metadata);
 }
 
 typedef struct loom_bytecode_symbol_table_t {
@@ -403,6 +473,13 @@ typedef struct loom_bytecode_symbol_table_t {
   const loom_bytecode_reader_section_t* ir_section;
   // Number of symbol entries.
   iree_host_size_t count;
+  // Number of root-region payload references declared by the section.
+  iree_host_size_t region_payload_count;
+  // Number of root-region payload references consumed so far.
+  iree_host_size_t region_payload_index;
+  // Retained payload metadata destination, or NULL during validation-only
+  // reads.
+  loom_bytecode_region_payload_metadata_t* region_payloads;
   // Import offset-table state.
   struct {
     // Number of entries.
@@ -476,10 +553,15 @@ static iree_status_t loom_bytecode_symbols_begin(
 
   uint64_t import_count = 0;
   uint64_t export_count = 0;
+  uint64_t region_payload_count = 0;
   IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_uvarint_inline(
       &reader->decoder, &table.cursor, &import_count));
   IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_uvarint_inline(
       &reader->decoder, &table.cursor, &export_count));
+  const uint64_t region_payload_count_offset =
+      loom_bytecode_reader_cursor_absolute_position(&table.cursor);
+  IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_uvarint_inline(
+      &reader->decoder, &table.cursor, &region_payload_count));
   if (import_count > count || export_count > count) {
     return loom_bytecode_reader_emit_invalid_field(
         &reader->decoder, IREE_SV("SYMBOLS"), IREE_SV("header"), 0,
@@ -489,6 +571,14 @@ static iree_status_t loom_bytecode_symbols_begin(
   }
   table.imports.count = (iree_host_size_t)import_count;
   table.exports.count = (iree_host_size_t)export_count;
+  if (region_payload_count > UINT32_MAX ||
+      region_payload_count > symbols_section->length) {
+    return loom_bytecode_reader_emit_invalid_field(
+        &reader->decoder, IREE_SV("SYMBOLS"), IREE_SV("header"), 0,
+        IREE_SV("root_region_payload_count"), region_payload_count_offset,
+        IREE_SV("root_region_payload_count_exceeds_index_or_section_bounds"));
+  }
+  table.region_payload_count = (iree_host_size_t)region_payload_count;
 
   const uint64_t offset_table_count = import_count + export_count;
   uint64_t* offset_table = NULL;
@@ -709,6 +799,12 @@ loom_bytecode_symbol_decode(loom_bytecode_symbol_validator_t* reader,
     IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_u8(&reader->decoder,
                                                       &table->cursor, &purity));
     const loom_func_like_vtable_t* func_like = unused_vtable->func_like;
+    if (func_like->body_region_index != LOOM_REGION_INDEX_NONE) {
+      symbol_metadata->body_region_index_plus_one =
+          (uint8_t)(func_like->body_region_index + 1);
+    }
+    symbol_metadata->kernel_workload_region_index_plus_one =
+        unused_vtable->symbol_def->kernel_workload_region_index_plus_one;
     IREE_RETURN_IF_ERROR(loom_bytecode_symbol_validate_func_enum(
         &reader->decoder, symbol_index, unused_vtable, func_like->cc_attr_index,
         IREE_SV("calling_convention"), calling_convention, cc_offset));
@@ -843,38 +939,18 @@ loom_bytecode_symbol_decode(loom_bytecode_symbol_validator_t* reader,
     IREE_RETURN_IF_ERROR(loom_bytecode_reader_skip_func_payload_attrs(
         reader, &table->cursor, symbol_index, unused_vtable, func_like,
         &attribute_ssa_scope));
-    uint8_t has_body = 0;
-    uint64_t has_body_offset =
-        loom_bytecode_reader_cursor_absolute_position(&table->cursor);
-    IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_u8(
-        &reader->decoder, &table->cursor, &has_body));
-    if (has_body > 1) {
-      return loom_bytecode_reader_emit_enum_value(
-          &reader->decoder, IREE_SV("has_body"), has_body, 2, has_body_offset);
-    }
-    if (has_body) {
-      uint64_t ir_offset = 0;
-      uint32_t ir_length = 0;
-      IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_u64_le(
-          &reader->decoder, &table->cursor, &ir_offset));
-      IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_u32_le(
-          &reader->decoder, &table->cursor, &ir_length));
-      IREE_RETURN_IF_ERROR(loom_bytecode_reader_validate_range(
-          &reader->decoder, IREE_SV("IR body"), ir_offset, ir_length,
-          table->ir_section->length));
-      symbol_metadata->has_body = true;
-      symbol_metadata->body_offset = ir_offset;
-      symbol_metadata->body_absolute_offset =
-          table->ir_section->absolute_offset + ir_offset;
-      symbol_metadata->body_length = ir_length;
-    }
+    IREE_RETURN_IF_ERROR(loom_bytecode_reader_decode_region_payloads(
+        reader, &table->cursor, table->ir_section, symbol_index, unused_vtable,
+        table->region_payload_count, &table->region_payload_index,
+        table->region_payloads, symbol_metadata));
   } else if (kind == LOOM_BYTECODE_SYMBOL_GLOBAL) {
     IREE_RETURN_IF_ERROR(loom_bytecode_reader_skip_global_payload(
         reader, &table->cursor, symbol_index, flags, symbol_metadata));
   } else if (kind == LOOM_BYTECODE_SYMBOL_RECORD) {
     IREE_RETURN_IF_ERROR(loom_bytecode_reader_skip_record_payload(
         reader, &table->cursor, table->ir_section, symbol_index, flags,
-        symbol_metadata));
+        table->region_payload_count, &table->region_payload_index,
+        table->region_payloads, symbol_metadata));
   }
 
   uint64_t next_entry_offset =
@@ -907,6 +983,13 @@ static iree_status_t loom_bytecode_symbols_finish(
         table->exports.index, IREE_SV("symbol_entry_offset"),
         table->symbols_section->absolute_offset,
         IREE_SV("export_offset_table_contains_entries_without_export_symbols"));
+  }
+  if (table->region_payload_index != table->region_payload_count) {
+    return loom_bytecode_reader_emit_invalid_field(
+        &reader->decoder, IREE_SV("SYMBOLS"), IREE_SV("header"), 0,
+        IREE_SV("root_region_payload_count"),
+        table->symbols_section->absolute_offset,
+        IREE_SV("root_region_payload_records_do_not_match_declared_total"));
   }
   IREE_RETURN_IF_ERROR(loom_bytecode_reader_expect_empty(
       &reader->decoder, &table->cursor, IREE_SV("SYMBOLS")));
@@ -941,6 +1024,7 @@ iree_status_t loom_bytecode_symbols_index(
                                                    ir_section, &table));
 
   out_metadata->symbol_count = table.count;
+  out_metadata->region_payload_count = table.region_payload_count;
   out_metadata->import_count = table.imports.count;
   out_metadata->export_count = table.exports.count;
   if (table.count > 0) {
@@ -949,6 +1033,13 @@ iree_status_t loom_bytecode_symbols_index(
         (void**)&out_metadata->symbols));
     memset(out_metadata->symbols, 0,
            table.count * sizeof(*out_metadata->symbols));
+  }
+  if (table.region_payload_count > 0) {
+    IREE_RETURN_IF_ERROR(
+        iree_arena_allocate_array(retained_arena, table.region_payload_count,
+                                  sizeof(*out_metadata->region_payloads),
+                                  (void**)&out_metadata->region_payloads));
+    table.region_payloads = out_metadata->region_payloads;
   }
   if (out_metadata->strings.count > 0) {
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(

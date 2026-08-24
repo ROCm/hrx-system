@@ -432,8 +432,8 @@ IREE_API_EXPORT iree_status_t iree_hal_replay_recorder_create(
 
   iree_hal_replay_file_writer_t* writer = NULL;
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0,
-      iree_hal_replay_file_writer_create(file_handle, host_allocator, &writer));
+      z0, iree_hal_replay_file_writer_allocate(file_handle, host_allocator,
+                                               &writer));
 
   iree_hal_replay_recorder_t* recorder = NULL;
   iree_status_t status = iree_allocator_malloc(

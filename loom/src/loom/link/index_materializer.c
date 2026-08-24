@@ -188,7 +188,7 @@ static iree_status_t loom_link_index_materialize_selective(
   IREE_RETURN_IF_ERROR(loom_link_index_selected_providers_initialize(
       symbol_count, environment->allocator, &selected));
   loom_link_template_candidate_loader_t* candidate_loader = NULL;
-  iree_status_t status = loom_link_template_candidate_loader_create(
+  iree_status_t status = loom_link_template_candidate_loader_allocate(
       index, environment, &candidate_loader);
 
   loom_link_plan_t* stable_plan = NULL;

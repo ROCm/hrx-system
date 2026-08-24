@@ -163,35 +163,42 @@ static iree_status_t loom_bytecode_symbol_policy_materialize_attribute_ssa(
       materializer->tables->metadata->types.count, ssa_scope);
 }
 
-static iree_status_t loom_bytecode_symbol_policy_materialize_body(
+static iree_status_t loom_bytecode_symbol_policy_materialize_region(
     loom_bytecode_symbol_policy_materializer_t* materializer,
     iree_string_view_t symbol_name,
     const loom_bytecode_symbol_policy_body_source_t* body_source,
-    iree_host_size_t symbol_ordinal, uint64_t ir_offset, uint32_t ir_length,
-    loom_builder_t* builder, loom_op_t* parent_op, uint8_t first_region_index,
-    const loom_bytecode_predefined_region_values_t* predefined_regions,
-    uint8_t predefined_region_count,
+    iree_host_size_t symbol_ordinal, uint8_t region_payload_ordinal,
+    const loom_bytecode_region_payload_metadata_t* header_payload,
+    loom_builder_t* builder, loom_op_t* parent_op,
+    loom_bytecode_region_materialization_flags_t flags,
+    const loom_value_id_t* predefined_values, uint16_t predefined_value_count,
     const loom_low_repr_descriptor_set_t* low_descriptor_set) {
-  (void)ir_offset;
-  (void)ir_length;
   IREE_ASSERT(body_source->source_ordinal == symbol_ordinal);
-  const loom_bytecode_symbol_metadata_t* metadata =
+  const loom_bytecode_symbol_metadata_t* symbol_metadata =
       loom_bytecode_selected_symbol_metadata(materializer, symbol_ordinal);
-  IREE_ASSERT(metadata->has_body);
-  IREE_ASSERT(metadata->body_absolute_offset <=
+  IREE_ASSERT(region_payload_ordinal < symbol_metadata->region_payload_count);
+  const loom_bytecode_region_payload_metadata_t* payload =
+      &materializer->tables->metadata
+           ->region_payloads[symbol_metadata->first_region_payload_index +
+                             region_payload_ordinal];
+  IREE_ASSERT(payload->region_index == header_payload->region_index);
+  IREE_ASSERT(payload->offset == header_payload->offset);
+  IREE_ASSERT(payload->length == header_payload->length);
+  IREE_ASSERT(region_payload_ordinal < body_source->region_summary_count);
+  IREE_ASSERT(payload->absolute_offset <=
               materializer->tables->bytecode.data_length);
-  IREE_ASSERT(metadata->body_length <=
-              materializer->tables->bytecode.data_length -
-                  metadata->body_absolute_offset);
-  const iree_const_byte_span_t body_bytes = iree_make_const_byte_span(
-      materializer->tables->bytecode.data +
-          (iree_host_size_t)metadata->body_absolute_offset,
-      metadata->body_length);
-  return loom_bytecode_selected_body_materialize_symbol_regions(
-      &materializer->body_materializer, symbol_name, body_bytes,
-      metadata->body_absolute_offset, &body_source->body_summary, builder,
-      parent_op, first_region_index, predefined_regions,
-      predefined_region_count, low_descriptor_set);
+  IREE_ASSERT(payload->length <= materializer->tables->bytecode.data_length -
+                                     payload->absolute_offset);
+  const iree_const_byte_span_t payload_bytes =
+      iree_make_const_byte_span(materializer->tables->bytecode.data +
+                                    (iree_host_size_t)payload->absolute_offset,
+                                payload->length);
+  return loom_bytecode_selected_body_materialize_region(
+      &materializer->body_materializer, symbol_name, payload_bytes,
+      payload->absolute_offset,
+      &body_source->region_summaries[region_payload_ordinal], builder,
+      parent_op, payload->region_index, flags, predefined_values,
+      predefined_value_count, low_descriptor_set);
 }
 
 void loom_bytecode_selected_symbol_materializer_initialize(

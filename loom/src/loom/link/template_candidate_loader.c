@@ -89,7 +89,7 @@ static iree_status_t loom_link_template_candidate_initialize_bytecode_module(
           loom_link_template_candidate_diagnostic_sink(loader, provider),
       .low_repr_environment = loader->environment->low_repr_environment,
   };
-  IREE_RETURN_IF_ERROR(loom_bytecode_symbol_header_reader_create(
+  IREE_RETURN_IF_ERROR(loom_bytecode_symbol_header_reader_allocate(
       provider->bytecode.contents, provider->bytecode.filename,
       loader->environment->context, loader->environment->block_pool, metadata,
       &options, loader->environment->allocator, &cache->header_reader));
@@ -268,7 +268,7 @@ static iree_status_t loom_link_template_candidate_build_bytecode_summary(
   *summary = (loom_template_provider_summary_t){
       .module = module,
       .kind = loom_link_template_candidate_kind(source_symbol->kind),
-      .has_body = header.has_body,
+      .has_body = header.body_region_payload_ordinal_plus_one != 0,
       .symbol = {0, header.symbol_id},
       .target_symbol = loom_symbol_ref_null(),
       .origin_ordinal = source_symbol->ordinal,
@@ -465,7 +465,7 @@ static iree_status_t loom_link_template_candidate_count(
   return iree_ok_status();
 }
 
-iree_status_t loom_link_template_candidate_loader_create(
+iree_status_t loom_link_template_candidate_loader_allocate(
     const loom_link_module_index_t* index,
     const loom_link_plan_materialization_environment_t* environment,
     loom_link_template_candidate_loader_t** out_loader) {
