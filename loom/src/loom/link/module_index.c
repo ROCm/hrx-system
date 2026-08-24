@@ -65,7 +65,7 @@ struct loom_link_module_index_t {
     // Allocated record capacity.
     iree_host_size_t capacity;
   } symbols;
-  // Total contract and root-region facets across indexed symbols.
+  // Total semantic facets across indexed symbols.
   iree_host_size_t facet_count;
   // Exported INPUT-provider symbols in stable provider order.
   struct {
@@ -564,9 +564,8 @@ static iree_status_t loom_link_index_append_symbol(
         loom_link_index_reserve_input_exports(index, input_export_count));
   }
   iree_host_size_t facet_count = 0;
-  if (!iree_host_size_checked_add(
-          index->facet_count,
-          (iree_host_size_t)facet_schema.root_region_count + 1, &facet_count)) {
+  if (!iree_host_size_checked_add(index->facet_count, facet_schema.facet_count,
+                                  &facet_count)) {
     return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
                             "link symbol facet count overflow");
   }
@@ -608,6 +607,42 @@ static iree_status_t loom_link_index_append_symbol(
 //===----------------------------------------------------------------------===//
 // Symbol classification
 //===----------------------------------------------------------------------===//
+
+// Extracts materialized/text structural roles before applying the shared
+// linker facet classifier. No linker metadata is stored on operation
+// definitions or reconstructed by walking symbol bodies.
+static loom_link_symbol_facet_schema_t
+loom_link_classify_materialized_symbol_facets(const loom_op_t* defining_op,
+                                              const loom_op_vtable_t* vtable) {
+  if (!defining_op || !vtable || !vtable->symbol_def) {
+    return loom_link_symbol_facet_schema_classify(
+        /*interfaces=*/0, /*root_region_count=*/0,
+        /*body_region_index_plus_one=*/0,
+        /*kernel_configuration_region_index_plus_one=*/0);
+  }
+  uint8_t body_region_index_plus_one = 0;
+  if (vtable->func_like &&
+      vtable->func_like->body_region_index != LOOM_REGION_INDEX_NONE) {
+    body_region_index_plus_one =
+        (uint8_t)(vtable->func_like->body_region_index + 1);
+  }
+  return loom_link_symbol_facet_schema_classify(
+      vtable->symbol_def->interfaces, defining_op->region_count,
+      body_region_index_plus_one,
+      vtable->symbol_def->kernel_workload_region_index_plus_one);
+}
+
+// Extracts the equivalent roles from validated bytecode metadata. Keeping the
+// representation adapters adjacent makes materialized, text, and bytecode
+// providers share one semantic policy.
+static loom_link_symbol_facet_schema_t
+loom_link_classify_bytecode_symbol_facets(
+    const loom_bytecode_symbol_metadata_t* symbol) {
+  return loom_link_symbol_facet_schema_classify(
+      symbol->interfaces, symbol->root_region_count,
+      symbol->body_region_index_plus_one,
+      symbol->kernel_workload_region_index_plus_one);
+}
 
 static bool loom_link_materialized_symbol_has_visibility_attr(
     const loom_module_t* module, const loom_symbol_t* symbol) {
@@ -764,18 +799,8 @@ static iree_status_t loom_link_index_module_materialized_symbols(
     const loom_op_t* defining_op = symbol->defining_op;
     const loom_op_vtable_t* vtable =
         defining_op ? loom_op_vtable(source_module, defining_op) : NULL;
-    loom_link_symbol_facet_schema_t facet_schema = {0};
-    if (vtable && vtable->symbol_def) {
-      facet_schema.interfaces = vtable->symbol_def->interfaces;
-      facet_schema.root_region_count = defining_op->region_count;
-      facet_schema.kernel_configuration_region_index_plus_one =
-          vtable->symbol_def->kernel_workload_region_index_plus_one;
-      if (vtable->func_like &&
-          vtable->func_like->body_region_index != LOOM_REGION_INDEX_NONE) {
-        facet_schema.body_region_index_plus_one =
-            (uint8_t)(vtable->func_like->body_region_index + 1);
-      }
-    }
+    const loom_link_symbol_facet_schema_t facet_schema =
+        loom_link_classify_materialized_symbol_facets(defining_op, vtable);
     IREE_RETURN_IF_ERROR(loom_link_index_append_symbol(
         index, module, name, symbol->kind, identity,
         loom_link_materialized_symbol_flags(source_module, symbol),
@@ -1007,13 +1032,8 @@ static iree_status_t loom_link_index_module_bytecode_symbols(
     const loom_bytecode_symbol_metadata_t* symbol =
         &bytecode_module->symbols[i];
     loom_link_symbol_flags_t flags = loom_link_bytecode_symbol_flags(symbol);
-    const loom_link_symbol_facet_schema_t facet_schema = {
-        .interfaces = symbol->interfaces,
-        .root_region_count = symbol->root_region_count,
-        .body_region_index_plus_one = symbol->body_region_index_plus_one,
-        .kernel_configuration_region_index_plus_one =
-            symbol->kernel_workload_region_index_plus_one,
-    };
+    const loom_link_symbol_facet_schema_t facet_schema =
+        loom_link_classify_bytecode_symbol_facets(symbol);
     IREE_RETURN_IF_ERROR(loom_link_index_append_symbol(
         index, module, symbol->name,
         loom_link_bytecode_symbol_kind(symbol->kind),
@@ -1506,13 +1526,34 @@ const loom_link_module_index_symbol_t* loom_link_module_index_symbol_at(
   return &index->symbols.values[ordinal];
 }
 
-iree_host_size_t loom_link_module_index_symbol_facet_ordinal(
+loom_link_symbol_facet_kind_t loom_link_module_index_symbol_facet_kind_at(
+    const loom_link_module_index_symbol_t* symbol, uint8_t ordinal) {
+  return symbol ? loom_link_symbol_facet_schema_kind_at(&symbol->facets.schema,
+                                                        ordinal)
+                : LOOM_LINK_SYMBOL_FACET_INVALID;
+}
+
+loom_link_symbol_facet_kind_t
+loom_link_module_index_symbol_source_root_facet_kind(
     const loom_link_module_index_symbol_t* symbol,
     uint8_t source_root_region_index_plus_one) {
-  IREE_ASSERT(symbol);
-  IREE_ASSERT_LE(source_root_region_index_plus_one,
-                 symbol->facets.schema.root_region_count);
-  return symbol->facets.start_ordinal + source_root_region_index_plus_one;
+  return symbol ? loom_link_symbol_facet_schema_source_root_kind(
+                      &symbol->facets.schema, source_root_region_index_plus_one)
+                : LOOM_LINK_SYMBOL_FACET_INVALID;
+}
+
+iree_host_size_t loom_link_module_index_symbol_facet_ordinal(
+    const loom_link_module_index_symbol_t* symbol,
+    loom_link_symbol_facet_kind_t kind) {
+  if (!symbol || kind == LOOM_LINK_SYMBOL_FACET_INVALID) {
+    return LOOM_LINK_MODULE_INDEX_INVALID_ORDINAL;
+  }
+  for (uint8_t i = 0; i < symbol->facets.schema.facet_count; ++i) {
+    if (loom_link_module_index_symbol_facet_kind_at(symbol, i) == kind) {
+      return symbol->facets.start_ordinal + i;
+    }
+  }
+  return LOOM_LINK_MODULE_INDEX_INVALID_ORDINAL;
 }
 
 loom_link_module_index_symbol_ordinal_list_t
