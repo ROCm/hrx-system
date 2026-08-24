@@ -244,19 +244,16 @@ class CommandBufferAtomicTest : public CtsTestBase<> {
                                             target_length);
     const iree_hal_atomic_flags_t atomic_flags =
         IREE_HAL_ATOMIC_FLAG_ACQUIRE | IREE_HAL_ATOMIC_FLAG_RELEASE;
-    const iree_hal_execution_stage_t source_stage_mask =
-        IREE_HAL_EXECUTION_STAGE_COMMAND_ISSUE;
-    const iree_hal_execution_stage_t target_stage_mask =
-        IREE_HAL_EXECUTION_STAGE_COMMAND_RETIRE;
 
+    // Command recording order does not establish atomic execution dependencies.
     const iree_hal_atomic_store_params_t store_params = {
         /*.value=*/10,
         /*.flags=*/atomic_flags,
         /*.width=*/width,
     };
     IREE_ASSERT_OK(iree_hal_command_buffer_atomic_store(
-        command_buffer, source_stage_mask, target_stage_mask, target_ref,
-        store_params));
+        command_buffer, IREE_HAL_EXECUTION_STAGE_COMMAND_ISSUE,
+        IREE_HAL_EXECUTION_STAGE_ATOMIC, target_ref, store_params));
 
     iree_hal_atomic_rmw_params_t rmw_params = {
         /*.operand=*/5,
@@ -265,32 +262,32 @@ class CommandBufferAtomicTest : public CtsTestBase<> {
         /*.operation=*/IREE_HAL_ATOMIC_RMW_OPERATION_ADD,
     };
     IREE_ASSERT_OK(iree_hal_command_buffer_atomic_rmw(
-        command_buffer, source_stage_mask, target_stage_mask, target_ref,
-        rmw_params));
+        command_buffer, IREE_HAL_EXECUTION_STAGE_ATOMIC,
+        IREE_HAL_EXECUTION_STAGE_ATOMIC, target_ref, rmw_params));
 
     rmw_params.operand = 3;
     rmw_params.operation = IREE_HAL_ATOMIC_RMW_OPERATION_SUBTRACT;
     IREE_ASSERT_OK(iree_hal_command_buffer_atomic_rmw(
-        command_buffer, source_stage_mask, target_stage_mask, target_ref,
-        rmw_params));
+        command_buffer, IREE_HAL_EXECUTION_STAGE_ATOMIC,
+        IREE_HAL_EXECUTION_STAGE_ATOMIC, target_ref, rmw_params));
 
     rmw_params.operand = 10;
     rmw_params.operation = IREE_HAL_ATOMIC_RMW_OPERATION_AND;
     IREE_ASSERT_OK(iree_hal_command_buffer_atomic_rmw(
-        command_buffer, source_stage_mask, target_stage_mask, target_ref,
-        rmw_params));
+        command_buffer, IREE_HAL_EXECUTION_STAGE_ATOMIC,
+        IREE_HAL_EXECUTION_STAGE_ATOMIC, target_ref, rmw_params));
 
     rmw_params.operand = 3;
     rmw_params.operation = IREE_HAL_ATOMIC_RMW_OPERATION_OR;
     IREE_ASSERT_OK(iree_hal_command_buffer_atomic_rmw(
-        command_buffer, source_stage_mask, target_stage_mask, target_ref,
-        rmw_params));
+        command_buffer, IREE_HAL_EXECUTION_STAGE_ATOMIC,
+        IREE_HAL_EXECUTION_STAGE_ATOMIC, target_ref, rmw_params));
 
     rmw_params.operand = 15;
     rmw_params.operation = IREE_HAL_ATOMIC_RMW_OPERATION_XOR;
     IREE_ASSERT_OK(iree_hal_command_buffer_atomic_rmw(
-        command_buffer, source_stage_mask, target_stage_mask, target_ref,
-        rmw_params));
+        command_buffer, IREE_HAL_EXECUTION_STAGE_ATOMIC,
+        IREE_HAL_EXECUTION_STAGE_COMMAND_RETIRE, target_ref, rmw_params));
     IREE_ASSERT_OK(iree_hal_command_buffer_end(command_buffer));
 
     IREE_ASSERT_OK(
@@ -351,19 +348,16 @@ class CommandBufferAtomicTest : public CtsTestBase<> {
                                             target_length);
     const iree_hal_atomic_flags_t atomic_flags =
         IREE_HAL_ATOMIC_FLAG_ACQUIRE | IREE_HAL_ATOMIC_FLAG_RELEASE;
-    const iree_hal_execution_stage_t source_stage_mask =
-        IREE_HAL_EXECUTION_STAGE_COMMAND_ISSUE;
-    const iree_hal_execution_stage_t target_stage_mask =
-        IREE_HAL_EXECUTION_STAGE_COMMAND_RETIRE;
 
+    // Command recording order does not establish atomic execution dependencies.
     const iree_hal_atomic_store_params_t store_params = {
         /*.value=*/0x12,
         /*.flags=*/atomic_flags,
         /*.width=*/width,
     };
     IREE_ASSERT_OK(iree_hal_command_buffer_atomic_store(
-        command_buffer, source_stage_mask, target_stage_mask, target_ref,
-        store_params));
+        command_buffer, IREE_HAL_EXECUTION_STAGE_COMMAND_ISSUE,
+        IREE_HAL_EXECUTION_STAGE_ATOMIC, target_ref, store_params));
 
     iree_hal_atomic_wait_params_t wait_params = {
         /*.value=*/0x2,
@@ -373,14 +367,14 @@ class CommandBufferAtomicTest : public CtsTestBase<> {
         /*.condition=*/IREE_HAL_ATOMIC_WAIT_CONDITION_EQUAL,
     };
     IREE_ASSERT_OK(iree_hal_command_buffer_atomic_wait(
-        command_buffer, source_stage_mask, target_stage_mask, target_ref,
-        wait_params));
+        command_buffer, IREE_HAL_EXECUTION_STAGE_ATOMIC,
+        IREE_HAL_EXECUTION_STAGE_ATOMIC, target_ref, wait_params));
 
     wait_params.value = 0x3;
     wait_params.condition = IREE_HAL_ATOMIC_WAIT_CONDITION_NOT_EQUAL;
     IREE_ASSERT_OK(iree_hal_command_buffer_atomic_wait(
-        command_buffer, source_stage_mask, target_stage_mask, target_ref,
-        wait_params));
+        command_buffer, IREE_HAL_EXECUTION_STAGE_ATOMIC,
+        IREE_HAL_EXECUTION_STAGE_ATOMIC, target_ref, wait_params));
 
     wait_params.value = 0x10;
     wait_params.mask =
@@ -388,8 +382,8 @@ class CommandBufferAtomicTest : public CtsTestBase<> {
     wait_params.condition =
         IREE_HAL_ATOMIC_WAIT_CONDITION_UNSIGNED_GREATER_EQUAL;
     IREE_ASSERT_OK(iree_hal_command_buffer_atomic_wait(
-        command_buffer, source_stage_mask, target_stage_mask, target_ref,
-        wait_params));
+        command_buffer, IREE_HAL_EXECUTION_STAGE_ATOMIC,
+        IREE_HAL_EXECUTION_STAGE_COMMAND_RETIRE, target_ref, wait_params));
     IREE_ASSERT_OK(iree_hal_command_buffer_end(command_buffer));
 
     IREE_ASSERT_OK(
