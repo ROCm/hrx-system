@@ -464,10 +464,22 @@ static bool loom_low_lower_result_storage_required(
          loom_module_value_has_type_uses(context->module, source_value_id);
 }
 
-static void loom_low_lower_mark_value_slice_storage_required(
+static void loom_low_lower_mark_structural_value_storage_required(
+    loom_low_lower_context_t* context, loom_value_id_t source_value_id) {
+  loom_low_lower_mark_value_storage_required(context, source_value_id);
+  if (context->policy->materialize_structural_operand.mark_storage_demands !=
+      NULL) {
+    context->policy->materialize_structural_operand.mark_storage_demands(
+        context->policy->materialize_structural_operand.user_data, context,
+        source_value_id);
+  }
+}
+
+static void loom_low_lower_mark_structural_value_slice_storage_required(
     loom_low_lower_context_t* context, loom_value_slice_t values) {
   for (uint16_t i = 0; i < values.count; ++i) {
-    loom_low_lower_mark_value_storage_required(context, values.values[i]);
+    loom_low_lower_mark_structural_value_storage_required(context,
+                                                          values.values[i]);
   }
 }
 
@@ -789,18 +801,23 @@ static void loom_low_lower_mark_structural_storage_demands(
           context, loom_buffer_assume_same_root_buffer(source_op));
       return;
     case LOOM_OP_FUNC_CALL:
-      loom_low_lower_mark_value_slice_storage_required(
+      loom_low_lower_mark_structural_value_slice_storage_required(
           context, loom_func_call_operands(source_op));
       return;
-    case LOOM_OP_FUNC_CALL_INDIRECT:
-      loom_low_lower_require_source_operands_storage(context, source_op);
+    case LOOM_OP_FUNC_CALL_INDIRECT: {
+      const loom_value_id_t* operands = loom_op_const_operands(source_op);
+      for (uint16_t i = 0; i < source_op->operand_count; ++i) {
+        loom_low_lower_mark_structural_value_storage_required(context,
+                                                              operands[i]);
+      }
       return;
+    }
     case LOOM_OP_FUNC_RETURN:
-      loom_low_lower_mark_value_slice_storage_required(
+      loom_low_lower_mark_structural_value_slice_storage_required(
           context, loom_func_return_operands(source_op));
       return;
     case LOOM_OP_CFG_BR:
-      loom_low_lower_mark_value_slice_storage_required(
+      loom_low_lower_mark_structural_value_slice_storage_required(
           context, loom_cfg_br_args(source_op));
       return;
     case LOOM_OP_CFG_COND_BR: {
@@ -822,7 +839,7 @@ static void loom_low_lower_mark_structural_storage_demands(
           context, loom_scf_for_upper_bound(source_op));
       loom_low_lower_mark_value_storage_required(context,
                                                  loom_scf_for_step(source_op));
-      loom_low_lower_mark_value_slice_storage_required(
+      loom_low_lower_mark_structural_value_slice_storage_required(
           context, loom_scf_for_iter_args(source_op));
       if (loom_scf_for_unroll_factor_is_present(source_op)) {
         loom_low_lower_mark_value_storage_required(
@@ -834,17 +851,17 @@ static void loom_low_lower_mark_structural_storage_demands(
           context, loom_scf_if_condition(source_op));
       return;
     case LOOM_OP_SCF_WHILE:
-      loom_low_lower_mark_value_slice_storage_required(
+      loom_low_lower_mark_structural_value_slice_storage_required(
           context, loom_scf_while_iter_args(source_op));
       return;
     case LOOM_OP_SCF_CONDITION:
       loom_low_lower_mark_value_storage_required(
           context, loom_scf_condition_condition(source_op));
-      loom_low_lower_mark_value_slice_storage_required(
+      loom_low_lower_mark_structural_value_slice_storage_required(
           context, loom_scf_condition_forwarded(source_op));
       return;
     case LOOM_OP_SCF_YIELD:
-      loom_low_lower_mark_value_slice_storage_required(
+      loom_low_lower_mark_structural_value_slice_storage_required(
           context, loom_scf_yield_values(source_op));
       return;
     case LOOM_OP_KERNEL_RETURN:
@@ -2654,8 +2671,9 @@ static iree_status_t loom_low_lower_remap_values(
   for (iree_host_size_t i = 0; i < value_count; ++i) {
     IREE_RETURN_IF_ERROR(
         loom_low_lower_lookup_value(context, source_values[i], &low_values[i]));
-    const loom_type_t required_low_type =
-        loom_module_value_type(context->module, low_values[i]);
+    loom_type_t required_low_type = loom_type_none();
+    IREE_RETURN_IF_ERROR(loom_low_lower_map_value(
+        context, source_op, source_values[i], &required_low_type));
     IREE_RETURN_IF_ERROR(loom_low_lower_materialize_structural_operand(
         context, source_op, i, source_values[i], required_low_type,
         &low_values[i]));
