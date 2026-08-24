@@ -1527,7 +1527,8 @@ size_t partial_elf_real_bo_entry_count(
 }
 
 iree_status_t maybe_write_partial_elf_bo_table(
-    iree_hal_amdxdna_native_command_t* command) {
+    iree_hal_amdxdna_native_command_t* command, bool* out_changed) {
+  if (out_changed) *out_changed = false;
   if (!uses_partial_elf_npu_packet(command)) {
     return iree_ok_status();
   }
@@ -1551,6 +1552,13 @@ iree_status_t maybe_write_partial_elf_bo_table(
         iree_hal_amdxdna_native_buffer_device_address(bound.buffer) +
         bound.offset;
   }
+  const auto* current_table =
+      reinterpret_cast<const uint8_t*>(command->start_packet) +
+      mcdm::kPathBBoTableOffset;
+  if (std::memcmp(current_table, real_bo_gpu_vas.data(),
+                  mcdm::kPathBBoTableSize) == 0) {
+    return iree_ok_status();
+  }
   mcdm::Error error;
   if (!mcdm::PopulatePathBBoTable(
           command->device->device, command->start_packet, command->command_size,
@@ -1558,6 +1566,7 @@ iree_status_t maybe_write_partial_elf_bo_table(
     return status_from_mcdm_error(
         "amdxdna Windows MCDM PARTIAL_ELF BO table population failed", error);
   }
+  if (out_changed) *out_changed = true;
   return iree_ok_status();
 }
 
@@ -2057,19 +2066,35 @@ iree_status_t prepare_pathb_chain_code(
       npu_data->instruction_buffer_size =
           static_cast<uint32_t>(child->control_buffer_size);
       npu_data->instruction_prop_count = 0;
-      IREE_RETURN_IF_ERROR(maybe_write_partial_elf_bo_table(child));
+      IREE_RETURN_IF_ERROR(
+          maybe_write_partial_elf_bo_table(child, /*out_changed=*/nullptr));
       IREE_RETURN_IF_ERROR(append_pathb_start_npu_chain_descriptor(
           child, descriptor_base, descriptor_capacity, &descriptor_used));
     }
   }
   for (size_t child_index = 0; child_index < chain_command->chain_child_count;
        ++child_index) {
-    // reset_command_packet_for_start and the PARTIAL_ELF BO-table rewrite both
-    // modify child command BOs. Publish the complete child allocation so a
-    // reused chain never exposes a fresh BO table with a stale ERT header.
-    IREE_RETURN_IF_ERROR(iree_hal_amdxdna_native_buffer_sync_all(
-        chain_command->chain_children[child_index]->exec_buffer,
-        IREE_HAL_AMDXDNA_NATIVE_BUFFER_SYNC_HOST_TO_DEVICE));
+    iree_hal_amdxdna_native_command_t* child =
+        chain_command->chain_children[child_index];
+    ert_packet* packet = command_packet(child);
+    size_t packet_bytes = 0;
+    if (!iree_hal_amdxdna_native_windows_calculate_ert_packet_bytes(
+            packet->count, child->exec_buffer->buffer.size, &packet_bytes)) {
+      return iree_make_status(
+          IREE_STATUS_OUT_OF_RANGE,
+          "amdxdna Windows MCDM chain child packet exceeds its execution BO");
+    }
+    // Chain preparation updates the ERT packet and, for PARTIAL_ELF, the
+    // adjacent BO table. Bytes after this prefix are not consumed by KMD.
+    const size_t metadata_bytes =
+        uses_partial_elf_npu_packet(child)
+            ? std::max(packet_bytes,
+                       mcdm::kPathBBoTableOffset + mcdm::kPathBBoTableSize)
+            : packet_bytes;
+    IREE_RETURN_IF_ERROR(iree_hal_amdxdna_native_buffer_sync(
+        child->exec_buffer,
+        IREE_HAL_AMDXDNA_NATIVE_BUFFER_SYNC_HOST_TO_DEVICE, metadata_bytes,
+        /*offset=*/0));
   }
   // Child ERT packets are persistent mapped command metadata. Publish all
   // packet and BO-table stores as one ordered batch before aperture code is
@@ -3673,10 +3698,10 @@ static iree_status_t iree_hal_amdxdna_native_submit_issue(
         command->exec_buffer->buffer.cpu_ptr);
     packet = command_packet(command);
   }
-  {
-    IREE_RETURN_IF_ERROR(maybe_write_partial_elf_bo_table(command));
-  }
-  if (is_pathb_partial_elf &&
+  bool partial_elf_bo_table_changed = false;
+  IREE_RETURN_IF_ERROR(maybe_write_partial_elf_bo_table(
+      command, &partial_elf_bo_table_changed));
+  if (is_pathb_partial_elf && partial_elf_bo_table_changed &&
       !mcdm::SyncBuffer(command->device->api, command->device->device,
                         command->exec_buffer->buffer,
                         mcdm::kPathBBoTableOffset, mcdm::kPathBBoTableSize,

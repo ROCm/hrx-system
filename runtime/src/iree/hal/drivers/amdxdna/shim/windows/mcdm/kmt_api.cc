@@ -193,6 +193,57 @@ bool CheckStatusOrPending(const char* call_name, NTSTATUS status,
   return CheckStatus(call_name, status, out_error);
 }
 
+uint64_t LastLevelCacheSize() {
+  static const uint64_t cache_size = []() -> uint64_t {
+    DWORD bytes = 0;
+    GetLogicalProcessorInformationEx(RelationCache, nullptr, &bytes);
+    if (!bytes) return 0;
+    std::vector<uint8_t> storage(bytes);
+    if (!GetLogicalProcessorInformationEx(
+            RelationCache,
+            reinterpret_cast<PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX>(
+                storage.data()),
+            &bytes)) {
+      return 0;
+    }
+    uint64_t largest_l3 = 0;
+    for (DWORD offset = 0; offset < bytes;) {
+      const auto* info =
+          reinterpret_cast<const SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX*>(
+              storage.data() + offset);
+      if (!info->Size || info->Size > bytes - offset) return 0;
+      if (info->Relationship == RelationCache && info->Cache.Level == 3) {
+        largest_l3 = std::max<uint64_t>(largest_l3, info->Cache.CacheSize);
+      }
+      offset += info->Size;
+    }
+    return largest_l3;
+  }();
+  return cache_size;
+}
+
+bool SyncSmallBufferCpuCache(const Buffer& buffer, uint64_t offset,
+                             uint64_t length, Error* out_error) {
+  if (length == 0) return true;
+  if (!buffer.cpu_ptr || offset > buffer.size || length > buffer.size - offset) {
+    SetError(out_error, "CPU BO sync range is out of bounds");
+    return false;
+  }
+  constexpr uintptr_t kCacheLineSize = 64;
+  uintptr_t line = reinterpret_cast<uintptr_t>(buffer.cpu_ptr) + offset;
+  const uintptr_t end = line + length;
+  _mm_lfence();
+  if (line & (kCacheLineSize - 1)) {
+    _mm_clflush(reinterpret_cast<void const*>(line));
+    line = (line + kCacheLineSize - 1) & ~(kCacheLineSize - 1);
+  }
+  while (line < end) {
+    _mm_clflush(reinterpret_cast<void const*>(line));
+    line += kCacheLineSize;
+  }
+  return true;
+}
+
 enum class CpuCacheOperation {
   writeback,
   invalidate,
@@ -1411,6 +1462,15 @@ bool InvalidateBufferCpuReads(const Buffer& buffer, uint64_t offset,
 
 bool SyncBuffer(const KmtApi& api, const Device& device, const Buffer& buffer,
                 uint64_t offset, uint64_t length, Error* out_error) {
+  // XRT uses cache-line synchronization for ranges smaller than the LLC and
+  // falls back to allocation-level KMT synchronization for larger ranges.
+  // This avoids a fixed KMT transition for command metadata while bounding
+  // the linear cost of flushing large buffers such as model weights.
+  const uint64_t last_level_cache_size = LastLevelCacheSize();
+  if (buffer.cpu_ptr && last_level_cache_size &&
+      length < last_level_cache_size) {
+    return SyncSmallBufferCpuCache(buffer, offset, length, out_error);
+  }
   D3DKMT_INVALIDATECACHE invalidate = {};
   invalidate.hDevice = device.device;
   invalidate.hAllocation = buffer.allocation;

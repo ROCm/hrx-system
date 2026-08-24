@@ -2098,10 +2098,11 @@ static iree_status_t iree_hal_amdxdna_direct_command_buffer_flush_chains(
             chain_cache->last_use = ++device_chain_cache->use_clock;
           }
         }
+        // PARTIAL_ELF dispatches commonly retain the same command shape while
+        // changing bindings. Reuse a compatible entry before allocating a new
+        // one, even when the cache has not reached its capacity yet.
         if (iree_status_is_ok(status) && !chain_cache &&
-            group->native_partial_elf &&
-            device_chain_cache->entry_count >=
-                kAmdxdnaChainCommandCacheCapacity) {
+            group->native_partial_elf) {
           for (iree_host_size_t i = 0; i < device_chain_cache->entry_count;
                ++i) {
             iree_hal_amdxdna_chain_command_cache_entry_t* entry =
