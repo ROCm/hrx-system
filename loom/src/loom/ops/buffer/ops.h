@@ -27,7 +27,8 @@ enum {
   LOOM_OP_BUFFER_ASSUME_SAME_ROOT = LOOM_OP_KIND(LOOM_DIALECT_BUFFER, 4),
   LOOM_OP_BUFFER_VIEW = LOOM_OP_KIND(LOOM_DIALECT_BUFFER, 5),
   LOOM_OP_BUFFER_PACK = LOOM_OP_KIND(LOOM_DIALECT_BUFFER, 6),
-  LOOM_OP_BUFFER_COUNT_ = 7,
+  LOOM_OP_BUFFER_LENGTH = LOOM_OP_KIND(LOOM_DIALECT_BUFFER, 7),
+  LOOM_OP_BUFFER_COUNT_ = 8,
 };
 
 // LOOM_OP_BUFFER_ALLOCA: Create a fixed-frame scratch buffer root in an allocatable memory space. Each execution produces a distinct storage identity; identical allocas must not be commoned. The byte length is the requested physical byte count for the execution. Targets requiring a static frame reserve its proven finite non-negative maximum. base_alignment is the minimum byte alignment of the root storage base. Target lowering determines which allocatable spaces are legal for the containing program kind.
@@ -187,6 +188,22 @@ iree_status_t loom_buffer_pack_facts(
 iree_status_t loom_buffer_pack_verify(
     const loom_module_t* module, const loom_op_t* op,
     iree_diagnostic_emitter_t emitter);
+
+// LOOM_OP_BUFFER_LENGTH: Query the physical byte length of a buffer root without accessing its payload. Returns zero when the buffer is null.
+// %byte_length = buffer.length %buffer
+LOOM_DEFINE_ISA(loom_buffer_length_isa, LOOM_OP_BUFFER_LENGTH)
+LOOM_DEFINE_OPERAND(loom_buffer_length_buffer, 0)
+LOOM_DEFINE_RESULT(loom_buffer_length_byte_length, 0)
+iree_status_t loom_buffer_length_build(
+    loom_builder_t* builder,
+    loom_value_id_t buffer,
+    loom_location_id_t location,
+    loom_op_t** out_op);
+iree_status_t loom_buffer_length_facts(
+    loom_fact_context_t* context,
+    const loom_module_t* module, const loom_op_t* op,
+    const loom_value_facts_t* operand_facts,
+    loom_value_facts_t* result_facts);
 
 // Returns the vtable array for the buffer dialect.
 const loom_op_vtable_t* const* loom_buffer_dialect_vtables(

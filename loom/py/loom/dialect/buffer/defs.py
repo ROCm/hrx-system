@@ -39,6 +39,7 @@ from loom.dsl import (
     OFFSET,
     PURE,
     REFINABLE_RESULT_TYPE_REFS,
+    SAFE_TO_SPECULATE,
     VIEW,
     AttrDef,
     Dialect,
@@ -195,7 +196,14 @@ buffer_assume_alignment = Op(
         "root base alignment fact."
     ),
     operands=[Operand("buffers", BUFFER, doc="Buffer roots to refine.", variadic=True)],
-    results=[Result("results", BUFFER, doc="Same buffer roots with refined alignment.", variadic=True)],
+    results=[
+        Result(
+            "results",
+            BUFFER,
+            doc="Same buffer roots with refined alignment.",
+            variadic=True,
+        )
+    ],
     attrs=[
         AttrDef(
             "minimum_alignment",
@@ -284,7 +292,14 @@ buffer_assume_noalias = Op(
         "gain this proof by default."
     ),
     operands=[Operand("buffers", BUFFER, doc="Buffer roots to refine.", variadic=True)],
-    results=[Result("results", BUFFER, doc="Same buffer roots with noalias scopes.", variadic=True)],
+    results=[
+        Result(
+            "results",
+            BUFFER,
+            doc="Same buffer roots with noalias scopes.",
+            variadic=True,
+        )
+    ],
     constraints=[VariadicValuesMatch("buffers", "results")],
     traits=[PURE, FACT_IDENTITY],
     facts="loom_buffer_assume_noalias_facts",
@@ -365,6 +380,30 @@ buffer_view = Op(
 )
 
 # ============================================================================
+# buffer.length — query physical byte length
+# ============================================================================
+
+buffer_length = Op(
+    name="buffer.length",
+    group=buffer_ops,
+    doc=("Query the physical byte length of a buffer root without accessing its payload. Returns zero when the buffer is null."),
+    operands=[Operand("buffer", BUFFER, doc="Opaque storage root, which may be null.")],
+    results=[
+        Result(
+            "byte_length",
+            OFFSET,
+            doc="Physical byte length of the complete buffer root.",
+        ),
+    ],
+    traits=[PURE, SAFE_TO_SPECULATE],
+    facts="loom_buffer_length_facts",
+    format=[Ref("buffer")],
+    examples=[
+        "%byte_length = buffer.length %buffer",
+    ],
+)
+
+# ============================================================================
 # Registry
 # ============================================================================
 
@@ -376,4 +415,5 @@ ALL_BUFFER_OPS: tuple[Op, ...] = (
     buffer_assume_same_root,
     buffer_view,
     buffer_pack,
+    buffer_length,
 )

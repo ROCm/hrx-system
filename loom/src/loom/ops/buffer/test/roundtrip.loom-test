@@ -4,3 +4,8 @@ func.def @pack_dynamic_ranges(%header_bytes: offset, %payload_bytes: offset) -> 
   %total, %header_offset, %payload_offset = buffer.pack [align(16) %header_bytes, align(256) %payload_bytes] : offset
   func.return %total, %header_offset, %payload_offset : offset, offset, offset
 }
+
+func.def @query_buffer_length(%buffer: buffer) -> (offset) {
+  %byte_length = buffer.length %buffer
+  func.return %byte_length : offset
+}
