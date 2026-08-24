@@ -22,6 +22,18 @@ struct MutableFunctionImage {
   uint8_t* bytecode;
 };
 
+// Stable function ordinals in BuildBufferModuleImage.
+enum BufferFunctionOrdinal : uint32_t {
+  kBufferAllocateFunctionOrdinal = 0,
+  kBufferLengthFunctionOrdinal = 1,
+  kBufferLoadFunctionOrdinal = 2,
+  // Sixteen functions in exact memory.format selector order.
+  kBufferRoundtripFunctionBase = 3,
+  kBufferStoreFunctionOrdinal = 19,
+  kBufferSubspanFunctionOrdinal = 20,
+  kBufferWrongLengthFunctionOrdinal = 21,
+};
+
 // Finds one section payload in |image| or returns null when absent.
 uint8_t* FindSectionPayload(std::vector<uint8_t>* image, uint16_t section_type);
 
@@ -57,6 +69,10 @@ std::vector<uint8_t> BuildValueOverflowModuleImage();
 // Builds one scalar-state fixture containing every Core 0.0 value constant,
 // selection, mutable value-global, and constant-pool operation.
 std::vector<uint8_t> BuildScalarStateModuleImage();
+
+// Builds one vm.buffer fixture covering construction, views, checked lane
+// access, and an intentionally mismatched operand type.
+std::vector<uint8_t> BuildBufferModuleImage();
 
 // Builds one structurally valid HAL-page inspection fixture.
 std::vector<uint8_t> BuildHALInspectionModuleImage();

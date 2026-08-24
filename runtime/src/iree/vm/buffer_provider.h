@@ -20,6 +20,12 @@ enum iree_vm_buffer_flag_bits_e {
 };
 typedef uint32_t iree_vm_buffer_flags_t;
 
+// Public access bits stored in the shared flags word.
+enum {
+  IREE_VM_BUFFER_ACCESS_MASK =
+      IREE_VM_BUFFER_ACCESS_FLAG_READ | IREE_VM_BUFFER_ACCESS_FLAG_WRITE,
+};
+
 // Uniform buffer object. The fields through |root| form the access-hot prefix;
 // the allocator and release callback are touched only during construction and
 // final destruction.
@@ -58,6 +64,61 @@ static_assert(sizeof(void*) != 8 || sizeof(iree_vm_buffer_t) == 64,
               "64-bit VM buffer object must remain 64 bytes");
 
 #undef IREE_VM_BUFFER_HOT_SIZE
+
+// Returns the access bits carried directly by |buffer|. Views may still lose
+// effective access when their flattened root closes.
+static inline iree_vm_buffer_access_flags_t iree_vm_buffer_local_access(
+    const iree_vm_buffer_t* buffer) {
+  return buffer->flags & IREE_VM_BUFFER_ACCESS_MASK;
+}
+
+// Returns access currently granted by |buffer| and its flattened root.
+static inline iree_vm_buffer_access_flags_t iree_vm_buffer_effective_access(
+    const iree_vm_buffer_t* buffer) {
+  const iree_vm_buffer_access_flags_t access =
+      iree_vm_buffer_local_access(buffer);
+  if (access == IREE_VM_BUFFER_ACCESS_FLAG_NONE) return access;
+  if ((buffer->flags & IREE_VM_BUFFER_FLAG_VIEW) &&
+      iree_vm_buffer_local_access(buffer->root) ==
+          IREE_VM_BUFFER_ACCESS_FLAG_NONE) {
+    return IREE_VM_BUFFER_ACCESS_FLAG_NONE;
+  }
+  return access;
+}
+
+// Returns one checked borrowed range. All liveness, rights, and range checks
+// complete before |out_span| is populated or a host pointer is formed.
+static inline iree_status_t iree_vm_buffer_map_range(
+    const iree_vm_buffer_t* buffer,
+    iree_vm_buffer_access_flags_t required_access, iree_host_size_t offset,
+    iree_host_size_t length, iree_byte_span_t* out_span) {
+  const iree_vm_buffer_access_flags_t local_access =
+      iree_vm_buffer_local_access(buffer);
+  if ((local_access & required_access) != required_access) {
+    if (local_access == IREE_VM_BUFFER_ACCESS_FLAG_NONE) {
+      return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                              "buffer is closed");
+    }
+    return iree_make_status(IREE_STATUS_PERMISSION_DENIED,
+                            "buffer does not permit the requested access");
+  }
+  if (offset > buffer->length || length > buffer->length - offset) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "buffer range offset %" PRIhsz " length %" PRIhsz
+                            " exceeds buffer length %" PRIhsz,
+                            offset, length, buffer->length);
+  }
+  if ((buffer->flags & IREE_VM_BUFFER_FLAG_VIEW) &&
+      iree_vm_buffer_local_access(buffer->root) ==
+          IREE_VM_BUFFER_ACCESS_FLAG_NONE) {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "buffer root is closed");
+  }
+
+  *out_span = length == 0 ? iree_byte_span_empty()
+                          : iree_make_byte_span(buffer->data + offset, length);
+  return iree_ok_status();
+}
 
 // Initializes one allocation-free read-only root embedded in storage owned by
 // |release_callback|. The callback is required and may invalidate

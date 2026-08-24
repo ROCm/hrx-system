@@ -56,6 +56,7 @@ iree_cc_library(
   SRCS
     "interpreter.c"
     "interpreter.h"
+    "interpreter_buffer.h"
     "interpreter_call.c"
     "interpreter_call.h"
     "interpreter_float.h"
@@ -192,6 +193,21 @@ iree_cc_test(
     module_call_test
   SRCS
     "module_call_test.cc"
+    "module_test_data.cc"
+    "module_test_data.h"
+  DEPS
+    ::bytecode
+    iree::testing::gtest
+    iree::testing::gtest_main
+    iree::vm
+    iree::vm::bytecode::wire
+)
+
+iree_cc_test(
+  NAME
+    module_buffer_test
+  SRCS
+    "module_buffer_test.cc"
     "module_test_data.cc"
     "module_test_data.h"
   DEPS

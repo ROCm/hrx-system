@@ -8,7 +8,7 @@
 
 #include <string.h>
 
-#include "iree/vm/buffer.h"
+#include "iree/vm/bytecode/interpreter_buffer.h"
 #include "iree/vm/bytecode/interpreter_call.h"
 #include "iree/vm/bytecode/interpreter_float.h"
 #include "iree/vm/bytecode/interpreter_float_math.h"
@@ -211,32 +211,6 @@ static void iree_vm_bytecode_frame_reset(iree_vm_ref_t* refs,
   }
 }
 
-static uint32_t iree_vm_bytecode_bf16_to_f32_bits(uint16_t source_bits) {
-  uint32_t result_bits = (uint32_t)source_bits << 16;
-  const bool is_nan =
-      (source_bits & 0x7F80u) == 0x7F80u && (source_bits & 0x007Fu) != 0;
-  if (is_nan) result_bits |= 0x00400000u;
-  return result_bits;
-}
-
-static iree_status_t iree_vm_bytecode_f32_to_u32(uint32_t source_bits,
-                                                 uint32_t* out_result) {
-  const bool is_nan = (source_bits & 0x7F800000u) == 0x7F800000u &&
-                      (source_bits & 0x007FFFFFu) != 0;
-  if (is_nan) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "cannot convert an f32 NaN to u32");
-  }
-  float source = 0.0f;
-  memcpy(&source, &source_bits, sizeof(source));
-  if (!(source > -1.0f && source < 0x1p32f)) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "f32 value is outside the u32 interval");
-  }
-  *out_result = (uint32_t)source;
-  return iree_ok_status();
-}
-
 // Copies one direct physical value bank in fixed native-vector-sized chunks.
 // Direct banks are capped at 16 cells, so this remains a bounded sequence with
 // no variable-length memcpy call or per-cell bounds branch.
@@ -295,86 +269,6 @@ static void iree_vm_bytecode_initialize_state(
   if (direct_function_count != 0) {
     memcpy(state->functions, call->function_arguments.direct,
            direct_function_count * sizeof(*state->functions));
-  }
-}
-
-// Resolves one verified indexed local-byte access. Static verification has
-// already proven |base| plus |access_length| fits the local byte array and
-// |scale| is nonzero. Division folds the architectural u16 index ceiling and
-// scaled-range requirement into one failure branch before any mutation.
-static iree_status_t iree_vm_bytecode_stack_resolve_index(
-    uint16_t local_byte_length, uint16_t base, uint8_t access_length,
-    uint64_t index, uint8_t scale, uint16_t* out_effective_base) {
-  const uint32_t available = (uint32_t)local_byte_length - access_length - base;
-  if (IREE_UNLIKELY(index > available / scale)) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "indexed stack access is out of range");
-  }
-  *out_effective_base = (uint16_t)(base + (uint32_t)index * scale);
-  return iree_ok_status();
-}
-
-// Repeats the low |pattern_width| bytes of |pattern| across |target|. The
-// caller handles an empty range before forming |target|.
-static void iree_vm_bytecode_stack_fill(uint8_t* target, uint16_t length,
-                                        uint64_t pattern,
-                                        uint8_t pattern_width) {
-  if (pattern_width == 1) {
-    memset(target, (uint8_t)pattern, length);
-    return;
-  }
-  uint64_t expanded_pattern = pattern;
-  if (pattern_width == 2) {
-    expanded_pattern &= UINT64_C(0xFFFF);
-    expanded_pattern |= expanded_pattern << 16;
-    expanded_pattern |= expanded_pattern << 32;
-  } else if (pattern_width == 4) {
-    expanded_pattern &= UINT64_C(0xFFFFFFFF);
-    expanded_pattern |= expanded_pattern << 32;
-  }
-  while (length >= sizeof(expanded_pattern)) {
-    iree_unaligned_store_le_u64(target, expanded_pattern);
-    target += sizeof(expanded_pattern);
-    length -= sizeof(expanded_pattern);
-  }
-  if (length != 0) {
-    uint8_t tail[sizeof(expanded_pattern)];
-    iree_unaligned_store_le_u64(tail, expanded_pattern);
-    memcpy(target, tail, length);
-  }
-}
-
-static void iree_vm_bytecode_stack_const_s16_i32(uint8_t* target,
-                                                 uint16_t count,
-                                                 int16_t immediate) {
-  const uint32_t value = (uint32_t)(int32_t)immediate;
-  for (uint16_t i = 0; i < count; ++i) {
-    iree_unaligned_store_le_u32(target + i * sizeof(value), value);
-  }
-}
-
-static void iree_vm_bytecode_stack_const_s16_i64(uint8_t* target,
-                                                 uint16_t count,
-                                                 int16_t immediate) {
-  const uint64_t value = (uint64_t)(int64_t)immediate;
-  for (uint16_t i = 0; i < count; ++i) {
-    iree_unaligned_store_le_u64(target + i * sizeof(value), value);
-  }
-}
-
-static void iree_vm_bytecode_stack_pack_i32(uint8_t* target,
-                                            const uint16_t* immediates,
-                                            uint8_t count) {
-  for (uint8_t i = 0; i < count; ++i) {
-    iree_unaligned_store_le_u32(target + i * sizeof(uint32_t), immediates[i]);
-  }
-}
-
-static void iree_vm_bytecode_stack_pack_i64(uint8_t* target,
-                                            const uint32_t* immediates,
-                                            uint8_t count) {
-  for (uint8_t i = 0; i < count; ++i) {
-    iree_unaligned_store_le_u64(target + i * sizeof(uint64_t), immediates[i]);
   }
 }
 
@@ -1598,6 +1492,121 @@ static iree_status_t iree_vm_bytecode_execute(
         iree_vm_ref_from_ptr_borrowed(&module->rodata_roots[record->rodata_u16],
                                       module->buffer_type));
     IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_isa_buffer_rodata_load_record_t);
+  }
+  IREE_VM_BYTECODE_DISPATCH_CASE(BUFFER_ALLOCATE, buffer_allocate) {
+    const iree_vm_isa_buffer_allocate_record_t* record =
+        (const iree_vm_isa_buffer_allocate_record_t*)record_data;
+    const uint64_t length = values[record->length_v8];
+    if (!iree_vm_bytecode_buffer_allocation_is_representable(length)) {
+      status =
+          iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                           "vm.buffer allocation is not host-representable");
+      IREE_VM_BYTECODE_DISPATCH_TERMINATE();
+    }
+    iree_vm_buffer_t* buffer = NULL;
+    status = iree_vm_buffer_create(
+        (iree_host_size_t)length,
+        /*minimum_alignment=*/0, invocation->process->host_allocator, &buffer);
+    if (!iree_status_is_ok(status)) {
+      IREE_VM_BYTECODE_DISPATCH_TERMINATE();
+    }
+    iree_vm_bytecode_ref_replace(
+        &refs[record->dst_r8],
+        (iree_vm_ref_t){buffer, (uintptr_t)module->buffer_type});
+    IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_isa_buffer_allocate_record_t);
+  }
+  IREE_VM_BYTECODE_DISPATCH_CASE(BUFFER_LENGTH, buffer_length) {
+    const iree_vm_isa_buffer_length_record_t* record =
+        (const iree_vm_isa_buffer_length_record_t*)record_data;
+    iree_vm_buffer_t* buffer = NULL;
+    status = iree_vm_bytecode_buffer_check_deref(refs[record->buffer_r8],
+                                                 module->buffer_type, &buffer);
+    if (!iree_status_is_ok(status)) {
+      IREE_VM_BYTECODE_DISPATCH_TERMINATE();
+    }
+    values[record->dst_v8] = buffer->length;
+    IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_isa_buffer_length_record_t);
+  }
+  IREE_VM_BYTECODE_DISPATCH_CASE(BUFFER_SUBSPAN, buffer_subspan) {
+    const iree_vm_isa_buffer_subspan_record_t* record =
+        (const iree_vm_isa_buffer_subspan_record_t*)record_data;
+    iree_vm_buffer_t* source = NULL;
+    status = iree_vm_bytecode_buffer_check_deref(refs[record->buffer_r8],
+                                                 module->buffer_type, &source);
+    if (!iree_status_is_ok(status)) {
+      IREE_VM_BYTECODE_DISPATCH_TERMINATE();
+    }
+    const uint64_t offset = values[record->offset_v8];
+    const uint64_t length = values[record->length_v8];
+    const iree_vm_buffer_access_flags_t access =
+        iree_vm_buffer_effective_access(source);
+    if (access == IREE_VM_BUFFER_ACCESS_FLAG_NONE) {
+      status = iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                                "vm.buffer source is closed");
+      IREE_VM_BYTECODE_DISPATCH_TERMINATE();
+    }
+    if (offset > source->length || length > source->length - offset) {
+      status = iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                                "vm.buffer subspan range is out of bounds");
+      IREE_VM_BYTECODE_DISPATCH_TERMINATE();
+    }
+    iree_vm_buffer_t* result = NULL;
+    status = iree_vm_buffer_subspan(
+        source, (iree_host_size_t)offset, (iree_host_size_t)length, access,
+        invocation->process->host_allocator, &result);
+    if (!iree_status_is_ok(status)) {
+      IREE_VM_BYTECODE_DISPATCH_TERMINATE();
+    }
+    iree_vm_bytecode_ref_replace(
+        &refs[record->dst_r8],
+        (iree_vm_ref_t){result, (uintptr_t)module->buffer_type});
+    IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_isa_buffer_subspan_record_t);
+  }
+  IREE_VM_BYTECODE_DISPATCH_CASE(BUFFER_LOAD, buffer_load) {
+    const iree_vm_isa_buffer_load_record_t* record =
+        (const iree_vm_isa_buffer_load_record_t*)record_data;
+    const uint64_t base = values[record->base_v8];
+    const uint64_t index = values[record->index_v8];
+    iree_vm_buffer_t* buffer = NULL;
+    status = iree_vm_bytecode_buffer_check_deref(refs[record->buffer_r8],
+                                                 module->buffer_type, &buffer);
+    if (!iree_status_is_ok(status)) {
+      IREE_VM_BYTECODE_DISPATCH_TERMINATE();
+    }
+    const uint8_t access_length =
+        (uint8_t)(1u << ((record->format_u8 >> 2) + (record->format_u8 & 3u)));
+    iree_byte_span_t source = iree_byte_span_empty();
+    status = iree_vm_bytecode_buffer_map_lanes(
+        buffer, IREE_VM_BUFFER_ACCESS_FLAG_READ, base, index, record->scale_u8,
+        access_length, &source);
+    if (!iree_status_is_ok(status)) {
+      IREE_VM_BYTECODE_DISPATCH_TERMINATE();
+    }
+    iree_vm_bytecode_stack_load_lanes(record->format_u8, source.data,
+                                      values + record->dst_v8);
+    IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_isa_buffer_load_record_t);
+  }
+  IREE_VM_BYTECODE_DISPATCH_CASE(BUFFER_STORE, buffer_store) {
+    const iree_vm_isa_buffer_store_record_t* record =
+        (const iree_vm_isa_buffer_store_record_t*)record_data;
+    iree_vm_buffer_t* buffer = NULL;
+    status = iree_vm_bytecode_buffer_check_deref(refs[record->buffer_r8],
+                                                 module->buffer_type, &buffer);
+    if (!iree_status_is_ok(status)) {
+      IREE_VM_BYTECODE_DISPATCH_TERMINATE();
+    }
+    const uint8_t access_length =
+        (uint8_t)(1u << ((record->format_u8 >> 2) + (record->format_u8 & 3u)));
+    iree_byte_span_t target = iree_byte_span_empty();
+    status = iree_vm_bytecode_buffer_map_lanes(
+        buffer, IREE_VM_BUFFER_ACCESS_FLAG_WRITE, values[record->base_v8],
+        values[record->index_v8], record->scale_u8, access_length, &target);
+    if (!iree_status_is_ok(status)) {
+      IREE_VM_BYTECODE_DISPATCH_TERMINATE();
+    }
+    iree_vm_bytecode_stack_store_lanes(record->format_u8,
+                                       values + record->src_v8, target.data);
+    IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_isa_buffer_store_record_t);
   }
   IREE_VM_BYTECODE_DISPATCH_CASE(CONVERSION_INTEGER, conversion_integer) {
     do {

@@ -50,6 +50,8 @@ class ByteBuffer {
     data_.resize((data_.size() + alignment - 1) & ~(alignment - 1), 0);
   }
 
+  size_t size() const { return data_.size(); }
+
   std::vector<uint8_t> Take() { return std::move(data_); }
 
  private:
@@ -1157,6 +1159,204 @@ std::vector<uint8_t> BuildScalarStateGlobals() {
   return section.Take();
 }
 
+std::vector<uint8_t> BuildBufferRefTypes() {
+  ByteBuffer section;
+  section.Append(iree_vm_bytecode_v0_ref_types_header_t{2});
+  section.Append(iree_vm_bytecode_v0_ref_type_group_row_t{0, 0, 1});
+  section.Append(iree_vm_bytecode_v0_ref_type_group_row_t{2, 0, 1});
+  section.Append(iree_vm_bytecode_v0_ref_type_entry_row_t{1, 0});
+  section.Append(iree_vm_bytecode_v0_ref_type_entry_row_t{3, 0});
+  return section.Take();
+}
+
+std::vector<uint8_t> BuildBufferSignatures() {
+  std::vector<iree_vm_bytecode_v0_signature_row_t> rows;
+  std::vector<iree_vm_bytecode_v0_signature_descriptor_row_t> descriptors;
+  const auto append_signature =
+      [&](uint16_t argument_value_count, uint16_t result_value_count,
+          int argument_ref_type, int result_ref_type) {
+        rows.push_back(iree_vm_bytecode_v0_signature_row_t{
+            static_cast<uint32_t>(descriptors.size()), argument_value_count,
+            result_value_count, static_cast<uint16_t>(argument_ref_type >= 0),
+            static_cast<uint16_t>(result_ref_type >= 0), 0, 0});
+        if (argument_ref_type >= 0) {
+          descriptors.push_back(iree_vm_bytecode_v0_signature_descriptor_row_t{
+              IREE_VM_BYTECODE_SIGNATURE_KIND_REF,
+              static_cast<uint16_t>(argument_ref_type)});
+        }
+        for (uint16_t i = 0; i < argument_value_count; ++i) {
+          descriptors.push_back(iree_vm_bytecode_v0_signature_descriptor_row_t{
+              IREE_VM_BYTECODE_SIGNATURE_KIND_I64, 0});
+        }
+        for (uint16_t i = 0; i < result_value_count; ++i) {
+          descriptors.push_back(iree_vm_bytecode_v0_signature_descriptor_row_t{
+              IREE_VM_BYTECODE_SIGNATURE_KIND_I64, 0});
+        }
+        if (result_ref_type >= 0) {
+          descriptors.push_back(iree_vm_bytecode_v0_signature_descriptor_row_t{
+              IREE_VM_BYTECODE_SIGNATURE_KIND_REF,
+              static_cast<uint16_t>(result_ref_type)});
+        }
+      };
+  append_signature(/*argument_value_count=*/1, /*result_value_count=*/0,
+                   /*argument_ref_type=*/-1, /*result_ref_type=*/0);
+  append_signature(/*argument_value_count=*/0, /*result_value_count=*/1,
+                   /*argument_ref_type=*/0, /*result_ref_type=*/-1);
+  append_signature(/*argument_value_count=*/2, /*result_value_count=*/1,
+                   /*argument_ref_type=*/0, /*result_ref_type=*/-1);
+  for (uint16_t lane_count : {1, 2, 4, 8}) {
+    append_signature(lane_count, lane_count, /*argument_ref_type=*/0,
+                     /*result_ref_type=*/-1);
+  }
+  append_signature(/*argument_value_count=*/3, /*result_value_count=*/0,
+                   /*argument_ref_type=*/0, /*result_ref_type=*/-1);
+  append_signature(/*argument_value_count=*/2, /*result_value_count=*/0,
+                   /*argument_ref_type=*/0, /*result_ref_type=*/0);
+  append_signature(/*argument_value_count=*/0, /*result_value_count=*/1,
+                   /*argument_ref_type=*/1, /*result_ref_type=*/-1);
+
+  ByteBuffer section;
+  section.Append(iree_vm_bytecode_v0_signatures_header_t{
+      static_cast<uint32_t>(rows.size())});
+  for (const auto& row : rows) section.Append(row);
+  for (const auto& descriptor : descriptors) section.Append(descriptor);
+  return section.Take();
+}
+
+std::vector<uint8_t> BuildBufferCallableTypes() {
+  ByteBuffer section;
+  section.Append(iree_vm_bytecode_v0_callable_types_header_t{10});
+  for (uint16_t signature_ordinal = 0; signature_ordinal < 10;
+       ++signature_ordinal) {
+    section.Append(
+        iree_vm_bytecode_v0_callable_type_row_t{signature_ordinal, 0});
+  }
+  return section.Take();
+}
+
+std::vector<uint8_t> BuildBufferExports() {
+  ByteBuffer section;
+  section.Append(iree_vm_bytecode_v0_exports_header_t{22});
+  section.Append(iree_vm_bytecode_v0_export_row_t{
+      4, 0, kBufferAllocateFunctionOrdinal, 0});
+  section.Append(
+      iree_vm_bytecode_v0_export_row_t{5, 1, kBufferLengthFunctionOrdinal, 0});
+  section.Append(
+      iree_vm_bytecode_v0_export_row_t{6, 2, kBufferLoadFunctionOrdinal, 0});
+  for (uint16_t format = IREE_VM_ISA_MEMORY_FORMAT_I8_X1;
+       format <= IREE_VM_ISA_MEMORY_FORMAT_I64_X8; ++format) {
+    const uint16_t callable_type = 3 + (format & 3u);
+    section.Append(iree_vm_bytecode_v0_export_row_t{
+        static_cast<uint16_t>(7 + format), callable_type,
+        static_cast<uint16_t>(kBufferRoundtripFunctionBase + format), 0});
+  }
+  section.Append(
+      iree_vm_bytecode_v0_export_row_t{23, 7, kBufferStoreFunctionOrdinal, 0});
+  section.Append(iree_vm_bytecode_v0_export_row_t{
+      24, 8, kBufferSubspanFunctionOrdinal, 0});
+  section.Append(iree_vm_bytecode_v0_export_row_t{
+      25, 9, kBufferWrongLengthFunctionOrdinal, 0});
+  return section.Take();
+}
+
+std::vector<uint8_t> BuildBufferFunctions() {
+  ByteBuffer bytecode;
+  std::vector<iree_vm_bytecode_v0_function_row_t> rows;
+  const auto begin_function = [&]() {
+    const uint32_t offset = static_cast<uint32_t>(bytecode.size());
+    bytecode.Append(iree_vm_isa_control_block_record_t{
+        IREE_VM_ISA_CORE_OPCODE_CONTROL_BLOCK, {0, 0, 0}});
+    return offset;
+  };
+  const auto end_function = [&](uint32_t offset, uint16_t callable_type,
+                                uint16_t value_register_count,
+                                uint16_t ref_register_count) {
+    bytecode.Append(iree_vm_isa_control_return_record_t{
+        IREE_VM_ISA_CORE_OPCODE_CONTROL_RETURN, {0, 0, 0}});
+    rows.push_back(iree_vm_bytecode_v0_function_row_t{
+        callable_type,
+        0,
+        offset,
+        static_cast<uint32_t>(bytecode.size() - offset),
+        0,
+        0,
+        0,
+        value_register_count,
+        ref_register_count,
+        0,
+        0,
+        0,
+        1,
+        {0, 0}});
+  };
+
+  uint32_t offset = begin_function();
+  bytecode.Append(iree_vm_isa_buffer_allocate_record_t{
+      IREE_VM_ISA_CORE_OPCODE_BUFFER_ALLOCATE, 0, 0, 0});
+  end_function(offset, /*callable_type=*/0, /*value_register_count=*/1,
+               /*ref_register_count=*/1);
+
+  offset = begin_function();
+  bytecode.Append(iree_vm_isa_buffer_length_record_t{
+      IREE_VM_ISA_CORE_OPCODE_BUFFER_LENGTH, 0, 0, 0});
+  end_function(offset, /*callable_type=*/1, /*value_register_count=*/1,
+               /*ref_register_count=*/1);
+
+  offset = begin_function();
+  bytecode.Append(iree_vm_isa_buffer_load_record_t{
+      IREE_VM_ISA_CORE_OPCODE_BUFFER_LOAD, 0, 0, 0, 1, 8,
+      IREE_VM_ISA_MEMORY_FORMAT_I64_X1, 0});
+  end_function(offset, /*callable_type=*/2, /*value_register_count=*/2,
+               /*ref_register_count=*/1);
+
+  for (uint8_t format = IREE_VM_ISA_MEMORY_FORMAT_I8_X1;
+       format <= IREE_VM_ISA_MEMORY_FORMAT_I64_X8; ++format) {
+    const uint8_t lane_count = (uint8_t)(1u << (format & 3u));
+    offset = begin_function();
+    bytecode.Append(iree_vm_isa_constant_zero_record_t{
+        IREE_VM_ISA_CORE_OPCODE_CONSTANT_ZERO, lane_count, 0});
+    bytecode.Append(iree_vm_isa_constant_zero_record_t{
+        IREE_VM_ISA_CORE_OPCODE_CONSTANT_ZERO,
+        static_cast<uint8_t>(lane_count + 1), 0});
+    bytecode.Append(iree_vm_isa_buffer_store_record_t{
+        IREE_VM_ISA_CORE_OPCODE_BUFFER_STORE, 0, lane_count,
+        static_cast<uint8_t>(lane_count + 1), 0, 0, format, 0});
+    bytecode.Append(iree_vm_isa_buffer_load_record_t{
+        IREE_VM_ISA_CORE_OPCODE_BUFFER_LOAD, 0, 0, lane_count,
+        static_cast<uint8_t>(lane_count + 1), 0, format, 0});
+    end_function(offset, /*callable_type=*/3 + (format & 3u),
+                 /*value_register_count=*/lane_count + 2,
+                 /*ref_register_count=*/1);
+  }
+
+  offset = begin_function();
+  bytecode.Append(iree_vm_isa_buffer_store_record_t{
+      IREE_VM_ISA_CORE_OPCODE_BUFFER_STORE, 0, 0, 1, 8, 2,
+      IREE_VM_ISA_MEMORY_FORMAT_I64_X1, 0});
+  end_function(offset, /*callable_type=*/7, /*value_register_count=*/3,
+               /*ref_register_count=*/1);
+
+  offset = begin_function();
+  bytecode.Append(iree_vm_isa_buffer_subspan_record_t{
+      IREE_VM_ISA_CORE_OPCODE_BUFFER_SUBSPAN, 0, 0, 0, 1, {0, 0, 0}});
+  end_function(offset, /*callable_type=*/8, /*value_register_count=*/2,
+               /*ref_register_count=*/1);
+
+  offset = begin_function();
+  bytecode.Append(iree_vm_isa_buffer_length_record_t{
+      IREE_VM_ISA_CORE_OPCODE_BUFFER_LENGTH, 0, 0, 0});
+  end_function(offset, /*callable_type=*/9, /*value_register_count=*/1,
+               /*ref_register_count=*/1);
+
+  ByteBuffer section;
+  section.Append(iree_vm_bytecode_v0_functions_header_t{
+      static_cast<uint32_t>(rows.size())});
+  for (const auto& row : rows) section.Append(row);
+  std::vector<uint8_t> bytecode_data = bytecode.Take();
+  section.AppendBytes(bytecode_data.data(), bytecode_data.size());
+  return section.Take();
+}
+
 std::vector<uint8_t> BuildHALInspectionRefTypes() {
   ByteBuffer section;
   section.Append(iree_vm_bytecode_v0_ref_types_header_t{1});
@@ -1439,6 +1639,25 @@ std::vector<uint8_t> BuildScalarStateModuleImage() {
       {IREE_VM_BYTECODE_SECTION_CONSTANTS, 0, BuildScalarStateConstants()},
       {IREE_VM_BYTECODE_SECTION_GLOBALS, 0, BuildScalarStateGlobals()},
       {IREE_VM_BYTECODE_SECTION_RODATA, 0, BuildTestRodata()},
+  });
+}
+
+std::vector<uint8_t> BuildBufferModuleImage() {
+  return BuildImage({
+      {IREE_VM_BYTECODE_SECTION_STRINGS, 0,
+       BuildStrings(
+           {"vm",           "buffer",       "zz_test",      "object",
+            "allocate",     "length",       "load",         "roundtrip.00",
+            "roundtrip.01", "roundtrip.02", "roundtrip.03", "roundtrip.04",
+            "roundtrip.05", "roundtrip.06", "roundtrip.07", "roundtrip.08",
+            "roundtrip.09", "roundtrip.10", "roundtrip.11", "roundtrip.12",
+            "roundtrip.13", "roundtrip.14", "roundtrip.15", "store",
+            "subspan",      "wrong_length"})},
+      {IREE_VM_BYTECODE_SECTION_REF_TYPES, 0, BuildBufferRefTypes()},
+      {IREE_VM_BYTECODE_SECTION_SIGNATURES, 0, BuildBufferSignatures()},
+      {IREE_VM_BYTECODE_SECTION_CALLABLE_TYPES, 0, BuildBufferCallableTypes()},
+      {IREE_VM_BYTECODE_SECTION_EXPORTS, 0, BuildBufferExports()},
+      {IREE_VM_BYTECODE_SECTION_FUNCTIONS, 0, BuildBufferFunctions()},
   });
 }
 

@@ -706,6 +706,61 @@ def _validate_verification_form(
             )
         require_zero(1, 1)
         require_ref_slot(2)
+    elif verification_form == "BUFFER_ALLOCATE":
+        if instruction.byte_length != 4:
+            raise ValueError(f"{instruction.mnemonic}: buffer allocate is not 4 bytes")
+        require_ref(1)
+        require_value(2)
+        require_zero(3, 1)
+    elif verification_form == "BUFFER_LENGTH":
+        if instruction.byte_length != 4:
+            raise ValueError(f"{instruction.mnemonic}: buffer length is not 4 bytes")
+        require_value(1)
+        require_ref(2)
+        require_zero(3, 1)
+    elif verification_form == "BUFFER_SUBSPAN":
+        if instruction.byte_length != 8:
+            raise ValueError(f"{instruction.mnemonic}: buffer subspan is not 8 bytes")
+        require_ref(1)
+        require_ref(2)
+        require_value(3)
+        require_value(4)
+        require_zero(5, 1, array_length=3)
+    elif verification_form in ("BUFFER_LOAD", "BUFFER_STORE"):
+        if instruction.byte_length != 8:
+            raise ValueError(
+                f"{instruction.mnemonic}: buffer lane access is not 8 bytes"
+            )
+        is_load = verification_form == "BUFFER_LOAD"
+        if is_load:
+            require_value(1)
+            require_ref(2)
+            require_value(3)
+            require_value(4)
+            scale_offset = 5
+            register_field = "dst_v8"
+        else:
+            require_ref(1)
+            require_value(2)
+            require_value(3)
+            scale_offset = 4
+            require_value(5)
+            register_field = "src_v8"
+        require_field(
+            scale_offset,
+            1,
+            ANY_BITS.entity_id,
+            (InstructionFieldRole.IMMEDIATE,),
+        )
+        require_field(
+            6,
+            1,
+            SELECTOR.entity_id,
+            (InstructionFieldRole.IMMEDIATE,),
+            rule_arguments=(EntityReference("core.selector.memory.format"),),
+        )
+        require_zero(7, 1)
+        require_lane_range(register_field, "format_u8")
     elif verification_form == "BUFFER_RODATA_LOAD":
         if instruction.byte_length != 4:
             raise ValueError(f"{instruction.mnemonic}: rodata load is not 4 bytes")

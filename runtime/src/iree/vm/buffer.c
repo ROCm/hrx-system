@@ -11,9 +11,6 @@
 
 #include "iree/vm/buffer_provider.h"
 
-#define IREE_VM_BUFFER_ACCESS_MASK \
-  (IREE_VM_BUFFER_ACCESS_FLAG_READ | IREE_VM_BUFFER_ACCESS_FLAG_WRITE)
-
 static void iree_vm_buffer_destroy(void* object);
 
 static const iree_vm_ref_type_table_t iree_vm_buffer_type_table_;
@@ -34,24 +31,6 @@ static const iree_vm_ref_type_table_t iree_vm_buffer_type_table_ = {
 
 const iree_vm_ref_type_table_t* iree_vm_buffer_provider_table(void) {
   return &iree_vm_buffer_type_table_;
-}
-
-static inline iree_vm_buffer_access_flags_t iree_vm_buffer_local_access(
-    const iree_vm_buffer_t* buffer) {
-  return buffer->flags & IREE_VM_BUFFER_ACCESS_MASK;
-}
-
-static inline iree_vm_buffer_access_flags_t iree_vm_buffer_effective_access(
-    const iree_vm_buffer_t* buffer) {
-  const iree_vm_buffer_access_flags_t access =
-      iree_vm_buffer_local_access(buffer);
-  if (access == IREE_VM_BUFFER_ACCESS_FLAG_NONE) return access;
-  if ((buffer->flags & IREE_VM_BUFFER_FLAG_VIEW) &&
-      iree_vm_buffer_local_access(buffer->root) ==
-          IREE_VM_BUFFER_ACCESS_FLAG_NONE) {
-    return IREE_VM_BUFFER_ACCESS_FLAG_NONE;
-  }
-  return access;
 }
 
 static iree_status_t iree_vm_buffer_validate_access(
@@ -99,38 +78,6 @@ static iree_status_t iree_vm_buffer_allocate_storage(
       iree_make_byte_span((uint8_t*)buffer + data_offset, length), NULL,
       iree_vm_buffer_release_callback_null(), host_allocator, buffer);
   *out_buffer = buffer;
-  return iree_ok_status();
-}
-
-static iree_status_t iree_vm_buffer_map_range(
-    const iree_vm_buffer_t* buffer,
-    iree_vm_buffer_access_flags_t required_access, iree_host_size_t offset,
-    iree_host_size_t length, iree_byte_span_t* out_span) {
-  const iree_vm_buffer_access_flags_t local_access =
-      iree_vm_buffer_local_access(buffer);
-  if ((local_access & required_access) != required_access) {
-    if (local_access == IREE_VM_BUFFER_ACCESS_FLAG_NONE) {
-      return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                              "buffer is closed");
-    }
-    return iree_make_status(IREE_STATUS_PERMISSION_DENIED,
-                            "buffer does not permit the requested access");
-  }
-  if (offset > buffer->length || length > buffer->length - offset) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "buffer range offset %" PRIhsz " length %" PRIhsz
-                            " exceeds buffer length %" PRIhsz,
-                            offset, length, buffer->length);
-  }
-  if ((buffer->flags & IREE_VM_BUFFER_FLAG_VIEW) &&
-      iree_vm_buffer_local_access(buffer->root) ==
-          IREE_VM_BUFFER_ACCESS_FLAG_NONE) {
-    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "buffer root is closed");
-  }
-
-  *out_span = length == 0 ? iree_byte_span_empty()
-                          : iree_make_byte_span(buffer->data + offset, length);
   return iree_ok_status();
 }
 
@@ -346,5 +293,3 @@ IREE_API_EXPORT const void* iree_vm_buffer_const_data(
   }
   return buffer->data;
 }
-
-#undef IREE_VM_BUFFER_ACCESS_MASK

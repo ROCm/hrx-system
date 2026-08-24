@@ -83,6 +83,7 @@ iree_runtime_cc_library(
     srcs = [
         "interpreter.c",
         "interpreter.h",
+        "interpreter_buffer.h",
         "interpreter_call.c",
         "interpreter_call.h",
         "interpreter_float.h",
@@ -226,6 +227,22 @@ iree_runtime_cc_test(
     name = "module_call_test",
     srcs = [
         "module_call_test.cc",
+        "module_test_data.cc",
+        "module_test_data.h",
+    ],
+    deps = [
+        ":bytecode",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+        "//runtime/src/iree/vm",
+        "//runtime/src/iree/vm/bytecode/wire",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "module_buffer_test",
+    srcs = [
+        "module_buffer_test.cc",
         "module_test_data.cc",
         "module_test_data.h",
     ],

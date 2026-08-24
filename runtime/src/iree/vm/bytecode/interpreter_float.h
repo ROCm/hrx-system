@@ -66,6 +66,33 @@ iree_vm_bytecode_float_f64_is_zero(uint64_t bits) {
   return (bits & UINT64_C(0x7FFFFFFFFFFFFFFF)) == 0;
 }
 
+// Converts one bf16 bit pattern to an f32 bit pattern while quieting NaNs.
+static inline uint32_t iree_vm_bytecode_bf16_to_f32_bits(uint16_t source_bits) {
+  uint32_t result_bits = (uint32_t)source_bits << 16;
+  const bool is_nan =
+      (source_bits & 0x7F80u) == 0x7F80u && (source_bits & 0x007Fu) != 0;
+  if (is_nan) result_bits |= 0x00400000u;
+  return result_bits;
+}
+
+// Converts one finite in-range f32 bit pattern to u32.
+static inline iree_status_t iree_vm_bytecode_f32_to_u32(uint32_t source_bits,
+                                                        uint32_t* out_result) {
+  const bool is_nan = (source_bits & 0x7F800000u) == 0x7F800000u &&
+                      (source_bits & 0x007FFFFFu) != 0;
+  if (is_nan) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "cannot convert an f32 NaN to u32");
+  }
+  const float source = iree_vm_bytecode_float_f32_from_bits(source_bits);
+  if (!(source > -1.0f && source < 0x1p32f)) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "f32 value is outside the u32 interval");
+  }
+  *out_result = (uint32_t)source;
+  return iree_ok_status();
+}
+
 static inline IREE_ATTRIBUTE_ALWAYS_INLINE void
 iree_vm_bytecode_execute_float_add_f32(
     const iree_vm_isa_float_add_f32_record_t* record, uint64_t* values) {
