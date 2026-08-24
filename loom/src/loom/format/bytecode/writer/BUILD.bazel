@@ -82,3 +82,22 @@ loom_cc_library(
         "//runtime/src/iree/base/internal:arena",
     ],
 )
+
+loom_cc_library(
+    name = "symbol",
+    srcs = ["symbol.c"],
+    hdrs = ["symbol.h"],
+    visibility = ["//loom/src/loom/format/bytecode:__pkg__"],
+    deps = [
+        ":attribute",
+        ":body",
+        ":encoder",
+        ":numbering",
+        "//loom/src/loom/analysis:symbol_references",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops/module",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)

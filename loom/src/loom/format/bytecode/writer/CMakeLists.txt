@@ -90,4 +90,25 @@ loom_cc_library(
   PUBLIC
 )
 
+loom_cc_library(
+  NAME
+    symbol
+  HDRS
+    "symbol.h"
+  SRCS
+    "symbol.c"
+  DEPS
+    ::attribute
+    ::body
+    ::encoder
+    ::numbering
+    iree::base
+    iree::base::internal::arena
+    loom::analysis::symbol_references
+    loom::ir
+    loom::ops::module
+    loom::ops::op_defs
+  PUBLIC
+)
+
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###
