@@ -205,20 +205,39 @@ static void iree_hal_streaming_context_destroy(
   iree_hal_streaming_stream_t* default_stream = context->default_stream;
   context->default_stream = NULL;
 
-  // Detach every stream while holding the same locks used to acquire an
-  // operation-scoped context reference. Once detached, new operations fail
-  // before touching context-owned state. Release list references outside the
-  // list lock because the last release may destroy a stream.
+  // Emptying the list under its own mutex is what takes the streams out of
+  // reach of every other reader: they all walk the list under this lock and now
+  // find nothing. It also disarms unregistration, whose scan of the emptied
+  // list matches no stream and so writes nothing, which leaves registration as
+  // the only writer that could still reach the array - and that cannot run
+  // either. A context reaches destruction in one of two states, and neither
+  // admits a registration: unpublished, which is how
+  // iree_hal_streaming_context_create disposes of a context it failed to finish
+  // building and where no thread but that one can name it; or published with
+  // its last reference gone, and registering runs under a reference. The array
+  // is therefore stable for the walk below.
   iree_slim_mutex_lock(&context->stream_list_mutex);
   const iree_host_size_t detached_stream_count = context->stream_count;
   context->stream_count = 0;
+  iree_slim_mutex_unlock(&context->stream_list_mutex);
+
+  // Detach under each stream's own mutex, which is the lock
+  // iree_hal_streaming_stream_retain_context reads the context under, so no
+  // reader can be part way through that read when the field is cleared. A
+  // reader that gets there first is refused anyway: it retains through
+  // iree_hal_streaming_context_try_retain, which fails once the last reference
+  // is gone, and an unpublished context has no such reader to refuse. The list
+  // mutex is not held: end_capture holds a stream mutex while walking the list,
+  // and taking these in the other order deadlocks against it. The list still
+  // holds its reference to every stream, so none can be destroyed while the
+  // loop runs; those references are released afterwards, outside both locks,
+  // because the last one destroys the stream.
   for (iree_host_size_t i = 0; i < detached_stream_count; ++i) {
     iree_hal_streaming_stream_t* stream = context->streams[i];
     iree_slim_mutex_lock(&stream->mutex);
     if (stream->context == context) stream->context = NULL;
     iree_slim_mutex_unlock(&stream->mutex);
   }
-  iree_slim_mutex_unlock(&context->stream_list_mutex);
   for (iree_host_size_t i = 0; i < detached_stream_count; ++i) {
     iree_hal_streaming_stream_release(context->streams[i]);
   }

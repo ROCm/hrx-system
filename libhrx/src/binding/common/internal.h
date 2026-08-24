@@ -1536,7 +1536,12 @@ iree_status_t iree_hal_streaming_context_disable_peer_access(
     iree_hal_streaming_context_t* context,
     iree_hal_streaming_context_t* peer_context);
 
-// Registers a stream and retains it for the context's stream list.
+// Registers a stream and retains it for the context's stream list. Callers
+// must hold a reference to |context| across the call: context destruction
+// zeroes the count under the list mutex and then walks the emptied extent and
+// frees the array without holding it. A registration landing in that window
+// writes into the array that walk is reading and about to free, and the
+// reference it takes for the list outlives both.
 // Synchronization: thread-safe internal locking.
 iree_status_t iree_hal_streaming_context_register_stream(
     iree_hal_streaming_context_t* context, iree_hal_streaming_stream_t* stream);
