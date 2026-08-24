@@ -48,7 +48,10 @@ from loom.target.arch.spirv.scalar_alu import (
     UNSIGNED_ORDERED_INTEGER_COMPARE_PREDICATES,
 )
 from loom.target.arch.spirv.scalar_constant import FLOAT_CONSTANT_TYPES
-from loom.target.arch.spirv.scalar_memory import STORAGE_BUFFER_SCALARS
+from loom.target.arch.spirv.scalar_memory import (
+    RAW_STORAGE_BUFFER_BYTE,
+    STORAGE_BUFFER_SCALARS,
+)
 from loom.target.low_descriptors import Descriptor
 
 
@@ -193,6 +196,25 @@ def test_generation_emits_scalar_memory_packet_rows() -> None:
 
     assert "LOOM_SPIRV_VALUE_CLASS_STORAGE_BUFFER_ADDRESS" in tables
     assert "LOOM_SPIRV_VALUE_CLASS_PTR_PHYSICAL_STORAGE_BUFFER" in tables
+
+
+def test_generation_emits_raw_storage_byte_bridge_rows() -> None:
+    suffix = RAW_STORAGE_BUFFER_BYTE.suffix
+    tables = generate_tables()
+    load_row = _generated_row(
+        tables,
+        f"spirv.op_load.storage_buffer.{suffix}",
+    )
+    assert "LOOM_SPIRV_SCALAR_TYPE_U8" in load_row
+    assert ".memory_alignment = 1" in load_row
+
+    extend_row = _generated_row(tables, f"spirv.op_uconvert.{suffix}.u32")
+    assert "LOOM_SPIRV_SCALAR_TYPE_U8" in extend_row
+    assert "LOOM_SPIRV_SCALAR_TYPE_U32" in extend_row
+
+    narrow_row = _generated_row(tables, f"spirv.op_uconvert.u32.{suffix}")
+    assert "LOOM_SPIRV_SCALAR_TYPE_U32" in narrow_row
+    assert "LOOM_SPIRV_SCALAR_TYPE_U8" in narrow_row
 
 
 def test_generation_emits_complete_float_constant_packet_rows() -> None:

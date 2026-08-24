@@ -133,6 +133,19 @@ STORAGE_BUFFER_SCALARS = (
     ),
 )
 
+# Internal byte carrier used by raw buffer access. SPIR-V permits this
+# restricted u8 value to participate in storage loads, stores, and integer
+# conversions with StorageBuffer8BitAccess alone; general u8 arithmetic still
+# requires Int8 and uses the ordinary u8 scalar rows above.
+RAW_STORAGE_BUFFER_BYTE = StorageBufferScalar(
+    source_type="i8",
+    suffix="raw_u8",
+    scalar_enum="LOOM_SPIRV_SCALAR_TYPE_U8",
+    byte_width=1,
+    feature_atoms=("storage_buffer_8bit_access",),
+    source_rule_enabled=False,
+)
+
 SOURCE_STORAGE_BUFFER_SCALARS = tuple(
     scalar for scalar in STORAGE_BUFFER_SCALARS if scalar.source_rule_enabled
 )

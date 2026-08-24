@@ -14,6 +14,7 @@ from loom.target.arch.spirv.cooperative_matrix import (
     cooperative_matrix_descriptor_key,
 )
 from loom.target.arch.spirv.descriptors import SPIRV_LOGICAL_CORE_DESCRIPTOR_SET
+from loom.target.arch.spirv.features import feature_bits_value
 from loom.target.arch.spirv.ordinary_vector import (
     ORDINARY_VECTOR_INSTRUCTIONS,
     OrdinaryVectorComponentKind,
@@ -53,7 +54,10 @@ from loom.target.arch.spirv.scalar_conversion import (
     INTEGER_VALUE_VIEW_CONVERSIONS,
     LOW_SCALAR_CONVERSIONS,
 )
-from loom.target.arch.spirv.scalar_memory import STORAGE_BUFFER_SCALARS
+from loom.target.arch.spirv.scalar_memory import (
+    RAW_STORAGE_BUFFER_BYTE,
+    STORAGE_BUFFER_SCALARS,
+)
 from loom.target.low_descriptors import AsmResultValueType
 
 
@@ -216,6 +220,14 @@ def test_result_asm_recipes_cover_every_spirv_descriptor_family() -> None:
             else:
                 add_carrier_only(load_key)
 
+    raw_byte_suffix = RAW_STORAGE_BUFFER_BYTE.suffix
+    add_carrier_only(
+        f"spirv.op_ptr_access_chain.storage_buffer.{raw_byte_suffix}.byte_offset"
+    )
+    add_carrier_only(f"spirv.op_load.storage_buffer.{raw_byte_suffix}")
+    add_carrier_only(f"spirv.op_uconvert.{raw_byte_suffix}.u32")
+    add_carrier_only(f"spirv.op_uconvert.u32.{raw_byte_suffix}")
+
     for case in COOPERATIVE_MATRIX_CASES:
         for role in ("lhs", "rhs", "init"):
             add_carrier_only(
@@ -255,3 +267,21 @@ def test_result_asm_recipes_cover_every_spirv_descriptor_family() -> None:
         assert actual_forms[key].result_value_types == (expected_recipe,), key
     for key in carrier_only_keys:
         assert actual_forms[key].result_value_types == (), key
+
+
+def test_raw_storage_byte_descriptors_do_not_require_int8() -> None:
+    suffix = RAW_STORAGE_BUFFER_BYTE.suffix
+    keys = (
+        f"spirv.op_ptr_access_chain.storage_buffer.{suffix}.byte_offset",
+        f"spirv.op_load.storage_buffer.{suffix}",
+        f"spirv.op_store.storage_buffer.{suffix}",
+        f"spirv.op_uconvert.{suffix}.u32",
+        f"spirv.op_uconvert.u32.{suffix}",
+    )
+    descriptors = {
+        descriptor.key: descriptor
+        for descriptor in SPIRV_LOGICAL_CORE_DESCRIPTOR_SET.descriptors
+    }
+    storage_feature_mask = feature_bits_value(("storage_buffer_8bit_access",))
+    for key in keys:
+        assert descriptors[key].feature_mask_words == (storage_feature_mask,)

@@ -74,6 +74,7 @@ from loom.target.arch.spirv.scalar_conversion import (
     ScalarConversion,
 )
 from loom.target.arch.spirv.scalar_memory import (
+    RAW_STORAGE_BUFFER_BYTE,
     SOURCE_STORAGE_BUFFER_SCALARS,
     STORAGE_BUFFER_SCALARS,
     StorageBufferScalar,
@@ -118,7 +119,9 @@ from loom.target.contracts import (
 from loom.target.low_descriptors import Descriptor
 
 _I1 = Scalar("i1")
+_I32 = Scalar("i32")
 _INDEX = Scalar("index")
+_OFFSET = Scalar("offset")
 
 
 def _descriptor(key: str) -> Descriptor:
@@ -634,6 +637,103 @@ def _buffer_view_rule(
 
 _STORAGE_BUFFER_MEMORY_SPACES = ("unknown", "generic", "global", "descriptor")
 _WORKGROUP_MEMORY_SPACES = ("workgroup",)
+
+
+def _raw_storage_buffer_byte_load_rule() -> DescriptorRule:
+    scalar = RAW_STORAGE_BUFFER_BYTE
+    address_descriptor = _descriptor(
+        f"spirv.op_ptr_access_chain.storage_buffer.{scalar.suffix}.byte_offset"
+    )
+    load_descriptor = _descriptor(f"spirv.op_load.storage_buffer.{scalar.suffix}")
+    extend_descriptor = _descriptor(f"spirv.op_uconvert.{scalar.suffix}.u32")
+    i32_pair = _INTEGER_ALU_TYPE_PAIR_BY_SOURCE_TYPE["i32"]
+    return DescriptorRule(
+        source_op=buffer.buffer_load_i8_u,
+        descriptor=load_descriptor,
+        guards=(
+            Guard.value_type("byte_offset", _OFFSET),
+            Guard.value_type("result", _I32),
+            *_feature_guards(load_descriptor),
+        ),
+        emit=(
+            _descriptor_emit(
+                descriptor=address_descriptor,
+                operands={
+                    "base": ValueRef.operand("source"),
+                    "byte_offset": ValueRef.operand("byte_offset"),
+                },
+                results={"ptr": ValueRef.temporary("byte_address")},
+                result_types={"ptr": DescriptorResultType()},
+            ),
+            _descriptor_emit(
+                descriptor=load_descriptor,
+                operands={"ptr": ValueRef.temporary("byte_address")},
+                results={"dst": ValueRef.temporary("byte")},
+                result_types={"dst": DescriptorResultType()},
+            ),
+            _descriptor_emit(
+                descriptor=extend_descriptor,
+                operands={"input": ValueRef.temporary("byte")},
+                results={"dst": ValueRef.temporary("unsigned_result")},
+                result_types={"dst": DescriptorResultType()},
+            ),
+            _integer_view_emit(
+                source_type=i32_pair.unsigned,
+                result_type=i32_pair.signed,
+                input_ref=ValueRef.temporary("unsigned_result"),
+                output_ref=ValueRef.result("result"),
+            ),
+        ),
+    )
+
+
+def _raw_storage_buffer_byte_store_rule() -> DescriptorRule:
+    scalar = RAW_STORAGE_BUFFER_BYTE
+    address_descriptor = _descriptor(
+        f"spirv.op_ptr_access_chain.storage_buffer.{scalar.suffix}.byte_offset"
+    )
+    narrow_descriptor = _descriptor(f"spirv.op_uconvert.u32.{scalar.suffix}")
+    store_descriptor = _descriptor(f"spirv.op_store.storage_buffer.{scalar.suffix}")
+    i32_pair = _INTEGER_ALU_TYPE_PAIR_BY_SOURCE_TYPE["i32"]
+    return DescriptorRule(
+        source_op=buffer.buffer_store_i8,
+        descriptor=store_descriptor,
+        guards=(
+            Guard.value_type("value", _I32),
+            Guard.value_type("byte_offset", _OFFSET),
+            *_feature_guards(store_descriptor),
+        ),
+        emit=(
+            _descriptor_emit(
+                descriptor=address_descriptor,
+                operands={
+                    "base": ValueRef.operand("target"),
+                    "byte_offset": ValueRef.operand("byte_offset"),
+                },
+                results={"ptr": ValueRef.temporary("byte_address")},
+                result_types={"ptr": DescriptorResultType()},
+            ),
+            _integer_view_emit(
+                source_type=i32_pair.signed,
+                result_type=i32_pair.unsigned,
+                input_ref=ValueRef.operand("value"),
+                output_ref=ValueRef.temporary("unsigned_value"),
+            ),
+            _descriptor_emit(
+                descriptor=narrow_descriptor,
+                operands={"input": ValueRef.temporary("unsigned_value")},
+                results={"dst": ValueRef.temporary("byte")},
+                result_types={"dst": DescriptorResultType()},
+            ),
+            _descriptor_emit(
+                descriptor=store_descriptor,
+                operands={
+                    "ptr": ValueRef.temporary("byte_address"),
+                    "value": ValueRef.temporary("byte"),
+                },
+            ),
+        ),
+    )
 
 
 def _storage_subview_rule(scalar: StorageBufferScalar) -> ValueElideRule:
@@ -1357,6 +1457,8 @@ SPIRV_LOGICAL_CORE_CONTRACT_FRAGMENT = ContractFragment(
         *SPIRV_ORDINARY_VECTOR_CONTRACT_CASES,
         *_compare_rules(),
         *_select_rules(),
+        _raw_storage_buffer_byte_load_rule(),
+        _raw_storage_buffer_byte_store_rule(),
         *_storage_buffer_rules(),
         *_control_barrier_rules(),
         *_cooperative_matrix_rules(),

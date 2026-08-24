@@ -1,0 +1,89 @@
+// RUN: emit spirv-dis input=source-low control-flow=structured-low validate
+// REQUIRES: spirv-dis, spirv-val
+
+// Vulkan shader, physical buffers, and StorageBuffer8BitAccess, deliberately
+// without Int8.
+spirv.target<vulkan1_3> @target {contract_feature_bits = 134}
+
+func.def target(@target) @raw_byte_roundtrip(%source: buffer, %source_offset: offset, %target: buffer, %target_offset: offset) -> (i32) {
+  %byte = buffer.load.i8.u %source[%source_offset]
+  buffer.store.i8 %byte, %target[%target_offset]
+  func.return %byte : i32
+}
+
+// ----
+               OpCapability Shader
+               OpCapability VulkanMemoryModel
+               OpCapability PhysicalStorageBufferAddresses
+               OpCapability Int64
+               OpCapability StorageBuffer8BitAccess
+               OpExtension "SPV_KHR_vulkan_memory_model"
+               OpExtension "SPV_KHR_physical_storage_buffer"
+               OpExtension "SPV_KHR_8bit_storage"
+               OpMemoryModel PhysicalStorageBuffer64 Vulkan
+               OpEntryPoint GLCompute %raw_byte_roundtrip "raw_byte_roundtrip"
+               OpExecutionMode %raw_byte_roundtrip LocalSize 1 1 1
+               OpName %raw_byte_roundtrip "raw_byte_roundtrip"
+               OpName %source "source"
+               OpName %source_offset "source_offset"
+               OpName %target "target"
+               OpName %target_offset "target_offset"
+               OpName %byte "byte"
+               OpMemberDecorate %_struct_6 0 Offset 0
+               OpDecorate %_struct_6 Block
+               OpDecorate %4 DescriptorSet 0
+               OpDecorate %4 Binding 0
+               OpDecorate %9 DescriptorSet 0
+               OpDecorate %9 Binding 1
+               OpDecorate %10 DescriptorSet 0
+               OpDecorate %10 Binding 2
+               OpDecorate %11 DescriptorSet 0
+               OpDecorate %11 Binding 3
+               OpMemberDecorate %_struct_13 0 Offset 0
+               OpDecorate %_struct_13 Block
+               OpDecorate %12 DescriptorSet 0
+               OpDecorate %12 Binding 4
+               OpDecorate %_ptr_PhysicalStorageBuffer_uchar ArrayStride 1
+        %int = OpTypeInt 32 1
+      %int_0 = OpConstant %int 0
+      %ulong = OpTypeInt 64 0
+  %_struct_6 = OpTypeStruct %ulong
+%_ptr_StorageBuffer__struct_6 = OpTypePointer StorageBuffer %_struct_6
+%_ptr_StorageBuffer_ulong = OpTypePointer StorageBuffer %ulong
+          %4 = OpVariable %_ptr_StorageBuffer__struct_6 StorageBuffer
+          %9 = OpVariable %_ptr_StorageBuffer__struct_6 StorageBuffer
+         %10 = OpVariable %_ptr_StorageBuffer__struct_6 StorageBuffer
+         %11 = OpVariable %_ptr_StorageBuffer__struct_6 StorageBuffer
+ %_struct_13 = OpTypeStruct %int
+%_ptr_StorageBuffer__struct_13 = OpTypePointer StorageBuffer %_struct_13
+%_ptr_StorageBuffer_int = OpTypePointer StorageBuffer %int
+         %12 = OpVariable %_ptr_StorageBuffer__struct_13 StorageBuffer
+       %void = OpTypeVoid
+         %17 = OpTypeFunction %void
+      %uchar = OpTypeInt 8 0
+%_ptr_PhysicalStorageBuffer_uchar = OpTypePointer PhysicalStorageBuffer %uchar
+       %uint = OpTypeInt 32 0
+%raw_byte_roundtrip = OpFunction %void None %17
+         %18 = OpLabel
+         %19 = OpAccessChain %_ptr_StorageBuffer_ulong %4 %int_0
+     %source = OpLoad %ulong %19 Aligned 8
+         %21 = OpAccessChain %_ptr_StorageBuffer_ulong %9 %int_0
+%source_offset = OpLoad %ulong %21 Aligned 8
+         %23 = OpAccessChain %_ptr_StorageBuffer_ulong %10 %int_0
+     %target = OpLoad %ulong %23 Aligned 8
+         %25 = OpAccessChain %_ptr_StorageBuffer_ulong %11 %int_0
+%target_offset = OpLoad %ulong %25 Aligned 8
+         %29 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_uchar %source
+         %30 = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_uchar %29 %source_offset
+         %31 = OpLoad %uchar %30 Aligned 1
+         %33 = OpUConvert %uint %31
+       %byte = OpBitcast %int %33
+         %35 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_uchar %target
+         %36 = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_uchar %35 %target_offset
+         %37 = OpBitcast %uint %byte
+         %38 = OpUConvert %uchar %37
+               OpStore %36 %38 Aligned 1
+         %39 = OpAccessChain %_ptr_StorageBuffer_int %12 %int_0
+               OpStore %39 %byte Aligned 4
+               OpReturn
+               OpFunctionEnd

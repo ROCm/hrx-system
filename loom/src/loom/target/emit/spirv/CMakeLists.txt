@@ -282,6 +282,7 @@ loom_check_test_suite(
     loom_check_file_test
   SRCS
     "test/barrier.loom-test"
+    "test/buffer_raw.loom-test"
     "test/emit.loom-test"
     "test/index_conversion.loom-test"
     "test/index_numeric.loom-test"

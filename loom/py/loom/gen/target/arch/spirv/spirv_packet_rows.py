@@ -82,6 +82,7 @@ from loom.target.arch.spirv.scalar_conversion import (  # noqa: E402
     ScalarConversion,
 )
 from loom.target.arch.spirv.scalar_memory import (  # noqa: E402
+    RAW_STORAGE_BUFFER_BYTE,
     STORAGE_BUFFER_SCALARS,
     StorageBufferScalar,
 )
@@ -273,46 +274,73 @@ def _control_barrier_rows() -> list[_PacketRow]:
     ]
 
 
+def _storage_buffer_rows_for_scalar(
+    scalar: StorageBufferScalar,
+) -> tuple[_PacketRow, ...]:
+    return (
+        _PacketRow(
+            f"spirv.op_ptr_access_chain.storage_buffer.{scalar.suffix}.byte_offset",
+            opcode="LOOM_SPIRV_OP_PTR_ACCESS_CHAIN",
+            form="LOOM_SPIRV_PACKET_FORM_PTR_ACCESS_CHAIN",
+            result_type=_physical_storage_buffer_pointer_value(scalar),
+            operand_types=(
+                _storage_buffer_address_value(),
+                _offset64_value(),
+            ),
+            result_count=1,
+        ),
+        _PacketRow(
+            f"spirv.op_load.storage_buffer.{scalar.suffix}",
+            opcode="LOOM_SPIRV_OP_LOAD",
+            form="LOOM_SPIRV_PACKET_FORM_LOAD_ALIGNED",
+            result_type=_scalar_value(scalar),
+            operand_types=(_physical_storage_buffer_pointer_value(scalar),),
+            result_count=1,
+            memory_alignment=scalar.byte_width,
+        ),
+        _PacketRow(
+            f"spirv.op_store.storage_buffer.{scalar.suffix}",
+            opcode="LOOM_SPIRV_OP_STORE",
+            form="LOOM_SPIRV_PACKET_FORM_STORE_ALIGNED",
+            operand_types=(
+                _physical_storage_buffer_pointer_value(scalar),
+                _scalar_value(scalar),
+            ),
+            memory_alignment=scalar.byte_width,
+        ),
+    )
+
+
 def _storage_buffer_rows() -> list[_PacketRow]:
-    rows: list[_PacketRow] = []
-    for scalar in STORAGE_BUFFER_SCALARS:
-        rows.append(
-            _PacketRow(
-                f"spirv.op_ptr_access_chain.storage_buffer.{scalar.suffix}.byte_offset",
-                opcode="LOOM_SPIRV_OP_PTR_ACCESS_CHAIN",
-                form="LOOM_SPIRV_PACKET_FORM_PTR_ACCESS_CHAIN",
-                result_type=_physical_storage_buffer_pointer_value(scalar),
-                operand_types=(
-                    _storage_buffer_address_value(),
-                    _offset64_value(),
-                ),
-                result_count=1,
-            )
-        )
-        rows.append(
-            _PacketRow(
-                f"spirv.op_load.storage_buffer.{scalar.suffix}",
-                opcode="LOOM_SPIRV_OP_LOAD",
-                form="LOOM_SPIRV_PACKET_FORM_LOAD_ALIGNED",
-                result_type=_scalar_value(scalar),
-                operand_types=(_physical_storage_buffer_pointer_value(scalar),),
-                result_count=1,
-                memory_alignment=scalar.byte_width,
-            )
-        )
-        rows.append(
-            _PacketRow(
-                f"spirv.op_store.storage_buffer.{scalar.suffix}",
-                opcode="LOOM_SPIRV_OP_STORE",
-                form="LOOM_SPIRV_PACKET_FORM_STORE_ALIGNED",
-                operand_types=(
-                    _physical_storage_buffer_pointer_value(scalar),
-                    _scalar_value(scalar),
-                ),
-                memory_alignment=scalar.byte_width,
-            )
-        )
-    return rows
+    return [row for scalar in STORAGE_BUFFER_SCALARS for row in _storage_buffer_rows_for_scalar(scalar)]
+
+
+def _raw_storage_buffer_byte_rows() -> tuple[_PacketRow, ...]:
+    scalar = RAW_STORAGE_BUFFER_BYTE
+    byte_value = _scalar_value(scalar)
+    u32_value = _value_type(
+        "LOOM_SPIRV_VALUE_CLASS_SCALAR",
+        "LOOM_SPIRV_SCALAR_TYPE_U32",
+    )
+    return (
+        *_storage_buffer_rows_for_scalar(scalar),
+        _PacketRow(
+            f"spirv.op_uconvert.{scalar.suffix}.u32",
+            opcode="LOOM_SPIRV_OP_U_CONVERT",
+            form="LOOM_SPIRV_PACKET_FORM_UNARY_TYPED",
+            result_type=u32_value,
+            operand_types=(byte_value,),
+            result_count=1,
+        ),
+        _PacketRow(
+            f"spirv.op_uconvert.u32.{scalar.suffix}",
+            opcode="LOOM_SPIRV_OP_U_CONVERT",
+            form="LOOM_SPIRV_PACKET_FORM_UNARY_TYPED",
+            result_type=byte_value,
+            operand_types=(u32_value,),
+            result_count=1,
+        ),
+    )
 
 
 def _workgroup_rows() -> list[_PacketRow]:
@@ -852,6 +880,7 @@ def _packet_rows() -> tuple[_PacketRow, ...]:
         *_integer_compare_rows(),
         *_select_rows(),
         *_storage_buffer_rows(),
+        *_raw_storage_buffer_byte_rows(),
         *_workgroup_rows(),
         *_control_barrier_rows(),
         *_cooperative_matrix_rows(),
