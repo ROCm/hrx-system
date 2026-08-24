@@ -70,14 +70,26 @@ iree_cc_test(
     iree::testing::gtest_main
 )
 
+iree_cc_library(
+  NAME
+    execution_test_provider
+  HDRS
+    "execution_test_provider.h"
+  SRCS
+    "execution_test_provider.c"
+  DEPS
+    ::vm
+  TESTONLY
+  PUBLIC
+)
+
 iree_cc_test(
   NAME
     execution_test
   SRCS
     "execution_test.cc"
-    "execution_test_provider.c"
-    "execution_test_provider.h"
   DEPS
+    ::execution_test_provider
     ::vm
     iree::testing::gtest
     iree::testing::gtest_main
@@ -88,9 +100,8 @@ iree_cc_binary_benchmark(
     execution_benchmark
   SRCS
     "execution_benchmark.cc"
-    "execution_test_provider.c"
-    "execution_test_provider.h"
   DEPS
+    ::execution_test_provider
     ::vm
     iree::testing::benchmark
     iree::testing::benchmark_main
