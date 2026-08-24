@@ -45,6 +45,15 @@ bool iree_hal_vulkan_command_buffer_is_empty(
 bool iree_hal_vulkan_command_buffer_has_native_commands(
     iree_hal_command_buffer_t* command_buffer);
 
+// Returns native Vulkan queue capabilities required by commands recorded in
+// |command_buffer|.
+VkQueueFlags iree_hal_vulkan_command_buffer_required_queue_flags(
+    iree_hal_command_buffer_t* command_buffer);
+
+// Returns true if |command_buffer| contains compute-based transfers.
+bool iree_hal_vulkan_command_buffer_has_compute_transfers(
+    iree_hal_command_buffer_t* command_buffer);
+
 // Returns true if |command_buffer| contains a transfer whose native resources
 // must be resolved and recorded for each issue.
 bool iree_hal_vulkan_command_buffer_requires_per_issue_recording(

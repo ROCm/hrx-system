@@ -8,7 +8,9 @@
 
 static VkPipelineStageFlags2
 iree_hal_vulkan_pipeline_stage_mask_from_hal_execution_stage(
-    iree_hal_execution_stage_t stage_mask, VkAccessFlags2 access_mask) {
+    iree_hal_execution_stage_t stage_mask, VkAccessFlags2 access_mask,
+    iree_hal_vulkan_barrier_flags_t flags,
+    iree_hal_vulkan_barrier_flags_t compute_transfer_flag) {
   VkPipelineStageFlags2 pipeline_stage_mask = 0;
   if (iree_any_bit_set(stage_mask, IREE_HAL_EXECUTION_STAGE_COMMAND_PROCESS)) {
     pipeline_stage_mask |= VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
@@ -21,6 +23,9 @@ iree_hal_vulkan_pipeline_stage_mask_from_hal_execution_stage(
   }
   if (iree_any_bit_set(stage_mask, IREE_HAL_EXECUTION_STAGE_TRANSFER)) {
     pipeline_stage_mask |= VK_PIPELINE_STAGE_2_TRANSFER_BIT;
+    if (iree_any_bit_set(flags, compute_transfer_flag)) {
+      pipeline_stage_mask |= VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
+    }
   }
   if (iree_any_bit_set(stage_mask, IREE_HAL_EXECUTION_STAGE_HOST)) {
     pipeline_stage_mask |= VK_PIPELINE_STAGE_2_HOST_BIT;
@@ -38,7 +43,8 @@ iree_hal_vulkan_pipeline_stage_mask_from_hal_execution_stage(
 }
 
 VkAccessFlags2 iree_hal_vulkan_barrier_source_access_mask(
-    iree_hal_execution_stage_t stage_mask) {
+    iree_hal_execution_stage_t stage_mask,
+    iree_hal_vulkan_barrier_flags_t flags) {
   VkAccessFlags2 access_mask = 0;
   if (iree_any_bit_set(stage_mask, IREE_HAL_EXECUTION_STAGE_COMMAND_PROCESS)) {
     access_mask |= VK_ACCESS_2_MEMORY_WRITE_BIT;
@@ -49,6 +55,10 @@ VkAccessFlags2 iree_hal_vulkan_barrier_source_access_mask(
   }
   if (iree_any_bit_set(stage_mask, IREE_HAL_EXECUTION_STAGE_TRANSFER)) {
     access_mask |= VK_ACCESS_2_TRANSFER_WRITE_BIT;
+    if (iree_any_bit_set(
+            flags, IREE_HAL_VULKAN_BARRIER_FLAG_COMPUTE_TRANSFER_SOURCE)) {
+      access_mask |= VK_ACCESS_2_SHADER_WRITE_BIT;
+    }
   }
   if (iree_any_bit_set(stage_mask, IREE_HAL_EXECUTION_STAGE_HOST)) {
     access_mask |= VK_ACCESS_2_HOST_WRITE_BIT;
@@ -57,7 +67,8 @@ VkAccessFlags2 iree_hal_vulkan_barrier_source_access_mask(
 }
 
 VkAccessFlags2 iree_hal_vulkan_barrier_target_access_mask(
-    iree_hal_execution_stage_t stage_mask) {
+    iree_hal_execution_stage_t stage_mask,
+    iree_hal_vulkan_barrier_flags_t flags) {
   VkAccessFlags2 access_mask = 0;
   if (iree_any_bit_set(stage_mask, IREE_HAL_EXECUTION_STAGE_COMMAND_PROCESS)) {
     access_mask |= VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT;
@@ -69,6 +80,10 @@ VkAccessFlags2 iree_hal_vulkan_barrier_target_access_mask(
   if (iree_any_bit_set(stage_mask, IREE_HAL_EXECUTION_STAGE_TRANSFER)) {
     access_mask |=
         VK_ACCESS_2_TRANSFER_READ_BIT | VK_ACCESS_2_TRANSFER_WRITE_BIT;
+    if (iree_any_bit_set(
+            flags, IREE_HAL_VULKAN_BARRIER_FLAG_COMPUTE_TRANSFER_TARGET)) {
+      access_mask |= VK_ACCESS_2_SHADER_READ_BIT | VK_ACCESS_2_SHADER_WRITE_BIT;
+    }
   }
   if (iree_any_bit_set(stage_mask, IREE_HAL_EXECUTION_STAGE_HOST)) {
     access_mask |= VK_ACCESS_2_HOST_READ_BIT | VK_ACCESS_2_HOST_WRITE_BIT;
@@ -83,11 +98,15 @@ void iree_hal_vulkan_barrier_record(const iree_hal_vulkan_device_syms_t* syms,
       .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2,
       .srcStageMask =
           iree_hal_vulkan_pipeline_stage_mask_from_hal_execution_stage(
-              barrier->source_stage_mask, barrier->source_access_mask),
+              barrier->source_stage_mask, barrier->source_access_mask,
+              barrier->flags,
+              IREE_HAL_VULKAN_BARRIER_FLAG_COMPUTE_TRANSFER_SOURCE),
       .srcAccessMask = barrier->source_access_mask,
       .dstStageMask =
           iree_hal_vulkan_pipeline_stage_mask_from_hal_execution_stage(
-              barrier->target_stage_mask, barrier->target_access_mask),
+              barrier->target_stage_mask, barrier->target_access_mask,
+              barrier->flags,
+              IREE_HAL_VULKAN_BARRIER_FLAG_COMPUTE_TRANSFER_TARGET),
       .dstAccessMask = barrier->target_access_mask,
   };
   VkDependencyInfo dependency_info = {
