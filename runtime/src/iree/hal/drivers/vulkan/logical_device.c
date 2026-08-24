@@ -1780,10 +1780,21 @@ static iree_status_t iree_hal_vulkan_logical_device_initialize_proactor(
 static iree_status_t iree_hal_vulkan_logical_device_initialize_allocator(
     iree_hal_vulkan_logical_device_t* device) {
   IREE_ASSERT_ARGUMENT(device);
+  const iree_hal_vulkan_allocator_queue_family_t queue_families[] = {
+      {
+          .queue_affinity = device->queues.compute.selection.affinity,
+          .family_index = device->queues.compute.selection.family_index,
+      },
+      {
+          .queue_affinity = device->queues.transfer.selection.affinity,
+          .family_index = device->queues.transfer.selection.family_index,
+      },
+  };
   return iree_hal_vulkan_allocator_create(
       (iree_hal_device_t*)device, &device->syms, device->logical_device,
       &device->physical_device, device->enabled_features,
       device->enabled_extensions, device->queues.affinity_mask,
+      IREE_ARRAYSIZE(queue_families), queue_families,
       device->queues.sparse_binding_lane, device->proactor,
       device->host_allocator, &device->device_allocator);
 }
