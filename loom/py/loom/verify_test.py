@@ -4,6 +4,7 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+import loom.ir as ir
 from loom.builtin_types import ALL_BUILTIN_TYPES
 from loom.diagnostics import DiagnosticEngine
 from loom.dialect.func import ALL_FUNC_OPS
@@ -19,6 +20,7 @@ from loom.dsl import (
     Operand,
     RegionDef,
     Result,
+    TypeConstraint,
 )
 from loom.format.bytecode.reader import read_module
 from loom.format.bytecode.writer import write_module
@@ -42,7 +44,46 @@ from loom.ir import (
     TypeKind,
     Value,
 )
-from loom.verify import verify_module
+from loom.verify import type_satisfies_constraint, verify_module
+
+
+def test_type_constraints_match_byte_pattern_scalars() -> None:
+    accepted_kinds = (
+        ir.ScalarTypeKind.I8,
+        ir.ScalarTypeKind.I16,
+        ir.ScalarTypeKind.I32,
+        ir.ScalarTypeKind.I64,
+        ir.ScalarTypeKind.F8E4M3,
+        ir.ScalarTypeKind.F8E5M2,
+        ir.ScalarTypeKind.F16,
+        ir.ScalarTypeKind.BF16,
+        ir.ScalarTypeKind.F32,
+        ir.ScalarTypeKind.F64,
+    )
+    for kind in accepted_kinds:
+        assert type_satisfies_constraint(
+            ir.ScalarType(kind), TypeConstraint.BYTE_PATTERN_SCALAR
+        )
+
+    rejected_kinds = (
+        ir.ScalarTypeKind.INDEX,
+        ir.ScalarTypeKind.OFFSET,
+        ir.ScalarTypeKind.I1,
+    )
+    for kind in rejected_kinds:
+        assert not type_satisfies_constraint(
+            ir.ScalarType(kind), TypeConstraint.BYTE_PATTERN_SCALAR
+        )
+
+
+def test_type_constraints_match_exact_i32() -> None:
+    assert type_satisfies_constraint(I32, TypeConstraint.I32)
+    assert not type_satisfies_constraint(F32, TypeConstraint.I32)
+
+
+def test_python_verifier_handles_existing_bitwise_constraints() -> None:
+    assert type_satisfies_constraint(INDEX, TypeConstraint.BITWISE_SCALAR)
+    assert type_satisfies_constraint(F32, TypeConstraint.BITWISE_SCALAR)
 
 
 def test_verifier_reports_missing_operand_value() -> None:

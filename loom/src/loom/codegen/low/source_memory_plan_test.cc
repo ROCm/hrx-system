@@ -1386,8 +1386,7 @@ TEST_F(SourceMemoryPlanTest, DynamicDenseLoadFactorsScaledWorkitemIndex) {
   loom_op_t* scaled_op = nullptr;
   IREE_ASSERT_OK(loom_index_mul_build(
       &builder_, loom_kernel_workitem_id_result(workitem_op), two,
-      loom_type_scalar(LOOM_SCALAR_TYPE_INDEX), LOOM_LOCATION_UNKNOWN,
-      &scaled_op));
+      LOOM_LOCATION_UNKNOWN, &scaled_op));
   const loom_value_id_t dynamic_indices[] = {
       loom_index_mul_result(scaled_op),
   };
@@ -1438,8 +1437,7 @@ TEST_F(SourceMemoryPlanTest, DynamicDenseLoadFactorsScaledOffsetWorkitemIndex) {
   loom_op_t* scaled_op = nullptr;
   IREE_ASSERT_OK(loom_index_mul_build(
       &builder_, loom_kernel_workitem_id_result(workitem_op), two,
-      loom_type_scalar(LOOM_SCALAR_TYPE_INDEX), LOOM_LOCATION_UNKNOWN,
-      &scaled_op));
+      LOOM_LOCATION_UNKNOWN, &scaled_op));
   loom_value_id_t one = loom_index_constant_result(BuildIndexConstant(1));
   loom_op_t* offset_op = nullptr;
   IREE_ASSERT_OK(loom_index_add_build(&builder_,
@@ -1497,8 +1495,7 @@ TEST_F(SourceMemoryPlanTest, DynamicDenseLoadFactorsMaddWorkitemIndex) {
   loom_op_t* offset_op = nullptr;
   IREE_ASSERT_OK(loom_index_madd_build(
       &builder_, loom_kernel_workitem_id_result(workitem_op), two, one,
-      loom_type_scalar(LOOM_SCALAR_TYPE_INDEX), LOOM_LOCATION_UNKNOWN,
-      &offset_op));
+      LOOM_LOCATION_UNKNOWN, &offset_op));
   const loom_value_id_t dynamic_indices[] = {
       loom_index_madd_result(offset_op),
   };
@@ -1670,7 +1667,6 @@ TEST_F(SourceMemoryPlanTest, DynamicDenseLoadRetainsOffsetAcrossDynamicStride) {
   loom_value_id_t two = loom_index_constant_result(BuildIndexConstant(2));
   loom_op_t* scaled_row_op = nullptr;
   IREE_ASSERT_OK(loom_index_mul_build(&builder_, row, two,
-                                      loom_type_scalar(LOOM_SCALAR_TYPE_INDEX),
                                       LOOM_LOCATION_UNKNOWN, &scaled_row_op));
   const loom_value_id_t scaled_dynamic_indices[] = {
       loom_index_mul_result(scaled_row_op),
@@ -1817,14 +1813,12 @@ TEST_F(SourceMemoryPlanTest, LinearizedScalarViewLoadRecoversCoordinateTerms) {
       loom_index_constant_result(BuildIndexConstant(64));
   loom_op_t* row_linear_op = nullptr;
   IREE_ASSERT_OK(loom_index_madd_build(&builder_, row, row_scale, lane,
-                                       loom_type_scalar(LOOM_SCALAR_TYPE_INDEX),
                                        LOOM_LOCATION_UNKNOWN, &row_linear_op));
   const loom_value_id_t block_scale =
       loom_index_constant_result(BuildIndexConstant(256));
   loom_op_t* linear_op = nullptr;
   IREE_ASSERT_OK(loom_index_madd_build(&builder_, block, block_scale,
                                        loom_index_madd_result(row_linear_op),
-                                       loom_type_scalar(LOOM_SCALAR_TYPE_INDEX),
                                        LOOM_LOCATION_UNKNOWN, &linear_op));
 
   const loom_value_id_t dynamic_indices[] = {loom_index_madd_result(linear_op)};
@@ -1895,7 +1889,6 @@ TEST_F(SourceMemoryPlanTest,
       loom_index_constant_result(BuildIndexConstant(64));
   loom_op_t* staged_lane_op = nullptr;
   IREE_ASSERT_OK(loom_index_madd_build(&builder_, stage, stage_scale, lane,
-                                       loom_type_scalar(LOOM_SCALAR_TYPE_INDEX),
                                        LOOM_LOCATION_UNKNOWN, &staged_lane_op));
   const loom_value_id_t row_offset =
       loom_index_constant_result(BuildIndexConstant(256));
@@ -1976,7 +1969,6 @@ TEST_F(SourceMemoryPlanTest,
   loom_op_t* linear_op = nullptr;
   IREE_ASSERT_OK(loom_index_madd_build(&builder_, unknown, scale,
                                        loom_kernel_workitem_id_result(lane_op),
-                                       loom_type_scalar(LOOM_SCALAR_TYPE_INDEX),
                                        LOOM_LOCATION_UNKNOWN, &linear_op));
   const loom_value_id_t constrained_linear =
       BuildIndexAssumeRange(loom_index_madd_result(linear_op), 0, 1023);
@@ -2060,7 +2052,6 @@ TEST_F(SourceMemoryPlanTest,
       loom_index_constant_result(BuildIndexConstant(4));
   loom_op_t* linear_op = nullptr;
   IREE_ASSERT_OK(loom_index_madd_build(&builder_, row, row_scale, column,
-                                       loom_type_scalar(LOOM_SCALAR_TYPE_INDEX),
                                        LOOM_LOCATION_UNKNOWN, &linear_op));
 
   const loom_value_id_t ranked_dynamic_indices[] = {row, column};

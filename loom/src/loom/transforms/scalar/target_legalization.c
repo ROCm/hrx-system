@@ -92,9 +92,8 @@ static iree_status_t loom_scalar_legalize_build_cmpi_i32(
     loom_scalar_cmpi_predicate_t predicate, loom_value_id_t lhs,
     loom_value_id_t rhs, loom_value_id_t* out_value) {
   loom_op_t* op = NULL;
-  IREE_RETURN_IF_ERROR(loom_scalar_cmpi_build(
-      builder, predicate, lhs, rhs, loom_type_scalar(LOOM_SCALAR_TYPE_I32),
-      loom_type_scalar(LOOM_SCALAR_TYPE_I1), location, &op));
+  IREE_RETURN_IF_ERROR(
+      loom_scalar_cmpi_build(builder, predicate, lhs, rhs, location, &op));
   *out_value = loom_scalar_cmpi_result(op);
   return iree_ok_status();
 }

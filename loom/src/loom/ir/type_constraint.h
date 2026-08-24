@@ -30,6 +30,8 @@ typedef enum loom_type_constraint_e {
   LOOM_TYPE_CONSTRAINT_REGISTER,
   // Exactly i1. Used for comparison results and boolean predicates.
   LOOM_TYPE_CONSTRAINT_I1,
+  // Exactly i32.
+  LOOM_TYPE_CONSTRAINT_I32,
   LOOM_TYPE_CONSTRAINT_VECTOR,
   // Vector type with rank 1.
   LOOM_TYPE_CONSTRAINT_RANK_ONE_VECTOR,
@@ -69,6 +71,8 @@ typedef enum loom_type_constraint_e {
   LOOM_TYPE_CONSTRAINT_STORAGE,
   // Scalar index, non-i1 integer, or floating-point bitwise payload.
   LOOM_TYPE_CONSTRAINT_BITWISE_SCALAR,
+  // Scalar 8/16/32/64-bit integer or floating-point byte pattern.
+  LOOM_TYPE_CONSTRAINT_BYTE_PATTERN_SCALAR,
   // Shaped type with index, non-i1 integer, or floating-point element type.
   LOOM_TYPE_CONSTRAINT_BITWISE_ELEMENT,
   LOOM_TYPE_CONSTRAINT_COUNT_,

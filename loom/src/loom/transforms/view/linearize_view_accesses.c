@@ -469,14 +469,12 @@ static iree_status_t loom_linearize_view_accesses_build_linear_index(
     } else if (accumulator == LOOM_VALUE_ID_INVALID) {
       loom_op_t* mul_op = NULL;
       IREE_RETURN_IF_ERROR(loom_index_mul_build(
-          builder, axis_index, stride_index,
-          loom_type_scalar(LOOM_SCALAR_TYPE_INDEX), location, &mul_op));
+          builder, axis_index, stride_index, location, &mul_op));
       accumulator = loom_index_mul_result(mul_op);
     } else {
       loom_op_t* madd_op = NULL;
       IREE_RETURN_IF_ERROR(loom_index_madd_build(
-          builder, axis_index, stride_index, accumulator,
-          loom_type_scalar(LOOM_SCALAR_TYPE_INDEX), location, &madd_op));
+          builder, axis_index, stride_index, accumulator, location, &madd_op));
       accumulator = loom_index_madd_result(madd_op);
     }
   }

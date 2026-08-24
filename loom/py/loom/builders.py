@@ -20,6 +20,7 @@ from loom.builder_model import (
     BuilderParamKind,
     BuilderSignature,
     dialect_python_name,
+    fixed_result_type_constraints,
     signatures_for_ops,
 )
 from loom.builtin_types import ALL_BUILTIN_TYPES
@@ -31,10 +32,15 @@ from loom.dsl import (
     ATTR_TYPE_SYMBOL_SET,
     AttrDef,
     Op,
+    TypeConstraint,
     TypeDef,
 )
 from loom.fields import compute_layout
 from loom.ir import (
+    I1,
+    I32,
+    INDEX,
+    OFFSET,
     Block,
     EnumArrayAttr,
     Module,
@@ -57,6 +63,13 @@ __all__ = [
 
 
 _STATIC_INDEX_SENTINEL = -(2**63)
+
+_FIXED_RESULT_TYPES: dict[TypeConstraint, Type] = {
+    TypeConstraint.I1: I1,
+    TypeConstraint.I32: I32,
+    TypeConstraint.INDEX: INDEX,
+    TypeConstraint.OFFSET: OFFSET,
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -295,6 +308,12 @@ class OpCallable:
         operand_segment_counts = self._append_operands(op, values, operands, attributes)
 
         results = values.get("results")
+        if results is None:
+            fixed_constraints = fixed_result_type_constraints(op)
+            if fixed_constraints is not None:
+                results = [
+                    _FIXED_RESULT_TYPES[constraint] for constraint in fixed_constraints
+                ]
         result_names = _normalize_result_names(
             op,
             results or [],

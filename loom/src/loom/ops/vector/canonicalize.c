@@ -359,9 +359,8 @@ static iree_status_t loom_vector_build_iota_lane_symbolic(
       base_value == 0) {
     if (element_type == LOOM_SCALAR_TYPE_INDEX && lane > 1) {
       loom_op_t* multiply_op = NULL;
-      IREE_RETURN_IF_ERROR(loom_index_mul_build(&rewriter->builder, step,
-                                                lane_value, result_type,
-                                                op->location, &multiply_op));
+      IREE_RETURN_IF_ERROR(loom_index_mul_build(
+          &rewriter->builder, step, lane_value, op->location, &multiply_op));
       scaled_step = loom_index_mul_result(multiply_op);
     }
     *out_value = scaled_step;
@@ -372,9 +371,8 @@ static iree_status_t loom_vector_build_iota_lane_symbolic(
   loom_op_t* add_op = NULL;
   if (element_type == LOOM_SCALAR_TYPE_INDEX) {
     if (lane > 1) {
-      IREE_RETURN_IF_ERROR(loom_index_madd_build(&rewriter->builder, step,
-                                                 lane_value, base, result_type,
-                                                 op->location, &add_op));
+      IREE_RETURN_IF_ERROR(loom_index_madd_build(
+          &rewriter->builder, step, lane_value, base, op->location, &add_op));
     } else {
       IREE_RETURN_IF_ERROR(loom_index_add_build(
           &rewriter->builder, base, step, result_type, op->location, &add_op));

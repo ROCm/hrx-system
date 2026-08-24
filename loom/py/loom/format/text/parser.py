@@ -88,6 +88,7 @@ from loom.ir import (
     ENCODING_TRANSFORM_TYPE,
     ENCODING_TYPE,
     I1,
+    I32,
     INDEX,
     NONE_TYPE,
     OFFSET,
@@ -190,6 +191,8 @@ def _concrete_type_for_constraint(constraint: TypeConstraint) -> Type | None:
     match constraint:
         case TypeConstraint.I1:
             return I1
+        case TypeConstraint.I32:
+            return I32
         case TypeConstraint.INDEX:
             return INDEX
         case TypeConstraint.OFFSET:

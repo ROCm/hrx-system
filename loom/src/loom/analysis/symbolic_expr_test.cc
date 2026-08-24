@@ -171,7 +171,6 @@ TEST_F(SymbolicExprTest, ExpandsIndexMaddWithConstantMultiplier) {
   loom_value_id_t stride = loom_index_constant_result(BuildIndexConstant(16));
   loom_op_t* madd_op = nullptr;
   IREE_ASSERT_OK(loom_index_madd_build(&builder_, row, stride, column,
-                                       loom_type_scalar(LOOM_SCALAR_TYPE_INDEX),
                                        LOOM_LOCATION_UNKNOWN, &madd_op));
 
   loom_symbolic_expr_t expression = {0};
@@ -192,7 +191,6 @@ TEST_F(SymbolicExprTest, ReadySummaryRetainsConstantFreeMaterialization) {
   loom_value_id_t stride = loom_index_constant_result(BuildIndexConstant(16));
   loom_op_t* linear_op = nullptr;
   IREE_ASSERT_OK(loom_index_madd_build(&builder_, row, stride, column,
-                                       loom_type_scalar(LOOM_SCALAR_TYPE_INDEX),
                                        LOOM_LOCATION_UNKNOWN, &linear_op));
   loom_value_id_t offset = loom_index_constant_result(BuildIndexConstant(4));
   loom_op_t* offset_op = nullptr;
@@ -222,7 +220,6 @@ TEST_F(SymbolicExprTest, DynamicMultiplyFallsBackToResultSymbol) {
   loom_value_id_t right = DefineIndexValue();
   loom_op_t* mul_op = nullptr;
   IREE_ASSERT_OK(loom_index_mul_build(&builder_, left, right,
-                                      loom_type_scalar(LOOM_SCALAR_TYPE_INDEX),
                                       LOOM_LOCATION_UNKNOWN, &mul_op));
   loom_value_id_t result = loom_index_mul_result(mul_op);
 
@@ -242,7 +239,6 @@ TEST_F(SymbolicExprTest, DynamicMaddFallsBackToResultSymbol) {
   loom_value_id_t addend = DefineIndexValue();
   loom_op_t* madd_op = nullptr;
   IREE_ASSERT_OK(loom_index_madd_build(&builder_, left, right, addend,
-                                       loom_type_scalar(LOOM_SCALAR_TYPE_INDEX),
                                        LOOM_LOCATION_UNKNOWN, &madd_op));
   loom_value_id_t result = loom_index_madd_result(madd_op);
 
@@ -261,7 +257,6 @@ TEST_F(SymbolicExprTest, ExpandsShiftWithExactAmount) {
   loom_value_id_t shift = loom_index_constant_result(BuildIndexConstant(3));
   loom_op_t* shift_op = nullptr;
   IREE_ASSERT_OK(loom_index_shli_build(&builder_, value, shift,
-                                       loom_type_scalar(LOOM_SCALAR_TYPE_INDEX),
                                        LOOM_LOCATION_UNKNOWN, &shift_op));
 
   loom_symbolic_expr_t expression = {0};
@@ -279,7 +274,6 @@ TEST_F(SymbolicExprTest, DynamicShiftFallsBackToResultSymbol) {
   loom_value_id_t shift = DefineIndexValue();
   loom_op_t* shift_op = nullptr;
   IREE_ASSERT_OK(loom_index_shli_build(&builder_, value, shift,
-                                       loom_type_scalar(LOOM_SCALAR_TYPE_INDEX),
                                        LOOM_LOCATION_UNKNOWN, &shift_op));
   loom_value_id_t result = loom_index_shli_result(shift_op);
 

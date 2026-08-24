@@ -1037,6 +1037,8 @@ def type_satisfies_constraint(value_type: Type, constraint: TypeConstraint) -> b
         return _encoding_role_is(value_type, EncodingRole.TRANSFORM)
     if constraint == TypeConstraint.I1:
         return _scalar_kind_is(value_type, ScalarTypeKind.I1)
+    if constraint == TypeConstraint.I32:
+        return _scalar_kind_is(value_type, ScalarTypeKind.I32)
 
     if isinstance(value_type, ScalarType):
         return _scalar_satisfies_constraint(value_type.kind, constraint)
@@ -1069,6 +1071,10 @@ def _scalar_satisfies_constraint(
         return scalar_kind in _INTEGER_SCALAR_KINDS
     if constraint == TypeConstraint.FLOAT:
         return scalar_kind in _FLOAT_SCALAR_KINDS
+    if constraint == TypeConstraint.BITWISE_SCALAR:
+        return scalar_kind in _BITWISE_SCALAR_KINDS
+    if constraint == TypeConstraint.BYTE_PATTERN_SCALAR:
+        return scalar_kind in _BYTE_PATTERN_SCALAR_KINDS
     if constraint == TypeConstraint.INDEX_OR_NON_I1_INTEGER_SCALAR:
         return scalar_kind in _INDEX_OR_NON_I1_INTEGER_SCALAR_KINDS
     return False
@@ -1100,6 +1106,8 @@ def _shaped_satisfies_constraint(
         return shaped_type.element_type.kind in _INTEGER_SCALAR_KINDS
     if constraint == TypeConstraint.FLOAT_ELEMENT:
         return shaped_type.element_type.kind in _FLOAT_SCALAR_KINDS
+    if constraint == TypeConstraint.BITWISE_ELEMENT:
+        return shaped_type.element_type.kind in _BITWISE_SCALAR_KINDS
     if constraint == TypeConstraint.INDEX_OR_NON_I1_INTEGER_ELEMENT:
         return shaped_type.element_type.kind in _INDEX_OR_NON_I1_INTEGER_SCALAR_KINDS
     if constraint == TypeConstraint.I1_ELEMENT:
@@ -1138,6 +1146,23 @@ _FLOAT_SCALAR_KINDS = frozenset(
         ScalarTypeKind.F64,
     }
 )
+
+_BYTE_PATTERN_SCALAR_KINDS = frozenset(
+    {
+        ScalarTypeKind.I8,
+        ScalarTypeKind.I16,
+        ScalarTypeKind.I32,
+        ScalarTypeKind.I64,
+        ScalarTypeKind.F8E4M3,
+        ScalarTypeKind.F8E5M2,
+        ScalarTypeKind.F16,
+        ScalarTypeKind.BF16,
+        ScalarTypeKind.F32,
+        ScalarTypeKind.F64,
+    }
+)
+
+_BITWISE_SCALAR_KINDS = frozenset({ScalarTypeKind.INDEX, *_BYTE_PATTERN_SCALAR_KINDS})
 
 _INDEX_OR_NON_I1_INTEGER_SCALAR_KINDS = frozenset(
     {

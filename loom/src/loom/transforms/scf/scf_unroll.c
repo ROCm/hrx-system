@@ -950,8 +950,7 @@ static iree_status_t loom_scf_unroll_build_in_bounds_condition(
   loom_op_t* cmp_op = NULL;
   IREE_RETURN_IF_ERROR(loom_index_cmp_build(
       &context->rewriter->builder, LOOM_INDEX_CMP_PREDICATE_SLT,
-      iteration_index, loom_scf_for_upper_bound(op), index_type,
-      loom_type_scalar(LOOM_SCALAR_TYPE_I1), op->location, &cmp_op));
+      iteration_index, loom_scf_for_upper_bound(op), op->location, &cmp_op));
   *out_condition = loom_index_cmp_result(cmp_op);
   return iree_ok_status();
 }
@@ -2540,7 +2539,7 @@ static iree_status_t loom_scf_unroll_build_dynamic_scheduled_main_upper(
   loom_op_t* non_negative_span_op = NULL;
   IREE_RETURN_IF_ERROR(loom_index_max_build(
       &context->rewriter->builder, loom_index_sub_result(span_op), zero,
-      index_type, op->location, &non_negative_span_op));
+      op->location, &non_negative_span_op));
   loom_value_id_t trip_count = loom_index_max_result(non_negative_span_op);
   if (step != 1) {
     loom_value_id_t step_minus_one = LOOM_VALUE_ID_INVALID;
@@ -2556,7 +2555,7 @@ static iree_status_t loom_scf_unroll_build_dynamic_scheduled_main_upper(
     loom_op_t* trip_count_op = NULL;
     IREE_RETURN_IF_ERROR(loom_index_div_build(
         &context->rewriter->builder, loom_index_add_result(padded_span_op),
-        step_value, index_type, op->location, &trip_count_op));
+        step_value, op->location, &trip_count_op));
     trip_count = loom_index_div_result(trip_count_op);
   }
 
@@ -2564,13 +2563,13 @@ static iree_status_t loom_scf_unroll_build_dynamic_scheduled_main_upper(
   IREE_RETURN_IF_ERROR(loom_scf_unroll_build_index_constant(
       context, op, unroll_factor, index_type, &factor_value));
   loom_op_t* tile_count_op = NULL;
-  IREE_RETURN_IF_ERROR(loom_index_div_build(
-      &context->rewriter->builder, trip_count, factor_value, index_type,
-      op->location, &tile_count_op));
+  IREE_RETURN_IF_ERROR(loom_index_div_build(&context->rewriter->builder,
+                                            trip_count, factor_value,
+                                            op->location, &tile_count_op));
   loom_op_t* main_span_op = NULL;
   IREE_RETURN_IF_ERROR(loom_index_mul_build(
       &context->rewriter->builder, loom_index_div_result(tile_count_op),
-      *out_scaled_step, index_type, op->location, &main_span_op));
+      *out_scaled_step, op->location, &main_span_op));
   loom_op_t* main_upper_op = NULL;
   IREE_RETURN_IF_ERROR(loom_index_add_build(
       &context->rewriter->builder, loom_scf_for_lower_bound(op),

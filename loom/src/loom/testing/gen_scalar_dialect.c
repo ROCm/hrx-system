@@ -291,12 +291,12 @@ static iree_status_t loom_test_gen_hook_scalar_comparison(
       *out_result = LOOM_TEST_GEN_HOOK_SKIPPED;
       return iree_ok_status();
     }
-    uint8_t predicate = (uint8_t)loom_test_gen_next_range(
-        context->gen, LOOM_SCALAR_CMPI_PREDICATE_COUNT_);
+    loom_scalar_cmpi_predicate_t predicate =
+        (loom_scalar_cmpi_predicate_t)loom_test_gen_next_range(
+            context->gen, LOOM_SCALAR_CMPI_PREDICATE_COUNT_);
     loom_op_t* op = NULL;
-    IREE_RETURN_IF_ERROR(loom_scalar_cmpi_build(context->builder, predicate,
-                                                lhs, rhs, operand_type, i1_type,
-                                                LOOM_LOCATION_UNKNOWN, &op));
+    IREE_RETURN_IF_ERROR(loom_scalar_cmpi_build(
+        context->builder, predicate, lhs, rhs, LOOM_LOCATION_UNKNOWN, &op));
     loom_test_gen_values_add(context->values, loom_op_results(op)[0], i1_type);
   } else {
     if (!loom_test_gen_values_pick_binary_float(context->gen, context->values,
@@ -304,17 +304,18 @@ static iree_status_t loom_test_gen_hook_scalar_comparison(
       *out_result = LOOM_TEST_GEN_HOOK_SKIPPED;
       return iree_ok_status();
     }
-    uint8_t predicate = (uint8_t)loom_test_gen_next_range(
-        context->gen, LOOM_SCALAR_CMPF_PREDICATE_COUNT_);
+    loom_scalar_cmpf_predicate_t predicate =
+        (loom_scalar_cmpf_predicate_t)loom_test_gen_next_range(
+            context->gen, LOOM_SCALAR_CMPF_PREDICATE_COUNT_);
     uint8_t flags = 0;
     if (loom_test_gen_next_probability(context->gen, 15)) {
       flags = (uint8_t)loom_test_gen_next_range(
           context->gen, LOOM_SCALAR_FASTMATHFLAGS_FAST + 1);
     }
     loom_op_t* op = NULL;
-    IREE_RETURN_IF_ERROR(loom_scalar_cmpf_build(
-        context->builder, flags, predicate, lhs, rhs, operand_type, i1_type,
-        LOOM_LOCATION_UNKNOWN, &op));
+    IREE_RETURN_IF_ERROR(loom_scalar_cmpf_build(context->builder, flags,
+                                                predicate, lhs, rhs,
+                                                LOOM_LOCATION_UNKNOWN, &op));
     loom_test_gen_values_add(context->values, loom_op_results(op)[0], i1_type);
   }
   *out_result = LOOM_TEST_GEN_HOOK_EMITTED;

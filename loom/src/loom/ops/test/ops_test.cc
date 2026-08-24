@@ -785,12 +785,12 @@ TEST_F(BuilderTest, ComparisonBuilder) {
   loom_value_id_t lhs = DefineValue(i32);
   loom_value_id_t rhs = DefineValue(i32);
   loom_op_t* op = NULL;
-  IREE_ASSERT_OK(loom_test_cmp_build(&builder_, 2, lhs, rhs, i32, i32,
-                                     LOOM_LOCATION_UNKNOWN, &op));
+  IREE_ASSERT_OK(loom_test_cmp_build(&builder_, LOOM_TEST_CMP_PREDICATE_LT, lhs,
+                                     rhs, LOOM_LOCATION_UNKNOWN, &op));
   ASSERT_NE(op, nullptr);
   EXPECT_EQ(op->kind, LOOM_OP_TEST_CMP);
   EXPECT_EQ(op->attribute_count, 1);
-  EXPECT_EQ(loom_test_cmp_predicate(op), 2);
+  EXPECT_EQ(loom_test_cmp_predicate(op), LOOM_TEST_CMP_PREDICATE_LT);
   EXPECT_EQ(loom_test_cmp_lhs(op), lhs);
   EXPECT_EQ(loom_test_cmp_rhs(op), rhs);
   EXPECT_NE(loom_test_cmp_result(op), LOOM_VALUE_ID_INVALID);

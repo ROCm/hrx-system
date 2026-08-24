@@ -1883,6 +1883,27 @@ def test_generate_builders_define_mixed_fixed_results() -> None:
     assert "builder, result_types_storage, 2," in builders_c
 
 
+def test_generate_builders_synthesize_exact_result_types() -> None:
+    op = Op(
+        "test.add",
+        group=Dialect("test"),
+        operands=[
+            Operand("lhs", TypeConstraint.I32),
+            Operand("rhs", TypeConstraint.I32),
+        ],
+        results=[Result("result", TypeConstraint.I32)],
+        format=[Ref("lhs"), COMMA, Ref("rhs")],
+    )
+
+    ops_h = generate_ops_h("test", 0, [op])
+    builders_c = generate_builders_c("test", [op])
+
+    assert "loom_type_t result_type" not in ops_h
+    assert "const loom_type_t* result_types" not in ops_h
+    assert "loom_type_scalar(LOOM_SCALAR_TYPE_I32)" in builders_c
+    assert "loom_builder_define_result" in builders_c
+
+
 def test_generate_builders_keep_array_for_multiple_dynamic_fixed_results() -> None:
     op = Op(
         "test.dynamic_results",

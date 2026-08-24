@@ -169,62 +169,52 @@ static iree_status_t loom_index_replace_single_result_with_binary_op(
     }
     case LOOM_OP_INDEX_MUL: {
       IREE_RETURN_IF_ERROR(loom_index_mul_build(&rewriter->builder, lhs, rhs,
-                                                result_type, op->location,
-                                                &replacement_op));
+                                                op->location, &replacement_op));
       break;
     }
     case LOOM_OP_INDEX_REM: {
       IREE_RETURN_IF_ERROR(loom_index_rem_build(&rewriter->builder, lhs, rhs,
-                                                result_type, op->location,
-                                                &replacement_op));
+                                                op->location, &replacement_op));
       break;
     }
     case LOOM_OP_INDEX_ANDI: {
-      IREE_RETURN_IF_ERROR(loom_index_andi_build(&rewriter->builder, lhs, rhs,
-                                                 result_type, op->location,
-                                                 &replacement_op));
+      IREE_RETURN_IF_ERROR(loom_index_andi_build(
+          &rewriter->builder, lhs, rhs, op->location, &replacement_op));
       break;
     }
     case LOOM_OP_INDEX_ORI: {
       IREE_RETURN_IF_ERROR(loom_index_ori_build(&rewriter->builder, lhs, rhs,
-                                                result_type, op->location,
-                                                &replacement_op));
+                                                op->location, &replacement_op));
       break;
     }
     case LOOM_OP_INDEX_XORI: {
-      IREE_RETURN_IF_ERROR(loom_index_xori_build(&rewriter->builder, lhs, rhs,
-                                                 result_type, op->location,
-                                                 &replacement_op));
+      IREE_RETURN_IF_ERROR(loom_index_xori_build(
+          &rewriter->builder, lhs, rhs, op->location, &replacement_op));
       break;
     }
     case LOOM_OP_INDEX_SHLI: {
-      IREE_RETURN_IF_ERROR(loom_index_shli_build(&rewriter->builder, lhs, rhs,
-                                                 result_type, op->location,
-                                                 &replacement_op));
+      IREE_RETURN_IF_ERROR(loom_index_shli_build(
+          &rewriter->builder, lhs, rhs, op->location, &replacement_op));
       break;
     }
     case LOOM_OP_INDEX_SHRSI: {
-      IREE_RETURN_IF_ERROR(loom_index_shrsi_build(&rewriter->builder, lhs, rhs,
-                                                  result_type, op->location,
-                                                  &replacement_op));
+      IREE_RETURN_IF_ERROR(loom_index_shrsi_build(
+          &rewriter->builder, lhs, rhs, op->location, &replacement_op));
       break;
     }
     case LOOM_OP_INDEX_SHRUI: {
-      IREE_RETURN_IF_ERROR(loom_index_shrui_build(&rewriter->builder, lhs, rhs,
-                                                  result_type, op->location,
-                                                  &replacement_op));
+      IREE_RETURN_IF_ERROR(loom_index_shrui_build(
+          &rewriter->builder, lhs, rhs, op->location, &replacement_op));
       break;
     }
     case LOOM_OP_INDEX_ROTLI: {
-      IREE_RETURN_IF_ERROR(loom_index_rotli_build(&rewriter->builder, lhs, rhs,
-                                                  result_type, op->location,
-                                                  &replacement_op));
+      IREE_RETURN_IF_ERROR(loom_index_rotli_build(
+          &rewriter->builder, lhs, rhs, op->location, &replacement_op));
       break;
     }
     case LOOM_OP_INDEX_ROTRI: {
-      IREE_RETURN_IF_ERROR(loom_index_rotri_build(&rewriter->builder, lhs, rhs,
-                                                  result_type, op->location,
-                                                  &replacement_op));
+      IREE_RETURN_IF_ERROR(loom_index_rotri_build(
+          &rewriter->builder, lhs, rhs, op->location, &replacement_op));
       break;
     }
     default:
@@ -274,12 +264,10 @@ static iree_status_t loom_index_replace_single_result_with_madd_op(
     loom_value_id_t b, loom_value_id_t c) {
   loom_builder_set_before(&rewriter->builder, op);
   loom_value_id_t value_checkpoint = loom_rewriter_value_checkpoint(rewriter);
-  loom_type_t result_type =
-      loom_module_value_type(rewriter->module, loom_op_const_results(op)[0]);
 
   loom_op_t* replacement_op = NULL;
-  IREE_RETURN_IF_ERROR(loom_index_madd_build(
-      &rewriter->builder, a, b, c, result_type, op->location, &replacement_op));
+  IREE_RETURN_IF_ERROR(loom_index_madd_build(&rewriter->builder, a, b, c,
+                                             op->location, &replacement_op));
   loom_value_id_t replacement = loom_index_madd_result(replacement_op);
   IREE_RETURN_IF_ERROR(loom_rewriter_preserve_result_names_on_new_values(
       rewriter, op, &replacement, 1, value_checkpoint));
@@ -621,12 +609,9 @@ static iree_status_t loom_index_replace_single_result_with_scaled_value(
   IREE_RETURN_IF_ERROR(loom_index_materialize_or_reuse_index_constant(
       op, rewriter, reusable_constant, scale, &scale_value));
 
-  loom_type_t result_type =
-      loom_module_value_type(rewriter->module, loom_op_const_results(op)[0]);
   loom_op_t* replacement_op = NULL;
-  IREE_RETURN_IF_ERROR(loom_index_mul_build(&rewriter->builder, value,
-                                            scale_value, result_type,
-                                            op->location, &replacement_op));
+  IREE_RETURN_IF_ERROR(loom_index_mul_build(
+      &rewriter->builder, value, scale_value, op->location, &replacement_op));
   loom_value_id_t replacement = loom_index_mul_result(replacement_op);
   IREE_RETURN_IF_ERROR(loom_rewriter_preserve_result_names_on_new_values(
       rewriter, op, &replacement, 1, value_checkpoint));
@@ -755,10 +740,9 @@ static iree_status_t loom_index_replace_single_result_with_scaled_add(
     IREE_RETURN_IF_ERROR(loom_index_materialize_or_reuse_index_constant(
         op, rewriter, reusable_scale, scale, &scale_value));
     loom_op_t* replacement_op = NULL;
-    IREE_RETURN_IF_ERROR(loom_index_madd_build(
-        &rewriter->builder, value, scale_value, addend_value,
-        loom_type_scalar(LOOM_SCALAR_TYPE_INDEX), op->location,
-        &replacement_op));
+    IREE_RETURN_IF_ERROR(loom_index_madd_build(&rewriter->builder, value,
+                                               scale_value, addend_value,
+                                               op->location, &replacement_op));
     replacement = loom_index_madd_result(replacement_op);
   }
 

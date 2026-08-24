@@ -93,8 +93,7 @@ static iree_status_t loom_view_legalize_build_atomic_addf_before_region(
   IREE_RETURN_IF_ERROR(loom_scalar_cmpi_build(
       builder, LOOM_SCALAR_CMPI_PREDICATE_NE,
       loom_scalar_bitcast_result(observed_bits_op),
-      loom_scalar_bitcast_result(expected_bits_op), integer_type,
-      loom_type_scalar(LOOM_SCALAR_TYPE_I1), location, &retry_op));
+      loom_scalar_bitcast_result(expected_bits_op), location, &retry_op));
 
   loom_op_t* condition_op = NULL;
   return loom_scf_condition_build(builder, loom_scalar_cmpi_result(retry_op),

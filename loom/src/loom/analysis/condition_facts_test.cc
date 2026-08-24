@@ -81,22 +81,19 @@ class ConditionFactsTest : public ::testing::Test {
     IREE_CHECK_OK(loom_value_fact_table_define(&fact_table_, value_id, facts));
   }
 
-  loom_op_t* BuildIndexCompare(uint8_t predicate, loom_value_id_t left,
-                               loom_value_id_t right) {
+  loom_op_t* BuildIndexCompare(loom_index_cmp_predicate_t predicate,
+                               loom_value_id_t left, loom_value_id_t right) {
     loom_op_t* op = nullptr;
     IREE_CHECK_OK(loom_index_cmp_build(&builder_, predicate, left, right,
-                                       loom_type_scalar(LOOM_SCALAR_TYPE_INDEX),
-                                       loom_type_scalar(LOOM_SCALAR_TYPE_I1),
                                        LOOM_LOCATION_UNKNOWN, &op));
     return op;
   }
 
-  loom_op_t* BuildScalarI32Compare(uint8_t predicate, loom_value_id_t left,
+  loom_op_t* BuildScalarI32Compare(loom_scalar_cmpi_predicate_t predicate,
+                                   loom_value_id_t left,
                                    loom_value_id_t right) {
     loom_op_t* op = nullptr;
     IREE_CHECK_OK(loom_scalar_cmpi_build(&builder_, predicate, left, right,
-                                         loom_type_scalar(LOOM_SCALAR_TYPE_I32),
-                                         loom_type_scalar(LOOM_SCALAR_TYPE_I1),
                                          LOOM_LOCATION_UNKNOWN, &op));
     return op;
   }

@@ -576,9 +576,9 @@ TEST_F(PrintOpTest, ComparisonOp) {
   loom_value_id_t rhs = def(i32);
 
   loom_op_t* op = NULL;
-  // predicate=0 → "eq" from the enum case name table.
-  IREE_ASSERT_OK(loom_test_cmp_build(&builder_, 0, lhs, rhs, i32, i32,
-                                     LOOM_LOCATION_UNKNOWN, &op));
+  // predicate=eq renders from the enum case name table.
+  IREE_ASSERT_OK(loom_test_cmp_build(&builder_, LOOM_TEST_CMP_PREDICATE_EQ, lhs,
+                                     rhs, LOOM_LOCATION_UNKNOWN, &op));
   EXPECT_EQ(print_op(op, LOOM_TEXT_PRINT_DEFAULT),
             "%2 = test.cmp eq, %0, %1 : i32\n");
 }

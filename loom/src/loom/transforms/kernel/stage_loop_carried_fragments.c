@@ -749,8 +749,7 @@ static iree_status_t loom_stage_loop_carried_fragments_rewrite(
     IREE_RETURN_IF_ERROR(loom_index_mul_build(
         &context->rewriter->builder,
         loom_kernel_subgroup_id_result(subgroup_id_op),
-        per_subgroup_column_count, loom_type_scalar(LOOM_SCALAR_TYPE_INDEX),
-        op->location, &subgroup_column_base_op));
+        per_subgroup_column_count, op->location, &subgroup_column_base_op));
     subgroup_column_base = loom_index_mul_result(subgroup_column_base_op);
   }
 

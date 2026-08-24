@@ -804,9 +804,7 @@ static iree_status_t loom_scf_to_cfg_lower_for(
   loom_op_t* compare_op = NULL;
   iree_status_t status = loom_index_cmp_build(
       &state->rewriter->builder, LOOM_INDEX_CMP_PREDICATE_SLT, header_iv,
-      loom_scf_for_upper_bound(op),
-      loom_module_value_type(state->module, loom_scf_for_lower_bound(op)),
-      loom_type_scalar(LOOM_SCALAR_TYPE_I1), op->location, &compare_op);
+      loom_scf_for_upper_bound(op), op->location, &compare_op);
   if (iree_status_is_ok(status)) {
     status = loom_cfg_cond_br_build(
         &state->rewriter->builder, loom_index_cmp_result(compare_op),
@@ -1021,8 +1019,7 @@ static iree_status_t loom_scf_to_cfg_build_switch_dispatch(
     status = loom_index_cmp_build(
         &state->rewriter->builder, LOOM_INDEX_CMP_PREDICATE_EQ,
         loom_scf_switch_selector(op), loom_index_constant_result(key_op),
-        loom_module_value_type(state->module, loom_scf_switch_selector(op)),
-        loom_type_scalar(LOOM_SCALAR_TYPE_I1), op->location, &cmp_op);
+        op->location, &cmp_op);
   }
   loom_op_t* cond_br_op = NULL;
   if (iree_status_is_ok(status)) {

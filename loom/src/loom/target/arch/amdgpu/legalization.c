@@ -212,8 +212,6 @@ static iree_status_t loom_amdgpu_build_match_any_lane_step(
     loom_value_id_t current_mask, loom_type_t mask_type,
     loom_location_id_t location, loom_value_id_t* out_next_mask) {
   *out_next_mask = LOOM_VALUE_ID_INVALID;
-  const loom_type_t i1_type = loom_type_scalar(LOOM_SCALAR_TYPE_I1);
-  const loom_type_t i32_type = loom_type_scalar(LOOM_SCALAR_TYPE_I32);
 
   loom_value_id_t source_lane = LOOM_VALUE_ID_INVALID;
   IREE_RETURN_IF_ERROR(loom_amdgpu_build_i32_constant(
@@ -222,13 +220,13 @@ static iree_status_t loom_amdgpu_build_match_any_lane_step(
   loom_op_t* is_source_lane_op = NULL;
   IREE_RETURN_IF_ERROR(loom_scalar_cmpi_build(
       builder, LOOM_SCALAR_CMPI_PREDICATE_EQ, lane_id_i32, source_lane,
-      i32_type, i1_type, location, &is_source_lane_op));
+      location, &is_source_lane_op));
   const loom_value_id_t is_source_lane =
       loom_scalar_cmpi_result(is_source_lane_op);
 
   loom_op_t* source_active_op = NULL;
   IREE_RETURN_IF_ERROR(loom_kernel_subgroup_vote_any_build(
-      builder, is_source_lane, i1_type, location, &source_active_op));
+      builder, is_source_lane, location, &source_active_op));
   const loom_value_id_t source_active =
       loom_kernel_subgroup_vote_any_result(source_active_op);
 
@@ -247,9 +245,9 @@ static iree_status_t loom_amdgpu_build_match_any_lane_step(
       loom_kernel_subgroup_broadcast_result(broadcast_op);
 
   loom_op_t* equal_op = NULL;
-  IREE_RETURN_IF_ERROR(loom_scalar_cmpi_build(
-      builder, LOOM_SCALAR_CMPI_PREDICATE_EQ, value, source_value, value_type,
-      i1_type, location, &equal_op));
+  IREE_RETURN_IF_ERROR(
+      loom_scalar_cmpi_build(builder, LOOM_SCALAR_CMPI_PREDICATE_EQ, value,
+                             source_value, location, &equal_op));
   const loom_value_id_t equal = loom_scalar_cmpi_result(equal_op);
 
   loom_op_t* equivalence_mask_op = NULL;
@@ -370,7 +368,6 @@ static iree_status_t loom_amdgpu_legalize_kernel_subgroup_match_all(
 
   const loom_value_id_t mask = loom_kernel_subgroup_match_all_mask(op);
   const loom_type_t mask_type = loom_module_value_type(context->module, mask);
-  const loom_type_t i1_type = loom_type_scalar(LOOM_SCALAR_TYPE_I1);
 
   loom_rewriter_t* rewriter = context->rewriter;
   loom_builder_set_before(&rewriter->builder, op);
@@ -384,14 +381,14 @@ static iree_status_t loom_amdgpu_legalize_kernel_subgroup_match_all(
       loom_kernel_subgroup_broadcast_first_result(first_op);
 
   loom_op_t* equal_op = NULL;
-  IREE_RETURN_IF_ERROR(loom_scalar_cmpi_build(
-      &rewriter->builder, LOOM_SCALAR_CMPI_PREDICATE_EQ, value, first_value,
-      value_type, i1_type, op->location, &equal_op));
+  IREE_RETURN_IF_ERROR(
+      loom_scalar_cmpi_build(&rewriter->builder, LOOM_SCALAR_CMPI_PREDICATE_EQ,
+                             value, first_value, op->location, &equal_op));
   const loom_value_id_t equal = loom_scalar_cmpi_result(equal_op);
 
   loom_op_t* all_op = NULL;
   IREE_RETURN_IF_ERROR(loom_kernel_subgroup_vote_all_build(
-      &rewriter->builder, equal, i1_type, op->location, &all_op));
+      &rewriter->builder, equal, op->location, &all_op));
   const loom_value_id_t all_equal =
       loom_kernel_subgroup_vote_all_result(all_op);
 

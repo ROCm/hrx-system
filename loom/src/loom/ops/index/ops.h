@@ -163,9 +163,11 @@ LOOM_DEFINE_OPERAND(loom_index_mul_lhs, 0)
 LOOM_DEFINE_OPERAND(loom_index_mul_rhs, 1)
 LOOM_DEFINE_RESULT(loom_index_mul_result, 0)
 iree_status_t loom_index_mul_build(
-    loom_builder_t* builder, loom_value_id_t lhs,
-    loom_value_id_t rhs, loom_type_t result_type,
-    loom_location_id_t location, loom_op_t** out_op);
+    loom_builder_t* builder,
+    loom_value_id_t lhs,
+    loom_value_id_t rhs,
+    loom_location_id_t location,
+    loom_op_t** out_op);
 iree_status_t loom_index_mul_canonicalize(loom_op_t* op, loom_rewriter_t* rewriter);
 iree_status_t loom_index_mul_facts(
     loom_fact_context_t* context,
@@ -200,9 +202,11 @@ LOOM_DEFINE_OPERAND(loom_index_div_lhs, 0)
 LOOM_DEFINE_OPERAND(loom_index_div_rhs, 1)
 LOOM_DEFINE_RESULT(loom_index_div_result, 0)
 iree_status_t loom_index_div_build(
-    loom_builder_t* builder, loom_value_id_t lhs,
-    loom_value_id_t rhs, loom_type_t result_type,
-    loom_location_id_t location, loom_op_t** out_op);
+    loom_builder_t* builder,
+    loom_value_id_t lhs,
+    loom_value_id_t rhs,
+    loom_location_id_t location,
+    loom_op_t** out_op);
 iree_status_t loom_index_div_canonicalize(loom_op_t* op, loom_rewriter_t* rewriter);
 iree_status_t loom_index_div_facts(
     loom_fact_context_t* context,
@@ -217,9 +221,11 @@ LOOM_DEFINE_OPERAND(loom_index_rem_lhs, 0)
 LOOM_DEFINE_OPERAND(loom_index_rem_rhs, 1)
 LOOM_DEFINE_RESULT(loom_index_rem_result, 0)
 iree_status_t loom_index_rem_build(
-    loom_builder_t* builder, loom_value_id_t lhs,
-    loom_value_id_t rhs, loom_type_t result_type,
-    loom_location_id_t location, loom_op_t** out_op);
+    loom_builder_t* builder,
+    loom_value_id_t lhs,
+    loom_value_id_t rhs,
+    loom_location_id_t location,
+    loom_op_t** out_op);
 iree_status_t loom_index_rem_canonicalize(loom_op_t* op, loom_rewriter_t* rewriter);
 iree_status_t loom_index_rem_facts(
     loom_fact_context_t* context,
@@ -234,9 +240,11 @@ LOOM_DEFINE_OPERAND(loom_index_min_lhs, 0)
 LOOM_DEFINE_OPERAND(loom_index_min_rhs, 1)
 LOOM_DEFINE_RESULT(loom_index_min_result, 0)
 iree_status_t loom_index_min_build(
-    loom_builder_t* builder, loom_value_id_t lhs,
-    loom_value_id_t rhs, loom_type_t result_type,
-    loom_location_id_t location, loom_op_t** out_op);
+    loom_builder_t* builder,
+    loom_value_id_t lhs,
+    loom_value_id_t rhs,
+    loom_location_id_t location,
+    loom_op_t** out_op);
 iree_status_t loom_index_min_canonicalize(loom_op_t* op, loom_rewriter_t* rewriter);
 iree_status_t loom_index_min_facts(
     loom_fact_context_t* context,
@@ -251,9 +259,11 @@ LOOM_DEFINE_OPERAND(loom_index_max_lhs, 0)
 LOOM_DEFINE_OPERAND(loom_index_max_rhs, 1)
 LOOM_DEFINE_RESULT(loom_index_max_result, 0)
 iree_status_t loom_index_max_build(
-    loom_builder_t* builder, loom_value_id_t lhs,
-    loom_value_id_t rhs, loom_type_t result_type,
-    loom_location_id_t location, loom_op_t** out_op);
+    loom_builder_t* builder,
+    loom_value_id_t lhs,
+    loom_value_id_t rhs,
+    loom_location_id_t location,
+    loom_op_t** out_op);
 iree_status_t loom_index_max_canonicalize(loom_op_t* op, loom_rewriter_t* rewriter);
 iree_status_t loom_index_max_facts(
     loom_fact_context_t* context,
@@ -273,7 +283,6 @@ iree_status_t loom_index_madd_build(
     loom_value_id_t a,
     loom_value_id_t b,
     loom_value_id_t c,
-    loom_type_t result_type,
     loom_location_id_t location,
     loom_op_t** out_op);
 iree_status_t loom_index_madd_canonicalize(loom_op_t* op, loom_rewriter_t* rewriter);
@@ -290,9 +299,11 @@ LOOM_DEFINE_OPERAND(loom_index_andi_lhs, 0)
 LOOM_DEFINE_OPERAND(loom_index_andi_rhs, 1)
 LOOM_DEFINE_RESULT(loom_index_andi_result, 0)
 iree_status_t loom_index_andi_build(
-    loom_builder_t* builder, loom_value_id_t lhs,
-    loom_value_id_t rhs, loom_type_t result_type,
-    loom_location_id_t location, loom_op_t** out_op);
+    loom_builder_t* builder,
+    loom_value_id_t lhs,
+    loom_value_id_t rhs,
+    loom_location_id_t location,
+    loom_op_t** out_op);
 iree_status_t loom_index_andi_canonicalize(loom_op_t* op, loom_rewriter_t* rewriter);
 iree_status_t loom_index_andi_facts(
     loom_fact_context_t* context,
@@ -307,9 +318,11 @@ LOOM_DEFINE_OPERAND(loom_index_ori_lhs, 0)
 LOOM_DEFINE_OPERAND(loom_index_ori_rhs, 1)
 LOOM_DEFINE_RESULT(loom_index_ori_result, 0)
 iree_status_t loom_index_ori_build(
-    loom_builder_t* builder, loom_value_id_t lhs,
-    loom_value_id_t rhs, loom_type_t result_type,
-    loom_location_id_t location, loom_op_t** out_op);
+    loom_builder_t* builder,
+    loom_value_id_t lhs,
+    loom_value_id_t rhs,
+    loom_location_id_t location,
+    loom_op_t** out_op);
 iree_status_t loom_index_ori_canonicalize(loom_op_t* op, loom_rewriter_t* rewriter);
 iree_status_t loom_index_ori_facts(
     loom_fact_context_t* context,
@@ -324,9 +337,11 @@ LOOM_DEFINE_OPERAND(loom_index_xori_lhs, 0)
 LOOM_DEFINE_OPERAND(loom_index_xori_rhs, 1)
 LOOM_DEFINE_RESULT(loom_index_xori_result, 0)
 iree_status_t loom_index_xori_build(
-    loom_builder_t* builder, loom_value_id_t lhs,
-    loom_value_id_t rhs, loom_type_t result_type,
-    loom_location_id_t location, loom_op_t** out_op);
+    loom_builder_t* builder,
+    loom_value_id_t lhs,
+    loom_value_id_t rhs,
+    loom_location_id_t location,
+    loom_op_t** out_op);
 iree_status_t loom_index_xori_canonicalize(loom_op_t* op, loom_rewriter_t* rewriter);
 iree_status_t loom_index_xori_facts(
     loom_fact_context_t* context,
@@ -341,9 +356,11 @@ LOOM_DEFINE_OPERAND(loom_index_shli_lhs, 0)
 LOOM_DEFINE_OPERAND(loom_index_shli_rhs, 1)
 LOOM_DEFINE_RESULT(loom_index_shli_result, 0)
 iree_status_t loom_index_shli_build(
-    loom_builder_t* builder, loom_value_id_t lhs,
-    loom_value_id_t rhs, loom_type_t result_type,
-    loom_location_id_t location, loom_op_t** out_op);
+    loom_builder_t* builder,
+    loom_value_id_t lhs,
+    loom_value_id_t rhs,
+    loom_location_id_t location,
+    loom_op_t** out_op);
 iree_status_t loom_index_shli_canonicalize(loom_op_t* op, loom_rewriter_t* rewriter);
 iree_status_t loom_index_shli_facts(
     loom_fact_context_t* context,
@@ -358,9 +375,11 @@ LOOM_DEFINE_OPERAND(loom_index_shrsi_lhs, 0)
 LOOM_DEFINE_OPERAND(loom_index_shrsi_rhs, 1)
 LOOM_DEFINE_RESULT(loom_index_shrsi_result, 0)
 iree_status_t loom_index_shrsi_build(
-    loom_builder_t* builder, loom_value_id_t lhs,
-    loom_value_id_t rhs, loom_type_t result_type,
-    loom_location_id_t location, loom_op_t** out_op);
+    loom_builder_t* builder,
+    loom_value_id_t lhs,
+    loom_value_id_t rhs,
+    loom_location_id_t location,
+    loom_op_t** out_op);
 iree_status_t loom_index_shrsi_canonicalize(loom_op_t* op, loom_rewriter_t* rewriter);
 iree_status_t loom_index_shrsi_facts(
     loom_fact_context_t* context,
@@ -375,9 +394,11 @@ LOOM_DEFINE_OPERAND(loom_index_shrui_lhs, 0)
 LOOM_DEFINE_OPERAND(loom_index_shrui_rhs, 1)
 LOOM_DEFINE_RESULT(loom_index_shrui_result, 0)
 iree_status_t loom_index_shrui_build(
-    loom_builder_t* builder, loom_value_id_t lhs,
-    loom_value_id_t rhs, loom_type_t result_type,
-    loom_location_id_t location, loom_op_t** out_op);
+    loom_builder_t* builder,
+    loom_value_id_t lhs,
+    loom_value_id_t rhs,
+    loom_location_id_t location,
+    loom_op_t** out_op);
 iree_status_t loom_index_shrui_canonicalize(loom_op_t* op, loom_rewriter_t* rewriter);
 iree_status_t loom_index_shrui_facts(
     loom_fact_context_t* context,
@@ -392,9 +413,11 @@ LOOM_DEFINE_OPERAND(loom_index_rotli_lhs, 0)
 LOOM_DEFINE_OPERAND(loom_index_rotli_rhs, 1)
 LOOM_DEFINE_RESULT(loom_index_rotli_result, 0)
 iree_status_t loom_index_rotli_build(
-    loom_builder_t* builder, loom_value_id_t lhs,
-    loom_value_id_t rhs, loom_type_t result_type,
-    loom_location_id_t location, loom_op_t** out_op);
+    loom_builder_t* builder,
+    loom_value_id_t lhs,
+    loom_value_id_t rhs,
+    loom_location_id_t location,
+    loom_op_t** out_op);
 iree_status_t loom_index_rotli_canonicalize(loom_op_t* op, loom_rewriter_t* rewriter);
 iree_status_t loom_index_rotli_facts(
     loom_fact_context_t* context,
@@ -409,9 +432,11 @@ LOOM_DEFINE_OPERAND(loom_index_rotri_lhs, 0)
 LOOM_DEFINE_OPERAND(loom_index_rotri_rhs, 1)
 LOOM_DEFINE_RESULT(loom_index_rotri_result, 0)
 iree_status_t loom_index_rotri_build(
-    loom_builder_t* builder, loom_value_id_t lhs,
-    loom_value_id_t rhs, loom_type_t result_type,
-    loom_location_id_t location, loom_op_t** out_op);
+    loom_builder_t* builder,
+    loom_value_id_t lhs,
+    loom_value_id_t rhs,
+    loom_location_id_t location,
+    loom_op_t** out_op);
 iree_status_t loom_index_rotri_canonicalize(loom_op_t* op, loom_rewriter_t* rewriter);
 iree_status_t loom_index_rotri_facts(
     loom_fact_context_t* context,
@@ -425,8 +450,9 @@ LOOM_DEFINE_ISA(loom_index_ctlzi_isa, LOOM_OP_INDEX_CTLZI)
 LOOM_DEFINE_OPERAND(loom_index_ctlzi_input, 0)
 LOOM_DEFINE_RESULT(loom_index_ctlzi_result, 0)
 iree_status_t loom_index_ctlzi_build(
-    loom_builder_t* builder, loom_value_id_t input,
-    loom_type_t result_type, loom_location_id_t location,
+    loom_builder_t* builder,
+    loom_value_id_t input,
+    loom_location_id_t location,
     loom_op_t** out_op);
 iree_status_t loom_index_ctlzi_facts(
     loom_fact_context_t* context,
@@ -440,8 +466,9 @@ LOOM_DEFINE_ISA(loom_index_cttzi_isa, LOOM_OP_INDEX_CTTZI)
 LOOM_DEFINE_OPERAND(loom_index_cttzi_input, 0)
 LOOM_DEFINE_RESULT(loom_index_cttzi_result, 0)
 iree_status_t loom_index_cttzi_build(
-    loom_builder_t* builder, loom_value_id_t input,
-    loom_type_t result_type, loom_location_id_t location,
+    loom_builder_t* builder,
+    loom_value_id_t input,
+    loom_location_id_t location,
     loom_op_t** out_op);
 iree_status_t loom_index_cttzi_facts(
     loom_fact_context_t* context,
@@ -455,8 +482,9 @@ LOOM_DEFINE_ISA(loom_index_ctpopi_isa, LOOM_OP_INDEX_CTPOPI)
 LOOM_DEFINE_OPERAND(loom_index_ctpopi_input, 0)
 LOOM_DEFINE_RESULT(loom_index_ctpopi_result, 0)
 iree_status_t loom_index_ctpopi_build(
-    loom_builder_t* builder, loom_value_id_t input,
-    loom_type_t result_type, loom_location_id_t location,
+    loom_builder_t* builder,
+    loom_value_id_t input,
+    loom_location_id_t location,
     loom_op_t** out_op);
 iree_status_t loom_index_ctpopi_facts(
     loom_fact_context_t* context,
@@ -472,10 +500,12 @@ LOOM_DEFINE_OPERAND(loom_index_cmp_rhs, 1)
 LOOM_DEFINE_RESULT(loom_index_cmp_result, 0)
 LOOM_DEFINE_ATTR_ENUM_TYPED(loom_index_cmp_predicate, 0, loom_index_cmp_predicate_t)
 iree_status_t loom_index_cmp_build(
-    loom_builder_t* builder, uint8_t predicate,
-    loom_value_id_t lhs, loom_value_id_t rhs,
-    loom_type_t operand_type, loom_type_t result_type,
-    loom_location_id_t location, loom_op_t** out_op);
+    loom_builder_t* builder,
+    loom_index_cmp_predicate_t predicate,
+    loom_value_id_t lhs,
+    loom_value_id_t rhs,
+    loom_location_id_t location,
+    loom_op_t** out_op);
 iree_status_t loom_index_cmp_canonicalize(loom_op_t* op, loom_rewriter_t* rewriter);
 iree_status_t loom_index_cmp_facts(
     loom_fact_context_t* context,

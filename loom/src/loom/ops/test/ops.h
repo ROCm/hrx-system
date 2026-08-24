@@ -496,10 +496,12 @@ LOOM_DEFINE_OPERAND(loom_test_cmp_rhs, 1)
 LOOM_DEFINE_RESULT(loom_test_cmp_result, 0)
 LOOM_DEFINE_ATTR_ENUM_TYPED(loom_test_cmp_predicate, 0, loom_test_cmp_predicate_t)
 iree_status_t loom_test_cmp_build(
-    loom_builder_t* builder, uint8_t predicate,
-    loom_value_id_t lhs, loom_value_id_t rhs,
-    loom_type_t operand_type, loom_type_t result_type,
-    loom_location_id_t location, loom_op_t** out_op);
+    loom_builder_t* builder,
+    loom_test_cmp_predicate_t predicate,
+    loom_value_id_t lhs,
+    loom_value_id_t rhs,
+    loom_location_id_t location,
+    loom_op_t** out_op);
 
 // LOOM_OP_TEST_MAP: Test region-capture elementwise op.
 // %result = test.map(%element = %input : tile<4xf32>) {
@@ -2313,7 +2315,6 @@ LOOM_DEFINE_RESULT(loom_test_condition_refines_positive_result, 0)
 iree_status_t loom_test_condition_refines_positive_build(
     loom_builder_t* builder,
     loom_value_id_t value,
-    loom_type_t result_type,
     loom_location_id_t location,
     loom_op_t** out_op);
 iree_status_t loom_test_condition_refines_positive_materialize(

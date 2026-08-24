@@ -62,16 +62,12 @@ class ConditionFactsBenchmark {
     loom_op_t* outer_compare = nullptr;
     IREE_CHECK_OK(loom_scalar_cmpi_build(
         &builder_, LOOM_SCALAR_CMPI_PREDICATE_SLT, lane, outer_bound,
-        loom_type_scalar(LOOM_SCALAR_TYPE_I32),
-        loom_type_scalar(LOOM_SCALAR_TYPE_I1), LOOM_LOCATION_UNKNOWN,
-        &outer_compare));
+        LOOM_LOCATION_UNKNOWN, &outer_compare));
     derive_condition_ = loom_scalar_cmpi_result(outer_compare);
     loom_op_t* inner_compare = nullptr;
     IREE_CHECK_OK(loom_scalar_cmpi_build(
         &builder_, LOOM_SCALAR_CMPI_PREDICATE_SLT, lane, inner_bound,
-        loom_type_scalar(LOOM_SCALAR_TYPE_I32),
-        loom_type_scalar(LOOM_SCALAR_TYPE_I1), LOOM_LOCATION_UNKNOWN,
-        &inner_compare));
+        LOOM_LOCATION_UNKNOWN, &inner_compare));
     proof_condition_ = loom_scalar_cmpi_result(inner_compare);
     for (int64_t i = 0; i < depth_; ++i) {
       loom_op_t* derive_and_op = nullptr;

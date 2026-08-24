@@ -491,7 +491,7 @@ static iree_status_t loom_finalize_op(
   // constraints. When the format doesn't include a RESULT_TYPE element for a
   // result, the value's type is NONE. SameType constraints can recover
   // pass-through result types from typed operands, and fixed-type constraints
-  // (e.g., I1 for comparison results) provide concrete singleton types.
+  // provide concrete singleton types.
   if (vtable->result_descriptors) {
     for (uint16_t i = 0;
          i < parsed->result_count && i < vtable->fixed_result_count; ++i) {
@@ -505,11 +505,27 @@ static iree_status_t loom_finalize_op(
       if (value->type.header != 0) {
         continue;
       }
-      if (vtable->result_descriptors[i].type_constraint ==
-          LOOM_TYPE_CONSTRAINT_I1) {
+      loom_scalar_type_t fixed_scalar_type = LOOM_SCALAR_TYPE_COUNT_;
+      switch (vtable->result_descriptors[i].type_constraint) {
+        case LOOM_TYPE_CONSTRAINT_I1:
+          fixed_scalar_type = LOOM_SCALAR_TYPE_I1;
+          break;
+        case LOOM_TYPE_CONSTRAINT_I32:
+          fixed_scalar_type = LOOM_SCALAR_TYPE_I32;
+          break;
+        case LOOM_TYPE_CONSTRAINT_INDEX:
+          fixed_scalar_type = LOOM_SCALAR_TYPE_INDEX;
+          break;
+        case LOOM_TYPE_CONSTRAINT_OFFSET:
+          fixed_scalar_type = LOOM_SCALAR_TYPE_OFFSET;
+          break;
+        default:
+          break;
+      }
+      if (fixed_scalar_type != LOOM_SCALAR_TYPE_COUNT_) {
         IREE_RETURN_IF_ERROR(
             loom_module_set_value_type(parser->module, parsed->result_ids[i],
-                                       loom_type_scalar(LOOM_SCALAR_TYPE_I1)));
+                                       loom_type_scalar(fixed_scalar_type)));
       }
     }
   }

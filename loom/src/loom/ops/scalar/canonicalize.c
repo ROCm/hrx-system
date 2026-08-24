@@ -523,9 +523,7 @@ static iree_status_t loom_scalar_replace_single_result_with_cmpi(
 
   loom_op_t* replacement_op = NULL;
   IREE_RETURN_IF_ERROR(loom_scalar_cmpi_build(
-      &rewriter->builder, predicate, lhs, rhs, operand_type,
-      loom_scalar_single_result_type(rewriter, op), op->location,
-      &replacement_op));
+      &rewriter->builder, predicate, lhs, rhs, op->location, &replacement_op));
   loom_value_id_t replacement = loom_scalar_cmpi_result(replacement_op);
   IREE_RETURN_IF_ERROR(loom_rewriter_preserve_result_names_on_new_values(
       rewriter, op, &replacement, 1, value_checkpoint));

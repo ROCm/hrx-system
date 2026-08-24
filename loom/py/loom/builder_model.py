@@ -55,7 +55,7 @@ from loom.assembly import (
 from loom.assembly import (
     Region as RegionFmt,
 )
-from loom.dsl import AttrDef, Op
+from loom.dsl import AttrDef, Op, Result, TypeConstraint
 from loom.fields import FieldKind, compute_layout
 
 __all__ = [
@@ -65,6 +65,7 @@ __all__ = [
     "attr_type_hint",
     "builder_method_names",
     "dialect_python_name",
+    "fixed_result_type_constraints",
     "signature_for_op",
     "signatures_for_ops",
 ]
@@ -81,6 +82,15 @@ _LOOM_BUILDER_MEMBER_NAMES = frozenset(
         "module",
         "region",
         "value",
+    }
+)
+
+_FIXED_RESULT_TYPE_CONSTRAINTS = frozenset(
+    {
+        TypeConstraint.I1,
+        TypeConstraint.I32,
+        TypeConstraint.INDEX,
+        TypeConstraint.OFFSET,
     }
 )
 
@@ -233,7 +243,11 @@ def signature_for_op(op: Op, method_name: str | None = None) -> BuilderSignature
     has_result_types = any(
         param.kind == BuilderParamKind.RESULT_TYPES for param in params
     )
-    if op.results and not has_result_types:
+    if (
+        op.results
+        and not has_result_types
+        and fixed_result_type_constraints(op) is None
+    ):
         params.append(
             BuilderParam(
                 name="results",
@@ -249,6 +263,20 @@ def signature_for_op(op: Op, method_name: str | None = None) -> BuilderSignature
         params=tuple(params),
         return_hint=_return_hint(op),
     )
+
+
+def fixed_result_type_constraints(op: Op) -> tuple[TypeConstraint, ...] | None:
+    """Returns statically known result types that a builder can synthesize."""
+    if not op.results:
+        return ()
+    if any(
+        not isinstance(result, Result)
+        or result.variadic
+        or result.type_constraint not in _FIXED_RESULT_TYPE_CONSTRAINTS
+        for result in op.results
+    ):
+        return None
+    return tuple(result.type_constraint for result in op.results)
 
 
 def signatures_for_ops(ops: tuple[Op, ...] | list[Op]) -> dict[str, BuilderSignature]:

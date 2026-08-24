@@ -62,6 +62,7 @@ __all__ = [
     "VIEW",
     "BUFFER",
     "INTEGER",
+    "BYTE_PATTERN_SCALAR",
     "INDEX_OR_NON_I1_INTEGER_SCALAR",
     "INTEGER_ELEMENT",
     "INDEX_OR_NON_I1_INTEGER_ELEMENT",
@@ -86,6 +87,7 @@ __all__ = [
     "REGISTER",
     "STORAGE",
     "I1",
+    "I32",
     # Type constraint helpers.
     "type_constraint_name",
     # Field descriptors.
@@ -306,6 +308,7 @@ class TypeConstraint(Enum):
       INTEGER  → ScalarType with kind in {I1, I8, I16, I32, I64}
       FLOAT    → ScalarType with kind in {F8*, F16, BF16, F32, F64}
       BITWISE_SCALAR → ScalarType index, non-i1 integer, or floating-point
+      BYTE_PATTERN_SCALAR → 8/16/32/64-bit integer or floating-point scalar
       INDEX_OR_NON_I1_INTEGER_SCALAR → ScalarType index or non-i1 integer
       INTEGER_ELEMENT → ShapedType with integer element type
       FLOAT_ELEMENT   → ShapedType with float element type
@@ -329,6 +332,8 @@ class TypeConstraint(Enum):
       POOL     → PoolType
       REGISTER → RegisterType
       STORAGE  → StorageType
+      I1       → ScalarType with kind=I1
+      I32      → ScalarType with kind=I32
 
     Element-qualified constraints are shaped-only: tile, tensor, vector,
     and view types can satisfy them, while scalar values continue to use
@@ -349,6 +354,7 @@ class TypeConstraint(Enum):
     INTEGER = "integer"
     FLOAT = "float"
     BITWISE_SCALAR = "bitwise_scalar"
+    BYTE_PATTERN_SCALAR = "byte_pattern_scalar"
     INDEX_OR_NON_I1_INTEGER_SCALAR = "index_or_non_i1_integer_scalar"
     INTEGER_ELEMENT = "integer_element"
     FLOAT_ELEMENT = "float_element"
@@ -373,6 +379,7 @@ class TypeConstraint(Enum):
     REGISTER = "register"
     STORAGE = "storage"
     I1 = "i1"
+    I32 = "i32"
 
 
 # Singletons for use in op declarations.
@@ -387,6 +394,7 @@ BUFFER = TypeConstraint.BUFFER
 INTEGER = TypeConstraint.INTEGER
 FLOAT = TypeConstraint.FLOAT
 BITWISE_SCALAR = TypeConstraint.BITWISE_SCALAR
+BYTE_PATTERN_SCALAR = TypeConstraint.BYTE_PATTERN_SCALAR
 INDEX_OR_NON_I1_INTEGER_SCALAR = TypeConstraint.INDEX_OR_NON_I1_INTEGER_SCALAR
 INTEGER_ELEMENT = TypeConstraint.INTEGER_ELEMENT
 FLOAT_ELEMENT = TypeConstraint.FLOAT_ELEMENT
@@ -411,6 +419,7 @@ POOL = TypeConstraint.POOL
 REGISTER = TypeConstraint.REGISTER
 STORAGE = TypeConstraint.STORAGE
 I1 = TypeConstraint.I1
+I32 = TypeConstraint.I32
 
 
 def type_constraint_name(constraint: TypeConstraint) -> str:

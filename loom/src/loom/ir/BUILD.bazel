@@ -160,7 +160,10 @@ loom_cc_test(
 
 loom_cc_test(
     name = "types_test",
-    srcs = ["types_test.cc"],
+    srcs = [
+        "type_constraint_test.cc",
+        "types_test.cc",
+    ],
     deps = [
         ":ir",
         "//runtime/src/iree/testing:gtest",

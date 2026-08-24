@@ -46,6 +46,7 @@ from loom.assembly import (
     TypesOf,
 )
 from loom.assembly import Region as RegionFmt
+from loom.builder_model import fixed_result_type_constraints
 from loom.dsl import ATTR_TYPE_FLAGS, AttrDef, FuncLikeInterface, Op, RegionDef, TiedResult, TypeConstraint
 from loom.fields import FieldKind, FieldLayout, compute_layout
 from loom.gen.ops import c_queries
@@ -59,6 +60,13 @@ def detect_builder_pattern(op: Op) -> str | None:
 
     Returns the macro name suffix or None for complex ops.
     """
+    # The shared macros accept caller-provided result types. Exact result
+    # constraints instead use the general generator so the public builder
+    # signature cannot contradict the op declaration.
+    has_explicit_result_type = any(isinstance(element, ResultType | ResultTypeList) for element in flatten_format(op.format))
+    if fixed_result_type_constraints(op) is not None and not has_explicit_result_type:
+        return None
+
     layout = compute_layout(op)
     non_flags = c_queries.non_flags_attrs(op)
     has_flags = c_queries.has_flags_attr(op)
@@ -151,6 +159,7 @@ IMPLICIT_ARG_TYPE_MAP: dict[str, str] = {
 _FIXED_RESULT_TYPE_CONSTRAINTS = frozenset(
     {
         TypeConstraint.I1,
+        TypeConstraint.I32,
         TypeConstraint.INDEX,
         TypeConstraint.OFFSET,
     }
@@ -703,11 +712,11 @@ def extract_c_params(op: Op, shared_enums: SharedEnumMap) -> list[dict[str, Any]
 
     walk(op.format)
 
-    # If the op has results but no ResultType/ResultTypeList was encountered
-    # in the format spec, we still need a result type parameter so the
-    # builder can define result values.
+    # Results not spelled by the assembly format normally require explicit
+    # builder parameters. Exact fixed result constraints are synthesized by
+    # the generated implementation instead.
     has_result_param = any(p["kind"] in ("result_type", "result_types") for p in params)
-    if not has_result_param and len(op.results) > 0 and inferred_result_source is None:
+    if not has_result_param and len(op.results) > 0 and inferred_result_source is None and fixed_result_type_constraints(op) is None:
         if layout.variadic_result:
             params.append(
                 {

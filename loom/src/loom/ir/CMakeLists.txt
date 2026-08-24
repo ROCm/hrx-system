@@ -163,6 +163,7 @@ loom_cc_test(
   NAME
     types_test
   SRCS
+    "type_constraint_test.cc"
     "types_test.cc"
   DEPS
     ::ir
