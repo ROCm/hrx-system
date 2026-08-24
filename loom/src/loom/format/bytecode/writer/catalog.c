@@ -416,19 +416,19 @@ static bool loom_bytecode_type_wire_equal(const loom_module_t* module,
 static iree_status_t loom_bytecode_numbering_append_string(
     loom_bytecode_numbering_t* numbering, iree_string_view_t view,
     uint32_t* out_writer_id) {
-  if (numbering->string_count >= numbering->string_capacity) {
+  if (numbering->strings.count >= numbering->strings.capacity) {
     IREE_RETURN_IF_ERROR(iree_arena_grow_array(
-        numbering->arena, numbering->string_count, /*minimum_capacity=*/16,
-        sizeof(iree_string_view_t), &numbering->string_capacity,
-        (void**)&numbering->string_entries));
+        numbering->arena, numbering->strings.count, /*minimum_capacity=*/16,
+        sizeof(iree_string_view_t), &numbering->strings.capacity,
+        (void**)&numbering->strings.values));
   }
-  if (numbering->string_count >= (1u << 24)) {
+  if (numbering->strings.count >= (1u << 24)) {
     return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
                             "bytecode string count exceeds format maximum "
                             "(16M)");
   }
-  uint32_t id = (uint32_t)numbering->string_count;
-  numbering->string_entries[numbering->string_count++] = view;
+  uint32_t id = (uint32_t)numbering->strings.count;
+  numbering->strings.values[numbering->strings.count++] = view;
   *out_writer_id = id;
   return iree_ok_status();
 }
@@ -502,8 +502,8 @@ iree_status_t loom_bytecode_numbering_initialize(
   if (module->strings.count > 0) {
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
         arena, module->strings.count, sizeof(uint32_t),
-        (void**)&numbering->module_string_map));
-    memset(numbering->module_string_map, 0xFF,
+        (void**)&numbering->strings.writer_ids_by_module_id));
+    memset(numbering->strings.writer_ids_by_module_id, 0xFF,
            module->strings.count * sizeof(uint32_t));
   }
 
@@ -512,10 +512,10 @@ iree_status_t loom_bytecode_numbering_initialize(
   uint32_t empty_string_writer_id = 0;
   IREE_RETURN_IF_ERROR(loom_bytecode_numbering_append_string(
       numbering, iree_string_view_empty(), &empty_string_writer_id));
-  if (numbering->module_string_map != NULL) {
+  if (numbering->strings.writer_ids_by_module_id != NULL) {
     for (iree_host_size_t i = 0; i < module->strings.count; ++i) {
       if (iree_string_view_is_empty(module->strings.entries[i])) {
-        numbering->module_string_map[i] = empty_string_writer_id;
+        numbering->strings.writer_ids_by_module_id[i] = empty_string_writer_id;
         break;
       }
     }
@@ -523,33 +523,34 @@ iree_status_t loom_bytecode_numbering_initialize(
 
   // Type map: parallel array for O(1) module_type_index → writer_type_id.
   if (module->types.count > 0) {
-    IREE_RETURN_IF_ERROR(
-        iree_arena_allocate_array(arena, module->types.count, sizeof(uint32_t),
-                                  (void**)&numbering->type_map));
-    memset(numbering->type_map, 0xFF, module->types.count * sizeof(uint32_t));
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        arena, module->types.count, sizeof(uint32_t),
+        (void**)&numbering->types.writer_ids_by_module_index));
+    memset(numbering->types.writer_ids_by_module_index, 0xFF,
+           module->types.count * sizeof(uint32_t));
 
     iree_host_size_t type_index_capacity =
         iree_host_size_next_power_of_two((module->types.count * 4 + 2) / 3);
     if (type_index_capacity < 16) type_index_capacity = 16;
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
         arena, type_index_capacity, sizeof(loom_bytecode_type_index_entry_t),
-        (void**)&numbering->type_index_entries));
+        (void**)&numbering->types.index_entries));
     for (iree_host_size_t i = 0; i < type_index_capacity; ++i) {
-      numbering->type_index_entries[i].hash = 0;
-      numbering->type_index_entries[i].module_index = LOOM_WRITER_ID_NONE;
+      numbering->types.index_entries[i].hash = 0;
+      numbering->types.index_entries[i].module_index = LOOM_WRITER_ID_NONE;
     }
-    numbering->type_index_capacity = type_index_capacity;
+    numbering->types.index_capacity = type_index_capacity;
     iree_host_size_t mask = type_index_capacity - 1;
     for (iree_host_size_t i = 0; i < module->types.count; ++i) {
       uint32_t hash =
           loom_bytecode_type_wire_hash(module, module->types.entries[i]);
       iree_host_size_t slot = hash & mask;
-      while (numbering->type_index_entries[slot].module_index !=
+      while (numbering->types.index_entries[slot].module_index !=
              LOOM_WRITER_ID_NONE) {
         slot = (slot + 1) & mask;
       }
-      numbering->type_index_entries[slot].hash = hash;
-      numbering->type_index_entries[slot].module_index = (uint32_t)i;
+      numbering->types.index_entries[slot].hash = hash;
+      numbering->types.index_entries[slot].module_index = (uint32_t)i;
     }
   }
 
@@ -570,15 +571,16 @@ iree_status_t loom_bytecode_numbering_intern_module_string(
                             " strings)",
                             string_id, numbering->module->strings.count);
   }
-  if (numbering->module_string_map[string_id] != LOOM_WRITER_ID_NONE) {
-    *out_writer_id = numbering->module_string_map[string_id];
+  if (numbering->strings.writer_ids_by_module_id[string_id] !=
+      LOOM_WRITER_ID_NONE) {
+    *out_writer_id = numbering->strings.writer_ids_by_module_id[string_id];
     return iree_ok_status();
   }
   iree_string_view_t view = numbering->module->strings.entries[string_id];
   uint32_t writer_id = 0;
   IREE_RETURN_IF_ERROR(
       loom_bytecode_numbering_append_string(numbering, view, &writer_id));
-  numbering->module_string_map[string_id] = writer_id;
+  numbering->strings.writer_ids_by_module_id[string_id] = writer_id;
   *out_writer_id = writer_id;
   return iree_ok_status();
 }
@@ -592,9 +594,10 @@ iree_status_t loom_bytecode_numbering_intern_string_view(
     return iree_ok_status();
   }
   // Check external strings first (linear scan, small list).
-  for (iree_host_size_t i = 0; i < numbering->external_string_count; ++i) {
-    if (iree_string_view_equal(numbering->external_strings[i].view, view)) {
-      *out_writer_id = numbering->external_strings[i].writer_id;
+  for (iree_host_size_t i = 0; i < numbering->strings.external.count; ++i) {
+    if (iree_string_view_equal(numbering->strings.external.values[i].view,
+                               view)) {
+      *out_writer_id = numbering->strings.external.values[i].writer_id;
       return iree_ok_status();
     }
   }
@@ -611,14 +614,15 @@ iree_status_t loom_bytecode_numbering_intern_string_view(
   uint32_t writer_id = 0;
   IREE_RETURN_IF_ERROR(
       loom_bytecode_numbering_append_string(numbering, view, &writer_id));
-  if (numbering->external_string_count >= numbering->external_string_capacity) {
+  if (numbering->strings.external.count >=
+      numbering->strings.external.capacity) {
     IREE_RETURN_IF_ERROR(iree_arena_grow_array(
-        numbering->arena, numbering->external_string_count,
+        numbering->arena, numbering->strings.external.count,
         /*minimum_capacity=*/16, sizeof(loom_bytecode_external_string_t),
-        &numbering->external_string_capacity,
-        (void**)&numbering->external_strings));
+        &numbering->strings.external.capacity,
+        (void**)&numbering->strings.external.values));
   }
-  numbering->external_strings[numbering->external_string_count++] =
+  numbering->strings.external.values[numbering->strings.external.count++] =
       (loom_bytecode_external_string_t){.view = view, .writer_id = writer_id};
   *out_writer_id = writer_id;
   return iree_ok_status();
@@ -627,14 +631,14 @@ iree_status_t loom_bytecode_numbering_intern_string_view(
 // Finds the representative module type table index for a given wire type.
 static uint32_t loom_bytecode_find_type_index(
     const loom_bytecode_numbering_t* numbering, loom_type_t type) {
-  if (numbering->type_index_capacity == 0) return LOOM_WRITER_ID_NONE;
+  if (numbering->types.index_capacity == 0) return LOOM_WRITER_ID_NONE;
   uint32_t hash = loom_bytecode_type_wire_hash(numbering->module, type);
-  iree_host_size_t mask = numbering->type_index_capacity - 1;
+  iree_host_size_t mask = numbering->types.index_capacity - 1;
   iree_host_size_t slot = hash & mask;
-  while (numbering->type_index_entries[slot].module_index !=
+  while (numbering->types.index_entries[slot].module_index !=
          LOOM_WRITER_ID_NONE) {
     const loom_bytecode_type_index_entry_t* entry =
-        &numbering->type_index_entries[slot];
+        &numbering->types.index_entries[slot];
     if (entry->hash == hash &&
         loom_bytecode_type_wire_equal(
             numbering->module,
@@ -659,8 +663,9 @@ iree_status_t loom_bytecode_numbering_intern_type(
                             (unsigned)loom_type_rank(type),
                             numbering->module->types.count);
   }
-  if (numbering->type_map[module_index] != LOOM_WRITER_ID_NONE) {
-    *out_writer_id = numbering->type_map[module_index];
+  if (numbering->types.writer_ids_by_module_index[module_index] !=
+      LOOM_WRITER_ID_NONE) {
+    *out_writer_id = numbering->types.writer_ids_by_module_index[module_index];
     return iree_ok_status();
   }
 
@@ -765,20 +770,21 @@ iree_status_t loom_bytecode_numbering_intern_type(
   }
 
   // Intern the parent type.
-  if (numbering->type_count >= (1u << 16)) {
+  if (numbering->types.count >= (1u << 16)) {
     return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
                             "bytecode type count exceeds format maximum (64K)");
   }
-  uint32_t writer_id = numbering->type_count;
-  numbering->type_map[module_index] = writer_id;
-  if (numbering->type_count >= numbering->type_order_capacity) {
+  uint32_t writer_id = numbering->types.count;
+  numbering->types.writer_ids_by_module_index[module_index] = writer_id;
+  if (numbering->types.count >= numbering->types.capacity) {
     IREE_RETURN_IF_ERROR(iree_arena_grow_array(
-        numbering->arena, numbering->type_count, /*minimum_capacity=*/16,
-        sizeof(iree_host_size_t), &numbering->type_order_capacity,
-        (void**)&numbering->type_order));
+        numbering->arena, numbering->types.count, /*minimum_capacity=*/16,
+        sizeof(iree_host_size_t), &numbering->types.capacity,
+        (void**)&numbering->types.module_indices_by_writer_id));
   }
-  numbering->type_order[numbering->type_count] = module_index;
-  numbering->type_count++;
+  numbering->types.module_indices_by_writer_id[numbering->types.count] =
+      module_index;
+  numbering->types.count++;
   *out_writer_id = writer_id;
   return iree_ok_status();
 }
@@ -788,9 +794,9 @@ iree_status_t loom_bytecode_numbering_intern_op(
     loom_bytecode_numbering_t* numbering, const loom_op_t* op,
     uint32_t* out_writer_op_id) {
   // Check existing entries.
-  for (uint32_t i = 0; i < numbering->op_count; ++i) {
-    if (numbering->op_entries[i].kind == op->kind) {
-      *out_writer_op_id = numbering->op_entries[i].writer_op_id;
+  for (uint32_t i = 0; i < numbering->ops.count; ++i) {
+    if (numbering->ops.values[i].kind == op->kind) {
+      *out_writer_op_id = numbering->ops.values[i].writer_op_id;
       return iree_ok_status();
     }
   }
@@ -800,18 +806,18 @@ iree_status_t loom_bytecode_numbering_intern_op(
   IREE_RETURN_IF_ERROR(loom_bytecode_numbering_intern_string_view(
       numbering, name, &string_writer_id));
 
-  if (numbering->op_count >= (1u << 24)) {
+  if (numbering->ops.count >= (1u << 24)) {
     return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
                             "bytecode op count exceeds format maximum (16M)");
   }
-  uint32_t writer_op_id = (uint32_t)numbering->op_count;
-  if (numbering->op_count >= numbering->op_capacity) {
+  uint32_t writer_op_id = (uint32_t)numbering->ops.count;
+  if (numbering->ops.count >= numbering->ops.capacity) {
     IREE_RETURN_IF_ERROR(iree_arena_grow_array(
-        numbering->arena, numbering->op_count, /*minimum_capacity=*/16,
-        sizeof(loom_bytecode_op_entry_t), &numbering->op_capacity,
-        (void**)&numbering->op_entries));
+        numbering->arena, numbering->ops.count, /*minimum_capacity=*/16,
+        sizeof(loom_bytecode_op_entry_t), &numbering->ops.capacity,
+        (void**)&numbering->ops.values));
   }
-  numbering->op_entries[numbering->op_count++] = (loom_bytecode_op_entry_t){
+  numbering->ops.values[numbering->ops.count++] = (loom_bytecode_op_entry_t){
       .kind = op->kind,
       .writer_op_id = writer_op_id,
       .string_writer_id = string_writer_id,
@@ -1014,7 +1020,7 @@ iree_status_t loom_bytecode_resolve_function_low_descriptor_set(
         IREE_STATUS_INVALID_ARGUMENT,
         "function representation contract string ID is out of range");
   }
-  if (!numbering->low_repr_environment.vtable) {
+  if (!numbering->low_repr.environment.vtable) {
     return iree_make_status(
         IREE_STATUS_FAILED_PRECONDITION,
         "serializing Low functions requires a representation codec");
@@ -1022,7 +1028,7 @@ iree_status_t loom_bytecode_resolve_function_low_descriptor_set(
   const iree_string_view_t descriptor_set_key =
       numbering->module->strings.entries[descriptor_set_key_id];
   *out_descriptor_set = loom_low_repr_lookup_descriptor_set(
-      &numbering->low_repr_environment, descriptor_set_key);
+      &numbering->low_repr.environment, descriptor_set_key);
   if (!*out_descriptor_set) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
@@ -1034,14 +1040,15 @@ iree_status_t loom_bytecode_resolve_function_low_descriptor_set(
 
 static iree_status_t loom_bytecode_number_scoped_enum(
     loom_bytecode_numbering_t* numbering, loom_attribute_t attr) {
-  if (!numbering->active_low_descriptor_set) {
+  if (!numbering->low_repr.active_descriptor_set) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
         "scoped enum attribute is outside a representation contract");
   }
-  const iree_string_view_t key = loom_low_repr_descriptor_key(
-      &numbering->low_repr_environment, numbering->active_low_descriptor_set,
-      loom_attr_as_scoped_enum(attr));
+  const iree_string_view_t key =
+      loom_low_repr_descriptor_key(&numbering->low_repr.environment,
+                                   numbering->low_repr.active_descriptor_set,
+                                   loom_attr_as_scoped_enum(attr));
   if (iree_string_view_is_empty(key)) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,

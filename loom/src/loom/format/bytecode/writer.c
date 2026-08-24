@@ -148,7 +148,7 @@ iree_status_t loom_bytecode_write_module(
   iree_status_t status =
       loom_bytecode_numbering_initialize(&numbering, module, &arena);
   numbering.location_mode = location_mode;
-  numbering.low_repr_environment = options ? options->low_repr_environment
+  numbering.low_repr.environment = options ? options->low_repr_environment
                                            : (loom_low_repr_environment_t){0};
 
   loom_module_record_plan_t record_plan = {0};

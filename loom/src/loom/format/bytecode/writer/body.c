@@ -536,7 +536,7 @@ iree_status_t loom_bytecode_write_ir_section(
           numbering, func_like, &low_descriptor_set));
 
       // Intern function signature and regions (matching Python walk order).
-      numbering->active_low_descriptor_set = low_descriptor_set;
+      numbering->low_repr.active_descriptor_set = low_descriptor_set;
       IREE_RETURN_IF_ERROR(loom_bytecode_number_function(numbering, func_like));
     } else if (is_record && symbol->defining_op->region_count == 1) {
       root_region_count = loom_bytecode_count_root_regions(symbol->defining_op);
@@ -597,7 +597,7 @@ iree_status_t loom_bytecode_write_ir_section(
           };
     }
     IREE_ASSERT(region_list->count == root_region_count);
-    numbering->active_low_descriptor_set = NULL;
+    numbering->low_repr.active_descriptor_set = NULL;
   }
 
   return iree_ok_status();

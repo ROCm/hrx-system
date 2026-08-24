@@ -97,10 +97,10 @@ iree_status_t loom_bytecode_write_strings_section(
     loom_bytecode_page_writer_t* page_writer,
     const loom_bytecode_numbering_t* numbering) {
   IREE_RETURN_IF_ERROR(loom_bytecode_page_writer_write_uvarint(
-      page_writer, numbering->string_count));
-  for (iree_host_size_t i = 0; i < numbering->string_count; ++i) {
+      page_writer, numbering->strings.count));
+  for (iree_host_size_t i = 0; i < numbering->strings.count; ++i) {
     IREE_RETURN_IF_ERROR(loom_bytecode_page_writer_write_string(
-        page_writer, numbering->string_entries[i]));
+        page_writer, numbering->strings.values[i]));
   }
   return iree_ok_status();
 }
@@ -124,11 +124,12 @@ iree_status_t loom_bytecode_write_types_section(
     loom_bytecode_numbering_t* numbering) {
   const loom_module_t* module = numbering->module;
   IREE_RETURN_IF_ERROR(loom_bytecode_page_writer_write_uvarint(
-      page_writer, numbering->type_count));
+      page_writer, numbering->types.count));
 
-  for (uint32_t writer_type_id = 0; writer_type_id < numbering->type_count;
+  for (uint32_t writer_type_id = 0; writer_type_id < numbering->types.count;
        ++writer_type_id) {
-    iree_host_size_t module_index = numbering->type_order[writer_type_id];
+    iree_host_size_t module_index =
+        numbering->types.module_indices_by_writer_id[writer_type_id];
     loom_type_t type = module->types.entries[module_index];
     loom_type_kind_t kind = loom_type_kind(type);
 
@@ -423,10 +424,10 @@ iree_status_t loom_bytecode_write_ops_section(
     loom_bytecode_page_writer_t* page_writer,
     const loom_bytecode_numbering_t* numbering) {
   IREE_RETURN_IF_ERROR(loom_bytecode_page_writer_write_uvarint(
-      page_writer, numbering->op_count));
-  for (uint32_t i = 0; i < numbering->op_count; ++i) {
+      page_writer, numbering->ops.count));
+  for (uint32_t i = 0; i < numbering->ops.count; ++i) {
     IREE_RETURN_IF_ERROR(loom_bytecode_page_writer_write_uvarint(
-        page_writer, numbering->op_entries[i].string_writer_id));
+        page_writer, numbering->ops.values[i].string_writer_id));
   }
   return iree_ok_status();
 }

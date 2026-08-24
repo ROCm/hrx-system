@@ -54,10 +54,13 @@ typedef struct loom_bytecode_numbering_t {
   iree_arena_allocator_t* arena;
   // File-level location mode controlling operation location references.
   loom_bytecode_location_mode_t location_mode;
-  // Stable-key codec supplied by the embedding compiler.
-  loom_low_repr_environment_t low_repr_environment;
-  // Representation contract active while numbering one Low function.
-  const loom_low_repr_descriptor_set_t* active_low_descriptor_set;
+  // Low representation state shared by catalog and body serialization.
+  struct {
+    // Stable-key codec supplied by the embedding compiler.
+    loom_low_repr_environment_t environment;
+    // Representation contract active while numbering one Low function.
+    const loom_low_repr_descriptor_set_t* active_descriptor_set;
+  } low_repr;
 
   // Bidirectional stable module ID and presentation-order mapping.
   struct {
@@ -67,41 +70,52 @@ typedef struct loom_bytecode_numbering_t {
     loom_symbol_id_t* wire_ordinals;
   } symbol_order;
 
-  // Bytecode string-table entries in first-use order.
-  iree_string_view_t* string_entries;
-  // Number of assigned bytecode string IDs.
-  iree_host_size_t string_count;
-  // Allocated capacity of |string_entries|.
-  iree_host_size_t string_capacity;
-  // Bytecode string IDs indexed by module string ID.
-  uint32_t* module_string_map;
+  // First-use-ordered string catalog and its module/external projections.
+  struct {
+    // Bytecode string-table entries indexed by bytecode string ID.
+    iree_string_view_t* values;
+    // Number of assigned bytecode string IDs.
+    iree_host_size_t count;
+    // Allocated capacity of |values|.
+    iree_host_size_t capacity;
+    // Bytecode string IDs indexed by module string ID.
+    uint32_t* writer_ids_by_module_id;
+    // Strings originating outside of the module string table.
+    struct {
+      // External string records in discovery order.
+      loom_bytecode_external_string_t* values;
+      // Number of populated external string records.
+      iree_host_size_t count;
+      // Allocated capacity of |values|.
+      iree_host_size_t capacity;
+    } external;
+  } strings;
 
-  // Strings originating outside of the module string table.
-  loom_bytecode_external_string_t* external_strings;
-  // Number of populated |external_strings| entries.
-  iree_host_size_t external_string_count;
-  // Allocated capacity of |external_strings|.
-  iree_host_size_t external_string_capacity;
+  // Structurally deduplicated type catalog and bidirectional ID projection.
+  struct {
+    // Bytecode type IDs indexed by module type-table index.
+    uint32_t* writer_ids_by_module_index;
+    // Structural reverse lookup from wire type to module type-table index.
+    loom_bytecode_type_index_entry_t* index_entries;
+    // Power-of-two capacity of |index_entries|.
+    iree_host_size_t index_capacity;
+    // Module type-table indices indexed by bytecode type ID.
+    iree_host_size_t* module_indices_by_writer_id;
+    // Number of assigned bytecode type IDs.
+    iree_host_size_t count;
+    // Allocated capacity of |module_indices_by_writer_id|.
+    iree_host_size_t capacity;
+  } types;
 
-  // Bytecode type IDs indexed by module type-table index.
-  uint32_t* type_map;
-  // Structural reverse lookup from wire type to module type-table index.
-  loom_bytecode_type_index_entry_t* type_index_entries;
-  // Power-of-two capacity of |type_index_entries|.
-  iree_host_size_t type_index_capacity;
-  // Module type-table indices indexed by bytecode type ID.
-  iree_host_size_t* type_order;
-  // Number of assigned bytecode type IDs.
-  iree_host_size_t type_count;
-  // Allocated capacity of |type_order|.
-  iree_host_size_t type_order_capacity;
-
-  // Operation kinds in first-use bytecode table order.
-  loom_bytecode_op_entry_t* op_entries;
-  // Number of assigned bytecode operation IDs.
-  iree_host_size_t op_count;
-  // Allocated capacity of |op_entries|.
-  iree_host_size_t op_capacity;
+  // First-use-ordered operation catalog.
+  struct {
+    // Operation entries indexed by bytecode operation ID.
+    loom_bytecode_op_entry_t* values;
+    // Number of assigned bytecode operation IDs.
+    iree_host_size_t count;
+    // Allocated capacity of |values|.
+    iree_host_size_t capacity;
+  } ops;
 } loom_bytecode_numbering_t;
 
 // Initializes empty catalogs and the stable symbol-order projection.
