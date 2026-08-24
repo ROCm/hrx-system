@@ -1044,6 +1044,7 @@ class TestInterfaces:
         interface = MemoryAccessInterface()
 
         assert interface.view == "view"
+        assert interface.byte_offset == "byte_offset"
         assert interface.value == "value"
         assert interface.indices == "indices"
         assert interface.static_indices == "static_indices"

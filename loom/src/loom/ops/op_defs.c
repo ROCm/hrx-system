@@ -1390,6 +1390,13 @@ loom_value_id_t loom_memory_access_view(loom_memory_access_t access) {
       access, vtable ? vtable->view_operand_index : LOOM_OPERAND_INDEX_NONE);
 }
 
+loom_value_id_t loom_memory_access_byte_offset(loom_memory_access_t access) {
+  const loom_memory_access_vtable_t* vtable = loom_memory_access_vtable(access);
+  return loom_memory_access_operand(
+      access,
+      vtable ? vtable->byte_offset_operand_index : LOOM_OPERAND_INDEX_NONE);
+}
+
 loom_value_id_t loom_memory_access_value(loom_memory_access_t access) {
   const loom_memory_access_vtable_t* vtable = loom_memory_access_vtable(access);
   return loom_memory_access_operand(

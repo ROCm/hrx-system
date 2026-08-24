@@ -1743,6 +1743,80 @@ static bool loom_low_source_memory_access_plan_build_indexed_impl(
       out_diagnostic);
 }
 
+static bool loom_low_source_memory_access_plan_build_byte_offset_impl(
+    const loom_view_region_table_t* view_regions,
+    loom_low_source_memory_operation_kind_t operation_kind,
+    loom_value_id_t memory_value_id, loom_value_id_t byte_offset_value_id,
+    loom_vector_memory_cache_policy_t cache_policy,
+    loom_low_source_memory_access_plan_t* out_plan,
+    loom_low_source_memory_access_diagnostic_t* out_diagnostic) {
+  const loom_module_t* module = view_regions->expression_context->module;
+  const loom_value_fact_table_t* fact_table =
+      view_regions->expression_context->fact_table;
+  if (memory_value_id >= module->values.count ||
+      byte_offset_value_id >= module->values.count) {
+    out_diagnostic->rejection_bits |=
+        LOOM_LOW_SOURCE_MEMORY_ACCESS_REJECTION_VIEW_SOURCE;
+    return false;
+  }
+
+  loom_value_fact_buffer_reference_t reference = {0};
+  if (!loom_value_facts_query_buffer_reference(
+          &fact_table->context,
+          loom_value_fact_table_lookup(fact_table, memory_value_id),
+          &reference)) {
+    out_diagnostic->rejection_bits |=
+        LOOM_LOW_SOURCE_MEMORY_ACCESS_REJECTION_VIEW_SOURCE;
+    return false;
+  }
+
+  *out_plan = (loom_low_source_memory_access_plan_t){
+      .operation_kind = operation_kind,
+      .view_value_id = memory_value_id,
+      .base_view_value_id = memory_value_id,
+      .memory_space = reference.memory_space,
+      .address_layout = LOOM_LOW_SOURCE_MEMORY_ADDRESS_LAYOUT_COMPACT_ROW_MAJOR,
+      .root_value_id = loom_value_fact_buffer_reference_resolve_root_value(
+          reference, memory_value_id),
+      .root_minimum_alignment =
+          loom_low_source_memory_clamp_alignment(reference.minimum_alignment),
+      .alias_scope_id = reference.alias_scope_id,
+      .element_byte_count = 1,
+      .vector_lane_count = 1,
+      .vector_lane_byte_stride = 1,
+      .vector_offset_kind = LOOM_LOW_SOURCE_MEMORY_VECTOR_OFFSET_NONE,
+      .dynamic_view_base_value_id = LOOM_VALUE_ID_INVALID,
+      .dynamic_view_base_byte_facts = loom_value_facts_unknown(),
+      .minimum_alignment = 1,
+      .cache_policy = cache_policy,
+  };
+
+  const loom_value_facts_t byte_offset_facts =
+      loom_value_fact_table_lookup(fact_table, byte_offset_value_id);
+  int64_t static_byte_offset = 0;
+  if (loom_value_facts_as_exact_i64(byte_offset_facts, &static_byte_offset)) {
+    out_plan->static_byte_offset = static_byte_offset;
+  } else {
+    loom_low_source_memory_dynamic_term_t term = {
+        .index = byte_offset_value_id,
+        .source = LOOM_LOW_SOURCE_MEMORY_DYNAMIC_INDEX_SOURCE_VALUE,
+        .dimension = LOOM_KERNEL_DIMENSION_COUNT_,
+        .axis = LOOM_LOW_SOURCE_MEMORY_DYNAMIC_TERM_AXIS_NONE,
+        .byte_stride = 1,
+        .byte_facts = byte_offset_facts,
+        .byte_shift = 0,
+    };
+    loom_low_source_memory_access_dynamic_index_source(
+        fact_table, byte_offset_value_id, &term.source, &term.dimension);
+    if (!loom_low_source_memory_access_append_dynamic_term(out_plan, &term,
+                                                           out_diagnostic)) {
+      return false;
+    }
+  }
+  loom_low_source_memory_access_finalize_alignment(out_plan);
+  return true;
+}
+
 bool loom_low_source_memory_access_plan_build(
     const loom_view_region_table_t* view_regions, const loom_op_t* source_op,
     loom_low_source_memory_access_plan_t* out_plan,
@@ -1782,6 +1856,14 @@ bool loom_low_source_memory_access_plan_build(
     out_diagnostic->rejection_bits |=
         LOOM_LOW_SOURCE_MEMORY_ACCESS_REJECTION_CACHE_POLICY;
     return false;
+  }
+
+  const loom_value_id_t byte_offset_value_id =
+      loom_memory_access_byte_offset(access);
+  if (byte_offset_value_id != LOOM_VALUE_ID_INVALID) {
+    return loom_low_source_memory_access_plan_build_byte_offset_impl(
+        view_regions, operation_kind, view_value_id, byte_offset_value_id,
+        cache_policy, out_plan, out_diagnostic);
   }
 
   const loom_type_t view_type = loom_module_value_type(module, view_value_id);

@@ -404,6 +404,63 @@ TEST_F(SourceMemoryPlanTest, StaticDenseLoadIncludesViewBase) {
   EXPECT_EQ(plan.dynamic_view_base_term_count, 0u);
 }
 
+TEST_F(SourceMemoryPlanTest, PhysicalByteLoadUsesBufferReferenceAndOffset) {
+  const loom_value_id_t root_buffer = DefineBufferArg();
+  const loom_value_id_t buffer = BuildAligned(root_buffer, 16);
+  const loom_value_id_t byte_offset =
+      loom_index_constant_result(BuildOffsetConstant(12));
+  loom_op_t* load_op = nullptr;
+  IREE_ASSERT_OK(loom_buffer_load_i8_u_build(&builder_, buffer, byte_offset,
+                                             LOOM_LOCATION_UNKNOWN, &load_op));
+
+  loom_value_fact_table_t facts = {0};
+  ComputeFacts(&facts);
+  loom_low_source_memory_access_plan_t plan = {};
+  loom_low_source_memory_access_diagnostic_t diagnostic = {0};
+  ASSERT_TRUE(BuildPlan(&facts, load_op, &plan, &diagnostic));
+  EXPECT_EQ(plan.operation_kind, LOOM_LOW_SOURCE_MEMORY_OPERATION_LOAD);
+  EXPECT_EQ(plan.view_value_id, buffer);
+  EXPECT_EQ(plan.base_view_value_id, buffer);
+  EXPECT_EQ(plan.root_value_id, root_buffer);
+  EXPECT_EQ(plan.address_layout,
+            LOOM_LOW_SOURCE_MEMORY_ADDRESS_LAYOUT_COMPACT_ROW_MAJOR);
+  EXPECT_EQ(plan.element_byte_count, 1u);
+  EXPECT_EQ(plan.vector_lane_count, 1u);
+  EXPECT_EQ(plan.vector_lane_byte_stride, 1);
+  EXPECT_EQ(plan.static_byte_offset, 12);
+  EXPECT_EQ(plan.root_minimum_alignment, 16u);
+  EXPECT_EQ(plan.minimum_alignment, 4u);
+  EXPECT_EQ(plan.dynamic_term_count, 0u);
+}
+
+TEST_F(SourceMemoryPlanTest, PhysicalByteStoreRetainsDynamicOffset) {
+  const loom_value_id_t buffer = DefineBufferArg();
+  const loom_value_id_t byte_offset = DefineOffsetArg();
+  const loom_value_id_t value =
+      DefineArg(loom_type_scalar(LOOM_SCALAR_TYPE_I32));
+  loom_op_t* store_op = nullptr;
+  IREE_ASSERT_OK(loom_buffer_store_i8_build(
+      &builder_, value, buffer, byte_offset, LOOM_LOCATION_UNKNOWN, &store_op));
+
+  loom_value_fact_table_t facts = {0};
+  ComputeFacts(&facts);
+  loom_low_source_memory_access_plan_t plan = {};
+  loom_low_source_memory_access_diagnostic_t diagnostic = {0};
+  ASSERT_TRUE(BuildPlan(&facts, store_op, &plan, &diagnostic));
+  EXPECT_EQ(plan.operation_kind, LOOM_LOW_SOURCE_MEMORY_OPERATION_STORE);
+  EXPECT_EQ(plan.root_value_id, buffer);
+  EXPECT_EQ(plan.static_byte_offset, 0);
+  ASSERT_EQ(plan.dynamic_term_count, 1u);
+  EXPECT_EQ(plan.dynamic_terms[0].index, byte_offset);
+  EXPECT_EQ(plan.dynamic_terms[0].source,
+            LOOM_LOW_SOURCE_MEMORY_DYNAMIC_INDEX_SOURCE_VALUE);
+  EXPECT_EQ(plan.dynamic_terms[0].dimension, LOOM_KERNEL_DIMENSION_COUNT_);
+  EXPECT_EQ(plan.dynamic_terms[0].axis,
+            LOOM_LOW_SOURCE_MEMORY_DYNAMIC_TERM_AXIS_NONE);
+  EXPECT_EQ(plan.dynamic_terms[0].byte_stride, 1);
+  EXPECT_EQ(plan.dynamic_terms[0].byte_shift, 0u);
+}
+
 TEST_F(SourceMemoryPlanTest, StaticStridedLayoutClassifiesCompactness) {
   loom_value_id_t buffer = DefineBufferArg();
   loom_value_id_t base_offset =

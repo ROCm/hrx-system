@@ -1325,6 +1325,9 @@ typedef struct loom_memory_access_vtable_t {
   // Index of the view or memory-object operand being accessed.
   uint8_t view_operand_index;
 
+  // Index of the physical byte-offset operand, or NONE for logical accesses.
+  uint8_t byte_offset_operand_index;
+
   // Index of the written value or atomic update contribution operand.
   uint8_t value_operand_index;
 

@@ -2790,6 +2790,7 @@ def test_generate_tables_memory_access_defaults_use_matching_fields() -> None:
     assert "static const loom_memory_access_vtable_t loom_test_load_memory_access" in tables_c
     assert ".operation_kind = LOOM_MEMORY_ACCESS_OPERATION_LOAD," in tables_c
     assert ".view_operand_index = 0," in tables_c
+    assert ".byte_offset_operand_index = 255," in tables_c
     assert ".value_operand_index = 255," in tables_c
     assert ".indices_operand_field_index = 1," in tables_c
     assert ".static_indices_attr_index = 0," in tables_c
@@ -2934,6 +2935,44 @@ def test_generate_tables_memory_access_accepts_segmented_indices_field() -> None
     assert "LOOM_OP_VTABLE_SEGMENTED_OPERANDS" in tables_c
     assert ".view_operand_index = 0," in tables_c
     assert ".indices_operand_field_index = 1," in tables_c
+
+
+def test_generate_tables_memory_access_accepts_physical_byte_offset() -> None:
+    op = Op(
+        "test.load",
+        group=Dialect("test"),
+        operands=[
+            Operand("source", ANY),
+            Operand("byte_offset", ANY),
+        ],
+        results=[Result("result", ANY)],
+        effects=[Reads("source")],
+        interfaces=[MemoryAccessInterface(view="source")],
+    )
+
+    tables_c = generate_tables_c("test", 0, [op])
+
+    assert ".view_operand_index = 0," in tables_c
+    assert ".byte_offset_operand_index = 1," in tables_c
+    assert ".indices_operand_field_index = 255," in tables_c
+
+
+def test_generate_tables_memory_access_rejects_mixed_byte_and_logical_offsets() -> None:
+    op = Op(
+        "test.load",
+        group=Dialect("test"),
+        operands=[
+            Operand("view", ANY),
+            Operand("byte_offset", ANY),
+            Operand("indices", ANY, variadic=True),
+        ],
+        results=[Result("result", ANY)],
+        effects=[Reads("view")],
+        interfaces=[MemoryAccessInterface()],
+    )
+
+    with _raises_value_error(r"MemoryAccessInterface on 'test\.load': byte_offset is mutually exclusive"):
+        generate_tables_c("test", 0, [op])
 
 
 def test_generate_tables_memory_access_rejects_explicit_missing_field() -> None:

@@ -1536,6 +1536,9 @@ bool loom_memory_access_operand_index_is_payload(loom_memory_access_t access,
 // Returns the accessed view or memory-object operand.
 loom_value_id_t loom_memory_access_view(loom_memory_access_t access);
 
+// Returns the physical byte-offset operand, or INVALID for logical accesses.
+loom_value_id_t loom_memory_access_byte_offset(loom_memory_access_t access);
+
 // Returns the written value or atomic update contribution operand.
 loom_value_id_t loom_memory_access_value(loom_memory_access_t access);
 

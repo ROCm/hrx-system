@@ -5161,6 +5161,8 @@ class MemoryAccessInterface:
 
     # Operand naming the accessed view or memory object.
     view: str | None
+    # Operand naming a physical byte offset into the memory object.
+    byte_offset: str | None = None
     # Operand naming the value written or atomic update contribution.
     value: str | None = None
     # Operand naming the expected compare-exchange value.
@@ -5200,6 +5202,7 @@ class MemoryAccessInterface:
         self,
         *,
         view: str | None | object = _DEFAULT_INTERFACE_FIELD,
+        byte_offset: str | None | object = _DEFAULT_INTERFACE_FIELD,
         value: str | None | object = _DEFAULT_INTERFACE_FIELD,
         expected: str | None | object = _DEFAULT_INTERFACE_FIELD,
         replacement: str | None | object = _DEFAULT_INTERFACE_FIELD,
@@ -5235,6 +5238,11 @@ class MemoryAccessInterface:
             )
 
         object.__setattr__(self, "view", _resolve("view", view, "view"))
+        object.__setattr__(
+            self,
+            "byte_offset",
+            _resolve("byte_offset", byte_offset, "byte_offset"),
+        )
         object.__setattr__(self, "value", _resolve("value", value, "value"))
         object.__setattr__(self, "expected", _resolve("expected", expected, "expected"))
         object.__setattr__(
