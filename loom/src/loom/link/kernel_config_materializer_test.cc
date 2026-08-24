@@ -110,6 +110,14 @@ class KernelConfigMaterializerTest : public ::testing::Test {
     return PlanPtr(plan);
   }
 
+  PlanPtr BuildConfigPlan(loom_link_module_index_t* index,
+                          iree_host_size_t kernel_symbol_ordinal) {
+    loom_link_plan_t* plan = nullptr;
+    IREE_CHECK_OK(loom_link_plan_build_kernel_configuration(
+        index, kernel_symbol_ordinal, iree_allocator_system(), &plan));
+    return PlanPtr(plan);
+  }
+
   iree_arena_block_pool_t block_pool_;
   loom_context_t context_;
 };
@@ -183,6 +191,36 @@ kernel.def target(@dispatch_target) @dispatch_rows(%element_count: index) {
 )"));
   Verify(source_module);
   std::vector<uint8_t> bytecode = Write(source_module);
+
+  {
+    IndexPtr materialized_index = CreateIndex();
+    IREE_ASSERT_OK(loom_link_module_index_add_materialized(
+        materialized_index.get(), source_module, /*options=*/nullptr,
+        /*out_provider_ordinal=*/nullptr));
+    const loom_link_module_index_symbol_t* materialized_kernel =
+        loom_link_module_index_lookup_name(materialized_index.get(),
+                                           IREE_SV("dispatch_rows"));
+    const loom_link_module_index_symbol_t* materialized_implementation_only =
+        loom_link_module_index_lookup_name(materialized_index.get(),
+                                           IREE_SV("implementation_only"));
+    ASSERT_NE(materialized_kernel, nullptr);
+    ASSERT_NE(materialized_implementation_only, nullptr);
+    PlanPtr materialized_plan =
+        BuildConfigPlan(materialized_index.get(), materialized_kernel->ordinal);
+    EXPECT_TRUE(loom_link_plan_contains_symbol(materialized_plan.get(),
+                                               materialized_kernel->ordinal));
+    EXPECT_FALSE(loom_link_plan_contains_symbol(
+        materialized_plan.get(), materialized_implementation_only->ordinal));
+    EXPECT_TRUE(loom_link_plan_contains_facet(materialized_plan.get(),
+                                              materialized_kernel->ordinal, 0));
+    EXPECT_TRUE(loom_link_plan_contains_facet(
+        materialized_plan.get(), materialized_kernel->ordinal,
+        materialized_kernel->facets.schema
+            .kernel_configuration_region_index_plus_one));
+    EXPECT_FALSE(loom_link_plan_contains_facet(
+        materialized_plan.get(), materialized_kernel->ordinal,
+        materialized_kernel->facets.schema.body_region_index_plus_one));
+  }
   loom_module_free(source_module);
 
   IndexPtr index = CreateIndex();
@@ -195,13 +233,22 @@ kernel.def target(@dispatch_target) @dispatch_rows(%element_count: index) {
   const loom_link_module_index_symbol_t* indexed_kernel =
       loom_link_module_index_lookup_name(index.get(), IREE_SV("dispatch_rows"));
   ASSERT_NE(indexed_kernel, nullptr);
-  PlanPtr plan = BuildPlan(index.get(), IREE_SV("dispatch_rows"));
+  PlanPtr plan = BuildConfigPlan(index.get(), indexed_kernel->ordinal);
   const loom_link_module_index_symbol_t* implementation_only =
       loom_link_module_index_lookup_name(index.get(),
                                          IREE_SV("implementation_only"));
   ASSERT_NE(implementation_only, nullptr);
-  EXPECT_TRUE(
+  EXPECT_FALSE(
       loom_link_plan_contains_symbol(plan.get(), implementation_only->ordinal));
+  EXPECT_TRUE(
+      loom_link_plan_contains_facet(plan.get(), indexed_kernel->ordinal, 0));
+  EXPECT_TRUE(loom_link_plan_contains_facet(
+      plan.get(), indexed_kernel->ordinal,
+      indexed_kernel->facets.schema
+          .kernel_configuration_region_index_plus_one));
+  EXPECT_FALSE(loom_link_plan_contains_facet(
+      plan.get(), indexed_kernel->ordinal,
+      indexed_kernel->facets.schema.body_region_index_plus_one));
 
   const loom_link_module_index_provider_t* provider =
       loom_link_module_index_symbol_provider(index.get(), indexed_kernel);
@@ -324,9 +371,12 @@ kernel.def target(@dispatch_target) @dispatch_rows(%element_count: index) {
 
   iree_arena_allocator_t materialization_arena;
   iree_arena_initialize(&block_pool_, &materialization_arena);
+  PlanPtr full_plan = BuildPlan(index.get(), IREE_SV("dispatch_rows"));
+  EXPECT_TRUE(loom_link_plan_contains_symbol(full_plan.get(),
+                                             implementation_only->ordinal));
   loom_link_plan_materialization_t full_materialization = {};
   iree_status_t full_status =
-      loom_link_plan_materialize(plan.get(), &environment, IREE_SV("full"),
+      loom_link_plan_materialize(full_plan.get(), &environment, IREE_SV("full"),
                                  &materialization_arena, &full_materialization);
   IREE_EXPECT_NOT_OK(full_status);
   loom_module_free(full_materialization.module);

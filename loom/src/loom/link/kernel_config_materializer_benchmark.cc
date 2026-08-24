@@ -51,12 +51,7 @@ class KernelConfigFixture {
         /*options=*/nullptr, /*out_provider_ordinal=*/nullptr));
     kernel_ = loom_link_module_index_lookup_name(index_, IREE_SV("benchmark"));
     if (kernel_ == nullptr) std::abort();
-    const iree_string_view_t roots[] = {IREE_SV("benchmark")};
-    loom_link_plan_options_t plan_options = {};
-    plan_options.mode = LOOM_LINK_PLAN_SELECTIVE;
-    plan_options.root_symbols = {IREE_ARRAYSIZE(roots), roots};
-    CheckStatus(loom_link_plan_build(index_, &plan_options,
-                                     iree_allocator_system(), &plan_));
+    plan_ = BuildPlan();
 
     const loom_link_module_index_provider_t* provider =
         loom_link_module_index_symbol_provider(index_, kernel_);
@@ -105,6 +100,13 @@ class KernelConfigFixture {
         plan_, kernel_->ordinal, &environment, IREE_SV("projected"),
         &materialization));
     return materialization;
+  }
+
+  loom_link_plan_t* BuildPlan() const {
+    loom_link_plan_t* plan = nullptr;
+    CheckStatus(loom_link_plan_build_kernel_configuration(
+        index_, kernel_->ordinal, iree_allocator_system(), &plan));
+    return plan;
   }
 
   iree_host_size_t config_payload_bytes() const {
@@ -201,11 +203,37 @@ static void BM_MaterializeKernelConfig(benchmark::State& state) {
   state.SetComplexityN(fixture.implementation_payload_bytes());
 }
 
+static void BM_PlanKernelConfig(benchmark::State& state) {
+  KernelConfigFixture fixture(static_cast<iree_host_size_t>(state.range(0)));
+  iree_host_size_t selected_facet_count = 0;
+  iree_host_size_t selected_symbol_count = 0;
+  for (auto _ : state) {
+    loom_link_plan_t* plan = fixture.BuildPlan();
+    selected_facet_count = loom_link_plan_facet_count(plan);
+    selected_symbol_count = loom_link_plan_symbol_count(plan);
+    benchmark::DoNotOptimize(plan);
+    state.PauseTiming();
+    loom_link_plan_free(plan);
+    state.ResumeTiming();
+  }
+  state.counters["configuration_payload_bytes"] =
+      static_cast<double>(fixture.config_payload_bytes());
+  state.counters["implementation_payload_bytes"] =
+      static_cast<double>(fixture.implementation_payload_bytes());
+  state.counters["selected_facets"] = static_cast<double>(selected_facet_count);
+  state.counters["selected_symbols"] =
+      static_cast<double>(selected_symbol_count);
+  state.SetComplexityN(fixture.implementation_payload_bytes());
+}
+
 static void ImplementationPayloadScales(benchmark::Benchmark* benchmark) {
   benchmark->Arg(0)->Arg(4 * 1024)->Arg(64 * 1024)->Arg(1024 * 1024);
 }
 
 BENCHMARK(BM_MaterializeKernelConfig)
+    ->Apply(ImplementationPayloadScales)
+    ->Complexity(benchmark::o1);
+BENCHMARK(BM_PlanKernelConfig)
     ->Apply(ImplementationPayloadScales)
     ->Complexity(benchmark::o1);
 

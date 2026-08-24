@@ -65,6 +65,16 @@ typedef bool (*loom_link_plan_strip_symbol_fn_t)(
     void* user_data, const loom_link_module_index_t* index,
     const loom_link_module_index_symbol_t* symbol);
 
+// One identity-resolved selective root facet. The symbol contract is always
+// selected. A nonzero source root also selects that independently bounded root
+// region without selecting sibling roots.
+typedef struct loom_link_plan_root_facet_t {
+  // Index-wide symbol ordinal resolved by the requesting subsystem.
+  iree_host_size_t symbol_ordinal;
+  // Source root region index plus one, or zero for the contract alone.
+  uint8_t source_root_region_index_plus_one;
+} loom_link_plan_root_facet_t;
+
 // Options controlling one planning operation.
 typedef struct loom_link_plan_options_t {
   // Planning mode. Zero defaults to ARCHIVE.
@@ -92,6 +102,13 @@ typedef struct loom_link_plan_options_t {
     // Index-wide template.def/template.ukernel symbol ordinals.
     const iree_host_size_t* values;
   } selected_template_providers;
+  // Identity-resolved facet roots for SELECTIVE mode.
+  struct {
+    // Number of root facet requests.
+    iree_host_size_t count;
+    // Root facet requests in caller-defined stable order.
+    const loom_link_plan_root_facet_t* values;
+  } root_facets;
 } loom_link_plan_options_t;
 
 // One live symbol selection in a plan.
@@ -104,9 +121,29 @@ typedef struct loom_link_plan_symbol_t {
   loom_link_plan_live_reason_t reason;
   // Plan-local ordinal that caused this dependency, or INVALID_ORDINAL.
   iree_host_size_t cause_ordinal;
+  // Plan-local contract facet ordinal for this symbol.
+  iree_host_size_t contract_facet_ordinal;
+  // Number of selected contract and root-region facets.
+  uint16_t selected_facet_count;
   // Root name that caused this selection when reason is ROOT.
   iree_string_view_t root_name;
 } loom_link_plan_symbol_t;
+
+// One live structural symbol facet in a selective plan.
+typedef struct loom_link_plan_facet_t {
+  // Plan-local facet ordinal.
+  iree_host_size_t ordinal;
+  // Plan-local symbol selection owning this facet.
+  iree_host_size_t symbol_plan_ordinal;
+  // Index-wide symbol ordinal owning this facet.
+  iree_host_size_t symbol_ordinal;
+  // Source root region index plus one, or zero for the symbol contract.
+  uint8_t source_root_region_index_plus_one;
+  // Why this facet is live.
+  loom_link_plan_live_reason_t reason;
+  // Plan-local facet ordinal that caused this selection, or INVALID_ORDINAL.
+  iree_host_size_t cause_ordinal;
+} loom_link_plan_facet_t;
 
 // Builds a link plan from |index|.
 //
@@ -134,6 +171,14 @@ iree_host_size_t loom_link_plan_symbol_count(const loom_link_plan_t* plan);
 const loom_link_plan_symbol_t* loom_link_plan_symbol_at(
     const loom_link_plan_t* plan, iree_host_size_t ordinal);
 
+// Returns the number of explicit structural facet selections in a selective
+// plan. Archive plans retain complete symbols without enumerating facets.
+iree_host_size_t loom_link_plan_facet_count(const loom_link_plan_t* plan);
+
+// Returns live facet selection |ordinal|, or NULL if out of range.
+const loom_link_plan_facet_t* loom_link_plan_facet_at(
+    const loom_link_plan_t* plan, iree_host_size_t ordinal);
+
 // Returns the number of reachable template-family demands.
 iree_host_size_t loom_link_plan_demanded_template_family_count(
     const loom_link_plan_t* plan);
@@ -146,6 +191,12 @@ loom_link_template_family_ordinal_t loom_link_plan_demanded_template_family_at(
 // Returns true when |symbol_ordinal| is live in |plan|.
 bool loom_link_plan_contains_symbol(const loom_link_plan_t* plan,
                                     iree_host_size_t symbol_ordinal);
+
+// Returns true when the contract or named source root of |symbol_ordinal| is
+// live in |plan|. Every valid facet of an archive-selected symbol is live.
+bool loom_link_plan_contains_facet(const loom_link_plan_t* plan,
+                                   iree_host_size_t symbol_ordinal,
+                                   uint8_t source_root_region_index_plus_one);
 
 // Returns true when a concrete provider satisfied |symbol_ordinal|'s
 // compile-time provider imports. Every availability anchor for the symbol is

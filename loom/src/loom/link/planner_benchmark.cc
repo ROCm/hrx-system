@@ -653,6 +653,7 @@ static void BenchmarkPlan(benchmark::State& state, loom_link_plan_mode_t mode,
       /*.root_symbols=*/root_symbols,
   };
 
+  iree_host_size_t selected_facet_count = 0;
   for (auto _ : state) {
     loom_link_plan_t* plan = nullptr;
     CheckStatus(
@@ -660,11 +661,13 @@ static void BenchmarkPlan(benchmark::State& state, loom_link_plan_mode_t mode,
     if (loom_link_plan_symbol_count(plan) != expected_symbol_count) {
       std::abort();
     }
+    selected_facet_count = loom_link_plan_facet_count(plan);
     benchmark::DoNotOptimize(plan);
     state.PauseTiming();
     loom_link_plan_free(plan);
     state.ResumeTiming();
   }
+  state.counters["selected_facets"] = static_cast<double>(selected_facet_count);
   SetCounters(state, fixture, expected_symbol_count);
   loom_link_module_index_free(index);
 }
