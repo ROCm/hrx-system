@@ -29,6 +29,7 @@ loom_cc_library(
   DEPS
     ::types
     iree::base
+    loom::error::emitter
   PUBLIC
 )
 

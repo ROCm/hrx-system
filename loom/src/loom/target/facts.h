@@ -14,6 +14,7 @@
 #define LOOM_TARGET_FACTS_H_
 
 #include "iree/base/api.h"
+#include "loom/error/emitter.h"
 #include "loom/target/types.h"
 
 #ifdef __cplusplus
@@ -21,6 +22,8 @@ extern "C" {
 #endif
 
 typedef struct loom_target_facts_t loom_target_facts_t;
+typedef struct loom_func_symbol_facts_t loom_func_symbol_facts_t;
+typedef struct loom_module_t loom_module_t;
 
 // Target-neutral fields whose explicit presence can affect specialization or
 // must survive projection into durable IR.
@@ -98,6 +101,16 @@ typedef void (*loom_target_fact_rebind_fn_t)(loom_target_facts_t* facts);
 typedef iree_string_view_t (*loom_target_fact_identity_name_fn_t)(
     const loom_target_facts_t* facts);
 
+// Validates function ABI attributes owned by one target family.
+//
+// Generic function contracts preserve ABI attribute dictionaries but do not
+// interpret their keys. A target family may validate the fields it owns at the
+// point the authored function contract is resolved. Invalid user IR emits a
+// diagnostic, sets |out_valid| false, and returns OK.
+typedef iree_status_t (*loom_target_function_abi_attrs_validate_fn_t)(
+    const loom_module_t* module, const loom_func_symbol_facts_t* func_facts,
+    iree_diagnostic_emitter_t diagnostic_emitter, bool* out_valid);
+
 // Static type descriptor for one target-family fact representation.
 struct loom_target_fact_type_t {
   // Stable target-family name used in diagnostics and pass predicates.
@@ -119,6 +132,10 @@ struct loom_target_fact_type_t {
 
   // Optional presentation projection for diagnostics and reports.
   loom_target_fact_identity_name_fn_t identity_name;
+
+  // Optional validator for target-family function ABI attributes. Families
+  // without a validator reject every authored ABI attribute field.
+  loom_target_function_abi_attrs_validate_fn_t validate_function_abi_attrs;
 };
 
 // Typed target-neutral facts projected from available target information.

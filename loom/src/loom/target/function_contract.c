@@ -80,8 +80,16 @@ static bool loom_target_function_contract_mul_u64(uint64_t lhs, uint64_t rhs,
 
 static iree_status_t loom_target_function_contract_apply_abi_attrs(
     const loom_module_t* module, const loom_func_symbol_facts_t* func_facts,
-    iree_diagnostic_emitter_t diagnostic_emitter, loom_named_attr_slice_t attrs,
-    bool* out_valid) {
+    const loom_target_fact_type_t* target_fact_type,
+    iree_diagnostic_emitter_t diagnostic_emitter, bool* out_valid) {
+  const loom_named_attr_slice_t attrs = func_facts->abi_attrs;
+  if (attrs.count == 0) {
+    return iree_ok_status();
+  }
+  if (target_fact_type->validate_function_abi_attrs != NULL) {
+    return target_fact_type->validate_function_abi_attrs(
+        module, func_facts, diagnostic_emitter, out_valid);
+  }
   for (iree_host_size_t i = 0; i < attrs.count; ++i) {
     const loom_named_attr_t* entry = &attrs.entries[i];
     iree_string_view_t name =
@@ -333,29 +341,6 @@ iree_status_t loom_target_function_contract_apply_hal_workgroup_size(
   return iree_ok_status();
 }
 
-iree_status_t loom_target_function_contract_resolve(
-    const loom_module_t* module, loom_symbol_fact_table_t* fact_table,
-    const loom_func_symbol_facts_t* func_facts,
-    iree_diagnostic_emitter_t diagnostic_emitter, bool* out_valid,
-    const loom_target_facts_t** out_target_facts,
-    loom_target_bundle_storage_t* out_bundle_storage) {
-  if (out_target_facts != NULL) {
-    *out_target_facts = NULL;
-  }
-  const loom_target_symbol_facts_t* target = NULL;
-  IREE_RETURN_IF_ERROR(loom_target_function_contract_lookup_target(
-      module, fact_table, func_facts, diagnostic_emitter, out_valid, &target));
-  if (!*out_valid) {
-    return iree_ok_status();
-  }
-  if (out_target_facts != NULL) {
-    *out_target_facts = target->projection;
-  }
-  return loom_target_function_contract_resolve_from_bundle(
-      module, func_facts, target->name, &target->projection->storage.bundle,
-      diagnostic_emitter, out_valid, out_bundle_storage);
-}
-
 typedef enum loom_target_function_contract_scope_e {
   LOOM_TARGET_FUNCTION_CONTRACT_SCOPE_ARTIFACT = 0,
   LOOM_TARGET_FUNCTION_CONTRACT_SCOPE_MODULE_INTERNAL = 1,
@@ -363,13 +348,14 @@ typedef enum loom_target_function_contract_scope_e {
 
 static iree_status_t loom_target_function_contract_resolve_scoped_bundle(
     const loom_module_t* module, const loom_func_symbol_facts_t* func_facts,
-    iree_string_view_t target_name, const loom_target_bundle_t* base_bundle,
+    iree_string_view_t target_name, const loom_target_facts_t* base_facts,
     loom_target_function_contract_scope_t scope,
     iree_diagnostic_emitter_t diagnostic_emitter, bool* out_valid,
     loom_target_bundle_storage_t* out_bundle_storage) {
   memset(out_bundle_storage, 0, sizeof(*out_bundle_storage));
   *out_valid = false;
 
+  const loom_target_bundle_t* base_bundle = &base_facts->storage.bundle;
   *out_bundle_storage = (loom_target_bundle_storage_t){
       .snapshot = *base_bundle->snapshot,
       .export_plan = *base_bundle->export_plan,
@@ -403,7 +389,7 @@ static iree_status_t loom_target_function_contract_resolve_scoped_bundle(
   }
   *out_valid = true;
   IREE_RETURN_IF_ERROR(loom_target_function_contract_apply_abi_attrs(
-      module, func_facts, diagnostic_emitter, func_facts->abi_attrs,
+      module, func_facts, base_facts->fact_type, diagnostic_emitter,
       out_valid));
   if (!*out_valid) {
     return iree_ok_status();
@@ -427,13 +413,26 @@ static iree_status_t loom_target_function_contract_resolve_scoped_bundle(
   return iree_ok_status();
 }
 
-iree_status_t loom_target_function_contract_resolve_from_bundle(
-    const loom_module_t* module, const loom_func_symbol_facts_t* func_facts,
-    iree_string_view_t target_name, const loom_target_bundle_t* base_bundle,
+iree_status_t loom_target_function_contract_resolve(
+    const loom_module_t* module, loom_symbol_fact_table_t* fact_table,
+    const loom_func_symbol_facts_t* func_facts,
     iree_diagnostic_emitter_t diagnostic_emitter, bool* out_valid,
+    const loom_target_facts_t** out_target_facts,
     loom_target_bundle_storage_t* out_bundle_storage) {
+  if (out_target_facts != NULL) {
+    *out_target_facts = NULL;
+  }
+  const loom_target_symbol_facts_t* target = NULL;
+  IREE_RETURN_IF_ERROR(loom_target_function_contract_lookup_target(
+      module, fact_table, func_facts, diagnostic_emitter, out_valid, &target));
+  if (!*out_valid) {
+    return iree_ok_status();
+  }
+  if (out_target_facts != NULL) {
+    *out_target_facts = target->projection;
+  }
   return loom_target_function_contract_resolve_scoped_bundle(
-      module, func_facts, target_name, base_bundle,
+      module, func_facts, target->name, target->projection,
       LOOM_TARGET_FUNCTION_CONTRACT_SCOPE_ARTIFACT, diagnostic_emitter,
       out_valid, out_bundle_storage);
 }
@@ -466,8 +465,8 @@ static iree_status_t loom_target_function_contract_refine_scoped_facts(
 
   loom_target_bundle_storage_t bundle_storage = {0};
   IREE_RETURN_IF_ERROR(loom_target_function_contract_resolve_scoped_bundle(
-      module, func_facts, target_name, &base_facts->storage.bundle, scope,
-      diagnostic_emitter, out_valid, &bundle_storage));
+      module, func_facts, target_name, base_facts, scope, diagnostic_emitter,
+      out_valid, &bundle_storage));
   if (!*out_valid) {
     return iree_ok_status();
   }

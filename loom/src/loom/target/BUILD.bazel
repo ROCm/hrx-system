@@ -33,6 +33,7 @@ loom_cc_library(
     hdrs = ["facts.h"],
     deps = [
         ":types",
+        "//loom/src/loom/error:emitter",
         "//runtime/src/iree/base",
     ],
 )
