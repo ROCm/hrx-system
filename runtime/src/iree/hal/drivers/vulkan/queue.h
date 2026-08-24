@@ -452,7 +452,8 @@ iree_status_t iree_hal_vulkan_queue_submit_fill(
     const iree_hal_semaphore_list_t signal_semaphore_list,
     iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
     iree_device_size_t length, const void* pattern,
-    iree_host_size_t pattern_length, iree_hal_fill_flags_t flags);
+    iree_host_size_t pattern_length,
+    iree_hal_vulkan_transfer_strategy_t strategy, iree_hal_fill_flags_t flags);
 
 // Submits a buffer update ordered by queue semaphores.
 iree_status_t iree_hal_vulkan_queue_submit_update(
@@ -461,7 +462,8 @@ iree_status_t iree_hal_vulkan_queue_submit_update(
     const iree_hal_semaphore_list_t signal_semaphore_list,
     const void* source_buffer, iree_host_size_t source_offset,
     iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
-    iree_device_size_t length, iree_hal_update_flags_t flags);
+    iree_device_size_t length, iree_hal_vulkan_transfer_strategy_t strategy,
+    iree_hal_update_flags_t flags);
 
 // Submits a buffer copy ordered by queue semaphores.
 iree_status_t iree_hal_vulkan_queue_submit_copy(
@@ -470,7 +472,8 @@ iree_status_t iree_hal_vulkan_queue_submit_copy(
     const iree_hal_semaphore_list_t signal_semaphore_list,
     iree_hal_buffer_t* source_buffer, iree_device_size_t source_offset,
     iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
-    iree_device_size_t length, iree_hal_copy_flags_t flags);
+    iree_device_size_t length, iree_hal_vulkan_transfer_strategy_t strategy,
+    iree_hal_copy_flags_t flags);
 
 // Submits a direct dispatch ordered by queue semaphores.
 iree_status_t iree_hal_vulkan_queue_submit_dispatch(
@@ -497,7 +500,8 @@ iree_status_t iree_hal_vulkan_queue_submit_write(
     const iree_hal_semaphore_list_t signal_semaphore_list,
     iree_hal_buffer_t* source_buffer, iree_device_size_t source_offset,
     iree_hal_file_t* target_file, uint64_t target_offset,
-    iree_device_size_t length, iree_hal_write_flags_t flags);
+    iree_device_size_t length, iree_hal_vulkan_transfer_strategy_t strategy,
+    iree_hal_write_flags_t flags);
 
 // Submits a file read ordered by queue semaphores.
 iree_status_t iree_hal_vulkan_queue_submit_read(
@@ -506,7 +510,8 @@ iree_status_t iree_hal_vulkan_queue_submit_read(
     const iree_hal_semaphore_list_t signal_semaphore_list,
     iree_hal_file_t* source_file, uint64_t source_offset,
     iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
-    iree_device_size_t length, iree_hal_read_flags_t flags);
+    iree_device_size_t length, iree_hal_vulkan_transfer_strategy_t strategy,
+    iree_hal_read_flags_t flags);
 
 // Submits a recorded command buffer ordered by queue semaphores.
 iree_status_t iree_hal_vulkan_queue_submit_execute(

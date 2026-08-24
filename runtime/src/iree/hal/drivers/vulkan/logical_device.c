@@ -20,6 +20,7 @@
 #include "iree/async/frontier_tracker.h"
 #include "iree/async/util/proactor_pool.h"
 #include "iree/hal/drivers/vulkan/allocator.h"
+#include "iree/hal/drivers/vulkan/buffer.h"
 #include "iree/hal/drivers/vulkan/builtins.h"
 #include "iree/hal/drivers/vulkan/command_buffer.h"
 #include "iree/hal/drivers/vulkan/debug_utils.h"
@@ -1019,6 +1020,65 @@ static iree_status_t iree_hal_vulkan_logical_device_select_queue_lane(
       device, preferred_role, required_flags, queue_affinity, out_queue);
 }
 
+static iree_hal_vulkan_transfer_strategy_t
+iree_hal_vulkan_logical_device_transfer_strategy_for_buffer_range(
+    iree_hal_buffer_t* buffer, iree_device_size_t offset,
+    iree_device_size_t length) {
+  const iree_hal_vulkan_buffer_range_alignment_t alignment =
+      iree_hal_vulkan_buffer_range_dword_alignment(buffer, offset, length);
+  switch (alignment) {
+    case IREE_HAL_VULKAN_BUFFER_RANGE_ALIGNMENT_ALIGNED:
+      return IREE_HAL_VULKAN_TRANSFER_STRATEGY_NATIVE;
+    case IREE_HAL_VULKAN_BUFFER_RANGE_ALIGNMENT_UNALIGNED:
+      return IREE_HAL_VULKAN_TRANSFER_STRATEGY_EDGE_PATCHED_NATIVE;
+    case IREE_HAL_VULKAN_BUFFER_RANGE_ALIGNMENT_UNKNOWN:
+    default:
+      return IREE_HAL_VULKAN_TRANSFER_STRATEGY_COMPUTE;
+  }
+}
+
+static iree_hal_vulkan_transfer_strategy_t
+iree_hal_vulkan_logical_device_transfer_strategy_for_file_range(
+    iree_hal_file_t* file, uint64_t offset, iree_device_size_t length) {
+  iree_hal_buffer_t* storage_buffer = iree_hal_file_storage_buffer(file);
+  if (!storage_buffer) return IREE_HAL_VULKAN_TRANSFER_STRATEGY_NATIVE;
+  if (offset > IREE_DEVICE_SIZE_MAX) {
+    return IREE_HAL_VULKAN_TRANSFER_STRATEGY_COMPUTE;
+  }
+  return iree_hal_vulkan_logical_device_transfer_strategy_for_buffer_range(
+      storage_buffer, (iree_device_size_t)offset, length);
+}
+
+static iree_hal_vulkan_transfer_strategy_t
+iree_hal_vulkan_logical_device_merge_copy_transfer_strategies(
+    iree_hal_vulkan_transfer_strategy_t lhs,
+    iree_hal_vulkan_transfer_strategy_t rhs) {
+  return lhs == IREE_HAL_VULKAN_TRANSFER_STRATEGY_NATIVE &&
+                 rhs == IREE_HAL_VULKAN_TRANSFER_STRATEGY_NATIVE
+             ? IREE_HAL_VULKAN_TRANSFER_STRATEGY_NATIVE
+             : IREE_HAL_VULKAN_TRANSFER_STRATEGY_COMPUTE;
+}
+
+static VkQueueFlags
+iree_hal_vulkan_logical_device_queue_flags_for_transfer_strategy(
+    iree_hal_vulkan_transfer_strategy_t strategy) {
+  return strategy == IREE_HAL_VULKAN_TRANSFER_STRATEGY_NATIVE
+             ? VK_QUEUE_TRANSFER_BIT
+             : VK_QUEUE_COMPUTE_BIT;
+}
+
+static iree_status_t iree_hal_vulkan_logical_device_select_transfer_queue_lane(
+    iree_hal_vulkan_logical_device_t* device,
+    iree_hal_queue_affinity_t queue_affinity, VkQueueFlags required_queue_flags,
+    iree_hal_vulkan_queue_t** out_queue) {
+  const iree_hal_vulkan_queue_role_t preferred_role =
+      iree_any_bit_set(required_queue_flags, VK_QUEUE_COMPUTE_BIT)
+          ? IREE_HAL_VULKAN_QUEUE_ROLE_COMPUTE
+          : IREE_HAL_VULKAN_QUEUE_ROLE_TRANSFER;
+  return iree_hal_vulkan_logical_device_select_queue_lane(
+      device, preferred_role, required_queue_flags, queue_affinity, out_queue);
+}
+
 static iree_status_t
 iree_hal_vulkan_logical_device_resolve_command_buffer_queue_affinity(
     iree_hal_vulkan_logical_device_t* device,
@@ -1247,13 +1307,19 @@ static iree_status_t iree_hal_vulkan_logical_device_queue_fill(
     iree_host_size_t pattern_length, iree_hal_fill_flags_t flags) {
   iree_hal_vulkan_logical_device_t* device =
       iree_hal_vulkan_logical_device_cast(base_device);
+  const iree_hal_vulkan_transfer_strategy_t strategy =
+      iree_hal_vulkan_logical_device_transfer_strategy_for_buffer_range(
+          target_buffer, target_offset, length);
+  const VkQueueFlags required_queue_flags =
+      iree_hal_vulkan_logical_device_queue_flags_for_transfer_strategy(
+          strategy);
   iree_hal_vulkan_queue_t* queue = NULL;
-  IREE_RETURN_IF_ERROR(iree_hal_vulkan_logical_device_select_queue_lane(
-      device, IREE_HAL_VULKAN_QUEUE_ROLE_TRANSFER, VK_QUEUE_TRANSFER_BIT,
-      queue_affinity, &queue));
+  IREE_RETURN_IF_ERROR(
+      iree_hal_vulkan_logical_device_select_transfer_queue_lane(
+          device, queue_affinity, required_queue_flags, &queue));
   return iree_hal_vulkan_queue_submit_fill(
       queue, wait_semaphore_list, signal_semaphore_list, target_buffer,
-      target_offset, length, pattern, pattern_length, flags);
+      target_offset, length, pattern, pattern_length, strategy, flags);
 }
 
 static iree_status_t iree_hal_vulkan_logical_device_queue_update(
@@ -1265,13 +1331,19 @@ static iree_status_t iree_hal_vulkan_logical_device_queue_update(
     iree_device_size_t length, iree_hal_update_flags_t flags) {
   iree_hal_vulkan_logical_device_t* device =
       iree_hal_vulkan_logical_device_cast(base_device);
+  const iree_hal_vulkan_transfer_strategy_t strategy =
+      iree_hal_vulkan_logical_device_transfer_strategy_for_buffer_range(
+          target_buffer, target_offset, length);
+  const VkQueueFlags required_queue_flags =
+      iree_hal_vulkan_logical_device_queue_flags_for_transfer_strategy(
+          strategy);
   iree_hal_vulkan_queue_t* queue = NULL;
-  IREE_RETURN_IF_ERROR(iree_hal_vulkan_logical_device_select_queue_lane(
-      device, IREE_HAL_VULKAN_QUEUE_ROLE_TRANSFER, VK_QUEUE_TRANSFER_BIT,
-      queue_affinity, &queue));
+  IREE_RETURN_IF_ERROR(
+      iree_hal_vulkan_logical_device_select_transfer_queue_lane(
+          device, queue_affinity, required_queue_flags, &queue));
   return iree_hal_vulkan_queue_submit_update(
       queue, wait_semaphore_list, signal_semaphore_list, source_buffer,
-      source_offset, target_buffer, target_offset, length, flags);
+      source_offset, target_buffer, target_offset, length, strategy, flags);
 }
 
 static iree_status_t iree_hal_vulkan_logical_device_queue_copy(
@@ -1283,13 +1355,22 @@ static iree_status_t iree_hal_vulkan_logical_device_queue_copy(
     iree_device_size_t length, iree_hal_copy_flags_t flags) {
   iree_hal_vulkan_logical_device_t* device =
       iree_hal_vulkan_logical_device_cast(base_device);
+  const iree_hal_vulkan_transfer_strategy_t strategy =
+      iree_hal_vulkan_logical_device_merge_copy_transfer_strategies(
+          iree_hal_vulkan_logical_device_transfer_strategy_for_buffer_range(
+              source_buffer, source_offset, length),
+          iree_hal_vulkan_logical_device_transfer_strategy_for_buffer_range(
+              target_buffer, target_offset, length));
+  const VkQueueFlags required_queue_flags =
+      iree_hal_vulkan_logical_device_queue_flags_for_transfer_strategy(
+          strategy);
   iree_hal_vulkan_queue_t* queue = NULL;
-  IREE_RETURN_IF_ERROR(iree_hal_vulkan_logical_device_select_queue_lane(
-      device, IREE_HAL_VULKAN_QUEUE_ROLE_TRANSFER, VK_QUEUE_TRANSFER_BIT,
-      queue_affinity, &queue));
+  IREE_RETURN_IF_ERROR(
+      iree_hal_vulkan_logical_device_select_transfer_queue_lane(
+          device, queue_affinity, required_queue_flags, &queue));
   return iree_hal_vulkan_queue_submit_copy(
       queue, wait_semaphore_list, signal_semaphore_list, source_buffer,
-      source_offset, target_buffer, target_offset, length, flags);
+      source_offset, target_buffer, target_offset, length, strategy, flags);
 }
 
 static iree_status_t iree_hal_vulkan_logical_device_queue_read(
@@ -1301,13 +1382,22 @@ static iree_status_t iree_hal_vulkan_logical_device_queue_read(
     iree_device_size_t length, iree_hal_read_flags_t flags) {
   iree_hal_vulkan_logical_device_t* device =
       iree_hal_vulkan_logical_device_cast(base_device);
+  const iree_hal_vulkan_transfer_strategy_t strategy =
+      iree_hal_vulkan_logical_device_merge_copy_transfer_strategies(
+          iree_hal_vulkan_logical_device_transfer_strategy_for_buffer_range(
+              target_buffer, target_offset, length),
+          iree_hal_vulkan_logical_device_transfer_strategy_for_file_range(
+              source_file, source_offset, length));
+  const VkQueueFlags required_queue_flags =
+      iree_hal_vulkan_logical_device_queue_flags_for_transfer_strategy(
+          strategy);
   iree_hal_vulkan_queue_t* queue = NULL;
-  IREE_RETURN_IF_ERROR(iree_hal_vulkan_logical_device_select_queue_lane(
-      device, IREE_HAL_VULKAN_QUEUE_ROLE_TRANSFER, VK_QUEUE_TRANSFER_BIT,
-      queue_affinity, &queue));
+  IREE_RETURN_IF_ERROR(
+      iree_hal_vulkan_logical_device_select_transfer_queue_lane(
+          device, queue_affinity, required_queue_flags, &queue));
   return iree_hal_vulkan_queue_submit_read(
       queue, wait_semaphore_list, signal_semaphore_list, source_file,
-      source_offset, target_buffer, target_offset, length, flags);
+      source_offset, target_buffer, target_offset, length, strategy, flags);
 }
 
 static iree_status_t iree_hal_vulkan_logical_device_queue_write(
@@ -1319,13 +1409,22 @@ static iree_status_t iree_hal_vulkan_logical_device_queue_write(
     iree_device_size_t length, iree_hal_write_flags_t flags) {
   iree_hal_vulkan_logical_device_t* device =
       iree_hal_vulkan_logical_device_cast(base_device);
+  const iree_hal_vulkan_transfer_strategy_t strategy =
+      iree_hal_vulkan_logical_device_merge_copy_transfer_strategies(
+          iree_hal_vulkan_logical_device_transfer_strategy_for_buffer_range(
+              source_buffer, source_offset, length),
+          iree_hal_vulkan_logical_device_transfer_strategy_for_file_range(
+              target_file, target_offset, length));
+  const VkQueueFlags required_queue_flags =
+      iree_hal_vulkan_logical_device_queue_flags_for_transfer_strategy(
+          strategy);
   iree_hal_vulkan_queue_t* queue = NULL;
-  IREE_RETURN_IF_ERROR(iree_hal_vulkan_logical_device_select_queue_lane(
-      device, IREE_HAL_VULKAN_QUEUE_ROLE_TRANSFER, VK_QUEUE_TRANSFER_BIT,
-      queue_affinity, &queue));
+  IREE_RETURN_IF_ERROR(
+      iree_hal_vulkan_logical_device_select_transfer_queue_lane(
+          device, queue_affinity, required_queue_flags, &queue));
   return iree_hal_vulkan_queue_submit_write(
       queue, wait_semaphore_list, signal_semaphore_list, source_buffer,
-      source_offset, target_file, target_offset, length, flags);
+      source_offset, target_file, target_offset, length, strategy, flags);
 }
 
 static iree_status_t iree_hal_vulkan_logical_device_queue_host_call(
