@@ -80,6 +80,16 @@ struct NativeReplayCapture {
   VkPipeline pipeline = VK_NULL_HANDLE;
 };
 
+struct ByteCopyParameters {
+  uint64_t source_address;
+  uint64_t target_address;
+  uint32_t source_byte_offset;
+  uint32_t target_byte_offset;
+  uint32_t target_word_count;
+  uint32_t flags;
+};
+static_assert(sizeof(ByteCopyParameters) == 32);
+
 static NativeReplayCapture* g_native_replay_capture = nullptr;
 
 static VKAPI_ATTR VkResult VKAPI_CALL
@@ -312,7 +322,8 @@ TEST_F(VulkanCommandBufferTest, ReplaysDebugGroupsAsDebugUtilsLabels) {
   g_native_replay_capture = nullptr;
 }
 
-TEST_F(VulkanCommandBufferTest, IndirectTransferRequiresPerIssueRecording) {
+TEST_F(VulkanCommandBufferTest,
+       FixedShapeIndirectTransferUsesReplayPublication) {
   CommandBufferPtr command_buffer = CreateCommandBuffer(
       /*binding_capacity=*/1, IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT);
   ASSERT_NE(command_buffer, nullptr);
@@ -326,8 +337,12 @@ TEST_F(VulkanCommandBufferTest, IndirectTransferRequiresPerIssueRecording) {
       &kPattern, sizeof(kPattern), IREE_HAL_FILL_FLAG_NONE));
   IREE_ASSERT_OK(iree_hal_command_buffer_end(command_buffer.get()));
 
-  EXPECT_TRUE(iree_hal_vulkan_command_buffer_requires_per_issue_recording(
+  EXPECT_FALSE(iree_hal_vulkan_command_buffer_requires_per_issue_recording(
       command_buffer.get()));
+  iree_device_size_t publication_length = 0;
+  IREE_ASSERT_OK(iree_hal_vulkan_command_buffer_native_bda_publication_length(
+      command_buffer.get(), &publication_length));
+  EXPECT_GT(publication_length, 0u);
 }
 
 TEST_F(VulkanCommandBufferTest, SystemScopeUsesHostMemoryDomain) {
@@ -432,8 +447,13 @@ TEST_F(VulkanCommandBufferTest,
   EXPECT_EQ(
       iree_hal_vulkan_command_buffer_required_queue_flags(command_buffer.get()),
       VK_QUEUE_COMPUTE_BIT);
-  EXPECT_TRUE(iree_hal_vulkan_command_buffer_has_compute_transfers(
+  EXPECT_FALSE(iree_hal_vulkan_command_buffer_requires_per_issue_recording(
       command_buffer.get()));
+
+  iree_device_size_t publication_length = 0;
+  IREE_ASSERT_OK(iree_hal_vulkan_command_buffer_native_bda_publication_length(
+      command_buffer.get(), &publication_length));
+  ASSERT_EQ(publication_length, 2 * sizeof(ByteCopyParameters));
 
   const iree_hal_buffer_params_t buffer_params = {
       /*.usage=*/IREE_HAL_BUFFER_USAGE_TRANSFER,
@@ -481,35 +501,101 @@ TEST_F(VulkanCommandBufferTest,
       reinterpret_cast<VkDevice>(static_cast<uintptr_t>(0x1234));
   const VkCommandBuffer native_command_buffer =
       reinterpret_cast<VkCommandBuffer>(static_cast<uintptr_t>(0x5678));
+  std::array<ByteCopyParameters, 2> published_parameters = {};
+  const iree_hal_vulkan_command_buffer_bda_publication_t publication = {
+      /*.host_span=*/iree_make_byte_span(published_parameters.data(),
+                                         sizeof(published_parameters)),
+      /*.device_address=*/0x5000,
+  };
 
   IREE_ASSERT_OK(iree_hal_vulkan_command_buffer_record_native(
       command_buffer.get(), &syms, logical_device, &debug_utils, &builtins,
-      native_command_buffer, /*usage_flags=*/0, VK_NULL_HANDLE, binding_table,
-      /*bda_publication=*/nullptr, &binding_cache,
+      native_command_buffer, /*usage_flags=*/0, binding_table, &publication,
+      &binding_cache,
       /*profile_marker=*/nullptr, iree_allocator_system()));
 
   EXPECT_EQ(capture.copy_buffer_count, 0);
   EXPECT_EQ(capture.bind_pipeline_count, 2);
   EXPECT_EQ(capture.pipeline, builtins.byte_transfer_pipelines.copy_pipeline);
   EXPECT_EQ(capture.dispatch_count, 2);
-  ASSERT_EQ(capture.pipeline_barrier_count, 3);
+  ASSERT_EQ(capture.pipeline_barrier_count, 4);
   EXPECT_EQ(capture.memory_barriers[0].srcStageMask,
             VK_PIPELINE_STAGE_2_TRANSFER_BIT);
   EXPECT_EQ(capture.memory_barriers[0].dstStageMask,
             VK_PIPELINE_STAGE_2_TRANSFER_BIT |
                 VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
   EXPECT_EQ(capture.memory_barriers[1].srcStageMask,
-            VK_PIPELINE_STAGE_2_TRANSFER_BIT |
-                VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
+            VK_PIPELINE_STAGE_2_HOST_BIT);
+  EXPECT_EQ(capture.memory_barriers[1].srcAccessMask,
+            VK_ACCESS_2_HOST_WRITE_BIT);
   EXPECT_EQ(capture.memory_barriers[1].dstStageMask,
-            VK_PIPELINE_STAGE_2_TRANSFER_BIT |
-                VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
+            VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
+  EXPECT_EQ(capture.memory_barriers[1].dstAccessMask,
+            VK_ACCESS_2_SHADER_READ_BIT);
   EXPECT_EQ(capture.memory_barriers[2].srcStageMask,
             VK_PIPELINE_STAGE_2_TRANSFER_BIT |
                 VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
   EXPECT_EQ(capture.memory_barriers[2].dstStageMask,
+            VK_PIPELINE_STAGE_2_TRANSFER_BIT |
+                VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
+  EXPECT_EQ(capture.memory_barriers[3].srcStageMask,
+            VK_PIPELINE_STAGE_2_TRANSFER_BIT |
+                VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
+  EXPECT_EQ(capture.memory_barriers[3].dstStageMask,
             VK_PIPELINE_STAGE_2_TRANSFER_BIT);
+  for (const ByteCopyParameters& parameters : published_parameters) {
+    EXPECT_EQ(parameters.source_address, 0x1000u);
+    EXPECT_EQ(parameters.target_address, 0x2000u);
+    EXPECT_EQ(parameters.source_byte_offset, 0u);
+    EXPECT_EQ(parameters.target_byte_offset, 0u);
+    EXPECT_EQ(parameters.target_word_count, 1u);
+    EXPECT_EQ(parameters.flags, 0u);
+  }
+  ASSERT_EQ(capture.push_constants_length, 40u);
+  uint64_t pushed_parameters_address = 0;
+  uint32_t pushed_flags = 0;
+  memcpy(&pushed_parameters_address, capture.push_constants.data(),
+         sizeof(pushed_parameters_address));
+  memcpy(&pushed_flags, capture.push_constants.data() + 36,
+         sizeof(pushed_flags));
+  EXPECT_EQ(pushed_parameters_address,
+            publication.device_address + sizeof(ByteCopyParameters));
+  EXPECT_EQ(pushed_flags, 2u);
+
+  cached_slots[0].device_address = 0x3000;
+  IREE_ASSERT_OK(iree_hal_vulkan_command_buffer_publish_bda_replay_data(
+      command_buffer.get(), binding_table, &publication, &binding_cache));
+  for (const ByteCopyParameters& parameters : published_parameters) {
+    EXPECT_EQ(parameters.source_address, 0x3000u);
+    EXPECT_EQ(parameters.target_address, 0x2000u);
+  }
   g_native_replay_capture = nullptr;
+}
+
+TEST_F(VulkanCommandBufferTest,
+       DynamicIndirectTransferRequiresPerIssueRecording) {
+  CommandBufferPtr command_buffer = CreateCommandBuffer(
+      /*binding_capacity=*/1, IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT);
+  ASSERT_NE(command_buffer, nullptr);
+
+  constexpr uint8_t kPattern = 0xA5;
+  IREE_ASSERT_OK(iree_hal_command_buffer_begin(command_buffer.get()));
+  IREE_ASSERT_OK(iree_hal_command_buffer_fill_buffer(
+      command_buffer.get(),
+      iree_hal_make_indirect_buffer_ref(/*buffer_slot=*/0, /*offset=*/0,
+                                        IREE_HAL_WHOLE_BUFFER),
+      &kPattern, sizeof(kPattern), IREE_HAL_FILL_FLAG_NONE));
+  IREE_ASSERT_OK(iree_hal_command_buffer_end(command_buffer.get()));
+
+  EXPECT_EQ(
+      iree_hal_vulkan_command_buffer_required_queue_flags(command_buffer.get()),
+      VK_QUEUE_COMPUTE_BIT);
+  EXPECT_TRUE(iree_hal_vulkan_command_buffer_requires_per_issue_recording(
+      command_buffer.get()));
+  iree_device_size_t publication_length = 0;
+  IREE_ASSERT_OK(iree_hal_vulkan_command_buffer_native_bda_publication_length(
+      command_buffer.get(), &publication_length));
+  EXPECT_EQ(publication_length, 0u);
 }
 
 TEST_F(VulkanCommandBufferTest,

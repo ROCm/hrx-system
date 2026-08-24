@@ -6,6 +6,7 @@
 
 #include "iree/hal/drivers/vulkan/byte_transfer.h"
 
+#include <array>
 #include <cstdint>
 #include <cstring>
 #include <vector>
@@ -29,6 +30,36 @@ struct ByteCopyPushConstants {
   uint32_t flags;
 };
 static_assert(sizeof(ByteCopyPushConstants) == 40);
+
+struct ByteFillPushConstants {
+  uint64_t target_address;
+  uint32_t fill_pattern;
+  uint32_t fill_pattern_width;
+  uint32_t target_byte_offset;
+  uint32_t byte_length;
+  uint32_t target_word_count;
+  uint32_t first_target_word;
+  uint32_t pattern_byte_offset;
+  uint32_t flags;
+};
+static_assert(sizeof(ByteFillPushConstants) == 40);
+
+struct ByteCopyParameters {
+  uint64_t source_address;
+  uint64_t target_address;
+  uint32_t source_byte_offset;
+  uint32_t target_byte_offset;
+  uint32_t target_word_count;
+  uint32_t flags;
+};
+static_assert(sizeof(ByteCopyParameters) == 32);
+
+struct ByteFillParameters {
+  uint64_t target_address;
+  uint32_t target_byte_offset;
+  uint32_t target_word_count;
+};
+static_assert(sizeof(ByteFillParameters) == 16);
 
 struct ByteTransferCapture {
   std::vector<ByteCopyPushConstants> push_constants;
@@ -131,6 +162,136 @@ TEST(ByteTransferTest, CopySegmentsBoundSourceAndTargetByteIndices) {
     }
   }
   g_byte_transfer_capture = nullptr;
+}
+
+TEST(ByteTransferTest, IndirectCopyPublishesResolvedParameters) {
+  constexpr VkDeviceAddress kSourceAddress = 0x1001;
+  constexpr VkDeviceAddress kTargetAddress = 0x2002;
+  constexpr VkDeviceSize kLength = 17;
+  iree_device_size_t publication_length = 0;
+  IREE_ASSERT_OK(iree_hal_vulkan_byte_transfer_copy_publication_length(
+      kLength, &publication_length));
+  ASSERT_EQ(publication_length, sizeof(ByteCopyParameters));
+
+  ByteCopyParameters parameters = {};
+  IREE_ASSERT_OK(iree_hal_vulkan_byte_transfer_publish_copy(
+      kSourceAddress, kTargetAddress, kLength,
+      iree_make_byte_span(&parameters, sizeof(parameters))));
+  EXPECT_EQ(parameters.source_address, 0x1000u);
+  EXPECT_EQ(parameters.target_address, 0x2000u);
+  EXPECT_EQ(parameters.source_byte_offset, 1u);
+  EXPECT_EQ(parameters.target_byte_offset, 2u);
+  EXPECT_EQ(parameters.target_word_count, 5u);
+  EXPECT_EQ(parameters.flags, 0u);
+
+  iree_hal_vulkan_byte_transfer_pipelines_t pipelines = {};
+  pipelines.syms.vkCmdBindPipeline = FakeCmdBindPipeline;
+  pipelines.syms.vkCmdPushConstants = FakeCmdPushConstants;
+  pipelines.syms.vkCmdDispatch = FakeCmdDispatch;
+  pipelines.max_workgroup_count_x = UINT32_MAX;
+  pipelines.pipeline_layout =
+      reinterpret_cast<VkPipelineLayout>(static_cast<uintptr_t>(0x1111));
+  pipelines.copy_pipeline =
+      reinterpret_cast<VkPipeline>(static_cast<uintptr_t>(0x2222));
+  const VkCommandBuffer command_buffer =
+      reinterpret_cast<VkCommandBuffer>(static_cast<uintptr_t>(0x3333));
+  ByteTransferCapture capture;
+  g_byte_transfer_capture = &capture;
+  IREE_ASSERT_OK(iree_hal_vulkan_byte_transfer_record_copy_indirect(
+      &pipelines, command_buffer, /*publication_address=*/0x4000, kLength));
+  ASSERT_EQ(capture.push_constants.size(), 1u);
+  EXPECT_EQ(capture.push_constants[0].source_address, 0x4000u);
+  EXPECT_EQ(capture.push_constants[0].byte_length, kLength);
+  EXPECT_EQ(capture.push_constants[0].target_word_count, 5u);
+  EXPECT_EQ(capture.push_constants[0].flags, 2u);
+  g_byte_transfer_capture = nullptr;
+}
+
+TEST(ByteTransferTest, IndirectFillPublishesResolvedParameters) {
+  constexpr VkDeviceAddress kTargetAddress = 0x2003;
+  constexpr VkDeviceSize kLength = 17;
+  iree_device_size_t publication_length = 0;
+  IREE_ASSERT_OK(iree_hal_vulkan_byte_transfer_fill_publication_length(
+      kLength, &publication_length));
+  ASSERT_EQ(publication_length, sizeof(ByteFillParameters));
+
+  ByteFillParameters parameters = {};
+  IREE_ASSERT_OK(iree_hal_vulkan_byte_transfer_publish_fill(
+      kTargetAddress, kLength,
+      iree_make_byte_span(&parameters, sizeof(parameters))));
+  EXPECT_EQ(parameters.target_address, 0x2000u);
+  EXPECT_EQ(parameters.target_byte_offset, 3u);
+  EXPECT_EQ(parameters.target_word_count, 5u);
+
+  iree_hal_vulkan_byte_transfer_pipelines_t pipelines = {};
+  pipelines.syms.vkCmdBindPipeline = FakeCmdBindPipeline;
+  pipelines.syms.vkCmdPushConstants = FakeCmdPushConstants;
+  pipelines.syms.vkCmdDispatch = FakeCmdDispatch;
+  pipelines.max_workgroup_count_x = UINT32_MAX;
+  pipelines.pipeline_layout =
+      reinterpret_cast<VkPipelineLayout>(static_cast<uintptr_t>(0x1111));
+  pipelines.fill_pipeline =
+      reinterpret_cast<VkPipeline>(static_cast<uintptr_t>(0x2222));
+  const VkCommandBuffer command_buffer =
+      reinterpret_cast<VkCommandBuffer>(static_cast<uintptr_t>(0x3333));
+  constexpr uint16_t kPattern = 0xBEEF;
+  ByteTransferCapture capture;
+  g_byte_transfer_capture = &capture;
+  IREE_ASSERT_OK(iree_hal_vulkan_byte_transfer_record_fill_indirect(
+      &pipelines, command_buffer, /*publication_address=*/0x5000, kLength,
+      reinterpret_cast<const uint8_t*>(&kPattern), sizeof(kPattern)));
+  ASSERT_EQ(capture.push_constants.size(), 1u);
+  ByteFillPushConstants constants = {};
+  memcpy(&constants, &capture.push_constants[0], sizeof(constants));
+  EXPECT_EQ(constants.target_address, 0x5000u);
+  EXPECT_EQ(constants.fill_pattern, kPattern);
+  EXPECT_EQ(constants.fill_pattern_width, sizeof(kPattern));
+  EXPECT_EQ(constants.byte_length, kLength);
+  EXPECT_EQ(constants.target_word_count, 5u);
+  EXPECT_EQ(constants.flags, 2u);
+  g_byte_transfer_capture = nullptr;
+}
+
+TEST(ByteTransferTest, IndirectParametersSegmentLargeTransfers) {
+  constexpr VkDeviceSize kSegmentLength =
+      static_cast<VkDeviceSize>(UINT32_MAX) - 3;
+  constexpr VkDeviceSize kLength = kSegmentLength + 5;
+  constexpr VkDeviceAddress kSourceAddress = 0x100000001ull;
+  constexpr VkDeviceAddress kTargetAddress = 0x300000002ull;
+
+  iree_device_size_t copy_publication_length = 0;
+  IREE_ASSERT_OK(iree_hal_vulkan_byte_transfer_copy_publication_length(
+      kLength, &copy_publication_length));
+  ASSERT_EQ(copy_publication_length, 2 * sizeof(ByteCopyParameters));
+  std::array<ByteCopyParameters, 2> copy_parameters = {};
+  IREE_ASSERT_OK(iree_hal_vulkan_byte_transfer_publish_copy(
+      kSourceAddress, kTargetAddress, kLength,
+      iree_make_byte_span(copy_parameters.data(), sizeof(copy_parameters))));
+  EXPECT_EQ(copy_parameters[0].source_address, 0x100000000ull);
+  EXPECT_EQ(copy_parameters[0].target_address, 0x300000000ull);
+  EXPECT_EQ(copy_parameters[0].source_byte_offset, 1u);
+  EXPECT_EQ(copy_parameters[0].target_byte_offset, 2u);
+  EXPECT_EQ(copy_parameters[0].target_word_count, 1u << 30);
+  EXPECT_EQ(copy_parameters[1].source_address, 0x1FFFFFFFCull);
+  EXPECT_EQ(copy_parameters[1].target_address, 0x3FFFFFFFCull);
+  EXPECT_EQ(copy_parameters[1].source_byte_offset, 1u);
+  EXPECT_EQ(copy_parameters[1].target_byte_offset, 2u);
+  EXPECT_EQ(copy_parameters[1].target_word_count, 2u);
+
+  iree_device_size_t fill_publication_length = 0;
+  IREE_ASSERT_OK(iree_hal_vulkan_byte_transfer_fill_publication_length(
+      kLength, &fill_publication_length));
+  ASSERT_EQ(fill_publication_length, 2 * sizeof(ByteFillParameters));
+  std::array<ByteFillParameters, 2> fill_parameters = {};
+  IREE_ASSERT_OK(iree_hal_vulkan_byte_transfer_publish_fill(
+      kTargetAddress, kLength,
+      iree_make_byte_span(fill_parameters.data(), sizeof(fill_parameters))));
+  EXPECT_EQ(fill_parameters[0].target_address, 0x300000000ull);
+  EXPECT_EQ(fill_parameters[0].target_byte_offset, 2u);
+  EXPECT_EQ(fill_parameters[0].target_word_count, 1u << 30);
+  EXPECT_EQ(fill_parameters[1].target_address, 0x3FFFFFFFCull);
+  EXPECT_EQ(fill_parameters[1].target_byte_offset, 2u);
+  EXPECT_EQ(fill_parameters[1].target_word_count, 2u);
 }
 
 #endif  // !IREE_HAL_VULKAN_LIBVULKAN_STATIC

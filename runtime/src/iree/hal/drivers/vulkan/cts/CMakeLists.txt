@@ -455,6 +455,7 @@ iree_cc_test(
     "${PROJECT_SOURCE_DIR}/runtime/src/iree/hal/cts/util/test_main.cc"
   DEPS
     ::backends
+    ::replay_cache_backends
     iree::base::tooling::flags
     iree::hal::cts::command_buffer::fill_buffer_test
     iree::hal::cts::util::registry
@@ -477,6 +478,7 @@ iree_cc_test(
     "${PROJECT_SOURCE_DIR}/runtime/src/iree/hal/cts/util/test_main.cc"
   DEPS
     ::backends
+    ::replay_cache_backends
     iree::base::tooling::flags
     iree::hal::cts::command_buffer::update_buffer_test
     iree::hal::cts::util::registry
@@ -499,6 +501,7 @@ iree_cc_test(
     "${PROJECT_SOURCE_DIR}/runtime/src/iree/hal/cts/util/test_main.cc"
   DEPS
     ::backends
+    ::replay_cache_backends
     iree::base::tooling::flags
     iree::hal::cts::command_buffer::copy_buffer_test
     iree::hal::cts::util::registry
@@ -596,6 +599,32 @@ iree_cc_test(
     iree::base::tooling::flags
     iree::hal
     iree::hal::cts::util::profile_test_util
+    iree::hal::cts::util::registry
+    iree::hal::cts::util::test_base
+    iree::hal::drivers::vulkan
+    iree::hal::drivers::vulkan::headers
+    iree::testing::gtest
+  LABELS
+    "vulkan_uses_vk_khr_buffer_device_address"
+    "iree-build-requirement=runtime.hal.vulkan"
+    "iree-run-requirement=runtime.resource.vulkan_device"
+    "runtime-resource=vulkan-device"
+  RESOURCE_GROUP
+    iree-hal-drivers-vulkan-tests
+)
+endif()
+
+if(IREE_HAL_DRIVER_VULKAN)
+iree_cc_test(
+  NAME
+    transfer_replay_cache_tests
+  SRCS
+    "${PROJECT_SOURCE_DIR}/runtime/src/iree/hal/cts/util/test_main.cc"
+    "transfer_replay_cache_test.cc"
+  DEPS
+    ::replay_cache_backends
+    iree::base::tooling::flags
+    iree::hal
     iree::hal::cts::util::registry
     iree::hal::cts::util::test_base
     iree::hal::drivers::vulkan
