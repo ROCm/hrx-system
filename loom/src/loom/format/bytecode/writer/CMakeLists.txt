@@ -42,4 +42,20 @@ loom_cc_library(
   PUBLIC
 )
 
+loom_cc_library(
+  NAME
+    numbering
+  HDRS
+    "numbering.h"
+  SRCS
+    "numbering.c"
+  DEPS
+    ::catalog
+    iree::base
+    iree::base::internal::arena
+    loom::ir
+    loom::ops::op_defs
+  PUBLIC
+)
+
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

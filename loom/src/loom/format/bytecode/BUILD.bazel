@@ -229,6 +229,7 @@ loom_cc_library(
         "//loom/src/loom/format:low_repr",
         "//loom/src/loom/format/bytecode/writer:catalog",
         "//loom/src/loom/format/bytecode/writer:encoder",
+        "//loom/src/loom/format/bytecode/writer:numbering",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:op_defs",
         "//loom/src/loom/ops/module",

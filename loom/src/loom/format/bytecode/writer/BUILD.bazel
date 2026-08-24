@@ -40,3 +40,17 @@ loom_cc_library(
         "//runtime/src/iree/io:stream",
     ],
 )
+
+loom_cc_library(
+    name = "numbering",
+    srcs = ["numbering.c"],
+    hdrs = ["numbering.h"],
+    visibility = ["//loom/src/loom/format/bytecode:__pkg__"],
+    deps = [
+        ":catalog",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_defs",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)

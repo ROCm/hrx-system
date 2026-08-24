@@ -263,6 +263,7 @@ loom_cc_library(
     loom::analysis::symbol_references
     loom::format::bytecode::writer::catalog
     loom::format::bytecode::writer::encoder
+    loom::format::bytecode::writer::numbering
     loom::format::low_repr
     loom::ir
     loom::ops::module
