@@ -1,0 +1,16 @@
+// RUN: emit source-low output=low
+
+x86.target<scalar> @target
+
+func.def target(@target) @raw_byte_roundtrip(%source: buffer, %source_offset: offset, %target: buffer, %target_offset: offset) -> (i32) {
+  %byte = buffer.load.i8.u %source[%source_offset]
+  buffer.store.i8 %byte, %target[%target_offset]
+  func.return %byte : i32
+}
+
+// ----
+low.func.def target<x86.scalar.core>(@target) abi(object_function) @raw_byte_roundtrip(%source: reg<x86.gpr64>, %source_offset: reg<x86.gpr64>, %target: reg<x86.gpr64>, %target_offset: reg<x86.gpr64>) -> (reg<x86.gpr32>) asm {
+  %byte = movzx.load.indexed.u8.gpr32 %source, %source_offset {disp32 = 0, scale = 1}
+  mov.store.indexed.u8.gpr32 %byte, %target, %target_offset {disp32 = 0, scale = 1}
+  return %byte
+}

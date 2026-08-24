@@ -692,6 +692,56 @@ def _buffer_view_rule() -> ValueAliasRule:
     )
 
 
+def _buffer_load_i8_u_rule(
+    descriptor_lookup: _DescriptorLookup,
+) -> DescriptorRule:
+    descriptor = descriptor_lookup("x86.scalar.movzx.load.indexed.u8.gpr32")
+    return DescriptorRule(
+        source_op=buffer.buffer_load_i8_u,
+        descriptor=descriptor,
+        guards=(
+            Guard.value_type("byte_offset", _OFFSET),
+            Guard.value_type("result", _I32),
+        ),
+        emit=(
+            _op_emit(
+                descriptor=descriptor,
+                operands={
+                    "base": ValueRef.operand("source"),
+                    "index": ValueRef.operand("byte_offset"),
+                },
+                results={"dst": ValueRef.result("result")},
+                immediates={"disp32": 0, "scale": 1},
+            ),
+        ),
+    )
+
+
+def _buffer_store_i8_rule(
+    descriptor_lookup: _DescriptorLookup,
+) -> DescriptorRule:
+    descriptor = descriptor_lookup("x86.scalar.mov.store.indexed.u8.gpr32")
+    return DescriptorRule(
+        source_op=buffer.buffer_store_i8,
+        descriptor=descriptor,
+        guards=(
+            Guard.value_type("value", _I32),
+            Guard.value_type("byte_offset", _OFFSET),
+        ),
+        emit=(
+            _op_emit(
+                descriptor=descriptor,
+                operands={
+                    "value": ValueRef.operand("value"),
+                    "base": ValueRef.operand("target"),
+                    "index": ValueRef.operand("byte_offset"),
+                },
+                immediates={"disp32": 0, "scale": 1},
+            ),
+        ),
+    )
+
+
 def _index_cast_alias_rule(
     input_type: TypePattern,
     result_type: TypePattern,
@@ -1080,6 +1130,8 @@ def x86_scalar_core_cases(
 ) -> Sequence[ContractCase]:
     return (
         _buffer_view_rule(),
+        _buffer_load_i8_u_rule(descriptor_lookup),
+        _buffer_store_i8_rule(descriptor_lookup),
         _binary_rule(
             scalar_arithmetic.scalar_addi,
             _I32,

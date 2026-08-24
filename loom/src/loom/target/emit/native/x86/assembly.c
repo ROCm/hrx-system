@@ -232,6 +232,18 @@ static iree_status_t loom_x86_append_gpr8_result(
                                     loom_op_const_results(op)[result_index]);
 }
 
+static iree_status_t loom_x86_append_gpr8_operand(
+    const loom_native_assembly_packet_context_t* context,
+    iree_host_size_t operand_index) {
+  const loom_op_t* op = context->packet->node->op;
+  if (operand_index >= op->operand_count) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "x86 assembly operand index is out of range");
+  }
+  return loom_x86_append_gpr8_value(context,
+                                    loom_op_const_operands(op)[operand_index]);
+}
+
 static loom_named_attr_slice_t loom_x86_packet_attrs(
     const loom_native_assembly_packet_context_t* context) {
   const loom_op_t* op = context->packet->node->op;
@@ -893,6 +905,15 @@ static iree_status_t loom_x86_append_load_packet(
   IREE_RETURN_IF_ERROR(loom_x86_append_result(context, 0));
   IREE_RETURN_IF_ERROR(
       iree_string_builder_append_cstring(context->builder, ", "));
+  const loom_low_descriptor_memory_effect_summary_t memory_effects =
+      loom_low_descriptor_memory_effect_summary(
+          context->schedule->target.descriptor_set,
+          context->packet->descriptor);
+  if (memory_effects.read_byte_count == 1 &&
+      memory_effects.read_unknown_width_count == 0) {
+    IREE_RETURN_IF_ERROR(
+        iree_string_builder_append_cstring(context->builder, "byte ptr "));
+  }
   return loom_x86_append_memory_operand(context, loom_op_const_operands(op)[0],
                                         index_value_id, scale, displacement);
 }
@@ -923,11 +944,22 @@ static iree_status_t loom_x86_append_store_packet(
   IREE_RETURN_IF_ERROR(loom_x86_append_mnemonic(context));
   IREE_RETURN_IF_ERROR(
       iree_string_builder_append_cstring(context->builder, " "));
+  const loom_low_descriptor_memory_effect_summary_t memory_effects =
+      loom_low_descriptor_memory_effect_summary(
+          context->schedule->target.descriptor_set,
+          context->packet->descriptor);
+  const bool is_byte_store = memory_effects.write_byte_count == 1 &&
+                             memory_effects.write_unknown_width_count == 0;
+  if (is_byte_store) {
+    IREE_RETURN_IF_ERROR(
+        iree_string_builder_append_cstring(context->builder, "byte ptr "));
+  }
   IREE_RETURN_IF_ERROR(loom_x86_append_memory_operand(
       context, base_value_id, index_value_id, scale, displacement));
   IREE_RETURN_IF_ERROR(
       iree_string_builder_append_cstring(context->builder, ", "));
-  return loom_x86_append_operand(context, 0);
+  return is_byte_store ? loom_x86_append_gpr8_operand(context, 0)
+                       : loom_x86_append_operand(context, 0);
 }
 
 static iree_status_t loom_x86_append_const_packet(

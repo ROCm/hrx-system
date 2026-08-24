@@ -111,6 +111,7 @@ loom_check_test_suite(
     loom_check_file_test
   SRCS
     "test/source_low/allocation.loom-test"
+    "test/source_low/buffer_raw.loom-test"
     "test/source_low/source_low.loom-test"
     "test/source_low/source_low_avx2.loom-test"
     "test/source_low/source_low_avx512_packed_dot.loom-test"
