@@ -52,19 +52,15 @@ iree_status_t loom_link_plan_build_kernel_configuration(
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "kernel symbol ordinal is out of range");
   }
-  const loom_link_symbol_facet_schema_t schema = kernel->facets.schema;
-  if (!iree_any_bit_set(schema.interfaces, LOOM_SYMBOL_INTERFACE_KERNEL)) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "selected symbol is not a kernel");
-  }
-  if (schema.kernel_configuration_region_index_plus_one == 0) {
+  if (loom_link_module_index_symbol_facet_ordinal(
+          kernel, LOOM_LINK_SYMBOL_FACET_KERNEL_CONFIGURATION) ==
+      LOOM_LINK_MODULE_INDEX_INVALID_ORDINAL) {
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "selected kernel has no configuration root");
+                            "selected symbol has no kernel configuration");
   }
   const loom_link_plan_root_facet_t root = {
       .symbol_ordinal = kernel_symbol_ordinal,
-      .source_root_region_index_plus_one =
-          schema.kernel_configuration_region_index_plus_one,
+      .kind = LOOM_LINK_SYMBOL_FACET_KERNEL_CONFIGURATION,
   };
   loom_link_plan_options_t options = {0};
   options.mode = LOOM_LINK_PLAN_SELECTIVE;
@@ -99,8 +95,7 @@ static iree_status_t loom_link_kernel_config_resolve_source(
   }
   if (!loom_link_plan_contains_facet(
           plan, kernel_symbol_ordinal,
-          indexed_symbol->facets.schema
-              .kernel_configuration_region_index_plus_one)) {
+          LOOM_LINK_SYMBOL_FACET_KERNEL_CONFIGURATION)) {
     return iree_make_status(
         IREE_STATUS_FAILED_PRECONDITION,
         "kernel configuration is not selected by the link plan");

@@ -95,8 +95,10 @@ loom_cc_library(
     module_index
   HDRS
     "module_index.h"
+    "symbol_facet.h"
   SRCS
     "module_index.c"
+    "symbol_facet.c"
   DEPS
     ::symbol_policy
     iree::base
@@ -369,6 +371,7 @@ loom_cc_test(
     loom::format::text::parser
     loom::ir
     loom::ops::check
+    loom::ops::command
     loom::ops::config
     loom::ops::func
     loom::ops::module

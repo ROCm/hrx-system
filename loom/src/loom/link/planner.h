@@ -65,14 +65,13 @@ typedef bool (*loom_link_plan_strip_symbol_fn_t)(
     void* user_data, const loom_link_module_index_t* index,
     const loom_link_module_index_symbol_t* symbol);
 
-// One identity-resolved selective root facet. The symbol contract is always
-// selected. A nonzero source root also selects that independently bounded root
-// region without selecting sibling roots.
+// One identity-resolved selective root facet. The symbol's primary
+// contract/definition facet is always selected with the requested facet.
 typedef struct loom_link_plan_root_facet_t {
   // Index-wide symbol ordinal resolved by the requesting subsystem.
   iree_host_size_t symbol_ordinal;
-  // Source root region index plus one, or zero for the contract alone.
-  uint8_t source_root_region_index_plus_one;
+  // Semantic facet requested by the selective link product.
+  loom_link_symbol_facet_kind_t kind;
 } loom_link_plan_root_facet_t;
 
 // Options controlling one planning operation.
@@ -121,9 +120,9 @@ typedef struct loom_link_plan_symbol_t {
   loom_link_plan_live_reason_t reason;
   // Plan-local ordinal that caused this dependency, or INVALID_ORDINAL.
   iree_host_size_t cause_ordinal;
-  // Plan-local contract facet ordinal for this symbol.
-  iree_host_size_t contract_facet_ordinal;
-  // Number of selected contract and root-region facets.
+  // Plan-local ordinal of the selected primary contract/definition facet.
+  iree_host_size_t primary_facet_ordinal;
+  // Number of selected semantic facets.
   uint16_t selected_facet_count;
   // Root name that caused this selection when reason is ROOT.
   iree_string_view_t root_name;
@@ -137,8 +136,8 @@ typedef struct loom_link_plan_facet_t {
   iree_host_size_t symbol_plan_ordinal;
   // Index-wide symbol ordinal owning this facet.
   iree_host_size_t symbol_ordinal;
-  // Source root region index plus one, or zero for the symbol contract.
-  uint8_t source_root_region_index_plus_one;
+  // Selected semantic facet.
+  loom_link_symbol_facet_kind_t kind;
   // Why this facet is live.
   loom_link_plan_live_reason_t reason;
   // Plan-local facet ordinal that caused this selection, or INVALID_ORDINAL.
@@ -192,11 +191,11 @@ loom_link_template_family_ordinal_t loom_link_plan_demanded_template_family_at(
 bool loom_link_plan_contains_symbol(const loom_link_plan_t* plan,
                                     iree_host_size_t symbol_ordinal);
 
-// Returns true when the contract or named source root of |symbol_ordinal| is
-// live in |plan|. Every valid facet of an archive-selected symbol is live.
+// Returns true when semantic |kind| of |symbol_ordinal| is live in |plan|.
+// Every valid facet of an archive-selected symbol is live.
 bool loom_link_plan_contains_facet(const loom_link_plan_t* plan,
                                    iree_host_size_t symbol_ordinal,
-                                   uint8_t source_root_region_index_plus_one);
+                                   loom_link_symbol_facet_kind_t kind);
 
 // Returns true when a concrete provider satisfied |symbol_ordinal|'s
 // compile-time provider imports. Every availability anchor for the symbol is

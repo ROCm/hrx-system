@@ -185,10 +185,23 @@ kernel.def @dispatch_rows(%element_count: index) {
     EXPECT_EQ(kernel->facets.schema.kernel_configuration_region_index_plus_one,
               1u);
     EXPECT_EQ(kernel->facets.schema.body_region_index_plus_one, 2u);
+    EXPECT_EQ(kernel->facets.schema.facet_count, 3u);
     EXPECT_EQ(loom_link_module_index_facet_count(index), 3u);
-    EXPECT_EQ(loom_link_module_index_symbol_facet_ordinal(kernel, 0), 0u);
-    EXPECT_EQ(loom_link_module_index_symbol_facet_ordinal(kernel, 1), 1u);
-    EXPECT_EQ(loom_link_module_index_symbol_facet_ordinal(kernel, 2), 2u);
+    EXPECT_EQ(loom_link_module_index_symbol_facet_kind_at(kernel, 0),
+              LOOM_LINK_SYMBOL_FACET_KERNEL_CONTRACT);
+    EXPECT_EQ(loom_link_module_index_symbol_facet_kind_at(kernel, 1),
+              LOOM_LINK_SYMBOL_FACET_KERNEL_CONFIGURATION);
+    EXPECT_EQ(loom_link_module_index_symbol_facet_kind_at(kernel, 2),
+              LOOM_LINK_SYMBOL_FACET_KERNEL_IMPLEMENTATION);
+    EXPECT_EQ(loom_link_module_index_symbol_facet_ordinal(
+                  kernel, LOOM_LINK_SYMBOL_FACET_KERNEL_CONTRACT),
+              0u);
+    EXPECT_EQ(loom_link_module_index_symbol_facet_ordinal(
+                  kernel, LOOM_LINK_SYMBOL_FACET_KERNEL_CONFIGURATION),
+              1u);
+    EXPECT_EQ(loom_link_module_index_symbol_facet_ordinal(
+                  kernel, LOOM_LINK_SYMBOL_FACET_KERNEL_IMPLEMENTATION),
+              2u);
   };
 
   IndexPtr materialized_index = CreateIndex();
@@ -288,17 +301,18 @@ kernel.def target(@dispatch_target) @dispatch_rows(%element_count: index) {
     EXPECT_FALSE(loom_link_plan_contains_symbol(config_plan.get(),
                                                 implementation_only->ordinal));
     EXPECT_TRUE(
-        loom_link_plan_contains_facet(config_plan.get(), kernel->ordinal, 0));
+        loom_link_plan_contains_facet(config_plan.get(), kernel->ordinal,
+                                      LOOM_LINK_SYMBOL_FACET_KERNEL_CONTRACT));
     EXPECT_TRUE(loom_link_plan_contains_facet(
         config_plan.get(), kernel->ordinal,
-        kernel->facets.schema.kernel_configuration_region_index_plus_one));
+        LOOM_LINK_SYMBOL_FACET_KERNEL_CONFIGURATION));
     EXPECT_FALSE(loom_link_plan_contains_facet(
         config_plan.get(), kernel->ordinal,
-        kernel->facets.schema.body_region_index_plus_one));
+        LOOM_LINK_SYMBOL_FACET_KERNEL_IMPLEMENTATION));
 
     PlanPtr full_plan = BuildPlan(index.get(), IREE_SV("dispatch_rows"));
     EXPECT_EQ(loom_link_plan_symbol_count(full_plan.get()), 3u);
-    EXPECT_EQ(loom_link_plan_facet_count(full_plan.get()), 6u);
+    EXPECT_EQ(loom_link_plan_facet_count(full_plan.get()), 5u);
     EXPECT_TRUE(
         loom_link_plan_contains_symbol(full_plan.get(), kernel->ordinal));
     EXPECT_TRUE(
@@ -307,10 +321,10 @@ kernel.def target(@dispatch_target) @dispatch_rows(%element_count: index) {
                                                implementation_only->ordinal));
     EXPECT_TRUE(loom_link_plan_contains_facet(
         full_plan.get(), kernel->ordinal,
-        kernel->facets.schema.kernel_configuration_region_index_plus_one));
+        LOOM_LINK_SYMBOL_FACET_KERNEL_CONFIGURATION));
     EXPECT_TRUE(loom_link_plan_contains_facet(
         full_plan.get(), kernel->ordinal,
-        kernel->facets.schema.body_region_index_plus_one));
+        LOOM_LINK_SYMBOL_FACET_KERNEL_IMPLEMENTATION));
 
     loom_link_plan_materialization_environment_t environment = {};
     environment.context = &context_;
@@ -419,15 +433,15 @@ kernel.def target(@dispatch_target) @dispatch_rows(%element_count: index) {
                                                materialized_kernel->ordinal));
     EXPECT_FALSE(loom_link_plan_contains_symbol(
         materialized_plan.get(), materialized_implementation_only->ordinal));
-    EXPECT_TRUE(loom_link_plan_contains_facet(materialized_plan.get(),
-                                              materialized_kernel->ordinal, 0));
     EXPECT_TRUE(loom_link_plan_contains_facet(
         materialized_plan.get(), materialized_kernel->ordinal,
-        materialized_kernel->facets.schema
-            .kernel_configuration_region_index_plus_one));
+        LOOM_LINK_SYMBOL_FACET_KERNEL_CONTRACT));
+    EXPECT_TRUE(loom_link_plan_contains_facet(
+        materialized_plan.get(), materialized_kernel->ordinal,
+        LOOM_LINK_SYMBOL_FACET_KERNEL_CONFIGURATION));
     EXPECT_FALSE(loom_link_plan_contains_facet(
         materialized_plan.get(), materialized_kernel->ordinal,
-        materialized_kernel->facets.schema.body_region_index_plus_one));
+        LOOM_LINK_SYMBOL_FACET_KERNEL_IMPLEMENTATION));
   }
   loom_module_free(source_module);
 
@@ -449,14 +463,14 @@ kernel.def target(@dispatch_target) @dispatch_rows(%element_count: index) {
   EXPECT_FALSE(
       loom_link_plan_contains_symbol(plan.get(), implementation_only->ordinal));
   EXPECT_TRUE(
-      loom_link_plan_contains_facet(plan.get(), indexed_kernel->ordinal, 0));
+      loom_link_plan_contains_facet(plan.get(), indexed_kernel->ordinal,
+                                    LOOM_LINK_SYMBOL_FACET_KERNEL_CONTRACT));
   EXPECT_TRUE(loom_link_plan_contains_facet(
       plan.get(), indexed_kernel->ordinal,
-      indexed_kernel->facets.schema
-          .kernel_configuration_region_index_plus_one));
+      LOOM_LINK_SYMBOL_FACET_KERNEL_CONFIGURATION));
   EXPECT_FALSE(loom_link_plan_contains_facet(
       plan.get(), indexed_kernel->ordinal,
-      indexed_kernel->facets.schema.body_region_index_plus_one));
+      LOOM_LINK_SYMBOL_FACET_KERNEL_IMPLEMENTATION));
 
   const loom_link_module_index_provider_t* provider =
       loom_link_module_index_symbol_provider(index.get(), indexed_kernel);

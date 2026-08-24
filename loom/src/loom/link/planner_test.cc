@@ -20,6 +20,7 @@
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
 #include "loom/ops/check/ops.h"
+#include "loom/ops/command/ops.h"
 #include "loom/ops/config/ops.h"
 #include "loom/ops/func/ops.h"
 #include "loom/ops/module/ops.h"
@@ -55,6 +56,8 @@ class LinkPlannerTest : public ::testing::Test {
     loom_context_initialize(iree_allocator_system(), &context_);
     RegisterDialect(LOOM_DIALECT_CHECK, loom_check_dialect_vtables,
                     loom_check_dialect_op_semantics);
+    RegisterDialect(LOOM_DIALECT_COMMAND, loom_command_dialect_vtables,
+                    loom_command_dialect_op_semantics);
     RegisterDialect(LOOM_DIALECT_CONFIG, loom_config_dialect_vtables,
                     loom_config_dialect_op_semantics);
     RegisterDialect(LOOM_DIALECT_FUNC, loom_func_dialect_vtables,
@@ -162,6 +165,23 @@ class LinkPlannerTest : public ::testing::Test {
     IREE_CHECK_OK(loom_link_module_index_add_bytecode(
         index, iree_make_const_byte_span(bytes.data(), bytes.size()), name,
         /*index_options=*/nullptr, &options, &provider_ordinal));
+    return provider_ordinal;
+  }
+
+  iree_host_size_t AddText(loom_link_module_index_t* index,
+                           iree_string_view_t source, iree_string_view_t name,
+                           loom_link_provider_role_t role) {
+    loom_link_module_index_add_options_t options = {
+        /*.provider_name=*/name,
+        /*.role=*/role,
+    };
+    loom_text_parse_options_t parse_options = {
+        /*.diagnostic_sink=*/{},
+        /*.max_errors=*/20,
+    };
+    iree_host_size_t provider_ordinal = LOOM_LINK_MODULE_INDEX_INVALID_ORDINAL;
+    IREE_CHECK_OK(loom_link_module_index_add_text(
+        index, source, name, &parse_options, &options, &provider_ordinal));
     return provider_ordinal;
   }
 
@@ -338,8 +358,8 @@ func.def @unused_private(%x: i32) -> (i32) {
 }
 
 TEST_F(LinkPlannerTest,
-       FacetRootsFilterAndUpgradeMultiRegionClosureAcrossProviders) {
-  loom_module_t* module = Parse(IREE_SV(R"(
+       OrdinaryDefinitionFacetCombinesEveryRootAcrossProviderForms) {
+  const iree_string_view_t source = IREE_SV(R"(
 test.record @config_dependency
 test.record @implementation_dependency
 
@@ -350,23 +370,11 @@ test.split_func @split_root() {
   test.symbol_array_attrs [@implementation_dependency] using []
   test.yield
 }
-)"));
+)");
+  loom_module_t* module = Parse(source);
   const std::vector<uint8_t> bytecode = WriteModule(module);
 
   auto verify_index = [&](const loom_link_module_index_t* index) {
-    auto find_plan_facet = [](const loom_link_plan_t* plan,
-                              iree_host_size_t symbol_ordinal,
-                              uint8_t source_root_region_index_plus_one) {
-      for (iree_host_size_t i = 0; i < loom_link_plan_facet_count(plan); ++i) {
-        const loom_link_plan_facet_t* facet = loom_link_plan_facet_at(plan, i);
-        if (facet->symbol_ordinal == symbol_ordinal &&
-            facet->source_root_region_index_plus_one ==
-                source_root_region_index_plus_one) {
-          return facet;
-        }
-      }
-      return static_cast<const loom_link_plan_facet_t*>(nullptr);
-    };
     const loom_link_module_index_module_t* indexed_module =
         loom_link_module_index_module_at(index, 0);
     ASSERT_NE(indexed_module, nullptr);
@@ -383,68 +391,133 @@ test.split_func @split_root() {
     ASSERT_NE(config_dependency, nullptr);
     ASSERT_NE(implementation_dependency, nullptr);
 
-    const loom_link_plan_root_facet_t config_root = {
-        /*.symbol_ordinal=*/root->ordinal,
-        /*.source_root_region_index_plus_one=*/1,
-    };
-    loom_link_plan_options_t config_options = {};
-    config_options.mode = LOOM_LINK_PLAN_SELECTIVE;
-    config_options.root_facets = {1, &config_root};
-    PlanPtr config_plan = BuildPlan(index, &config_options);
-    EXPECT_TRUE(ContainsSymbol(config_plan.get(), root));
-    EXPECT_TRUE(ContainsSymbol(config_plan.get(), config_dependency));
-    EXPECT_FALSE(ContainsSymbol(config_plan.get(), implementation_dependency));
-    EXPECT_TRUE(
-        loom_link_plan_contains_facet(config_plan.get(), root->ordinal, 0));
-    EXPECT_TRUE(
-        loom_link_plan_contains_facet(config_plan.get(), root->ordinal, 1));
-    EXPECT_FALSE(
-        loom_link_plan_contains_facet(config_plan.get(), root->ordinal, 2));
-    const loom_link_plan_facet_t* config_root_facet =
-        find_plan_facet(config_plan.get(), root->ordinal, 1);
-    const loom_link_plan_facet_t* config_dependency_facet =
-        find_plan_facet(config_plan.get(), config_dependency->ordinal, 0);
-    ASSERT_NE(config_root_facet, nullptr);
-    ASSERT_NE(config_dependency_facet, nullptr);
-    EXPECT_EQ(config_dependency_facet->cause_ordinal,
-              config_root_facet->ordinal);
+    EXPECT_EQ(root->facets.schema.root_region_count, 2u);
+    EXPECT_EQ(root->facets.schema.facet_count, 1u);
+    EXPECT_EQ(loom_link_module_index_symbol_facet_kind_at(root, 0),
+              LOOM_LINK_SYMBOL_FACET_DEFINITION);
+    EXPECT_EQ(loom_link_module_index_symbol_source_root_facet_kind(root, 0),
+              LOOM_LINK_SYMBOL_FACET_DEFINITION);
+    EXPECT_EQ(loom_link_module_index_symbol_source_root_facet_kind(root, 1),
+              LOOM_LINK_SYMBOL_FACET_DEFINITION);
+    EXPECT_EQ(loom_link_module_index_symbol_source_root_facet_kind(root, 2),
+              LOOM_LINK_SYMBOL_FACET_DEFINITION);
 
-    const loom_link_plan_root_facet_t upgraded_roots[] = {
-        config_root,
-        {
-            /*.symbol_ordinal=*/root->ordinal,
-            /*.source_root_region_index_plus_one=*/2,
-        },
+    const loom_link_plan_root_facet_t definition_root = {
+        /*.symbol_ordinal=*/root->ordinal,
+        /*.kind=*/LOOM_LINK_SYMBOL_FACET_DEFINITION,
     };
-    loom_link_plan_options_t upgraded_options = {};
-    upgraded_options.mode = LOOM_LINK_PLAN_SELECTIVE;
-    upgraded_options.root_facets = {IREE_ARRAYSIZE(upgraded_roots),
-                                    upgraded_roots};
-    PlanPtr upgraded_plan = BuildPlan(index, &upgraded_options);
-    EXPECT_TRUE(ContainsSymbol(upgraded_plan.get(), root));
-    EXPECT_TRUE(ContainsSymbol(upgraded_plan.get(), config_dependency));
-    EXPECT_TRUE(ContainsSymbol(upgraded_plan.get(), implementation_dependency));
-    EXPECT_TRUE(
-        loom_link_plan_contains_facet(upgraded_plan.get(), root->ordinal, 0));
-    EXPECT_TRUE(
-        loom_link_plan_contains_facet(upgraded_plan.get(), root->ordinal, 1));
-    EXPECT_TRUE(
-        loom_link_plan_contains_facet(upgraded_plan.get(), root->ordinal, 2));
-    const loom_link_plan_facet_t* implementation_root_facet =
-        find_plan_facet(upgraded_plan.get(), root->ordinal, 2);
-    const loom_link_plan_facet_t* implementation_dependency_facet =
-        find_plan_facet(upgraded_plan.get(), implementation_dependency->ordinal,
-                        0);
-    ASSERT_NE(implementation_root_facet, nullptr);
-    ASSERT_NE(implementation_dependency_facet, nullptr);
-    EXPECT_EQ(implementation_dependency_facet->cause_ordinal,
-              implementation_root_facet->ordinal);
+    loom_link_plan_options_t options = {};
+    options.mode = LOOM_LINK_PLAN_SELECTIVE;
+    options.root_facets = {1, &definition_root};
+    PlanPtr plan = BuildPlan(index, &options);
+    EXPECT_TRUE(ContainsSymbol(plan.get(), root));
+    EXPECT_TRUE(ContainsSymbol(plan.get(), config_dependency));
+    EXPECT_TRUE(ContainsSymbol(plan.get(), implementation_dependency));
+    EXPECT_EQ(loom_link_plan_facet_count(plan.get()), 3u);
+    EXPECT_TRUE(loom_link_plan_contains_facet(
+        plan.get(), root->ordinal, LOOM_LINK_SYMBOL_FACET_DEFINITION));
   };
 
   IndexPtr materialized_index = CreateIndex();
   AddMaterialized(materialized_index.get(), module, IREE_SV("materialized"),
                   LOOM_LINK_PROVIDER_ROLE_INPUT);
   verify_index(materialized_index.get());
+
+  IndexPtr text_index = CreateIndex();
+  AddText(text_index.get(), source, IREE_SV("module.loom"),
+          LOOM_LINK_PROVIDER_ROLE_INPUT);
+  verify_index(text_index.get());
+
+  IndexPtr bytecode_index = CreateIndex();
+  AddBytecode(bytecode_index.get(), bytecode, IREE_SV("module.loombc"),
+              LOOM_LINK_PROVIDER_ROLE_INPUT);
+  verify_index(bytecode_index.get());
+}
+
+TEST_F(LinkPlannerTest,
+       CommandFacetsSeparateContractAndImplementationAcrossProviderForms) {
+  const iree_string_view_t source = IREE_SV(R"(
+command.program.def @leaf() launch() {
+  command.return
+}
+
+command.program.def @root() launch() {
+  command.program.launch @leaf() : ()
+  command.return
+}
+)");
+  loom_module_t* module = Parse(source);
+  const std::vector<uint8_t> bytecode = WriteModule(module);
+
+  auto verify_index = [&](const loom_link_module_index_t* index) {
+    const loom_link_module_index_symbol_t* root =
+        loom_link_module_index_lookup_name(index, IREE_SV("root"));
+    const loom_link_module_index_symbol_t* leaf =
+        loom_link_module_index_lookup_name(index, IREE_SV("leaf"));
+    ASSERT_NE(root, nullptr);
+    ASSERT_NE(leaf, nullptr);
+    EXPECT_EQ(root->facets.schema.facet_count, 2u);
+    EXPECT_EQ(loom_link_module_index_symbol_facet_kind_at(root, 0),
+              LOOM_LINK_SYMBOL_FACET_COMMAND_CONTRACT);
+    EXPECT_EQ(loom_link_module_index_symbol_facet_kind_at(root, 1),
+              LOOM_LINK_SYMBOL_FACET_COMMAND_IMPLEMENTATION);
+
+    const loom_link_plan_root_facet_t contract_root = {
+        /*.symbol_ordinal=*/root->ordinal,
+        /*.kind=*/LOOM_LINK_SYMBOL_FACET_COMMAND_CONTRACT,
+    };
+    loom_link_plan_options_t contract_options = {};
+    contract_options.mode = LOOM_LINK_PLAN_SELECTIVE;
+    contract_options.root_facets = {1, &contract_root};
+    PlanPtr contract_plan = BuildPlan(index, &contract_options);
+    EXPECT_TRUE(ContainsSymbol(contract_plan.get(), root));
+    EXPECT_FALSE(ContainsSymbol(contract_plan.get(), leaf));
+    EXPECT_TRUE(
+        loom_link_plan_contains_facet(contract_plan.get(), root->ordinal,
+                                      LOOM_LINK_SYMBOL_FACET_COMMAND_CONTRACT));
+    EXPECT_FALSE(loom_link_plan_contains_facet(
+        contract_plan.get(), root->ordinal,
+        LOOM_LINK_SYMBOL_FACET_COMMAND_IMPLEMENTATION));
+
+    const loom_link_plan_root_facet_t invalid_root = {
+        /*.symbol_ordinal=*/root->ordinal,
+        /*.kind=*/LOOM_LINK_SYMBOL_FACET_KERNEL_CONFIGURATION,
+    };
+    loom_link_plan_options_t invalid_options = {};
+    invalid_options.mode = LOOM_LINK_PLAN_SELECTIVE;
+    invalid_options.root_facets = {1, &invalid_root};
+    PlanPtr invalid_plan;
+    IREE_EXPECT_STATUS_IS(
+        IREE_STATUS_INVALID_ARGUMENT,
+        BuildPlanStatus(index, &invalid_options, &invalid_plan));
+
+    const loom_link_plan_root_facet_t implementation_root = {
+        /*.symbol_ordinal=*/root->ordinal,
+        /*.kind=*/LOOM_LINK_SYMBOL_FACET_COMMAND_IMPLEMENTATION,
+    };
+    loom_link_plan_options_t implementation_options = {};
+    implementation_options.mode = LOOM_LINK_PLAN_SELECTIVE;
+    implementation_options.root_facets = {1, &implementation_root};
+    PlanPtr implementation_plan = BuildPlan(index, &implementation_options);
+    EXPECT_TRUE(ContainsSymbol(implementation_plan.get(), root));
+    EXPECT_TRUE(ContainsSymbol(implementation_plan.get(), leaf));
+    EXPECT_TRUE(
+        loom_link_plan_contains_facet(implementation_plan.get(), root->ordinal,
+                                      LOOM_LINK_SYMBOL_FACET_COMMAND_CONTRACT));
+    EXPECT_TRUE(loom_link_plan_contains_facet(
+        implementation_plan.get(), root->ordinal,
+        LOOM_LINK_SYMBOL_FACET_COMMAND_IMPLEMENTATION));
+  };
+
+  IndexPtr materialized_index = CreateIndex();
+  AddMaterialized(materialized_index.get(), module, IREE_SV("materialized"),
+                  LOOM_LINK_PROVIDER_ROLE_INPUT);
+  verify_index(materialized_index.get());
+
+  IndexPtr text_index = CreateIndex();
+  AddText(text_index.get(), source, IREE_SV("module.loom"),
+          LOOM_LINK_PROVIDER_ROLE_INPUT);
+  verify_index(text_index.get());
 
   IndexPtr bytecode_index = CreateIndex();
   AddBytecode(bytecode_index.get(), bytecode, IREE_SV("module.loombc"),
