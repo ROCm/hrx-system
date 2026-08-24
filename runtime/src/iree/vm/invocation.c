@@ -742,7 +742,7 @@ static bool iree_vm_invocation_execution_is_current(
   return execution->process_storage == process_storage.data;
 }
 
-static iree_status_t iree_vm_invocation_dispatch_start(
+iree_status_t iree_vm_invocation_dispatch_start(
     iree_vm_invocation_t* invocation,
     const iree_vm_linked_module_t* linked_module, uint16_t function_ordinal,
     bool may_yield, const iree_vm_call_packet_t* call,

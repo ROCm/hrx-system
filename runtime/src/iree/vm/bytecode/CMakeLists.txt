@@ -56,6 +56,8 @@ iree_cc_library(
   SRCS
     "interpreter.c"
     "interpreter.h"
+    "interpreter_call.c"
+    "interpreter_call.h"
     "interpreter_float.h"
     "interpreter_float_math.c"
     "interpreter_float_math.h"

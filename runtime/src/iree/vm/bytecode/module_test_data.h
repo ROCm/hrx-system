@@ -44,6 +44,9 @@ std::vector<uint8_t> BuildFunctionModuleImage();
 // Builds one function-global and overflow-ABI fixture.
 std::vector<uint8_t> BuildFunctionStateModuleImage();
 
+// Builds one scalar direct, indirect, and suspending call fixture.
+std::vector<uint8_t> BuildCallModuleImage();
+
 // Builds the exact 17-record launch-configuration fixture plus empty and
 // full-signature no-op decomposition functions.
 std::vector<uint8_t> BuildLaunchConfigModuleImage();

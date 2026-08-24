@@ -43,6 +43,12 @@ from model.isa.validation import (
     VALUE_REGISTER_RANGE_FROM_MEMORY_FORMAT,
     ZERO,
 )
+from model.isa.validation import (
+    CONTROL_CALL as CONTROL_CALL_RULE,
+)
+from model.isa.validation import (
+    CONTROL_CALL_INDIRECT as CONTROL_CALL_INDIRECT_RULE,
+)
 from model.schema import EntityReference, FieldReference, RuleUse, ScalarEncoding
 from model.specification import Projection
 
@@ -262,6 +268,64 @@ def _validate_verification_form(
         ):
             raise ValueError(
                 f"{instruction.mnemonic}: switch-target constraint does not "
+                "match its runtime verification form"
+            )
+    elif verification_form == "CONTROL_CALL":
+        if instruction.byte_length != 8:
+            raise ValueError(f"{instruction.mnemonic}: direct call is not 8 bytes")
+        require_field(
+            1,
+            1,
+            SELECTOR.entity_id,
+            (InstructionFieldRole.IMMEDIATE,),
+            rule_arguments=(EntityReference("core.selector.control.call.target"),),
+        )
+        for offset in (2, 4):
+            require_field(
+                offset,
+                2,
+                CONSTRAINT_MEMBER.entity_id,
+                (InstructionFieldRole.CONSTRAINT_MEMBER,),
+                rule_arguments=("control.call",),
+            )
+        require_zero(6, 2)
+        expected_constraint = RuleUse(
+            CONTROL_CALL_RULE.entity_id,
+            (
+                FieldReference("target_kind_u8"),
+                FieldReference("target_ordinal_u16"),
+                FieldReference("direct_ref_move_mask_u16"),
+            ),
+        )
+        if instruction.constraints != (expected_constraint,):
+            raise ValueError(
+                f"{instruction.mnemonic}: call constraint does not match its "
+                "runtime verification form"
+            )
+    elif verification_form == "CONTROL_CALL_INDIRECT":
+        if instruction.byte_length != 8:
+            raise ValueError(f"{instruction.mnemonic}: indirect call is not 8 bytes")
+        require_function(1)
+        for offset in (2, 4):
+            require_field(
+                offset,
+                2,
+                CONSTRAINT_MEMBER.entity_id,
+                (InstructionFieldRole.CONSTRAINT_MEMBER,),
+                rule_arguments=("control.call.indirect",),
+            )
+        require_zero(6, 2)
+        expected_constraint = RuleUse(
+            CONTROL_CALL_INDIRECT_RULE.entity_id,
+            (
+                FieldReference("target_f8"),
+                FieldReference("callable_type_ordinal_u16"),
+                FieldReference("direct_ref_move_mask_u16"),
+            ),
+        )
+        if instruction.constraints != (expected_constraint,):
+            raise ValueError(
+                f"{instruction.mnemonic}: indirect-call constraint does not "
                 "match its runtime verification form"
             )
     elif verification_form == "CONTROL_ASSERT":

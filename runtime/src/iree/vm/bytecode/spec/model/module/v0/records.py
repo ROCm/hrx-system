@@ -612,13 +612,14 @@ _RECORD_DEFINITIONS = (
         4,
         (
             WireField(
-                name="signature_ordinal_u16",
+                name="callable_type_ordinal_u16",
                 offset=0,
                 encoding_id=U16.entity_id,
-                description="Exact function signature ordinal.",
+                description="Canonical callable type implemented by the function.",
                 validation=(
                     RuleUse(
-                        ORDINAL.entity_id, (EntityReference(SIGNATURES.entity_id),)
+                        ORDINAL.entity_id,
+                        (EntityReference(CALLABLE_TYPES.entity_id),),
                     ),
                 ),
             ),

@@ -801,12 +801,23 @@ static iree_status_t iree_vm_bytecode_verify_exports(
 static iree_status_t iree_vm_bytecode_verify_function_signature_structure(
     const iree_vm_bytecode_module_layout_t* layout,
     const iree_vm_bytecode_v0_function_row_t* row) {
-  if (row->signature_ordinal_u16 >= layout->signatures.count) {
+  if (row->callable_type_ordinal_u16 >= layout->callable_types.count) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "function signature ordinal is out of range");
+                            "function callable type ordinal is out of range");
+  }
+  const iree_vm_bytecode_v0_callable_type_row_t* callable_type =
+      iree_vm_bytecode_function_callable_type(layout, row);
+  const iree_vm_bytecode_callable_type_flags_t expected_callable_flags =
+      iree_any_bit_set(row->flags_u16, IREE_VM_BYTECODE_FUNCTION_FLAG_MAY_YIELD)
+          ? IREE_VM_BYTECODE_CALLABLE_TYPE_FLAG_MAY_YIELD
+          : 0;
+  if (callable_type->flags_u16 != expected_callable_flags) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "function behavior does not match its canonical callable type");
   }
   const iree_vm_bytecode_v0_signature_row_t* signature =
-      &layout->signatures.rows[row->signature_ordinal_u16];
+      iree_vm_bytecode_function_signature(layout, row);
   const uint16_t required_value_registers =
       iree_min(16u, iree_max(signature->argument_value_count_u16,
                              signature->result_value_count_u16));
@@ -1342,8 +1353,10 @@ static iree_status_t iree_vm_bytecode_verify_exports_against_functions(
         &layout->callable_types.rows[export_row->callable_type_ordinal_u16];
     const iree_vm_bytecode_v0_function_row_t* function =
         &layout->functions.rows[export_row->function_ordinal_u16];
+    const iree_vm_bytecode_v0_callable_type_row_t* function_callable_type =
+        iree_vm_bytecode_function_callable_type(layout, function);
     if (callable_type->signature_ordinal_u16 !=
-            function->signature_ordinal_u16 ||
+            function_callable_type->signature_ordinal_u16 ||
         (iree_any_bit_set(function->flags_u16,
                           IREE_VM_BYTECODE_FUNCTION_FLAG_MAY_YIELD) &&
          !iree_any_bit_set(callable_type->flags_u16,

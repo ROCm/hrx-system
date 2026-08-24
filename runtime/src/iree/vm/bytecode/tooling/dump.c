@@ -530,11 +530,13 @@ static iree_status_t iree_vm_bytecode_dump_function(
     iree_string_builder_t* builder) {
   const iree_vm_bytecode_v0_function_row_t* function =
       &module->layout.functions.rows[ordinal];
+  const iree_vm_bytecode_v0_callable_type_row_t* callable_type =
+      iree_vm_bytecode_function_callable_type(&module->layout, function);
   const iree_vm_bytecode_v0_signature_row_t* signature =
-      &module->layout.signatures.rows[function->signature_ordinal_u16];
+      iree_vm_bytecode_function_signature(&module->layout, function);
   const iree_vm_bytecode_v0_signature_descriptor_row_t* descriptors =
-      iree_vm_bytecode_signature_descriptors(&module->layout.signatures,
-                                             function->signature_ordinal_u16);
+      iree_vm_bytecode_signature_descriptors(
+          &module->layout.signatures, callable_type->signature_ordinal_u16);
   const uint32_t argument_count =
       iree_vm_bytecode_signature_argument_count(signature);
   const uint32_t result_count =
@@ -542,10 +544,12 @@ static iree_status_t iree_vm_bytecode_dump_function(
 
   IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
       builder,
-      "  [%" PRIu32 "] signature[%" PRIu16 "] bytecode=[%" PRIu32 ", +%" PRIu32
-      ") registers=(%" PRIu16 ", %" PRIu16 ", %" PRIu16 ") locals=(%" PRIu16
-      ", %" PRIu32 ", %" PRIu32 ") switch_targets=%" PRIu32,
-      ordinal, function->signature_ordinal_u16, function->bytecode_offset_u32,
+      "  [%" PRIu32 "] callable[%" PRIu16 "] signature[%" PRIu16
+      "] bytecode=[%" PRIu32 ", +%" PRIu32 ") registers=(%" PRIu16 ", %" PRIu16
+      ", %" PRIu16 ") locals=(%" PRIu16 ", %" PRIu32 ", %" PRIu32
+      ") switch_targets=%" PRIu32,
+      ordinal, function->callable_type_ordinal_u16,
+      callable_type->signature_ordinal_u16, function->bytecode_offset_u32,
       function->bytecode_length_u32, function->value_register_count_u16,
       function->ref_register_count_u16, function->function_register_count_u16,
       function->local_byte_length_u16, function->local_ref_count_u32,

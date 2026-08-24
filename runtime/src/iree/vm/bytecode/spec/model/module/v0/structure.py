@@ -1170,11 +1170,11 @@ VALIDATION_OBLIGATIONS = (
     ValidationObligation(
         entity_id="core.validation.module.functions.rows",
         since=CORE_0,
-        summary="Validate signature, flags, register counts, local extents, and reserved fields.",
+        summary="Validate callable type, flags, register counts, local extents, and reserved fields.",
         scope=ValidationScope.SECTION,
         kind="validate_function_rows",
         inputs=(RecordFieldReference(RECORDS_BY_KEY["function_row"].entity_id),),
-        normative_text="Validate signature, flags, register counts, local extents, and reserved fields.",
+        normative_text="Validate callable type, flags, register counts, local extents, and reserved fields.",
         section_id=SECTIONS_BY_KEY["functions"].entity_id,
     ),
     ValidationObligation(
@@ -1186,7 +1186,7 @@ VALIDATION_OBLIGATIONS = (
         inputs=(
             RecordFieldReference(
                 RECORDS_BY_KEY["function_row"].entity_id,
-                "signature_ordinal_u16",
+                "callable_type_ordinal_u16",
             ),
             RecordFieldReference(
                 RECORDS_BY_KEY["function_row"].entity_id,

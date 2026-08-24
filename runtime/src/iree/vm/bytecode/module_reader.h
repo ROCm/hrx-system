@@ -31,6 +31,24 @@ iree_vm_bytecode_signature_descriptors(
   return table->descriptors + table->rows[ordinal].descriptor_base_u32;
 }
 
+// Returns the canonical callable row for a verified bytecode function.
+static inline const iree_vm_bytecode_v0_callable_type_row_t*
+iree_vm_bytecode_function_callable_type(
+    const iree_vm_bytecode_module_layout_t* layout,
+    const iree_vm_bytecode_v0_function_row_t* function) {
+  return &layout->callable_types.rows[function->callable_type_ordinal_u16];
+}
+
+// Returns the exact signature row for a verified bytecode function.
+static inline const iree_vm_bytecode_v0_signature_row_t*
+iree_vm_bytecode_function_signature(
+    const iree_vm_bytecode_module_layout_t* layout,
+    const iree_vm_bytecode_v0_function_row_t* function) {
+  const iree_vm_bytecode_v0_callable_type_row_t* callable_type =
+      iree_vm_bytecode_function_callable_type(layout, function);
+  return &layout->signatures.rows[callable_type->signature_ordinal_u16];
+}
+
 // Returns the source-ordered argument count for a verified signature.
 static inline uint32_t iree_vm_bytecode_signature_argument_count(
     const iree_vm_bytecode_v0_signature_row_t* row) {

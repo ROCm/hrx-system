@@ -156,6 +156,15 @@ iree_status_t iree_vm_invocation_drive_start(
 iree_status_t iree_vm_invocation_drive_resume(
     iree_vm_invocation_t* invocation, iree_vm_execution_outcome_t* out_outcome);
 
+// Enters one already resolved target without repeating the public module-call
+// boundary checks. Built-in providers may use this only after proving the
+// target identity, callable contract, and current invocation state.
+iree_status_t iree_vm_invocation_dispatch_start(
+    iree_vm_invocation_t* invocation,
+    const iree_vm_linked_module_t* linked_module, uint16_t function_ordinal,
+    bool may_yield, const iree_vm_call_packet_t* call,
+    iree_vm_execution_outcome_t* out_outcome);
+
 // Validates every root result without touching caller storage.
 iree_status_t iree_vm_invocation_validate_root_results(
     const iree_vm_invocation_t* invocation);

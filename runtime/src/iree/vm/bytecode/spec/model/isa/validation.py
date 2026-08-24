@@ -300,11 +300,12 @@ CONTROL_CALL = _record_rule(
     ),
     "Validates a direct call target and move mask against its signature.",
     "The selected local function or import declaration must exist with "
-    "matching import optionality. A local target uses its function signature; "
+    "matching import optionality. A local target uses its canonical callable-"
+    "type signature; "
     "an import uses its callable-type signature. The caller's three direct "
     "register prefixes and canonical overflow packet must cover that signature, "
     "and direct_ref_move_mask must not name a direct ref argument outside it. "
-    "A local call does not require or infer a callable-type declaration.",
+    "The callable permission must fit the caller's derived MAY_YIELD fact.",
 )
 CONTROL_CALL_INDIRECT = _record_rule(
     "control_call_indirect",

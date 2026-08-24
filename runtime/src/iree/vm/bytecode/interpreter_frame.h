@@ -9,6 +9,16 @@
 
 #include "iree/vm/bytecode/module_storage.h"
 
+// Caller-owned ref packet regions kept live across one suspended child call.
+typedef struct iree_vm_bytecode_call_cleanup_t {
+  // First direct argument state not replaced by direct results.
+  iree_vm_ref_t* direct_arguments;
+  // Number of contiguous direct argument states to release.
+  uint16_t direct_argument_count;
+  // Number of argument states at the start of the local-ref bank to release.
+  uint16_t overflow_argument_count;
+} iree_vm_bytecode_call_cleanup_t;
+
 // Bytecode execution state followed by exact function-owned banks when stored
 // in a durable frame.
 typedef struct iree_vm_bytecode_execution_state_t {
@@ -32,6 +42,8 @@ typedef struct iree_vm_bytecode_execution_state_t {
   uint8_t* local_bytes;
   // Number of ref states released by durable frame cleanup.
   uint32_t ref_count;
+  // Ref packet ownership pending one suspended child completion.
+  iree_vm_bytecode_call_cleanup_t pending_call_cleanup;
 } iree_vm_bytecode_execution_state_t;
 
 // Exact durable payload layout for one bytecode function frame.

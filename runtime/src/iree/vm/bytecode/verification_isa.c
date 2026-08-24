@@ -5,6 +5,7 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 #include "iree/base/alignment.h"
+#include "iree/vm/bytecode/module_reader.h"
 #include "iree/vm/bytecode/verification.h"
 #include "iree/vm/bytecode/wire/core/abi.h"
 #include "iree/vm/bytecode/wire/core/buffer.h"
@@ -31,6 +32,8 @@ typedef enum iree_vm_bytecode_verification_form_e {
   IREE_VM_BYTECODE_VERIFICATION_FORM_CONTROL_BRANCH_CONDITIONAL_S16,
   IREE_VM_BYTECODE_VERIFICATION_FORM_CONTROL_BRANCH_CONDITIONAL_S32,
   IREE_VM_BYTECODE_VERIFICATION_FORM_CONTROL_SWITCH,
+  IREE_VM_BYTECODE_VERIFICATION_FORM_CONTROL_CALL,
+  IREE_VM_BYTECODE_VERIFICATION_FORM_CONTROL_CALL_INDIRECT,
   IREE_VM_BYTECODE_VERIFICATION_FORM_CONTROL_ASSERT,
   IREE_VM_BYTECODE_VERIFICATION_FORM_CONTROL_FAIL,
   IREE_VM_BYTECODE_VERIFICATION_FORM_VALUE_ABI_ARGUMENT_LOAD,
@@ -293,7 +296,9 @@ static iree_status_t iree_vm_bytecode_verify_function_address_record(
       }
       const iree_vm_bytecode_v0_function_row_t* target =
           &layout->functions.rows[record->target_ordinal_u16];
-      if (target->signature_ordinal_u16 !=
+      const iree_vm_bytecode_v0_callable_type_row_t* target_callable_type =
+          iree_vm_bytecode_function_callable_type(layout, target);
+      if (target_callable_type->signature_ordinal_u16 !=
               callable_type->signature_ordinal_u16 ||
           (iree_any_bit_set(target->flags_u16,
                             IREE_VM_BYTECODE_FUNCTION_FLAG_MAY_YIELD) &&
@@ -335,6 +340,178 @@ static iree_status_t iree_vm_bytecode_verify_function_address_record(
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "func.address target kind is invalid");
   }
+}
+
+// Verifies that one caller frame covers the complete implicit call packet.
+static iree_status_t iree_vm_bytecode_verify_call_packet(
+    const iree_vm_bytecode_v0_function_row_t* caller,
+    const iree_vm_bytecode_v0_callable_type_row_t* callable_type,
+    const iree_vm_bytecode_v0_signature_row_t* signature,
+    uint16_t direct_ref_move_mask) {
+  const uint16_t direct_value_count =
+      iree_min(16u, iree_max(signature->argument_value_count_u16,
+                             signature->result_value_count_u16));
+  const uint16_t direct_ref_count =
+      iree_min(16u, iree_max(signature->argument_ref_count_u16,
+                             signature->result_ref_count_u16));
+  const uint16_t direct_function_count =
+      iree_min(16u, iree_max(signature->argument_function_count_u16,
+                             signature->result_function_count_u16));
+  if (caller->value_register_count_u16 < direct_value_count ||
+      caller->ref_register_count_u16 < direct_ref_count ||
+      caller->function_register_count_u16 < direct_function_count) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "call register banks do not cover the direct packet prefixes");
+  }
+
+  const uint16_t direct_ref_argument_count =
+      iree_min(16u, signature->argument_ref_count_u16);
+  const uint16_t valid_ref_move_mask =
+      direct_ref_argument_count == 16
+          ? UINT16_MAX
+          : (uint16_t)((1u << direct_ref_argument_count) - 1u);
+  if ((direct_ref_move_mask & ~valid_ref_move_mask) != 0) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "call ref move mask exceeds its argument prefix");
+  }
+
+  const uint32_t argument_value_overflow =
+      signature->argument_value_count_u16 > 16
+          ? (uint32_t)signature->argument_value_count_u16 - 16u
+          : 0;
+  const uint32_t result_value_overflow =
+      signature->result_value_count_u16 > 16
+          ? (uint32_t)signature->result_value_count_u16 - 16u
+          : 0;
+  const uint32_t required_local_bytes =
+      (argument_value_overflow + result_value_overflow) * sizeof(uint64_t);
+  if (required_local_bytes > caller->local_byte_length_u16) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "call value overflow packet exceeds local byte storage");
+  }
+
+  const uint32_t argument_ref_overflow =
+      signature->argument_ref_count_u16 > 16
+          ? (uint32_t)signature->argument_ref_count_u16 - 16u
+          : 0;
+  const uint32_t result_ref_overflow =
+      signature->result_ref_count_u16 > 16
+          ? (uint32_t)signature->result_ref_count_u16 - 16u
+          : 0;
+  uint32_t required_local_refs = argument_ref_overflow + result_ref_overflow;
+  if (direct_ref_move_mask != valid_ref_move_mask) {
+    required_local_refs += direct_ref_argument_count;
+  }
+  if (required_local_refs > caller->local_ref_count_u32) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "call ref overflow and scratch packet exceeds local ref storage");
+  }
+
+  const uint32_t argument_function_overflow =
+      signature->argument_function_count_u16 > 16
+          ? (uint32_t)signature->argument_function_count_u16 - 16u
+          : 0;
+  const uint32_t result_function_overflow =
+      signature->result_function_count_u16 > 16
+          ? (uint32_t)signature->result_function_count_u16 - 16u
+          : 0;
+  if (argument_function_overflow + result_function_overflow >
+      caller->local_function_count_u32) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "call function overflow packet exceeds local function storage");
+  }
+
+  if (iree_any_bit_set(callable_type->flags_u16,
+                       IREE_VM_BYTECODE_CALLABLE_TYPE_FLAG_MAY_YIELD) &&
+      !iree_any_bit_set(caller->flags_u16,
+                        IREE_VM_BYTECODE_FUNCTION_FLAG_MAY_YIELD)) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "non-yielding function calls a potentially yielding target");
+  }
+  return iree_ok_status();
+}
+
+// Verifies one direct local or import call against immutable module tables.
+static iree_status_t iree_vm_bytecode_verify_control_call_record(
+    const iree_vm_bytecode_module_layout_t* layout,
+    const iree_vm_bytecode_v0_function_row_t* caller,
+    const iree_vm_isa_control_call_record_t* record) {
+  if (record->zero_padding_u16 != 0) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "control.call padding is nonzero");
+  }
+
+  const iree_vm_bytecode_v0_callable_type_row_t* callable_type = NULL;
+  switch (record->target_kind_u8) {
+    case IREE_VM_ISA_CONTROL_CALL_TARGET_LOCAL: {
+      if (record->target_ordinal_u16 >= layout->functions.count) {
+        return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "control.call local target is out of range");
+      }
+      callable_type = iree_vm_bytecode_function_callable_type(
+          layout, &layout->functions.rows[record->target_ordinal_u16]);
+      break;
+    }
+    case IREE_VM_ISA_CONTROL_CALL_TARGET_REQUIRED_IMPORT:
+    case IREE_VM_ISA_CONTROL_CALL_TARGET_OPTIONAL_IMPORT: {
+      if (record->target_ordinal_u16 >= layout->imports.entry_count) {
+        return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "control.call import target is out of range");
+      }
+      const iree_vm_bytecode_v0_import_entry_row_t* import =
+          &layout->imports.entries[record->target_ordinal_u16];
+      const bool is_optional = iree_any_bit_set(
+          import->flags_u16, IREE_VM_BYTECODE_IMPORT_FLAG_OPTIONAL);
+      const bool expects_optional =
+          record->target_kind_u8 ==
+          IREE_VM_ISA_CONTROL_CALL_TARGET_OPTIONAL_IMPORT;
+      if (is_optional != expects_optional) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "control.call import target kind does not match its declaration");
+      }
+      callable_type =
+          &layout->callable_types.rows[import->callable_type_ordinal_u16];
+      break;
+    }
+    default:
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "control.call target kind is invalid");
+  }
+
+  const iree_vm_bytecode_v0_signature_row_t* signature =
+      &layout->signatures.rows[callable_type->signature_ordinal_u16];
+  return iree_vm_bytecode_verify_call_packet(caller, callable_type, signature,
+                                             record->direct_ref_move_mask_u16);
+}
+
+// Verifies one indirect call's static contract and packet requirements.
+static iree_status_t iree_vm_bytecode_verify_control_call_indirect_record(
+    const iree_vm_bytecode_module_layout_t* layout,
+    const iree_vm_bytecode_v0_function_row_t* caller,
+    const iree_vm_isa_control_call_indirect_record_t* record) {
+  if (record->zero_padding_u16 != 0) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "control.call.indirect padding is nonzero");
+  }
+  IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_function_register(
+      record->target_f8, caller->function_register_count_u16));
+  if (record->callable_type_ordinal_u16 >= layout->callable_types.count) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "control.call.indirect callable type is out of range");
+  }
+  const iree_vm_bytecode_v0_callable_type_row_t* callable_type =
+      &layout->callable_types.rows[record->callable_type_ordinal_u16];
+  const iree_vm_bytecode_v0_signature_row_t* signature =
+      &layout->signatures.rows[callable_type->signature_ordinal_u16];
+  return iree_vm_bytecode_verify_call_packet(caller, callable_type, signature,
+                                             record->direct_ref_move_mask_u16);
 }
 
 typedef struct iree_vm_bytecode_function_verification_scratch_t {
@@ -447,7 +624,7 @@ static iree_status_t iree_vm_bytecode_function_verify(
     const iree_vm_bytecode_v0_function_row_t* function, uint32_t ordinal,
     iree_vm_bytecode_function_verification_scratch_t scratch) {
   const iree_vm_bytecode_v0_signature_row_t* signature =
-      &layout->signatures.rows[function->signature_ordinal_u16];
+      iree_vm_bytecode_function_signature(layout, function);
   const uint8_t* bytecode =
       layout->functions.bytecode_data + function->bytecode_offset_u32;
   if (bytecode[0] != IREE_VM_ISA_CORE_OPCODE_CONTROL_BLOCK) {
@@ -584,6 +761,29 @@ static iree_status_t iree_vm_bytecode_function_verify(
                                   "control.switch target slice is out of "
                                   "range");
         }
+        break;
+      }
+      case IREE_VM_BYTECODE_VERIFICATION_FORM_CONTROL_CALL: {
+        if (record_length == remaining_length) {
+          return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                  "control.call requires a sequential record");
+        }
+        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_control_call_record(
+            layout, function,
+            (const iree_vm_isa_control_call_record_t*)record_data));
+        break;
+      }
+      case IREE_VM_BYTECODE_VERIFICATION_FORM_CONTROL_CALL_INDIRECT: {
+        if (record_length == remaining_length) {
+          return iree_make_status(
+              IREE_STATUS_INVALID_ARGUMENT,
+              "control.call.indirect requires a sequential record");
+        }
+        IREE_RETURN_IF_ERROR(
+            iree_vm_bytecode_verify_control_call_indirect_record(
+                layout, function,
+                (const iree_vm_isa_control_call_indirect_record_t*)
+                    record_data));
         break;
       }
       case IREE_VM_BYTECODE_VERIFICATION_FORM_CONTROL_ASSERT: {

@@ -9,6 +9,7 @@
 #include <string.h>
 
 #include "iree/vm/buffer.h"
+#include "iree/vm/bytecode/interpreter_call.h"
 #include "iree/vm/bytecode/interpreter_float.h"
 #include "iree/vm/bytecode/interpreter_float_math.h"
 #include "iree/vm/bytecode/interpreter_frame.h"
@@ -384,7 +385,7 @@ static iree_status_t iree_vm_bytecode_publish_results(
     const iree_vm_call_packet_t* call, uint64_t* values, iree_vm_ref_t* refs,
     iree_vm_function_ref_t* functions) {
   const iree_vm_bytecode_v0_signature_row_t* signature =
-      &module->layout.signatures.rows[function->signature_ordinal_u16];
+      iree_vm_bytecode_function_signature(&module->layout, function);
   if (signature->result_ref_count_u16 || signature->result_function_count_u16) {
     const uint32_t argument_count =
         iree_vm_bytecode_signature_argument_count(signature);
@@ -392,7 +393,9 @@ static iree_status_t iree_vm_bytecode_publish_results(
         iree_vm_bytecode_signature_result_count(signature);
     const iree_vm_bytecode_v0_signature_descriptor_row_t* result_descriptors =
         iree_vm_bytecode_signature_descriptors(
-            &module->layout.signatures, function->signature_ordinal_u16) +
+            &module->layout.signatures,
+            iree_vm_bytecode_function_callable_type(&module->layout, function)
+                ->signature_ordinal_u16) +
         argument_count;
     uint16_t ref_ordinal = 0;
     uint16_t function_ordinal = 0;
@@ -606,6 +609,40 @@ static iree_status_t iree_vm_bytecode_execute(
       IREE_VM_BYTECODE_DISPATCH_CONTINUE();
     }
     IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_isa_control_switch_record_t);
+  }
+  IREE_VM_BYTECODE_DISPATCH_CASE(CONTROL_CALL, control_call) {
+    const iree_vm_isa_control_call_record_t* record =
+        (const iree_vm_isa_control_call_record_t*)record_data;
+    state->program_counter = record_data + sizeof(*record);
+    iree_vm_execution_outcome_t call_outcome = UINT32_MAX;
+    status = iree_vm_bytecode_call_start_direct(module, execution, state,
+                                                record, &call_outcome);
+    if (!iree_status_is_ok(status) ||
+        call_outcome == IREE_VM_EXECUTION_OUTCOME_SUSPENDED) {
+      if (iree_status_is_ok(status)) {
+        *out_outcome = IREE_VM_EXECUTION_OUTCOME_SUSPENDED;
+      }
+      IREE_VM_BYTECODE_DISPATCH_TERMINATE();
+    }
+    record_data = state->program_counter;
+    IREE_VM_BYTECODE_DISPATCH_CONTINUE();
+  }
+  IREE_VM_BYTECODE_DISPATCH_CASE(CONTROL_CALL_INDIRECT, control_call_indirect) {
+    const iree_vm_isa_control_call_indirect_record_t* record =
+        (const iree_vm_isa_control_call_indirect_record_t*)record_data;
+    state->program_counter = record_data + sizeof(*record);
+    iree_vm_execution_outcome_t call_outcome = UINT32_MAX;
+    status = iree_vm_bytecode_call_start_indirect(module, execution, state,
+                                                  record, &call_outcome);
+    if (!iree_status_is_ok(status) ||
+        call_outcome == IREE_VM_EXECUTION_OUTCOME_SUSPENDED) {
+      if (iree_status_is_ok(status)) {
+        *out_outcome = IREE_VM_EXECUTION_OUTCOME_SUSPENDED;
+      }
+      IREE_VM_BYTECODE_DISPATCH_TERMINATE();
+    }
+    record_data = state->program_counter;
+    IREE_VM_BYTECODE_DISPATCH_CONTINUE();
   }
   IREE_VM_BYTECODE_DISPATCH_CASE(CONTROL_ASSERT, control_assert) {
     const iree_vm_isa_control_assert_record_t* record =
@@ -1894,7 +1931,7 @@ iree_status_t iree_vm_bytecode_function_start(
   const iree_vm_bytecode_v0_function_row_t* function =
       &module->layout.functions.rows[params->function_ordinal];
   const iree_vm_bytecode_v0_signature_row_t* signature =
-      &module->layout.signatures.rows[function->signature_ordinal_u16];
+      iree_vm_bytecode_function_signature(&module->layout, function);
   return iree_any_bit_set(function->flags_u16,
                           IREE_VM_BYTECODE_FUNCTION_FLAG_MAY_YIELD)
              ? iree_vm_bytecode_function_start_durable(
@@ -1920,6 +1957,7 @@ iree_status_t iree_vm_bytecode_function_resume(
       &module->layout.functions.rows[function_ordinal];
   iree_vm_bytecode_execution_state_t* state =
       (iree_vm_bytecode_execution_state_t*)iree_vm_frame_storage(params->frame);
+  iree_vm_bytecode_call_cleanup_completed(state);
   iree_status_t status = iree_vm_bytecode_execute(
       module, function, &params->execution, state, out_outcome);
   if (iree_status_is_ok(status) &&
