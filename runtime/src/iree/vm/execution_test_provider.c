@@ -142,6 +142,17 @@ static const iree_vm_module_signature_type_t
 };
 
 static const iree_vm_module_signature_type_t
+    iree_vm_execution_test_multiply_f32_arguments[] = {
+        {IREE_VM_SCALAR_TYPE_F32, 0},
+        {IREE_VM_SCALAR_TYPE_F32, 0},
+};
+
+static const iree_vm_module_signature_type_t
+    iree_vm_execution_test_f32_result[] = {
+        {IREE_VM_SCALAR_TYPE_F32, 0},
+};
+
+static const iree_vm_module_signature_type_t
     iree_vm_execution_test_launch_config_arguments[] = {
         {IREE_VM_SCALAR_TYPE_I32, 0},
         {IREE_VM_SCALAR_TYPE_BF16, 0},
@@ -182,6 +193,7 @@ enum iree_vm_execution_test_callable_ordinal_e {
   IREE_VM_EXECUTION_TEST_CALLABLE_INITIALIZE = 4,
   IREE_VM_EXECUTION_TEST_CALLABLE_YIELD_REF = 5,
   IREE_VM_EXECUTION_TEST_CALLABLE_LAUNCH_CONFIG = 6,
+  IREE_VM_EXECUTION_TEST_CALLABLE_MULTIPLY_F32 = 7,
 };
 
 static const iree_vm_module_callable_type_declaration_t
@@ -271,6 +283,19 @@ static const iree_vm_module_callable_type_declaration_t
                 },
             .flags = IREE_VM_CALLABLE_TYPE_FLAG_NONE,
         },
+        {
+            .signature =
+                {
+                    .arguments =
+                        {iree_vm_execution_test_multiply_f32_arguments,
+                         IREE_ARRAYSIZE(
+                             iree_vm_execution_test_multiply_f32_arguments)},
+                    .results = {iree_vm_execution_test_f32_result,
+                                IREE_ARRAYSIZE(
+                                    iree_vm_execution_test_f32_result)},
+                },
+            .flags = IREE_VM_CALLABLE_TYPE_FLAG_NONE,
+        },
 };
 
 static const iree_vm_module_callable_type_declaration_t
@@ -313,7 +338,8 @@ enum iree_vm_execution_test_application_function_ordinal_e {
   IREE_VM_EXECUTION_TEST_APPLICATION_FUNCTION_YIELD_REF = 8,
   IREE_VM_EXECUTION_TEST_APPLICATION_FUNCTION_YIELD_TWICE = 9,
   IREE_VM_EXECUTION_TEST_APPLICATION_FUNCTION_LAUNCH_CONFIG = 10,
-  IREE_VM_EXECUTION_TEST_APPLICATION_FUNCTION_COUNT = 11,
+  IREE_VM_EXECUTION_TEST_APPLICATION_FUNCTION_MULTIPLY_F32 = 11,
+  IREE_VM_EXECUTION_TEST_APPLICATION_FUNCTION_COUNT = 12,
 };
 
 static const iree_vm_module_export_declaration_t
@@ -335,6 +361,8 @@ static const iree_vm_module_export_declaration_t
         {IREE_SVL("launch_config"),
          IREE_VM_EXECUTION_TEST_CALLABLE_LAUNCH_CONFIG,
          IREE_VM_EXECUTION_TEST_APPLICATION_FUNCTION_LAUNCH_CONFIG, 0},
+        {IREE_SVL("multiply_f32"), IREE_VM_EXECUTION_TEST_CALLABLE_MULTIPLY_F32,
+         IREE_VM_EXECUTION_TEST_APPLICATION_FUNCTION_MULTIPLY_F32, 0},
         {IREE_SVL("nested_yield"), IREE_VM_EXECUTION_TEST_CALLABLE_YIELD_I32,
          IREE_VM_EXECUTION_TEST_APPLICATION_FUNCTION_NESTED_YIELD, 0},
         {IREE_SVL("yield_ref"), IREE_VM_EXECUTION_TEST_CALLABLE_YIELD_REF,
@@ -574,6 +602,20 @@ static void iree_vm_execution_test_add(const iree_vm_call_packet_t* call) {
   iree_vm_call_value_result_store(call, 0, lhs + rhs);
 }
 
+static void iree_vm_execution_test_multiply_f32(
+    const iree_vm_call_packet_t* call) {
+  const uint32_t lhs_bits = (uint32_t)iree_vm_call_value_argument_load(call, 0);
+  const uint32_t rhs_bits = (uint32_t)iree_vm_call_value_argument_load(call, 1);
+  float lhs = 0.0f;
+  float rhs = 0.0f;
+  memcpy(&lhs, &lhs_bits, sizeof(lhs));
+  memcpy(&rhs, &rhs_bits, sizeof(rhs));
+  const float product = lhs * rhs;
+  uint32_t product_bits = 0;
+  memcpy(&product_bits, &product, sizeof(product_bits));
+  iree_vm_call_value_result_store(call, 0, product_bits);
+}
+
 static void iree_vm_execution_test_launch_config(
     const iree_vm_call_packet_t* call) {
   const uint32_t row_count =
@@ -688,6 +730,10 @@ static iree_status_t iree_vm_execution_test_application_start(
           out_outcome);
     case IREE_VM_EXECUTION_TEST_APPLICATION_FUNCTION_LAUNCH_CONFIG:
       iree_vm_execution_test_launch_config(&params->call);
+      *out_outcome = IREE_VM_EXECUTION_OUTCOME_COMPLETED;
+      return iree_ok_status();
+    case IREE_VM_EXECUTION_TEST_APPLICATION_FUNCTION_MULTIPLY_F32:
+      iree_vm_execution_test_multiply_f32(&params->call);
       *out_outcome = IREE_VM_EXECUTION_OUTCOME_COMPLETED;
       return iree_ok_status();
     default:

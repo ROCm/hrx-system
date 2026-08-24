@@ -89,6 +89,7 @@ iree_runtime_cc_test(
     deps = [
         ":execution_test_provider",
         ":vm",
+        "//runtime/src/iree/base/internal:fpu_state",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],

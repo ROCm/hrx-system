@@ -13,6 +13,7 @@
 #include <mutex>
 #include <thread>
 
+#include "iree/base/internal/fpu_state.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 #include "iree/vm/execution_test_provider.h"
@@ -811,6 +812,42 @@ TEST(VMExecutionTest, SynchronousAdapterDrivesARepeatedlyYieldingFunction) {
   int32_t value = 0;
   IREE_ASSERT_OK(iree_vm_i32_from_variant(results[0], &value));
   EXPECT_EQ(value, 32);
+}
+
+TEST(VMExecutionTest, InvocationScopesCanonicalFpuState) {
+  ExecutionHarness harness;
+  harness.Initialize();
+  harness.CreateProcess();
+
+  iree_vm_function_t multiply_f32 = iree_vm_function_null();
+  IREE_ASSERT_OK(
+      harness.LookupApplication(IREE_SV("multiply_f32"), &multiply_f32));
+  iree_vm_variant_t arguments[2] = {};
+  IREE_ASSERT_OK(iree_vm_variant_from_scalar_bits(
+      IREE_VM_SCALAR_TYPE_F32, UINT32_C(0x00800000), &arguments[0]));
+  IREE_ASSERT_OK(iree_vm_variant_from_scalar_bits(
+      IREE_VM_SCALAR_TYPE_F32, UINT32_C(0x3F000000), &arguments[1]));
+  iree_vm_variant_t results[1] = {};
+
+  const iree_fpu_state_t caller_state =
+      iree_fpu_state_push(IREE_FPU_STATE_FLAG_FLUSH_DENORMALS_TO_ZERO);
+  iree_status_t status =
+      iree_vm_invoke(harness.invocation, multiply_f32,
+                     iree_vm_variant_span_from_array(arguments),
+                     iree_vm_variant_span_from_array(results));
+  const iree_fpu_state_t observed_caller_state =
+      iree_fpu_state_push(IREE_FPU_STATE_FLAG_FLUSH_DENORMALS_TO_ZERO);
+  const bool caller_state_was_restored = observed_caller_state.previous_value ==
+                                         observed_caller_state.current_value;
+  iree_fpu_state_pop(observed_caller_state);
+  iree_fpu_state_pop(caller_state);
+
+  IREE_ASSERT_OK(status);
+  uint64_t result_bits = 0;
+  IREE_ASSERT_OK(iree_vm_scalar_bits_from_variant(
+      results[0], IREE_VM_SCALAR_TYPE_F32, &result_bits));
+  EXPECT_EQ(result_bits, UINT32_C(0x00400000));
+  EXPECT_TRUE(caller_state_was_restored);
 }
 
 }  // namespace

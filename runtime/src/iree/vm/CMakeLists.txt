@@ -91,6 +91,7 @@ iree_cc_test(
   DEPS
     ::execution_test_provider
     ::vm
+    iree::base::internal::fpu_state
     iree::testing::gtest
     iree::testing::gtest_main
 )
