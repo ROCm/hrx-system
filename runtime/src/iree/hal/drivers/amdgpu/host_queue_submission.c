@@ -989,6 +989,8 @@ uint64_t iree_hal_amdgpu_host_queue_finish_kernel_submission(
       submission->kernargs.write_position;
   submission->reclaim_entry->queue_upload_write_position =
       submission->queue_upload.write_position;
+  submission->reclaim_entry->signal_semaphore_count =
+      (uint16_t)signal_semaphore_list.count;
   submission->reclaim_entry->count = submission->reclaim_resource_count;
   submission->reclaim_entry->pre_signal_action = submission->pre_signal_action;
   iree_hal_amdgpu_host_queue_merge_barrier_axes(queue, resolution);
@@ -1681,6 +1683,7 @@ uint64_t iree_hal_amdgpu_host_queue_finish_barrier_submission(
   }
   reclaim_entry->kernarg_write_position = (uint64_t)iree_atomic_load(
       &queue->kernarg_ring.write_position, iree_memory_order_relaxed);
+  reclaim_entry->signal_semaphore_count = (uint16_t)signal_semaphore_list.count;
   reclaim_entry->count = submission->reclaim_resource_count;
 
   iree_hal_amdgpu_host_queue_merge_barrier_axes(queue, resolution);

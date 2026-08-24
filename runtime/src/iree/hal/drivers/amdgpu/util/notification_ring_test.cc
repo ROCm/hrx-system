@@ -47,6 +47,25 @@ typedef struct RetireCallbackState {
   int callback_count;
 } RetireCallbackState;
 
+typedef struct ReleaseOrderResource {
+  // HAL resource header used by the reclaim entry.
+  iree_hal_resource_t resource;
+  // Semaphore that must remain unpublished when this resource is destroyed.
+  iree_async_semaphore_t* semaphore;
+  // Number of times the destroy callback has run.
+  int destroy_count;
+} ReleaseOrderResource;
+
+static void DestroyReleaseOrderResource(iree_hal_resource_t* base_resource) {
+  auto* resource = reinterpret_cast<ReleaseOrderResource*>(base_resource);
+  EXPECT_EQ(iree_async_semaphore_query(resource->semaphore), 0u);
+  ++resource->destroy_count;
+}
+
+static const iree_hal_resource_vtable_t kReleaseOrderResourceVTable = {
+    /*.destroy=*/DestroyReleaseOrderResource,
+};
+
 static void VerifySemaphoreNotVisibleBeforePreSignalAction(
     iree_hal_amdgpu_reclaim_entry_t* entry, void* user_data,
     const iree_status_t status) {
@@ -745,6 +764,41 @@ TEST_F(NotificationRingTest, PreSignalActionRunsBeforeSemaphorePublication) {
   iree_async_semaphore_release(semaphore);
 }
 
+TEST_F(NotificationRingTest,
+       OperationResourcesReleaseBeforeSemaphorePublication) {
+  IREE_ASSERT_OK_AND_ASSIGN(auto ring, InitializeRing());
+  iree_async_semaphore_t* semaphore = CreateSemaphore();
+
+  iree_hal_amdgpu_reclaim_entry_t* reclaim_entry =
+      ReclaimEntryForNextEpoch(ring.get());
+  iree_hal_resource_t** resources = nullptr;
+  IREE_ASSERT_OK(iree_hal_amdgpu_reclaim_entry_prepare(
+      reclaim_entry, &block_pool, /*count=*/2, &resources));
+  iree_async_semaphore_retain(semaphore);
+  resources[0] = reinterpret_cast<iree_hal_resource_t*>(semaphore);
+  ReleaseOrderResource operation_resource = {};
+  iree_hal_resource_initialize(&kReleaseOrderResourceVTable,
+                               &operation_resource.resource);
+  operation_resource.semaphore = semaphore;
+  resources[1] = &operation_resource.resource;
+  reclaim_entry->signal_semaphore_count = 1;
+  reclaim_entry->count = 2;
+
+  uint64_t epoch = iree_hal_amdgpu_notification_ring_advance_epoch(ring.get());
+  PushNotification(ring.get(), epoch, semaphore, 1);
+  SimulateCompletions(ring.get(), 1);
+
+  uint64_t kernarg_position = 0;
+  EXPECT_EQ(
+      iree_hal_amdgpu_notification_ring_drain(
+          ring.get(), EmptyFrontier(), nullptr, nullptr, &kernarg_position),
+      1u);
+  EXPECT_EQ(operation_resource.destroy_count, 1);
+  EXPECT_EQ(iree_async_semaphore_query(semaphore), 1u);
+
+  iree_async_semaphore_release(semaphore);
+}
+
 TEST_F(NotificationRingTest, RetireCallbackRunsBeforeSemaphorePublication) {
   IREE_ASSERT_OK_AND_ASSIGN(auto ring, InitializeRing());
   iree_async_semaphore_t* semaphore = CreateSemaphore();
@@ -795,8 +849,21 @@ TEST_F(NotificationRingTest, FailAllRetireCallbackRunsBeforeSemaphoreFailure) {
   };
 
   iree_hal_amdgpu_reclaim_entry_t* reclaim_entry =
-      ReclaimEntryForNextEpoch(ring.get(), /*kernarg_write_position=*/64,
-                               /*queue_upload_write_position=*/256);
+      ReclaimEntryForNextEpoch(ring.get());
+  iree_hal_resource_t** resources = nullptr;
+  IREE_ASSERT_OK(iree_hal_amdgpu_reclaim_entry_prepare(
+      reclaim_entry, &block_pool, /*count=*/2, &resources));
+  reclaim_entry->kernarg_write_position = 64;
+  reclaim_entry->queue_upload_write_position = 256;
+  iree_async_semaphore_retain(semaphore);
+  resources[0] = reinterpret_cast<iree_hal_resource_t*>(semaphore);
+  ReleaseOrderResource operation_resource = {};
+  iree_hal_resource_initialize(&kReleaseOrderResourceVTable,
+                               &operation_resource.resource);
+  operation_resource.semaphore = semaphore;
+  resources[1] = &operation_resource.resource;
+  reclaim_entry->signal_semaphore_count = 1;
+  reclaim_entry->count = 2;
   reclaim_entry->pre_signal_action = {
       /*.fn=*/VerifySemaphoreNotVisibleBeforeFailedPreSignalAction,
       /*.user_data=*/&action_state,
@@ -822,6 +889,7 @@ TEST_F(NotificationRingTest, FailAllRetireCallbackRunsBeforeSemaphoreFailure) {
   EXPECT_EQ(callback_state.flags, IREE_HAL_AMDGPU_RECLAIM_RETIRE_FLAG_FAILED);
   EXPECT_EQ(reclaim_positions.kernarg_write_position, 64u);
   EXPECT_EQ(reclaim_positions.queue_upload_write_position, 256u);
+  EXPECT_EQ(operation_resource.destroy_count, 1);
 
   iree_async_semaphore_release(semaphore);
 }
