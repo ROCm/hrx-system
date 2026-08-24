@@ -73,7 +73,7 @@ class ProjectionTest(unittest.TestCase):
         )
         self.assertEqual(
             sum(isinstance(entity, NumericValue) for entity in module_entities),
-            29,
+            30,
         )
         self.assertEqual(len(instructions), 217)
         self.assertEqual(
@@ -354,7 +354,7 @@ class ProjectionTest(unittest.TestCase):
                     re.MULTILINE,
                 )
             ),
-            29 + 13,
+            30 + 13,
         )
         self.assertIn(
             "IREE_VM_BYTECODE_SECTION_PRESENTATION_REQUIRED_FLAGS = 0x0001,",

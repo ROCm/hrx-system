@@ -856,7 +856,8 @@ static iree_status_t iree_vm_bytecode_verify_functions(
   uint32_t bytecode_length = 0;
   for (uint32_t i = 0; i < header->function_count_u32; ++i) {
     const iree_vm_bytecode_v0_function_row_t* row = &rows[i];
-    if ((row->flags_u16 & ~IREE_VM_BYTECODE_FUNCTION_FLAG_MAY_YIELD) != 0 ||
+    if ((row->flags_u16 & ~(IREE_VM_BYTECODE_FUNCTION_FLAG_MAY_YIELD |
+                            IREE_VM_BYTECODE_FUNCTION_FLAG_HAS_CALL)) != 0 ||
         row->bytecode_length_u32 == 0 || row->bytecode_length_u32 % 4 != 0 ||
         row->switch_target_base_u32 != switch_target_count ||
         row->bytecode_offset_u32 != bytecode_length ||

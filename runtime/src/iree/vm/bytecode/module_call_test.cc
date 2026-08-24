@@ -5,6 +5,7 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 #include <cstdint>
+#include <cstring>
 #include <utility>
 #include <vector>
 
@@ -13,6 +14,8 @@
 #include "iree/vm/bytecode/module.h"
 #include "iree/vm/bytecode/module_test_data.h"
 #include "iree/vm/bytecode/wire/core/control.h"
+#include "iree/vm/bytecode/wire/core/opcodes.h"
+#include "iree/vm/bytecode/wire/core/selectors.h"
 #include "iree/vm/process.h"
 
 namespace iree::vm::bytecode::testing {
@@ -145,6 +148,12 @@ TEST(VMBytecodeModuleCallTest, RejectsMalformedCallInstructions) {
   expect_rejected(1, [](MutableFunctionImage function) {
     function.row->value_register_count_u16 = 0;
   });
+  expect_rejected(1, [](MutableFunctionImage function) {
+    function.row->flags_u16 &= ~IREE_VM_BYTECODE_FUNCTION_FLAG_HAS_CALL;
+  });
+  expect_rejected(0, [](MutableFunctionImage function) {
+    function.row->flags_u16 |= IREE_VM_BYTECODE_FUNCTION_FLAG_HAS_CALL;
+  });
   expect_rejected(2, [](MutableFunctionImage function) {
     auto* record =
         reinterpret_cast<iree_vm_isa_control_call_indirect_record_t*>(
@@ -224,6 +233,32 @@ TEST(VMBytecodeModuleCallTest, ExecutesDirectIndirectAndSuspendingCalls) {
   };
   expect_suspending_result(IREE_SV("call_yield"), 43, 44);
   expect_suspending_result(IREE_SV("call_yield_indirect"), 44, 45);
+}
+
+TEST(VMBytecodeModuleCallTest, BoundsRecursiveCallsByInvocationStorage) {
+  std::vector<uint8_t> image = BuildCallModuleImage();
+  const MutableFunctionImage function = FindFunctionImage(&image, 0);
+  ASSERT_NE(function.row, nullptr);
+  function.row->flags_u16 |= IREE_VM_BYTECODE_FUNCTION_FLAG_HAS_CALL;
+  const iree_vm_isa_control_call_record_t call = {
+      IREE_VM_ISA_CORE_OPCODE_CONTROL_CALL,
+      IREE_VM_ISA_CONTROL_CALL_TARGET_LOCAL, 0, 0, 0};
+  std::memcpy(function.bytecode + 4, &call, sizeof(call));
+
+  CallExecutionHarness harness(std::move(image));
+  IREE_ASSERT_OK(harness.Initialize(IREE_SV("call")));
+  iree_vm_function_t call_direct = iree_vm_function_null();
+  IREE_ASSERT_OK(harness.LookupFunction(IREE_SV("call"), IREE_SV("call_direct"),
+                                        &call_direct));
+  iree_vm_variant_t arguments[] = {iree_vm_variant_from_i32(41)};
+  const iree_vm_variant_t sentinel = iree_vm_variant_from_i64(0x1234);
+  iree_vm_variant_t results[] = {sentinel};
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_RESOURCE_EXHAUSTED,
+      iree_vm_invoke(harness.invocation, call_direct,
+                     iree_vm_variant_span_from_array(arguments),
+                     iree_vm_variant_span_from_array(results)));
+  ExpectVariantEqual(results[0], sentinel);
 }
 
 }  // namespace

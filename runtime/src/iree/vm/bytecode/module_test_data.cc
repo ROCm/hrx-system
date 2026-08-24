@@ -375,9 +375,35 @@ std::vector<uint8_t> BuildCallFunctions() {
   section.Append(iree_vm_bytecode_v0_function_row_t{
       0, 0, 0, 16, 0, 0, 0, 2, 0, 0, 0, 0, 1, {0, 0}});
   section.Append(iree_vm_bytecode_v0_function_row_t{
-      0, 0, 16, 16, 0, 0, 0, 1, 0, 0, 0, 0, 1, {0, 0}});
+      0,
+      IREE_VM_BYTECODE_FUNCTION_FLAG_HAS_CALL,
+      16,
+      16,
+      0,
+      0,
+      0,
+      1,
+      0,
+      0,
+      0,
+      0,
+      1,
+      {0, 0}});
   section.Append(iree_vm_bytecode_v0_function_row_t{
-      0, 0, 32, 24, 0, 0, 0, 1, 0, 1, 0, 0, 1, {0, 0}});
+      0,
+      IREE_VM_BYTECODE_FUNCTION_FLAG_HAS_CALL,
+      32,
+      24,
+      0,
+      0,
+      0,
+      1,
+      0,
+      1,
+      0,
+      0,
+      1,
+      {0, 0}});
   section.Append(iree_vm_bytecode_v0_function_row_t{
       1,
       IREE_VM_BYTECODE_FUNCTION_FLAG_MAY_YIELD,
@@ -395,7 +421,8 @@ std::vector<uint8_t> BuildCallFunctions() {
       {0, 0}});
   section.Append(iree_vm_bytecode_v0_function_row_t{
       1,
-      IREE_VM_BYTECODE_FUNCTION_FLAG_MAY_YIELD,
+      IREE_VM_BYTECODE_FUNCTION_FLAG_MAY_YIELD |
+          IREE_VM_BYTECODE_FUNCTION_FLAG_HAS_CALL,
       84,
       16,
       0,
@@ -410,7 +437,8 @@ std::vector<uint8_t> BuildCallFunctions() {
       {0, 0}});
   section.Append(iree_vm_bytecode_v0_function_row_t{
       1,
-      IREE_VM_BYTECODE_FUNCTION_FLAG_MAY_YIELD,
+      IREE_VM_BYTECODE_FUNCTION_FLAG_MAY_YIELD |
+          IREE_VM_BYTECODE_FUNCTION_FLAG_HAS_CALL,
       100,
       24,
       0,

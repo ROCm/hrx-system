@@ -115,7 +115,14 @@ _TABLE_DEFINITIONS = (
         "function_flag",
         U16,
         NumericTableKind.FLAGS,
-        (("may_yield", 1 << 0, "The function may yield."),),
+        (
+            ("may_yield", 1 << 0, "The function may yield."),
+            (
+                "has_call",
+                1 << 1,
+                "The function contains a direct or indirect call.",
+            ),
+        ),
     ),
     _table(
         "global_ref_flag",

@@ -628,7 +628,7 @@ _RECORD_DEFINITIONS = (
                 offset=2,
                 encoding_id=U16.entity_id,
                 description="Function behavior flags.",
-                validation=(RuleUse(ALLOWED_BITS.entity_id, (1,)),),
+                validation=(RuleUse(ALLOWED_BITS.entity_id, (3,)),),
             ),
             WireField(
                 name="bytecode_offset_u32",

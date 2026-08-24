@@ -560,6 +560,11 @@ static iree_status_t iree_vm_bytecode_dump_function(
     IREE_RETURN_IF_ERROR(
         iree_string_builder_append_cstring(builder, " may_yield"));
   }
+  if (iree_any_bit_set(function->flags_u16,
+                       IREE_VM_BYTECODE_FUNCTION_FLAG_HAS_CALL)) {
+    IREE_RETURN_IF_ERROR(
+        iree_string_builder_append_cstring(builder, " has_call"));
+  }
   IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, "\n"));
   IREE_RETURN_IF_ERROR(iree_vm_bytecode_dump_emit(write_callback, builder));
 

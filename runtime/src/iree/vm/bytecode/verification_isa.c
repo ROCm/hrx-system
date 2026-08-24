@@ -635,6 +635,7 @@ static iree_status_t iree_vm_bytecode_function_verify(
 
   iree_vm_bytecode_verification_form_t final_form =
       IREE_VM_BYTECODE_VERIFICATION_FORM_NONE;
+  bool has_call = false;
   uint32_t block_count = 0;
   uint32_t byte_offset = 0;
   while (byte_offset < function->bytecode_length_u32) {
@@ -764,6 +765,7 @@ static iree_status_t iree_vm_bytecode_function_verify(
         break;
       }
       case IREE_VM_BYTECODE_VERIFICATION_FORM_CONTROL_CALL: {
+        has_call = true;
         if (record_length == remaining_length) {
           return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                                   "control.call requires a sequential record");
@@ -774,6 +776,7 @@ static iree_status_t iree_vm_bytecode_function_verify(
         break;
       }
       case IREE_VM_BYTECODE_VERIFICATION_FORM_CONTROL_CALL_INDIRECT: {
+        has_call = true;
         if (record_length == remaining_length) {
           return iree_make_status(
               IREE_STATUS_INVALID_ARGUMENT,
@@ -1705,6 +1708,14 @@ static iree_status_t iree_vm_bytecode_function_verify(
                             " decoded control.block count does not match its "
                             "declaration",
                             ordinal);
+  }
+  if (has_call != iree_any_bit_set(function->flags_u16,
+                                   IREE_VM_BYTECODE_FUNCTION_FLAG_HAS_CALL)) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "function %" PRIu32
+        " call records do not match its function-row declaration",
+        ordinal);
   }
   if (final_form != IREE_VM_BYTECODE_VERIFICATION_FORM_CONTROL_RETURN &&
       final_form != IREE_VM_BYTECODE_VERIFICATION_FORM_CONTROL_YIELD_S32 &&

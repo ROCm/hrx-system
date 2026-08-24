@@ -1933,7 +1933,8 @@ iree_status_t iree_vm_bytecode_function_start(
   const iree_vm_bytecode_v0_signature_row_t* signature =
       iree_vm_bytecode_function_signature(&module->layout, function);
   return iree_any_bit_set(function->flags_u16,
-                          IREE_VM_BYTECODE_FUNCTION_FLAG_MAY_YIELD)
+                          IREE_VM_BYTECODE_FUNCTION_FLAG_MAY_YIELD |
+                              IREE_VM_BYTECODE_FUNCTION_FLAG_HAS_CALL)
              ? iree_vm_bytecode_function_start_durable(
                    module, function, signature, params, out_outcome)
              : iree_vm_bytecode_function_start_transient(
