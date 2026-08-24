@@ -30,6 +30,8 @@ enum {
   LOOM_WASM_OPCODE_RETURN = 0x0F,
   LOOM_WASM_OPCODE_LOCAL_GET = 0x20,
   LOOM_WASM_OPCODE_LOCAL_SET = 0x21,
+  LOOM_WASM_OPCODE_I32_LOAD8_U = 0x2D,
+  LOOM_WASM_OPCODE_I32_STORE8 = 0x3A,
   LOOM_WASM_OPCODE_I32_CONST = 0x41,
   LOOM_WASM_OPCODE_I32_EQZ = 0x45,
   LOOM_WASM_OPCODE_I32_ADD = 0x6A,
@@ -818,36 +820,36 @@ static iree_status_t loom_wasm_emit_i8x16_shuffle(
   return loom_wasm_emit_local_set(state, results.values[0]);
 }
 
-static iree_status_t loom_wasm_emit_v128_load(
+static iree_status_t loom_wasm_emit_memory_load(
     loom_wasm_emit_state_t* state, const loom_op_t* op,
-    const loom_low_descriptor_t* descriptor) {
+    const loom_low_descriptor_t* descriptor, uint8_t alignment_exponent) {
   if (!loom_low_op_isa(op) || op->operand_count != 1 || op->result_count != 1) {
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "wasm.v128.load packet shape is invalid");
+                            "Wasm memory load packet shape is invalid");
   }
   loom_value_slice_t operands = loom_low_op_operands(op);
   loom_value_slice_t results = loom_low_op_results(op);
   IREE_RETURN_IF_ERROR(loom_wasm_emit_local_get(state, operands.values[0]));
   IREE_RETURN_IF_ERROR(
       loom_wasm_write_opcode(&state->writer, descriptor->encoding_id));
-  IREE_RETURN_IF_ERROR(loom_wasm_emit_memarg(state, /*alignment_exponent=*/4,
-                                             /*offset=*/0));
+  IREE_RETURN_IF_ERROR(
+      loom_wasm_emit_memarg(state, alignment_exponent, /*offset=*/0));
   return loom_wasm_emit_local_set(state, results.values[0]);
 }
 
-static iree_status_t loom_wasm_emit_v128_store(
+static iree_status_t loom_wasm_emit_memory_store(
     loom_wasm_emit_state_t* state, const loom_op_t* op,
-    const loom_low_descriptor_t* descriptor) {
+    const loom_low_descriptor_t* descriptor, uint8_t alignment_exponent) {
   if (!loom_low_op_isa(op) || op->operand_count != 2 || op->result_count != 0) {
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "wasm.v128.store packet shape is invalid");
+                            "Wasm memory store packet shape is invalid");
   }
   loom_value_slice_t operands = loom_low_op_operands(op);
   IREE_RETURN_IF_ERROR(loom_wasm_emit_local_get(state, operands.values[0]));
   IREE_RETURN_IF_ERROR(loom_wasm_emit_local_get(state, operands.values[1]));
   IREE_RETURN_IF_ERROR(
       loom_wasm_write_opcode(&state->writer, descriptor->encoding_id));
-  return loom_wasm_emit_memarg(state, /*alignment_exponent=*/4, /*offset=*/0);
+  return loom_wasm_emit_memarg(state, alignment_exponent, /*offset=*/0);
 }
 
 static iree_status_t loom_wasm_emit_descriptor_packet(
@@ -895,10 +897,18 @@ static iree_status_t loom_wasm_emit_descriptor_packet(
     case LOOM_WASM_ENCODING_I32X4_REPLACE_LANE:
     case LOOM_WASM_ENCODING_F32X4_REPLACE_LANE:
       return loom_wasm_emit_lane_stack_op(state, op, descriptor);
+    case LOOM_WASM_OPCODE_I32_LOAD8_U:
+      return loom_wasm_emit_memory_load(state, op, descriptor,
+                                        /*alignment_exponent=*/0);
+    case LOOM_WASM_OPCODE_I32_STORE8:
+      return loom_wasm_emit_memory_store(state, op, descriptor,
+                                         /*alignment_exponent=*/0);
     case LOOM_WASM_ENCODING_V128_LOAD:
-      return loom_wasm_emit_v128_load(state, op, descriptor);
+      return loom_wasm_emit_memory_load(state, op, descriptor,
+                                        /*alignment_exponent=*/4);
     case LOOM_WASM_ENCODING_V128_STORE:
-      return loom_wasm_emit_v128_store(state, op, descriptor);
+      return loom_wasm_emit_memory_store(state, op, descriptor,
+                                         /*alignment_exponent=*/4);
     default: {
       iree_string_view_t key = loom_low_descriptor_set_string(
           state->allocation->target.descriptor_set,

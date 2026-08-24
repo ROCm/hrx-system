@@ -420,6 +420,70 @@ def _buffer_view_rule() -> ValueAliasRule:
     )
 
 
+def _buffer_byte_address_emits(
+    buffer_field: str,
+) -> tuple[ValueRef, tuple[EmitDescriptorOp, ...]]:
+    address = ValueRef.temporary("address")
+    return address, (
+        EmitDescriptorOp(
+            descriptor=_descriptor("wasm.i32.add"),
+            operands={
+                "lhs": ValueRef.operand(buffer_field),
+                "rhs": ValueRef.operand("byte_offset"),
+            },
+            results={"dst": address},
+            result_types={"dst": _I32},
+            form=DescriptorEmitForm.OP,
+        ),
+    )
+
+
+def _buffer_load_i8_u_rule() -> DescriptorRule:
+    descriptor = _descriptor("wasm.i32.load8_u")
+    address, address_emits = _buffer_byte_address_emits("source")
+    return DescriptorRule(
+        source_op=buffer.buffer_load_i8_u,
+        descriptor=descriptor,
+        guards=(
+            _value_type("byte_offset", _OFFSET),
+            _value_type("result", _I32),
+        ),
+        emit=(
+            *address_emits,
+            EmitDescriptorOp(
+                descriptor=descriptor,
+                operands={"address": address},
+                results={"dst": ValueRef.result("result")},
+                form=DescriptorEmitForm.OP,
+            ),
+        ),
+    )
+
+
+def _buffer_store_i8_rule() -> DescriptorRule:
+    descriptor = _descriptor("wasm.i32.store8")
+    address, address_emits = _buffer_byte_address_emits("target")
+    return DescriptorRule(
+        source_op=buffer.buffer_store_i8,
+        descriptor=descriptor,
+        guards=(
+            _value_type("value", _I32),
+            _value_type("byte_offset", _OFFSET),
+        ),
+        emit=(
+            *address_emits,
+            EmitDescriptorOp(
+                descriptor=descriptor,
+                operands={
+                    "address": address,
+                    "value": ValueRef.operand("value"),
+                },
+                form=DescriptorEmitForm.OP,
+            ),
+        ),
+    )
+
+
 def _source_memory_constraint(
     operation: SourceMemoryOperation,
     *,
@@ -558,6 +622,8 @@ WASM_CORE_SIMD128_CONTRACT_FRAGMENT = ContractFragment(
     public_header="loom/target/emit/wasm/contracts/core_simd128.h",
     cases=(
         _buffer_view_rule(),
+        _buffer_load_i8_u_rule(),
+        _buffer_store_i8_rule(),
         _binary_rule(scalar_arithmetic.scalar_addi, _I32, "wasm.i32.add"),
         _binary_rule(scalar_arithmetic.scalar_subi, _I32, "wasm.i32.sub"),
         _binary_rule(scalar_arithmetic.scalar_addf, _F32, "wasm.f32.add"),

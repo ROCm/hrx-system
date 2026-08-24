@@ -159,6 +159,8 @@ _SHUFFLE_BYTE_IMMEDIATES = tuple(
 _OP_BR = 0x0C
 _OP_BR_IF = 0x0D
 _OP_RETURN = 0x0F
+_OP_I32_LOAD8_U = 0x2D
+_OP_I32_STORE8 = 0x3A
 _OP_I32_CONST = 0x41
 _OP_I32_LT_U = 0x49
 _OP_I32_ADD = 0x6A
@@ -223,6 +225,20 @@ _STORE_EFFECT = Effect(
     memory_space=MemorySpace.WASM_MEMORY,
     flags=(EffectFlag.DEPENDENCY,),
     width_bits=128,
+)
+
+_BYTE_LOAD_EFFECT = Effect(
+    EffectKind.READ,
+    memory_space=MemorySpace.WASM_MEMORY,
+    flags=(EffectFlag.DEPENDENCY,),
+    width_bits=8,
+)
+
+_BYTE_STORE_EFFECT = Effect(
+    EffectKind.WRITE,
+    memory_space=MemorySpace.WASM_MEMORY,
+    flags=(EffectFlag.DEPENDENCY,),
+    width_bits=8,
 )
 
 _CONTROL_EFFECT = Effect(
@@ -713,6 +729,28 @@ WASM_CORE_SIMD128_DESCRIPTOR_SET = DescriptorSet(
             ),
             schedule_class=_SCHEDULE_SIMD_I32X4,
             flags=(DescriptorFlag.DEAD_REMOVABLE,),
+        ),
+        Descriptor(
+            key="wasm.i32.load8_u",
+            mnemonic="i32.load8_u",
+            semantic_tag="memory.load.u8.i32",
+            encoding_id=_OP_I32_LOAD8_U,
+            operands=(_i32_result(), _i32_resource("address")),
+            asm_forms=_asm(results=("dst",), operands=("address",)),
+            effects=(_BYTE_LOAD_EFFECT,),
+            schedule_class=_SCHEDULE_MEMORY_LOAD,
+            flags=(DescriptorFlag.SIDE_EFFECTING,),
+        ),
+        Descriptor(
+            key="wasm.i32.store8",
+            mnemonic="i32.store8",
+            semantic_tag="memory.store.i8",
+            encoding_id=_OP_I32_STORE8,
+            operands=(_i32_resource("address"), _i32_operand("value")),
+            asm_forms=_asm(operands=("address", "value")),
+            effects=(_BYTE_STORE_EFFECT,),
+            schedule_class=_SCHEDULE_MEMORY_STORE,
+            flags=(DescriptorFlag.SIDE_EFFECTING,),
         ),
         Descriptor(
             key="wasm.v128.load",

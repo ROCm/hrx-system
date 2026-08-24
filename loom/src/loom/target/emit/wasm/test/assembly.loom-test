@@ -491,3 +491,44 @@ Disassembly of section CODE:
   local.get  1
   return
   end
+
+// ====
+
+// RUN: emit wasm-dis
+// REQUIRES: wasm-objdump
+
+wasm.target<simd128> @target
+
+low.func.def public target<wasm.core.simd128>(@target) abi(wasm_function) @byte_roundtrip(%source: reg<wasm.i32>, %source_offset: reg<wasm.i32>, %target: reg<wasm.i32>, %target_offset: reg<wasm.i32>) -> (reg<wasm.i32>) asm {
+  %source_address = i32.add %source, %source_offset
+  %byte = i32.load8_u %source_address
+  %target_address = i32.add %target, %target_offset
+  i32.store8 %target_address, %byte
+  return %byte
+}
+
+// ----
+Disassembly of section CODE:
+
+<CODE>:
+        # 1 functions in section.
+
+<byte_roundtrip>:
+
+  local.get  0
+  local.get  1
+  i32.add
+  local.set  0
+  local.get  0
+  i32.load8_u  0
+  local.set  0
+  local.get  2
+  local.get  3
+  i32.add
+  local.set  1
+  local.get  1
+  local.get  0
+  i32.store8  0
+  local.get  0
+  return
+  end
