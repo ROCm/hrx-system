@@ -108,6 +108,21 @@ enum loom_link_symbol_flag_bits_e {
 };
 typedef uint32_t loom_link_symbol_flags_t;
 
+// Structural projection points exposed by one indexed symbol definition.
+// Contract references use source root zero; independently bounded root regions
+// use their one-based source region index.
+typedef struct loom_link_symbol_facet_schema_t {
+  // Structural symbol interfaces declared by the defining operation.
+  loom_symbol_interface_flags_t interfaces;
+  // Number of root region slots declared by the defining operation.
+  uint8_t root_region_count;
+  // Function body source root region index plus one, or zero when absent.
+  uint8_t body_region_index_plus_one;
+  // Kernel configuration source root region index plus one, or zero when
+  // absent.
+  uint8_t kernel_configuration_region_index_plus_one;
+} loom_link_symbol_facet_schema_t;
+
 // Options applied when adding a provider to an index.
 typedef struct loom_link_module_index_add_options_t {
   // Stable provider label for diagnostics and deterministic private naming.
@@ -217,6 +232,14 @@ typedef struct loom_link_module_index_symbol_t {
   loom_link_symbol_identity_t identity;
   // Linker-index symbol flags.
   loom_link_symbol_flags_t flags;
+  // Independently selectable structural projections of this symbol.
+  struct {
+    // Schema projected from the defining operation during source indexing.
+    loom_link_symbol_facet_schema_t schema;
+    // Index-wide ordinal of the contract facet. Root region facets immediately
+    // follow in source region order.
+    iree_host_size_t start_ordinal;
+  } facets;
   // Slice in the owning module's flat dependency occurrence array.
   struct {
     // First occurrence index.
@@ -316,9 +339,20 @@ const loom_link_module_index_module_t* loom_link_module_index_module_at(
 iree_host_size_t loom_link_module_index_symbol_count(
     const loom_link_module_index_t* index);
 
+// Returns the number of index-wide structural symbol facets.
+iree_host_size_t loom_link_module_index_facet_count(
+    const loom_link_module_index_t* index);
+
 // Returns symbol |ordinal|, or NULL if out of range.
 const loom_link_module_index_symbol_t* loom_link_module_index_symbol_at(
     const loom_link_module_index_t* index, iree_host_size_t ordinal);
+
+// Returns the index-wide facet ordinal for |source_root_region_index_plus_one|.
+// Zero selects the symbol contract. The source root must be present in the
+// symbol facet schema.
+iree_host_size_t loom_link_module_index_symbol_facet_ordinal(
+    const loom_link_module_index_symbol_t* symbol,
+    uint8_t source_root_region_index_plus_one);
 
 // Returns exported symbols owned by INPUT providers.
 //

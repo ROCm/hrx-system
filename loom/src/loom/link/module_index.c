@@ -65,6 +65,8 @@ struct loom_link_module_index_t {
     // Allocated record capacity.
     iree_host_size_t capacity;
   } symbols;
+  // Total contract and root-region facets across indexed symbols.
+  iree_host_size_t facet_count;
   // Exported INPUT-provider symbols in stable provider order.
   struct {
     // Growable index-wide symbol ordinal storage.
@@ -537,7 +539,8 @@ static iree_status_t loom_link_index_append_module(
 static iree_status_t loom_link_index_append_symbol(
     loom_link_module_index_t* index, loom_link_module_index_module_t* module,
     iree_string_view_t name, loom_symbol_kind_t kind,
-    loom_link_symbol_identity_t identity, loom_link_symbol_flags_t flags) {
+    loom_link_symbol_identity_t identity, loom_link_symbol_flags_t flags,
+    loom_link_symbol_facet_schema_t facet_schema) {
   const iree_host_size_t symbol_ordinal = index->symbols.count;
   iree_host_size_t symbol_count = 0;
   if (!iree_host_size_checked_add(symbol_ordinal, 1, &symbol_count)) {
@@ -560,6 +563,13 @@ static iree_status_t loom_link_index_append_symbol(
     IREE_RETURN_IF_ERROR(
         loom_link_index_reserve_input_exports(index, input_export_count));
   }
+  iree_host_size_t facet_count = 0;
+  if (!iree_host_size_checked_add(
+          index->facet_count,
+          (iree_host_size_t)facet_schema.root_region_count + 1, &facet_count)) {
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "link symbol facet count overflow");
+  }
   loom_link_module_index_symbol_t* symbol =
       &index->symbols.values[symbol_ordinal];
   *symbol = (loom_link_module_index_symbol_t){
@@ -571,6 +581,11 @@ static iree_status_t loom_link_index_append_symbol(
       .template_family_ordinal = LOOM_LINK_TEMPLATE_FAMILY_ORDINAL_INVALID,
       .identity = identity,
       .flags = flags,
+      .facets =
+          {
+              .schema = facet_schema,
+              .start_ordinal = index->facet_count,
+          },
       .next =
           {
               .same_name_ordinal = LOOM_LINK_MODULE_INDEX_INVALID_ORDINAL,
@@ -581,6 +596,7 @@ static iree_status_t loom_link_index_append_symbol(
 
   ++module->symbol_count;
   index->symbols.count = symbol_count;
+  index->facet_count = facet_count;
   IREE_RETURN_IF_ERROR(
       loom_link_index_insert_symbol_name(index, symbol_ordinal));
   if (is_input_export) {
@@ -745,9 +761,25 @@ static iree_status_t loom_link_index_module_materialized_symbols(
         loom_link_symbol_has_global_identity(source_module, symbol)
             ? LOOM_LINK_SYMBOL_IDENTITY_GLOBAL
             : LOOM_LINK_SYMBOL_IDENTITY_PRIVATE;
+    const loom_op_t* defining_op = symbol->defining_op;
+    const loom_op_vtable_t* vtable =
+        defining_op ? loom_op_vtable(source_module, defining_op) : NULL;
+    loom_link_symbol_facet_schema_t facet_schema = {0};
+    if (vtable && vtable->symbol_def) {
+      facet_schema.interfaces = vtable->symbol_def->interfaces;
+      facet_schema.root_region_count = defining_op->region_count;
+      facet_schema.kernel_configuration_region_index_plus_one =
+          vtable->symbol_def->kernel_workload_region_index_plus_one;
+      if (vtable->func_like &&
+          vtable->func_like->body_region_index != LOOM_REGION_INDEX_NONE) {
+        facet_schema.body_region_index_plus_one =
+            (uint8_t)(vtable->func_like->body_region_index + 1);
+      }
+    }
     IREE_RETURN_IF_ERROR(loom_link_index_append_symbol(
         index, module, name, symbol->kind, identity,
-        loom_link_materialized_symbol_flags(source_module, symbol)));
+        loom_link_materialized_symbol_flags(source_module, symbol),
+        facet_schema));
   }
   return iree_ok_status();
 }
@@ -975,10 +1007,18 @@ static iree_status_t loom_link_index_module_bytecode_symbols(
     const loom_bytecode_symbol_metadata_t* symbol =
         &bytecode_module->symbols[i];
     loom_link_symbol_flags_t flags = loom_link_bytecode_symbol_flags(symbol);
+    const loom_link_symbol_facet_schema_t facet_schema = {
+        .interfaces = symbol->interfaces,
+        .root_region_count = symbol->root_region_count,
+        .body_region_index_plus_one = symbol->body_region_index_plus_one,
+        .kernel_configuration_region_index_plus_one =
+            symbol->kernel_workload_region_index_plus_one,
+    };
     IREE_RETURN_IF_ERROR(loom_link_index_append_symbol(
         index, module, symbol->name,
         loom_link_bytecode_symbol_kind(symbol->kind),
-        loom_link_bytecode_symbol_identity(symbol, flags), flags));
+        loom_link_bytecode_symbol_identity(symbol, flags), flags,
+        facet_schema));
   }
   return iree_ok_status();
 }
@@ -1453,12 +1493,26 @@ iree_host_size_t loom_link_module_index_symbol_count(
   return index ? index->symbols.count : 0;
 }
 
+iree_host_size_t loom_link_module_index_facet_count(
+    const loom_link_module_index_t* index) {
+  return index ? index->facet_count : 0;
+}
+
 const loom_link_module_index_symbol_t* loom_link_module_index_symbol_at(
     const loom_link_module_index_t* index, iree_host_size_t ordinal) {
   if (!index || ordinal >= index->symbols.count) {
     return NULL;
   }
   return &index->symbols.values[ordinal];
+}
+
+iree_host_size_t loom_link_module_index_symbol_facet_ordinal(
+    const loom_link_module_index_symbol_t* symbol,
+    uint8_t source_root_region_index_plus_one) {
+  IREE_ASSERT(symbol);
+  IREE_ASSERT_LE(source_root_region_index_plus_one,
+                 symbol->facets.schema.root_region_count);
+  return symbol->facets.start_ordinal + source_root_region_index_plus_one;
 }
 
 loom_link_module_index_symbol_ordinal_list_t

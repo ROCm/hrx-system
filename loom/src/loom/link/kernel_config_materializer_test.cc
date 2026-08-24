@@ -115,6 +115,52 @@ class KernelConfigMaterializerTest : public ::testing::Test {
 };
 
 TEST_F(KernelConfigMaterializerTest,
+       IndexesKernelFacetSchemaAcrossProviderForms) {
+  loom_module_t* source_module = Parse(IREE_SV(R"(
+kernel.def @dispatch_rows(%element_count: index) {
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%element_count, %one, %one) workgroup_size(%one, %one, %one) : index
+} launch(%source: buffer) {
+  kernel.return
+}
+)"));
+  Verify(source_module);
+  const std::vector<uint8_t> bytecode = Write(source_module);
+
+  auto verify_index = [](const loom_link_module_index_t* index) {
+    const loom_link_module_index_symbol_t* kernel =
+        loom_link_module_index_lookup_name(index, IREE_SV("dispatch_rows"));
+    ASSERT_NE(kernel, nullptr);
+    EXPECT_TRUE(iree_any_bit_set(kernel->facets.schema.interfaces,
+                                 LOOM_SYMBOL_INTERFACE_KERNEL));
+    EXPECT_EQ(kernel->facets.schema.root_region_count, 2u);
+    EXPECT_EQ(kernel->facets.schema.kernel_configuration_region_index_plus_one,
+              1u);
+    EXPECT_EQ(kernel->facets.schema.body_region_index_plus_one, 2u);
+    EXPECT_EQ(loom_link_module_index_facet_count(index), 3u);
+    EXPECT_EQ(loom_link_module_index_symbol_facet_ordinal(kernel, 0), 0u);
+    EXPECT_EQ(loom_link_module_index_symbol_facet_ordinal(kernel, 1), 1u);
+    EXPECT_EQ(loom_link_module_index_symbol_facet_ordinal(kernel, 2), 2u);
+  };
+
+  IndexPtr materialized_index = CreateIndex();
+  IREE_ASSERT_OK(loom_link_module_index_add_materialized(
+      materialized_index.get(), source_module, /*options=*/nullptr,
+      /*out_provider_ordinal=*/nullptr));
+  verify_index(materialized_index.get());
+
+  IndexPtr bytecode_index = CreateIndex();
+  IREE_ASSERT_OK(loom_link_module_index_add_bytecode(
+      bytecode_index.get(),
+      iree_make_const_byte_span(bytecode.data(), bytecode.size()),
+      IREE_SV("provider.loombc"), /*index_options=*/nullptr,
+      /*options=*/nullptr, /*out_provider_ordinal=*/nullptr));
+  verify_index(bytecode_index.get());
+
+  loom_module_free(source_module);
+}
+
+TEST_F(KernelConfigMaterializerTest,
        ProjectsConfigurationWithoutReadingPoisonedImplementation) {
   loom_module_t* source_module = Parse(IREE_SV(R"(
 target.generic<reference> @dispatch_target
