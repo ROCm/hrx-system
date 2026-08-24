@@ -74,6 +74,7 @@ _MEMORY_PAYLOAD_FORMAT_INDEX = {
     AmdgpuMemoryPayloadFormat.GENERIC: 0,
     AmdgpuMemoryPayloadFormat.LOW_16BIT_FLOAT: 1,
     AmdgpuMemoryPayloadFormat.SIGNED_16BIT_INTEGER: 2,
+    AmdgpuMemoryPayloadFormat.UNSIGNED_8BIT_INTEGER: 3,
 }
 
 _MEMORY_DESCRIPTOR_CANDIDATE_PACKET_BYTE_COUNT_MAX = 31

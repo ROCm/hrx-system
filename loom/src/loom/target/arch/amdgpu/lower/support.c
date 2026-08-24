@@ -9,6 +9,7 @@
 #include "loom/analysis/view_regions.h"
 #include "loom/codegen/low/source_memory_plan.h"
 #include "loom/ir/context.h"
+#include "loom/ops/buffer/ops.h"
 #include "loom/ops/cfg/ops.h"
 #include "loom/ops/index/ops.h"
 #include "loom/ops/kernel/ops.h"
@@ -792,6 +793,15 @@ static_assert(IREE_ARRAYSIZE(kAmdgpuScfSourceProducerFlags) ==
               "AMDGPU scf source producer table out of sync");
 
 static const loom_amdgpu_source_producer_flags_t
+    kAmdgpuBufferSourceProducerFlags[LOOM_OP_BUFFER_COUNT_] = {
+        [LOOM_AMDGPU_OP_INDEX(LOOM_OP_BUFFER_LOAD_I8_U)] =
+            LOOM_AMDGPU_SOURCE_PRODUCER_MEMORY_ACCESS,
+};
+static_assert(IREE_ARRAYSIZE(kAmdgpuBufferSourceProducerFlags) ==
+                  LOOM_OP_BUFFER_COUNT_,
+              "AMDGPU buffer source producer table out of sync");
+
+static const loom_amdgpu_source_producer_flags_t
     kAmdgpuVectorSourceProducerFlags[LOOM_OP_VECTOR_COUNT_] = {
         [LOOM_AMDGPU_OP_INDEX(LOOM_OP_VECTOR_CONSTANT)] =
             LOOM_AMDGPU_SOURCE_PRODUCER_VECTOR_STORAGE,
@@ -907,6 +917,8 @@ static const loom_amdgpu_source_producer_dialect_table_t
             kAmdgpuIndexSourceProducerFlags),
         [LOOM_DIALECT_SCF] = LOOM_AMDGPU_SOURCE_PRODUCER_DIALECT_TABLE(
             kAmdgpuScfSourceProducerFlags),
+        [LOOM_DIALECT_BUFFER] = LOOM_AMDGPU_SOURCE_PRODUCER_DIALECT_TABLE(
+            kAmdgpuBufferSourceProducerFlags),
         [LOOM_DIALECT_VECTOR] = LOOM_AMDGPU_SOURCE_PRODUCER_DIALECT_TABLE(
             kAmdgpuVectorSourceProducerFlags),
         [LOOM_DIALECT_VIEW] = LOOM_AMDGPU_SOURCE_PRODUCER_DIALECT_TABLE(

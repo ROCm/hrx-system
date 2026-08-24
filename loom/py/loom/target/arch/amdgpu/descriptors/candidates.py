@@ -118,6 +118,7 @@ _S = AmdgpuMemoryPayloadRegisterClass.SGPR
 _G = AmdgpuMemoryPayloadFormat.GENERIC
 _F16 = AmdgpuMemoryPayloadFormat.LOW_16BIT_FLOAT
 _I16 = AmdgpuMemoryPayloadFormat.SIGNED_16BIT_INTEGER
+_U8 = AmdgpuMemoryPayloadFormat.UNSIGNED_8BIT_INTEGER
 
 
 def _memory_candidate(
@@ -146,6 +147,7 @@ def _memory_candidate(
 # payload format, payload register count, descriptor ref suffix.
 _MEMORY_DESCRIPTOR_CANDIDATE_ROWS = (
     (_B, _AD, _LD, 1, _V, _G, 1, "BUFFER_LOAD_I8"),
+    (_B, _AD, _LD, 1, _V, _U8, 1, "BUFFER_LOAD_U8"),
     (_B, _AD, _ST, 1, _V, _G, 1, "BUFFER_STORE_B8"),
     (_B, _AD, _LD, 2, _V, _F16, 1, "BUFFER_LOAD_B16_D16"),
     (_B, _AD, _LD, 2, _V, _I16, 1, "BUFFER_LOAD_I16"),
@@ -181,6 +183,7 @@ _MEMORY_DESCRIPTOR_CANDIDATE_ROWS = (
     (_SM, _SMEM, _LD, 8, _S, _G, 2, "S_LOAD_DWORDX2"),
     (_SM, _SMEM, _LD, 16, _S, _G, 4, "S_LOAD_DWORDX4"),
     (_GS, _SA, _LD, 1, _V, _G, 1, "GLOBAL_LOAD_I8_SADDR"),
+    (_GS, _SA, _LD, 1, _V, _U8, 1, "GLOBAL_LOAD_U8_SADDR"),
     (_GS, _SA, _ST, 1, _V, _G, 1, "GLOBAL_STORE_B8_SADDR"),
     (_GS, _SA, _LD, 2, _V, _F16, 1, "GLOBAL_LOAD_B16_D16_SADDR"),
     (_GS, _SA, _LD, 2, _V, _I16, 1, "GLOBAL_LOAD_I16_SADDR"),
@@ -195,6 +198,7 @@ _MEMORY_DESCRIPTOR_CANDIDATE_ROWS = (
     (_GS, _SA, _ST, 12, _V, _G, 3, "GLOBAL_STORE_B96_SADDR"),
     (_GS, _SA, _ST, 16, _V, _G, 4, "GLOBAL_STORE_B128_SADDR"),
     (_GF, _FL, _LD, 1, _V, _G, 1, "GLOBAL_LOAD_I8"),
+    (_GF, _FL, _LD, 1, _V, _U8, 1, "GLOBAL_LOAD_U8"),
     (_GF, _FL, _ST, 1, _V, _G, 1, "GLOBAL_STORE_B8"),
     (_GF, _FL, _LD, 2, _V, _F16, 1, "GLOBAL_LOAD_B16_D16"),
     (_GF, _FL, _LD, 2, _V, _I16, 1, "GLOBAL_LOAD_I16"),
@@ -208,6 +212,9 @@ _MEMORY_DESCRIPTOR_CANDIDATE_ROWS = (
     (_GF, _FL, _ST, 8, _V, _G, 2, "GLOBAL_STORE_B64"),
     (_GF, _FL, _ST, 12, _V, _G, 3, "GLOBAL_STORE_B96"),
     (_GF, _FL, _ST, 16, _V, _G, 4, "GLOBAL_STORE_B128"),
+    (_L, _AD, _LD, 1, _V, _G, 1, "DS_READ_U8"),
+    (_L, _AD, _LD, 1, _V, _U8, 1, "DS_READ_U8"),
+    (_L, _AD, _ST, 1, _V, _G, 1, "DS_WRITE_B8"),
     (_L, _AD, _LD, 2, _V, _I16, 1, "DS_READ_U16"),
     (_L, _AD, _LD, 2, _V, _G, 1, "DS_READ_U16"),
     (_L, _AD, _LD, 4, _V, _G, 1, "DS_READ_B32"),
@@ -230,7 +237,7 @@ _MEMORY_DESCRIPTOR_CANDIDATE_ROWS = (
     (_L, _ADT, _LD, 4, _V, _G, 1, "DS_READ_ADDTID_B32"),
     (_L, _ADT, _ST, 4, _V, _G, 1, "DS_WRITE_ADDTID_B32"),
     (_SC, _SV, _LD, 1, _V, _G, 1, "SCRATCH_LOAD_I8_VADDR"),
-    (_SC, _SV, _LD, 1, _V, _G, 1, "SCRATCH_LOAD_U8_VADDR"),
+    (_SC, _SV, _LD, 1, _V, _U8, 1, "SCRATCH_LOAD_U8_VADDR"),
     (_SC, _SV, _LD, 2, _V, _F16, 1, "SCRATCH_LOAD_U16_VADDR"),
     (_SC, _SV, _LD, 2, _V, _G, 1, "SCRATCH_LOAD_U16_VADDR"),
     (_SC, _SV, _LD, 2, _V, _I16, 1, "SCRATCH_LOAD_I16_VADDR"),
