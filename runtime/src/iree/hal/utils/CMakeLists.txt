@@ -280,6 +280,29 @@ iree_cc_library(
 
 iree_cc_library(
   NAME
+    profile_clock_alignment
+  HDRS
+    "profile_clock_alignment.h"
+  SRCS
+    "profile_clock_alignment.c"
+  DEPS
+    iree::base
+  PUBLIC
+)
+
+iree_cc_test(
+  NAME
+    profile_clock_alignment_test
+  SRCS
+    "profile_clock_alignment_test.cc"
+  DEPS
+    ::profile_clock_alignment
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+iree_cc_library(
+  NAME
     statistics_sink
   HDRS
     "statistics_sink.h"

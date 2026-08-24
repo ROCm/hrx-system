@@ -386,13 +386,7 @@ static uint64_t iree_hal_vulkan_host_time_domain_timestamp_ns(
 static void iree_hal_vulkan_profile_clock_alignment_reset(
     iree_hal_vulkan_profile_clock_alignment_t* clock_alignment) {
   iree_slim_mutex_lock(&clock_alignment->mutex);
-  clock_alignment->minimum_clock_tick = UINT64_MAX;
-  clock_alignment->maximum_clock_tick = 0;
-  clock_alignment->minimum_event_tick = UINT64_MAX;
-  clock_alignment->maximum_event_tick = 0;
-  clock_alignment->has_clock_ticks = false;
-  clock_alignment->has_event_ticks = false;
-  clock_alignment->has_invalid_alignment = false;
+  iree_hal_profile_clock_alignment_reset(&clock_alignment->state);
   iree_slim_mutex_unlock(&clock_alignment->mutex);
 }
 
@@ -400,24 +394,9 @@ static bool iree_hal_vulkan_profile_clock_alignment_record_clock_tick(
     iree_hal_vulkan_profile_clock_alignment_t* clock_alignment,
     uint64_t calibrated_device_tick) {
   iree_slim_mutex_lock(&clock_alignment->mutex);
-  if (clock_alignment->has_clock_ticks) {
-    clock_alignment->minimum_clock_tick =
-        iree_min(clock_alignment->minimum_clock_tick, calibrated_device_tick);
-    clock_alignment->maximum_clock_tick =
-        iree_max(clock_alignment->maximum_clock_tick, calibrated_device_tick);
-  } else {
-    clock_alignment->minimum_clock_tick = calibrated_device_tick;
-    clock_alignment->maximum_clock_tick = calibrated_device_tick;
-    clock_alignment->has_clock_ticks = true;
-  }
-  if (clock_alignment->has_event_ticks &&
-      (clock_alignment->minimum_event_tick <
-           clock_alignment->minimum_clock_tick ||
-       clock_alignment->maximum_event_tick >
-           clock_alignment->maximum_clock_tick)) {
-    clock_alignment->has_invalid_alignment = true;
-  }
-  const bool has_invalid_alignment = clock_alignment->has_invalid_alignment;
+  const bool has_invalid_alignment =
+      iree_hal_profile_clock_alignment_record_clock_tick(
+          &clock_alignment->state, calibrated_device_tick);
   iree_slim_mutex_unlock(&clock_alignment->mutex);
   return has_invalid_alignment;
 }

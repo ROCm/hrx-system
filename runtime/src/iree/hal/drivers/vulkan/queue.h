@@ -23,6 +23,7 @@
 #include "iree/hal/drivers/vulkan/semaphore.h"
 #include "iree/hal/drivers/vulkan/util/libvulkan.h"
 #include "iree/hal/local/profile.h"
+#include "iree/hal/utils/profile_clock_alignment.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -56,29 +57,11 @@ typedef struct iree_hal_vulkan_queue_staging_ring_t
 // Logical-device-owned clock alignment state shared with queue lanes while
 // profiling is active.
 typedef struct iree_hal_vulkan_profile_clock_alignment_t {
-  // Mutex protecting the sampled tick ranges and invalid-alignment flag.
+  // Mutex protecting |state| across queue harvest and device sampling.
   iree_slim_mutex_t mutex;
 
-  // Earliest calibrated device clock tick observed during the session.
-  uint64_t minimum_clock_tick;
-
-  // Latest calibrated device clock tick observed during the session.
-  uint64_t maximum_clock_tick;
-
-  // Earliest device event tick observed during the active profiling session.
-  uint64_t minimum_event_tick;
-
-  // Latest device event tick observed during the active profiling session.
-  uint64_t maximum_event_tick;
-
-  // True when at least one calibrated device clock tick has been observed.
-  bool has_clock_ticks;
-
-  // True when at least one device event tick has been observed.
-  bool has_event_ticks;
-
-  // True when calibrated device timestamps are not aligned with event ticks.
-  bool has_invalid_alignment;
+  // Sampled device clock and event tick ranges for the active session.
+  iree_hal_profile_clock_alignment_t state;
 } iree_hal_vulkan_profile_clock_alignment_t;
 
 typedef enum iree_hal_vulkan_queue_role_e {
