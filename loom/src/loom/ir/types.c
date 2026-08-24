@@ -49,6 +49,38 @@ iree_status_t loom_type_function_build(const loom_type_t* arg_types,
 // Type equality
 //===----------------------------------------------------------------------===//
 
+bool loom_type_is_module_independent(loom_type_t type) {
+  const loom_type_kind_t kind = loom_type_kind(type);
+  if (!loom_type_kind_is_valid(kind)) return false;
+  switch (kind) {
+    case LOOM_TYPE_FUNCTION: {
+      const loom_func_type_data_t* data = loom_type_func_data(type);
+      return data && loom_type_sequence_is_module_independent(
+                         data->types, (iree_host_size_t)data->arg_count +
+                                          data->result_count);
+    }
+    case LOOM_TYPE_DIALECT:
+    case LOOM_TYPE_PARAMETERIZED:
+      return false;
+    case LOOM_TYPE_REGISTER: {
+      if (!loom_type_register_has_value_type(type)) return true;
+      const loom_type_t* value_type = loom_type_register_value_type(type);
+      return value_type && loom_type_is_module_independent(*value_type);
+    }
+    default:
+      return !loom_type_has_static_encoding(type);
+  }
+}
+
+bool loom_type_sequence_is_module_independent(const loom_type_t* types,
+                                              iree_host_size_t type_count) {
+  if (type_count > 0 && !types) return false;
+  for (iree_host_size_t i = 0; i < type_count; ++i) {
+    if (!loom_type_is_module_independent(types[i])) return false;
+  }
+  return true;
+}
+
 static bool loom_type_sequence_equal(const loom_type_t* a_types,
                                      const loom_type_t* b_types,
                                      uint16_t type_count) {

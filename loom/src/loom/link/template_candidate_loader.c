@@ -155,6 +155,7 @@ static iree_status_t loom_link_template_candidate_copy_signature_types(
     iree_arena_allocator_t* arena, loom_template_provider_summary_t* summary) {
   const iree_host_size_t type_count =
       (iree_host_size_t)header->argument_count + header->result_count;
+  summary->signature_is_module_independent = true;
   if (type_count == 0) {
     return iree_ok_status();
   }
@@ -174,6 +175,8 @@ static iree_status_t loom_link_template_candidate_copy_signature_types(
   summary->argument_types = header->argument_count != 0 ? types : NULL;
   summary->result_types =
       header->result_count != 0 ? types + header->argument_count : NULL;
+  summary->signature_is_module_independent =
+      loom_type_sequence_is_module_independent(types, type_count);
   return iree_ok_status();
 }
 
@@ -373,6 +376,33 @@ static bool loom_link_template_candidate_projection_lookup_global(
   return false;
 }
 
+static bool loom_link_template_candidate_projection_try_symbol(
+    const loom_link_template_candidate_projection_t* projection,
+    loom_symbol_ref_t source_ref, loom_symbol_ref_t* out_target_ref) {
+  *out_target_ref = loom_symbol_ref_null();
+  if (!loom_symbol_ref_is_valid(source_ref)) {
+    return true;
+  }
+  IREE_ASSERT(source_ref.module_id == 0);
+  IREE_ASSERT(source_ref.symbol_id < projection->source_module->symbol_count);
+  const iree_host_size_t source_ordinal =
+      projection->source_module->symbol_start_ordinal + source_ref.symbol_id;
+  IREE_ASSERT(source_ordinal < projection->target_symbol_count);
+  const loom_symbol_ref_t target_ref =
+      projection->target_symbols[source_ordinal];
+  if (loom_symbol_ref_is_valid(target_ref)) {
+    *out_target_ref = target_ref;
+    return true;
+  }
+
+  const loom_link_module_index_symbol_t* source_symbol =
+      loom_link_module_index_symbol_at(projection->index, source_ordinal);
+  IREE_ASSERT(source_symbol != NULL);
+  return source_symbol->identity == LOOM_LINK_SYMBOL_IDENTITY_GLOBAL &&
+         loom_link_template_candidate_projection_lookup_global(
+             projection, source_symbol, out_target_ref);
+}
+
 static iree_status_t loom_link_template_candidate_projection_add_placeholder(
     loom_link_template_candidate_projection_t* projection,
     const loom_link_module_index_symbol_t* source_symbol,
@@ -410,8 +440,9 @@ static iree_status_t loom_link_template_candidate_remap_symbol(
   const iree_host_size_t source_ordinal =
       projection->source_module->symbol_start_ordinal + source_ref.symbol_id;
   IREE_ASSERT(source_ordinal < projection->target_symbol_count);
-  loom_symbol_ref_t target_ref = projection->target_symbols[source_ordinal];
-  if (loom_symbol_ref_is_valid(target_ref)) {
+  loom_symbol_ref_t target_ref = loom_symbol_ref_null();
+  if (loom_link_template_candidate_projection_try_symbol(projection, source_ref,
+                                                         &target_ref)) {
     *out_target_ref = target_ref;
     return iree_ok_status();
   }
@@ -419,15 +450,30 @@ static iree_status_t loom_link_template_candidate_remap_symbol(
   const loom_link_module_index_symbol_t* source_symbol =
       loom_link_module_index_symbol_at(projection->index, source_ordinal);
   IREE_ASSERT(source_symbol != NULL);
-  if (source_symbol->identity == LOOM_LINK_SYMBOL_IDENTITY_GLOBAL &&
-      loom_link_template_candidate_projection_lookup_global(
-          projection, source_symbol, &target_ref)) {
-    projection->target_symbols[source_ordinal] = target_ref;
-    *out_target_ref = target_ref;
-    return iree_ok_status();
-  }
   return loom_link_template_candidate_projection_add_placeholder(
       projection, source_symbol, out_target_ref);
+}
+
+static void loom_link_template_candidate_borrow_summary(
+    const loom_template_provider_summary_t* source,
+    const loom_link_template_candidate_projection_t* projection,
+    loom_symbol_ref_t target_family, iree_host_size_t origin_ordinal,
+    loom_template_provider_summary_t* out_provider) {
+  IREE_ASSERT(source->signature_is_module_independent);
+  loom_symbol_ref_t target_symbol = loom_symbol_ref_null();
+  (void)loom_link_template_candidate_projection_try_symbol(
+      projection, source->target_symbol, &target_symbol);
+  const loom_symbol_t* family_symbol =
+      &projection->target_module->symbols.entries[target_family.symbol_id];
+  *out_provider = *source;
+  out_provider->symbol = loom_symbol_ref_null();
+  out_provider->target_symbol = target_symbol;
+  out_provider->function = (loom_func_like_t){0};
+  out_provider->func_facts = NULL;
+  out_provider->origin_ordinal = origin_ordinal;
+  out_provider->family = target_family;
+  out_provider->family_name =
+      projection->target_module->strings.entries[family_symbol->name_id];
 }
 
 static iree_status_t loom_link_template_candidate_capacity(
@@ -503,14 +549,16 @@ iree_status_t loom_link_template_candidate_loader_project(
     loom_link_template_candidate_loader_t* loader, const loom_link_plan_t* plan,
     loom_link_plan_materialization_t* materialization,
     loom_link_template_provider_membership_t selected_providers,
-    iree_arena_allocator_t* arena,
+    iree_arena_allocator_t* arena, bool* out_materialization_modified,
     loom_template_provider_slice_t* out_candidates) {
   IREE_ASSERT_ARGUMENT(loader);
   IREE_ASSERT_ARGUMENT(plan);
   IREE_ASSERT_ARGUMENT(materialization);
   IREE_ASSERT_ARGUMENT(materialization->module);
   IREE_ASSERT_ARGUMENT(arena);
+  IREE_ASSERT_ARGUMENT(out_materialization_modified);
   IREE_ASSERT_ARGUMENT(out_candidates);
+  *out_materialization_modified = false;
   *out_candidates = loom_template_provider_slice_empty();
   IREE_ASSERT(selected_providers.symbol_count ==
               loom_link_module_index_symbol_count(loader->index));
@@ -561,12 +609,19 @@ iree_status_t loom_link_template_candidate_loader_project(
             .target_symbols = materialization->target_symbols.values,
             .target_symbol_count = materialization->target_symbols.count,
         };
-        IREE_RETURN_IF_ERROR(loom_template_provider_summary_project(
-            source_summary, materialization->module, target_family,
-            provider_ordinal,
-            loom_ir_remap_symbol_callback_make(
-                loom_link_template_candidate_remap_symbol, &projection),
-            arena, &candidates[candidate_count++]));
+        if (source_summary->signature_is_module_independent) {
+          loom_link_template_candidate_borrow_summary(
+              source_summary, &projection, target_family, provider_ordinal,
+              &candidates[candidate_count++]);
+        } else {
+          *out_materialization_modified = true;
+          IREE_RETURN_IF_ERROR(loom_template_provider_summary_project(
+              source_summary, materialization->module, target_family,
+              provider_ordinal,
+              loom_ir_remap_symbol_callback_make(
+                  loom_link_template_candidate_remap_symbol, &projection),
+              arena, &candidates[candidate_count++]));
+        }
       }
       provider_ordinal = provider->next.template_provider_ordinal;
     }

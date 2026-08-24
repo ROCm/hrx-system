@@ -172,6 +172,49 @@ template.def<@demo.family> @external(%x: i32) -> (i32) {
 }
 
 TEST_F(TemplateSelectionQueryTest,
+       SelectsBorrowedProviderAcrossModuleValueDomains) {
+  ModulePtr source = ParseModule(R"(
+template.decl @source.family(%m: index, %arg: tensor<[%m]xf32>) -> (tensor<[%m]xf32>)
+
+template.def<@source.family> @source.provider(%m: index, %arg: tensor<[%m]xf32>) -> (tensor<[%m]xf32>) where [mul(%m, 16)] {
+  template.return %arg : tensor<[%m]xf32>
+}
+)");
+  ModulePtr application = ParseModule(R"(
+template.decl @application.family(%m: index, %arg: tensor<[%m]xf32>) -> (tensor<[%m]xf32>)
+
+func.def @padding(%x: i32) -> (i32) {
+  func.return %x : i32
+}
+
+func.def public @entry(%m: index, %arg: tensor<[%m]xf32>) -> (tensor<[%m]xf32>) where [range(%m, 32, 32)] {
+  %result = template.apply<@application.family>(%m, %arg) : (index, tensor<[%m]xf32>) -> (tensor<[%m]xf32>)
+  func.return %result : tensor<[%m]xf32>
+}
+)");
+  loom_template_provider_summary_t external = ExternalizeProvider(
+      source.get(), IREE_SV("source.family"), IREE_SV("source.provider"), 11);
+  ASSERT_TRUE(external.signature_is_module_independent);
+  external.family = {
+      /*.module_id=*/0,
+      /*.symbol_id=*/
+      FindSymbol(application.get(), IREE_SV("application.family")),
+  };
+  const loom_symbol_t* family_symbol =
+      &application->symbols.entries[external.family.symbol_id];
+  external.family_name = application->strings.entries[family_symbol->name_id];
+  const std::string module_before = PrintModule(application.get());
+
+  const loom_template_selection_query_result_t result =
+      Query(application.get(), &external, 1, /*origin_count=*/12);
+
+  ASSERT_EQ(result.selected_origins.count, 1u);
+  EXPECT_EQ(result.selected_origins.values[0], 11u);
+  EXPECT_EQ(result.unresolved_site_count, 0u);
+  EXPECT_EQ(PrintModule(application.get()), module_before);
+}
+
+TEST_F(TemplateSelectionQueryTest,
        FamilyPredicateGatesExternalProviderSelection) {
   ModulePtr rejected_module = ParseModule(R"(
 template.decl @demo.family(%m: index) -> (index) where [mul(%m, 16)]

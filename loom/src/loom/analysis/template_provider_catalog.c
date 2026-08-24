@@ -125,6 +125,7 @@ static iree_status_t loom_template_provider_catalog_populate_signature(
   provider->result_ids = facts->result_ids;
   const iree_host_size_t type_count =
       (iree_host_size_t)facts->argument_count + facts->result_count;
+  provider->signature_is_module_independent = true;
   if (type_count == 0) {
     return iree_ok_status();
   }
@@ -140,6 +141,8 @@ static iree_status_t loom_template_provider_catalog_populate_signature(
   provider->argument_types = facts->argument_count > 0 ? types : NULL;
   provider->result_types =
       facts->result_count > 0 ? types + facts->argument_count : NULL;
+  provider->signature_is_module_independent =
+      loom_type_sequence_is_module_independent(types, type_count);
   return iree_ok_status();
 }
 
@@ -305,6 +308,8 @@ iree_status_t loom_template_provider_catalog_build(
   IREE_RETURN_IF_ERROR(loom_template_provider_catalog_count_local(
       module, buckets, &local_provider_count));
   for (iree_host_size_t i = 0; i < external_provider_count; ++i) {
+    IREE_ASSERT(external_providers[i].module == module ||
+                external_providers[i].signature_is_module_independent);
     const loom_symbol_ref_t family = external_providers[i].family;
     IREE_ASSERT(loom_symbol_ref_is_valid(family));
     IREE_ASSERT(family.module_id == 0);

@@ -629,6 +629,18 @@ static inline bool loom_register_class_name_is_qualified(
 
 // --- Type comparison ---
 
+// Returns true when |type|'s structural identity contains no module-local
+// string, type, encoding, attribute, or symbol identities.
+//
+// SSA value references do not make a type module-dependent: callers can map
+// those explicitly with loom_type_value_remap_t. Compound function and
+// register types are module-independent only when every nested value type is.
+bool loom_type_is_module_independent(loom_type_t type);
+
+// Returns true when every type in |types| is module-independent.
+bool loom_type_sequence_is_module_independent(const loom_type_t* types,
+                                              iree_host_size_t type_count);
+
 // One-way SSA value map used when comparing types across forwarding
 // boundaries.
 typedef struct loom_type_value_remap_t {

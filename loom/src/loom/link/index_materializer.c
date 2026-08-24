@@ -127,13 +127,14 @@ static iree_status_t loom_link_index_query_candidates(
     const loom_link_index_selected_providers_t* selected,
     const loom_link_plan_options_t* options,
     iree_arena_block_pool_t* block_pool, iree_arena_allocator_t* arena,
+    bool* out_materialization_modified,
     loom_template_selection_query_result_t* out_result) {
   loom_template_provider_slice_t external_candidates =
       loom_template_provider_slice_empty();
   IREE_RETURN_IF_ERROR(loom_link_template_candidate_loader_project(
       candidate_loader, plan, materialization,
       loom_link_index_selected_provider_membership(selected), arena,
-      &external_candidates));
+      out_materialization_modified, &external_candidates));
 
   loom_symbol_fact_table_t fact_table;
   loom_symbol_fact_table_initialize(&fact_table, arena);
@@ -192,6 +193,7 @@ static iree_status_t loom_link_index_materialize_selective(
       index, environment, &candidate_loader);
 
   loom_link_plan_t* stable_plan = NULL;
+  loom_module_t* stable_module = NULL;
   while (iree_status_is_ok(status) && stable_plan == NULL) {
     loom_link_plan_t* plan = NULL;
     status = loom_link_index_build_plan(index, plan_options, &selected,
@@ -210,17 +212,19 @@ static iree_status_t loom_link_index_materialize_selective(
     status = loom_link_plan_materialize(plan, environment, module_name,
                                         &iteration_arena, &analysis);
     loom_template_selection_query_result_t query = {0};
+    bool analysis_modified = false;
     if (iree_status_is_ok(status)) {
       status = loom_link_index_query_candidates(
           index, candidate_loader, plan, &analysis, &selected, plan_options,
-          environment->block_pool, &iteration_arena, &query);
+          environment->block_pool, &iteration_arena, &analysis_modified,
+          &query);
     }
     const bool changed =
         iree_status_is_ok(status) &&
         loom_link_index_append_query_selections(&query, &selected);
-    loom_module_free(analysis.module);
-    iree_arena_deinitialize(&iteration_arena);
     if (!iree_status_is_ok(status)) {
+      loom_module_free(analysis.module);
+      iree_arena_deinitialize(&iteration_arena);
       loom_link_plan_free(plan);
       break;
     }
@@ -228,10 +232,21 @@ static iree_status_t loom_link_index_materialize_selective(
       loom_link_plan_free(plan);
     } else {
       stable_plan = plan;
+      if (!analysis_modified) {
+        stable_module = analysis.module;
+        analysis.module = NULL;
+      }
     }
+    loom_module_free(analysis.module);
+    iree_arena_deinitialize(&iteration_arena);
   }
 
-  if (iree_status_is_ok(status)) {
+  if (iree_status_is_ok(status) && stable_module != NULL) {
+    out_materialization->plan = stable_plan;
+    out_materialization->module = stable_module;
+    stable_plan = NULL;
+    stable_module = NULL;
+  } else if (iree_status_is_ok(status)) {
     iree_arena_allocator_t final_arena;
     iree_arena_initialize(environment->block_pool, &final_arena);
     loom_link_plan_materialization_t final = {0};
@@ -248,6 +263,7 @@ static iree_status_t loom_link_index_materialize_selective(
   }
 
   loom_link_plan_free(stable_plan);
+  loom_module_free(stable_module);
   loom_link_template_candidate_loader_free(candidate_loader);
   loom_link_index_selected_providers_deinitialize(&selected);
   return status;

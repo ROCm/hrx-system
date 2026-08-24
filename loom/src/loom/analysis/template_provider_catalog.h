@@ -53,6 +53,10 @@ typedef struct loom_template_provider_summary_t {
   // True when the provider has a materialized body.
   bool has_body;
 
+  // True when every signature type can be compared outside this provider
+  // module's identity domain after remapping SSA value references.
+  bool signature_is_module_independent;
+
   // Local module symbol reference, or null for external providers.
   loom_symbol_ref_t symbol;
 
@@ -173,9 +177,12 @@ iree_status_t loom_template_provider_catalog_build_local(
     loom_template_provider_catalog_t* catalog, const loom_module_t* module,
     loom_symbol_fact_table_t* fact_table);
 
-// Rebuilds |catalog| from local providers plus caller-projected external
-// summaries. External payloads must already use |module|'s symbol and value
-// domains and remain live for the catalog lifetime.
+// Rebuilds |catalog| from local providers plus external summaries.
+//
+// Each external family reference must use |module|'s symbol domain. Other
+// payloads may borrow a different module only when
+// signature_is_module_independent is true. Every borrowed payload must remain
+// live for the catalog lifetime.
 iree_status_t loom_template_provider_catalog_build(
     loom_template_provider_catalog_t* catalog, const loom_module_t* module,
     loom_symbol_fact_table_t* fact_table,

@@ -446,6 +446,46 @@ template.def<@demo.choose> @implementation(%x: i32) -> (i32) {
   loom_link_index_materialization_deinitialize(&materialization);
 }
 
+TEST_F(LinkIndexMaterializerTest,
+       SelectsBytecodeProviderWithModuleDependentSignature) {
+  loom_module_t* root = Parse(IREE_SV(R"(
+template.decl @demo.choose(%arg: hal.buffer) -> (hal.buffer)
+
+func.def public @entry(%arg: hal.buffer) -> (hal.buffer) {
+  %result = template.apply<@demo.choose>(%arg) : (hal.buffer) -> (hal.buffer)
+  func.return %result : hal.buffer
+}
+)"),
+                              IREE_SV("root.loom"));
+  loom_module_t* library = Parse(IREE_SV(R"(
+template.decl @demo.choose(%arg: hal.buffer) -> (hal.buffer)
+
+template.def<@demo.choose> priority(10) @implementation(%arg: hal.buffer) -> (hal.buffer) {
+  template.return %arg : hal.buffer
+}
+
+template.def<@demo.choose> priority(1) @fallback(%arg: hal.buffer) -> (hal.buffer) {
+  template.return %arg : hal.buffer
+}
+)"),
+                                 IREE_SV("library.loom"));
+  const std::vector<uint8_t> library_bytecode = WriteModule(library);
+
+  IndexPtr index = CreateIndex();
+  AddMaterialized(index.get(), root, IREE_SV("root"),
+                  LOOM_LINK_PROVIDER_ROLE_INPUT);
+  AddBytecode(index.get(), library_bytecode, IREE_SV("library"),
+              LOOM_LINK_PROVIDER_ROLE_LIBRARY);
+
+  loom_link_index_materialization_t materialization =
+      Materialize(index.get(), IREE_SV("@entry"));
+  Verify(materialization.module);
+  EXPECT_NE(FindSymbol(materialization.module, IREE_SV("implementation")),
+            nullptr);
+  EXPECT_EQ(FindSymbol(materialization.module, IREE_SV("fallback")), nullptr);
+  loom_link_index_materialization_deinitialize(&materialization);
+}
+
 TEST_F(LinkIndexMaterializerTest, ClosedLinkRejectsUnresolvedApplication) {
   loom_module_t* root = Parse(IREE_SV(R"(
 template.decl @demo.missing(%x: i32) -> (i32)

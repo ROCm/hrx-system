@@ -100,7 +100,8 @@ loom_template_applicability_target_feasibility(
 static bool loom_template_applicability_types_match(
     const loom_module_t* application_module, const loom_op_t* application_op,
     const loom_template_provider_summary_t* provider) {
-  IREE_ASSERT(provider->module == application_module);
+  IREE_ASSERT(provider->module == application_module ||
+              provider->signature_is_module_independent);
   const loom_value_slice_t operands =
       loom_template_applicability_application_operands(application_op);
   const loom_value_slice_t results =

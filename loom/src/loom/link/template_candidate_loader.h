@@ -50,12 +50,13 @@ void loom_link_template_candidate_loader_free(
 // provider-owned symbol references become disposable analysis placeholders;
 // they never enter the final linked artifact. The returned summaries belong to
 // |arena| and are suitable as the external catalog overlay for one selection
-// query.
+// query. |out_materialization_modified| is true when projection added any
+// disposable state to materialization->module.
 iree_status_t loom_link_template_candidate_loader_project(
     loom_link_template_candidate_loader_t* loader, const loom_link_plan_t* plan,
     loom_link_plan_materialization_t* materialization,
     loom_link_template_provider_membership_t selected_providers,
-    iree_arena_allocator_t* arena,
+    iree_arena_allocator_t* arena, bool* out_materialization_modified,
     loom_template_provider_slice_t* out_candidates);
 
 #ifdef __cplusplus
