@@ -30,6 +30,13 @@
                OpMemberName %Parameters 7 "flags"
                OpName %WordBuffer "WordBuffer"
                OpMemberName %WordBuffer 0 "words"
+               OpName %CopyParameters "CopyParameters"
+               OpMemberName %CopyParameters 0 "source"
+               OpMemberName %CopyParameters 1 "target"
+               OpMemberName %CopyParameters 2 "source_byte_offset"
+               OpMemberName %CopyParameters 3 "target_byte_offset"
+               OpMemberName %CopyParameters 4 "target_word_count"
+               OpMemberName %CopyParameters 5 "flags"
                OpName %params "params"
                OpName %gl_GlobalInvocationID "gl_GlobalInvocationID"
                OpDecorate %Parameters Block
@@ -44,6 +51,19 @@
                OpDecorate %_runtimearr_uint ArrayStride 4
                OpDecorate %WordBuffer Block
                OpMemberDecorate %WordBuffer 0 Offset 0
+               OpDecorate %CopyParameters Block
+               OpMemberDecorate %CopyParameters 0 NonWritable
+               OpMemberDecorate %CopyParameters 0 Offset 0
+               OpMemberDecorate %CopyParameters 1 NonWritable
+               OpMemberDecorate %CopyParameters 1 Offset 8
+               OpMemberDecorate %CopyParameters 2 NonWritable
+               OpMemberDecorate %CopyParameters 2 Offset 16
+               OpMemberDecorate %CopyParameters 3 NonWritable
+               OpMemberDecorate %CopyParameters 3 Offset 20
+               OpMemberDecorate %CopyParameters 4 NonWritable
+               OpMemberDecorate %CopyParameters 4 Offset 24
+               OpMemberDecorate %CopyParameters 5 NonWritable
+               OpMemberDecorate %CopyParameters 5 Offset 28
                OpDecorate %gl_GlobalInvocationID BuiltIn GlobalInvocationId
        %void = OpTypeVoid
           %3 = OpTypeFunction %void
@@ -64,6 +84,9 @@
       %int_0 = OpConstant %int 0
 %_ptr_PushConstant__ptr_PhysicalStorageBuffer_WordBuffer = OpTypePointer PushConstant %_ptr_PhysicalStorageBuffer_WordBuffer
 %_ptr_PhysicalStorageBuffer_uint = OpTypePointer PhysicalStorageBuffer %uint
+%CopyParameters = OpTypeStruct %_ptr_PhysicalStorageBuffer_WordBuffer %_ptr_PhysicalStorageBuffer_WordBuffer %uint %uint %uint %uint
+%_ptr_PhysicalStorageBuffer_CopyParameters = OpTypePointer PhysicalStorageBuffer %CopyParameters
+%_ptr_PhysicalStorageBuffer__ptr_PhysicalStorageBuffer_WordBuffer = OpTypePointer PhysicalStorageBuffer %_ptr_PhysicalStorageBuffer_WordBuffer
       %int_6 = OpConstant %int 6
      %v3uint = OpTypeVector %uint 3
 %_ptr_Input_v3uint = OpTypePointer Input %v3uint
@@ -82,6 +105,46 @@
 %uint_4294967295 = OpConstant %uint 4294967295
        %main = OpFunction %void None %3
           %5 = OpLabel
+%pushed_source_address_ptr = OpAccessChain %_ptr_PushConstant__ptr_PhysicalStorageBuffer_WordBuffer %params %int_0
+%pushed_source_address = OpLoad %_ptr_PhysicalStorageBuffer_WordBuffer %pushed_source_address_ptr
+%pushed_target_address_ptr = OpAccessChain %_ptr_PushConstant__ptr_PhysicalStorageBuffer_WordBuffer %params %int_1
+%pushed_target_address = OpLoad %_ptr_PhysicalStorageBuffer_WordBuffer %pushed_target_address_ptr
+%pushed_source_byte_offset_ptr = OpAccessChain %_ptr_PushConstant_uint %params %int_2
+%pushed_source_byte_offset = OpLoad %uint %pushed_source_byte_offset_ptr
+%pushed_target_byte_offset_ptr = OpAccessChain %_ptr_PushConstant_uint %params %int_3
+%pushed_target_byte_offset = OpLoad %uint %pushed_target_byte_offset_ptr
+%pushed_target_word_count_ptr = OpAccessChain %_ptr_PushConstant_uint %params %int_5
+%pushed_target_word_count = OpLoad %uint %pushed_target_word_count_ptr
+%pushed_flags_ptr = OpAccessChain %_ptr_PushConstant_uint %params %int_7
+%pushed_flags = OpLoad %uint %pushed_flags_ptr
+%indirect_flag = OpBitwiseAnd %uint %pushed_flags %uint_2
+%uses_indirect_parameters = OpINotEqual %bool %indirect_flag %uint_0
+               OpSelectionMerge %resolved_parameters None
+               OpBranchConditional %uses_indirect_parameters %load_indirect_parameters %use_direct_parameters
+%use_direct_parameters = OpLabel
+               OpBranch %resolved_parameters
+%load_indirect_parameters = OpLabel
+%copy_parameters = OpBitcast %_ptr_PhysicalStorageBuffer_CopyParameters %pushed_source_address
+%indirect_source_address_ptr = OpAccessChain %_ptr_PhysicalStorageBuffer__ptr_PhysicalStorageBuffer_WordBuffer %copy_parameters %int_0
+%indirect_source_address = OpLoad %_ptr_PhysicalStorageBuffer_WordBuffer %indirect_source_address_ptr Aligned 8
+%indirect_target_address_ptr = OpAccessChain %_ptr_PhysicalStorageBuffer__ptr_PhysicalStorageBuffer_WordBuffer %copy_parameters %int_1
+%indirect_target_address = OpLoad %_ptr_PhysicalStorageBuffer_WordBuffer %indirect_target_address_ptr Aligned 8
+%indirect_source_byte_offset_ptr = OpAccessChain %_ptr_PhysicalStorageBuffer_uint %copy_parameters %int_2
+%indirect_source_byte_offset = OpLoad %uint %indirect_source_byte_offset_ptr Aligned 4
+%indirect_target_byte_offset_ptr = OpAccessChain %_ptr_PhysicalStorageBuffer_uint %copy_parameters %int_3
+%indirect_target_byte_offset = OpLoad %uint %indirect_target_byte_offset_ptr Aligned 4
+%indirect_target_word_count_ptr = OpAccessChain %_ptr_PhysicalStorageBuffer_uint %copy_parameters %int_4
+%indirect_target_word_count = OpLoad %uint %indirect_target_word_count_ptr Aligned 4
+%indirect_flags_ptr = OpAccessChain %_ptr_PhysicalStorageBuffer_uint %copy_parameters %int_5
+%indirect_flags = OpLoad %uint %indirect_flags_ptr Aligned 4
+               OpBranch %resolved_parameters
+%resolved_parameters = OpLabel
+%resolved_source_address = OpPhi %_ptr_PhysicalStorageBuffer_WordBuffer %pushed_source_address %use_direct_parameters %indirect_source_address %load_indirect_parameters
+%resolved_target_address = OpPhi %_ptr_PhysicalStorageBuffer_WordBuffer %pushed_target_address %use_direct_parameters %indirect_target_address %load_indirect_parameters
+%resolved_source_byte_offset = OpPhi %uint %pushed_source_byte_offset %use_direct_parameters %indirect_source_byte_offset %load_indirect_parameters
+%resolved_target_byte_offset = OpPhi %uint %pushed_target_byte_offset %use_direct_parameters %indirect_target_byte_offset %load_indirect_parameters
+%resolved_target_word_count = OpPhi %uint %pushed_target_word_count %use_direct_parameters %indirect_target_word_count %load_indirect_parameters
+%resolved_flags = OpPhi %uint %pushed_flags %use_direct_parameters %indirect_flags %load_indirect_parameters
                OpSelectionMerge %196 None
                OpSwitch %uint_0 %197
         %197 = OpLabel
@@ -91,7 +154,7 @@
          %55 = OpLoad %uint %54
          %56 = OpIAdd %uint %49 %55
          %59 = OpAccessChain %_ptr_PushConstant_uint %params %int_5
-         %60 = OpLoad %uint %59
+         %60 = OpCopyObject %uint %resolved_target_word_count
          %61 = OpUGreaterThanEqual %bool %56 %60
                OpSelectionMerge %63 None
                OpBranchConditional %61 %62 %63
@@ -105,14 +168,14 @@
                OpBranch %70
          %69 = OpLabel
          %72 = OpAccessChain %_ptr_PushConstant_uint %params %int_3
-         %73 = OpLoad %uint %72
+         %73 = OpCopyObject %uint %resolved_target_byte_offset
                OpBranch %70
          %70 = OpLabel
         %232 = OpPhi %uint %73 %69 %uint_0 %74
          %79 = OpIMul %uint %56 %uint_4
          %81 = OpIAdd %uint %79 %232
          %82 = OpAccessChain %_ptr_PushConstant_uint %params %int_3
-         %83 = OpLoad %uint %82
+         %83 = OpCopyObject %uint %resolved_target_byte_offset
          %84 = OpISub %uint %81 %83
                OpBranch %89
          %89 = OpLabel
@@ -137,7 +200,7 @@
          %90 = OpLabel
         %107 = OpBitwiseAnd %uint %235 %uint_3
         %109 = OpAccessChain %_ptr_PushConstant_uint %params %int_2
-        %110 = OpLoad %uint %109
+        %110 = OpCopyObject %uint %resolved_source_byte_offset
         %111 = OpIAdd %uint %107 %110
         %115 = OpShiftRightLogical %uint %235 %uint_2
         %117 = OpShiftRightLogical %uint %111 %uint_2
@@ -147,20 +210,20 @@
                OpSwitch %uint_0 %213
         %213 = OpLabel
         %214 = OpAccessChain %_ptr_PushConstant_uint %params %int_7
-        %215 = OpLoad %uint %214
+        %215 = OpCopyObject %uint %resolved_flags
         %216 = OpBitwiseAnd %uint %215 %uint_1
         %217 = OpINotEqual %bool %216 %uint_0
                OpSelectionMerge %224 None
                OpBranchConditional %217 %218 %224
         %218 = OpLabel
         %219 = OpAccessChain %_ptr_PushConstant__ptr_PhysicalStorageBuffer_WordBuffer %params %int_0
-        %220 = OpLoad %_ptr_PhysicalStorageBuffer_WordBuffer %219
+        %220 = OpCopyObject %_ptr_PhysicalStorageBuffer_WordBuffer %resolved_source_address
         %222 = OpAccessChain %_ptr_PhysicalStorageBuffer_uint %220 %int_0 %118
         %223 = OpAtomicLoad %uint %222 %uint_1 %uint_0
                OpBranch %230
         %224 = OpLabel
         %225 = OpAccessChain %_ptr_PushConstant__ptr_PhysicalStorageBuffer_WordBuffer %params %int_0
-        %226 = OpLoad %_ptr_PhysicalStorageBuffer_WordBuffer %225
+        %226 = OpCopyObject %_ptr_PhysicalStorageBuffer_WordBuffer %resolved_source_address
         %228 = OpAccessChain %_ptr_PhysicalStorageBuffer_uint %226 %int_0 %118
         %229 = OpLoad %uint %228 Aligned 4
                OpBranch %230
@@ -185,13 +248,13 @@
                OpBranchConditional %151 %152 %153
         %152 = OpLabel
         %154 = OpAccessChain %_ptr_PushConstant__ptr_PhysicalStorageBuffer_WordBuffer %params %int_1
-        %155 = OpLoad %_ptr_PhysicalStorageBuffer_WordBuffer %154
+        %155 = OpCopyObject %_ptr_PhysicalStorageBuffer_WordBuffer %resolved_target_address
         %158 = OpAccessChain %_ptr_PhysicalStorageBuffer_uint %155 %int_0 %56
                OpStore %158 %244 Aligned 4
                OpBranch %196
         %153 = OpLabel
         %161 = OpAccessChain %_ptr_PushConstant__ptr_PhysicalStorageBuffer_WordBuffer %params %int_1
-        %162 = OpLoad %_ptr_PhysicalStorageBuffer_WordBuffer %161
+        %162 = OpCopyObject %_ptr_PhysicalStorageBuffer_WordBuffer %resolved_target_address
         %164 = OpAccessChain %_ptr_PhysicalStorageBuffer_uint %162 %int_0 %56
         %165 = OpAtomicLoad %uint %164 %uint_1 %uint_0
                OpBranch %166

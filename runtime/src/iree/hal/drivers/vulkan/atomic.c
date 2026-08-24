@@ -363,6 +363,7 @@ void iree_hal_vulkan_atomic_record_command(
     iree_hal_execution_stage_t target_stage_mask,
     VkDeviceAddress target_address,
     iree_hal_vulkan_atomic_record_flags_t record_flags,
+    iree_hal_vulkan_barrier_flags_t barrier_flags,
     iree_hal_vulkan_atomic_params_t params) {
   const VkAccessFlags2 atomic_access_mask =
       iree_hal_vulkan_atomic_access_mask(params);
@@ -370,11 +371,12 @@ void iree_hal_vulkan_atomic_record_command(
       iree_any_bit_set(params.flags, IREE_HAL_ATOMIC_FLAG_RELEASE) &&
       iree_any_bit_set(atomic_access_mask, VK_ACCESS_2_SHADER_WRITE_BIT);
   const iree_hal_vulkan_barrier_t pre_barrier = {
+      .flags = barrier_flags,
       .source_stage_mask = source_stage_mask,
-      .source_access_mask =
-          has_release
-              ? iree_hal_vulkan_barrier_source_access_mask(source_stage_mask)
-              : 0,
+      .source_access_mask = has_release
+                                ? iree_hal_vulkan_barrier_source_access_mask(
+                                      source_stage_mask, barrier_flags)
+                                : 0,
       .target_stage_mask = IREE_HAL_EXECUTION_STAGE_ATOMIC,
       .target_access_mask = has_release ? atomic_access_mask : 0,
   };
@@ -387,13 +389,14 @@ void iree_hal_vulkan_atomic_record_command(
       iree_any_bit_set(params.flags, IREE_HAL_ATOMIC_FLAG_ACQUIRE) &&
       iree_any_bit_set(atomic_access_mask, VK_ACCESS_2_SHADER_READ_BIT);
   const iree_hal_vulkan_barrier_t post_barrier = {
+      .flags = barrier_flags,
       .source_stage_mask = IREE_HAL_EXECUTION_STAGE_ATOMIC,
       .source_access_mask = has_acquire ? atomic_access_mask : 0,
       .target_stage_mask = target_stage_mask,
-      .target_access_mask =
-          has_acquire
-              ? iree_hal_vulkan_barrier_target_access_mask(target_stage_mask)
-              : 0,
+      .target_access_mask = has_acquire
+                                ? iree_hal_vulkan_barrier_target_access_mask(
+                                      target_stage_mask, barrier_flags)
+                                : 0,
   };
   iree_hal_vulkan_barrier_record(syms, command_buffer, &post_barrier);
 }

@@ -227,6 +227,7 @@ iree_runtime_cc_test(
     srcs = ["//runtime/src/iree/hal/cts/util:test_main.cc"],
     deps = [
         ":backends",
+        ":replay_cache_backends",
         "//runtime/src/iree/base/tooling:flags",
         "//runtime/src/iree/hal/cts/command_buffer:fill_buffer_test",
         "//runtime/src/iree/hal/cts/util:registry",
@@ -240,6 +241,7 @@ iree_runtime_cc_test(
     srcs = ["//runtime/src/iree/hal/cts/util:test_main.cc"],
     deps = [
         ":backends",
+        ":replay_cache_backends",
         "//runtime/src/iree/base/tooling:flags",
         "//runtime/src/iree/hal/cts/command_buffer:update_buffer_test",
         "//runtime/src/iree/hal/cts/util:registry",
@@ -253,6 +255,7 @@ iree_runtime_cc_test(
     srcs = ["//runtime/src/iree/hal/cts/util:test_main.cc"],
     deps = [
         ":backends",
+        ":replay_cache_backends",
         "//runtime/src/iree/base/tooling:flags",
         "//runtime/src/iree/hal/cts/command_buffer:copy_buffer_test",
         "//runtime/src/iree/hal/cts/util:registry",
@@ -323,6 +326,27 @@ iree_runtime_cc_test(
         "//runtime/src/iree/base/tooling:flags",
         "//runtime/src/iree/hal",
         "//runtime/src/iree/hal/cts/util:profile_test_util",
+        "//runtime/src/iree/hal/cts/util:registry",
+        "//runtime/src/iree/hal/cts/util:test_base",
+        "//runtime/src/iree/hal/drivers/vulkan",
+        "//runtime/src/iree/hal/drivers/vulkan:headers",
+        "//runtime/src/iree/testing:gtest",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "transfer_replay_cache_tests",
+    srcs = [
+        "transfer_replay_cache_test.cc",
+        "//runtime/src/iree/hal/cts/util:test_main.cc",
+    ],
+    tags = [
+        "vulkan_uses_vk_khr_buffer_device_address",
+    ],
+    deps = [
+        ":replay_cache_backends",
+        "//runtime/src/iree/base/tooling:flags",
+        "//runtime/src/iree/hal",
         "//runtime/src/iree/hal/cts/util:registry",
         "//runtime/src/iree/hal/cts/util:test_base",
         "//runtime/src/iree/hal/drivers/vulkan",

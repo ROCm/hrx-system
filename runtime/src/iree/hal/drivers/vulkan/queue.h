@@ -326,7 +326,7 @@ typedef struct iree_hal_vulkan_queue_t {
     // Cached replay hits that reused existing BDA publication bytes.
     uint64_t publication_skip_count;
 
-    // Cached replay hits that republished changed BDA table bytes.
+    // Cached replay hits that republished changed BDA publication bytes.
     uint64_t publication_update_count;
 
     // Cached replay acquisitions bypassed because profiling was active.

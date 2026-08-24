@@ -10,6 +10,7 @@
 #include "iree/base/api.h"
 #include "iree/hal/api.h"
 #include "iree/hal/drivers/vulkan/api.h"
+#include "iree/hal/drivers/vulkan/barrier.h"
 #include "iree/hal/drivers/vulkan/util/libvulkan.h"
 
 #ifdef __cplusplus
@@ -158,6 +159,7 @@ void iree_hal_vulkan_atomic_record_command(
     iree_hal_execution_stage_t target_stage_mask,
     VkDeviceAddress target_address,
     iree_hal_vulkan_atomic_record_flags_t record_flags,
+    iree_hal_vulkan_barrier_flags_t barrier_flags,
     iree_hal_vulkan_atomic_params_t params);
 
 #ifdef __cplusplus

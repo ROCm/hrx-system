@@ -14,6 +14,14 @@
 
 #define IREE_HAL_VULKAN_BYTE_TRANSFER_WORKGROUP_SIZE 64u
 
+// Maximum bytes described by one indirect transfer parameter record. Leaving
+// three bytes of headroom keeps every dword-relative shader index in uint32_t
+// for any resolved byte alignment. The length is a multiple of four, so every
+// segment has the same byte alignment. Adjacent partial segments may touch the
+// same dword; the shader's compare-exchange edge updates preserve both spans.
+#define IREE_HAL_VULKAN_BYTE_TRANSFER_INDIRECT_SEGMENT_LENGTH \
+  ((VkDeviceSize)UINT32_MAX - 3u)
+
 typedef enum iree_hal_vulkan_byte_copy_flag_bits_e {
   // No special copy behavior.
   IREE_HAL_VULKAN_BYTE_COPY_FLAG_NONE = 0u,
@@ -21,8 +29,61 @@ typedef enum iree_hal_vulkan_byte_copy_flag_bits_e {
   // Loads source words atomically because widened source and target dwords
   // overlap even though the requested byte ranges do not.
   IREE_HAL_VULKAN_BYTE_COPY_FLAG_ATOMIC_SOURCE = 1u << 0,
+
+  // Loads resolved parameters from the publication address carried in the
+  // source_address push constant.
+  IREE_HAL_VULKAN_BYTE_COPY_FLAG_INDIRECT_PARAMETERS = 1u << 1,
 } iree_hal_vulkan_byte_copy_flag_bits_t;
 typedef uint32_t iree_hal_vulkan_byte_copy_flags_t;
+
+typedef enum iree_hal_vulkan_byte_fill_flag_bits_e {
+  // No special fill behavior.
+  IREE_HAL_VULKAN_BYTE_FILL_FLAG_NONE = 0u,
+
+  // Loads resolved parameters from the publication address carried in the
+  // target_address push constant.
+  IREE_HAL_VULKAN_BYTE_FILL_FLAG_INDIRECT_PARAMETERS = 1u << 1,
+} iree_hal_vulkan_byte_fill_flag_bits_t;
+typedef uint32_t iree_hal_vulkan_byte_fill_flags_t;
+
+// Host-published parameters for one indirect copy segment.
+typedef struct iree_hal_vulkan_byte_copy_parameters_t {
+  // Dword-aligned source buffer device address.
+  uint64_t source_address;
+
+  // Dword-aligned target buffer device address.
+  uint64_t target_address;
+
+  // Byte offset of the first source byte within source_address.
+  uint32_t source_byte_offset;
+
+  // Byte offset of the first target byte within target_address.
+  uint32_t target_byte_offset;
+
+  // Number of target dwords touched by this segment.
+  uint32_t target_word_count;
+
+  // Bitfield of iree_hal_vulkan_byte_copy_flag_bits_t values.
+  iree_hal_vulkan_byte_copy_flags_t flags;
+} iree_hal_vulkan_byte_copy_parameters_t;
+
+static_assert(sizeof(iree_hal_vulkan_byte_copy_parameters_t) == 32,
+              "publication layout must match the byte copy shader");
+
+// Host-published parameters for one indirect fill segment.
+typedef struct iree_hal_vulkan_byte_fill_parameters_t {
+  // Dword-aligned target buffer device address.
+  uint64_t target_address;
+
+  // Byte offset of the first target byte within target_address.
+  uint32_t target_byte_offset;
+
+  // Number of target dwords touched by this segment.
+  uint32_t target_word_count;
+} iree_hal_vulkan_byte_fill_parameters_t;
+
+static_assert(sizeof(iree_hal_vulkan_byte_fill_parameters_t) == 16,
+              "publication layout must match the byte fill shader");
 
 typedef struct iree_hal_vulkan_byte_copy_push_constants_t {
   // Dword-aligned source buffer device address.
@@ -77,6 +138,9 @@ typedef struct iree_hal_vulkan_byte_fill_push_constants_t {
 
   // Pattern byte corresponding to the first byte of this segment.
   uint32_t pattern_byte_offset;
+
+  // Bitfield of iree_hal_vulkan_byte_fill_flag_bits_t values.
+  iree_hal_vulkan_byte_fill_flags_t flags;
 } iree_hal_vulkan_byte_fill_push_constants_t;
 
 static_assert(sizeof(iree_hal_vulkan_byte_fill_push_constants_t) == 40,
@@ -226,6 +290,53 @@ static uint32_t iree_hal_vulkan_byte_transfer_target_word_count(
                     sizeof(uint32_t));
 }
 
+static uint32_t iree_hal_vulkan_byte_transfer_indirect_segment_length(
+    VkDeviceSize remaining_length) {
+  return (uint32_t)iree_min(
+      remaining_length, IREE_HAL_VULKAN_BYTE_TRANSFER_INDIRECT_SEGMENT_LENGTH);
+}
+
+static iree_status_t iree_hal_vulkan_byte_transfer_indirect_publication_length(
+    VkDeviceSize length, iree_device_size_t parameter_size,
+    iree_device_size_t* out_publication_length) {
+  *out_publication_length = 0;
+  if (length == 0) return iree_ok_status();
+  const iree_device_size_t segment_count =
+      length / IREE_HAL_VULKAN_BYTE_TRANSFER_INDIRECT_SEGMENT_LENGTH +
+      (length % IREE_HAL_VULKAN_BYTE_TRANSFER_INDIRECT_SEGMENT_LENGTH != 0);
+  if (!iree_device_size_checked_mul(segment_count, parameter_size,
+                                    out_publication_length)) {
+    return iree_make_status(
+        IREE_STATUS_OUT_OF_RANGE,
+        "Vulkan indirect byte transfer publication length overflows");
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t iree_hal_vulkan_byte_transfer_validate_publication_span(
+    iree_byte_span_t publication_span, iree_device_size_t required_length,
+    iree_string_view_t transfer_name) {
+  if (required_length > IREE_HOST_SIZE_MAX) {
+    return iree_make_status(
+        IREE_STATUS_OUT_OF_RANGE,
+        "Vulkan indirect %.*s publication exceeds host addressable size",
+        (int)transfer_name.size, transfer_name.data);
+  }
+  if (publication_span.data_length != (iree_host_size_t)required_length) {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "Vulkan indirect %.*s publication has %" PRIhsz
+                            " bytes but requires %" PRIdsz,
+                            (int)transfer_name.size, transfer_name.data,
+                            publication_span.data_length, required_length);
+  }
+  if (required_length != 0 && !publication_span.data) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "Vulkan indirect %.*s publication storage is NULL",
+                            (int)transfer_name.size, transfer_name.data);
+  }
+  return iree_ok_status();
+}
+
 static iree_status_t iree_hal_vulkan_byte_transfer_validate_range(
     VkDeviceAddress address, VkDeviceSize length,
     iree_string_view_t range_name) {
@@ -253,6 +364,67 @@ static bool iree_hal_vulkan_byte_transfer_aligned_ranges_overlap(
   const VkDeviceAddress target_end =
       (target_address + length + 3u) & ~(VkDeviceAddress)3;
   return source_start < target_end && target_start < source_end;
+}
+
+iree_status_t iree_hal_vulkan_byte_transfer_copy_publication_length(
+    VkDeviceSize length, iree_device_size_t* out_publication_length) {
+  IREE_ASSERT_ARGUMENT(out_publication_length);
+  return iree_hal_vulkan_byte_transfer_indirect_publication_length(
+      length, sizeof(iree_hal_vulkan_byte_copy_parameters_t),
+      out_publication_length);
+}
+
+iree_status_t iree_hal_vulkan_byte_transfer_publish_copy(
+    VkDeviceAddress source_address, VkDeviceAddress target_address,
+    VkDeviceSize length, iree_byte_span_t publication_span) {
+  IREE_RETURN_IF_ERROR(iree_hal_vulkan_byte_transfer_validate_range(
+      source_address, length, IREE_SV("source")));
+  IREE_RETURN_IF_ERROR(iree_hal_vulkan_byte_transfer_validate_range(
+      target_address, length, IREE_SV("target")));
+  const VkDeviceAddress source_end = source_address + length;
+  const VkDeviceAddress target_end = target_address + length;
+  if (source_address < target_end && target_address < source_end) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "Vulkan byte copy source and target ranges overlap");
+  }
+
+  iree_device_size_t publication_length = 0;
+  IREE_RETURN_IF_ERROR(iree_hal_vulkan_byte_transfer_copy_publication_length(
+      length, &publication_length));
+  IREE_RETURN_IF_ERROR(iree_hal_vulkan_byte_transfer_validate_publication_span(
+      publication_span, publication_length, IREE_SV("copy")));
+
+  iree_hal_vulkan_byte_copy_flags_t flags = IREE_HAL_VULKAN_BYTE_COPY_FLAG_NONE;
+  if (iree_hal_vulkan_byte_transfer_aligned_ranges_overlap(
+          source_address, target_address, length)) {
+    flags |= IREE_HAL_VULKAN_BYTE_COPY_FLAG_ATOMIC_SOURCE;
+  }
+
+  iree_host_size_t publication_offset = 0;
+  VkDeviceSize remaining_length = length;
+  while (remaining_length != 0) {
+    const uint32_t segment_length =
+        iree_hal_vulkan_byte_transfer_indirect_segment_length(remaining_length);
+    const uint32_t source_byte_offset = (uint32_t)(source_address & 3u);
+    const uint32_t target_byte_offset = (uint32_t)(target_address & 3u);
+    const iree_hal_vulkan_byte_copy_parameters_t parameters = {
+        .source_address = source_address & ~(VkDeviceAddress)3,
+        .target_address = target_address & ~(VkDeviceAddress)3,
+        .source_byte_offset = source_byte_offset,
+        .target_byte_offset = target_byte_offset,
+        .target_word_count = iree_hal_vulkan_byte_transfer_target_word_count(
+            target_byte_offset, segment_length),
+        .flags = flags,
+    };
+    memcpy(publication_span.data + publication_offset, &parameters,
+           sizeof(parameters));
+    publication_offset += sizeof(parameters);
+    source_address += segment_length;
+    target_address += segment_length;
+    remaining_length -= segment_length;
+  }
+  return iree_ok_status();
 }
 
 iree_status_t iree_hal_vulkan_byte_transfer_record_copy(
@@ -331,6 +503,65 @@ iree_status_t iree_hal_vulkan_byte_transfer_record_copy(
   return iree_ok_status();
 }
 
+iree_status_t iree_hal_vulkan_byte_transfer_record_copy_indirect(
+    const iree_hal_vulkan_byte_transfer_pipelines_t* pipelines,
+    VkCommandBuffer command_buffer, VkDeviceAddress publication_address,
+    VkDeviceSize length) {
+  IREE_ASSERT_ARGUMENT(pipelines);
+  IREE_ASSERT_ARGUMENT(command_buffer);
+  if (length == 0) return iree_ok_status();
+  if ((publication_address &
+       (iree_alignof(iree_hal_vulkan_byte_copy_parameters_t) - 1)) != 0) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "Vulkan indirect copy publication address 0x%" PRIx64
+        " is not naturally aligned",
+        (uint64_t)publication_address);
+  }
+
+  iree_vkCmdBindPipeline(IREE_VULKAN_DEVICE(&pipelines->syms), command_buffer,
+                         VK_PIPELINE_BIND_POINT_COMPUTE,
+                         pipelines->copy_pipeline);
+  VkDeviceSize remaining_length = length;
+  while (remaining_length != 0) {
+    const uint32_t segment_length =
+        iree_hal_vulkan_byte_transfer_indirect_segment_length(remaining_length);
+    iree_hal_vulkan_byte_copy_push_constants_t constants = {
+        .source_address = publication_address,
+        .byte_length = segment_length,
+        .target_word_count = iree_hal_vulkan_byte_transfer_target_word_count(
+            /*target_byte_offset=*/3, segment_length),
+        .flags = IREE_HAL_VULKAN_BYTE_COPY_FLAG_INDIRECT_PARAMETERS,
+    };
+    while (constants.first_target_word < constants.target_word_count) {
+      const uint32_t remaining_word_count =
+          constants.target_word_count - constants.first_target_word;
+      const uint64_t required_workgroup_count =
+          ((uint64_t)remaining_word_count +
+           IREE_HAL_VULKAN_BYTE_TRANSFER_WORKGROUP_SIZE - 1) /
+          IREE_HAL_VULKAN_BYTE_TRANSFER_WORKGROUP_SIZE;
+      const uint32_t workgroup_count = (uint32_t)iree_min(
+          required_workgroup_count, (uint64_t)pipelines->max_workgroup_count_x);
+      iree_vkCmdPushConstants(IREE_VULKAN_DEVICE(&pipelines->syms),
+                              command_buffer, pipelines->pipeline_layout,
+                              VK_SHADER_STAGE_COMPUTE_BIT,
+                              /*offset=*/0, sizeof(constants), &constants);
+      iree_vkCmdDispatch(IREE_VULKAN_DEVICE(&pipelines->syms), command_buffer,
+                         workgroup_count, /*groupCountY=*/1,
+                         /*groupCountZ=*/1);
+      const uint64_t dispatched_word_count =
+          (uint64_t)workgroup_count *
+          IREE_HAL_VULKAN_BYTE_TRANSFER_WORKGROUP_SIZE;
+      constants.first_target_word += (uint32_t)iree_min(
+          dispatched_word_count, (uint64_t)remaining_word_count);
+    }
+
+    publication_address += sizeof(iree_hal_vulkan_byte_copy_parameters_t);
+    remaining_length -= segment_length;
+  }
+  return iree_ok_status();
+}
+
 static iree_status_t iree_hal_vulkan_byte_transfer_expand_pattern(
     const uint8_t* pattern, iree_host_size_t pattern_length,
     uint32_t* out_pattern) {
@@ -348,6 +579,46 @@ static iree_status_t iree_hal_vulkan_byte_transfer_expand_pattern(
           "(got %" PRIhsz ")",
           pattern_length);
   }
+}
+
+iree_status_t iree_hal_vulkan_byte_transfer_fill_publication_length(
+    VkDeviceSize length, iree_device_size_t* out_publication_length) {
+  IREE_ASSERT_ARGUMENT(out_publication_length);
+  return iree_hal_vulkan_byte_transfer_indirect_publication_length(
+      length, sizeof(iree_hal_vulkan_byte_fill_parameters_t),
+      out_publication_length);
+}
+
+iree_status_t iree_hal_vulkan_byte_transfer_publish_fill(
+    VkDeviceAddress target_address, VkDeviceSize length,
+    iree_byte_span_t publication_span) {
+  IREE_RETURN_IF_ERROR(iree_hal_vulkan_byte_transfer_validate_range(
+      target_address, length, IREE_SV("target")));
+  iree_device_size_t publication_length = 0;
+  IREE_RETURN_IF_ERROR(iree_hal_vulkan_byte_transfer_fill_publication_length(
+      length, &publication_length));
+  IREE_RETURN_IF_ERROR(iree_hal_vulkan_byte_transfer_validate_publication_span(
+      publication_span, publication_length, IREE_SV("fill")));
+
+  iree_host_size_t publication_offset = 0;
+  VkDeviceSize remaining_length = length;
+  while (remaining_length != 0) {
+    const uint32_t segment_length =
+        iree_hal_vulkan_byte_transfer_indirect_segment_length(remaining_length);
+    const uint32_t target_byte_offset = (uint32_t)(target_address & 3u);
+    const iree_hal_vulkan_byte_fill_parameters_t parameters = {
+        .target_address = target_address & ~(VkDeviceAddress)3,
+        .target_byte_offset = target_byte_offset,
+        .target_word_count = iree_hal_vulkan_byte_transfer_target_word_count(
+            target_byte_offset, segment_length),
+    };
+    memcpy(publication_span.data + publication_offset, &parameters,
+           sizeof(parameters));
+    publication_offset += sizeof(parameters);
+    target_address += segment_length;
+    remaining_length -= segment_length;
+  }
+  return iree_ok_status();
 }
 
 iree_status_t iree_hal_vulkan_byte_transfer_record_fill(
@@ -409,6 +680,75 @@ iree_status_t iree_hal_vulkan_byte_transfer_record_fill(
     }
 
     target_address += segment_length;
+    fill_offset += segment_length;
+    remaining_length -= segment_length;
+  }
+  return iree_ok_status();
+}
+
+iree_status_t iree_hal_vulkan_byte_transfer_record_fill_indirect(
+    const iree_hal_vulkan_byte_transfer_pipelines_t* pipelines,
+    VkCommandBuffer command_buffer, VkDeviceAddress publication_address,
+    VkDeviceSize length, const uint8_t* pattern,
+    iree_host_size_t pattern_length) {
+  IREE_ASSERT_ARGUMENT(pipelines);
+  IREE_ASSERT_ARGUMENT(command_buffer);
+  IREE_ASSERT_ARGUMENT(pattern);
+  if (length == 0) return iree_ok_status();
+  if ((publication_address &
+       (iree_alignof(iree_hal_vulkan_byte_fill_parameters_t) - 1)) != 0) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "Vulkan indirect fill publication address 0x%" PRIx64
+        " is not naturally aligned",
+        (uint64_t)publication_address);
+  }
+  uint32_t fill_pattern = 0;
+  IREE_RETURN_IF_ERROR(iree_hal_vulkan_byte_transfer_expand_pattern(
+      pattern, pattern_length, &fill_pattern));
+
+  iree_vkCmdBindPipeline(IREE_VULKAN_DEVICE(&pipelines->syms), command_buffer,
+                         VK_PIPELINE_BIND_POINT_COMPUTE,
+                         pipelines->fill_pipeline);
+  VkDeviceSize remaining_length = length;
+  VkDeviceSize fill_offset = 0;
+  while (remaining_length != 0) {
+    const uint32_t segment_length =
+        iree_hal_vulkan_byte_transfer_indirect_segment_length(remaining_length);
+    iree_hal_vulkan_byte_fill_push_constants_t constants = {
+        .target_address = publication_address,
+        .fill_pattern = fill_pattern,
+        .fill_pattern_width = (uint32_t)pattern_length,
+        .byte_length = segment_length,
+        .target_word_count = iree_hal_vulkan_byte_transfer_target_word_count(
+            /*target_byte_offset=*/3, segment_length),
+        .pattern_byte_offset = (uint32_t)(fill_offset % pattern_length),
+        .flags = IREE_HAL_VULKAN_BYTE_FILL_FLAG_INDIRECT_PARAMETERS,
+    };
+    while (constants.first_target_word < constants.target_word_count) {
+      const uint32_t remaining_word_count =
+          constants.target_word_count - constants.first_target_word;
+      const uint64_t required_workgroup_count =
+          ((uint64_t)remaining_word_count +
+           IREE_HAL_VULKAN_BYTE_TRANSFER_WORKGROUP_SIZE - 1) /
+          IREE_HAL_VULKAN_BYTE_TRANSFER_WORKGROUP_SIZE;
+      const uint32_t workgroup_count = (uint32_t)iree_min(
+          required_workgroup_count, (uint64_t)pipelines->max_workgroup_count_x);
+      iree_vkCmdPushConstants(IREE_VULKAN_DEVICE(&pipelines->syms),
+                              command_buffer, pipelines->pipeline_layout,
+                              VK_SHADER_STAGE_COMPUTE_BIT,
+                              /*offset=*/0, sizeof(constants), &constants);
+      iree_vkCmdDispatch(IREE_VULKAN_DEVICE(&pipelines->syms), command_buffer,
+                         workgroup_count, /*groupCountY=*/1,
+                         /*groupCountZ=*/1);
+      const uint64_t dispatched_word_count =
+          (uint64_t)workgroup_count *
+          IREE_HAL_VULKAN_BYTE_TRANSFER_WORKGROUP_SIZE;
+      constants.first_target_word += (uint32_t)iree_min(
+          dispatched_word_count, (uint64_t)remaining_word_count);
+    }
+
+    publication_address += sizeof(iree_hal_vulkan_byte_fill_parameters_t);
     fill_offset += segment_length;
     remaining_length -= segment_length;
   }
