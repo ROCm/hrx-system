@@ -25,6 +25,24 @@ loom_cc_library(
 
 loom_cc_library(
   NAME
+    body
+  HDRS
+    "body.h"
+  SRCS
+    "body.c"
+  DEPS
+    ::attribute
+    ::encoder
+    ::numbering
+    iree::base
+    iree::base::internal::arena
+    loom::ir
+    loom::ops::op_defs
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
     catalog
   HDRS
     "catalog.h"

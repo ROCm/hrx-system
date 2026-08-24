@@ -25,6 +25,22 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "body",
+    srcs = ["body.c"],
+    hdrs = ["body.h"],
+    visibility = ["//loom/src/loom/format/bytecode:__pkg__"],
+    deps = [
+        ":attribute",
+        ":encoder",
+        ":numbering",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_defs",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
     name = "catalog",
     srcs = ["catalog.c"],
     hdrs = ["catalog.h"],
