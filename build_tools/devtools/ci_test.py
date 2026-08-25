@@ -1046,6 +1046,13 @@ class CiTest(unittest.TestCase):
         self.assertNotIn("/ Sanitizers", block)
         self.assertNotRegex(block, r"iree-bazel-vulkan-(asan|msan|tsan|ubsan)")
 
+    def test_fetch_toolchain_uses_owned_ci_entry_point(self):
+        script = Path(".github/scripts/fetch_rocm_toolchain.sh").read_text()
+        self.assertIn(
+            '"${HRX_PYTHON}" build_tools/ci/ci_core_linux.py fetch-rocm', script
+        )
+        self.assertNotIn("build_tools/ci_core_", script)
+
     @unittest.skipUnless(sys.platform.startswith("linux"), "Linux CI toolchain setup")
     def test_fetch_toolchain_versions_root_and_rebases_rocm_paths(self):
         with tempfile.TemporaryDirectory() as temporary_dir:
@@ -1065,7 +1072,7 @@ if [[ "$1" == "-m" && "$2" == "venv" ]]; then
   cp "$0" "$3/bin/python3"
 elif [[ "$1" == "-m" && "$2" == "pip" ]]; then
   exit 0
-elif [[ "$1" == "build_tools/ci_core_linux.py" && "$2" == "fetch-rocm" ]]; then
+elif [[ "$1" == "build_tools/ci/ci_core_linux.py" && "$2" == "fetch-rocm" ]]; then
   mkdir -p "${HRX_ROCM_ROOT}/lib/llvm/bin"
   printf '%s\n' \
     '{"artifact_identity":"nightly-123456-linux-release-core"}' \
@@ -1164,12 +1171,14 @@ fi
             ".github/workflows/build_core_windows.yml", "build_core_windows"
         )
         self.assertIn("runs-on: azure-windows-scale-rocm", build_block)
-        self.assertIn("python build_tools/ci_core_windows.py fetch-rocm", build_block)
-        self.assertIn("python build_tools/ci_core_windows.py build", build_block)
-        self.assertIn("python build_tools/ci_core_windows.py test", build_block)
-        self.assertIn("python build_tools/ci_core_windows.py package", build_block)
         self.assertIn(
-            "python build_tools/ci_core_windows.py extract-packages", build_block
+            "python build_tools/ci/ci_core_windows.py fetch-rocm", build_block
+        )
+        self.assertIn("python build_tools/ci/ci_core_windows.py build", build_block)
+        self.assertIn("python build_tools/ci/ci_core_windows.py test", build_block)
+        self.assertIn("python build_tools/ci/ci_core_windows.py package", build_block)
+        self.assertIn(
+            "python build_tools/ci/ci_core_windows.py extract-packages", build_block
         )
         self.assertIn(
             "HRX_ROCM_ROOT: ${{ github.workspace }}/build/windows/${{ inputs.windows_toolchain }}/rocm-root",
@@ -1248,10 +1257,10 @@ fi
             r"\s+fetch_rocm: true",
         )
         self.assertIn("if: matrix.fetch_rocm", block)
-        self.assertIn("python build_tools/ci_core_windows.py fetch-rocm", block)
+        self.assertIn("python build_tools/ci/ci_core_windows.py fetch-rocm", block)
         self.assertNotRegex(
             block,
-            r"ci_core_windows\.py (build|test|package|extract-packages)",
+            r"ci/ci_core_windows\.py (build|test|package|extract-packages)",
         )
         self.assertNotIn("uses: ./.github/workflows/build_core_windows.yml", block)
         self.assertIn("VsDevCmd.bat", block)
@@ -1263,25 +1272,48 @@ fi
             ".github/workflows/ci_iree_bazel.yml", "windows_bazel"
         )
 
-        self.assertIn("name: Windows / Repository / MSVC + ROCm", block)
+        self.assertIn("name: ${{ matrix.name }}", block)
+        self.assertRegex(
+            block,
+            r"name: Windows / Repository / clang-cl \+ ROCm\n"
+            r"\s+host_toolchain: clang-cl",
+        )
+        self.assertRegex(
+            block,
+            r"name: Windows / Repository / MSVC \+ ROCm\n"
+            r"\s+host_toolchain: msvc",
+        )
         self.assertNotIn("if: ${{ false }}", block)
         self.assertIn("runs-on: azure-windows-scale-rocm", block)
-        self.assertIn("python build_tools/ci_core_windows.py fetch-rocm", block)
+        self.assertIn(
+            "BAZEL_LLVM: ${{ github.workspace }}\\build\\iree-bazel-windows\\rocm-root\\lib\\llvm",
+            block,
+        )
+        self.assertIn("python build_tools/ci/ci_core_windows.py fetch-rocm", block)
         self.assertIn("python dev.py bazel setup --venv", block)
         self.assertIn('Join-Path $env:SystemDrive "b"', block)
         self.assertNotIn('Join-Path $env:RUNNER_TEMP "bazel"', block)
         self.assertIn("startup --output_user_root=$bazelOutputRoot", block)
         self.assertNotIn("output_user_root=C:", block)
+        self.assertIn('if ("${{ matrix.host_toolchain }}" -eq "msvc")', block)
+        self.assertIn('"build --config=windows-msvc"', block)
         self.assertIn("VsDevCmd.bat", block)
+        self.assertIn('if "${{ matrix.host_toolchain }}"=="msvc"', block)
         self.assertIn('set "CC=cl.exe"', block)
         self.assertIn('set "CXX=cl.exe"', block)
         self.assertIn('set "AR=lib.exe"', block)
+        self.assertIn('set "CC=%BAZEL_LLVM%\\bin\\clang-cl.exe"', block)
+        self.assertIn('set "CXX=%BAZEL_LLVM%\\bin\\clang-cl.exe"', block)
+        self.assertIn('set "AR=%BAZEL_LLVM%\\bin\\llvm-lib.exe"', block)
         self.assertIn(
             "build_tools/devtools/ci.py iree-bazel-repository-integration",
             block,
         )
         self.assertIn("--amdgpu-target gfx11-generic", block)
-        self.assertNotIn('set "CC=%HRX_ROCM_ROOT%', block)
+        self.assertIn(
+            "bazel-profiles-iree-bazel-repository-integration-${{ matrix.host_toolchain }}",
+            block,
+        )
 
     def test_iree_workflows_do_not_trigger_on_libhrx_only_paths(self):
         for path in (

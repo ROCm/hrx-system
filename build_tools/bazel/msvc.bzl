@@ -32,14 +32,11 @@ def _iree_msvc_masm_object_impl(ctx):
         source_file = source_file.path,
     )
 
-    assembler = cc_common.get_tool_for_action(
-        action_name = ASSEMBLE_ACTION_NAME,
-        feature_configuration = feature_configuration,
-    )
-
     # rules_cc includes globally enabled C/C++ default compilation flags in its
-    # assemble command line. Keep the toolchain-selected assembler and
-    # environment but construct the MASM-only command line explicitly.
+    # assemble command line. Keep the toolchain environment but construct the
+    # MASM-only command line explicitly. The clang-cl toolchain intentionally
+    # selects clang-cl.exe for generic assembly, so invoke ml64.exe from the
+    # MSVC environment PATH for this explicitly MASM-only rule.
     arguments = ctx.actions.args()
     arguments.add("/nologo")
     arguments.add("/Zi")
@@ -55,7 +52,7 @@ def _iree_msvc_masm_object_impl(ctx):
     ctx.actions.run(
         arguments = [arguments],
         env = environment,
-        executable = assembler,
+        executable = ctx.file._masm_wrapper,
         inputs = depset(
             direct = [source_file],
             transitive = [cc_toolchain.all_files],
@@ -73,6 +70,10 @@ _iree_msvc_masm_object = rule(
             allow_single_file = [".asm"],
             mandatory = True,
         ),
+        "_masm_wrapper": attr.label(
+            allow_single_file = [".bat"],
+            default = Label("//build_tools/bazel:msvc_masm_wrapper.bat"),
+        ),
     }),
     fragments = ["cpp"],
     toolchains = use_cc_toolchain(mandatory = True),
@@ -85,9 +86,10 @@ def iree_msvc_masm_library(
         visibility = None):
     """Builds one MASM source file as an MSVC C/C++ library dependency.
 
-    This uses the assembler action from the configured C/C++ toolchain without
+    This invokes MASM from the configured C/C++ toolchain environment without
     inheriting C/C++ compilation flags. Native cc_library assembly handling
-    includes those flags and causes ml.exe/ml64.exe to warn for each one.
+    includes those flags and causes ml.exe/ml64.exe to warn for each one, while
+    the clang-cl toolchain selects clang-cl.exe for generic assembly inputs.
 
     Args:
       name: Name of the resulting cc_library target.

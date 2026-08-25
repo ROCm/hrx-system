@@ -5,49 +5,11 @@
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 load("@rules_python//python:defs.bzl", "py_test")
-load("//build_tools/bazel:cc.bzl", "iree_cc_library")
-load("//build_tools/bazel:cc_link.bzl", "cc_link")
 
 package(
     default_visibility = ["//visibility:public"],
     features = ["layering_check"],
     licenses = ["notice"],  # Apache 2.0
-)
-
-iree_cc_library(
-    name = "pthreads",
-    linkopts = cc_link.pthreads_linkopts(),
-)
-
-iree_cc_library(
-    name = "dl",
-    linkopts = cc_link.dl_linkopts(),
-)
-
-iree_cc_library(
-    name = "rt",
-    linkopts = cc_link.rt_linkopts(),
-)
-
-py_test(
-    name = "ci_core_linux_test",
-    srcs = [
-        "ci_core_common.py",
-        "ci_core_linux.py",
-        "ci_core_linux_test.py",
-    ],
-    main = "ci_core_linux_test.py",
-    deps = ["//build_tools/devtools"],
-)
-
-py_test(
-    name = "ci_core_windows_test",
-    srcs = [
-        "ci_core_common.py",
-        "ci_core_windows.py",
-        "ci_core_windows_test.py",
-    ],
-    main = "ci_core_windows_test.py",
 )
 
 py_test(

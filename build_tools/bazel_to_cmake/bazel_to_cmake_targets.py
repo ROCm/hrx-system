@@ -17,9 +17,9 @@ class TargetConverter:
         self._update_target_mappings(
             {
                 # Internal utilities to emulate various binary/library options.
-                f"{iree_repo}//build_tools:pthreads": [],
-                f"{iree_repo}//build_tools:dl": ["${CMAKE_DL_LIBS}"],
-                f"{iree_repo}//build_tools:rt": [],
+                f"{iree_repo}//build_tools/bazel:pthreads": [],
+                f"{iree_repo}//build_tools/bazel:dl": ["${CMAKE_DL_LIBS}"],
+                f"{iree_repo}//build_tools/bazel:rt": [],
                 # HIP
                 "@hip_api_headers//:headers": [
                     "iree::third_party::hip_api_headers",

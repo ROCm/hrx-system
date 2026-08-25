@@ -25,12 +25,12 @@ import sys
 import tarfile
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
+REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from build_tools import ci_core_common as common
-from build_tools.ci_core_common import (
+from build_tools.ci import ci_core_common as common
+from build_tools.ci.ci_core_common import (
     ARTIFACT_SETS,
     CORE_CTEST_EXCLUDE_REGEXES,
     cmake_options_from_env,

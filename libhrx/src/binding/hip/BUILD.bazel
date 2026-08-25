@@ -159,7 +159,7 @@ hrx_cc_test(
     srcs = ["handle_registry_test.cc"],
     deps = [
         ":handle_registry",
-        "//build_tools:pthreads",
+        "//build_tools/bazel:pthreads",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],
@@ -192,7 +192,7 @@ hrx_cc_test(
     },
     target_compatible_with = _LINUX_COMPATIBILITY,
     deps = [
-        "//build_tools:dl",
+        "//build_tools/bazel:dl",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],
@@ -212,7 +212,7 @@ hrx_cc_test(
     deps = [
         # The test itself calls dlopen()/dlsym()/dlclose(); link libdl so the
         # executable resolves them (glibc that ships dl separately, ld.lld).
-        "//build_tools:dl",
+        "//build_tools/bazel:dl",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],
@@ -231,8 +231,8 @@ hrx_cc_test(
     target_compatible_with = _LINUX_COMPATIBILITY,
     deps = [
         ":launch_params",
-        "//build_tools:dl",
-        "//build_tools:pthreads",
+        "//build_tools/bazel:dl",
+        "//build_tools/bazel:pthreads",
         "//libhrx/src/binding/common",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
@@ -252,7 +252,7 @@ hrx_cc_test(
     target_compatible_with = _LINUX_COMPATIBILITY,
     deps = [
         ":launch_params",
-        "//build_tools:dl",
+        "//build_tools/bazel:dl",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],

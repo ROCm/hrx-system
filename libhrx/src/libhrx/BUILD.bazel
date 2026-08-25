@@ -59,7 +59,7 @@ HRX_INCLUDES = [
 ]
 
 HRX_DEPS = [
-    "//build_tools:dl",
+    "//build_tools/bazel:dl",
     "//runtime/src/iree/async",
     "//runtime/src/iree/base",
     "//runtime/src/iree/base:core_headers",

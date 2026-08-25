@@ -97,7 +97,7 @@ loom_cc_binary(
     srcs = ["emit_amdgpu_hsa.c"],
     target_compatible_with = LOOMC_TARGET_AMDGPU_COMPATIBLE_WITH,
     deps = [
-        "//build_tools:dl",
+        "//build_tools/bazel:dl",
         "//loom/binding/c:loomc",
         "//loom/binding/c/target/amdgpu",
         "//third_party:hsa_runtime_headers",
@@ -120,7 +120,7 @@ loom_cc_binary(
     srcs = ["emit_spirv_vulkan.c"],
     target_compatible_with = LOOMC_TARGET_SPIRV_VULKAN_COMPATIBLE_WITH,
     deps = [
-        "//build_tools:dl",
+        "//build_tools/bazel:dl",
         "//loom/binding/c:loomc",
         "//loom/binding/c/target/spirv",
         "//loom/binding/c/target/spirv/vulkan",
@@ -167,7 +167,7 @@ loom_cc_test(
     ],
     target_compatible_with = LOOMC_TARGET_AMDGPU_COMPATIBLE_WITH,
     deps = [
-        "//build_tools:dl",
+        "//build_tools/bazel:dl",
         "//loom/binding/c:loomc",
         "//loom/binding/c/target/amdgpu",
         "//third_party:hsa_runtime_headers",
@@ -186,7 +186,7 @@ loom_cc_test(
     ],
     target_compatible_with = LOOMC_TARGET_SPIRV_VULKAN_COMPATIBLE_WITH,
     deps = [
-        "//build_tools:dl",
+        "//build_tools/bazel:dl",
         "//loom/binding/c:loomc",
         "//loom/binding/c/target/spirv",
         "//loom/binding/c/target/spirv/vulkan",

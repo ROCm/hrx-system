@@ -25,8 +25,8 @@ hrx_cc_shared_library(
     includes = PASSTHROUGH_INCLUDES,
     target_compatible_with = _LINUX_COMPATIBILITY,
     deps = [
-        "//build_tools:dl",
-        "//build_tools:pthreads",
+        "//build_tools/bazel:dl",
+        "//build_tools/bazel:pthreads",
     ],
 )
 
@@ -36,7 +36,7 @@ hrx_cc_shared_library(
     hdrs = ["hip_function_table.h"],
     includes = PASSTHROUGH_INCLUDES,
     target_compatible_with = _LINUX_COMPATIBILITY,
-    deps = ["//build_tools:pthreads"],
+    deps = ["//build_tools/bazel:pthreads"],
 )
 
 hrx_cc_shared_library(
@@ -53,5 +53,5 @@ hrx_cc_shared_library(
     hdrs = ["hip_function_table.h"],
     includes = PASSTHROUGH_INCLUDES,
     target_compatible_with = _LINUX_COMPATIBILITY,
-    deps = ["//build_tools:pthreads"],
+    deps = ["//build_tools/bazel:pthreads"],
 )

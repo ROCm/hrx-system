@@ -105,18 +105,18 @@ jobs:
         run: python3 -m pip install --upgrade boto3 cmake==3.31.6 zstandard
 
       - name: Fetch ROCm artifacts
-        run: python3 build_tools/ci_core_linux.py fetch-rocm
+        run: python3 build_tools/ci/ci_core_linux.py fetch-rocm
 
       - name: Prepare CMake build
-        run: python3 build_tools/ci_core_linux.py build
+        run: python3 build_tools/ci/ci_core_linux.py build
 
       - name: Run tests
         if: ${{ inputs.run_tests }}
-        run: python3 build_tools/ci_core_linux.py test
+        run: python3 build_tools/ci/ci_core_linux.py test
 
       - name: Package
         if: ${{ inputs.package }}
-        run: python3 build_tools/ci_core_linux.py package
+        run: python3 build_tools/ci/ci_core_linux.py package
 
       - name: Upload public package
         if: ${{ inputs.package }}

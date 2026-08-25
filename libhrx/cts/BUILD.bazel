@@ -70,7 +70,7 @@ hrx_cc_library(
         "core",
     ],
     deps = [
-        "//build_tools:dl",
+        "//build_tools/bazel:dl",
         "//third_party:catch2",
     ],
 )
@@ -153,7 +153,7 @@ hrx_cc_test(
     tags = AMD_GPU_CTS_TAGS,
     target_compatible_with = _LINUX_COMPATIBILITY,
     deps = [
-        "//build_tools:dl",
+        "//build_tools/bazel:dl",
         "//libhrx/src/binding/hip:launch_params",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
@@ -179,8 +179,8 @@ hrx_cc_test(
     deps = [
         ":amdgpu_executable_test_kernels",
         ":amdgpu_hip_printf_test_kernels",
-        "//build_tools:dl",
         "//build_tools/amdgpu:target_map_h",
+        "//build_tools/bazel:dl",
         "//libhrx/src/binding/hip:launch_params",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
@@ -204,8 +204,8 @@ hrx_cc_test(
     target_compatible_with = _LINUX_COMPATIBILITY,
     deps = [
         ":amdgpu_hip_printf_test_kernels",
-        "//build_tools:dl",
         "//build_tools/amdgpu:target_map_h",
+        "//build_tools/bazel:dl",
         "//libhrx/src/binding/hip:launch_params",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
@@ -229,8 +229,8 @@ hrx_cc_test(
     target_compatible_with = _LINUX_COMPATIBILITY,
     deps = [
         ":amdgpu_hip_printf_test_kernels",
-        "//build_tools:dl",
         "//build_tools/amdgpu:target_map_h",
+        "//build_tools/bazel:dl",
         "//libhrx/src/binding/hip:launch_params",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",

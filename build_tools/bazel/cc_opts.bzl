@@ -111,20 +111,32 @@ _MSVC_COPTS = [
     "/wd5105",  # Macro expansion producing 'defined' has undefined behavior.
 ]
 
+_CLANG_CL_COPTS = _MSVC_COPTS + [
+    "-Wno-unused-function",
+    "-Wno-unused-lambda-capture",
+    "-Wno-unused-variable",
+]
+
 _MSVC_ONLY_COPTS = [
     # Enable the standards-conforming preprocessor required by __VA_OPT__.
     # clang-cl is already conforming and diagnoses this option as unused.
     "/Zc:preprocessor",
 ]
 
-_MSVC_CONLYOPTS = [
-    "/std:c11",
-]
+# The rules_cc Windows toolchain enables its standards-conforming C17 mode.
+# Do not append another /std option: MSVC warns whenever the later option
+# overrides the toolchain default, and C17 preserves the C11 language surface
+# required by IREE code.
+_MSVC_CONLYOPTS = []
 
 _MSVC_CXXOPTS = [
     "/GR-",
     "/std:c++17",
     "/Zc:__cplusplus",
+]
+
+_CLANG_CL_CXXOPTS = _MSVC_CXXOPTS + [
+    "-Wno-invalid-offsetof",
 ]
 
 def _append(values, appended_values):
@@ -162,7 +174,7 @@ def _iree_code_compiler_options(
             _compiler_options(
                 _CLANG_COPTS,
                 _GCC_COPTS,
-                _MSVC_COPTS,
+                _CLANG_CL_COPTS,
                 _MSVC_COPTS + _MSVC_ONLY_COPTS,
             ),
             copts,
@@ -180,7 +192,7 @@ def _iree_code_compiler_options(
             _compiler_options(
                 _CLANG_CXXOPTS,
                 _GCC_CXXOPTS,
-                _MSVC_CXXOPTS,
+                _CLANG_CL_CXXOPTS,
                 _MSVC_CXXOPTS,
             ),
             cxxopts,
