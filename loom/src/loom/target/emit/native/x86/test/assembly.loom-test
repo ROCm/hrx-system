@@ -79,6 +79,20 @@ low.func.def target<x86.scalar.core>(@x86_target) @x86_fragment(%input: reg<x86.
 
 // ====
 
+x86.target<scalar> @x86_target
+
+low.func.def target<x86.scalar.core>(@x86_target) @x86_fragment(%condition: reg<x86.gpr32>, %true_value: reg<x86.gpr32>, %false_value: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
+  %result = select.gpr32 %condition, %true_value, %false_value
+  return %result
+}
+
+// ----
+  test eax, eax
+  cmovne edx, ecx
+  ret
+
+// ====
+
 x86.target<avx512> @x86_target
 
 low.func.def target<x86.avx512.core>(@x86_target) @x86_fragment(%base: reg<x86.gpr64>, %lhs: reg<x86.zmm>, %rhs: reg<x86.zmm>) asm {

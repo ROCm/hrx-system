@@ -19,6 +19,8 @@ from loom.dialect.scalar import arithmetic as scalar_arithmetic
 from loom.dialect.scalar import bitwise as scalar_bitwise
 from loom.dialect.scalar import comparison as scalar_comparison
 from loom.dialect.scalar import conversion as scalar_conversion
+from loom.dialect.scf import ALL_SCF_OPS
+from loom.dialect.scf import defs as scf
 from loom.dialect.view import ALL_VIEW_OPS
 from loom.dialect.view import defs as view
 from loom.dsl import Op
@@ -186,6 +188,33 @@ def _binary_rule(
                 operands={
                     "lhs": ValueRef.operand("lhs"),
                     "rhs": ValueRef.operand("rhs"),
+                },
+                results={"dst": ValueRef.result("result")},
+            ),
+        ),
+    )
+
+
+def _select_rule(
+    type_pattern: TypePattern,
+    descriptor_key: str,
+    descriptor_lookup: _DescriptorLookup,
+) -> DescriptorRule:
+    descriptor = descriptor_lookup(descriptor_key)
+    return DescriptorRule(
+        source_op=scf.scf_select,
+        descriptor=descriptor,
+        guards=(
+            Guard.value_type("condition", _I1),
+            *_typed_guards(("true_value", "false_value", "result"), type_pattern),
+        ),
+        emit=(
+            _op_emit(
+                descriptor=descriptor,
+                operands={
+                    "condition": ValueRef.operand("condition"),
+                    "true_value": ValueRef.operand("true_value"),
+                    "false_value": ValueRef.operand("false_value"),
                 },
                 results={"dst": ValueRef.result("result")},
             ),
@@ -1304,6 +1333,7 @@ def x86_scalar_core_cases(
             "x86.scalar.xor.gpr32",
             descriptor_lookup,
         ),
+        _select_rule(_I32, "x86.scalar.select.gpr32", descriptor_lookup),
         _shift_imm_rule(
             scalar_bitwise.scalar_shli,
             _I32,
@@ -1469,6 +1499,7 @@ X86_SCALAR_CONTRACT_DIALECT_OPS = {
     "buffer": ALL_BUFFER_OPS,
     "index": ALL_INDEX_OPS,
     "scalar": ALL_SCALAR_OPS,
+    "scf": ALL_SCF_OPS,
     "view": ALL_VIEW_OPS,
 }
 

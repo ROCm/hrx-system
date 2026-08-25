@@ -45,3 +45,19 @@ low.func.def target<x86.scalar.core>(@target) abi(object_function) @scalar_i1_bi
 ^else:
   return %false_value
 }
+
+// ====
+
+x86.target<scalar> @target
+
+func.def target(@target) @scalar_i32_select(%condition: i1, %true_value: i32, %false_value: i32) -> (i32) {
+  %result = scf.select %condition, %true_value, %false_value : i32
+  func.return %result : i32
+}
+
+// ----
+low.func.def target<x86.scalar.core>(@target) abi(object_function) @scalar_i32_select(%condition: reg<x86.gpr32>, %true_value: reg<x86.gpr32>, %false_value: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
+  %9 = copy %false_value : reg<x86.gpr32> -> reg<x86.gpr32>
+  %result = select.gpr32 %condition, %true_value, %9
+  return %result
+}

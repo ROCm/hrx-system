@@ -740,6 +740,40 @@ static iree_status_t loom_x86_append_truncate_packet(
   return loom_x86_append_gpr32_operand(context, 0);
 }
 
+static iree_status_t loom_x86_append_select_packet(
+    const loom_native_assembly_packet_context_t* context) {
+  const loom_op_t* op = context->packet->node->op;
+  if (op->result_count != 1 || op->operand_count != 3) {
+    const iree_string_view_t key = loom_x86_descriptor_key(context);
+    return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
+                            "x86 select descriptor '%.*s' has an unsupported "
+                            "operand shape",
+                            (int)key.size, key.data);
+  }
+  const loom_low_allocation_assignment_t* result_assignment =
+      loom_x86_map_assignment(context, loom_op_const_results(op)[0]);
+  const loom_low_allocation_assignment_t* false_assignment =
+      loom_x86_map_assignment(context, loom_op_const_operands(op)[2]);
+  if (!loom_x86_assignments_match(result_assignment, false_assignment)) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "x86 select result must share the false-value physical register");
+  }
+
+  IREE_RETURN_IF_ERROR(
+      iree_string_builder_append_cstring(context->builder, "test "));
+  IREE_RETURN_IF_ERROR(loom_x86_append_operand(context, 0));
+  IREE_RETURN_IF_ERROR(
+      iree_string_builder_append_cstring(context->builder, ", "));
+  IREE_RETURN_IF_ERROR(loom_x86_append_operand(context, 0));
+  IREE_RETURN_IF_ERROR(
+      iree_string_builder_append_cstring(context->builder, "\n  cmovne "));
+  IREE_RETURN_IF_ERROR(loom_x86_append_result(context, 0));
+  IREE_RETURN_IF_ERROR(
+      iree_string_builder_append_cstring(context->builder, ", "));
+  return loom_x86_append_operand(context, 1);
+}
+
 static iree_status_t loom_x86_append_lea_packet(
     const loom_native_assembly_packet_context_t* context) {
   const loom_op_t* op = context->packet->node->op;
@@ -1203,6 +1237,9 @@ static iree_status_t loom_x86_append_descriptor_packet(
   }
   if (iree_string_view_equal(mnemonic, IREE_SV("mov.trunc"))) {
     return loom_x86_append_truncate_packet(context);
+  }
+  if (iree_string_view_equal(mnemonic, IREE_SV("select.cmovne"))) {
+    return loom_x86_append_select_packet(context);
   }
   if (iree_string_view_equal(mnemonic, IREE_SV("lea"))) {
     return loom_x86_append_lea_packet(context);

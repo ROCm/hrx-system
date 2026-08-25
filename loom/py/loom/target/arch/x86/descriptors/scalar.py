@@ -11,6 +11,8 @@ from __future__ import annotations
 from pathlib import Path
 
 from loom.target.low_descriptors import (
+    Constraint,
+    ConstraintKind,
     Descriptor,
     DescriptorFlag,
     DescriptorOpKind,
@@ -229,6 +231,31 @@ def _gpr64_to_gpr32_truncate_descriptor() -> Descriptor:
     )
 
 
+def _gpr32_select_descriptor() -> Descriptor:
+    return Descriptor(
+        key="x86.scalar.select.gpr32",
+        mnemonic="select.cmovne",
+        semantic_tag="integer.select.i32",
+        operands=(
+            _gpr32_result(),
+            _gpr32_operand("condition"),
+            _gpr32_operand("true_value"),
+            _gpr32_operand("false_value"),
+        ),
+        constraints=(
+            Constraint(ConstraintKind.TIED, 0, 3),
+            Constraint(ConstraintKind.DESTRUCTIVE, 0, 3),
+        ),
+        asm_forms=_asm(
+            mnemonic="select.gpr32",
+            results=("dst",),
+            operands=("condition", "true_value", "false_value"),
+        ),
+        schedule_class=_SCHEDULE_SCALAR,
+        flags=(DescriptorFlag.DEAD_REMOVABLE,),
+    )
+
+
 def _gpr32_compare_descriptor(
     *,
     predicate: str,
@@ -398,6 +425,7 @@ X86_SCALAR_SUFFIX_DESCRIPTORS = (
         semantic_tag="integer.shru.i64",
     ),
     _gpr64_to_gpr32_truncate_descriptor(),
+    _gpr32_select_descriptor(),
     *(
         _gpr32_compare_descriptor(
             predicate=predicate,
