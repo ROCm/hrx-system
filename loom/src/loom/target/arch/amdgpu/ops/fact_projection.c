@@ -6,14 +6,23 @@
 
 #include "loom/ops/target/facts.h"
 #include "loom/target/arch/amdgpu/facts.h"
+#include "loom/target/arch/amdgpu/ops/ops.h"
 #include "loom/target/arch/amdgpu/ops/target.h"
 
-static void loom_amdgpu_target_facts_project(const loom_module_t* module,
-                                             const loom_op_t* target_op,
-                                             loom_target_facts_t* base_facts) {
-  (void)module;
+static void loom_amdgpu_target_facts_project(
+    const loom_target_record_view_t* record, loom_target_facts_t* base_facts) {
   loom_amdgpu_target_facts_t* facts = (loom_amdgpu_target_facts_t*)base_facts;
-  loom_amdgpu_target_record_resolve_identity(target_op, &facts->identity);
+  const loom_amdgpu_target_info_t* target =
+      loom_amdgpu_target_info_find_target_by_kind(record->selector);
+  IREE_ASSERT(target != NULL);
+  const loom_attribute_t features_attr = loom_target_record_view_attribute(
+      record, loom_amdgpu_target_features_ATTR_INDEX);
+  const loom_signed_enum_set_t features =
+      loom_attr_is_absent(features_attr)
+          ? loom_signed_enum_set_empty()
+          : loom_attr_as_signed_enum_set(features_attr);
+  loom_amdgpu_target_identity_initialize_with_features(
+      target, features.words, features.word_count, &facts->identity);
   loom_amdgpu_target_properties_resolve(
       &facts->identity, &facts->base.storage.bundle, &facts->properties);
   facts->subgroup_size_explicit = loom_target_facts_field_is_explicit(

@@ -84,6 +84,13 @@ void loom_amdgpu_target_identity_initialize(
     const loom_amdgpu_target_info_t* target,
     loom_amdgpu_target_identity_t* out_identity);
 
+// Initializes one identity and applies packed positive/negative target-ID
+// feature assertions. |feature_words| contains |feature_word_count| positive
+// words followed by the same number of negative words.
+void loom_amdgpu_target_identity_initialize_with_features(
+    const loom_amdgpu_target_info_t* target, const uint64_t* feature_words,
+    uint16_t feature_word_count, loom_amdgpu_target_identity_t* out_identity);
+
 // Returns whether two identities select the same canonical target and every
 // known target-ID feature state.
 bool loom_amdgpu_target_identity_equal(
