@@ -45,7 +45,7 @@ typedef enum loom_scf_for_unroll_schedule_e {
   LOOM_SCF_FOR_UNROLL_SCHEDULE_COUNT_ = 3,
 } loom_scf_for_unroll_schedule_t;
 
-// LOOM_OP_SCF_FOR: Bounded counted loop with optional loop-carried state.
+// LOOM_OP_SCF_FOR: Bounded counted loop over an index or offset domain with optional loop-carried state.
 // scf.for %iv = [%c0 to %n step %c1] {
 //   scf.yield
 // }

@@ -46,6 +46,7 @@ from loom.assembly import (
     kw,
 )
 from loom.dsl import (
+    ADDRESS,
     ANY,
     ATTR_TYPE_ENUM,
     ATTR_TYPE_I64_ARRAY,
@@ -299,13 +300,25 @@ scf_lookup = Op(
 scf_for = Op(
     "scf.for",
     group=scf_ops,
-    doc="Bounded counted loop with optional loop-carried state.",
+    doc="Bounded counted loop over an index or offset domain with optional loop-carried state.",
     canonicalize="loom_scf_for_canonicalize",
     verify="loom_scf_for_verify",
     operands=[
-        Operand("lower_bound", INDEX),
-        Operand("upper_bound", INDEX),
-        Operand("step", INDEX),
+        Operand(
+            "lower_bound",
+            ADDRESS,
+            doc="Inclusive index or physical byte-offset lower bound.",
+        ),
+        Operand(
+            "upper_bound",
+            ADDRESS,
+            doc="Exclusive upper bound in the lower-bound address domain.",
+        ),
+        Operand(
+            "step",
+            ADDRESS,
+            doc="Positive step in the lower-bound address domain.",
+        ),
         Operand("iter_args", ANY, variadic=True),
         Operand(
             "unroll_factor",
@@ -337,7 +350,7 @@ scf_for = Op(
             doc="Loop body. Terminated by scf.yield.",
             single_block=True,
             terminator="scf.yield",
-            implicit_args=(("iv", "index"),),
+            implicit_args=(("iv", "type_of:lower_bound"),),
             arg_source="iter_args",
         ),
     ],
@@ -352,6 +365,7 @@ scf_for = Op(
         ),
     ],
     constraints=[
+        SameType("lower_bound", "upper_bound", "step"),
         IterArgsMatchResults("iter_args", "results"),
         YieldCountMatchesResults("body", "results"),
         YieldTypesMatchResults("body", "results"),
@@ -391,6 +405,7 @@ scf_for = Op(
     ],
     examples=[
         "scf.for %iv = [%c0 to %n step %c1] {\n  scf.yield\n}",
+        "scf.for %byte_offset = [%zero to %byte_length step %one] {\n  scf.yield\n}",
         "%result = scf.for %iv = [%c0 to %n step %c1](%acc = %init : f32) -> (f32) {\n  %next = scalar.addf %acc, %acc : f32\n  scf.yield %next : f32\n}",
         "scf.for %iv = [%c0 to %n step %c1] unroll(%factor) {\n  scf.yield\n}",
         "scf.for %iv = [%c0 to %n step %c1] unroll(%factor) schedule(interleaved) {\n  scf.yield\n}",

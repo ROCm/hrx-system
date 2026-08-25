@@ -779,6 +779,46 @@ static iree_status_t loom_parse_format_bind_function_low_repr(
   return iree_ok_status();
 }
 
+// Resolves a counted loop's implicit induction-variable type after its range
+// operands have been parsed and before the body region consumes the pending
+// block argument. Counted loops define the induction variable in the same
+// address domain as their lower bound.
+static iree_status_t loom_parse_format_resolve_loop_iv_type(
+    loom_parser_t* parser, const loom_op_vtable_t* vtable,
+    const loom_parsed_op_t* parsed, uint8_t region_index) {
+  const loom_loop_like_vtable_t* loop_like = vtable->loop_like;
+  if (!loop_like || loop_like->body_region_index != region_index ||
+      loop_like->iv_block_arg_index == LOOM_BLOCK_ARG_INDEX_NONE) {
+    return iree_ok_status();
+  }
+
+  IREE_ASSERT(loop_like->iv_block_arg_index < parser->pending_block_args.count);
+  uint16_t lower_bound_operand_index = loop_like->lower_bound_operand_index;
+  if (loop_like->segmented_operands) {
+    IREE_ASSERT(lower_bound_operand_index < parsed->operand_segment_count);
+    uint16_t flat_operand_index = 0;
+    for (uint8_t i = 0; i < lower_bound_operand_index; ++i) {
+      flat_operand_index += parsed->operand_segment_counts[i];
+    }
+    IREE_ASSERT(parsed->operand_segment_counts[lower_bound_operand_index] == 1);
+    lower_bound_operand_index = flat_operand_index;
+  }
+  IREE_ASSERT(lower_bound_operand_index < parsed->operand_count);
+
+  const loom_value_id_t iv_value_id =
+      parser->pending_block_args.entries[loop_like->iv_block_arg_index]
+          .value_id;
+  if (loom_type_kind(loom_module_value_type(parser->module, iv_value_id)) !=
+      LOOM_TYPE_NONE) {
+    return iree_ok_status();
+  }
+  const loom_value_id_t lower_bound_value_id =
+      parsed->operand_ids[lower_bound_operand_index];
+  return loom_module_set_value_type(
+      parser->module, iv_value_id,
+      loom_module_value_type(parser->module, lower_bound_value_id));
+}
+
 iree_status_t loom_parser_walk_format(loom_parser_t* parser,
                                       const loom_op_vtable_t* vtable,
                                       loom_token_t op_name_token,
@@ -797,16 +837,15 @@ iree_status_t loom_parser_walk_format(loom_parser_t* parser,
     switch (element->kind) {
       case LOOM_FORMAT_KIND_OPERAND_REF: {
         if (element->field_index == 0xFF) {
-          // Induction variable reference (e.g., %iv in test.loop).
-          // Consume the SSA token, create an index-typed value, and queue it
-          // as a pending block arg. REGION defines the loop IV name in the
-          // child scope when seeding the entry block.
+          // Counted-loop induction variable reference (for example, %iv in
+          // scf.for). Its type follows the lower bound, which appears later in
+          // the format, so REGION resolves the type before seeding the entry
+          // block.
           loom_token_t iv_token = loom_token_none();
           LOOM_PARSE_EXPECT(parser, LOOM_TOKEN_SSA_VALUE, &iv_token);
           loom_value_id_t iv_value_id = 0;
           IREE_RETURN_IF_ERROR(loom_module_define_value(
-              parser->module, loom_type_scalar(LOOM_SCALAR_TYPE_INDEX),
-              &iv_value_id));
+              parser->module, loom_type_none(), &iv_value_id));
           IREE_RETURN_IF_ERROR(
               loom_parser_add_pending_block_arg(parser, iv_value_id, iv_token));
           break;
@@ -1032,6 +1071,8 @@ iree_status_t loom_parser_walk_format(loom_parser_t* parser,
               "format REGION field_index %u out of range (op has %u regions)",
               element->field_index, vtable->region_count);
         }
+        IREE_RETURN_IF_ERROR(loom_parse_format_resolve_loop_iv_type(
+            parser, vtable, parsed, element->field_index));
         bool has_pending_func_args =
             parser->pending_func_args.count > pending_func_arg_start;
         bool is_func_like_body =

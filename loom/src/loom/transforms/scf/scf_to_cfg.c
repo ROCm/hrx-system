@@ -13,6 +13,7 @@
 #include "loom/ir/attribute.h"
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
+#include "loom/ir/types.h"
 #include "loom/ops/cfg/ops.h"
 #include "loom/ops/index/ops.h"
 #include "loom/ops/op_defs.h"
@@ -802,8 +803,14 @@ static iree_status_t loom_scf_to_cfg_lower_for(
   loom_builder_ip_t header_ip =
       loom_scf_to_cfg_set_block_end(state, header_block, op->parent_op);
   loom_op_t* compare_op = NULL;
+  const loom_index_cmp_predicate_t predicate =
+      loom_type_element_type(loom_module_value_type(
+          state->module, loom_scf_for_lower_bound(op))) ==
+              LOOM_SCALAR_TYPE_OFFSET
+          ? LOOM_INDEX_CMP_PREDICATE_ULT
+          : LOOM_INDEX_CMP_PREDICATE_SLT;
   iree_status_t status = loom_index_cmp_build(
-      &state->rewriter->builder, LOOM_INDEX_CMP_PREDICATE_SLT, header_iv,
+      &state->rewriter->builder, predicate, header_iv,
       loom_scf_for_upper_bound(op), op->location, &compare_op);
   if (iree_status_is_ok(status)) {
     status = loom_cfg_cond_br_build(

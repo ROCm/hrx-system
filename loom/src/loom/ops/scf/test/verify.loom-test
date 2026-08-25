@@ -14,6 +14,17 @@ func.def @for_iter_args_too_few(%lo: index, %hi: index, %step: index, %init: f32
 
 // ====
 
+// All counted-loop bounds share one address domain.
+func.def @for_bound_type_mismatch(%lo: offset, %hi: index, %step: offset) {
+  // ERROR@+1: TYPE/001 "lower_bound" "upper_bound"
+  scf.for %byte_offset = [%lo to %hi step %step] {
+    test.use %byte_offset : offset
+  }
+  func.return
+}
+
+// ====
+
 // scf.for with more iter_args than results: count check fires the
 // other direction.
 func.def @for_iter_args_too_many(%lo: index, %hi: index, %step: index, %a: f32, %b: f32) -> (f32) {

@@ -2670,6 +2670,7 @@ def _make_counted_loop_op(
     *,
     body_arg_source: str | None = "iter_args",
     step: str | None = "step",
+    iv_type: str = "type_of:lower_bound",
     constraints: list[Constraint] | None = None,
 ) -> Op:
     if constraints is None:
@@ -2693,7 +2694,7 @@ def _make_counted_loop_op(
                 "body",
                 single_block=True,
                 terminator="test.yield",
-                implicit_args=(("iv", "index"),),
+                implicit_args=(("iv", iv_type),),
                 arg_source=body_arg_source,
             )
         ],
@@ -2757,6 +2758,16 @@ def test_generate_tables_rejects_loop_like_unprojected_body_state() -> None:
     op = _make_counted_loop_op(body_arg_source=None)
 
     with _raises_value_error(r"LoopLikeInterface on 'test\.for': body 'body' must source carried arguments from 'iter_args'"):
+        _generate_counted_loop_tables(op)
+
+
+def test_generate_tables_rejects_counted_loop_iv_type_mismatch() -> None:
+    op = _make_counted_loop_op(iv_type="index")
+
+    with _raises_value_error(
+        r"LoopLikeInterface on 'test\.for': induction variable 'iv' "
+        r"must use 'type_of:lower_bound'"
+    ):
         _generate_counted_loop_tables(op)
 
 

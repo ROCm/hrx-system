@@ -745,6 +745,36 @@ func.def @partial_factor_dynamic_tail_guard(%end: index) {
 
 // ====
 
+func.def @partial_factor_offset_tail_guard(%end: offset) {
+  %start = index.constant 0 : offset
+  %step = index.constant 1 : offset
+  %factor = index.constant 2 : index
+  scf.for %byte_offset = [%start to %end step %step] unroll(%factor) {
+    test.use %byte_offset : offset
+  }
+  func.return
+}
+
+// ----
+func.def @partial_factor_offset_tail_guard(%end: offset) {
+  %start = index.constant 0 : offset
+  %step = index.constant 1 : offset
+  %factor = index.constant 2 : index
+  %5 = index.constant 2 : offset
+  scf.for %byte_offset = [%start to %end step %5] {
+    test.use %byte_offset : offset
+    %7 = index.constant 1 : offset
+    %byte_offset_1 = index.add %byte_offset, %7 : offset
+    %9 = index.cmp ult, %byte_offset_1, %end : offset
+    scf.if %9 {
+      test.use %byte_offset_1 : offset
+    }
+  }
+  func.return
+}
+
+// ====
+
 func.def @partial_factor_dynamic_tail_guard_step_two(%end: index) {
   %start = index.constant 0 : index
   %step = index.constant 2 : index

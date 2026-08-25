@@ -2300,6 +2300,16 @@ class TestParseLoopOp:
             == "test.loop %i = %c0 to %n step %c1 {\n}"
         )
 
+    def test_induction_variable_uses_bound_address_domain(self) -> None:
+        module, scope = _setup_scope(("c0", OFFSET), ("n", OFFSET), ("c1", OFFSET))
+        op = _parse_op(
+            "test.loop %i = %c0 to %n step %c1 {\n}",
+            module=module,
+            scope=scope,
+        )
+        iv_value_id = op.regions[0].blocks[0].arg_ids[0]
+        assert module.values[iv_value_id].type == OFFSET
+
     def test_explicit_implicit_yield_is_canonicalized(self) -> None:
         module, scope = _setup_scope(("c0", INDEX), ("n", INDEX), ("c1", INDEX))
         op = _parse_op(

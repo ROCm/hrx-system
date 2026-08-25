@@ -948,9 +948,13 @@ static iree_status_t loom_scf_unroll_build_in_bounds_condition(
     loom_value_id_t* out_condition) {
   *out_condition = LOOM_VALUE_ID_INVALID;
   loom_op_t* cmp_op = NULL;
+  const loom_index_cmp_predicate_t predicate =
+      loom_type_element_type(index_type) == LOOM_SCALAR_TYPE_OFFSET
+          ? LOOM_INDEX_CMP_PREDICATE_ULT
+          : LOOM_INDEX_CMP_PREDICATE_SLT;
   IREE_RETURN_IF_ERROR(loom_index_cmp_build(
-      &context->rewriter->builder, LOOM_INDEX_CMP_PREDICATE_SLT,
-      iteration_index, loom_scf_for_upper_bound(op), op->location, &cmp_op));
+      &context->rewriter->builder, predicate, iteration_index,
+      loom_scf_for_upper_bound(op), op->location, &cmp_op));
   *out_condition = loom_index_cmp_result(cmp_op);
   return iree_ok_status();
 }

@@ -512,8 +512,11 @@ def _validate_loop_like_interface(op: Op, iface: LoopLikeInterface, interface_na
         for bound_name in bound_names:
             c_queries.resolve_operand_index(op, bound_name, interface_name)
         iv_index = c_queries.resolve_block_arg_index(op, iface.body, iface.iv, interface_name)
-        if iv_index + 1 != len(body.implicit_args):
-            raise ValueError(f"{interface_name} on {op.name!r}: carried body arguments must immediately follow the induction variable")
+        expected_iv_type = f"type_of:{iface.lower_bound}"
+        if body.implicit_args[iv_index][1] != expected_iv_type:
+            raise ValueError(f"{interface_name} on {op.name!r}: induction variable {iface.iv!r} must use {expected_iv_type!r}")
+        if iv_index != 0 or len(body.implicit_args) != 1:
+            raise ValueError(f"{interface_name} on {op.name!r}: induction variable must be the only implicit body argument")
     else:
         if iface.iv is not None:
             raise ValueError(f"{interface_name} on {op.name!r}: condition loops cannot declare an induction variable")
