@@ -362,6 +362,26 @@ func.def target(@test_target) @scalarizes_dense_full_logical_mma(%lhs_data: vect
 
 test.target<low_core> @test_target
 
+func.def target(@test_target) @legalizes_scalar_extui_i1_reference(%condition: i1) -> (i32) {
+  %r = scalar.extui %condition : i1 to i32
+  func.return %r : i32
+}
+
+// ----
+test.target<low_core> @test_target
+
+func.def target(@test_target) @legalizes_scalar_extui_i1_reference(%condition: i1) -> (i32) {
+  %3 = scalar.constant 1 : i32
+  %4 = scalar.constant 0 : i32
+  %r = scf.select %condition, %3, %4 : i32
+  func.return %r : i32
+}
+
+// ====
+// RUN: pass target-legalize{mode=final},dce,canonicalize
+
+test.target<low_core> @test_target
+
 func.def target(@test_target) @legalizes_scalar_fmai_reference(%a: i32, %b: i32, %c: i32) -> (i32) {
   %r = scalar.fmai %a, %b, %c : i32
   func.return %r : i32
