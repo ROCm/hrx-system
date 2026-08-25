@@ -2184,7 +2184,10 @@ static iree_status_t loom_cfg_simplify_process_function_once(
 
 iree_status_t loom_cfg_simplify_run(loom_pass_t* pass, loom_module_t* module,
                                     loom_func_like_t function) {
-  if (!loom_func_like_body(function)) return iree_ok_status();
+  loom_region_t* body = loom_func_like_body(function);
+  if (!body) {
+    return iree_ok_status();
+  }
 
   loom_rewriter_t rewriter = {0};
   IREE_RETURN_IF_ERROR(
@@ -2217,13 +2220,12 @@ iree_status_t loom_cfg_simplify_run(loom_pass_t* pass, loom_module_t* module,
         &fact_table);
     if (!iree_status_is_ok(status)) break;
 
-    status = loom_cfg_simplify_mark_cfg_regions(loom_func_like_body(function),
-                                                &analysis_arena);
+    status = loom_cfg_simplify_mark_cfg_regions(body, &analysis_arena);
     if (!iree_status_is_ok(status)) break;
 
     loom_dominance_info_t dominance = {0};
-    status =
-        loom_dominance_info_initialize(module, &analysis_arena, &dominance);
+    status = loom_dominance_info_initialize_region(module, body,
+                                                   &analysis_arena, &dominance);
     if (!iree_status_is_ok(status)) break;
 
     state.fact_table = fact_table;

@@ -834,11 +834,7 @@ iree_status_t loom_cse_run(loom_pass_t* pass, loom_module_t* module,
     }
   }
 
-  loom_dominance_info_t dominance = {0};
-  IREE_RETURN_IF_ERROR(
-      loom_dominance_info_initialize(module, pass->arena, &dominance));
-
-  // Scope arena: holds all scope structs and hash table arrays.
+  // Scope arena: holds dominance, scope structs, and hash table arrays.
   // Reset between root regions to bound peak memory to the largest single
   // function-like region. Shares the pass arena's block pool.
   iree_arena_allocator_t scope_arena;
@@ -856,6 +852,13 @@ iree_status_t loom_cse_run(loom_pass_t* pass, loom_module_t* module,
     if (!region) continue;
 
     iree_arena_reset(&scope_arena);
+    loom_dominance_info_t dominance = {0};
+    status = loom_dominance_info_initialize_region(module, region, &scope_arena,
+                                                   &dominance);
+    if (!iree_status_is_ok(status)) {
+      break;
+    }
+
     stack.count = 0;
     status = loom_cse_push_region_block_frames(&stack, pass->arena,
                                                &scope_arena, &dominance, region,
