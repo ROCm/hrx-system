@@ -601,6 +601,43 @@ ERR_LOWERING_052 = ErrorDef(
     ),
 )
 
+# ERR_LOWERING_053: Command-produced dispatch counts have no preceding wave.
+ERR_LOWERING_053 = ErrorDef(
+    domain=ErrorDomain.LOWERING,
+    code=53,
+    severity=Severity.ERROR,
+    summary="Command-produced dispatch workgroup counts need an earlier wave.",
+    message=(
+        "command-program preparation cannot dispatch @{kernel_name} from "
+        "dynamic workgroup counts without a preceding execution wave"
+    ),
+    params=(ErrorParam("kernel_name", ParamKind.STRING),),
+    fix_hint=(
+        "Place the count-producing command in an earlier serial execution "
+        "wave so an execution barrier precedes the indirect dispatch"
+    ),
+)
+
+# ERR_LOWERING_054: Indirect dispatch count storage cannot be placed.
+ERR_LOWERING_054 = ErrorDef(
+    domain=ErrorDomain.LOWERING,
+    code=54,
+    severity=Severity.ERROR,
+    summary="Indirect dispatch workgroup-count storage cannot be placed.",
+    message=(
+        "command-program preparation cannot place the workgroup-count view "
+        "for @{kernel_name}; it requires {requirement}"
+    ),
+    params=(
+        ErrorParam("kernel_name", ParamKind.STRING),
+        ErrorParam("requirement", ParamKind.STRING),
+    ),
+    fix_hint=(
+        "Use an exactly placed dense view<3xi32> rooted in a program buffer "
+        "binding, immutable parameter root, or command buffer.alloca"
+    ),
+)
+
 ALL_LOWERING_ERRORS: tuple[ErrorDef, ...] = (
     ERR_LOWERING_022,
     ERR_LOWERING_023,
@@ -631,4 +668,6 @@ ALL_LOWERING_ERRORS: tuple[ErrorDef, ...] = (
     ERR_LOWERING_050,
     ERR_LOWERING_051,
     ERR_LOWERING_052,
+    ERR_LOWERING_053,
+    ERR_LOWERING_054,
 )

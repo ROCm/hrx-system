@@ -69,6 +69,8 @@ typedef struct loom_cmd_lower_types_t {
 } loom_cmd_lower_types_t;
 
 typedef struct loom_cmd_lower_buffer_tuple_t {
+  // Materialization role selecting the root register type.
+  loom_cmd_buffer_role_t role;
   // Fixed or rebindable buffer root.
   loom_value_id_t root;
   // Root-relative byte offset.
@@ -365,6 +367,7 @@ static iree_status_t loom_cmd_lower_build_buffer_tuple(
     uint64_t byte_offset, uint64_t byte_length, loom_location_id_t location,
     loom_cmd_lower_buffer_tuple_t* out_tuple) {
   *out_tuple = (loom_cmd_lower_buffer_tuple_t){
+      .role = binding->role,
       .root = LOOM_VALUE_ID_INVALID,
       .byte_offset = LOOM_VALUE_ID_INVALID,
       .byte_length = LOOM_VALUE_ID_INVALID,
@@ -385,20 +388,16 @@ static iree_status_t loom_cmd_lower_build_buffer_tuple(
                                            &out_tuple->byte_length);
 }
 
-static iree_status_t loom_cmd_lower_build_buffer_ref(
-    loom_cmd_lower_state_t* state, const loom_cmd_buffer_binding_t* binding,
-    uint64_t byte_offset, uint64_t byte_length, loom_location_id_t location,
-    loom_value_id_t* out_buffer_ref) {
-  loom_cmd_lower_buffer_tuple_t tuple = {0};
-  IREE_RETURN_IF_ERROR(loom_cmd_lower_build_buffer_tuple(
-      state, binding, byte_offset, byte_length, location, &tuple));
+static iree_status_t loom_cmd_lower_build_buffer_ref_from_tuple(
+    loom_cmd_lower_state_t* state, const loom_cmd_lower_buffer_tuple_t* tuple,
+    loom_location_id_t location, loom_value_id_t* out_buffer_ref) {
   const loom_value_id_t operands[] = {
-      tuple.root,
-      tuple.byte_offset,
-      tuple.byte_length,
+      tuple->root,
+      tuple->byte_offset,
+      tuple->byte_length,
   };
   const uint32_t descriptor_ordinal =
-      binding->role == LOOM_CMD_BUFFER_ROLE_FIXED
+      tuple->role == LOOM_CMD_BUFFER_ROLE_FIXED
           ? CMD_CORE_DESCRIPTOR_REF_BUFFER_REF_DIRECT
           : CMD_CORE_DESCRIPTOR_REF_BUFFER_REF_BINDING;
   loom_op_t* buffer_ref_op = NULL;
@@ -407,6 +406,17 @@ static iree_status_t loom_cmd_lower_build_buffer_ref(
       &state->types.buffer_ref, 1, location, &buffer_ref_op));
   *out_buffer_ref = loom_low_op_results(buffer_ref_op).values[0];
   return iree_ok_status();
+}
+
+static iree_status_t loom_cmd_lower_build_buffer_ref(
+    loom_cmd_lower_state_t* state, const loom_cmd_buffer_binding_t* binding,
+    uint64_t byte_offset, uint64_t byte_length, loom_location_id_t location,
+    loom_value_id_t* out_buffer_ref) {
+  loom_cmd_lower_buffer_tuple_t tuple = {0};
+  IREE_RETURN_IF_ERROR(loom_cmd_lower_build_buffer_tuple(
+      state, binding, byte_offset, byte_length, location, &tuple));
+  return loom_cmd_lower_build_buffer_ref_from_tuple(state, &tuple, location,
+                                                    out_buffer_ref);
 }
 
 static iree_status_t loom_cmd_lower_map_source_bindings(
@@ -578,10 +588,16 @@ static iree_status_t loom_cmd_lower_build_direct_dispatch(
       &dispatch_op);
 }
 
+typedef enum loom_cmd_lower_indirect_dispatch_kind_e {
+  LOOM_CMD_LOWER_INDIRECT_DISPATCH_KIND_STATIC = 0,
+  LOOM_CMD_LOWER_INDIRECT_DISPATCH_KIND_DYNAMIC = 1,
+} loom_cmd_lower_indirect_dispatch_kind_t;
+
 static iree_status_t loom_cmd_lower_build_indirect_dispatch(
     loom_cmd_lower_state_t* state, const loom_op_t* source_op,
     const loom_cmd_lower_dispatch_t* dispatch,
-    loom_value_id_t workgroup_count_ref, bool has_barrier) {
+    loom_value_id_t workgroup_count_ref,
+    loom_cmd_lower_indirect_dispatch_kind_t kind, bool has_barrier) {
   IREE_ASSERT_LT(dispatch->executable_index,
                  state->plan->abi_layout.executable_count);
   IREE_ASSERT_LT(dispatch->entry_index, state->plan->abi_layout.entry_count);
@@ -597,9 +613,18 @@ static iree_status_t loom_cmd_lower_build_indirect_dispatch(
       state, source_op, dispatch, prefix_operands,
       IREE_ARRAYSIZE(prefix_operands), &operands, &operand_count));
   loom_op_t* dispatch_op = NULL;
-  const uint32_t descriptor_ordinal =
-      has_barrier ? CMD_CORE_DESCRIPTOR_REF_DISPATCH_INDIRECT_STATIC_BARRIER
-                  : CMD_CORE_DESCRIPTOR_REF_DISPATCH_INDIRECT_STATIC;
+  uint32_t descriptor_ordinal = 0;
+  if (kind == LOOM_CMD_LOWER_INDIRECT_DISPATCH_KIND_STATIC) {
+    descriptor_ordinal =
+        has_barrier ? CMD_CORE_DESCRIPTOR_REF_DISPATCH_INDIRECT_STATIC_BARRIER
+                    : CMD_CORE_DESCRIPTOR_REF_DISPATCH_INDIRECT_STATIC;
+  } else {
+    IREE_ASSERT_EQ(kind, LOOM_CMD_LOWER_INDIRECT_DISPATCH_KIND_DYNAMIC);
+    IREE_ASSERT(has_barrier,
+                "command-produced indirect counts cross an execution wave");
+    descriptor_ordinal =
+        CMD_CORE_DESCRIPTOR_REF_DISPATCH_INDIRECT_DYNAMIC_BARRIER;
+  }
   return loom_cmd_lower_build_descriptor_op(
       state, descriptor_ordinal, operands, operand_count,
       /*result_types=*/NULL, /*result_count=*/0, source_op->location,
@@ -614,7 +639,24 @@ static iree_status_t loom_cmd_lower_build_host_dispatch(
                  state->plan->launch_graph->host_tuple_count);
   return loom_cmd_lower_build_indirect_dispatch(
       state, source_op, dispatch,
-      state->resources.launch_counts[host_tuple_ordinal], has_barrier);
+      state->resources.launch_counts[host_tuple_ordinal],
+      LOOM_CMD_LOWER_INDIRECT_DISPATCH_KIND_STATIC, has_barrier);
+}
+
+static iree_status_t loom_cmd_lower_build_source_indirect_dispatch(
+    loom_cmd_lower_state_t* state, const loom_op_t* source_op,
+    const loom_cmd_lower_dispatch_t* dispatch, loom_value_id_t source_value,
+    loom_cmd_lower_indirect_dispatch_kind_t kind, bool has_barrier) {
+  IREE_ASSERT_LT(source_value, state->resources.source_value_count);
+  const loom_cmd_lower_buffer_tuple_t* tuple =
+      &state->resources.source_values[source_value].buffer;
+  IREE_ASSERT_NE(tuple->root, LOOM_VALUE_ID_INVALID,
+                 "placed indirect count views have a low buffer tuple");
+  loom_value_id_t workgroup_count_ref = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_cmd_lower_build_buffer_ref_from_tuple(
+      state, tuple, source_op->location, &workgroup_count_ref));
+  return loom_cmd_lower_build_indirect_dispatch(
+      state, source_op, dispatch, workgroup_count_ref, kind, has_barrier);
 }
 
 static iree_status_t loom_cmd_lower_build_dispatch(
@@ -633,6 +675,16 @@ static iree_status_t loom_cmd_lower_build_dispatch(
       return loom_cmd_lower_build_host_dispatch(
           state, launch_count->source_op, dispatch,
           launch_count->payload.host_tuple_ordinal, has_barrier);
+    case LOOM_CMD_LAUNCH_COUNT_KIND_INDIRECT_STATIC:
+      return loom_cmd_lower_build_source_indirect_dispatch(
+          state, launch_count->source_op, dispatch,
+          launch_count->payload.indirect_source_value,
+          LOOM_CMD_LOWER_INDIRECT_DISPATCH_KIND_STATIC, has_barrier);
+    case LOOM_CMD_LAUNCH_COUNT_KIND_INDIRECT_DYNAMIC:
+      return loom_cmd_lower_build_source_indirect_dispatch(
+          state, launch_count->source_op, dispatch,
+          launch_count->payload.indirect_source_value,
+          LOOM_CMD_LOWER_INDIRECT_DISPATCH_KIND_DYNAMIC, has_barrier);
     default:
       IREE_ASSERT_UNREACHABLE("aggregate launch count kind is valid");
       IREE_BUILTIN_UNREACHABLE();

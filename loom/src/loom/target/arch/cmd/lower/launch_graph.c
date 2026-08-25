@@ -14,6 +14,7 @@
 #include "loom/ir/context.h"
 #include "loom/ir/facts.h"
 #include "loom/ir/module.h"
+#include "loom/ops/buffer/ops.h"
 #include "loom/ops/command/ops.h"
 #include "loom/ops/func/ops.h"
 #include "loom/ops/kernel/launch_config.h"
@@ -443,6 +444,110 @@ static iree_status_t loom_cmd_launch_graph_record_direct_dispatch(
   return iree_ok_status();
 }
 
+typedef enum loom_cmd_launch_graph_indirect_origin_e {
+  LOOM_CMD_LAUNCH_GRAPH_INDIRECT_ORIGIN_UNRESOLVED = 0,
+  LOOM_CMD_LAUNCH_GRAPH_INDIRECT_ORIGIN_STATIC = 1,
+  LOOM_CMD_LAUNCH_GRAPH_INDIRECT_ORIGIN_DYNAMIC = 2,
+} loom_cmd_launch_graph_indirect_origin_t;
+
+static loom_cmd_launch_graph_indirect_origin_t
+loom_cmd_launch_graph_classify_indirect_origin(
+    const loom_cmd_launch_graph_build_t* build, loom_value_id_t source_value) {
+  IREE_ASSERT_LT(source_value, build->source_module->values.count);
+  const loom_value_t* source =
+      loom_module_value(build->source_module, source_value);
+  if (!loom_value_is_block_arg(source) &&
+      loom_command_parameter_isa(loom_value_def_op(source))) {
+    // Parameter layout assigns the exact immutable range after key placement.
+    return LOOM_CMD_LAUNCH_GRAPH_INDIRECT_ORIGIN_STATIC;
+  }
+
+  const loom_value_facts_t facts =
+      loom_value_fact_table_lookup(build->source_facts, source_value);
+  loom_value_fact_view_reference_t reference = {0};
+  if (!loom_value_facts_query_view_reference(&build->source_facts->context,
+                                             facts, &reference)) {
+    return LOOM_CMD_LAUNCH_GRAPH_INDIRECT_ORIGIN_UNRESOLVED;
+  }
+  int64_t byte_offset = 0;
+  int64_t byte_length = 0;
+  if (!loom_value_facts_as_exact_i64(reference.base_byte_offset,
+                                     &byte_offset) ||
+      !loom_value_facts_as_exact_i64(reference.footprint_byte_length,
+                                     &byte_length) ||
+      byte_offset < 0 ||
+      byte_offset % LOOM_CMD_PROGRAM_LAUNCH_COUNT_TUPLE_ALIGNMENT != 0 ||
+      byte_length != LOOM_CMD_PROGRAM_LAUNCH_COUNT_TUPLE_BYTE_LENGTH) {
+    return LOOM_CMD_LAUNCH_GRAPH_INDIRECT_ORIGIN_UNRESOLVED;
+  }
+
+  IREE_ASSERT_LT(reference.root_value_id, build->source_module->values.count);
+  const loom_value_t* root_value =
+      loom_module_value(build->source_module, reference.root_value_id);
+  if (loom_value_is_block_arg(root_value)) {
+    return LOOM_CMD_LAUNCH_GRAPH_INDIRECT_ORIGIN_STATIC;
+  }
+  const loom_op_t* defining_op = loom_value_def_op(root_value);
+  if (defining_op && loom_buffer_alloca_isa(defining_op)) {
+    return LOOM_CMD_LAUNCH_GRAPH_INDIRECT_ORIGIN_DYNAMIC;
+  }
+  return LOOM_CMD_LAUNCH_GRAPH_INDIRECT_ORIGIN_UNRESOLVED;
+}
+
+static iree_status_t loom_cmd_launch_graph_emit_indirect_error(
+    loom_cmd_launch_graph_build_t* build,
+    const loom_cmd_schedule_command_t* command, const loom_error_def_t* error,
+    const loom_diagnostic_param_t* params, uint8_t param_count) {
+  const loom_diagnostic_emission_t emission = {
+      .module = build->source_module,
+      .op = command->source_op,
+      .error = error,
+      .params = params,
+      .param_count = param_count,
+  };
+  build->valid = false;
+  return iree_diagnostic_emit(build->diagnostic_emitter, &emission);
+}
+
+static iree_status_t loom_cmd_launch_graph_record_indirect_dispatch(
+    loom_cmd_launch_graph_build_t* build,
+    const loom_cmd_schedule_command_t* command, bool has_preceding_wave,
+    loom_cmd_launch_count_t* launch) {
+  IREE_ASSERT_EQ(command->kind,
+                 LOOM_CMD_SCHEDULE_COMMAND_KIND_KERNEL_DISPATCH_INDIRECT);
+  const loom_cmd_schedule_value_slice_t counts =
+      command->count_inputs.workgroup_counts;
+  IREE_ASSERT_EQ(counts.count, 1u);
+  const loom_value_id_t source_value = counts.values[0];
+  const loom_cmd_launch_graph_indirect_origin_t origin =
+      loom_cmd_launch_graph_classify_indirect_origin(build, source_value);
+  const iree_string_view_t kernel_name =
+      loom_cmd_launch_graph_symbol_name(build->source_module, command->callee);
+  if (origin == LOOM_CMD_LAUNCH_GRAPH_INDIRECT_ORIGIN_UNRESOLVED) {
+    const loom_diagnostic_param_t params[] = {
+        loom_param_string(kernel_name),
+        loom_param_with_field_ref(
+            loom_param_string(IREE_SV("an exact aligned buffer range")),
+            loom_diagnostic_field_ref(LOOM_DIAGNOSTIC_FIELD_OPERAND, 0)),
+    };
+    return loom_cmd_launch_graph_emit_indirect_error(
+        build, command, LOOM_ERR_LOWERING_054, params, IREE_ARRAYSIZE(params));
+  }
+  if (origin == LOOM_CMD_LAUNCH_GRAPH_INDIRECT_ORIGIN_DYNAMIC &&
+      !has_preceding_wave) {
+    const loom_diagnostic_param_t params[] = {
+        loom_param_string(kernel_name),
+    };
+    return loom_cmd_launch_graph_emit_indirect_error(
+        build, command, LOOM_ERR_LOWERING_053, params, IREE_ARRAYSIZE(params));
+  }
+  launch->kind = origin == LOOM_CMD_LAUNCH_GRAPH_INDIRECT_ORIGIN_DYNAMIC
+                     ? LOOM_CMD_LAUNCH_COUNT_KIND_INDIRECT_DYNAMIC
+                     : LOOM_CMD_LAUNCH_COUNT_KIND_INDIRECT_STATIC;
+  launch->payload.indirect_source_value = source_value;
+  return iree_ok_status();
+}
+
 static iree_status_t loom_cmd_launch_graph_clone_config(
     loom_cmd_launch_graph_build_t* build,
     const loom_cmd_schedule_command_t* command,
@@ -558,31 +663,40 @@ static iree_status_t loom_cmd_launch_graph_build_body(
   }
 
   iree_host_size_t result_offset = 0;
-  for (iree_host_size_t i = 0; i < build->schedule->command_count; ++i) {
-    const loom_cmd_schedule_command_t* command = &build->schedule->commands[i];
-    loom_cmd_launch_count_t* launch = &build->launches[i];
-    launch->source_op = command->source_op;
-    switch (command->kind) {
-      case LOOM_CMD_SCHEDULE_COMMAND_KIND_KERNEL_LAUNCH: {
-        IREE_RETURN_IF_ERROR(
-            loom_cmd_launch_graph_clone_config(build, command, result_offset));
-        result_offset += LOOM_CMD_PROGRAM_LAUNCH_COUNT_DIMENSION_COUNT;
-        break;
+  for (iree_host_size_t wave_index = 0;
+       wave_index < build->schedule->wave_count; ++wave_index) {
+    const loom_cmd_schedule_wave_t wave = build->schedule->waves[wave_index];
+    for (iree_host_size_t wave_command_index = 0;
+         wave_command_index < wave.command_count; ++wave_command_index) {
+      const iree_host_size_t command_index =
+          wave.command_offset + wave_command_index;
+      const loom_cmd_schedule_command_t* command =
+          &build->schedule->commands[command_index];
+      loom_cmd_launch_count_t* launch = &build->launches[command_index];
+      launch->source_op = command->source_op;
+      switch (command->kind) {
+        case LOOM_CMD_SCHEDULE_COMMAND_KIND_KERNEL_LAUNCH: {
+          IREE_RETURN_IF_ERROR(loom_cmd_launch_graph_clone_config(
+              build, command, result_offset));
+          result_offset += LOOM_CMD_PROGRAM_LAUNCH_COUNT_DIMENSION_COUNT;
+          break;
+        }
+        case LOOM_CMD_SCHEDULE_COMMAND_KIND_KERNEL_DISPATCH_DIRECT: {
+          IREE_RETURN_IF_ERROR(loom_cmd_launch_graph_record_direct_dispatch(
+              build, command, launch));
+          if (!build->valid) return iree_ok_status();
+          break;
+        }
+        case LOOM_CMD_SCHEDULE_COMMAND_KIND_KERNEL_DISPATCH_INDIRECT: {
+          IREE_RETURN_IF_ERROR(loom_cmd_launch_graph_record_indirect_dispatch(
+              build, command, wave_index != 0, launch));
+          if (!build->valid) return iree_ok_status();
+          break;
+        }
+        default:
+          IREE_ASSERT_UNREACHABLE("schedule command kind is valid");
+          IREE_BUILTIN_UNREACHABLE();
       }
-      case LOOM_CMD_SCHEDULE_COMMAND_KIND_KERNEL_DISPATCH_DIRECT: {
-        IREE_RETURN_IF_ERROR(loom_cmd_launch_graph_record_direct_dispatch(
-            build, command, launch));
-        if (!build->valid) return iree_ok_status();
-        break;
-      }
-      case LOOM_CMD_SCHEDULE_COMMAND_KIND_KERNEL_DISPATCH_INDIRECT: {
-        return iree_make_status(
-            IREE_STATUS_UNIMPLEMENTED,
-            "indirect kernel dispatch requires count-origin placement");
-      }
-      default:
-        IREE_ASSERT_UNREACHABLE("schedule command kind is valid");
-        IREE_BUILTIN_UNREACHABLE();
     }
   }
   IREE_ASSERT_EQ(result_offset, result_count);

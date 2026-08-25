@@ -82,6 +82,7 @@ loom_cc_library(
         "//loom/src/loom/ops:op_defs",
         "//loom/src/loom/ops:special_values",
         "//loom/src/loom/ops:type_registry",
+        "//loom/src/loom/ops/buffer",
         "//loom/src/loom/ops/command",
         "//loom/src/loom/ops/func",
         "//loom/src/loom/ops/kernel",

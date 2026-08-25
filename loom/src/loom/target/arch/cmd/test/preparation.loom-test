@@ -635,3 +635,135 @@ low.func.def public retain target<cmd.core> abi(command_program) abi_layout({ent
   cmd.dispatch.direct<%1, %2>[%5, %5, %5](%0, %3, %4)
   return
 }
+
+// ====
+
+// RUN: emit command-program @stable_indirect_dispatch
+
+kernel.entry.decl @stable_count_entry(%output: buffer) where [workgroup_size(64, 1, 1)]
+
+command.program.def public @stable_indirect_dispatch() launch(%count_storage: buffer, %output: buffer) {
+  %c0 = index.constant 0 : offset
+  %counts = buffer.view %count_storage[%c0] : buffer -> view<3xi32>
+  kernel.dispatch @stable_count_entry[%counts](%output) : [view<3xi32>](buffer)
+  command.return
+}
+
+// ----
+low.func.def public retain target<cmd.core> abi(command_program) abi_layout({entry_count = 1, executable_count = 1, fixed_buffer_count = 0, rebindable_binding_count = 2}) @stable_indirect_dispatch() asm {
+  %0 = resource<command_input> {index = 0, source_type = buffer} : reg<cmd.binding>
+  %1 = resource<command_input> {index = 1, source_type = buffer} : reg<cmd.binding>
+  %2 = resource<command_input> {index = 0, source_type = index} : reg<cmd.executable>
+  %3 = resource<command_input> {index = 0, source_type = index} : reg<cmd.entry>
+  %4 = cmd.constant.u64 0
+  %5 = cmd.constant.u64 -1
+  %6 = cmd.constant.u64 12
+  %7 = cmd.buffer.ref.binding %0, %4, %6
+  cmd.dispatch.indirect.static<%2, %3>[%7](%1, %4, %5)
+  return
+}
+
+// ====
+
+// RUN: emit command-program @dynamic_indirect_dispatch
+
+kernel.entry.decl @produce_counts(%counts: view<3xi32>) where [workgroup_size(64, 1, 1)]
+kernel.entry.decl @consume_counts(%output: buffer, %scratch: view<4xi32>) where [workgroup_size(64, 1, 1)]
+
+command.program.def public @dynamic_indirect_dispatch() launch(%output: buffer) {
+  %c0 = index.constant 0 : offset
+  %c1 = index.constant 1 : index
+  %count_bytes = index.constant 12 : offset
+  %count_storage = buffer.alloca<global> align(4) %count_bytes : buffer
+  %counts = buffer.view %count_storage[%c0] : buffer -> view<3xi32>
+  kernel.dispatch @produce_counts[%c1](%counts) : [index](view<3xi32>)
+  %scratch_bytes = index.constant 16 : offset
+  %scratch_storage = buffer.alloca<global> align(4) %scratch_bytes : buffer
+  %scratch = buffer.view %scratch_storage[%c0] : buffer -> view<4xi32>
+  kernel.dispatch @consume_counts[%counts](%output, %scratch) : [view<3xi32>](buffer, view<4xi32>)
+  command.return
+}
+
+// ----
+low.func.def public retain target<cmd.core> abi(command_program) abi_layout({entry_count = 2, executable_count = 2, fixed_buffer_count = 0, rebindable_binding_count = 2}) @dynamic_indirect_dispatch() asm {
+  %0 = resource<command_input> {index = 0, source_type = buffer} : reg<cmd.binding>
+  %1 = resource<command_input> {index = 1, source_type = buffer} : reg<cmd.binding>
+  %2 = resource<command_input> {index = 0, source_type = index} : reg<cmd.executable>
+  %3 = resource<command_input> {index = 1, source_type = index} : reg<cmd.executable>
+  %4 = resource<command_input> {index = 0, source_type = index} : reg<cmd.entry>
+  %5 = resource<command_input> {index = 1, source_type = index} : reg<cmd.entry>
+  %6 = cmd.constant.u64 0
+  %7 = cmd.constant.u64 -1
+  %8 = cmd.constant.u64 12
+  %9 = cmd.constant.u64 16
+  %10 = cmd.constant.u32 1
+  cmd.dispatch.direct<%2, %4>[%10, %10, %10](%1, %6, %8)
+  %11 = cmd.buffer.ref.binding %1, %6, %8
+  cmd.dispatch.indirect.dynamic.barrier<%3, %5>[%11](%0, %6, %7, %1, %8, %9)
+  return
+}
+
+// ====
+
+// RUN: emit command-program @fixed_indirect_dispatch
+
+kernel.entry.decl @fixed_count_entry() where [workgroup_size(64, 1, 1)]
+
+command.program.def public @fixed_indirect_dispatch() launch(%parameters: buffer) {
+  %counts = command.parameter %parameters, "dispatch.counts" : view<3xi32>
+  kernel.dispatch @fixed_count_entry[%counts]() : [view<3xi32>]()
+  command.return
+}
+
+// ----
+low.func.def public retain target<cmd.core> abi(command_program) abi_layout({entry_count = 1, executable_count = 1, fixed_buffer_count = 1, rebindable_binding_count = 0}) @fixed_indirect_dispatch() asm {
+  %0 = resource<command_input> {index = 0, source_type = buffer} : reg<cmd.buffer>
+  %1 = resource<command_input> {index = 0, source_type = index} : reg<cmd.executable>
+  %2 = resource<command_input> {index = 0, source_type = index} : reg<cmd.entry>
+  %3 = cmd.constant.u64 0
+  %4 = cmd.constant.u64 -1
+  %5 = cmd.constant.u64 12
+  %6 = cmd.buffer.ref.direct %0, %3, %5
+  cmd.dispatch.indirect.static<%1, %2>[%6]()
+  return
+}
+
+// ====
+
+// RUN: emit command-program @mixed_host_and_stable_counts
+
+kernel.def @logical_count(%count: index) {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%count, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch(%output: buffer) {
+  kernel.return
+}
+
+kernel.entry.decl @stable_mixed_entry(%output: buffer) where [workgroup_size(64, 1, 1)]
+
+command.program.def public @mixed_host_and_stable_counts(%count: index) launch(%count_storage: buffer, %output: buffer) where [range(%count, 1, 1024)] {
+  %c0 = index.constant 0 : offset
+  %counts = buffer.view %count_storage[%c0] : buffer -> view<3xi32>
+  kernel.launch @logical_count[%count](%output) : [index](buffer)
+  kernel.dispatch @stable_mixed_entry[%counts](%output) : [view<3xi32>](buffer)
+  command.return
+}
+
+// ----
+low.func.def public retain target<cmd.core> abi(command_program) abi_layout({entry_count = 2, executable_count = 2, fixed_buffer_count = 0, rebindable_binding_count = 3}) @mixed_host_and_stable_counts() asm {
+  %0 = resource<command_input> {index = 0, source_type = buffer} : reg<cmd.binding>
+  %1 = resource<command_input> {index = 1, source_type = buffer} : reg<cmd.binding>
+  %2 = resource<command_input> {index = 2, source_type = buffer} : reg<cmd.binding>
+  %3 = resource<command_input> {index = 0, source_type = index} : reg<cmd.executable>
+  %4 = resource<command_input> {index = 1, source_type = index} : reg<cmd.executable>
+  %5 = resource<command_input> {index = 0, source_type = index} : reg<cmd.entry>
+  %6 = resource<command_input> {index = 1, source_type = index} : reg<cmd.entry>
+  %7 = cmd.constant.u64 0
+  %8 = cmd.constant.u64 -1
+  %9 = cmd.constant.u64 12
+  %10 = cmd.buffer.ref.binding %2, %7, %9
+  cmd.dispatch.indirect.static<%3, %5>[%10]()
+  %11 = cmd.buffer.ref.binding %0, %7, %9
+  cmd.dispatch.indirect.static.barrier<%4, %6>[%11](%1, %7, %8)
+  return
+}

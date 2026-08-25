@@ -86,6 +86,7 @@ loom_cc_library(
     loom::error::error_defs
     loom::ir
     loom::ir::facts
+    loom::ops::buffer
     loom::ops::command
     loom::ops::func
     loom::ops::kernel

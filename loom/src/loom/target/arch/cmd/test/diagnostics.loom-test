@@ -60,3 +60,37 @@ command.program.def public @dynamic_argument(%scale: i32) launch() {
   kernel.dispatch @scalar_entry[%c1](%scale) : [index](i32)
   command.return
 }
+
+// ====
+
+// RUN: emit command-program @unordered_indirect_dispatch
+
+kernel.entry.decl @write_counts(%counts: view<3xi32>) where [workgroup_size(64, 1, 1)]
+kernel.entry.decl @use_counts() where [workgroup_size(64, 1, 1)]
+
+command.program.def public @unordered_indirect_dispatch() launch() {
+  %c0 = index.constant 0 : offset
+  %c1 = index.constant 1 : index
+  %count_bytes = index.constant 12 : offset
+  %count_storage = buffer.alloca<global> align(4) %count_bytes : buffer
+  %counts = buffer.view %count_storage[%c0] : buffer -> view<3xi32>
+  command.concurrent {
+    kernel.dispatch @write_counts[%c1](%counts) : [index](view<3xi32>)
+    // ERROR@+1: LOWERING/053 {kernel_name="use_counts"}
+    kernel.dispatch @use_counts[%counts]() : [view<3xi32>]()
+  }
+  command.return
+}
+
+// ====
+
+// RUN: emit command-program @unplaced_indirect_dispatch
+
+kernel.entry.decl @unplaced_counts() where [workgroup_size(64, 1, 1)]
+
+command.program.def public @unplaced_indirect_dispatch(%byte_offset: offset) launch(%count_storage: buffer) {
+  %counts = buffer.view %count_storage[%byte_offset] : buffer -> view<3xi32>
+  // ERROR@+1: LOWERING/054 {kernel_name="unplaced_counts", requirement="an exact aligned buffer range"}
+  kernel.dispatch @unplaced_counts[%counts]() : [view<3xi32>]()
+  command.return
+}

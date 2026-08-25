@@ -28,6 +28,10 @@ typedef enum loom_cmd_launch_count_kind_e {
   LOOM_CMD_LAUNCH_COUNT_KIND_DIRECT = 1,
   // The aggregate host function produces one issue-time tuple.
   LOOM_CMD_LAUNCH_COUNT_KIND_HOST = 2,
+  // A stable source view supplies the tuple before command execution.
+  LOOM_CMD_LAUNCH_COUNT_KIND_INDIRECT_STATIC = 3,
+  // A transient source view receives the tuple during command execution.
+  LOOM_CMD_LAUNCH_COUNT_KIND_INDIRECT_DYNAMIC = 4,
 } loom_cmd_launch_count_kind_t;
 
 // Aggregate workgroup-count assignment for one source issue command.
@@ -41,6 +45,8 @@ typedef struct loom_cmd_launch_count_t {
     loom_target_dispatch_workgroup_count_t direct;
     // Dense xyz tuple ordinal returned by the host function when HOST.
     uint32_t host_tuple_ordinal;
+    // Source view when |kind| is either INDIRECT kind.
+    loom_value_id_t indirect_source_value;
   } payload;
 } loom_cmd_launch_count_t;
 
@@ -49,7 +55,9 @@ typedef struct loom_cmd_launch_count_t {
 // The owned module contains one pure host func.def whose arguments correspond
 // to the source program's specialization arguments. Its results are flattened
 // xyz values for |host_tuple_count| unique dynamic logical-launch tuples.
-// Static tuples have no function results and remain in DIRECT rows.
+// Static tuples have no function results and remain in DIRECT rows. Explicit
+// indirect dispatches retain their source view and whether its root exists
+// before or during command execution.
 //
 // Launch rows retain source-op pointers, so the source module must outlive this
 // object. All other storage is owned by |module| and released together. Wave
@@ -80,9 +88,11 @@ typedef struct loom_cmd_launch_graph_t {
 // across the combined function. Equal residual xyz tuples share one dense host
 // result ordinal. Exact tuples are returned as direct dispatch metadata.
 // Already configured direct dispatches bypass launch-config cloning and retain
-// their exact counts. |source_facts| is a borrowed table populated for the
-// source program and each scheduled kernel's launch-config region by the owning
-// program plan.
+// their exact counts. Configured indirect dispatches retain exactly placed
+// source views; command-input roots are static and buffer.alloca roots are
+// dynamic. Dynamic roots require an earlier execution wave. |source_facts| is
+// a borrowed table populated for the source program and each scheduled kernel's
+// launch-config region by the owning program plan.
 //
 // This host slice accepts only workload values derived from command-program
 // specialization arguments and pure scalar operations. Buffer-sourced values

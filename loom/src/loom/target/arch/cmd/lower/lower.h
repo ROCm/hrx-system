@@ -81,7 +81,7 @@ typedef struct loom_cmd_lower_plan_t {
   iree_host_size_t buffer_range_count;
   // External resource-table shape emitted on the lowered function.
   loom_cmd_abi_layout_t abi_layout;
-  // Aggregate launch graph defining direct and host count placement.
+  // Aggregate launch graph defining direct, host, and source count placement.
   const loom_cmd_launch_graph_t* launch_graph;
   // Host launch-count table placement, ignored when the graph has no tuples.
   loom_cmd_lower_launch_count_binding_t launch_count_binding;
@@ -96,9 +96,10 @@ typedef struct loom_cmd_lower_plan_t {
 // The portable issue-time ABI accepts buffer roots and explicitly resolved
 // view ranges plus workgroup counts classified by |plan->launch_graph|. Exact
 // tuples become direct dispatches. Host tuples become static-indirect
-// dispatches referencing one rebindable output table. Buffer and view arguments
-// become resolved ranges; exact scalar arguments preserve their tagless ABI
-// bits.
+// dispatches referencing one rebindable output table. Stable source views
+// remain static indirect, while transient source views become dynamic indirect
+// after a preceding execution barrier. Buffer and view arguments become
+// resolved ranges; exact scalar arguments preserve their tagless ABI bits.
 // Unsupported kernel-argument forms fail without changing the source program.
 // On success the replacement keeps the source symbol identity and is returned
 // in |out_low_function|.

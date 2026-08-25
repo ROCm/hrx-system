@@ -387,6 +387,116 @@ command.program.def public @bodyless() launch(%output: buffer) {
   loom_cmd_program_plan_deinitialize(&plan);
 }
 
+TEST_F(CmdProgramPlanTest, SerializesIndirectCountOrigins) {
+  ModulePtr source_module = ParseAndVerify(R"(
+kernel.def @logical_count(%count: index) {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%count, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch() {
+  kernel.return
+}
+
+kernel.entry.decl @stable_entry() where [workgroup_size(64, 1, 1)]
+kernel.entry.decl @produce_counts(%counts: view<3xi32>) where [workgroup_size(64, 1, 1)]
+kernel.entry.decl @dynamic_entry() where [workgroup_size(64, 1, 1)]
+
+command.program.def public @stable_root(%count: index) launch(%count_storage: buffer) where [range(%count, 1, 1024)] {
+  %c0 = index.constant 0 : offset
+  %counts = buffer.view %count_storage[%c0] : buffer -> view<3xi32>
+  kernel.launch @logical_count[%count]() : [index]()
+  kernel.dispatch @stable_entry[%counts]() : [view<3xi32>]()
+  command.return
+}
+
+command.program.def public @dynamic_root() launch() {
+  %c0 = index.constant 0 : offset
+  %c1 = index.constant 1 : index
+  %count_bytes = index.constant 12 : offset
+  %count_storage = buffer.alloca<global> align(4) %count_bytes : buffer
+  %counts = buffer.view %count_storage[%c0] : buffer -> view<3xi32>
+  kernel.dispatch @produce_counts[%c1](%counts) : [index](view<3xi32>)
+  kernel.dispatch @dynamic_entry[%counts]() : [view<3xi32>]()
+  command.return
+}
+)");
+  ASSERT_NE(source_module, nullptr);
+  const loom_op_t* source_programs[] = {
+      FindSymbol(source_module.get(), IREE_SV("stable_root")),
+      FindSymbol(source_module.get(), IREE_SV("dynamic_root")),
+  };
+
+  loom_cmd_program_plan_t plan = {};
+  bool valid = false;
+  IREE_ASSERT_OK(loom_cmd_program_plan_prepare(
+      source_module.get(), source_programs, IREE_ARRAYSIZE(source_programs),
+      loom_pass_builtin_registry(),
+      /*diagnostic_emitter=*/{}, &block_pool_, &valid, &plan,
+      iree_allocator_system()));
+  ASSERT_TRUE(valid);
+  source_module.reset();
+
+  ASSERT_EQ(plan.root_count, 2u);
+  const loom_cmd_program_root_t& stable_root = plan.roots[0];
+  EXPECT_EQ(stable_root.launch_counts.binding_index, 1u);
+  EXPECT_EQ(stable_root.launch_counts.required_byte_length, 12u);
+  EXPECT_EQ(stable_root.launch_counts.minimum_alignment, 4u);
+  iree_byte_span_t stable_data = iree_byte_span_empty();
+  IREE_ASSERT_OK(loom_cmd_program_plan_serialize_root(&plan, 0, &stable_data,
+                                                      iree_allocator_system()));
+  loom_cmd_program_t stable_program = {};
+  IREE_ASSERT_OK(loom_cmd_program_parse(
+      iree_make_const_byte_span(stable_data.data, stable_data.data_length),
+      &stable_program));
+  ASSERT_EQ(stable_program.commands.count, 2u);
+  const loom_cmd_program_command_t host_dispatch =
+      loom_cmd_program_command_at(&stable_program, 0);
+  const loom_cmd_program_command_t stable_dispatch =
+      loom_cmd_program_command_at(&stable_program, 1);
+  EXPECT_EQ(host_dispatch.kind,
+            LOOM_CMD_PROGRAM_COMMAND_KIND_DISPATCH_INDIRECT_STATIC);
+  EXPECT_EQ(stable_dispatch.kind,
+            LOOM_CMD_PROGRAM_COMMAND_KIND_DISPATCH_INDIRECT_STATIC_BARRIER);
+  EXPECT_EQ(
+      loom_cmd_program_buffer_ref_at(
+          &stable_program,
+          host_dispatch.payload.dispatch_indirect.workgroup_count_buffer_ref)
+          .root_index,
+      1u);
+  EXPECT_EQ(
+      loom_cmd_program_buffer_ref_at(
+          &stable_program,
+          stable_dispatch.payload.dispatch_indirect.workgroup_count_buffer_ref)
+          .root_index,
+      0u);
+
+  const loom_cmd_program_root_t& dynamic_root = plan.roots[1];
+  EXPECT_EQ(dynamic_root.launch_counts.binding_index, UINT32_MAX);
+  EXPECT_EQ(dynamic_root.transient.binding_index, 0u);
+  iree_byte_span_t dynamic_data = iree_byte_span_empty();
+  IREE_ASSERT_OK(loom_cmd_program_plan_serialize_root(&plan, 1, &dynamic_data,
+                                                      iree_allocator_system()));
+  loom_cmd_program_t dynamic_program = {};
+  IREE_ASSERT_OK(loom_cmd_program_parse(
+      iree_make_const_byte_span(dynamic_data.data, dynamic_data.data_length),
+      &dynamic_program));
+  ASSERT_EQ(dynamic_program.commands.count, 2u);
+  const loom_cmd_program_command_t dynamic_dispatch =
+      loom_cmd_program_command_at(&dynamic_program, 1);
+  EXPECT_EQ(dynamic_dispatch.kind,
+            LOOM_CMD_PROGRAM_COMMAND_KIND_DISPATCH_INDIRECT_DYNAMIC_BARRIER);
+  const loom_cmd_program_buffer_ref_t dynamic_count_ref =
+      loom_cmd_program_buffer_ref_at(&dynamic_program,
+                                     dynamic_dispatch.payload.dispatch_indirect
+                                         .workgroup_count_buffer_ref);
+  EXPECT_EQ(dynamic_count_ref.role, LOOM_CMD_PROGRAM_BUFFER_ROLE_REBINDABLE);
+  EXPECT_EQ(dynamic_count_ref.root_index,
+            dynamic_program.requirements.transient.binding_index);
+
+  iree_allocator_free(iree_allocator_system(), dynamic_data.data);
+  iree_allocator_free(iree_allocator_system(), stable_data.data);
+  loom_cmd_program_plan_deinitialize(&plan);
+}
+
 TEST_F(CmdProgramPlanTest, SerializesMovedReferenceValues) {
   ModulePtr module = ParseAndVerify(R"(
 low.func.def target<cmd.core> abi(command_program) @moved_binding() {
