@@ -64,6 +64,7 @@ from loom.format.bytecode.writer import (
     LOCATION_MODE_SOURCE_LOCATIONS,
     SECTION_LOCATIONS,
     SECTION_SYMBOL_REFERENCES,
+    SYMBOL_INTERFACE_BITS,
     write_module,
 )
 from loom.format.text.parser import Parser
@@ -599,14 +600,15 @@ class TestSymbolReferencesSection:
         assert (symbol_count, dependency_count, template_demand_count) == (4, 3, 1)
         assert module_dependency_count == 0
 
-        rows: list[tuple[list[tuple[int, int]], list[tuple[int, int]]]] = []
+        rows: list[tuple[list[tuple[int, int, int]], list[tuple[int, int]]]] = []
         for _ in range(symbol_count):
             row_dependency_count, offset = decode_varint(data, offset)
             dependencies = []
             for _ in range(row_dependency_count):
                 source_root, offset = decode_varint(data, offset)
                 target_symbol, offset = decode_varint(data, offset)
-                dependencies.append((source_root, target_symbol))
+                target_interfaces, offset = decode_varint(data, offset)
+                dependencies.append((source_root, target_symbol, target_interfaces))
             row_template_demand_count, offset = decode_varint(data, offset)
             template_demands = []
             for _ in range(row_template_demand_count):
@@ -617,7 +619,11 @@ class TestSymbolReferencesSection:
 
         assert rows[:3] == [([], []), ([], []), ([], [])]
         assert rows[3] == (
-            [(2, 2), (2, 1), (1, 0)],
+            [
+                (2, 2, SYMBOL_INTERFACE_BITS["template_family"]),
+                (2, 1, SYMBOL_INTERFACE_BITS["record"]),
+                (1, 0, SYMBOL_INTERFACE_BITS["record"]),
+            ],
             [(2, 2)],
         )
         assert offset == len(data)

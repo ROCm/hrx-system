@@ -60,6 +60,8 @@ enum loom_symbol_interface_bits_e {
   LOOM_SYMBOL_INTERFACE_TEMPLATE_PROVIDER = 1u << 11,
   // Symbol defines or declares an executable kernel entry ABI.
   LOOM_SYMBOL_INTERFACE_KERNEL_ENTRY = 1u << 12,
+  // All symbol interface bits understood by this compiler version.
+  LOOM_SYMBOL_INTERFACE_FLAG_MASK = (1u << 13) - 1,
 };
 
 enum loom_symbol_reference_role_e {

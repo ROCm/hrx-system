@@ -85,7 +85,7 @@ extern "C" {
 
 #define LOOM_BYTECODE_MAGIC "LOOM"
 #define LOOM_BYTECODE_MAGIC_LENGTH 4
-#define LOOM_BYTECODE_FORMAT_VERSION 31
+#define LOOM_BYTECODE_FORMAT_VERSION 32
 
 #define LOOM_BYTECODE_SOURCE_TRIVIA_LEADING_BLANK_LINE (1u << 0)
 #define LOOM_BYTECODE_SOURCE_TRIVIA_COMMENT_COUNT_SHIFT 1
@@ -743,11 +743,13 @@ typedef enum loom_bytecode_section_kind_e {
 //   For each module dependency:
 //     [source_root_region_index_plus_one: varint] (must be zero)
 //     [target_symbol_index: varint]
+//     [target_interfaces: varint]
 //   For each symbol in SYMBOLS ordinal order:
 //     [dependency_count: varint]
 //     For each dependency:
 //       [source_root_region_index_plus_one: varint]
 //       [target_symbol_index: varint]
+//       [target_interfaces: varint]
 //     [template_demand_count: varint]
 //     For each abstract provider demand:
 //       [source_root_region_index_plus_one: varint]

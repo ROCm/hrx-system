@@ -18,6 +18,7 @@
 #include "loom/ops/config/ops.h"
 #include "loom/ops/func/ops.h"
 #include "loom/ops/global/ops.h"
+#include "loom/ops/kernel/ops.h"
 #include "loom/ops/op_defs.h"
 #include "loom/ops/target/ops.h"
 #include "loom/ops/template/ops.h"
@@ -39,6 +40,7 @@ class SymbolReferencesTest : public ::testing::Test {
     RegisterDialect(LOOM_DIALECT_CONFIG, loom_config_dialect_vtables);
     RegisterDialect(LOOM_DIALECT_FUNC, loom_func_dialect_vtables);
     RegisterDialect(LOOM_DIALECT_GLOBAL, loom_global_dialect_vtables);
+    RegisterDialect(LOOM_DIALECT_KERNEL, loom_kernel_dialect_vtables);
     RegisterDialect(LOOM_DIALECT_TARGET, loom_target_dialect_vtables);
     RegisterDialect(LOOM_DIALECT_TEMPLATE, loom_template_dialect_vtables);
     IREE_ASSERT_OK(loom_test_dialect_register(&context_));
@@ -225,18 +227,22 @@ func.def @entry() -> (index) {
   ASSERT_NE(read_occurrence, nullptr);
   ASSERT_NE(read_occurrence->user_op, nullptr);
   EXPECT_EQ(read_occurrence->user_op->kind, LOOM_OP_GLOBAL_LOAD);
+  EXPECT_EQ(read_occurrence->target_interfaces,
+            LOOM_SYMBOL_INTERFACE_GLOBAL | LOOM_SYMBOL_INTERFACE_RODATA);
 
   const loom_symbol_reference_occurrence_t* write_occurrence = FindOccurrence(
       table, writer, state, LOOM_SYMBOL_REFERENCE_OCCURRENCE_GLOBAL_ACCESS);
   ASSERT_NE(write_occurrence, nullptr);
   ASSERT_NE(write_occurrence->user_op, nullptr);
   EXPECT_EQ(write_occurrence->user_op->kind, LOOM_OP_GLOBAL_STORE);
+  EXPECT_EQ(write_occurrence->target_interfaces, LOOM_SYMBOL_INTERFACE_GLOBAL);
 
   const loom_symbol_reference_occurrence_t* call_occurrence = FindOccurrence(
       table, entry, reader, LOOM_SYMBOL_REFERENCE_OCCURRENCE_CALL);
   ASSERT_NE(call_occurrence, nullptr);
   ASSERT_NE(call_occurrence->user_op, nullptr);
   EXPECT_EQ(call_occurrence->user_op->kind, LOOM_OP_FUNC_CALL);
+  EXPECT_EQ(call_occurrence->target_interfaces, LOOM_SYMBOL_INTERFACE_CALLABLE);
 
   EXPECT_EQ(read_occurrence->source_root_region_index_plus_one, 1u);
   EXPECT_EQ(write_occurrence->source_root_region_index_plus_one, 1u);
@@ -244,6 +250,42 @@ func.def @entry() -> (index) {
 
   EXPECT_EQ(table.symbols[state].incoming_count, 2u);
   EXPECT_EQ(table.symbols[reader].incoming_count, 1u);
+}
+
+TEST_F(SymbolReferencesTest, KernelReferencesRetainDistinctTargetInterfaces) {
+  ModulePtr module = ParseModule(R"(
+kernel.decl @logical() launch()
+kernel.entry.decl @configured() where [workgroup_size(1, 1, 1)]
+
+func.def @entry() {
+  kernel.launch @logical() : ()
+  kernel.dispatch @configured[]() : []()
+  func.return
+}
+)");
+
+  const loom_symbol_id_t logical = FindSymbol(module.get(), IREE_SV("logical"));
+  const loom_symbol_id_t configured =
+      FindSymbol(module.get(), IREE_SV("configured"));
+  const loom_symbol_id_t entry = FindSymbol(module.get(), IREE_SV("entry"));
+
+  const loom_symbol_reference_table_t table = BuildTable(module.get());
+
+  const loom_symbol_reference_occurrence_t* launch_occurrence = FindOccurrence(
+      table, entry, logical, LOOM_SYMBOL_REFERENCE_OCCURRENCE_CALL);
+  ASSERT_NE(launch_occurrence, nullptr);
+  ASSERT_NE(launch_occurrence->user_op, nullptr);
+  EXPECT_EQ(launch_occurrence->user_op->kind, LOOM_OP_KERNEL_LAUNCH);
+  EXPECT_EQ(launch_occurrence->target_interfaces, LOOM_SYMBOL_INTERFACE_KERNEL);
+
+  const loom_symbol_reference_occurrence_t* dispatch_occurrence =
+      FindOccurrence(table, entry, configured,
+                     LOOM_SYMBOL_REFERENCE_OCCURRENCE_CALL);
+  ASSERT_NE(dispatch_occurrence, nullptr);
+  ASSERT_NE(dispatch_occurrence->user_op, nullptr);
+  EXPECT_EQ(dispatch_occurrence->user_op->kind, LOOM_OP_KERNEL_DISPATCH);
+  EXPECT_EQ(dispatch_occurrence->target_interfaces,
+            LOOM_SYMBOL_INTERFACE_KERNEL_ENTRY);
 }
 
 TEST_F(SymbolReferencesTest, OccurrencesRetainContractAndRootRegionOrigins) {

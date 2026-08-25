@@ -181,8 +181,25 @@ BYTECODE_IR_KIND_BY_TYPE_KIND: dict[int, TypeKind] = {
 
 # File magic and version.
 MAGIC = b"LOOM"
-FORMAT_VERSION = 31
+FORMAT_VERSION = 32
 PRODUCER = "loom-py"
+
+SYMBOL_INTERFACE_BITS = {
+    "func_like": 1 << 0,
+    "global": 1 << 1,
+    "executable": 1 << 2,
+    "record": 1 << 3,
+    "target": 1 << 4,
+    "config": 1 << 5,
+    "rodata": 1 << 6,
+    "kernel": 1 << 7,
+    "callable": 1 << 8,
+    "command_program": 1 << 9,
+    "template_family": 1 << 10,
+    "template_provider": 1 << 11,
+    "kernel_entry": 1 << 12,
+}
+SYMBOL_INTERFACE_FLAG_MASK = (1 << 13) - 1
 
 SOURCE_TRIVIA_LEADING_BLANK_LINE = 1
 SOURCE_TRIVIA_COMMENT_COUNT_SHIFT = 1
@@ -287,6 +304,7 @@ class _SymbolReferenceRecord:
 
     source_root_region_index_plus_one: int
     target_symbol_index: int
+    target_interfaces: int = 0
 
 
 class _SymbolReferenceProjectionBuilder:
@@ -329,7 +347,10 @@ class _SymbolReferenceProjectionBuilder:
         )
 
     def _add_dependency(
-        self, source_scope: _SymbolReferenceSourceScope, name: str
+        self,
+        source_scope: _SymbolReferenceSourceScope,
+        name: str,
+        target_interfaces: int,
     ) -> None:
         try:
             target_symbol_index = self._wire_symbol_indices[name]
@@ -338,6 +359,7 @@ class _SymbolReferenceProjectionBuilder:
         record = _SymbolReferenceRecord(
             source_root_region_index_plus_one=source_scope.root_region_index_plus_one,
             target_symbol_index=target_symbol_index,
+            target_interfaces=target_interfaces,
         )
         if source_scope.symbol_index is None:
             self._module_dependencies.append(record)
@@ -356,19 +378,23 @@ class _SymbolReferenceProjectionBuilder:
             symbol_ref is not None
             and symbol_ref.role is SymbolReferenceRole.AVAILABILITY
         )
+        target_interfaces = 0
+        if symbol_ref is not None:
+            for interface in symbol_ref.interfaces:
+                target_interfaces |= SYMBOL_INTERFACE_BITS[interface]
         if attr_type == "symbol" or isinstance(value, SymbolName):
             if not is_availability:
-                self._add_dependency(source_scope, str(value))
+                self._add_dependency(source_scope, str(value), target_interfaces)
             return
         if attr_type == "symbol_array" or isinstance(value, SymbolNameArray):
             if not is_availability:
                 for name in value:
-                    self._add_dependency(source_scope, str(name))
+                    self._add_dependency(source_scope, str(name), target_interfaces)
             return
         if attr_type == "symbol_set" or isinstance(value, SymbolNameSet):
             if not is_availability:
                 for name in value:
-                    self._add_dependency(source_scope, str(name))
+                    self._add_dependency(source_scope, str(name), target_interfaces)
             return
         if isinstance(value, _IR_TYPE_CLASSES):
             self._visit_type(source_scope, cast(Type, value))
@@ -2363,6 +2389,7 @@ class BytecodeWriter:
         for dependency in self._module_dependencies:
             buf.write_varint(dependency.source_root_region_index_plus_one)
             buf.write_varint(dependency.target_symbol_index)
+            buf.write_varint(dependency.target_interfaces)
         for dependencies, template_demands in zip(
             self._symbol_dependencies,
             self._symbol_template_demands,
@@ -2372,6 +2399,7 @@ class BytecodeWriter:
             for dependency in dependencies:
                 buf.write_varint(dependency.source_root_region_index_plus_one)
                 buf.write_varint(dependency.target_symbol_index)
+                buf.write_varint(dependency.target_interfaces)
             buf.write_varint(len(template_demands))
             for demand in template_demands:
                 buf.write_varint(demand.source_root_region_index_plus_one)

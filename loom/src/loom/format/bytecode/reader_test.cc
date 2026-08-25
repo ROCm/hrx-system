@@ -141,10 +141,14 @@ class ReaderTest : public ::testing::Test {
     std::vector<size_t> module_dependencies;
     // Byte offsets of module-root dependency source origins.
     std::vector<size_t> module_dependency_origins;
+    // Byte offsets of module-root dependency target interface constraints.
+    std::vector<size_t> module_dependency_target_interfaces;
     // Byte offsets of dependency target ordinals by source symbol.
     std::vector<std::vector<size_t>> symbol_dependencies;
     // Byte offsets of dependency source origins by source symbol.
     std::vector<std::vector<size_t>> symbol_dependency_origins;
+    // Byte offsets of dependency target interface constraints by source symbol.
+    std::vector<std::vector<size_t>> symbol_dependency_target_interfaces;
     // Byte offsets of template-family symbol ordinals by source symbol.
     std::vector<std::vector<size_t>> symbol_template_demands;
     // Byte offsets of template-demand source origins by source symbol.
@@ -2137,15 +2141,20 @@ class ReaderTest : public ::testing::Test {
     const uint64_t module_dependency_count = ReadUVarint(bytes, &offset);
     layout.module_dependencies.reserve((size_t)module_dependency_count);
     layout.module_dependency_origins.reserve((size_t)module_dependency_count);
+    layout.module_dependency_target_interfaces.reserve(
+        (size_t)module_dependency_count);
     for (uint64_t i = 0; i < module_dependency_count; ++i) {
       layout.module_dependency_origins.push_back(offset);
       ReadUVarint(bytes, &offset);
       layout.module_dependencies.push_back(offset);
       ReadUVarint(bytes, &offset);
+      layout.module_dependency_target_interfaces.push_back(offset);
+      ReadUVarint(bytes, &offset);
     }
 
     layout.symbol_dependencies.reserve((size_t)symbol_count);
     layout.symbol_dependency_origins.reserve((size_t)symbol_count);
+    layout.symbol_dependency_target_interfaces.reserve((size_t)symbol_count);
     layout.symbol_template_demands.reserve((size_t)symbol_count);
     layout.symbol_template_demand_origins.reserve((size_t)symbol_count);
     for (uint64_t i = 0; i < symbol_count; ++i) {
@@ -2154,12 +2163,17 @@ class ReaderTest : public ::testing::Test {
           layout.symbol_dependencies.emplace_back();
       std::vector<size_t>& dependency_origin_offsets =
           layout.symbol_dependency_origins.emplace_back();
+      std::vector<size_t>& dependency_target_interface_offsets =
+          layout.symbol_dependency_target_interfaces.emplace_back();
       dependency_offsets.reserve((size_t)dependency_count);
       dependency_origin_offsets.reserve((size_t)dependency_count);
+      dependency_target_interface_offsets.reserve((size_t)dependency_count);
       for (uint64_t j = 0; j < dependency_count; ++j) {
         dependency_origin_offsets.push_back(offset);
         ReadUVarint(bytes, &offset);
         dependency_offsets.push_back(offset);
+        ReadUVarint(bytes, &offset);
+        dependency_target_interface_offsets.push_back(offset);
         ReadUVarint(bytes, &offset);
       }
 
@@ -3513,12 +3527,18 @@ TEST_F(ReaderTest, PreservesPhysicalSymbolDefinitionOrder) {
   const uint8_t* dependency_origins =
       module_metadata.dependency_source_root_region_indices_plus_one +
       function_references.first_dependency_index;
+  const loom_symbol_interface_flags_t* dependency_target_interfaces =
+      module_metadata.dependency_target_interfaces +
+      function_references.first_dependency_index;
   EXPECT_EQ(dependency_symbol_indices[0], 1u);
   EXPECT_EQ(dependency_symbol_indices[1], 2u);
   EXPECT_EQ(dependency_symbol_indices[2], 1u);
   EXPECT_EQ(dependency_origins[0], 1u);
   EXPECT_EQ(dependency_origins[1], 1u);
   EXPECT_EQ(dependency_origins[2], 1u);
+  EXPECT_EQ(dependency_target_interfaces[0], LOOM_SYMBOL_INTERFACE_RECORD);
+  EXPECT_EQ(dependency_target_interfaces[1], LOOM_SYMBOL_INTERFACE_RECORD);
+  EXPECT_EQ(dependency_target_interfaces[2], LOOM_SYMBOL_INTERFACE_RECORD);
   iree_arena_deinitialize(&metadata_arena);
 
   loom_module_t* read_module = nullptr;
@@ -5474,6 +5494,24 @@ TEST_F(ReaderTest, RejectsSymbolReferenceOriginOutsideSourceRoots) {
   const size_t origin_offset = layout.symbol_dependency_origins[2][0];
   ASSERT_LT(origin_offset, bytes.size());
   bytes[origin_offset] = 2;
+
+  ExpectReadError(bytes, "ERR_BYTECODE_006");
+
+  loom_module_free(module);
+}
+
+TEST_F(ReaderTest, RejectsSymbolReferenceUnknownTargetInterfaces) {
+  loom_module_t* module = CreateSymbolArrayModule();
+  auto bytes = WriteModule(module);
+  SymbolReferenceLayout layout = ReadSymbolReferenceLayout(bytes);
+  ASSERT_EQ(layout.symbol_dependency_target_interfaces.size(), 3u);
+  ASSERT_EQ(layout.symbol_dependency_target_interfaces[2].size(), 3u);
+  const size_t interfaces_offset =
+      layout.symbol_dependency_target_interfaces[2][0];
+  ASSERT_LT(interfaces_offset + 2, bytes.size());
+  bytes[interfaces_offset] = 0x80;
+  bytes[interfaces_offset + 1] = 0x80;
+  bytes[interfaces_offset + 2] = 0x01;
 
   ExpectReadError(bytes, "ERR_BYTECODE_006");
 

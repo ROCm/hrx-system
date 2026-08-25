@@ -52,6 +52,7 @@ from loom.format.bytecode.writer import (
     SECTION_TYPES,
     SOURCE_TRIVIA_COMMENT_COUNT_SHIFT,
     SOURCE_TRIVIA_LEADING_BLANK_LINE,
+    SYMBOL_INTERFACE_FLAG_MASK,
     SYMBOL_KIND_ANCHOR,
 )
 from loom.ir import (
@@ -1433,7 +1434,7 @@ class BytecodeReader:
         minimum_encoded_bytes = (
             1
             + symbol_count * 2
-            + total_dependency_count * 2
+            + total_dependency_count * 3
             + total_template_demand_count * 2
         )
         if minimum_encoded_bytes > len(data) - offset:
@@ -1459,6 +1460,9 @@ class BytecodeReader:
                 dependency, offset = decode_varint(data, offset)
                 if dependency >= symbol_count:
                     raise BytecodeError("dependency symbol index is out of range")
+                target_interfaces, offset = decode_varint(data, offset)
+                if target_interfaces & ~SYMBOL_INTERFACE_FLAG_MASK:
+                    raise BytecodeError("dependency target interfaces are invalid")
                 decoded_dependency_count += 1
             return offset
 
