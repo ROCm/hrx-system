@@ -1447,6 +1447,25 @@ static bool loom_amdgpu_scalar_cmpi_i64_requires_native_mask(
          predicate != LOOM_SCALAR_CMPI_PREDICATE_NE;
 }
 
+static bool loom_amdgpu_index_cmp_requires_native_mask(
+    const loom_module_t* module,
+    const loom_amdgpu_source_value_analysis_t* analysis,
+    const loom_op_t* source_op) {
+  // Full-width address comparisons are assembled from 32-bit vector compares
+  // and therefore produce a native lane mask. Address comparisons proven to
+  // fit in 32 bits retain the scalar SCC path.
+  if (!loom_index_cmp_isa(source_op)) return false;
+  const loom_value_id_t lhs = loom_index_cmp_lhs(source_op);
+  const loom_value_id_t rhs = loom_index_cmp_rhs(source_op);
+  if (lhs >= module->values.count || rhs >= module->values.count) return false;
+  const loom_value_fact_table_t* fact_table =
+      analysis != NULL ? analysis->fact_table : NULL;
+  return loom_amdgpu_source_address_value_needs_64bit(
+             module, fact_table, lhs, loom_module_value_type(module, lhs)) ||
+         loom_amdgpu_source_address_value_needs_64bit(
+             module, fact_table, rhs, loom_module_value_type(module, rhs));
+}
+
 static bool loom_amdgpu_i1_compare_values(
     const loom_module_t* module,
     const loom_amdgpu_source_value_analysis_t* analysis,
@@ -1484,6 +1503,9 @@ static bool loom_amdgpu_i1_compare_values(
                        LOOM_AMDGPU_SOURCE_PRODUCER_SCALAR_CMPI) &&
       loom_amdgpu_scalar_cmpi_i64_requires_native_mask(module, source_op,
                                                        out_values)) {
+    out_values->flags |= LOOM_AMDGPU_I1_COMPARE_REQUIRES_NATIVE_MASK;
+  }
+  if (loom_amdgpu_index_cmp_requires_native_mask(module, analysis, source_op)) {
     out_values->flags |= LOOM_AMDGPU_I1_COMPARE_REQUIRES_NATIVE_MASK;
   }
   return true;
