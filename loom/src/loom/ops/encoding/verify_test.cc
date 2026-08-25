@@ -39,6 +39,7 @@ static iree_status_t EmitEncodingParamError(iree_diagnostic_emitter_t emitter,
       loom_param_string(param_name),
   };
   loom_diagnostic_emission_t emission = {
+      /*.module=*/nullptr,
       /*.op=*/op,
       /*.error=*/error,
       /*.params=*/diagnostic_params,

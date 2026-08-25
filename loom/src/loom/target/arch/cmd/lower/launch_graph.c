@@ -9,6 +9,7 @@
 #include <inttypes.h>
 #include <string.h>
 
+#include "loom/error/error_catalog.h"
 #include "loom/ir/attribute.h"
 #include "loom/ir/context.h"
 #include "loom/ir/facts.h"
@@ -43,6 +44,10 @@ typedef struct loom_cmd_launch_graph_build_t {
   const loom_cmd_schedule_plan_t* schedule;
   // Borrowed source facts populated by the owning program plan.
   const loom_value_fact_table_t* source_facts;
+  // Destination for user-authored contract diagnostics.
+  iree_diagnostic_emitter_t diagnostic_emitter;
+  // False after a source contract diagnostic has been emitted.
+  bool valid;
   // Owned aggregate host module under construction.
   loom_module_t* module;
   // Aggregate host function under construction.
@@ -78,9 +83,9 @@ static iree_string_view_t loom_cmd_launch_graph_symbol_name(
 }
 
 static loom_op_t* loom_cmd_launch_graph_resolve_kernel(
-    const loom_module_t* module, const loom_op_t* launch_op) {
-  IREE_ASSERT(loom_kernel_launch_isa(launch_op));
-  const loom_symbol_ref_t callee = loom_kernel_launch_callee(launch_op);
+    const loom_module_t* module, const loom_cmd_schedule_command_t* command) {
+  IREE_ASSERT_EQ(command->kind, LOOM_CMD_SCHEDULE_COMMAND_KIND_KERNEL_LAUNCH);
+  const loom_symbol_ref_t callee = command->callee;
   IREE_ASSERT(loom_symbol_ref_is_valid(callee));
   IREE_ASSERT_EQ(callee.module_id, 0u);
   IREE_ASSERT_LT(callee.symbol_id, module->symbols.count);
@@ -272,7 +277,7 @@ static iree_status_t loom_cmd_launch_graph_build_host_function(
   const uint16_t specialization_count = (uint16_t)specialization_count_i64;
 
   const iree_host_size_t result_count =
-      build->schedule->command_count *
+      build->schedule->kernel_launch_count *
       LOOM_CMD_PROGRAM_LAUNCH_COUNT_DIMENSION_COUNT;
   if (result_count > UINT16_MAX) {
     return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
@@ -365,17 +370,91 @@ static iree_status_t loom_cmd_launch_graph_build_host_function(
   return iree_ok_status();
 }
 
+static bool loom_cmd_launch_graph_exact_u32(
+    const loom_value_fact_table_t* facts, loom_value_id_t value_id,
+    uint32_t* out_value, bool* out_is_exact) {
+  *out_value = 0;
+  *out_is_exact = false;
+  int64_t value = 0;
+  if (!loom_value_facts_as_exact_i64(
+          loom_value_fact_table_lookup(facts, value_id), &value)) {
+    return true;
+  }
+  *out_is_exact = true;
+  if (value < 0 || value > UINT32_MAX) return false;
+  *out_value = (uint32_t)value;
+  return true;
+}
+
+static iree_status_t loom_cmd_launch_graph_emit_direct_count_error(
+    loom_cmd_launch_graph_build_t* build,
+    const loom_cmd_schedule_command_t* command, uint32_t dimension,
+    iree_string_view_t requirement) {
+  const iree_string_view_t kernel_name =
+      loom_cmd_launch_graph_symbol_name(build->source_module, command->callee);
+  const loom_diagnostic_param_t params[] = {
+      loom_param_string(kernel_name),
+      loom_param_with_field_ref(
+          loom_param_u32(dimension),
+          loom_diagnostic_field_ref(LOOM_DIAGNOSTIC_FIELD_OPERAND, dimension)),
+      loom_param_string(requirement),
+  };
+  const loom_diagnostic_emission_t emission = {
+      .module = build->source_module,
+      .op = command->source_op,
+      .error = LOOM_ERR_LOWERING_051,
+      .params = params,
+      .param_count = IREE_ARRAYSIZE(params),
+  };
+  build->valid = false;
+  return iree_diagnostic_emit(build->diagnostic_emitter, &emission);
+}
+
+static iree_status_t loom_cmd_launch_graph_record_direct_dispatch(
+    loom_cmd_launch_graph_build_t* build,
+    const loom_cmd_schedule_command_t* command,
+    loom_cmd_launch_count_t* launch) {
+  IREE_ASSERT_EQ(command->kind,
+                 LOOM_CMD_SCHEDULE_COMMAND_KIND_KERNEL_DISPATCH_DIRECT);
+  const loom_cmd_schedule_value_slice_t counts =
+      command->count_inputs.workgroup_counts;
+  IREE_ASSERT_GE(counts.count, 1u);
+  IREE_ASSERT_LE(counts.count, 3u);
+  loom_target_dispatch_workgroup_count_t direct = {
+      .x = 1,
+      .y = 1,
+      .z = 1,
+  };
+  uint32_t* direct_values[] = {&direct.x, &direct.y, &direct.z};
+  for (uint16_t i = 0; i < counts.count; ++i) {
+    bool is_exact = false;
+    if (!loom_cmd_launch_graph_exact_u32(build->source_facts, counts.values[i],
+                                         direct_values[i], &is_exact)) {
+      return loom_cmd_launch_graph_emit_direct_count_error(
+          build, command, i, IREE_SV("within the unsigned 32-bit range"));
+    }
+    if (!is_exact) {
+      return loom_cmd_launch_graph_emit_direct_count_error(
+          build, command, i, IREE_SV("an exact unsigned 32-bit value"));
+    }
+  }
+  launch->kind = LOOM_CMD_LAUNCH_COUNT_KIND_DIRECT;
+  launch->payload.direct = direct;
+  return iree_ok_status();
+}
+
 static iree_status_t loom_cmd_launch_graph_clone_config(
-    loom_cmd_launch_graph_build_t* build, iree_host_size_t launch_index) {
-  const loom_op_t* launch_op = build->schedule->commands[launch_index];
+    loom_cmd_launch_graph_build_t* build,
+    const loom_cmd_schedule_command_t* command,
+    iree_host_size_t result_offset) {
   loom_op_t* kernel_op =
-      loom_cmd_launch_graph_resolve_kernel(build->source_module, launch_op);
+      loom_cmd_launch_graph_resolve_kernel(build->source_module, command);
   loom_region_t* config_region = loom_kernel_def_config(kernel_op);
   loom_block_t* config_block = loom_region_entry_block(config_region);
   const loom_op_t* launch_config = loom_kernel_def_launch_config_op(kernel_op);
 
-  const loom_value_slice_t source_workloads =
-      loom_kernel_launch_workloads(launch_op);
+  const loom_cmd_schedule_value_slice_t source_workloads =
+      command->count_inputs.workloads;
   const loom_value_slice_t config_arguments =
       loom_kernel_workload_arg_ids(build->source_module, kernel_op);
   IREE_ASSERT_EQ(source_workloads.count, config_arguments.count);
@@ -449,9 +528,7 @@ static iree_status_t loom_cmd_launch_graph_clone_config(
             launch_config, (loom_kernel_dimension_t)dimension);
     IREE_RETURN_IF_ERROR(loom_ir_remap_resolve_value(
         &config_remap, source_count,
-        &build->launch_result_values
-             [launch_index * LOOM_CMD_PROGRAM_LAUNCH_COUNT_DIMENSION_COUNT +
-              dimension]));
+        &build->launch_result_values[result_offset + dimension]));
   }
   return iree_ok_status();
 }
@@ -459,7 +536,7 @@ static iree_status_t loom_cmd_launch_graph_clone_config(
 static iree_status_t loom_cmd_launch_graph_build_body(
     loom_cmd_launch_graph_build_t* build) {
   const iree_host_size_t result_count =
-      build->schedule->command_count *
+      build->schedule->kernel_launch_count *
       LOOM_CMD_PROGRAM_LAUNCH_COUNT_DIMENSION_COUNT;
   if (result_count != 0) {
     IREE_RETURN_IF_ERROR(
@@ -471,8 +548,6 @@ static iree_status_t loom_cmd_launch_graph_build_body(
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
         &build->module->arena, build->schedule->command_count,
         sizeof(*build->launches), (void**)&build->launches));
-    memset(build->launches, 0,
-           build->schedule->command_count * sizeof(*build->launches));
   }
   if (build->schedule->wave_count != 0) {
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
@@ -482,10 +557,35 @@ static iree_status_t loom_cmd_launch_graph_build_body(
            build->schedule->wave_count * sizeof(*build->waves));
   }
 
+  iree_host_size_t result_offset = 0;
   for (iree_host_size_t i = 0; i < build->schedule->command_count; ++i) {
-    build->launches[i].source_op = build->schedule->commands[i];
-    IREE_RETURN_IF_ERROR(loom_cmd_launch_graph_clone_config(build, i));
+    const loom_cmd_schedule_command_t* command = &build->schedule->commands[i];
+    loom_cmd_launch_count_t* launch = &build->launches[i];
+    launch->source_op = command->source_op;
+    switch (command->kind) {
+      case LOOM_CMD_SCHEDULE_COMMAND_KIND_KERNEL_LAUNCH: {
+        IREE_RETURN_IF_ERROR(
+            loom_cmd_launch_graph_clone_config(build, command, result_offset));
+        result_offset += LOOM_CMD_PROGRAM_LAUNCH_COUNT_DIMENSION_COUNT;
+        break;
+      }
+      case LOOM_CMD_SCHEDULE_COMMAND_KIND_KERNEL_DISPATCH_DIRECT: {
+        IREE_RETURN_IF_ERROR(loom_cmd_launch_graph_record_direct_dispatch(
+            build, command, launch));
+        if (!build->valid) return iree_ok_status();
+        break;
+      }
+      case LOOM_CMD_SCHEDULE_COMMAND_KIND_KERNEL_DISPATCH_INDIRECT: {
+        return iree_make_status(
+            IREE_STATUS_UNIMPLEMENTED,
+            "indirect kernel dispatch requires count-origin placement");
+      }
+      default:
+        IREE_ASSERT_UNREACHABLE("schedule command kind is valid");
+        IREE_BUILTIN_UNREACHABLE();
+    }
   }
+  IREE_ASSERT_EQ(result_offset, result_count);
 
   loom_op_t* return_op = NULL;
   return loom_func_return_build(&build->builder, build->launch_result_values,
@@ -518,22 +618,6 @@ static iree_status_t loom_cmd_launch_graph_run_cse(
   return status;
 }
 
-static bool loom_cmd_launch_graph_exact_u32(
-    const loom_value_fact_table_t* facts, loom_value_id_t value_id,
-    uint32_t* out_value, bool* out_is_exact) {
-  *out_value = 0;
-  *out_is_exact = false;
-  int64_t value = 0;
-  if (!loom_value_facts_as_exact_i64(
-          loom_value_fact_table_lookup(facts, value_id), &value)) {
-    return true;
-  }
-  *out_is_exact = true;
-  if (value < 0 || value > UINT32_MAX) return false;
-  *out_value = (uint32_t)value;
-  return true;
-}
-
 static bool loom_cmd_launch_graph_tuples_equal(const loom_value_id_t* left,
                                                const loom_value_id_t* right) {
   return left[0] == right[0] && left[1] == right[1] && left[2] == right[2];
@@ -550,7 +634,7 @@ static iree_status_t loom_cmd_launch_graph_compact_results(
   const loom_value_slice_t return_values =
       loom_func_return_operands(old_return_op);
   const iree_host_size_t result_count =
-      build->schedule->command_count *
+      build->schedule->kernel_launch_count *
       LOOM_CMD_PROGRAM_LAUNCH_COUNT_DIMENSION_COUNT;
   IREE_ASSERT_EQ(return_values.count, result_count);
 
@@ -571,11 +655,16 @@ static iree_status_t loom_cmd_launch_graph_compact_results(
   }
 
   uint32_t host_tuple_count = 0;
+  iree_host_size_t result_offset = 0;
   for (iree_host_size_t launch_index = 0;
        launch_index < build->schedule->command_count; ++launch_index) {
-    const loom_value_id_t* tuple =
-        &return_values.values[launch_index *
-                              LOOM_CMD_PROGRAM_LAUNCH_COUNT_DIMENSION_COUNT];
+    if (build->schedule->commands[launch_index].kind !=
+        LOOM_CMD_SCHEDULE_COMMAND_KIND_KERNEL_LAUNCH) {
+      continue;
+    }
+    const iree_host_size_t tuple_offset = result_offset;
+    result_offset += LOOM_CMD_PROGRAM_LAUNCH_COUNT_DIMENSION_COUNT;
+    const loom_value_id_t* tuple = &return_values.values[tuple_offset];
     loom_target_dispatch_workgroup_count_t direct = {0};
     uint32_t* direct_values[] = {&direct.x, &direct.y, &direct.z};
     bool all_exact = true;
@@ -619,15 +708,14 @@ static iree_status_t loom_cmd_launch_graph_compact_results(
       for (uint8_t dimension = 0;
            dimension < LOOM_CMD_PROGRAM_LAUNCH_COUNT_DIMENSION_COUNT;
            ++dimension) {
-        remove_results[launch_index *
-                           LOOM_CMD_PROGRAM_LAUNCH_COUNT_DIMENSION_COUNT +
-                       dimension] = false;
+        remove_results[tuple_offset + dimension] = false;
       }
       ++host_tuple_count;
     }
     build->launches[launch_index].kind = LOOM_CMD_LAUNCH_COUNT_KIND_HOST;
     build->launches[launch_index].payload.host_tuple_ordinal = tuple_ordinal;
   }
+  IREE_ASSERT_EQ(result_offset, result_count);
 
   iree_host_size_t kept_count = 0;
   for (iree_host_size_t i = 0; i < result_count; ++i) {
@@ -659,14 +747,17 @@ iree_status_t loom_cmd_launch_graph_materialize(
     const loom_module_t* source_module, loom_op_t* source_program_op,
     const loom_cmd_schedule_plan_t* schedule,
     const loom_value_fact_table_t* source_facts,
+    iree_diagnostic_emitter_t diagnostic_emitter,
     iree_arena_block_pool_t* block_pool, iree_allocator_t allocator,
-    loom_cmd_launch_graph_t* out_graph) {
+    bool* out_valid, loom_cmd_launch_graph_t* out_graph) {
   IREE_ASSERT_ARGUMENT(source_module);
   IREE_ASSERT_ARGUMENT(source_program_op);
   IREE_ASSERT_ARGUMENT(schedule);
   IREE_ASSERT_ARGUMENT(source_facts);
   IREE_ASSERT_ARGUMENT(block_pool);
+  IREE_ASSERT_ARGUMENT(out_valid);
   IREE_ASSERT_ARGUMENT(out_graph);
+  *out_valid = false;
   memset(out_graph, 0, sizeof(*out_graph));
 
   loom_module_t* graph_module = NULL;
@@ -685,8 +776,11 @@ iree_status_t loom_cmd_launch_graph_materialize(
       .source_program = loom_func_like_cast(source_module, source_program_op),
       .schedule = schedule,
       .source_facts = source_facts,
+      .diagnostic_emitter = diagnostic_emitter,
+      .valid = true,
       .module = graph_module,
   };
+  const bool has_logical_launches = schedule->kernel_launch_count != 0;
   IREE_ASSERT(loom_func_like_isa(build.source_program));
   if (iree_status_is_ok(status)) {
     iree_arena_initialize(block_pool, &scratch_arena);
@@ -702,24 +796,24 @@ iree_status_t loom_cmd_launch_graph_materialize(
   if (iree_status_is_ok(status)) {
     status = loom_cmd_launch_graph_build_body(&build);
   }
-  if (iree_status_is_ok(status)) {
+  if (has_logical_launches && build.valid && iree_status_is_ok(status)) {
     loom_pass_value_fact_owner_initialize(block_pool, &fact_owner);
     fact_owner_initialized = true;
     status = loom_canonicalizer_initialize(graph_module, &scratch_arena,
                                            &fact_owner, &canonicalizer);
     canonicalizer_initialized = iree_status_is_ok(status);
   }
-  if (iree_status_is_ok(status)) {
+  if (has_logical_launches && build.valid && iree_status_is_ok(status)) {
     loom_canonicalizer_result_t result = {0};
     status = loom_canonicalizer_run_function(
         &canonicalizer, build.host_function, &(loom_canonicalizer_options_t){0},
         &result);
   }
-  if (iree_status_is_ok(status)) {
+  if (has_logical_launches && build.valid && iree_status_is_ok(status)) {
     status = loom_cmd_launch_graph_run_cse(graph_module, build.host_function,
                                            block_pool);
   }
-  if (iree_status_is_ok(status)) {
+  if (has_logical_launches && build.valid && iree_status_is_ok(status)) {
     loom_canonicalizer_result_t result = {0};
     status = loom_canonicalizer_run_function(
         &canonicalizer, build.host_function, &(loom_canonicalizer_options_t){0},
@@ -727,14 +821,14 @@ iree_status_t loom_cmd_launch_graph_materialize(
   }
 
   uint32_t host_tuple_count = 0;
-  if (iree_status_is_ok(status)) {
+  if (has_logical_launches && build.valid && iree_status_is_ok(status)) {
     const loom_value_fact_table_t* facts =
         loom_canonicalizer_fact_table(&canonicalizer);
     IREE_ASSERT(facts != NULL);
     status =
         loom_cmd_launch_graph_compact_results(&build, facts, &host_tuple_count);
   }
-  if (iree_status_is_ok(status)) {
+  if (has_logical_launches && build.valid && iree_status_is_ok(status)) {
     loom_canonicalizer_result_t result = {0};
     status = loom_canonicalizer_run_function(
         &canonicalizer, build.host_function, &(loom_canonicalizer_options_t){0},
@@ -750,7 +844,7 @@ iree_status_t loom_cmd_launch_graph_materialize(
   if (scratch_arena_initialized) {
     iree_arena_deinitialize(&scratch_arena);
   }
-  if (!iree_status_is_ok(status)) {
+  if (!iree_status_is_ok(status) || !build.valid) {
     if (graph_module) loom_module_free(graph_module);
     memset(out_graph, 0, sizeof(*out_graph));
     return status;
@@ -765,6 +859,7 @@ iree_status_t loom_cmd_launch_graph_materialize(
       .wave_count = schedule->wave_count,
       .host_tuple_count = host_tuple_count,
   };
+  *out_valid = true;
   return iree_ok_status();
 }
 

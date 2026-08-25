@@ -75,6 +75,12 @@ bool loom_value_facts_as_exact_float(loom_scalar_type_t scalar_type,
                                      loom_value_facts_t facts,
                                      double* out_value);
 
+// Returns the exact floating-point value encoded in its declared scalar
+// format. NaN facts without a retained payload are not exact bit patterns.
+bool loom_value_facts_as_exact_float_bits(loom_scalar_type_t scalar_type,
+                                          loom_value_facts_t facts,
+                                          uint64_t* out_bits);
+
 // Evaluates logistic using selected-width arithmetic and a sign-split formula
 // that preserves representable negative tails. Exact logistic, SiLU, and
 // logistic GELU fact transfers share these helpers so their semantics agree.

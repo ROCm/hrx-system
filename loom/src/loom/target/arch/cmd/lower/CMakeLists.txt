@@ -82,6 +82,8 @@ loom_cc_library(
     ::schedule
     iree::base
     iree::base::internal::arena
+    loom::error::emitter
+    loom::error::error_defs
     loom::ir
     loom::ir::facts
     loom::ops::command
@@ -186,6 +188,7 @@ loom_cc_library(
     loom::error::emitter
     loom::error::error_defs
     loom::ir
+    loom::ir::facts
     loom::link::linker
     loom::ops::command
     loom::ops::kernel

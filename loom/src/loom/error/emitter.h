@@ -21,6 +21,7 @@ extern "C" {
 #endif
 
 typedef struct loom_op_t loom_op_t;
+typedef struct loom_module_t loom_module_t;
 typedef struct loom_error_def_t loom_error_def_t;
 typedef struct loom_diagnostic_param_t loom_diagnostic_param_t;
 
@@ -84,19 +85,32 @@ static inline bool loom_diagnostic_field_ref_is_set(
 // optional field_ref metadata lets the note highlight a specific field
 // occurrence on the related op without formatting that structure into prose.
 typedef struct loom_diagnostic_related_op_t {
+  // Human-readable relationship rendered with the secondary location.
   iree_string_view_t label;
+  // Module containing |op| when it differs from the emitter's active module.
+  const loom_module_t* module;
+  // Secondary operation associated with the diagnostic.
   const loom_op_t* op;
+  // Optional source field to highlight on |op|.
   loom_diagnostic_field_ref_t field_ref;
 } loom_diagnostic_related_op_t;
 
 // A single structured diagnostic emission request from a producer to the
 // subsystem that owns source resolution and final sink callbacks.
 typedef struct loom_diagnostic_emission_t {
+  // Module containing |op| when it differs from the emitter's active module.
+  const loom_module_t* module;
+  // Primary operation associated with the diagnostic.
   const loom_op_t* op;
+  // Stable error definition selecting the diagnostic message contract.
   const loom_error_def_t* error;
+  // Error parameters in definition order.
   const loom_diagnostic_param_t* params;
+  // Number of entries in |params|.
   iree_host_size_t param_count;
+  // Secondary operation locations associated with the diagnostic.
   const loom_diagnostic_related_op_t* related_ops;
+  // Number of entries in |related_ops|.
   iree_host_size_t related_op_count;
 } loom_diagnostic_emission_t;
 

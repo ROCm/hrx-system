@@ -187,19 +187,36 @@ command.program.def public @increment_twice(%element_count: index) launch(%sourc
   ASSERT_NE(plan.dependency_units[0].module, nullptr);
   ASSERT_NE(plan.dependency_units[1].module, nullptr);
   EXPECT_NE(plan.dependency_units[0].module, plan.dependency_units[1].module);
+  EXPECT_EQ(plan.entry_module, nullptr);
+  ASSERT_EQ(plan.entry_requirement_count, 2u);
+  ASSERT_NE(plan.entry_requirements, nullptr);
+  EXPECT_EQ(plan.entry_requirements[0].source,
+            LOOM_CMD_ENTRY_REQUIREMENT_SOURCE_KERNEL_UNIT);
+  EXPECT_EQ(plan.entry_requirements[0].contract.kernel_unit_index, 0u);
+  EXPECT_EQ(plan.entry_requirements[1].source,
+            LOOM_CMD_ENTRY_REQUIREMENT_SOURCE_KERNEL_UNIT);
+  EXPECT_EQ(plan.entry_requirements[1].contract.kernel_unit_index, 1u);
   ASSERT_EQ(twice.dependency_count, 1u);
   ASSERT_NE(twice.dependency_unit_indices, nullptr);
   EXPECT_EQ(twice.dependency_unit_indices[0], 0u);
+  ASSERT_EQ(twice.entry_requirement_count, 1u);
+  ASSERT_NE(twice.entry_requirement_indices, nullptr);
+  EXPECT_EQ(twice.entry_requirement_indices[0], 0u);
   ASSERT_EQ(mixed.dependency_count, 2u);
   ASSERT_NE(mixed.dependency_unit_indices, nullptr);
   EXPECT_EQ(mixed.dependency_unit_indices[0], 0u);
   EXPECT_EQ(mixed.dependency_unit_indices[1], 1u);
+  ASSERT_EQ(mixed.entry_requirement_count, 2u);
+  ASSERT_NE(mixed.entry_requirement_indices, nullptr);
+  EXPECT_EQ(mixed.entry_requirement_indices[0], 0u);
+  EXPECT_EQ(mixed.entry_requirement_indices[1], 1u);
 
   loom_cmd_program_plan_deinitialize(&plan);
   EXPECT_EQ(plan.root_module, nullptr);
   EXPECT_EQ(plan.launch_module, nullptr);
   EXPECT_EQ(plan.roots, nullptr);
   EXPECT_EQ(plan.dependency_units, nullptr);
+  EXPECT_EQ(plan.entry_requirements, nullptr);
 }
 
 TEST_F(CmdProgramPlanTest, OwnsParameterRequirementTables) {
@@ -270,6 +287,94 @@ command.program.def public @parameterized() launch(%parameters: buffer, %target:
   EXPECT_EQ(root.transient.required_byte_length, 0u);
   EXPECT_EQ(root.transient.minimum_alignment, 0u);
 
+  loom_cmd_program_plan_deinitialize(&plan);
+}
+
+TEST_F(CmdProgramPlanTest, OwnsBodylessEntryRequirementsAndArtifact) {
+  ModulePtr source_module = ParseAndVerify(R"(
+kernel.entry.decl @configured_a(%scale: i8, %output: buffer) where [workgroup_size(64, 1, 1)]
+kernel.entry.decl @configured_b(%output: buffer) where [workgroup_size(256, 1, 1)]
+
+command.program.def public @bodyless() launch(%output: buffer) {
+  %count_x = index.constant 7 : index
+  %count_y = index.constant 5 : index
+  %scale = scalar.constant -1 : i8
+  command.concurrent {
+    kernel.dispatch @configured_a[%count_x](%scale, %output) : [index](i8, buffer)
+    kernel.dispatch @configured_a[%count_x](%scale, %output) : [index](i8, buffer)
+  }
+  kernel.dispatch @configured_b[%count_x, %count_y](%output) : [index, index](buffer)
+  command.return
+}
+)");
+  ASSERT_NE(source_module, nullptr);
+  const loom_op_t* source_programs[] = {
+      FindSymbol(source_module.get(), IREE_SV("bodyless")),
+  };
+
+  loom_cmd_program_plan_t plan = {};
+  bool valid = false;
+  IREE_ASSERT_OK(loom_cmd_program_plan_prepare(
+      source_module.get(), source_programs, IREE_ARRAYSIZE(source_programs),
+      loom_pass_builtin_registry(),
+      /*diagnostic_emitter=*/{}, &block_pool_, &valid, &plan,
+      iree_allocator_system()));
+  ASSERT_TRUE(valid);
+  source_module.reset();
+
+  ASSERT_EQ(plan.root_count, 1u);
+  ASSERT_EQ(plan.dependency_count, 0u);
+  EXPECT_EQ(plan.dependency_units, nullptr);
+  ASSERT_NE(plan.entry_module, nullptr);
+  ASSERT_EQ(plan.entry_requirement_count, 2u);
+  ASSERT_NE(plan.entry_requirements, nullptr);
+  EXPECT_EQ(plan.entry_requirements[0].source,
+            LOOM_CMD_ENTRY_REQUIREMENT_SOURCE_DECLARATION);
+  EXPECT_EQ(plan.entry_requirements[1].source,
+            LOOM_CMD_ENTRY_REQUIREMENT_SOURCE_DECLARATION);
+  EXPECT_EQ(plan.entry_requirements[0].contract.declaration_op,
+            FindSymbol(plan.entry_module, IREE_SV("configured_a")));
+  EXPECT_EQ(plan.entry_requirements[1].contract.declaration_op,
+            FindSymbol(plan.entry_module, IREE_SV("configured_b")));
+
+  const loom_cmd_program_root_t& root = plan.roots[0];
+  EXPECT_EQ(root.dependency_count, 0u);
+  EXPECT_EQ(root.dependency_unit_indices, nullptr);
+  ASSERT_EQ(root.entry_requirement_count, 2u);
+  ASSERT_NE(root.entry_requirement_indices, nullptr);
+  EXPECT_EQ(root.entry_requirement_indices[0], 0u);
+  EXPECT_EQ(root.entry_requirement_indices[1], 1u);
+
+  iree_byte_span_t data = iree_byte_span_empty();
+  IREE_ASSERT_OK(loom_cmd_program_plan_serialize_root(&plan, 0, &data,
+                                                      iree_allocator_system()));
+  loom_cmd_program_t program = {};
+  IREE_ASSERT_OK(loom_cmd_program_parse(
+      iree_make_const_byte_span(data.data, data.data_length), &program));
+  EXPECT_EQ(program.requirements.executable_count, 2u);
+  EXPECT_EQ(program.requirements.entry_count, 2u);
+  ASSERT_EQ(program.commands.count, 3u);
+  const loom_cmd_program_command_t first =
+      loom_cmd_program_command_at(&program, 0);
+  const loom_cmd_program_command_t second =
+      loom_cmd_program_command_at(&program, 1);
+  const loom_cmd_program_command_t third =
+      loom_cmd_program_command_at(&program, 2);
+  EXPECT_EQ(first.kind, LOOM_CMD_PROGRAM_COMMAND_KIND_DISPATCH_DIRECT);
+  EXPECT_EQ(second.kind, LOOM_CMD_PROGRAM_COMMAND_KIND_DISPATCH_DIRECT);
+  EXPECT_EQ(third.kind, LOOM_CMD_PROGRAM_COMMAND_KIND_DISPATCH_DIRECT_BARRIER);
+  EXPECT_EQ(first.payload.dispatch_direct.executable_index, 0u);
+  EXPECT_EQ(first.payload.dispatch_direct.entry_index, 0u);
+  EXPECT_EQ(first.payload.dispatch_direct.workgroup_count_x, 7u);
+  EXPECT_EQ(first.payload.dispatch_direct.workgroup_count_y, 1u);
+  EXPECT_EQ(first.payload.dispatch_direct.workgroup_count_z, 1u);
+  EXPECT_EQ(third.payload.dispatch_direct.executable_index, 1u);
+  EXPECT_EQ(third.payload.dispatch_direct.entry_index, 1u);
+  EXPECT_EQ(third.payload.dispatch_direct.workgroup_count_x, 7u);
+  EXPECT_EQ(third.payload.dispatch_direct.workgroup_count_y, 5u);
+  EXPECT_EQ(third.payload.dispatch_direct.workgroup_count_z, 1u);
+
+  iree_allocator_free(iree_allocator_system(), data.data);
   loom_cmd_program_plan_deinitialize(&plan);
 }
 

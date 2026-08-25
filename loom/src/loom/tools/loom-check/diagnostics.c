@@ -242,11 +242,13 @@ iree_status_t loom_check_source_resolver_for_case(
 }
 
 static bool loom_check_diagnostic_resolve_location(
-    const loom_check_diagnostic_emitter_capture_t* capture, const loom_op_t* op,
+    const loom_check_diagnostic_emitter_capture_t* capture,
+    const loom_module_t* module, const loom_op_t* op,
     loom_source_range_t* out_source_location) {
-  if (!capture || !capture->module || !op) return false;
-  if (!loom_source_resolve(capture->source_resolver, capture->module,
-                           op->location, out_source_location)) {
+  if (!capture || !op) return false;
+  if (!module) module = capture->module;
+  if (!module || !loom_source_resolve(capture->source_resolver, module,
+                                      op->location, out_source_location)) {
     return false;
   }
   if (out_source_location->provenance ==
@@ -270,7 +272,8 @@ static iree_host_size_t loom_check_diagnostic_collect_related_locations(
     loom_source_range_t source_location = {
         .provenance = LOOM_SOURCE_PROVENANCE_UNAVAILABLE_SOURCE,
     };
-    if (!loom_check_diagnostic_resolve_location(capture, related_ops[i].op,
+    if (!loom_check_diagnostic_resolve_location(capture, related_ops[i].module,
+                                                related_ops[i].op,
                                                 &source_location)) {
       continue;
     }
@@ -318,13 +321,20 @@ iree_status_t loom_check_diagnostic_emitter_capture_emit(
     diagnostic.related_locations = related_locations;
   }
 
-  if (loom_check_diagnostic_resolve_location(capture, emission->op,
+  if (loom_check_diagnostic_resolve_location(capture, emission->module,
+                                             emission->op,
                                              &diagnostic.source_location)) {
     diagnostic.origin = diagnostic.source_location;
   }
 
-  IREE_RETURN_IF_ERROR(loom_check_diagnostic_collector_sink(
-      capture->diagnostic_collector, &diagnostic));
+  const loom_module_t* diagnostic_module =
+      emission->module ? emission->module : capture->module;
+  const loom_module_t* previous_module = capture->diagnostic_collector->module;
+  capture->diagnostic_collector->module = diagnostic_module;
+  iree_status_t status = loom_check_diagnostic_collector_sink(
+      capture->diagnostic_collector, &diagnostic);
+  capture->diagnostic_collector->module = previous_module;
+  IREE_RETURN_IF_ERROR(status);
   ++capture->emission_count;
   return iree_ok_status();
 }

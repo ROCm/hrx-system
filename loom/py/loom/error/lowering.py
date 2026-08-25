@@ -558,6 +558,49 @@ ERR_LOWERING_050 = ErrorDef(
     ),
 )
 
+# ERR_LOWERING_051: Command dispatch count is not statically representable.
+ERR_LOWERING_051 = ErrorDef(
+    domain=ErrorDomain.LOWERING,
+    code=51,
+    severity=Severity.ERROR,
+    summary="Command dispatch workgroup count is not statically representable.",
+    message=(
+        "command-program preparation requires workgroup-count dimension "
+        "{dimension} of @{kernel_name} to be {requirement}"
+    ),
+    params=(
+        ErrorParam("kernel_name", ParamKind.STRING),
+        ErrorParam("dimension", ParamKind.U32),
+        ErrorParam("requirement", ParamKind.STRING),
+    ),
+    fix_hint=(
+        "Specialize each direct count to an exact unsigned 32-bit value or "
+        "provide a dense view<3xi32> for indirect dispatch"
+    ),
+)
+
+# ERR_LOWERING_052: Command dispatch argument is not statically representable.
+ERR_LOWERING_052 = ErrorDef(
+    domain=ErrorDomain.LOWERING,
+    code=52,
+    severity=Severity.ERROR,
+    summary="Command dispatch argument is not statically representable.",
+    message=(
+        "command-program preparation cannot encode argument {argument_index} "
+        "of @{kernel_name} with type {actual_type}; it requires {requirement}"
+    ),
+    params=(
+        ErrorParam("kernel_name", ParamKind.STRING),
+        ErrorParam("argument_index", ParamKind.U32),
+        ErrorParam("actual_type", ParamKind.TYPE),
+        ErrorParam("requirement", ParamKind.STRING),
+    ),
+    fix_hint=(
+        "Pass buffer or view ranges, or specialize scalar ABI arguments to "
+        "exact values before preparing the command program"
+    ),
+)
+
 ALL_LOWERING_ERRORS: tuple[ErrorDef, ...] = (
     ERR_LOWERING_022,
     ERR_LOWERING_023,
@@ -586,4 +629,6 @@ ALL_LOWERING_ERRORS: tuple[ErrorDef, ...] = (
     ERR_LOWERING_048,
     ERR_LOWERING_049,
     ERR_LOWERING_050,
+    ERR_LOWERING_051,
+    ERR_LOWERING_052,
 )

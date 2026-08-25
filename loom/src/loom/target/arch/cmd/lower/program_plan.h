@@ -24,11 +24,37 @@
 extern "C" {
 #endif
 
+// Source supplying one atomic executable-entry binding requirement.
+typedef enum loom_cmd_entry_requirement_source_e {
+  // Compiler-owned kernel unit that can produce an executable entry.
+  LOOM_CMD_ENTRY_REQUIREMENT_SOURCE_KERNEL_UNIT = 0,
+  // Bodyless configured entry declaration supplied by the host.
+  LOOM_CMD_ENTRY_REQUIREMENT_SOURCE_DECLARATION = 1,
+} loom_cmd_entry_requirement_source_t;
+
+// One plan-wide atomic executable-entry binding requirement.
+//
+// A root-local slot resolves this entire row at once. The executable object
+// and executable-local entry token may not be selected independently.
+typedef struct loom_cmd_entry_requirement_t {
+  // Active requirement source.
+  loom_cmd_entry_requirement_source_t source;
+  // Source-specific plan-owned contract.
+  union {
+    // Index into the containing plan's kernel-unit table.
+    uint32_t kernel_unit_index;
+    // Configured entry declaration owned by the plan's entry module.
+    const loom_op_t* declaration_op;
+  } contract;
+} loom_cmd_entry_requirement_t;
+
 // One prepared command root within a program plan.
 //
-// The lowered command function addresses the plan-wide dependency table. Its
-// launch function in the plan's shared host module evaluates this root's
-// dynamic launch counts. Both remain valid after the source module is released.
+// The lowered command function addresses root-local executable and entry slots.
+// |entry_requirement_indices| maps each slot to one atomic plan-wide binding
+// requirement. The launch function in the plan's shared host module evaluates
+// this root's dynamic launch counts. All referenced artifacts remain valid
+// after the source module is released.
 typedef struct loom_cmd_program_root_t {
   // Lowered command root in the plan's shared root module.
   loom_op_t* function_op;
@@ -42,11 +68,17 @@ typedef struct loom_cmd_program_root_t {
   // Number of unique dynamic xyz tuples returned by |launch_function_op|.
   uint32_t launch_tuple_count;
 
-  // Plan-wide dependency unit index for each root-local executable slot.
+  // Plan-wide body-backed kernel units used by this root in first-use order.
   uint32_t* dependency_unit_indices;
 
   // Number of entries in |dependency_unit_indices|.
   uint32_t dependency_count;
+
+  // Plan-wide requirement for each root-local executable/entry slot.
+  uint32_t* entry_requirement_indices;
+
+  // Number of entries in |entry_requirement_indices|.
+  uint32_t entry_requirement_count;
 
   // Concrete immutable parameter requirements and their fixed placement.
   loom_cmd_parameter_requirement_table_t parameters;
@@ -59,9 +91,11 @@ typedef struct loom_cmd_program_root_t {
 //
 // The root module contains every selected command symbol lowered to the
 // portable cmd low ISA. The launch module contains one pure host function per
-// selected root. Equivalent dependency launch sites across all roots share one
-// selectively linked and specialized kernel unit. No compilation or artifact
-// emission occurs while preparing the plan.
+// selected root. Equivalent logical launch sites across all roots share one
+// selectively linked and specialized kernel unit. Bodyless direct dispatches
+// retain selectively linked configured entry declarations and never
+// materialize a kernel body. No compilation or artifact emission occurs while
+// preparing the plan.
 typedef struct loom_cmd_program_plan_t {
   // Owned module containing all lowered command roots.
   loom_module_t* root_module;
@@ -69,19 +103,28 @@ typedef struct loom_cmd_program_plan_t {
   // Owned module containing all root launch-count functions.
   loom_module_t* launch_module;
 
+  // Owned module containing bodyless configured entry declarations.
+  loom_module_t* entry_module;
+
   // Selected roots in caller order.
   loom_cmd_program_root_t* roots;
 
   // Number of entries in |roots|.
   iree_host_size_t root_count;
 
-  // Unique independently owned dependencies in executable-slot order.
+  // Unique independently owned body-backed kernel dependencies.
   loom_cmd_kernel_unit_t* dependency_units;
 
   // Number of entries in |dependency_units|.
   iree_host_size_t dependency_count;
 
-  // Host allocator used for the root and dependency-unit tables.
+  // Unique atomic executable-entry requirements in plan-wide order.
+  loom_cmd_entry_requirement_t* entry_requirements;
+
+  // Number of entries in |entry_requirements|.
+  iree_host_size_t entry_requirement_count;
+
+  // Host allocator used for all plan-owned host tables.
   iree_allocator_t host_allocator;
 } loom_cmd_program_plan_t;
 
@@ -91,11 +134,12 @@ typedef struct loom_cmd_program_plan_t {
 // command.program.def operations. Preparation selectively links their union
 // dependency closure into one module, flattens command-program composition,
 // resolves root-local control flow and explicit unroll policies, interns
-// equivalent launch sites across roots into private dependency units,
-// materializes one launch-count program per root, assigns plan-wide dense
-// dependency slots, and lowers every command root. Dependency kernel bodies
-// retain their ordinary target-compilation path. The source module is unchanged
-// and need not outlive the returned plan.
+// equivalent logical launch sites across roots into private dependency units,
+// retains configured entry declarations for bodyless direct dispatches,
+// materializes one launch-count program per root, assigns root-local atomic
+// entry slots, and lowers every command root. Dependency kernel bodies retain
+// their ordinary target-compilation path. The source module is unchanged and
+// need not outlive the returned plan.
 //
 // |pass_registry| must provide the standard canonicalize and unroll-scf-for
 // function passes used to resolve root-local source structure. It is a
