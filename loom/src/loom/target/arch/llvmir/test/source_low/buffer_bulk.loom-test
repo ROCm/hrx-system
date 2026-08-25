@@ -1,0 +1,109 @@
+// RUN: emit source-low output=low
+
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+
+func.def target(@target) @copy(%source: buffer, %source_offset: offset, %target: buffer, %target_offset: offset, %byte_length: offset) {
+  buffer.copy %source[%source_offset], %target[%target_offset], %byte_length
+  func.return
+}
+
+// ----
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @copy(%source: reg<llvmir.ptr>, %source_offset: reg<llvmir.i64>, %target: reg<llvmir.ptr>, %target_offset: reg<llvmir.i64>, %byte_length: reg<llvmir.i64>) asm {
+  %21 = const.i64 0
+  %22 = const.i64 1
+  low.br ^_bb1(%21: reg<llvmir.i64>)
+^_bb1(%20: reg<llvmir.i64>):
+  %23 = cmp.ult.i64 %20, %byte_length
+  low.cond_br %23, ^_bb2, ^_bb3 : reg<llvmir.i1>
+^_bb2:
+  %24 = add.i64 %source_offset, %20
+  %25 = load.indexed.i8 %source, %24, 0, 1
+  %26 = zext.i8.i32 %25
+  %27 = add.i64 %target_offset, %20
+  %28 = trunc.i32.i8 %26
+  store.indexed.i8 %28, %target, %27, 0, 1
+  %29 = add.i64 %20, %22
+  low.br ^_bb1(%29: reg<llvmir.i64>)
+^_bb3:
+  return
+}
+
+// ====
+
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+
+func.def target(@target) @fill(%pattern: i32, %target: buffer, %target_offset: offset, %byte_length: offset) {
+  buffer.fill %pattern, %target[%target_offset], %byte_length : i32
+  func.return
+}
+
+// ----
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @fill(%pattern: reg<llvmir.i32>, %target: reg<llvmir.ptr>, %target_offset: reg<llvmir.i64>, %byte_length: reg<llvmir.i64>) asm {
+  %27 = const.i64 0
+  %28 = const.i64 1
+  %29 = const.i32 8
+  %30 = const.i32 24
+  low.br ^_bb1(%27: reg<llvmir.i64>, %pattern: reg<llvmir.i32>)
+^_bb1(%25: reg<llvmir.i64>, %26: reg<llvmir.i32>):
+  %31 = cmp.ult.i64 %25, %byte_length
+  low.cond_br %31, ^_bb2, ^_bb3 : reg<llvmir.i1>
+^_bb2:
+  %32 = add.i64 %target_offset, %25
+  %33 = trunc.i32.i8 %26
+  store.indexed.i8 %33, %target, %32, 0, 1
+  %34 = lshr.i32 %26, %29
+  %35 = shl.i32 %26, %30
+  %36 = or.i32 %34, %35
+  %37 = add.i64 %25, %28
+  low.br ^_bb1(%37: reg<llvmir.i64>, %36: reg<llvmir.i32>)
+^_bb3:
+  return
+}
+
+// ====
+
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+
+func.def target(@target) @compare(%lhs: buffer, %lhs_offset: offset, %rhs: buffer, %rhs_offset: offset, %byte_length: offset) -> (i32) {
+  %order = buffer.compare %lhs[%lhs_offset], %rhs[%rhs_offset], %byte_length
+  func.return %order : i32
+}
+
+// ----
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @compare(%lhs: reg<llvmir.ptr>, %lhs_offset: reg<llvmir.i64>, %rhs: reg<llvmir.ptr>, %rhs_offset: reg<llvmir.i64>, %byte_length: reg<llvmir.i64>) -> (reg<llvmir.i32>) asm {
+  %42 = const.i64 0
+  %43 = const.i64 1
+  %44 = const.i32 0
+  %45 = const.i32 -1
+  %46 = const.i32 1
+  low.br ^_bb1(%42: reg<llvmir.i64>, %44: reg<llvmir.i32>)
+^_bb1(%40: reg<llvmir.i64>, %41: reg<llvmir.i32>):
+  %47 = cmp.ult.i64 %40, %byte_length
+  %48 = cmp.eq.i32 %41, %44
+  %49 = and.i1 %47, %48
+  low.cond_br %49, ^_bb2, ^_bb3 : reg<llvmir.i1>
+^_bb2:
+  %50 = add.i64 %lhs_offset, %40
+  %51 = load.indexed.i8 %lhs, %50, 0, 1
+  %52 = zext.i8.i32 %51
+  %53 = add.i64 %rhs_offset, %40
+  %54 = load.indexed.i8 %rhs, %53, 0, 1
+  %55 = zext.i8.i32 %54
+  %56 = cmp.eq.i32 %52, %55
+  %57 = cmp.ult.i32 %52, %55
+  %58 = select.i32 %57, %45, %46
+  %59 = select.i32 %56, %44, %58
+  %60 = add.i64 %40, %43
+  low.br ^_bb1(%60: reg<llvmir.i64>, %59: reg<llvmir.i32>)
+^_bb3:
+  return %41
+}

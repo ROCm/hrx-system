@@ -1,0 +1,199 @@
+// RUN: emit source-low output=low
+
+wasm.target<simd128> @target
+
+func.def target(@target) @copy(%source: buffer, %source_offset: offset, %target: buffer, %target_offset: offset, %byte_length: offset) {
+  buffer.copy %source[%source_offset], %target[%target_offset], %byte_length
+  func.return
+}
+
+// ----
+low.func.def target<wasm.core.simd128>(@target) abi(wasm_function) @copy(%source: reg<wasm.i32>, %source_offset: reg<wasm.i32>, %target: reg<wasm.i32>, %target_offset: reg<wasm.i32>, %byte_length: reg<wasm.i32>) asm {
+  %21 = i32.const 0
+  %22 = i32.const 1
+  low.br ^_bb1(%21: reg<wasm.i32>)
+^_bb1(%20: reg<wasm.i32>):
+  %23 = i32.lt_u %20, %byte_length
+  low.cond_br %23, ^_bb2, ^_bb3 : reg<wasm.i32>
+^_bb2:
+  %24 = i32.add %source_offset, %20
+  %25 = i32.add %source, %24
+  %26 = i32.load8_u %25
+  %27 = i32.add %target_offset, %20
+  %28 = i32.add %target, %27
+  i32.store8 %28, %26
+  %29 = i32.add %20, %22
+  low.br ^_bb1(%29: reg<wasm.i32>)
+^_bb3:
+  return
+}
+
+// ====
+
+wasm.target<simd128> @target
+
+func.def target(@target) @fill_f32(%pattern: f32, %target: buffer, %target_offset: offset, %byte_length: offset) {
+  buffer.fill %pattern, %target[%target_offset], %byte_length : f32
+  func.return
+}
+
+// ----
+low.func.def target<wasm.core.simd128>(@target) abi(wasm_function) @fill_f32(%pattern: reg<wasm.f32>, %target: reg<wasm.i32>, %target_offset: reg<wasm.i32>, %byte_length: reg<wasm.i32>) asm {
+  %28 = i32.reinterpret_f32 %pattern
+  %29 = i32.const 0
+  %30 = i32.const 1
+  %31 = i32.const 8
+  %32 = i32.const 24
+  low.br ^_bb1(%29: reg<wasm.i32>, %28: reg<wasm.i32>)
+^_bb1(%26: reg<wasm.i32>, %27: reg<wasm.i32>):
+  %33 = i32.lt_u %26, %byte_length
+  low.cond_br %33, ^_bb2, ^_bb3 : reg<wasm.i32>
+^_bb2:
+  %34 = i32.add %target_offset, %26
+  %35 = i32.add %target, %34
+  i32.store8 %35, %27
+  %36 = i32.shr_u %27, %31
+  %37 = i32.shl %27, %32
+  %38 = i32.or %36, %37
+  %39 = i32.add %26, %30
+  low.br ^_bb1(%39: reg<wasm.i32>, %38: reg<wasm.i32>)
+^_bb3:
+  return
+}
+
+// ====
+
+wasm.target<simd128> @target
+
+func.def target(@target) @fill_f8(%pattern: f8E4M3, %target: buffer, %target_offset: offset, %byte_length: offset) {
+  buffer.fill %pattern, %target[%target_offset], %byte_length : f8E4M3
+  func.return
+}
+
+// ----
+low.func.def target<wasm.core.simd128>(@target) abi(wasm_function) @fill_f8(%pattern: reg<wasm.i32>, %target: reg<wasm.i32>, %target_offset: reg<wasm.i32>, %byte_length: reg<wasm.i32>) asm {
+  %19 = i32.const 255
+  %20 = i32.and %pattern, %19
+  %21 = i32.const 0
+  %22 = i32.const 1
+  low.br ^_bb1(%21: reg<wasm.i32>)
+^_bb1(%18: reg<wasm.i32>):
+  %23 = i32.lt_u %18, %byte_length
+  low.cond_br %23, ^_bb2, ^_bb3 : reg<wasm.i32>
+^_bb2:
+  %24 = i32.add %target_offset, %18
+  %25 = i32.add %target, %24
+  i32.store8 %25, %20
+  %26 = i32.add %18, %22
+  low.br ^_bb1(%26: reg<wasm.i32>)
+^_bb3:
+  return
+}
+
+// ====
+
+wasm.target<simd128> @target
+
+func.def target(@target) @fill_bf16(%pattern: bf16, %target: buffer, %target_offset: offset, %byte_length: offset) {
+  buffer.fill %pattern, %target[%target_offset], %byte_length : bf16
+  func.return
+}
+
+// ----
+low.func.def target<wasm.core.simd128>(@target) abi(wasm_function) @fill_bf16(%pattern: reg<wasm.i32>, %target: reg<wasm.i32>, %target_offset: reg<wasm.i32>, %byte_length: reg<wasm.i32>) asm {
+  %32 = i32.const 65535
+  %33 = i32.and %pattern, %32
+  %34 = i32.const 16
+  %35 = i32.shl %33, %34
+  %36 = i32.or %33, %35
+  %37 = i32.const 0
+  %38 = i32.const 1
+  %39 = i32.const 8
+  %40 = i32.const 24
+  low.br ^_bb1(%37: reg<wasm.i32>, %36: reg<wasm.i32>)
+^_bb1(%30: reg<wasm.i32>, %31: reg<wasm.i32>):
+  %41 = i32.lt_u %30, %byte_length
+  low.cond_br %41, ^_bb2, ^_bb3 : reg<wasm.i32>
+^_bb2:
+  %42 = i32.add %target_offset, %30
+  %43 = i32.add %target, %42
+  i32.store8 %43, %31
+  %44 = i32.shr_u %31, %39
+  %45 = i32.shl %31, %40
+  %46 = i32.or %44, %45
+  %47 = i32.add %30, %38
+  low.br ^_bb1(%47: reg<wasm.i32>, %46: reg<wasm.i32>)
+^_bb3:
+  return
+}
+
+// ====
+
+wasm.target<simd128> @target
+
+func.def target(@target) @fill_f64(%pattern: f64, %target: buffer, %target_offset: offset, %byte_length: offset) {
+  buffer.fill %pattern, %target[%target_offset], %byte_length : f64
+  func.return
+}
+
+// ----
+low.func.def target<wasm.core.simd128>(@target) abi(wasm_function) @fill_f64(%pattern: reg<wasm.f64>, %target: reg<wasm.i32>, %target_offset: reg<wasm.i32>, %byte_length: reg<wasm.i32>) asm {
+  %29 = i64.reinterpret_f64 %pattern
+  %30 = i32.const 0
+  %31 = i32.const 1
+  %32 = i64.const 8
+  %33 = i64.const 56
+  low.br ^_bb1(%30: reg<wasm.i32>, %29: reg<wasm.i64>)
+^_bb1(%27: reg<wasm.i32>, %28: reg<wasm.i64>):
+  %34 = i32.lt_u %27, %byte_length
+  low.cond_br %34, ^_bb2, ^_bb3 : reg<wasm.i32>
+^_bb2:
+  %35 = i32.wrap_i64 %28
+  %36 = i32.add %target_offset, %27
+  %37 = i32.add %target, %36
+  i32.store8 %37, %35
+  %38 = i64.shr_u %28, %32
+  %39 = i64.shl %28, %33
+  %40 = i64.or %38, %39
+  %41 = i32.add %27, %31
+  low.br ^_bb1(%41: reg<wasm.i32>, %40: reg<wasm.i64>)
+^_bb3:
+  return
+}
+
+// ====
+
+wasm.target<simd128> @target
+
+func.def target(@target) @compare(%lhs: buffer, %lhs_offset: offset, %rhs: buffer, %rhs_offset: offset, %byte_length: offset) -> (i32) {
+  %order = buffer.compare %lhs[%lhs_offset], %rhs[%rhs_offset], %byte_length
+  func.return %order : i32
+}
+
+// ----
+low.func.def target<wasm.core.simd128>(@target) abi(wasm_function) @compare(%lhs: reg<wasm.i32>, %lhs_offset: reg<wasm.i32>, %rhs: reg<wasm.i32>, %rhs_offset: reg<wasm.i32>, %byte_length: reg<wasm.i32>) -> (reg<wasm.i32>) asm {
+  %42 = i32.const 0
+  %43 = i32.const 1
+  %45 = i32.const -1
+  low.br ^_bb1(%42: reg<wasm.i32>, %42: reg<wasm.i32>)
+^_bb1(%40: reg<wasm.i32>, %41: reg<wasm.i32>):
+  %47 = i32.lt_u %40, %byte_length
+  %48 = i32.eq %41, %42
+  %49 = i32.and %47, %48
+  low.cond_br %49, ^_bb2, ^_bb3 : reg<wasm.i32>
+^_bb2:
+  %50 = i32.add %lhs_offset, %40
+  %51 = i32.add %lhs, %50
+  %52 = i32.load8_u %51
+  %53 = i32.add %rhs_offset, %40
+  %54 = i32.add %rhs, %53
+  %55 = i32.load8_u %54
+  %56 = i32.eq %52, %55
+  %57 = i32.lt_u %52, %55
+  %58 = i32.select %45, %43, %57
+  %59 = i32.select %42, %58, %56
+  %60 = i32.add %40, %43
+  low.br ^_bb1(%60: reg<wasm.i32>, %59: reg<wasm.i32>)
+^_bb3:
+  return %41
+}
