@@ -127,14 +127,13 @@ static iree_status_t loom_link_index_query_candidates(
     const loom_link_index_selected_providers_t* selected,
     const loom_link_plan_options_t* options,
     iree_arena_block_pool_t* block_pool, iree_arena_allocator_t* arena,
-    bool* out_materialization_modified,
     loom_template_selection_query_result_t* out_result) {
   loom_template_provider_slice_t external_candidates =
       loom_template_provider_slice_empty();
-  IREE_RETURN_IF_ERROR(loom_link_template_candidate_loader_project(
+  IREE_RETURN_IF_ERROR(loom_link_template_candidate_loader_load(
       candidate_loader, plan, materialization,
       loom_link_index_selected_provider_membership(selected), arena,
-      out_materialization_modified, &external_candidates));
+      &external_candidates));
 
   loom_symbol_fact_table_t fact_table;
   loom_symbol_fact_table_initialize(&fact_table, arena);
@@ -224,12 +223,10 @@ static iree_status_t loom_link_index_materialize_selective(
     status = loom_link_plan_materialize(plan, environment, module_name,
                                         &iteration_arena, &analysis);
     loom_template_selection_query_result_t query = {0};
-    bool analysis_modified = false;
     if (iree_status_is_ok(status)) {
       status = loom_link_index_query_candidates(
           index, candidate_loader, plan, &analysis, &selected, plan_options,
-          environment->block_pool, &iteration_arena, &analysis_modified,
-          &query);
+          environment->block_pool, &iteration_arena, &query);
     }
     const bool changed =
         iree_status_is_ok(status) &&
@@ -246,10 +243,8 @@ static iree_status_t loom_link_index_materialize_selective(
       loom_link_plan_free(plan);
     } else {
       stable_plan = plan;
-      if (!analysis_modified) {
-        stable_module = analysis.module;
-        analysis.module = NULL;
-      }
+      stable_module = analysis.module;
+      analysis.module = NULL;
     }
     loom_module_free(analysis.module);
     iree_arena_deinitialize(&iteration_arena);

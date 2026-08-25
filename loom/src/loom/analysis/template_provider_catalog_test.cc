@@ -24,34 +24,6 @@ namespace {
 
 using ModulePtr = ::loom::testing::ModulePtr;
 
-struct SymbolProjection {
-  loom_symbol_ref_t source;
-  loom_symbol_ref_t target;
-  iree_host_size_t invocation_count;
-};
-
-static iree_status_t RemapProjectedSymbol(void* user_data,
-                                          const loom_module_t* source_module,
-                                          loom_module_t* target_module,
-                                          loom_symbol_ref_t source_ref,
-                                          loom_symbol_ref_t* out_target_ref) {
-  (void)source_module;
-  SymbolProjection* projection = static_cast<SymbolProjection*>(user_data);
-  if (source_ref.module_id != projection->source.module_id ||
-      source_ref.symbol_id != projection->source.symbol_id) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "unexpected source symbol reference");
-  }
-  if (projection->target.module_id != 0 ||
-      projection->target.symbol_id >= target_module->symbols.count) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "invalid projected target symbol reference");
-  }
-  ++projection->invocation_count;
-  *out_target_ref = projection->target;
-  return iree_ok_status();
-}
-
 class TemplateProviderCatalogTest : public ::testing::Test {
  protected:
   void SetUp() override {
@@ -194,10 +166,12 @@ template.def<@qwen.q4.matmul> public priority(10) @fast(%arg0: i32) -> (i32) {
   EXPECT_EQ(fast->priority, 10);
   ASSERT_EQ(fast->argument_count, 1u);
   ASSERT_EQ(fast->result_count, 1u);
-  EXPECT_TRUE(loom_type_equal(fast->argument_types[0],
-                              loom_type_scalar(LOOM_SCALAR_TYPE_I32)));
-  EXPECT_TRUE(loom_type_equal(fast->result_types[0],
-                              loom_type_scalar(LOOM_SCALAR_TYPE_I32)));
+  EXPECT_TRUE(loom_type_equal(
+      loom_module_value_type(fast->module, fast->argument_ids[0]),
+      loom_type_scalar(LOOM_SCALAR_TYPE_I32)));
+  EXPECT_TRUE(
+      loom_type_equal(loom_module_value_type(fast->module, fast->result_ids[0]),
+                      loom_type_scalar(LOOM_SCALAR_TYPE_I32)));
 
   const loom_template_provider_summary_t* asm_impl =
       FindProvider(qwen, IREE_SV("asm_impl"));
@@ -322,7 +296,7 @@ template.def<@demo.contract> priority(1) @fallback(%arg0: i32) -> (i32) {
 }
 
 TEST_F(TemplateProviderCatalogTest,
-       ProjectsValueDependentProviderMetadataAcrossModules) {
+       BindsProviderMetadataToExistingFamilySignature) {
   ModulePtr source = ParseModule(R"(
 test.target<low_core> @source.gfx11
 template.decl @source.family(%m: index, %arg: tensor<[%m]xf32>) -> (tensor<[%m]xf32>)
@@ -343,10 +317,6 @@ template.decl @target.family(%n: index, %arg: tensor<[%n]xf32>) -> (tensor<[%n]x
   const loom_template_provider_summary_t& source_provider =
       source_providers.providers[0];
 
-  const loom_symbol_ref_t source_target = {
-      /*.module_id=*/0,
-      /*.symbol_id=*/FindSymbol(source.get(), IREE_SV("source.gfx11")),
-  };
   const loom_symbol_ref_t target_target = {
       /*.module_id=*/0,
       /*.symbol_id=*/FindSymbol(target.get(), IREE_SV("target.gfx11")),
@@ -355,62 +325,57 @@ template.decl @target.family(%n: index, %arg: tensor<[%n]xf32>) -> (tensor<[%n]x
       /*.module_id=*/0,
       /*.symbol_id=*/FindSymbol(target.get(), IREE_SV("target.family")),
   };
-  SymbolProjection symbol_projection = {
-      /*.source=*/source_target,
-      /*.target=*/target_target,
-      /*.invocation_count=*/0,
-  };
-
   const iree_host_size_t target_value_count_before = target->values.count;
-  loom_template_provider_summary_t projected = {};
-  IREE_ASSERT_OK(loom_template_provider_summary_project(
-      &source_provider, target.get(), target_family,
-      /*origin_ordinal=*/123,
-      loom_ir_remap_symbol_callback_make(RemapProjectedSymbol,
-                                         &symbol_projection),
-      &analysis_arena_, &projected));
+  loom_template_provider_summary_t bound = {};
+  IREE_ASSERT_OK(loom_template_provider_summary_bind_family(
+      &source_provider, target.get(), target_family, target_target,
+      /*origin_ordinal=*/123, &analysis_arena_, &bound));
 
-  EXPECT_EQ(projected.module, target.get());
-  EXPECT_FALSE(loom_symbol_ref_is_valid(projected.symbol));
-  EXPECT_FALSE(loom_func_like_isa(projected.function));
-  EXPECT_EQ(projected.func_facts, nullptr);
-  EXPECT_EQ(projected.origin_ordinal, 123u);
-  EXPECT_EQ(projected.family.symbol_id, target_family.symbol_id);
+  EXPECT_EQ(target->values.count, target_value_count_before);
+  EXPECT_EQ(bound.module, target.get());
+  EXPECT_FALSE(loom_symbol_ref_is_valid(bound.symbol));
+  EXPECT_FALSE(loom_func_like_isa(bound.function));
+  EXPECT_EQ(bound.func_facts, nullptr);
+  EXPECT_EQ(bound.origin_ordinal, 123u);
+  EXPECT_EQ(bound.family.symbol_id, target_family.symbol_id);
   EXPECT_TRUE(
-      iree_string_view_equal(projected.family_name, IREE_SV("target.family")));
-  EXPECT_EQ(projected.target_symbol.symbol_id, target_target.symbol_id);
-  EXPECT_EQ(symbol_projection.invocation_count, 1u);
-  EXPECT_EQ(projected.target_facts, source_provider.target_facts);
+      iree_string_view_equal(bound.family_name, IREE_SV("target.family")));
+  EXPECT_EQ(bound.target_symbol.symbol_id, target_target.symbol_id);
+  EXPECT_EQ(bound.target_facts, source_provider.target_facts);
 
-  ASSERT_EQ(projected.argument_count, 2u);
-  ASSERT_EQ(projected.result_count, 1u);
-  EXPECT_GE(projected.argument_ids[0], target_value_count_before);
-  EXPECT_NE(projected.argument_ids[0], source_provider.argument_ids[0]);
-  ASSERT_TRUE(loom_type_is_tensor(projected.argument_types[1]));
-  EXPECT_EQ(loom_type_dim_value_id_at(projected.argument_types[1], 0),
-            projected.argument_ids[0]);
-  ASSERT_TRUE(loom_type_is_tensor(projected.result_types[0]));
-  EXPECT_EQ(loom_type_dim_value_id_at(projected.result_types[0], 0),
-            projected.argument_ids[0]);
+  ASSERT_EQ(bound.argument_count, 2u);
+  ASSERT_EQ(bound.result_count, 1u);
+  EXPECT_LT(bound.argument_ids[0], target_value_count_before);
+  EXPECT_NE(bound.argument_ids[0], source_provider.argument_ids[0]);
+  const loom_type_t bound_argument_type =
+      loom_module_value_type(bound.module, bound.argument_ids[1]);
+  const loom_type_t bound_result_type =
+      loom_module_value_type(bound.module, bound.result_ids[0]);
+  ASSERT_TRUE(loom_type_is_tensor(bound_argument_type));
+  EXPECT_EQ(loom_type_dim_value_id_at(bound_argument_type, 0),
+            bound.argument_ids[0]);
+  ASSERT_TRUE(loom_type_is_tensor(bound_result_type));
+  EXPECT_EQ(loom_type_dim_value_id_at(bound_result_type, 0),
+            bound.argument_ids[0]);
   EXPECT_TRUE(loom_type_equal(
-      loom_module_value_type(target.get(), projected.argument_ids[1]),
-      projected.argument_types[1]));
+      loom_module_value_type(target.get(), bound.argument_ids[1]),
+      bound_argument_type));
 
-  ASSERT_EQ(projected.predicate_count, 1u);
-  ASSERT_NE(projected.predicates, nullptr);
-  EXPECT_EQ(projected.predicates[0].kind, LOOM_PREDICATE_MUL);
-  EXPECT_EQ(projected.predicates[0].arg_tags[0], LOOM_PRED_ARG_VALUE);
-  EXPECT_EQ((loom_value_id_t)projected.predicates[0].args[0],
-            projected.argument_ids[0]);
-  EXPECT_EQ(projected.predicates[0].arg_tags[1], LOOM_PRED_ARG_CONST);
-  EXPECT_EQ(projected.predicates[0].args[1], 16);
+  ASSERT_EQ(bound.predicate_count, 1u);
+  ASSERT_NE(bound.predicates, nullptr);
+  EXPECT_EQ(bound.predicates[0].kind, LOOM_PREDICATE_MUL);
+  EXPECT_EQ(bound.predicates[0].arg_tags[0], LOOM_PRED_ARG_VALUE);
+  EXPECT_EQ((loom_value_id_t)bound.predicates[0].args[0],
+            bound.argument_ids[0]);
+  EXPECT_EQ(bound.predicates[0].arg_tags[1], LOOM_PRED_ARG_CONST);
+  EXPECT_EQ(bound.predicates[0].args[1], 16);
 
-  ASSERT_EQ(projected.target_condition_count, 1u);
-  ASSERT_NE(projected.target_conditions, nullptr);
-  EXPECT_EQ(projected.target_conditions[0].descriptor,
+  ASSERT_EQ(bound.target_condition_count, 1u);
+  ASSERT_NE(bound.target_conditions, nullptr);
+  EXPECT_EQ(bound.target_conditions[0].descriptor,
             &loom_target_subgroup_size_condition);
   EXPECT_EQ(
-      loom_target_subgroup_size_attr_size(projected.target_conditions[0].value),
+      loom_target_subgroup_size_attr_size(bound.target_conditions[0].value),
       32);
 }
 

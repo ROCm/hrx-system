@@ -11,7 +11,6 @@
 #include "loom/ir/module.h"
 #include "loom/ops/op_defs.h"
 #include "loom/ops/target/facts.h"
-#include "loom/rewrite/remap.h"
 
 #define LOOM_TEMPLATE_PROVIDER_INDEX_INVALID ((uint32_t)UINT32_MAX)
 
@@ -98,54 +97,6 @@ static iree_status_t loom_template_provider_catalog_lookup_facts(
   return iree_ok_status();
 }
 
-static iree_status_t loom_template_provider_catalog_copy_value_types(
-    const loom_module_t* module, const loom_value_id_t* value_ids,
-    uint16_t value_count, loom_type_t* types) {
-  for (uint16_t i = 0; i < value_count; ++i) {
-    const loom_value_id_t value_id = value_ids[i];
-    if (value_id >= module->values.count) {
-      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "template provider signature value id %u is "
-                              "outside "
-                              "the module value table",
-                              (uint32_t)value_id);
-    }
-    types[i] = loom_module_value_type(module, value_id);
-  }
-  return iree_ok_status();
-}
-
-static iree_status_t loom_template_provider_catalog_populate_signature(
-    loom_template_provider_catalog_t* catalog, const loom_module_t* module,
-    const loom_func_symbol_facts_t* facts,
-    loom_template_provider_summary_t* provider) {
-  provider->argument_count = facts->argument_count;
-  provider->result_count = facts->result_count;
-  provider->argument_ids = facts->argument_ids;
-  provider->result_ids = facts->result_ids;
-  const iree_host_size_t type_count =
-      (iree_host_size_t)facts->argument_count + facts->result_count;
-  provider->signature_is_module_independent = true;
-  if (type_count == 0) {
-    return iree_ok_status();
-  }
-
-  loom_type_t* types = NULL;
-  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      catalog->arena, type_count, sizeof(*types), (void**)&types));
-  IREE_RETURN_IF_ERROR(loom_template_provider_catalog_copy_value_types(
-      module, facts->argument_ids, facts->argument_count, types));
-  IREE_RETURN_IF_ERROR(loom_template_provider_catalog_copy_value_types(
-      module, facts->result_ids, facts->result_count,
-      types + facts->argument_count));
-  provider->argument_types = facts->argument_count > 0 ? types : NULL;
-  provider->result_types =
-      facts->result_count > 0 ? types + facts->argument_count : NULL;
-  provider->signature_is_module_independent =
-      loom_type_sequence_is_module_independent(types, type_count);
-  return iree_ok_status();
-}
-
 static iree_status_t loom_template_provider_catalog_target_facts(
     const loom_module_t* module, loom_symbol_fact_table_t* fact_table,
     loom_symbol_ref_t target_symbol,
@@ -208,16 +159,18 @@ static iree_status_t loom_template_provider_catalog_populate_local(
         .func_facts = facts,
         .origin_ordinal = IREE_HOST_SIZE_MAX,
         .family = facts->template_family,
+        .argument_count = facts->argument_count,
+        .result_count = facts->result_count,
         .family_name = facts->template_family_name,
         .name = facts->name,
         .priority = facts->priority,
+        .argument_ids = facts->argument_ids,
+        .result_ids = facts->result_ids,
         .predicates = facts->predicates,
         .predicate_count = facts->predicate_count,
         .target_conditions = facts->target_conditions,
         .target_condition_count = facts->target_condition_count,
     };
-    IREE_RETURN_IF_ERROR(loom_template_provider_catalog_populate_signature(
-        catalog, module, facts, provider));
     IREE_RETURN_IF_ERROR(loom_template_provider_catalog_target_facts(
         module, fact_table, facts->target_symbol, &provider->target_facts));
   }
@@ -308,8 +261,7 @@ iree_status_t loom_template_provider_catalog_build(
   IREE_RETURN_IF_ERROR(loom_template_provider_catalog_count_local(
       module, buckets, &local_provider_count));
   for (iree_host_size_t i = 0; i < external_provider_count; ++i) {
-    IREE_ASSERT(external_providers[i].module == module ||
-                external_providers[i].signature_is_module_independent);
+    IREE_ASSERT(external_providers[i].module == module);
     const loom_symbol_ref_t family = external_providers[i].family;
     IREE_ASSERT(loom_symbol_ref_is_valid(family));
     IREE_ASSERT(family.module_id == 0);
@@ -362,11 +314,69 @@ iree_status_t loom_template_provider_catalog_build_local(
                                               /*external_provider_count=*/0);
 }
 
-iree_status_t loom_template_provider_summary_project(
+static bool loom_template_provider_summary_remap_value(
     const loom_template_provider_summary_t* source,
-    loom_module_t* target_module, loom_symbol_ref_t target_family,
-    iree_host_size_t origin_ordinal,
-    loom_ir_remap_symbol_callback_t symbol_remap, iree_arena_allocator_t* arena,
+    const loom_value_id_t* target_argument_ids,
+    const loom_value_id_t* target_result_ids, loom_value_id_t source_value_id,
+    loom_value_id_t* out_target_value_id) {
+  for (uint16_t i = 0; i < source->argument_count; ++i) {
+    if (source->argument_ids[i] == source_value_id) {
+      *out_target_value_id = target_argument_ids[i];
+      return true;
+    }
+  }
+  for (uint16_t i = 0; i < source->result_count; ++i) {
+    if (source->result_ids[i] == source_value_id) {
+      *out_target_value_id = target_result_ids[i];
+      return true;
+    }
+  }
+  return false;
+}
+
+static iree_status_t loom_template_provider_summary_bind_predicates(
+    const loom_template_provider_summary_t* source,
+    const loom_value_id_t* target_argument_ids,
+    const loom_value_id_t* target_result_ids, iree_arena_allocator_t* arena,
+    const loom_predicate_t** out_predicates) {
+  *out_predicates = NULL;
+  if (source->predicate_count == 0) return iree_ok_status();
+
+  loom_predicate_t* predicates = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(arena, source->predicate_count,
+                                                 sizeof(*predicates),
+                                                 (void**)&predicates));
+  memcpy(predicates, source->predicates,
+         source->predicate_count * sizeof(*predicates));
+  for (uint16_t i = 0; i < source->predicate_count; ++i) {
+    loom_predicate_t* predicate = &predicates[i];
+    for (uint8_t j = 0; j < predicate->arg_count; ++j) {
+      if (predicate->arg_tags[j] != LOOM_PRED_ARG_VALUE) continue;
+      const int64_t raw_source_value_id = predicate->args[j];
+      if (raw_source_value_id < 0 || raw_source_value_id > UINT32_MAX) {
+        return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "provider predicate has an invalid value id");
+      }
+      loom_value_id_t target_value_id = LOOM_VALUE_ID_INVALID;
+      if (!loom_template_provider_summary_remap_value(
+              source, target_argument_ids, target_result_ids,
+              (loom_value_id_t)raw_source_value_id, &target_value_id)) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "provider predicate references a value outside its signature");
+      }
+      predicate->args[j] = (int64_t)target_value_id;
+    }
+  }
+  *out_predicates = predicates;
+  return iree_ok_status();
+}
+
+iree_status_t loom_template_provider_summary_bind_family(
+    const loom_template_provider_summary_t* source,
+    const loom_module_t* target_module, loom_symbol_ref_t target_family,
+    loom_symbol_ref_t target_symbol, iree_host_size_t origin_ordinal,
+    iree_arena_allocator_t* arena,
     loom_template_provider_summary_t* out_provider) {
   IREE_ASSERT_ARGUMENT(source);
   IREE_ASSERT_ARGUMENT(source->module);
@@ -378,73 +388,32 @@ iree_status_t loom_template_provider_summary_project(
       target_family.module_id != 0 ||
       target_family.symbol_id >= target_module->symbols.count) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "projected template family is invalid");
+                            "bound template family is invalid");
   }
 
-  loom_ir_remap_t remap = {0};
-  IREE_RETURN_IF_ERROR(loom_ir_remap_initialize(
-      source->module, target_module, arena,
-      &(loom_ir_remap_options_t){
-          .remap_symbol = symbol_remap,
-          .value_map_kind = LOOM_IR_REMAP_VALUE_MAP_SPARSE,
-      },
-      &remap));
-
-  const iree_host_size_t value_count =
-      (iree_host_size_t)source->argument_count + source->result_count;
-  loom_value_id_t* value_ids = NULL;
-  loom_type_t* types = NULL;
-  loom_value_id_t base_value_id = LOOM_VALUE_ID_INVALID;
-  if (value_count > 0) {
-    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        arena, value_count, sizeof(*value_ids), (void**)&value_ids));
-    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        arena, value_count, sizeof(*types), (void**)&types));
-    IREE_RETURN_IF_ERROR(loom_module_define_untyped_values(
-        target_module, value_count, &base_value_id));
-    for (iree_host_size_t i = 0; i < value_count; ++i) {
-      value_ids[i] = (loom_value_id_t)(base_value_id + i);
-    }
-    IREE_RETURN_IF_ERROR(loom_ir_remap_map_values(
-        &remap, source->argument_ids, value_ids, source->argument_count));
-    IREE_RETURN_IF_ERROR(loom_ir_remap_map_values(
-        &remap, source->result_ids, value_ids + source->argument_count,
-        source->result_count));
-    for (uint16_t i = 0; i < source->argument_count; ++i) {
-      IREE_RETURN_IF_ERROR(
-          loom_ir_remap_type(&remap, source->argument_types[i], &types[i]));
-    }
-    for (uint16_t i = 0; i < source->result_count; ++i) {
-      IREE_RETURN_IF_ERROR(loom_ir_remap_type(
-          &remap, source->result_types[i], &types[source->argument_count + i]));
-    }
-    for (iree_host_size_t i = 0; i < value_count; ++i) {
-      IREE_RETURN_IF_ERROR(
-          loom_module_set_value_type(target_module, value_ids[i], types[i]));
-    }
-  }
-
-  loom_predicate_t* predicates = NULL;
-  IREE_RETURN_IF_ERROR(loom_ir_remap_predicate_list(
-      &remap, source->predicates, source->predicate_count, &predicates));
-  loom_target_condition_t* target_conditions = NULL;
-  if (source->target_condition_count > 0) {
-    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        arena, source->target_condition_count, sizeof(*target_conditions),
-        (void**)&target_conditions));
-    for (uint16_t i = 0; i < source->target_condition_count; ++i) {
-      target_conditions[i].descriptor = source->target_conditions[i].descriptor;
-      IREE_RETURN_IF_ERROR(
-          loom_ir_remap_attribute(&remap, source->target_conditions[i].value,
-                                  &target_conditions[i].value));
-    }
-  }
-
-  loom_symbol_ref_t target_symbol = loom_symbol_ref_null();
-  IREE_RETURN_IF_ERROR(
-      loom_ir_remap_symbol_ref(&remap, source->target_symbol, &target_symbol));
   const loom_symbol_t* family_symbol =
       &target_module->symbols.entries[target_family.symbol_id];
+  loom_func_like_t family =
+      loom_func_like_cast(target_module, family_symbol->defining_op);
+  if (!loom_func_like_isa(family)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "bound template family is not function-like");
+  }
+  uint16_t argument_count = 0;
+  const loom_value_id_t* argument_ids =
+      loom_func_like_arg_ids(family, &argument_count);
+  const uint16_t result_count = family.op->result_count;
+  const loom_value_id_t* result_ids = loom_op_const_results(family.op);
+  if (argument_count != source->argument_count ||
+      result_count != source->result_count) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "provider signature does not match its bound template family");
+  }
+
+  const loom_predicate_t* predicates = NULL;
+  IREE_RETURN_IF_ERROR(loom_template_provider_summary_bind_predicates(
+      source, argument_ids, result_ids, arena, &predicates));
   *out_provider = *source;
   out_provider->module = target_module;
   out_provider->symbol = loom_symbol_ref_null();
@@ -455,14 +424,9 @@ iree_status_t loom_template_provider_summary_project(
   out_provider->family = target_family;
   out_provider->family_name =
       target_module->strings.entries[family_symbol->name_id];
-  out_provider->argument_types = source->argument_count > 0 ? types : NULL;
-  out_provider->result_types =
-      source->result_count > 0 ? types + source->argument_count : NULL;
-  out_provider->argument_ids = source->argument_count > 0 ? value_ids : NULL;
-  out_provider->result_ids =
-      source->result_count > 0 ? value_ids + source->argument_count : NULL;
+  out_provider->argument_ids = argument_ids;
+  out_provider->result_ids = result_ids;
   out_provider->predicates = predicates;
-  out_provider->target_conditions = target_conditions;
   return iree_ok_status();
 }
 

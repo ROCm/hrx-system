@@ -192,17 +192,17 @@ func.def public @entry(%m: index, %arg: tensor<[%m]xf32>) -> (tensor<[%m]xf32>) 
   func.return %result : tensor<[%m]xf32>
 }
 )");
-  loom_template_provider_summary_t external = ExternalizeProvider(
+  const loom_template_provider_summary_t source_provider = ExternalizeProvider(
       source.get(), IREE_SV("source.family"), IREE_SV("source.provider"), 11);
-  ASSERT_TRUE(external.signature_is_module_independent);
-  external.family = {
+  const loom_symbol_ref_t target_family = {
       /*.module_id=*/0,
       /*.symbol_id=*/
       FindSymbol(application.get(), IREE_SV("application.family")),
   };
-  const loom_symbol_t* family_symbol =
-      &application->symbols.entries[external.family.symbol_id];
-  external.family_name = application->strings.entries[family_symbol->name_id];
+  loom_template_provider_summary_t external = {};
+  IREE_ASSERT_OK(loom_template_provider_summary_bind_family(
+      &source_provider, application.get(), target_family,
+      loom_symbol_ref_null(), /*origin_ordinal=*/11, &arena_, &external));
   const std::string module_before = PrintModule(application.get());
 
   const loom_template_selection_query_result_t result =

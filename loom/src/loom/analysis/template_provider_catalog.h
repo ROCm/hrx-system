@@ -19,7 +19,6 @@
 #include "loom/analysis/symbol_facts.h"
 #include "loom/ir/ir.h"
 #include "loom/ops/func_symbol_facts.h"
-#include "loom/rewrite/remap.h"
 #include "loom/target/facts.h"
 
 #ifdef __cplusplus
@@ -52,10 +51,6 @@ typedef struct loom_template_provider_summary_t {
 
   // True when the provider has a materialized body.
   bool has_body;
-
-  // True when every signature type can be compared outside this provider
-  // module's identity domain after remapping SSA value references.
-  bool signature_is_module_independent;
 
   // Local module symbol reference, or null for external providers.
   loom_symbol_ref_t symbol;
@@ -96,12 +91,6 @@ typedef struct loom_template_provider_summary_t {
 
   // Provider priority used to rank applicable implementations.
   int64_t priority;
-
-  // Borrowed argument type list in signature order, or NULL when empty.
-  const loom_type_t* argument_types;
-
-  // Borrowed result type list in signature order, or NULL when empty.
-  const loom_type_t* result_types;
 
   // Borrowed argument value IDs in the summary module's value domain.
   const loom_value_id_t* argument_ids;
@@ -179,28 +168,29 @@ iree_status_t loom_template_provider_catalog_build_local(
 
 // Rebuilds |catalog| from local providers plus external summaries.
 //
-// Each external family reference must use |module|'s symbol domain. Other
-// payloads may borrow a different module only when
-// signature_is_module_independent is true. Every borrowed payload must remain
-// live for the catalog lifetime.
+// Every external provider must already be bound to |module|'s family and
+// signature domain. Borrowed source-owned names, conditions, and target facts
+// must remain live for the catalog lifetime.
 iree_status_t loom_template_provider_catalog_build(
     loom_template_provider_catalog_t* catalog, const loom_module_t* module,
     loom_symbol_fact_table_t* fact_table,
     const loom_template_provider_summary_t* external_providers,
     iree_host_size_t external_provider_count);
 
-// Projects one provider header into |target_module|'s value/type/symbol domain.
+// Binds one provider contract to an already-linked template family.
 //
-// The projection creates only unowned signature values and immutable metadata;
-// it never materializes or fabricates a provider operation. |target_family|
-// supplies the already-linked family identity. Other symbol references are
-// translated through |symbol_remap|. The source summary and any borrowed target
-// facts must remain live while the projected summary is queried.
-iree_status_t loom_template_provider_summary_project(
+// The family owns the canonical signature used for applicability. Provider
+// predicates are translated from |source|'s signature values to the matching
+// family values; no values, types, symbols, or operations are added to
+// |target_module|. |target_symbol| is the already-linked target witness when
+// available and may be null when |source| carries immutable target facts.
+// Source-owned names, conditions, and target facts must remain live while the
+// bound summary is queried.
+iree_status_t loom_template_provider_summary_bind_family(
     const loom_template_provider_summary_t* source,
-    loom_module_t* target_module, loom_symbol_ref_t target_family,
-    iree_host_size_t origin_ordinal,
-    loom_ir_remap_symbol_callback_t symbol_remap, iree_arena_allocator_t* arena,
+    const loom_module_t* target_module, loom_symbol_ref_t target_family,
+    loom_symbol_ref_t target_symbol, iree_host_size_t origin_ordinal,
+    iree_arena_allocator_t* arena,
     loom_template_provider_summary_t* out_provider);
 
 // Returns local providers for |family|.

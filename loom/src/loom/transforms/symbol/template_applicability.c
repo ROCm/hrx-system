@@ -100,8 +100,7 @@ loom_template_applicability_target_feasibility(
 static bool loom_template_applicability_types_match(
     const loom_module_t* application_module, const loom_op_t* application_op,
     const loom_template_provider_summary_t* provider) {
-  IREE_ASSERT(provider->module == application_module ||
-              provider->signature_is_module_independent);
+  IREE_ASSERT(provider->module == application_module);
   const loom_value_slice_t operands =
       loom_template_applicability_application_operands(application_op);
   const loom_value_slice_t results =
@@ -119,8 +118,9 @@ static bool loom_template_applicability_types_match(
   for (uint16_t i = 0; i < operands.count; ++i) {
     const loom_type_t operand_type =
         loom_module_value_type(application_module, operands.values[i]);
-    if (!loom_type_equal_after_value_remap(application_module,
-                                           provider->argument_types[i],
+    const loom_type_t provider_type =
+        loom_module_value_type(application_module, provider->argument_ids[i]);
+    if (!loom_type_equal_after_value_remap(application_module, provider_type,
                                            operand_type, &signature_remap)) {
       return false;
     }
@@ -129,8 +129,9 @@ static bool loom_template_applicability_types_match(
   for (uint16_t i = 0; i < results.count; ++i) {
     const loom_type_t result_type =
         loom_module_value_type(application_module, results.values[i]);
-    if (!loom_type_equal_after_value_remap(application_module,
-                                           provider->result_types[i],
+    const loom_type_t provider_type =
+        loom_module_value_type(application_module, provider->result_ids[i]);
+    if (!loom_type_equal_after_value_remap(application_module, provider_type,
                                            result_type, &signature_remap)) {
       return false;
     }

@@ -116,44 +116,6 @@ TEST(TypesTest, RegisterTypeEqualAndHashAreStructural) {
   EXPECT_FALSE(loom_type_equal(first, different_payload1));
 }
 
-TEST(TypesTest, ModuleIndependenceIsRecursiveAndAllowsSsaIdentity) {
-  loom_type_t scalar = loom_type_scalar(LOOM_SCALAR_TYPE_I32);
-  loom_type_t dynamic_view = loom_type_shaped_1d(
-      LOOM_TYPE_VIEW, LOOM_SCALAR_TYPE_F32, loom_dim_pack_dynamic(7), 0);
-  dynamic_view.encoding_id = 9;
-  dynamic_view.encoding_flags = LOOM_ENCODING_FLAG_SSA;
-  loom_type_t static_encoded_view = dynamic_view;
-  static_encoded_view.encoding_id = 1;
-  static_encoded_view.encoding_flags = 0;
-  loom_type_t dialect = loom_type_dialect(/*name_id=*/3, 0, nullptr);
-
-  EXPECT_TRUE(loom_type_is_module_independent(scalar));
-  EXPECT_TRUE(loom_type_is_module_independent(dynamic_view));
-  EXPECT_FALSE(loom_type_is_module_independent(static_encoded_view));
-  EXPECT_FALSE(loom_type_is_module_independent(dialect));
-
-  loom_register_type_data_t scalar_register_data = {42, 4, scalar};
-  loom_register_type_data_t dialect_register_data = {42, 4, dialect};
-  EXPECT_TRUE(loom_type_is_module_independent(
-      loom_type_register_payload_with_value_type(&scalar_register_data)));
-  EXPECT_FALSE(loom_type_is_module_independent(
-      loom_type_register_payload_with_value_type(&dialect_register_data)));
-
-  loom_type_t independent_types[] = {scalar, dynamic_view};
-  loom_type_t dependent_types[] = {scalar, dialect};
-  EXPECT_TRUE(loom_type_sequence_is_module_independent(
-      independent_types, IREE_ARRAYSIZE(independent_types)));
-  EXPECT_FALSE(loom_type_sequence_is_module_independent(
-      dependent_types, IREE_ARRAYSIZE(dependent_types)));
-
-  OwnedFunctionType independent_function = BuildFunctionType(
-      independent_types, IREE_ARRAYSIZE(independent_types), &scalar, 1);
-  OwnedFunctionType dependent_function = BuildFunctionType(
-      dependent_types, IREE_ARRAYSIZE(dependent_types), &scalar, 1);
-  EXPECT_TRUE(loom_type_is_module_independent(independent_function.get()));
-  EXPECT_FALSE(loom_type_is_module_independent(dependent_function.get()));
-}
-
 typedef struct ValueRefCapture {
   loom_value_id_t values[2];
   iree_host_size_t count;
