@@ -112,9 +112,9 @@ low.func.def target<amdgpu.rdna3.core>(@target) @conservative_scratch_stores_do_
   scratch_store_b32 v3, v0, off offset:0 glc:0 slc:0 dlc:0
   scratch_store_b32 v1, v2, off offset:0 glc:0 slc:0 dlc:0
   s_waitcnt_vscnt vscnt(0)
-  scratch_load_b32 v4, v3, off offset:0 glc:0 slc:0 dlc:0
+  scratch_load_b32 v0, v3, off offset:0 glc:0 slc:0 dlc:0
   s_waitcnt vmcnt(0) lgkmcnt(63)
-  global_store_b32 v3, v4, s[0:1] offset:0
+  global_store_b32 v3, v0, s[0:1] offset:0
   s_waitcnt_vscnt vscnt(0)
   s_endpgm
 
@@ -132,9 +132,9 @@ low.func.def target<amdgpu.rdna3.core>(@target) @scratch_store_load_memory_effec
 // ----
   scratch_store_b32 v1, v0, off offset:0 glc:0 slc:0 dlc:0
   s_waitcnt_vscnt vscnt(0)
-  scratch_load_b32 v2, v1, off offset:0 glc:0 slc:0 dlc:0
+  scratch_load_b32 v0, v1, off offset:0 glc:0 slc:0 dlc:0
   s_waitcnt vmcnt(0) lgkmcnt(63)
-  global_store_b32 v1, v2, s[0:1] offset:0
+  global_store_b32 v1, v0, s[0:1] offset:0
   s_waitcnt_vscnt vscnt(0)
   s_endpgm
 
@@ -347,7 +347,7 @@ low.func.def target<amdgpu.rdna3.core>(@target) @loop_carried_branch_arg_waits_a
 // must therefore stay at the carried value's consumer instead of being elided
 // as an already-observed same-block producer.
 // ----
-{"format":"loom.low.packet_hazard_plan.v1","function":"loop_carried_branch_arg_waits_at_next_iteration_use","target":"target","descriptor_set":"amdgpu.rdna3.core","progress_count":2,"hazard_count":2,"progress":[{"index":0,"packet":2,"node":2,"block":1,"scheduled_ordinal":0,"class_id":2,"class_name":"amdgpu.vmem_store","action":"advance","units":1},{"index":1,"packet":3,"node":3,"block":1,"scheduled_ordinal":1,"class_id":1,"class_name":"amdgpu.vmem_load","action":"advance","units":1}],"hazards":[{"index":0,"kind":"action","action_id":1,"action_name":"amdgpu.wait_packet","reason_id":8,"reason_name":"amdgpu.memory_effect","producer_node":null,"producer_packet":null,"producer_scheduled_ordinal":null,"consumer_node":2,"insertion_packet":2,"block":1,"scheduled_ordinal":0,"progress_class_id":1,"progress_class_name":"amdgpu.vmem_load","required":1,"observed":0,"residual":1},{"index":1,"kind":"action","action_id":1,"action_name":"amdgpu.wait_packet","reason_id":4,"reason_name":"amdgpu.store_source_reuse","producer_node":2,"producer_packet":2,"producer_scheduled_ordinal":0,"consumer_node":3,"insertion_packet":3,"block":1,"scheduled_ordinal":1,"progress_class_id":2,"progress_class_name":"amdgpu.vmem_store","required":1,"observed":0,"residual":1}]}
+{"format":"loom.low.packet_hazard_plan.v1","function":"loop_carried_branch_arg_waits_at_next_iteration_use","target":"target","descriptor_set":"amdgpu.rdna3.core","progress_count":2,"hazard_count":2,"progress":[{"index":0,"packet":2,"node":2,"block":1,"scheduled_ordinal":0,"class_id":2,"class_name":"amdgpu.vmem_store","action":"advance","units":1},{"index":1,"packet":3,"node":3,"block":1,"scheduled_ordinal":1,"class_id":1,"class_name":"amdgpu.vmem_load","action":"advance","units":1}],"hazards":[{"index":0,"kind":"action","action_id":1,"action_name":"amdgpu.wait_packet","reason_id":8,"reason_name":"amdgpu.memory_effect","producer_node":null,"producer_packet":null,"producer_scheduled_ordinal":null,"consumer_node":2,"insertion_packet":2,"block":1,"scheduled_ordinal":0,"progress_class_id":1,"progress_class_name":"amdgpu.vmem_load","required":1,"observed":0,"residual":1},{"index":1,"kind":"action","action_id":1,"action_name":"amdgpu.wait_packet","reason_id":8,"reason_name":"amdgpu.memory_effect","producer_node":null,"producer_packet":null,"producer_scheduled_ordinal":null,"consumer_node":3,"insertion_packet":3,"block":1,"scheduled_ordinal":1,"progress_class_id":2,"progress_class_name":"amdgpu.vmem_store","required":1,"observed":0,"residual":1}]}
 
 // ====
 // RUN: emit amdgpu-assembly @loop_carried_branch_arg_waits_at_next_iteration_use_assembly strategy=source
@@ -584,9 +584,9 @@ low.func.def target<amdgpu.rdna3.core>(@target) @scratch_store_load_cross_block_
   scratch_store_b32 v1, v0, off offset:0 glc:0 slc:0 dlc:0
 .Lbb1:
   s_waitcnt_vscnt vscnt(0)
-  scratch_load_b32 v2, v1, off offset:0 glc:0 slc:0 dlc:0
+  scratch_load_b32 v0, v1, off offset:0 glc:0 slc:0 dlc:0
   s_waitcnt vmcnt(0) lgkmcnt(63)
-  global_store_b32 v1, v2, s[0:1] offset:0
+  global_store_b32 v1, v0, s[0:1] offset:0
   s_waitcnt_vscnt vscnt(0)
   s_endpgm
 
@@ -740,7 +740,7 @@ low.func.def target<amdgpu.rdna3.core>(@target) @cross_block_global_write_aliase
   global_store_b32 v0, v1, s[0:1] offset:0
 .Lbb1:
   s_waitcnt_vscnt vscnt(0)
-  flat_load_dwordx2 v[2:3], v[2:3], off offset:0
+  flat_load_dwordx2 v[0:1], v[2:3], off offset:0
   s_endpgm
 
 // ====
@@ -838,9 +838,9 @@ low.func.def target<amdgpu.rdna3.core>(@target) @exec_state_packets_preserve_scr
   s_mov_b64_exec_read s[0:1]
   s_mov_b64 exec, -1
   s_waitcnt_vscnt vscnt(0)
-  scratch_load_b32 v2, off, off offset:0 glc:0 slc:0 dlc:0
+  scratch_load_b32 v0, off, off offset:0 glc:0 slc:0 dlc:0
   s_waitcnt vmcnt(0) lgkmcnt(63)
-  global_store_b32 v1, v2, s[2:3] offset:0
+  global_store_b32 v1, v0, s[2:3] offset:0
   s_waitcnt_vscnt vscnt(0)
   s_endpgm
 
@@ -863,9 +863,9 @@ low.func.def target<amdgpu.cdna3.core>(@target) @cdna_scratch_packets_read_m0_st
   s_mov_b32 m0, 0
   scratch_store_b32 off, v0, off offset:0 nt:0 sc0:0 sc1:0
   s_waitcnt vmcnt(0) lgkmcnt(15)
-  scratch_load_b32 v2, off, off offset:0 nt:0 sc0:0 sc1:0
+  scratch_load_b32 v0, off, off offset:0 nt:0 sc0:0 sc1:0
   s_waitcnt vmcnt(0) lgkmcnt(15)
-  global_store_dword v1, v2, s[0:1] offset:0
+  global_store_dword v1, v0, s[0:1] offset:0
   s_waitcnt vmcnt(0) lgkmcnt(15)
   s_endpgm
 

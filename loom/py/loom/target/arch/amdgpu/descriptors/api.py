@@ -1043,8 +1043,6 @@ _GFX125X_XCNT_SCHEDULE_CLASSES = frozenset(
 
 _AMDGPU_WAIT_PLAN_RESIDUAL_ACTION_WAIT_PACKET = 1
 _AMDGPU_WAIT_PLAN_RESIDUAL_ACTION_WAIT_PACKET_NAME = "amdgpu.wait_packet"
-_AMDGPU_WAIT_PLAN_REASON_STORE_SOURCE_REUSE = 4
-_AMDGPU_WAIT_PLAN_REASON_STORE_SOURCE_REUSE_NAME = "amdgpu.store_source_reuse"
 _AMDGPU_WAIT_PLAN_REASON_READ_RESULT_REUSE = 5
 _AMDGPU_WAIT_PLAN_REASON_READ_RESULT_REUSE_NAME = "amdgpu.read_result_reuse"
 _AMDGPU_WAIT_PLAN_REASON_MEMORY_SOURCE_REUSE = 10
@@ -1175,14 +1173,6 @@ def _amdgpu_operand_is_packet_input(operand: Operand) -> bool:
     )
 
 
-def _amdgpu_operand_accepts_vgpr(operand: Operand) -> bool:
-    return any(
-        reg_alt.reg_class == _REG_VGPR
-        and RegClassAltFlag.IMMEDIATE not in reg_alt.flags
-        for reg_alt in operand.reg_alts
-    )
-
-
 def _amdgpu_operand_accepts_sgpr(operand: Operand) -> bool:
     return any(
         reg_alt.reg_class == _REG_SGPR
@@ -1258,9 +1248,6 @@ def _amdgpu_descriptor_storage_leases(
         _AMDGPU_WAIT_COUNTER_MASKS[_COUNTER_VMEM_STORE]
         | _AMDGPU_WAIT_COUNTER_MASKS[_COUNTER_TENSOR]
     )
-    vmem_write_counter_mask = (
-        write_counter_mask & _AMDGPU_WAIT_COUNTER_MASKS[_COUNTER_VMEM_STORE]
-    )
     xcnt_source_counter_mask = (
         _AMDGPU_WAIT_COUNTER_MASKS[_COUNTER_X]
         if enable_gfx125x_xcnt
@@ -1286,21 +1273,6 @@ def _amdgpu_descriptor_storage_leases(
                     operand,
                     current_packet_operand_index,
                     xcnt_source_counter_mask,
-                )
-            if _amdgpu_operand_accepts_vgpr(operand) and vmem_write_counter_mask != 0:
-                storage_leases.append(
-                    _amdgpu_storage_lease(
-                        kind=StorageLeaseKind.SOURCE_READ,
-                        attachment=StorageLeaseAttachment.OPERAND,
-                        attachment_index=current_packet_operand_index,
-                        unit_count=operand.unit_count,
-                        release_class_id=_COUNTER_VMEM_STORE,
-                        release_reason_id=_AMDGPU_WAIT_PLAN_REASON_STORE_SOURCE_REUSE,
-                        release_reason_name=(
-                            _AMDGPU_WAIT_PLAN_REASON_STORE_SOURCE_REUSE_NAME
-                        ),
-                        flags=_AMDGPU_STORAGE_LEASE_FLAGS,
-                    )
                 )
             if _amdgpu_operand_accepts_sgpr(operand):
                 _amdgpu_append_memory_source_leases(

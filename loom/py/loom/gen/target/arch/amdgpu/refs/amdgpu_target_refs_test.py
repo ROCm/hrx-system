@@ -43,6 +43,10 @@ from loom.target.low_descriptors import (
     ResourceFlag,
     ResourceKind,
     ScheduleClass,
+    StorageLease,
+    StorageLeaseAttachment,
+    StorageLeaseKind,
+    StorageLeaseReleaseScope,
 )
 
 _RESOURCE_SALU = "salu"
@@ -75,6 +79,7 @@ def _descriptor(
     instruction_classes: tuple[InstructionClass, ...] = (),
     operands: tuple[Operand, ...] = (),
     encoding_field_values: tuple[EncodingFieldValue, ...] = (),
+    storage_leases: tuple[StorageLease, ...] = (),
 ) -> Descriptor:
     return Descriptor(
         key=key,
@@ -87,6 +92,7 @@ def _descriptor(
         immediates=immediates,
         instruction_classes=instruction_classes,
         encoding_field_values=encoding_field_values,
+        storage_leases=storage_leases,
     )
 
 
@@ -317,6 +323,54 @@ def test_descriptor_trait_names_include_destination_selection_forwarding() -> No
 
     assert "LOOM_AMDGPU_DESCRIPTOR_TRAIT_DESTINATION_SELECTION_FORWARDING" in amdgpu_target_refs._descriptor_trait_names(trait_context, descriptor_set.descriptors[0])
     assert "LOOM_AMDGPU_DESCRIPTOR_TRAIT_DESTINATION_SELECTION_FORWARDING" not in amdgpu_target_refs._descriptor_trait_names(trait_context, descriptor_set.descriptors[1])
+
+
+def test_descriptor_trait_names_include_retained_address_sources() -> None:
+    source_lease = StorageLease(
+        kind=StorageLeaseKind.SOURCE_READ,
+        attachment=StorageLeaseAttachment.OPERAND,
+        attachment_index=0,
+        unit_offset=0,
+        unit_count=1,
+        release_scope=StorageLeaseReleaseScope.PROGRESS_CLASS,
+        release_class_id=1,
+        release_class_name="test.progress",
+        release_action_id=1,
+        release_action_name="test.release",
+        release_reason_id=1,
+        release_reason_name="test.retained",
+    )
+    descriptor_set = _descriptor_set(
+        _descriptor(
+            "amdgpu.global_store_b32",
+            operands=(
+                Operand("addr", OperandRole.OPERAND, ()),
+                Operand("value", OperandRole.OPERAND, ()),
+            ),
+            storage_leases=(source_lease,),
+        ),
+        _descriptor(
+            "amdgpu.buffer_store_b32",
+            operands=(
+                Operand("value", OperandRole.OPERAND, ()),
+                Operand("vaddr", OperandRole.OPERAND, ()),
+            ),
+            storage_leases=(replace(source_lease, attachment_index=1),),
+        ),
+        _descriptor(
+            "amdgpu.global_store_b32.issue_consumed",
+            operands=(
+                Operand("addr", OperandRole.OPERAND, ()),
+                Operand("value", OperandRole.OPERAND, ()),
+            ),
+            storage_leases=(replace(source_lease, attachment_index=1),),
+        ),
+    )
+    trait_context = amdgpu_target_refs._descriptor_trait_context(descriptor_set)
+
+    assert "LOOM_AMDGPU_DESCRIPTOR_TRAIT_ADDRESS_SOURCE_RETAINED" in (amdgpu_target_refs._descriptor_trait_names(trait_context, descriptor_set.descriptors[0]))
+    assert "LOOM_AMDGPU_DESCRIPTOR_TRAIT_ADDRESS_SOURCE_RETAINED" in (amdgpu_target_refs._descriptor_trait_names(trait_context, descriptor_set.descriptors[1]))
+    assert "LOOM_AMDGPU_DESCRIPTOR_TRAIT_ADDRESS_SOURCE_RETAINED" not in (amdgpu_target_refs._descriptor_trait_names(trait_context, descriptor_set.descriptors[2]))
 
 
 def test_descriptor_trait_names_include_memory_and_ref_facts() -> None:

@@ -79,21 +79,21 @@ low.func.def target<amdgpu.gfx9_4.generic.core>(@gfx9_4_generic_target) @gfx9_4_
   v_mov_b32_copy v0, s0
   s_mov_b32 m0, 0
   scratch_store_b32 off, v0, off offset:0 nt:0 sc0:0 sc1:0
-  v_mov_b32_copy v1, s1
+  v_mov_b32_copy v0, s1
   s_mov_b32 m0, 0
-  scratch_store_b32 off, v1, off offset:4 nt:0 sc0:0 sc1:0
+  scratch_store_b32 off, v0, off offset:4 nt:0 sc0:0 sc1:0
   s_mov_b64 exec, s[2:3]
   s_mov_b64_exec_read s[0:1]
   s_mov_b64 exec, -1
   s_mov_b32 m0, 0
   s_waitcnt vmcnt(0) lgkmcnt(15)
-  scratch_load_b32 v2, off, off offset:0 nt:0 sc0:0 sc1:0
+  scratch_load_b32 v0, off, off offset:0 nt:0 sc0:0 sc1:0
   s_waitcnt vmcnt(0) lgkmcnt(15)
-  v_readfirstlane_b32 s2, v2
+  v_readfirstlane_b32 s2, v0
   s_mov_b32 m0, 0
-  scratch_load_b32 v2, off, off offset:4 nt:0 sc0:0 sc1:0
+  scratch_load_b32 v0, off, off offset:4 nt:0 sc0:0 sc1:0
   s_waitcnt vmcnt(0) lgkmcnt(15)
-  v_readfirstlane_b32 s3, v2
+  v_readfirstlane_b32 s3, v0
   s_mov_b64 exec, s[0:1]
   s_endpgm
 

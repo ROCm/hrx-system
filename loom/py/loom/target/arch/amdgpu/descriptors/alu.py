@@ -861,6 +861,31 @@ def _v_add_u32_overlay(instruction_name: str) -> AmdgpuDescriptorOverlay:
     )
 
 
+def _v_add_u32_rhs_tied_overlay(
+    instruction_name: str,
+) -> AmdgpuDescriptorOverlay:
+    return AmdgpuDescriptorOverlay(
+        descriptor_key="amdgpu.v_add_u32.rhs_tied",
+        instruction_name=instruction_name,
+        mnemonic="v_add_u32_rhs_tied",
+        encoding_name="ENC_VOP2",
+        semantic_tag="integer.add.u32",
+        schedule_class=_SCHEDULE_VALU,
+        operands=(
+            AmdgpuOperandOverlay("VDST", _vgpr_result()),
+            AmdgpuOperandOverlay("SRC0", _sgpr_vgpr_operand("lhs")),
+            AmdgpuOperandOverlay("VSRC1", _vgpr_operand("rhs")),
+        ),
+        asm_forms=_asm(
+            native_assembly_mnemonic=instruction_name.lower(),
+            results=("dst",),
+            operands=("lhs", "rhs"),
+        ),
+        constraints=_destructive_accumulator_constraints(2),
+        flags=(DescriptorFlag.DEAD_REMOVABLE,),
+    )
+
+
 def _v_add_u32_src0_inline_overlay(instruction_name: str) -> AmdgpuDescriptorOverlay:
     return _v_binary_src0_inline_overlay(
         descriptor_key="amdgpu.v_add_u32.src0_inline",
@@ -1181,6 +1206,31 @@ def _v_sub_u32_overlay(instruction_name: str, mnemonic: str) -> AmdgpuDescriptor
             AmdgpuOperandOverlay("VSRC1", _vgpr_operand("rhs")),
         ),
         constraints=_REMATERIALIZABLE_RESULT_CONSTRAINTS,
+        flags=(DescriptorFlag.DEAD_REMOVABLE,),
+    )
+
+
+def _v_sub_u32_lhs_tied_overlay(
+    instruction_name: str, mnemonic: str
+) -> AmdgpuDescriptorOverlay:
+    return AmdgpuDescriptorOverlay(
+        descriptor_key="amdgpu.v_sub_u32.lhs_tied",
+        instruction_name=instruction_name,
+        mnemonic=f"{mnemonic}_lhs_tied",
+        encoding_name="ENC_VOP2",
+        semantic_tag="integer.sub.u32",
+        schedule_class=_SCHEDULE_VALU,
+        operands=(
+            AmdgpuOperandOverlay("VDST", _vgpr_result()),
+            AmdgpuOperandOverlay("SRC0", _vgpr_operand("lhs")),
+            AmdgpuOperandOverlay("VSRC1", _vgpr_operand("rhs")),
+        ),
+        asm_forms=_asm(
+            native_assembly_mnemonic=mnemonic,
+            results=("dst",),
+            operands=("lhs", "rhs"),
+        ),
+        constraints=_destructive_accumulator_constraints(1),
         flags=(DescriptorFlag.DEAD_REMOVABLE,),
     )
 
@@ -6859,6 +6909,7 @@ __all__ = (
     "_v_add_f32_src0_inline_overlay",
     "_v_add_u32_literal_overlay",
     "_v_add_u32_overlay",
+    "_v_add_u32_rhs_tied_overlay",
     "_v_add_u32_src0_inline_overlay",
     "_v_and_b32_literal_overlay",
     "_v_and_b32_overlay",
@@ -7070,6 +7121,7 @@ __all__ = (
     "_v_subrev_f32_overlay",
     "_v_subrev_f32_overlays",
     "_v_subrev_f32_src0_inline_overlay",
+    "_v_sub_u32_lhs_tied_overlay",
     "_v_sub_u32_overlay",
     "_v_ternary_float_overlay",
     "_v_unary_f32_overlay",

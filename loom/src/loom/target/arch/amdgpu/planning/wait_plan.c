@@ -356,8 +356,6 @@ iree_string_view_t loom_amdgpu_wait_plan_reason_name(
       return IREE_SV("amdgpu.ssa_use");
     case LOOM_AMDGPU_WAIT_PLAN_REASON_BARRIER:
       return IREE_SV("amdgpu.barrier");
-    case LOOM_AMDGPU_WAIT_PLAN_REASON_STORE_SOURCE_REUSE:
-      return IREE_SV("amdgpu.store_source_reuse");
     case LOOM_AMDGPU_WAIT_PLAN_REASON_READ_RESULT_REUSE:
       return IREE_SV("amdgpu.read_result_reuse");
     case LOOM_AMDGPU_WAIT_PLAN_REASON_TRANS_RESULT_USE:
@@ -416,7 +414,6 @@ static bool loom_amdgpu_wait_plan_reason_has_consumer(
     loom_amdgpu_wait_plan_reason_t reason) {
   switch (reason) {
     case LOOM_AMDGPU_WAIT_PLAN_REASON_SSA_USE:
-    case LOOM_AMDGPU_WAIT_PLAN_REASON_STORE_SOURCE_REUSE:
     case LOOM_AMDGPU_WAIT_PLAN_REASON_READ_RESULT_REUSE:
     case LOOM_AMDGPU_WAIT_PLAN_REASON_TRANS_RESULT_USE:
     case LOOM_AMDGPU_WAIT_PLAN_REASON_VALU_SGPR_READ:
@@ -433,7 +430,6 @@ static bool loom_amdgpu_wait_plan_reason_has_consumer(
 static bool loom_amdgpu_wait_plan_reason_is_storage_release(
     loom_amdgpu_wait_plan_reason_t reason) {
   switch (reason) {
-    case LOOM_AMDGPU_WAIT_PLAN_REASON_STORE_SOURCE_REUSE:
     case LOOM_AMDGPU_WAIT_PLAN_REASON_READ_RESULT_REUSE:
     case LOOM_AMDGPU_WAIT_PLAN_REASON_MEMORY_SOURCE_REUSE:
       return true;

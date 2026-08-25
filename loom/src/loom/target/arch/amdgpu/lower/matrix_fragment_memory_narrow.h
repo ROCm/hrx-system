@@ -38,9 +38,9 @@ iree_status_t loom_amdgpu_emit_fragment_memory_fp8_to_packed_16bit_load_packet(
     const loom_amdgpu_matrix_fragment_layout_t* layout,
     const loom_amdgpu_fragment_memory_plan_t* plan,
     const loom_amdgpu_fragment_memory_packet_plan_t* packet,
-    const loom_amdgpu_fragment_memory_address_accumulator_t* base_accumulator,
-    loom_value_id_t low_address_resource, loom_value_id_t low_packet_resource,
-    loom_type_t vgpr_type, loom_type_t mask_type, loom_value_id_t low_soffset,
+    loom_amdgpu_fragment_memory_address_state_t* address_state,
+    loom_value_id_t low_packet_resource, loom_type_t vgpr_type,
+    loom_type_t mask_type, loom_value_id_t low_soffset,
     loom_value_id_t* out_low_packet);
 
 #ifdef __cplusplus

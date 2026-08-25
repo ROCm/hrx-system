@@ -226,16 +226,19 @@ static bool loom_low_source_memory_access_axis_is_dynamic(
 }
 
 static bool loom_low_source_memory_access_static_byte_offset(
+    const loom_value_fact_table_t* fact_table,
     const loom_vector_memory_access_t* vector_access,
     loom_attribute_t static_indices, const uint8_t* dynamic_axes,
-    uint8_t dynamic_axis_count, int64_t* out_static_byte_offset) {
+    uint8_t dynamic_axis_count, uint8_t* out_dynamic_stride_axes,
+    uint8_t* out_dynamic_stride_axis_count, int64_t* out_static_byte_offset) {
   *out_static_byte_offset = 0;
+  *out_dynamic_stride_axis_count = 0;
   if (static_indices.kind != LOOM_ATTR_I64_ARRAY ||
-      static_indices.count > LOOM_ENCODING_ADDRESS_LAYOUT_MAX_RANK) {
+      static_indices.count != vector_access->view_rank) {
     return false;
   }
 
-  int64_t static_origin[LOOM_ENCODING_ADDRESS_LAYOUT_MAX_RANK] = {0};
+  int64_t static_byte_offset = 0;
   for (uint16_t i = 0; i < static_indices.count; ++i) {
     if (loom_low_source_memory_access_axis_is_dynamic(dynamic_axes,
                                                       dynamic_axis_count, i)) {
@@ -247,14 +250,29 @@ static bool loom_low_source_memory_access_static_byte_offset(
     if (static_indices.i64_array[i] == INT64_MIN) {
       return false;
     }
-    static_origin[i] = static_indices.i64_array[i];
+    const int64_t coordinate = static_indices.i64_array[i];
+    if (coordinate == 0) continue;
+    if (coordinate < 0) return false;
+    loom_low_source_memory_axis_byte_stride_t axis_stride;
+    loom_low_source_memory_query_axis_byte_stride(fact_table, vector_access,
+                                                  (uint8_t)i, &axis_stride);
+    if (axis_stride.kind == LOOM_LOW_SOURCE_MEMORY_AXIS_BYTE_STRIDE_STATIC) {
+      if (!iree_checked_mul_add_i64(static_byte_offset, coordinate,
+                                    axis_stride.static_byte_coefficient,
+                                    &static_byte_offset)) {
+        return false;
+      }
+      continue;
+    }
+    if (axis_stride.kind != LOOM_LOW_SOURCE_MEMORY_AXIS_BYTE_STRIDE_DYNAMIC ||
+        *out_dynamic_stride_axis_count >= vector_access->view_rank) {
+      return false;
+    }
+    out_dynamic_stride_axes[*out_dynamic_stride_axis_count] = (uint8_t)i;
+    ++*out_dynamic_stride_axis_count;
   }
-  loom_attribute_t static_origin_attr =
-      loom_attr_i64_array(static_origin, static_indices.count);
-  int64_t lane_indices[] = {0};
-  return loom_vector_memory_access_static_lane_byte_offset(
-      vector_access, static_origin_attr, lane_indices,
-      IREE_ARRAYSIZE(lane_indices), out_static_byte_offset);
+  *out_static_byte_offset = static_byte_offset;
+  return true;
 }
 
 static void loom_low_source_memory_access_fold_exact_dynamic_indices(
@@ -321,81 +339,142 @@ static bool loom_low_source_memory_access_power_of_two_shift(
   return true;
 }
 
-static bool loom_low_source_memory_access_dynamic_dense_axis_byte_stride(
+static bool loom_low_source_memory_access_explicit_stride_value(
     const loom_vector_memory_access_t* vector_access, uint8_t view_axis,
-    int64_t* out_byte_stride, loom_value_id_t* out_stride_values,
-    uint8_t* out_stride_value_count) {
-  *out_byte_stride = 0;
-  *out_stride_value_count = 0;
-  if (vector_access->layout_kind != LOOM_VECTOR_MEMORY_LAYOUT_DENSE ||
-      view_axis >= vector_access->view_rank ||
-      vector_access->static_element_byte_count <= 0) {
+    loom_value_id_t* out_value) {
+  *out_value = LOOM_VALUE_ID_INVALID;
+  const loom_encoding_address_layout_operands_t* operands =
+      &vector_access->layout_operands;
+  if (operands->static_strides.kind != LOOM_ATTR_I64_ARRAY ||
+      operands->static_strides.count != vector_access->view_rank ||
+      view_axis >= operands->static_strides.count) {
     return false;
   }
-
-  int64_t byte_stride = vector_access->static_element_byte_count;
-  for (uint8_t axis = (uint8_t)(view_axis + 1); axis < vector_access->view_rank;
-       ++axis) {
-    if (loom_type_dim_is_dynamic_at(vector_access->view_type, axis)) {
-      if (*out_stride_value_count >=
-          LOOM_LOW_SOURCE_MEMORY_DYNAMIC_TERM_CAPACITY) {
-        return false;
-      }
-      out_stride_values[*out_stride_value_count] =
-          loom_type_dim_value_id_at(vector_access->view_type, axis);
-      *out_stride_value_count += 1;
-      continue;
+  uint16_t dynamic_ordinal = 0;
+  for (uint16_t axis = 0; axis < operands->static_strides.count; ++axis) {
+    if (operands->static_strides.i64_array[axis] != INT64_MIN) continue;
+    if (axis == view_axis) {
+      if (dynamic_ordinal >= operands->dynamic_stride_count) return false;
+      *out_value = operands->dynamic_stride_values[dynamic_ordinal];
+      return true;
     }
-    const int64_t dimension_size =
-        loom_type_dim_static_size_at(vector_access->view_type, axis);
-    if (dimension_size < 0 ||
-        !iree_checked_mul_i64(byte_stride, dimension_size, &byte_stride)) {
-      return false;
-    }
-  }
-  *out_byte_stride = byte_stride;
-  return true;
-}
-
-static bool loom_low_source_memory_access_dynamic_axis_byte_stride(
-    const loom_vector_memory_access_t* vector_access, uint8_t dynamic_axis,
-    int64_t* out_byte_stride, loom_value_id_t* out_stride_values,
-    uint8_t* out_stride_value_count) {
-  *out_byte_stride = 0;
-  *out_stride_value_count = 0;
-  switch (vector_access->layout_kind) {
-    case LOOM_VECTOR_MEMORY_LAYOUT_DENSE:
-      return loom_low_source_memory_access_dynamic_dense_axis_byte_stride(
-          vector_access, dynamic_axis, out_byte_stride, out_stride_values,
-          out_stride_value_count);
-    case LOOM_VECTOR_MEMORY_LAYOUT_STRIDED: {
-      int64_t axis_stride = 0;
-      if (!loom_vector_memory_access_static_axis_stride(
-              vector_access, dynamic_axis, &axis_stride)) {
-        return false;
-      }
-      return iree_checked_mul_i64(axis_stride,
-                                  vector_access->static_element_byte_count,
-                                  out_byte_stride);
-    }
-    case LOOM_VECTOR_MEMORY_LAYOUT_UNKNOWN:
-      return false;
+    ++dynamic_ordinal;
   }
   return false;
 }
 
+void loom_low_source_memory_query_axis_byte_stride(
+    const loom_value_fact_table_t* fact_table,
+    const loom_vector_memory_access_t* vector_access, uint8_t view_axis,
+    loom_low_source_memory_axis_byte_stride_t* out_stride) {
+  *out_stride = (loom_low_source_memory_axis_byte_stride_t){
+      .kind = LOOM_LOW_SOURCE_MEMORY_AXIS_BYTE_STRIDE_UNAVAILABLE,
+      .byte_facts = loom_value_facts_unknown(),
+      .static_byte_shift = LOOM_LOW_SOURCE_MEMORY_ACCESS_BYTE_SHIFT_NONE,
+  };
+  if (view_axis >= vector_access->view_rank ||
+      vector_access->static_element_byte_count < 0) {
+    return;
+  }
+
+  int64_t static_byte_coefficient = vector_access->static_element_byte_count;
+  loom_value_facts_t byte_facts =
+      loom_value_facts_exact_i64(static_byte_coefficient);
+  if (vector_access->layout_kind == LOOM_VECTOR_MEMORY_LAYOUT_DENSE) {
+    for (uint8_t axis = (uint8_t)(view_axis + 1);
+         axis < vector_access->view_rank; ++axis) {
+      loom_value_facts_t dimension_facts = loom_value_facts_unknown();
+      if (loom_type_dim_is_dynamic_at(vector_access->view_type, axis)) {
+        const loom_value_id_t dimension_value =
+            loom_type_dim_value_id_at(vector_access->view_type, axis);
+        dimension_facts = loom_value_facts_non_negative_extent(
+            loom_value_fact_table_lookup(fact_table, dimension_value));
+        int64_t exact_dimension = 0;
+        if (loom_low_source_memory_access_exact_i64(dimension_facts,
+                                                    &exact_dimension)) {
+          if (!iree_checked_mul_i64(static_byte_coefficient, exact_dimension,
+                                    &static_byte_coefficient)) {
+            out_stride->kind = LOOM_LOW_SOURCE_MEMORY_AXIS_BYTE_STRIDE_INVALID;
+            return;
+          }
+        } else {
+          out_stride->dynamic_factors[out_stride->dynamic_factor_count++] =
+              dimension_value;
+        }
+      } else {
+        const int64_t dimension_size =
+            loom_type_dim_static_size_at(vector_access->view_type, axis);
+        dimension_facts = loom_value_facts_exact_i64(dimension_size);
+        if (dimension_size < 0 ||
+            !iree_checked_mul_i64(static_byte_coefficient, dimension_size,
+                                  &static_byte_coefficient)) {
+          out_stride->kind = LOOM_LOW_SOURCE_MEMORY_AXIS_BYTE_STRIDE_INVALID;
+          return;
+        }
+      }
+      loom_value_facts_muli(&byte_facts, &dimension_facts, &byte_facts);
+    }
+  } else if (vector_access->layout_kind == LOOM_VECTOR_MEMORY_LAYOUT_STRIDED) {
+    const loom_value_fact_address_layout_t layout =
+        vector_access->layout_summary;
+    if (layout.kind != LOOM_VALUE_FACT_ADDRESS_LAYOUT_STRIDED ||
+        view_axis >= layout.rank || !layout.strides) {
+      return;
+    }
+    const loom_value_facts_t element_stride_facts = layout.strides[view_axis];
+    if (loom_value_facts_is_float(element_stride_facts)) {
+      out_stride->kind = LOOM_LOW_SOURCE_MEMORY_AXIS_BYTE_STRIDE_INVALID;
+      return;
+    }
+    loom_value_facts_muli(&byte_facts, &element_stride_facts, &byte_facts);
+    int64_t exact_element_stride = 0;
+    if (loom_low_source_memory_access_exact_i64(element_stride_facts,
+                                                &exact_element_stride)) {
+      if (!iree_checked_mul_i64(static_byte_coefficient, exact_element_stride,
+                                &static_byte_coefficient)) {
+        out_stride->kind = LOOM_LOW_SOURCE_MEMORY_AXIS_BYTE_STRIDE_INVALID;
+        return;
+      }
+    } else {
+      loom_value_id_t stride_value = LOOM_VALUE_ID_INVALID;
+      if (!loom_low_source_memory_access_explicit_stride_value(
+              vector_access, view_axis, &stride_value)) {
+        out_stride->kind =
+            LOOM_LOW_SOURCE_MEMORY_AXIS_BYTE_STRIDE_UNMATERIALIZED;
+        out_stride->byte_facts = byte_facts;
+        return;
+      }
+      out_stride->dynamic_factors[out_stride->dynamic_factor_count++] =
+          stride_value;
+    }
+  } else {
+    return;
+  }
+
+  // A zero static factor makes the complete product exact even when a suffix
+  // dimension is dynamic.
+  if (static_byte_coefficient == 0) {
+    out_stride->dynamic_factor_count = 0;
+    byte_facts = loom_value_facts_exact_i64(0);
+  }
+  out_stride->kind = out_stride->dynamic_factor_count == 0
+                         ? LOOM_LOW_SOURCE_MEMORY_AXIS_BYTE_STRIDE_STATIC
+                         : LOOM_LOW_SOURCE_MEMORY_AXIS_BYTE_STRIDE_DYNAMIC;
+  out_stride->static_byte_coefficient = static_byte_coefficient;
+  out_stride->byte_facts = byte_facts;
+  (void)loom_low_source_memory_access_power_of_two_shift(
+      static_byte_coefficient, &out_stride->static_byte_shift);
+}
+
 static uint8_t loom_low_source_memory_access_axis_from_byte_stride(
+    const loom_value_fact_table_t* fact_table,
     const loom_vector_memory_access_t* vector_access, int64_t byte_stride) {
-  if (!vector_access) return LOOM_LOW_SOURCE_MEMORY_DYNAMIC_TERM_AXIS_NONE;
   for (uint8_t axis = 0; axis < vector_access->view_rank; ++axis) {
-    int64_t axis_byte_stride = 0;
-    loom_value_id_t
-        stride_values[LOOM_LOW_SOURCE_MEMORY_DYNAMIC_TERM_CAPACITY] = {0};
-    uint8_t stride_value_count = 0;
-    if (!loom_low_source_memory_access_dynamic_axis_byte_stride(
-            vector_access, axis, &axis_byte_stride, stride_values,
-            &stride_value_count) ||
-        stride_value_count != 0 || axis_byte_stride != byte_stride) {
+    loom_low_source_memory_axis_byte_stride_t axis_stride;
+    loom_low_source_memory_query_axis_byte_stride(fact_table, vector_access,
+                                                  axis, &axis_stride);
+    if (axis_stride.kind != LOOM_LOW_SOURCE_MEMORY_AXIS_BYTE_STRIDE_STATIC ||
+        axis_stride.static_byte_coefficient != byte_stride) {
       continue;
     }
     return axis;
@@ -821,7 +900,7 @@ static bool loom_low_source_memory_access_add_view_region_expression_terms(
     const uint8_t dynamic_axis =
         expression_role == LOOM_LOW_SOURCE_MEMORY_VIEW_EXPRESSION_PROJECTION
             ? loom_low_source_memory_access_axis_from_byte_stride(
-                  vector_access, expression_term->coefficient)
+                  fact_table, vector_access, expression_term->coefficient)
             : LOOM_LOW_SOURCE_MEMORY_DYNAMIC_TERM_AXIS_NONE;
     loom_low_source_memory_dynamic_term_t term = {
         .index = materialized_value,
@@ -1291,13 +1370,18 @@ static bool loom_low_source_memory_access_plan_from_components(
     return false;
   }
 
-  int64_t vector_axis_stride = 0;
-  if (!loom_vector_memory_access_static_axis_stride(
-          &vector_access, vector_access.first_vector_axis,
-          &vector_axis_stride) ||
-      !iree_checked_mul_i64(vector_axis_stride,
-                            vector_access.static_element_byte_count,
-                            &out_plan->vector_lane_byte_stride)) {
+  loom_low_source_memory_axis_byte_stride_t vector_axis_stride;
+  loom_low_source_memory_query_axis_byte_stride(fact_table, &vector_access,
+                                                vector_access.first_vector_axis,
+                                                &vector_axis_stride);
+  if (vector_axis_stride.kind ==
+      LOOM_LOW_SOURCE_MEMORY_AXIS_BYTE_STRIDE_STATIC) {
+    out_plan->vector_lane_byte_stride =
+        vector_axis_stride.static_byte_coefficient;
+  } else if (out_plan->vector_lane_count == 1) {
+    // A one-lane access has no adjacent-lane address delta to materialize.
+    out_plan->vector_lane_byte_stride = 0;
+  } else {
     out_diagnostic->rejection_bits |=
         LOOM_LOW_SOURCE_MEMORY_ACCESS_REJECTION_VECTOR_AXIS_STRIDE;
     return false;
@@ -1321,9 +1405,12 @@ static bool loom_low_source_memory_access_plan_from_components(
   static_indices =
       loom_attr_i64_array(folded_static_indices, static_indices.count);
 
+  uint8_t dynamic_stride_axes[LOOM_ENCODING_ADDRESS_LAYOUT_MAX_RANK] = {0};
+  uint8_t dynamic_stride_axis_count = 0;
   int64_t static_byte_offset = 0;
   if (!loom_low_source_memory_access_static_byte_offset(
-          &vector_access, static_indices, dynamic_axes, dynamic_axis_count,
+          fact_table, &vector_access, static_indices, dynamic_axes,
+          dynamic_axis_count, dynamic_stride_axes, &dynamic_stride_axis_count,
           &static_byte_offset)) {
     out_diagnostic->rejection_bits |=
         LOOM_LOW_SOURCE_MEMORY_ACCESS_REJECTION_STATIC_OFFSET;
@@ -1335,6 +1422,50 @@ static bool loom_low_source_memory_access_plan_from_components(
     return false;
   }
 
+  // A nonzero static coordinate crossing a runtime physical stride is still a
+  // dynamic byte-address term. Use the first stride factor as the term source
+  // and retain the remaining factors on its byte stride.
+  for (uint8_t i = 0; i < dynamic_stride_axis_count; ++i) {
+    const uint8_t axis = dynamic_stride_axes[i];
+    const int64_t coordinate = static_indices.i64_array[axis];
+    loom_low_source_memory_axis_byte_stride_t axis_stride;
+    loom_low_source_memory_query_axis_byte_stride(fact_table, &vector_access,
+                                                  axis, &axis_stride);
+    IREE_ASSERT_GT(axis_stride.dynamic_factor_count, 0u);
+    int64_t byte_stride = 0;
+    if (!iree_checked_mul_i64(axis_stride.static_byte_coefficient, coordinate,
+                              &byte_stride)) {
+      out_diagnostic->rejection_bits |=
+          LOOM_LOW_SOURCE_MEMORY_ACCESS_REJECTION_DYNAMIC_STRIDE;
+      return false;
+    }
+    loom_low_source_memory_dynamic_term_t term = {
+        .index = axis_stride.dynamic_factors[0],
+        .source = LOOM_LOW_SOURCE_MEMORY_DYNAMIC_INDEX_SOURCE_VALUE,
+        .dimension = LOOM_KERNEL_DIMENSION_COUNT_,
+        .axis = LOOM_LOW_SOURCE_MEMORY_DYNAMIC_TERM_AXIS_NONE,
+        .byte_stride = byte_stride,
+        .byte_facts = loom_value_facts_unknown(),
+        .byte_shift = LOOM_LOW_SOURCE_MEMORY_ACCESS_BYTE_SHIFT_NONE,
+        .stride_value_count = (uint8_t)(axis_stride.dynamic_factor_count - 1),
+    };
+    loom_low_source_memory_access_dynamic_index_source(
+        fact_table, term.index, &term.source, &term.dimension);
+    for (uint8_t factor = 1; factor < axis_stride.dynamic_factor_count;
+         ++factor) {
+      term.stride_values[factor - 1] = axis_stride.dynamic_factors[factor];
+    }
+    (void)loom_low_source_memory_access_power_of_two_shift(term.byte_stride,
+                                                           &term.byte_shift);
+    loom_low_source_memory_dynamic_term_compute_scaled_byte_facts(
+        fact_table, term.index, term.byte_stride, term.stride_values,
+        term.stride_value_count, &term.byte_facts);
+    if (!loom_low_source_memory_access_append_dynamic_term(out_plan, &term,
+                                                           out_diagnostic)) {
+      return false;
+    }
+  }
+
   for (uint8_t i = 0; i < dynamic_axis_count; ++i) {
     const uint8_t dynamic_axis = dynamic_axes[i];
     if (dynamic_axis >= vector_access.view_rank) {
@@ -1343,16 +1474,23 @@ static bool loom_low_source_memory_access_plan_from_components(
       return false;
     }
 
-    int64_t byte_stride = 0;
-    loom_value_id_t
-        stride_values[LOOM_LOW_SOURCE_MEMORY_DYNAMIC_TERM_CAPACITY] = {0};
-    uint8_t stride_value_count = 0;
-    if (!loom_low_source_memory_access_dynamic_axis_byte_stride(
-            &vector_access, dynamic_axis, &byte_stride, stride_values,
-            &stride_value_count)) {
+    loom_low_source_memory_axis_byte_stride_t axis_stride;
+    loom_low_source_memory_query_axis_byte_stride(fact_table, &vector_access,
+                                                  dynamic_axis, &axis_stride);
+    if (axis_stride.kind != LOOM_LOW_SOURCE_MEMORY_AXIS_BYTE_STRIDE_STATIC &&
+        axis_stride.kind != LOOM_LOW_SOURCE_MEMORY_AXIS_BYTE_STRIDE_DYNAMIC) {
       out_diagnostic->rejection_bits |=
           LOOM_LOW_SOURCE_MEMORY_ACCESS_REJECTION_DYNAMIC_STRIDE;
       return false;
+    }
+    int64_t byte_stride = axis_stride.static_byte_coefficient;
+    loom_value_id_t
+        stride_values[LOOM_LOW_SOURCE_MEMORY_DYNAMIC_TERM_CAPACITY] = {0};
+    const uint8_t stride_value_count = axis_stride.dynamic_factor_count;
+    for (uint8_t stride_ordinal = 0; stride_ordinal < stride_value_count;
+         ++stride_ordinal) {
+      stride_values[stride_ordinal] =
+          axis_stride.dynamic_factors[stride_ordinal];
     }
 
     const loom_value_id_t source_index = dynamic_index_values[i];

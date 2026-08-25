@@ -51,8 +51,7 @@ typedef enum loom_amdgpu_wait_plan_reason_e {
   LOOM_AMDGPU_WAIT_PLAN_REASON_SSA_USE = 2,
   // A barrier observes memory that may still have outstanding packets.
   LOOM_AMDGPU_WAIT_PLAN_REASON_BARRIER = 3,
-  // A packet reuses physical VGPRs still consumed by an outstanding store.
-  LOOM_AMDGPU_WAIT_PLAN_REASON_STORE_SOURCE_REUSE = 4,
+  // Reason identifier 4 is reserved to keep report identifiers stable.
   // A packet overwrites physical registers that still receive an outstanding
   // memory-read result.
   LOOM_AMDGPU_WAIT_PLAN_REASON_READ_RESULT_REUSE = 5,

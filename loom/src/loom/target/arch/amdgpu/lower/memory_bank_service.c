@@ -186,6 +186,19 @@ iree_status_t loom_amdgpu_fragment_memory_report_bank_service(
         IREE_SV("address-dynamic-base-not-subgroup-uniform"), out_report);
     return iree_ok_status();
   }
+  if (!loom_amdgpu_fragment_memory_runtime_packet_offset_is_subgroup_uniform(
+          plan, packet->register_index, element_index)) {
+    loom_amdgpu_memory_full_subgroup_proof_t active_lane_proof = {0};
+    IREE_RETURN_IF_ERROR(loom_amdgpu_memory_prove_full_subgroup(
+        context, source_op, model->wave_size,
+        LOOM_AMDGPU_MEMORY_LANE_SOURCE_SUBGROUP_LANE, &active_lane_proof));
+    if (active_lane_proof.is_full_subgroup) {
+      out_report->active_lane_proof = active_lane_proof.proof;
+    }
+    loom_amdgpu_memory_bank_service_mark_unknown(
+        IREE_SV("address-runtime-fragment-stride"), out_report);
+    return iree_ok_status();
+  }
 
   uint64_t packet_byte_offset =
       plan->address_layout.register_byte_offsets[packet->register_index];

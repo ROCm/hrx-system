@@ -424,15 +424,6 @@ def test_storage_lease_rows_project_memory_dependencies() -> None:
         (
             StorageLeaseKind.SOURCE_READ,
             StorageLeaseAttachment.OPERAND,
-            0,
-            1,
-            _COUNTER_VMEM_STORE,
-            "amdgpu.store_source_reuse",
-            source_flags,
-        ),
-        (
-            StorageLeaseKind.SOURCE_READ,
-            StorageLeaseAttachment.OPERAND,
             1,
             4,
             _COUNTER_VMEM_LOAD,
@@ -1327,6 +1318,34 @@ def test_pure_integer_valu_results_are_rematerializable() -> None:
                 constraint.kind is ConstraintKind.REMATERIALIZABLE
                 for constraint in descriptor.constraints
             )
+
+
+def test_tied_u32_address_arithmetic_forms_are_destructive() -> None:
+    for overlays, add_native_mnemonic, sub_mnemonic in (
+        (_gfx940_core_overlays(), "v_add_u32", "v_sub_u32"),
+        (_gfx11_core_overlays(), "v_add_nc_u32", "v_sub_nc_u32"),
+        (_gfx125x_core_overlays(), "v_add_nc_u32", "v_sub_nc_u32"),
+    ):
+        descriptors = {descriptor.descriptor_key: descriptor for descriptor in overlays}
+        add = descriptors["amdgpu.v_add_u32.rhs_tied"]
+        assert add.mnemonic == "v_add_u32_rhs_tied"
+        assert add.asm_forms is not None
+        assert add.asm_forms[0].native_assembly_mnemonic == add_native_mnemonic
+        assert add.constraints == (
+            Constraint(ConstraintKind.TIED, 0, 2),
+            Constraint(ConstraintKind.DESTRUCTIVE, 0, 2),
+            Constraint(ConstraintKind.EARLY_CLOBBER, 0),
+        )
+
+        sub = descriptors["amdgpu.v_sub_u32.lhs_tied"]
+        assert sub.mnemonic == f"{sub_mnemonic}_lhs_tied"
+        assert sub.asm_forms is not None
+        assert sub.asm_forms[0].native_assembly_mnemonic == sub_mnemonic
+        assert sub.constraints == (
+            Constraint(ConstraintKind.TIED, 0, 1),
+            Constraint(ConstraintKind.DESTRUCTIVE, 0, 1),
+            Constraint(ConstraintKind.EARLY_CLOBBER, 0),
+        )
 
 
 def test_integer_binary_src0_accepts_scalar_or_vector_registers() -> None:

@@ -48,6 +48,8 @@ typedef enum loom_amdgpu_descriptor_trait_bit_e {
   // Descriptor writes a sub-DWORD result through destination-selection
   // forwarding rather than an ordinary full-register write.
   LOOM_AMDGPU_DESCRIPTOR_TRAIT_DESTINATION_SELECTION_FORWARDING = 1u << 11,
+  // A packet address operand remains physically live after the packet issues.
+  LOOM_AMDGPU_DESCRIPTOR_TRAIT_ADDRESS_SOURCE_RETAINED = 1u << 12,
 } loom_amdgpu_descriptor_trait_bit_t;
 typedef uint32_t loom_amdgpu_descriptor_traits_t;
 

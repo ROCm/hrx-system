@@ -1,0 +1,41 @@
+// RUN: emit source-low output=low
+
+amdgpu.target<gfx1100> @target
+
+kernel.def target(@target) @fragment_runtime_stride_address_range_rejected() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%row_size0: index, %output: buffer) {
+  %row_size = index.assume %row_size0 [range(%row_size0, 16, 1073741823)] : index
+  %base = index.constant 0 : offset
+  %m = index.constant 16 : index
+  %n = index.constant 16 : index
+  %output_view = buffer.view %output[%base] : buffer -> view<16x[%row_size]xf32>
+  %values = vector.constant 0.0 : vector<8xf32>
+  %result = vector.fragment<result> %values shape [%m, %n] : vector<8xf32>
+  // ERROR@+1: AMDGPU/023 {constraint_key="fragment_memory.address_range"}
+  vector.fragment.store<result> %result, %output_view[0, 0] shape [%m, %n] : vector<8xf32>, view<16x[%row_size]xf32>
+  kernel.return
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+
+kernel.def target(@target) @fragment_unbounded_runtime_stride_rejected() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%row_stride: index, %output: buffer) {
+  %base = index.constant 0 : offset
+  %m = index.constant 16 : index
+  %n = index.constant 16 : index
+  %layout = encoding.layout.strided [%row_stride, 1] : encoding<layout>
+  %output_view = buffer.view %output[%base] : buffer -> view<16x16xf32, %layout>
+  %values = vector.constant 0.0 : vector<8xf32>
+  %result = vector.fragment<result> %values shape [%m, %n] : vector<8xf32>
+  // ERROR@+1: AMDGPU/023 {constraint_key="fragment_memory.view_stride"}
+  vector.fragment.store<result> %result, %output_view[0, 0] shape [%m, %n] : vector<8xf32>, view<16x16xf32, %layout>
+  kernel.return
+}

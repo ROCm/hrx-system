@@ -215,6 +215,18 @@ class SourceMemoryPlanTest : public ::testing::Test {
     return loom_encoding_layout_strided_result(op);
   }
 
+  loom_value_id_t BuildDynamicStridedLayout(loom_value_id_t row_stride,
+                                            int64_t column_stride) {
+    const int64_t static_strides[] = {INT64_MIN, column_stride};
+    loom_op_t* op = nullptr;
+    IREE_CHECK_OK(loom_encoding_layout_strided_build(
+        &builder_, &row_stride, 1, static_strides,
+        IREE_ARRAYSIZE(static_strides),
+        loom_type_encoding_with_role(LOOM_ENCODING_ROLE_ADDRESS_LAYOUT),
+        LOOM_LOCATION_UNKNOWN, &op));
+    return loom_encoding_layout_strided_result(op);
+  }
+
   loom_type_t ViewType1D(loom_scalar_type_t element_type, int64_t extent,
                          loom_value_id_t layout) {
     loom_type_t type = loom_type_shaped_1d(LOOM_TYPE_VIEW, element_type,
@@ -236,6 +248,23 @@ class SourceMemoryPlanTest : public ::testing::Test {
                                            loom_dim_pack_static(columns), 0);
     type.encoding_id = (uint16_t)layout;
     type.encoding_flags = LOOM_ENCODING_FLAG_SSA;
+    return type;
+  }
+
+  loom_type_t ViewType3D(uint64_t blocks, uint64_t rows, uint64_t columns,
+                         loom_value_id_t layout) {
+    loom_overflow_dim_t* dimensions = nullptr;
+    IREE_CHECK_OK(iree_arena_allocate_array(
+        &module_->arena, 3, sizeof(*dimensions), (void**)&dimensions));
+    dimensions[0] = blocks;
+    dimensions[1] = rows;
+    dimensions[2] = columns;
+    loom_type_t type = {};
+    type.header =
+        loom_type_make_header(LOOM_TYPE_VIEW, LOOM_SCALAR_TYPE_F32, 3, 0);
+    type.encoding_id = (uint16_t)layout;
+    type.encoding_flags = LOOM_ENCODING_FLAG_SSA;
+    type.dims[0] = (uint64_t)(uintptr_t)dimensions;
     return type;
   }
 
@@ -406,6 +435,177 @@ TEST_F(SourceMemoryPlanTest, StaticStridedLayoutClassifiesCompactness) {
     ASSERT_TRUE(BuildPlan(&facts, load_ops[i], &plan, &diagnostic));
     EXPECT_EQ(plan.address_layout, expected_layouts[i]);
   }
+}
+
+TEST_F(SourceMemoryPlanTest, DynamicStridedLayoutScalesDynamicOrigin) {
+  const loom_value_id_t buffer = DefineBufferArg();
+  const loom_value_id_t row_stride = DefineIndexArg();
+  const loom_value_id_t row = DefineIndexArg();
+  const loom_value_id_t layout =
+      BuildDynamicStridedLayout(row_stride, /*column_stride=*/1);
+  const loom_value_id_t base_offset =
+      loom_index_constant_result(BuildOffsetConstant(0));
+  loom_op_t* view_op = nullptr;
+  IREE_ASSERT_OK(loom_buffer_view_build(&builder_, buffer, base_offset,
+                                        ViewType2D(8, 16, layout),
+                                        LOOM_LOCATION_UNKNOWN, &view_op));
+  const int64_t static_indices[] = {INT64_MIN, 0};
+  loom_op_t* load_op = nullptr;
+  IREE_ASSERT_OK(loom_vector_load_build(
+      &builder_, 0, loom_buffer_view_result(view_op), &row, 1, static_indices,
+      IREE_ARRAYSIZE(static_indices), 0, 0, VectorType1D(1),
+      LOOM_LOCATION_UNKNOWN, &load_op));
+
+  loom_value_fact_table_t facts = {0};
+  ComputeFacts(&facts);
+  loom_low_source_memory_access_plan_t plan = {};
+  loom_low_source_memory_access_diagnostic_t diagnostic = {0};
+  ASSERT_TRUE(BuildPlan(&facts, load_op, &plan, &diagnostic));
+  ASSERT_EQ(plan.dynamic_term_count, 1u);
+  EXPECT_EQ(plan.dynamic_terms[0].index, row);
+  EXPECT_EQ(plan.dynamic_terms[0].byte_stride, 4);
+  ASSERT_EQ(plan.dynamic_terms[0].stride_value_count, 1u);
+  EXPECT_EQ(plan.dynamic_terms[0].stride_values[0], row_stride);
+}
+
+TEST_F(SourceMemoryPlanTest, DynamicStridedLayoutScalesStaticOrigin) {
+  const loom_value_id_t buffer = DefineBufferArg();
+  const loom_value_id_t row_stride = DefineIndexArg();
+  const loom_value_id_t layout =
+      BuildDynamicStridedLayout(row_stride, /*column_stride=*/1);
+  const loom_value_id_t base_offset =
+      loom_index_constant_result(BuildOffsetConstant(0));
+  loom_op_t* view_op = nullptr;
+  IREE_ASSERT_OK(loom_buffer_view_build(&builder_, buffer, base_offset,
+                                        ViewType2D(8, 16, layout),
+                                        LOOM_LOCATION_UNKNOWN, &view_op));
+  const int64_t static_indices[] = {3, 0};
+  loom_op_t* load_op = nullptr;
+  IREE_ASSERT_OK(loom_vector_load_build(
+      &builder_, 0, loom_buffer_view_result(view_op), nullptr, 0,
+      static_indices, IREE_ARRAYSIZE(static_indices), 0, 0, VectorType1D(1),
+      LOOM_LOCATION_UNKNOWN, &load_op));
+
+  loom_value_fact_table_t facts = {0};
+  ComputeFacts(&facts);
+  loom_low_source_memory_access_plan_t plan = {};
+  loom_low_source_memory_access_diagnostic_t diagnostic = {0};
+  ASSERT_TRUE(BuildPlan(&facts, load_op, &plan, &diagnostic));
+  EXPECT_EQ(plan.static_byte_offset, 0);
+  ASSERT_EQ(plan.dynamic_term_count, 1u);
+  EXPECT_EQ(plan.dynamic_terms[0].index, row_stride);
+  EXPECT_EQ(plan.dynamic_terms[0].byte_stride, 12);
+  EXPECT_EQ(plan.dynamic_terms[0].stride_value_count, 0u);
+}
+
+TEST_F(SourceMemoryPlanTest, ExactDynamicStrideFoldsIntoStaticOffset) {
+  const loom_value_id_t buffer = DefineBufferArg();
+  const loom_value_id_t row_stride =
+      loom_index_constant_result(BuildIndexConstant(64));
+  const loom_value_id_t layout =
+      BuildDynamicStridedLayout(row_stride, /*column_stride=*/1);
+  const loom_value_id_t base_offset =
+      loom_index_constant_result(BuildOffsetConstant(0));
+  loom_op_t* view_op = nullptr;
+  IREE_ASSERT_OK(loom_buffer_view_build(&builder_, buffer, base_offset,
+                                        ViewType2D(8, 16, layout),
+                                        LOOM_LOCATION_UNKNOWN, &view_op));
+  const int64_t static_indices[] = {3, 0};
+  loom_op_t* load_op = nullptr;
+  IREE_ASSERT_OK(loom_vector_load_build(
+      &builder_, 0, loom_buffer_view_result(view_op), nullptr, 0,
+      static_indices, IREE_ARRAYSIZE(static_indices), 0, 0, VectorType1D(1),
+      LOOM_LOCATION_UNKNOWN, &load_op));
+
+  loom_value_fact_table_t facts = {0};
+  ComputeFacts(&facts);
+  loom_low_source_memory_access_plan_t plan = {};
+  loom_low_source_memory_access_diagnostic_t diagnostic = {0};
+  ASSERT_TRUE(BuildPlan(&facts, load_op, &plan, &diagnostic));
+  EXPECT_EQ(plan.static_byte_offset, 768);
+  EXPECT_EQ(plan.dynamic_term_count, 0u);
+}
+
+TEST_F(SourceMemoryPlanTest, DenseAxisStrideRetainsMultipleRuntimeFactors) {
+  const loom_value_id_t rows = DefineIndexArg();
+  const loom_value_id_t exact_rows =
+      loom_index_constant_result(BuildIndexConstant(8));
+  const loom_value_id_t columns = DefineIndexArg();
+  const loom_value_id_t layout = BuildDenseLayout();
+  const loom_type_t view_type =
+      ViewType3D(loom_dim_pack_static(4), loom_dim_pack_dynamic(rows),
+                 loom_dim_pack_dynamic(columns), layout);
+  const loom_type_t exact_row_view_type =
+      ViewType3D(loom_dim_pack_static(4), loom_dim_pack_dynamic(exact_rows),
+                 loom_dim_pack_dynamic(columns), layout);
+  loom_value_fact_table_t facts = {0};
+  ComputeFacts(&facts);
+  loom_vector_memory_access_t access = {};
+  ASSERT_TRUE(loom_vector_memory_access_describe(
+      &facts.context, module_, view_type, VectorType1D(1), &access));
+
+  loom_low_source_memory_axis_byte_stride_t block_stride = {};
+  loom_low_source_memory_query_axis_byte_stride(&facts, &access, 0,
+                                                &block_stride);
+  EXPECT_EQ(block_stride.kind, LOOM_LOW_SOURCE_MEMORY_AXIS_BYTE_STRIDE_DYNAMIC);
+  EXPECT_EQ(block_stride.static_byte_coefficient, 4);
+  ASSERT_EQ(block_stride.dynamic_factor_count, 2u);
+  EXPECT_EQ(block_stride.dynamic_factors[0], rows);
+  EXPECT_EQ(block_stride.dynamic_factors[1], columns);
+
+  loom_low_source_memory_axis_byte_stride_t row_stride = {};
+  loom_low_source_memory_query_axis_byte_stride(&facts, &access, 1,
+                                                &row_stride);
+  EXPECT_EQ(row_stride.kind, LOOM_LOW_SOURCE_MEMORY_AXIS_BYTE_STRIDE_DYNAMIC);
+  EXPECT_EQ(row_stride.static_byte_coefficient, 4);
+  ASSERT_EQ(row_stride.dynamic_factor_count, 1u);
+  EXPECT_EQ(row_stride.dynamic_factors[0], columns);
+
+  loom_vector_memory_access_t exact_row_access = {};
+  ASSERT_TRUE(loom_vector_memory_access_describe(
+      &facts.context, module_, exact_row_view_type, VectorType1D(1),
+      &exact_row_access));
+  loom_low_source_memory_axis_byte_stride_t folded_block_stride = {};
+  loom_low_source_memory_query_axis_byte_stride(&facts, &exact_row_access, 0,
+                                                &folded_block_stride);
+  EXPECT_EQ(folded_block_stride.static_byte_coefficient, 32);
+  ASSERT_EQ(folded_block_stride.dynamic_factor_count, 1u);
+  EXPECT_EQ(folded_block_stride.dynamic_factors[0], columns);
+}
+
+TEST_F(SourceMemoryPlanTest, FactOnlyRuntimeStrideIsNotMaterialized) {
+  const loom_value_id_t buffer = DefineBufferArg();
+  const loom_value_id_t unknown_layout = DefineArg(
+      loom_type_encoding_with_role(LOOM_ENCODING_ROLE_ADDRESS_LAYOUT));
+  loom_op_t* assume_op = nullptr;
+  IREE_ASSERT_OK(loom_encoding_layout_assume_strided_build(
+      &builder_, unknown_layout, 2,
+      loom_type_encoding_with_role(LOOM_ENCODING_ROLE_ADDRESS_LAYOUT),
+      LOOM_LOCATION_UNKNOWN, &assume_op));
+  const loom_value_id_t layout =
+      loom_encoding_layout_assume_strided_result(assume_op);
+  const loom_value_id_t row = DefineIndexArg();
+  const loom_value_id_t base_offset =
+      loom_index_constant_result(BuildOffsetConstant(0));
+  loom_op_t* view_op = nullptr;
+  IREE_ASSERT_OK(loom_buffer_view_build(&builder_, buffer, base_offset,
+                                        ViewType2D(8, 16, layout),
+                                        LOOM_LOCATION_UNKNOWN, &view_op));
+  const int64_t static_indices[] = {INT64_MIN, 0};
+  loom_op_t* load_op = nullptr;
+  IREE_ASSERT_OK(loom_vector_load_build(
+      &builder_, 0, loom_buffer_view_result(view_op), &row, 1, static_indices,
+      IREE_ARRAYSIZE(static_indices), 0, 0, VectorType1D(1),
+      LOOM_LOCATION_UNKNOWN, &load_op));
+
+  loom_value_fact_table_t facts = {0};
+  ComputeFacts(&facts);
+  loom_low_source_memory_access_plan_t plan = {};
+  loom_low_source_memory_access_diagnostic_t diagnostic = {0};
+  EXPECT_FALSE(BuildPlan(&facts, load_op, &plan, &diagnostic));
+  EXPECT_NE(diagnostic.rejection_bits &
+                LOOM_LOW_SOURCE_MEMORY_ACCESS_REJECTION_DYNAMIC_STRIDE,
+            0u);
 }
 
 TEST_F(SourceMemoryPlanTest, ViewMemoryOperationKindUsesInterfaceShape) {

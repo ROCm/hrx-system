@@ -177,8 +177,8 @@ hrx_cc_test(
     target_compatible_with = _LINUX_COMPATIBILITY,
     deps = [
         ":amdgpu_executable_test_kernels",
-        "//build_tools:dl",
         "//build_tools/amdgpu:target_map_h",
+        "//build_tools/bazel:dl",
         "//libhrx/src/binding/hip:launch_params",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
