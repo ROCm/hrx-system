@@ -3211,8 +3211,10 @@ TEST_F(ReaderTest, ReadsFunctionModuleIndex) {
   EXPECT_EQ(symbol.visibility, LOOM_BYTECODE_SYMBOL_VISIBILITY_PUBLIC);
   EXPECT_TRUE(
       iree_all_bits_set(symbol.flags, LOOM_BYTECODE_SYMBOL_FLAG_PUBLIC));
-  EXPECT_TRUE(
-      iree_string_view_equal(symbol.defining_op_name, IREE_SV("test.func")));
+  ASSERT_LT(symbol.defining_op_ordinal, module_metadata.ops.count);
+  EXPECT_TRUE(iree_string_view_equal(
+      module_metadata.ops.entries[symbol.defining_op_ordinal].name,
+      IREE_SV("test.func")));
   EXPECT_EQ(symbol.argument_count, 1u);
   EXPECT_EQ(symbol.result_count, 1u);
   ASSERT_EQ(symbol.region_payload_count, 1u);
@@ -3772,6 +3774,40 @@ TEST_F(ReaderTest, MetadataRejectsPredicateSsaReferenceOutOfRange) {
   loom_module_free(module);
 }
 
+TEST_F(ReaderTest, IndexRetainsSignatureLocalPredicates) {
+  loom_module_t* module = CreatePredicateFunctionModule();
+  auto bytes = WriteModule(module);
+
+  iree_arena_allocator_t metadata_arena;
+  iree_arena_initialize(&block_pool_, &metadata_arena);
+  loom_bytecode_file_metadata_t metadata = {0};
+  std::vector<std::string> error_ids;
+  loom_bytecode_read_result_t result =
+      ReadIndex(bytes, &metadata_arena, &metadata, &error_ids);
+
+  EXPECT_EQ(result.error_count, 0u);
+  EXPECT_TRUE(error_ids.empty());
+  ASSERT_EQ(metadata.module_count, 1u);
+  ASSERT_EQ(metadata.modules[0].symbol_count, 1u);
+  const loom_bytecode_symbol_metadata_t& symbol =
+      metadata.modules[0].symbols[0];
+  ASSERT_EQ(symbol.predicate_count, 2u);
+  ASSERT_NE(symbol.predicates, nullptr);
+  EXPECT_EQ(symbol.predicates[0].kind, LOOM_PREDICATE_MUL);
+  EXPECT_EQ(symbol.predicates[0].arg_tags[0], LOOM_PRED_ARG_VALUE);
+  EXPECT_EQ(symbol.predicates[0].args[0], 0);
+  EXPECT_EQ(symbol.predicates[0].arg_tags[1], LOOM_PRED_ARG_CONST);
+  EXPECT_EQ(symbol.predicates[0].args[1], 16);
+  EXPECT_EQ(symbol.predicates[1].kind, LOOM_PREDICATE_RANGE);
+  EXPECT_EQ(symbol.predicates[1].arg_tags[0], LOOM_PRED_ARG_VALUE);
+  EXPECT_EQ(symbol.predicates[1].args[0], 0);
+  EXPECT_EQ(symbol.predicates[1].args[1], 32);
+  EXPECT_EQ(symbol.predicates[1].args[2], 512);
+
+  iree_arena_deinitialize(&metadata_arena);
+  loom_module_free(module);
+}
+
 TEST_F(ReaderTest, RetainedFunctionSurvivesModuleRead) {
   loom_module_t* module = CreateRetainedFunctionModule();
   auto bytes = WriteModule(module);
@@ -3843,8 +3879,10 @@ TEST_F(ReaderTest, ReadsImportOffsetTableInIndex) {
       iree_string_view_equal(symbol.import_module, IREE_SV("kernel_lib")));
   EXPECT_TRUE(
       iree_string_view_equal(symbol.import_symbol, IREE_SV("extern_f")));
-  EXPECT_TRUE(
-      iree_string_view_equal(symbol.defining_op_name, IREE_SV("func.decl")));
+  ASSERT_LT(symbol.defining_op_ordinal, module_metadata.ops.count);
+  EXPECT_TRUE(iree_string_view_equal(
+      module_metadata.ops.entries[symbol.defining_op_ordinal].name,
+      IREE_SV("func.decl")));
   EXPECT_EQ(symbol.argument_count, 1u);
   EXPECT_EQ(symbol.result_count, 1u);
   EXPECT_EQ(symbol.region_payload_count, 0u);

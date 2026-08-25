@@ -489,25 +489,6 @@ loom_cc_test(
 
 loom_cc_test(
   NAME
-    selected_function_header_test
-  SRCS
-    "selected_function_header_test.cc"
-  DEPS
-    iree::base::internal::arena
-    iree::io::stream
-    iree::testing::gtest
-    iree::testing::gtest_main
-    loom::format::bytecode::index
-    loom::format::bytecode::reader
-    loom::format::bytecode::symbol_header_reader
-    loom::format::bytecode::writer
-    loom::format::text::parser
-    loom::ir
-    loom::ops::template
-)
-
-loom_cc_test(
-  NAME
     selected_tables_test
   SRCS
     "selected_tables_test.cc"

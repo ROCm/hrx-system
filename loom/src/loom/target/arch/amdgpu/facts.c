@@ -21,6 +21,36 @@ void loom_amdgpu_target_identity_initialize(
                                                &out_identity->amdhsa_features);
 }
 
+void loom_amdgpu_target_identity_initialize_with_features(
+    const loom_amdgpu_target_info_t* target, const uint64_t* feature_words,
+    uint16_t feature_word_count, loom_amdgpu_target_identity_t* out_identity) {
+  loom_amdgpu_target_identity_initialize(target, out_identity);
+  for (uint8_t stable_value = 0; stable_value < 32; ++stable_value) {
+    const loom_amdgpu_target_id_feature_support_bit_t support_bit =
+        (loom_amdgpu_target_id_feature_support_bit_t)(UINT32_C(1)
+                                                      << stable_value);
+    if (!iree_any_bit_set(LOOM_AMDGPU_TARGET_ID_FEATURE_SUPPORT_KNOWN_FLAGS,
+                          support_bit)) {
+      continue;
+    }
+    const iree_host_size_t word_index = stable_value / 64u;
+    const uint64_t bit = UINT64_C(1) << (stable_value % 64u);
+    const bool positive = word_index < feature_word_count &&
+                          iree_any_bit_set(feature_words[word_index], bit);
+    const bool negative =
+        word_index < feature_word_count &&
+        iree_any_bit_set(feature_words[feature_word_count + word_index], bit);
+    if (!positive && !negative) continue;
+    IREE_ASSERT(!(positive && negative));
+    loom_amdgpu_target_feature_state_t* state =
+        loom_amdgpu_amdhsa_feature_state_select(&out_identity->amdhsa_features,
+                                                support_bit);
+    IREE_ASSERT(state != NULL);
+    *state = positive ? LOOM_AMDGPU_TARGET_FEATURE_ON
+                      : LOOM_AMDGPU_TARGET_FEATURE_OFF;
+  }
+}
+
 bool loom_amdgpu_target_identity_equal(
     const loom_amdgpu_target_identity_t* lhs,
     const loom_amdgpu_target_identity_t* rhs) {

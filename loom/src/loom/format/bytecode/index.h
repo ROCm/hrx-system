@@ -69,6 +69,10 @@ typedef struct loom_bytecode_encoding_metadata_t {
 typedef struct loom_bytecode_op_metadata_t {
   // Borrowed registered operation name view from the module STRINGS table.
   iree_string_view_t name;
+  // Context-owned operation vtable resolved during bytecode validation.
+  const loom_op_vtable_t* vtable;
+  // Dense context-local operation kind resolved during bytecode validation.
+  loom_op_kind_t kind;
 } loom_bytecode_op_metadata_t;
 
 // Validated independently bounded root-region payload.
@@ -82,6 +86,18 @@ typedef struct loom_bytecode_region_payload_metadata_t {
   // Declared region slot on the defining symbol operation.
   uint8_t region_index;
 } loom_bytecode_region_payload_metadata_t;
+
+// Validated function/global/record attribute payload in one symbol entry.
+typedef struct loom_bytecode_symbol_attribute_metadata_t {
+  // Absolute file byte offset of the attribute value payload after its kind.
+  uint64_t value_offset;
+  // Byte length of the attribute value payload.
+  uint64_t value_length;
+  // Descriptor slot on the defining operation.
+  uint8_t attribute_index;
+  // Validated wire attribute kind.
+  loom_bytecode_attr_kind_t kind;
+} loom_bytecode_symbol_attribute_metadata_t;
 
 // Validated symbol record exposed by the bytecode index.
 typedef struct loom_bytecode_symbol_metadata_t {
@@ -105,8 +121,9 @@ typedef struct loom_bytecode_symbol_metadata_t {
   iree_string_view_t import_module;
   // Borrowed source symbol name for imports, or empty when not imported.
   iree_string_view_t import_symbol;
-  // Borrowed defining op name for function/global/record symbols.
-  iree_string_view_t defining_op_name;
+  // Module-local OPS ordinal of the defining operation, or UINT32_MAX for
+  // symbols without a defining operation.
+  uint32_t defining_op_ordinal;
   // Function-like calling convention byte, or zero for non-function symbols.
   uint8_t calling_convention;
   // Function-like purity byte, or zero for non-function symbols.
@@ -137,6 +154,18 @@ typedef struct loom_bytecode_symbol_metadata_t {
   uint32_t template_family_symbol_ordinal;
   // Concrete provider priority value, or zero when not applicable.
   uint64_t priority;
+  // Arena-owned predicates retaining signature-local VALUE ordinals.
+  const loom_predicate_t* predicates;
+  // Number of retained predicate entries.
+  uint16_t predicate_count;
+  // Arena-owned attribute payloads required by retained linker contracts.
+  const loom_bytecode_symbol_attribute_metadata_t* attributes;
+  // Number of retained attribute payloads.
+  uint8_t attribute_count;
+  // Retained template target attribute ordinal plus one, or zero when absent.
+  uint8_t template_target_attribute_ordinal_plus_one;
+  // Retained template requires attribute ordinal plus one, or zero when absent.
+  uint8_t template_requires_attribute_ordinal_plus_one;
   // First entry in the module's root-region payload array.
   uint32_t first_region_payload_index;
   // Number of independently bounded root-region payloads.

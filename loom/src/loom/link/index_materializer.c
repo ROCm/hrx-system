@@ -130,7 +130,7 @@ static iree_status_t loom_link_index_query_candidates(
     loom_template_selection_query_result_t* out_result) {
   loom_template_provider_slice_t external_candidates =
       loom_template_provider_slice_empty();
-  IREE_RETURN_IF_ERROR(loom_link_template_candidate_loader_project(
+  IREE_RETURN_IF_ERROR(loom_link_template_candidate_loader_load(
       candidate_loader, plan, materialization,
       loom_link_index_selected_provider_membership(selected), arena,
       &external_candidates));
@@ -192,6 +192,9 @@ static iree_status_t loom_link_index_materialize_selective(
       index, environment, &candidate_loader);
 
   loom_link_plan_t* stable_plan = NULL;
+  loom_module_t* stable_module = NULL;
+  iree_host_size_t queried_template_demand_count = 0;
+  bool has_queried_template_demands = false;
   while (iree_status_is_ok(status) && stable_plan == NULL) {
     loom_link_plan_t* plan = NULL;
     status = loom_link_index_build_plan(index, plan_options, &selected,
@@ -200,6 +203,16 @@ static iree_status_t loom_link_index_materialize_selective(
       break;
     }
     if (loom_link_plan_demanded_template_family_count(plan) == 0) {
+      stable_plan = plan;
+      break;
+    }
+    const iree_host_size_t template_demand_count =
+        loom_link_plan_template_demand_occurrence_count(plan);
+    // The prior query considered every provider for every demanded family.
+    // When the selected closure adds no application sites, neither its
+    // applications nor its provider universe changed and selection is stable.
+    if (has_queried_template_demands &&
+        template_demand_count == queried_template_demand_count) {
       stable_plan = plan;
       break;
     }
@@ -218,20 +231,31 @@ static iree_status_t loom_link_index_materialize_selective(
     const bool changed =
         iree_status_is_ok(status) &&
         loom_link_index_append_query_selections(&query, &selected);
-    loom_module_free(analysis.module);
-    iree_arena_deinitialize(&iteration_arena);
     if (!iree_status_is_ok(status)) {
+      loom_module_free(analysis.module);
+      iree_arena_deinitialize(&iteration_arena);
       loom_link_plan_free(plan);
       break;
     }
     if (changed) {
+      queried_template_demand_count = template_demand_count;
+      has_queried_template_demands = true;
       loom_link_plan_free(plan);
     } else {
       stable_plan = plan;
+      stable_module = analysis.module;
+      analysis.module = NULL;
     }
+    loom_module_free(analysis.module);
+    iree_arena_deinitialize(&iteration_arena);
   }
 
-  if (iree_status_is_ok(status)) {
+  if (iree_status_is_ok(status) && stable_module != NULL) {
+    out_materialization->plan = stable_plan;
+    out_materialization->module = stable_module;
+    stable_plan = NULL;
+    stable_module = NULL;
+  } else if (iree_status_is_ok(status)) {
     iree_arena_allocator_t final_arena;
     iree_arena_initialize(environment->block_pool, &final_arena);
     loom_link_plan_materialization_t final = {0};
@@ -248,6 +272,7 @@ static iree_status_t loom_link_index_materialize_selective(
   }
 
   loom_link_plan_free(stable_plan);
+  loom_module_free(stable_module);
   loom_link_template_candidate_loader_free(candidate_loader);
   loom_link_index_selected_providers_deinitialize(&selected);
   return status;

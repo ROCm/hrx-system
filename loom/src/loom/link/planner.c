@@ -94,6 +94,8 @@ struct loom_link_plan_t {
   struct {
     // Growable dense family ordinal storage.
     loom_link_template_family_ordinal_t* values;
+    // Number of reachable demand occurrences, including repeated families.
+    iree_host_size_t occurrence_count;
     // Number of unique demanded families.
     iree_host_size_t count;
     // Allocated family ordinal capacity.
@@ -959,6 +961,7 @@ static iree_status_t loom_link_plan_expand_symbol_facet_dependencies(
 static iree_status_t loom_link_plan_record_template_family_demand(
     loom_link_plan_t* plan,
     loom_link_template_family_ordinal_t family_ordinal) {
+  ++plan->demanded_template_families.occurrence_count;
   if (loom_link_plan_bitmap_test_and_set(&plan->reachability.template_families,
                                          family_ordinal)) {
     return iree_ok_status();
@@ -1453,6 +1456,11 @@ const loom_link_plan_facet_t* loom_link_plan_facet_at(
 iree_host_size_t loom_link_plan_demanded_template_family_count(
     const loom_link_plan_t* plan) {
   return plan ? plan->demanded_template_families.count : 0;
+}
+
+iree_host_size_t loom_link_plan_template_demand_occurrence_count(
+    const loom_link_plan_t* plan) {
+  return plan ? plan->demanded_template_families.occurrence_count : 0;
 }
 
 loom_link_template_family_ordinal_t loom_link_plan_demanded_template_family_at(

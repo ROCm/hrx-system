@@ -459,6 +459,7 @@ static void loom_link_index_append_template_provider(
         .next.template_provider_ordinal = symbol_ordinal;
   }
   family->providers.last_symbol_ordinal = symbol_ordinal;
+  ++family->providers.count;
 }
 
 static iree_status_t loom_link_index_append_provider(

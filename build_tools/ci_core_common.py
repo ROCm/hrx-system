@@ -694,6 +694,30 @@ def s3_cache_path(cache_dir: Path, bucket: str, key: str) -> Path:
     return cache_dir / bucket / relpath
 
 
+def rocm_artifact_identity(
+    *,
+    release_type: str,
+    run_id: str,
+    platform_name: str,
+    artifact_variant: str,
+    artifact_set: str,
+) -> str:
+    """Returns the immutable filesystem identity of a fetched ROCm root."""
+    components = (
+        release_type,
+        run_id,
+        platform_name,
+        artifact_variant,
+        artifact_set,
+    )
+    for component in components:
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", component):
+            raise RuntimeError(
+                f"Unsafe ROCm artifact identity component: {component!r}"
+            )
+    return "-".join(components)
+
+
 def write_rocm_manifest(
     path: Path,
     *,
@@ -705,7 +729,15 @@ def write_rocm_manifest(
     artifact_set: str,
     artifacts: list[S3Object],
 ) -> None:
+    artifact_identity = rocm_artifact_identity(
+        release_type=release_type,
+        run_id=run_id,
+        platform_name=platform_name,
+        artifact_variant=artifact_variant,
+        artifact_set=artifact_set,
+    )
     data = {
+        "artifact_identity": artifact_identity,
         "generated_at": dt.datetime.now(dt.UTC).isoformat(),
         "release_type": release_type,
         "run_id": run_id,

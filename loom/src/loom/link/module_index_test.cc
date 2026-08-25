@@ -467,6 +467,7 @@ template.def<@demo.contract> @provider(%x: i32) -> (i32) {
                                   LOOM_LINK_SYMBOL_FLAG_CONCRETE_DEFINITION));
     EXPECT_EQ(family->providers.first_symbol_ordinal, provider->ordinal);
     EXPECT_EQ(family->providers.last_symbol_ordinal, provider->ordinal);
+    EXPECT_EQ(family->providers.count, 1u);
     EXPECT_EQ(provider->next.template_provider_ordinal,
               LOOM_LINK_MODULE_INDEX_INVALID_ORDINAL);
   };

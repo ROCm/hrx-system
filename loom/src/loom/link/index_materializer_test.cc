@@ -27,6 +27,8 @@
 #include "loom/ops/module/ops.h"
 #include "loom/ops/op_defs.h"
 #include "loom/ops/op_registry.h"
+#include "loom/ops/test/ops.h"
+#include "loom/ops/test/registry.h"
 #include "loom/verify/verify.h"
 
 namespace loom {
@@ -52,6 +54,7 @@ class LinkIndexMaterializerTest : public ::testing::Test {
                                      &block_pool_);
     loom_context_initialize(iree_allocator_system(), &context_);
     IREE_ASSERT_OK(loom_op_registry_register_all_dialects(&context_));
+    IREE_ASSERT_OK(loom_test_dialect_register(&context_));
     IREE_ASSERT_OK(loom_context_finalize(&context_));
   }
 
@@ -379,6 +382,101 @@ template.def<@demo.choose> priority(1) @slow(%x: i32) -> (i32) {
 }
 
 TEST_F(LinkIndexMaterializerTest,
+       SelectsBytecodeProviderFromCompleteApplicabilityContract) {
+  loom_module_t* root = Parse(IREE_SV(R"(
+test.target<low_core> @request_target {subgroup_size = 64}
+
+template.decl @demo.choose(%x: i32) -> (i32)
+
+func.def public target(@request_target) @entry(%x: i32) -> (i32) where [range(%x, 32, 32)] {
+  %result = template.apply<@demo.choose>(%x) : (i32) -> (i32)
+  func.return %result : i32
+}
+)"),
+                              IREE_SV("root.loom"));
+  loom_module_t* library = Parse(IREE_SV(R"(
+test.target<low_core> @matching_target
+test.target<quirky> @mismatched_target
+
+template.decl @demo.choose(%x: i32) -> (i32)
+
+template.def<@demo.choose> target(@mismatched_target) priority(50) @wrong_target(%x: i32) -> (i32) {
+  template.return %x : i32
+}
+
+template.def<@demo.choose> requires [#target.subgroup.size<32>] priority(40) @wrong_requires(%x: i32) -> (i32) {
+  template.return %x : i32
+}
+
+template.def<@demo.choose> priority(30) @wrong_predicate(%x: i32) -> (i32) where [range(%x, 33, 33)] {
+  template.return %x : i32
+}
+
+template.def<@demo.choose> target(@matching_target) requires [#target.subgroup.size<64>] priority(20) @selected(%x: i32) -> (i32) where [mul(%x, 16)] {
+  template.return %x : i32
+}
+
+template.def<@demo.choose> priority(1) @fallback(%x: i32) -> (i32) {
+  template.return %x : i32
+}
+)"),
+                                 IREE_SV("library.loom"));
+  std::vector<uint8_t> library_bytecode = WriteModule(library);
+
+  IndexPtr index = CreateIndex();
+  AddMaterialized(index.get(), root, IREE_SV("root"),
+                  LOOM_LINK_PROVIDER_ROLE_INPUT);
+  const iree_host_size_t library_provider =
+      AddBytecode(index.get(), library_bytecode, IREE_SV("library"),
+                  LOOM_LINK_PROVIDER_ROLE_LIBRARY);
+  const loom_link_module_index_provider_t* indexed_library =
+      loom_link_module_index_provider_at(index.get(), library_provider);
+  ASSERT_NE(indexed_library, nullptr);
+  const loom_bytecode_module_metadata_t* metadata =
+      &indexed_library->bytecode.metadata.modules[0];
+  const char* rejected_provider_names[] = {"wrong_target", "wrong_requires",
+                                           "wrong_predicate", "fallback"};
+  for (const char* rejected_provider_name : rejected_provider_names) {
+    const loom_bytecode_symbol_metadata_t* rejected_metadata = nullptr;
+    for (iree_host_size_t i = 0; i < metadata->symbol_count; ++i) {
+      if (iree_string_view_equal(
+              metadata->symbols[i].name,
+              iree_make_cstring_view(rejected_provider_name))) {
+        rejected_metadata = &metadata->symbols[i];
+        break;
+      }
+    }
+    ASSERT_NE(rejected_metadata, nullptr);
+    ASSERT_GT(rejected_metadata->region_payload_count, 0u);
+    for (uint8_t i = 0; i < rejected_metadata->region_payload_count; ++i) {
+      const loom_bytecode_region_payload_metadata_t* payload =
+          &metadata
+               ->region_payloads[rejected_metadata->first_region_payload_index +
+                                 i];
+      std::fill_n(library_bytecode.data() + payload->absolute_offset,
+                  payload->length, UINT8_C(0xFF));
+    }
+  }
+
+  loom_link_index_materialization_t materialization =
+      Materialize(index.get(), IREE_SV("@entry"));
+  ASSERT_NE(materialization.plan, nullptr);
+  ASSERT_NE(materialization.module, nullptr);
+  Verify(materialization.module);
+  EXPECT_NE(FindSymbol(materialization.module, IREE_SV("selected")), nullptr);
+  EXPECT_NE(FindSymbol(materialization.module, IREE_SV("matching_target")),
+            nullptr);
+  for (const char* rejected_provider_name : rejected_provider_names) {
+    EXPECT_EQ(FindSymbol(materialization.module,
+                         iree_make_cstring_view(rejected_provider_name)),
+              nullptr);
+  }
+  EXPECT_EQ(FindSymbol(materialization.module, IREE_SV("mismatched_target")),
+            nullptr);
+  loom_link_index_materialization_deinitialize(&materialization);
+}
+
+TEST_F(LinkIndexMaterializerTest,
        RejectedFamilyDoesNotReadBytecodeProviderBody) {
   loom_module_t* root = Parse(IREE_SV(R"(
 template.decl @demo.choose(%x: i32) -> (i32) where [mul(%x, 16)]
@@ -443,6 +541,46 @@ template.def<@demo.choose> @implementation(%x: i32) -> (i32) {
   ASSERT_NE(implementation, nullptr);
   EXPECT_FALSE(loom_link_plan_contains_symbol(materialization.plan,
                                               implementation->ordinal));
+  loom_link_index_materialization_deinitialize(&materialization);
+}
+
+TEST_F(LinkIndexMaterializerTest,
+       SelectsBytecodeProviderWithModuleDependentSignature) {
+  loom_module_t* root = Parse(IREE_SV(R"(
+template.decl @demo.choose(%arg: hal.buffer) -> (hal.buffer)
+
+func.def public @entry(%arg: hal.buffer) -> (hal.buffer) {
+  %result = template.apply<@demo.choose>(%arg) : (hal.buffer) -> (hal.buffer)
+  func.return %result : hal.buffer
+}
+)"),
+                              IREE_SV("root.loom"));
+  loom_module_t* library = Parse(IREE_SV(R"(
+template.decl @demo.choose(%arg: hal.buffer) -> (hal.buffer)
+
+template.def<@demo.choose> priority(10) @implementation(%arg: hal.buffer) -> (hal.buffer) {
+  template.return %arg : hal.buffer
+}
+
+template.def<@demo.choose> priority(1) @fallback(%arg: hal.buffer) -> (hal.buffer) {
+  template.return %arg : hal.buffer
+}
+)"),
+                                 IREE_SV("library.loom"));
+  const std::vector<uint8_t> library_bytecode = WriteModule(library);
+
+  IndexPtr index = CreateIndex();
+  AddMaterialized(index.get(), root, IREE_SV("root"),
+                  LOOM_LINK_PROVIDER_ROLE_INPUT);
+  AddBytecode(index.get(), library_bytecode, IREE_SV("library"),
+              LOOM_LINK_PROVIDER_ROLE_LIBRARY);
+
+  loom_link_index_materialization_t materialization =
+      Materialize(index.get(), IREE_SV("@entry"));
+  Verify(materialization.module);
+  EXPECT_NE(FindSymbol(materialization.module, IREE_SV("implementation")),
+            nullptr);
+  EXPECT_EQ(FindSymbol(materialization.module, IREE_SV("fallback")), nullptr);
   loom_link_index_materialization_deinitialize(&materialization);
 }
 

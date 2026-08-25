@@ -94,7 +94,11 @@ static iree_status_t loom_bytecode_operation_decode_entry(
   }
   validator->module_view->ops.values[index] = vtable;
   validator->module_view->ops.kinds[index] = kind;
-  *out_metadata = (loom_bytecode_op_metadata_t){.name = op_name};
+  *out_metadata = (loom_bytecode_op_metadata_t){
+      .name = op_name,
+      .vtable = vtable,
+      .kind = kind,
+  };
   return iree_ok_status();
 }
 

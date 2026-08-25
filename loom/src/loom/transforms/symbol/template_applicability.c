@@ -118,8 +118,9 @@ static bool loom_template_applicability_types_match(
   for (uint16_t i = 0; i < operands.count; ++i) {
     const loom_type_t operand_type =
         loom_module_value_type(application_module, operands.values[i]);
-    if (!loom_type_equal_after_value_remap(application_module,
-                                           provider->argument_types[i],
+    const loom_type_t provider_type =
+        loom_module_value_type(application_module, provider->argument_ids[i]);
+    if (!loom_type_equal_after_value_remap(application_module, provider_type,
                                            operand_type, &signature_remap)) {
       return false;
     }
@@ -128,8 +129,9 @@ static bool loom_template_applicability_types_match(
   for (uint16_t i = 0; i < results.count; ++i) {
     const loom_type_t result_type =
         loom_module_value_type(application_module, results.values[i]);
-    if (!loom_type_equal_after_value_remap(application_module,
-                                           provider->result_types[i],
+    const loom_type_t provider_type =
+        loom_module_value_type(application_module, provider->result_ids[i]);
+    if (!loom_type_equal_after_value_remap(application_module, provider_type,
                                            result_type, &signature_remap)) {
       return false;
     }

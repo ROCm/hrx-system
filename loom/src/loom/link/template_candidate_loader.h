@@ -44,14 +44,14 @@ iree_status_t loom_link_template_candidate_loader_allocate(
 void loom_link_template_candidate_loader_free(
     loom_link_template_candidate_loader_t* loader);
 
-// Projects unselected candidates for families demanded by |plan|.
+// Binds unselected candidates for families demanded by |plan|.
 //
-// Source summaries are projected into materialization->module. Missing
-// provider-owned symbol references become disposable analysis placeholders;
-// they never enter the final linked artifact. The returned summaries belong to
-// |arena| and are suitable as the external catalog overlay for one selection
-// query.
-iree_status_t loom_link_template_candidate_loader_project(
+// Each candidate borrows its source-owned applicability facts while using the
+// already-linked family signature in materialization->module. This never adds
+// values, symbols, types, or operations to the materialized module. The
+// returned summaries belong to |arena| and are suitable as the external
+// catalog overlay for one selection query.
+iree_status_t loom_link_template_candidate_loader_load(
     loom_link_template_candidate_loader_t* loader, const loom_link_plan_t* plan,
     loom_link_plan_materialization_t* materialization,
     loom_link_template_provider_membership_t selected_providers,

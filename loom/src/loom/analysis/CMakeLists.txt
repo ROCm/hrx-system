@@ -205,9 +205,7 @@ loom_cc_library(
     loom::ops::func_symbol_facts
     loom::ops::op_defs
     loom::ops::target
-    loom::rewrite::remap
     loom::target::facts
-    loom::util::adaptive_sort
   PUBLIC
 )
 

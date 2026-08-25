@@ -76,7 +76,9 @@ typedef struct loom_target_condition_t {
   // Static family-owned semantics.
   const loom_target_condition_descriptor_t* descriptor;
 
-  // Borrowed parameterized value owned by the source module.
+  // Borrowed self-contained parameterized value. Storage may belong to a
+  // source module, but target-condition semantics never depend on its module
+  // identity.
   loom_attribute_t value;
 } loom_target_condition_t;
 

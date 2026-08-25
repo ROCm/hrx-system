@@ -226,25 +226,10 @@ void loom_amdgpu_target_record_resolve_identity(
   const loom_amdgpu_target_info_t* target =
       loom_amdgpu_target_record_target(target_op);
   IREE_ASSERT(target != NULL);
-  loom_amdgpu_target_identity_initialize(target, out_identity);
   const loom_signed_enum_set_t features =
       loom_amdgpu_target_features(target_op);
-  for (iree_host_size_t stable_value = 0;
-       stable_value < LOOM_AMDGPU_TARGET_FEATURES_COUNT_; ++stable_value) {
-    const bool positive =
-        loom_signed_enum_set_contains_positive(features, (uint8_t)stable_value);
-    const bool negative =
-        loom_signed_enum_set_contains_negative(features, (uint8_t)stable_value);
-    if (!positive && !negative) continue;
-    IREE_ASSERT(!(positive && negative));
-    loom_amdgpu_target_feature_state_t* state =
-        loom_amdgpu_amdhsa_feature_state_select(
-            &out_identity->amdhsa_features,
-            loom_amdgpu_target_feature_support_bit((uint8_t)stable_value));
-    IREE_ASSERT(state != NULL);
-    *state = positive ? LOOM_AMDGPU_TARGET_FEATURE_ON
-                      : LOOM_AMDGPU_TARGET_FEATURE_OFF;
-  }
+  loom_amdgpu_target_identity_initialize_with_features(
+      target, features.words, features.word_count, out_identity);
 }
 
 void loom_amdgpu_target_record_resolve_properties(
