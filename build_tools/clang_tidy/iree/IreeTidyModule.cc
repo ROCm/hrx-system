@@ -5,7 +5,6 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 #include "clang-tidy/ClangTidyModule.h"
-#include "clang-tidy/ClangTidyModuleRegistry.h"
 #include "iree/ExtentChecks.h"
 #include "iree/LifecycleChecks.h"
 #include "iree/RecursionCheck.h"
@@ -14,6 +13,14 @@
 #include "iree/StatusChecks.h"
 #include "iree/StyleChecks.h"
 #include "iree/TraceChecks.h"
+#include "llvm/Support/Registry.h"
+
+// LLVM 24 moved this public registry instantiation into ClangTidyModule.h;
+// older supported releases declared it in a separate header. Name the stable
+// underlying registry directly so one plugin source spans both header layouts.
+namespace llvm {
+extern template class Registry<clang::tidy::ClangTidyModule>;
+}  // namespace llvm
 
 namespace clang::tidy::iree {
 namespace {
@@ -54,7 +61,7 @@ class IreeTidyModule final : public ClangTidyModule {
 }  // namespace
 }  // namespace clang::tidy::iree
 
-static clang::tidy::ClangTidyModuleRegistry::Add<
+static llvm::Registry<clang::tidy::ClangTidyModule>::Add<
     clang::tidy::iree::IreeTidyModule>
     X("iree-module", "Adds IREE-specific checks.");
 
