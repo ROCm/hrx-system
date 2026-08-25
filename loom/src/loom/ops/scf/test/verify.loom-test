@@ -188,6 +188,20 @@ func.def @while_wrong_before_terminator(%cond: i1, %init: index) -> (index) {
 
 // ====
 
+// scf.condition is meaningful only as the direct terminator of a scf.while
+// before region. Nesting it under another structured op must not reach while
+// lowering as malformed IR.
+func.def @while_condition_requires_direct_while_parent(%cond: i1) {
+  // ERROR@+1: STRUCTURE/018 "scf.if" "0" "scf.yield" "scf.condition"
+  scf.if %cond {
+    // ERROR@+1: STRUCTURE/029 "scf.condition" "parent" "scf.while" "scf.if"
+    scf.condition %cond : i1
+  }
+  func.return
+}
+
+// ====
+
 // scf.lookup case keys are sorted and unique. The parser preserves source key
 // order so the verifier owns the structured key-order diagnostic.
 func.def @lookup_unsorted_case_keys(%variant: index, %a: index, %b: index, %fallback: index) -> (index) {

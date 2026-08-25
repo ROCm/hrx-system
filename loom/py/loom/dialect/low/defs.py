@@ -26,6 +26,7 @@ from loom.assembly import (
     RPAREN,
     Attr,
     AttrDict,
+    BindingList,
     BlockArgs,
     BlockRef,
     Clause,
@@ -69,6 +70,8 @@ from loom.dsl import (
     TERMINATOR,
     UNKNOWN_EFFECTS,
     AttrDef,
+    BlockArgCount,
+    BlockArgsMatchTypes,
     BlockArgsSatisfy,
     CallLikeInterface,
     CallLikeKind,
@@ -77,6 +80,7 @@ from loom.dsl import (
     EnumDef,
     FuncLikeInterface,
     FuncLikeInterfaceFlag,
+    HasParent,
     ImplicitTerminator,
     IterArgsMatchResults,
     LoopLikeInterface,
@@ -777,6 +781,52 @@ low_scf_yield = Op(
 )
 
 # ============================================================================
+# low.scf.condition — low while-loop condition terminator
+# ============================================================================
+
+low_scf_condition = Op(
+    "low.scf.condition",
+    group=low_ops,
+    phase=OpPhase.EXECUTABLE,
+    doc=(
+        "Terminate a low.scf.while condition region with a register predicate "
+        "and loop-carried register values. Forwarded values enter the body when "
+        "the predicate is true and become the loop results when it is false."
+    ),
+    operands=[
+        Operand(
+            "condition",
+            REGISTER,
+            doc="Register predicate controlling whether the loop body executes.",
+        ),
+        Operand(
+            "forwarded",
+            REGISTER,
+            variadic=True,
+            doc="Register values forwarded to the body or loop results.",
+        ),
+    ],
+    traits=[TERMINATOR, STORAGE_RELATION, HasParent("low.scf.while")],
+    format=[
+        Ref("condition"),
+        OptionalGroup(
+            [COMMA, Refs("forwarded")],
+            anchor="forwarded",
+        ),
+        COLON,
+        TypeOf("condition"),
+        OptionalGroup(
+            [COMMA, TypesOf("forwarded")],
+            anchor="forwarded",
+        ),
+    ],
+    examples=[
+        "low.scf.condition %keep_going : reg<spirv.id : i1>",
+        "low.scf.condition %keep_going, %next : reg<spirv.id : i1>, reg<spirv.id : i32>",
+    ],
+)
+
+# ============================================================================
 # low.scf.if — low conditional structured control flow
 # ============================================================================
 
@@ -931,6 +981,80 @@ low_scf_for = Op(
     examples=[
         "low.scf.for [%lo to %hi step %step] do(%iv: reg<amdgpu.sgpr x1>) {\n  low.scf.yield\n}",
         "%result = low.scf.for [%lo to %hi step %step] iter_args(%acc0: reg<amdgpu.vgpr x1>) -> (reg<amdgpu.vgpr x1>) do(%iv: reg<amdgpu.sgpr x1>, %acc: reg<amdgpu.vgpr x1>) {\n  low.scf.yield %acc : reg<amdgpu.vgpr x1>\n}",
+    ],
+)
+
+# ============================================================================
+# low.scf.while — low condition-controlled structured loop
+# ============================================================================
+
+low_scf_while = Op(
+    "low.scf.while",
+    group=low_ops,
+    phase=OpPhase.EXECUTABLE,
+    doc=("Condition-controlled target-low loop with explicit condition and body regions and loop-carried register state."),
+    verify="loom_low_scf_while_verify",
+    operands=[
+        Operand(
+            "iter_args",
+            REGISTER,
+            variadic=True,
+            doc="Initial loop-carried register values.",
+        )
+    ],
+    results=[Result("results", REGISTER, variadic=True)],
+    regions=[
+        RegionDef(
+            "before",
+            doc=("Runs before each condition check. Terminated by low.scf.condition."),
+            single_block=True,
+            terminator="low.scf.condition",
+        ),
+        RegionDef(
+            "after",
+            doc="Runs while the condition is true. Terminated by low.scf.yield.",
+            single_block=True,
+            terminator="low.scf.yield",
+            arg_source="iter_args",
+        ),
+    ],
+    interfaces=[
+        LoopLikeInterface(
+            body="after",
+            condition_region="before",
+            iter_args="iter_args",
+        ),
+    ],
+    constraints=[
+        IterArgsMatchResults("iter_args", "results"),
+        BlockArgCount("before", "iter_args"),
+        BlockArgsMatchTypes("before", "iter_args"),
+        BlockArgCount("after", "iter_args"),
+        BlockArgsMatchTypes("after", "iter_args"),
+        YieldCountMatchesResults("after", "results"),
+        YieldTypesMatchResults("after", "results"),
+    ],
+    traits=[STORAGE_RELATION],
+    format=[
+        OptionalGroup(
+            [BindingList("iter_args")],
+            anchor="iter_args",
+        ),
+        OptionalGroup(
+            [ARROW, ResultTypeList("results")],
+            anchor="results",
+        ),
+        Region("before", syntax="low.asm.optional"),
+        kw("do"),
+        OptionalGroup(
+            [BlockArgs("after")],
+            anchor="iter_args",
+        ),
+        Region("after", syntax="low.asm.optional"),
+    ],
+    examples=[
+        "low.scf.while {\n  low.scf.condition %condition : reg<spirv.id : i1>\n} do {\n  low.scf.yield\n}",
+        "%result = low.scf.while(%before = %initial : reg<spirv.id : i32>) -> (reg<spirv.id : i32>) {\n  low.scf.condition %keep_going, %before : reg<spirv.id : i1>, reg<spirv.id : i32>\n} do(%body: reg<spirv.id : i32>) {\n  low.scf.yield %body : reg<spirv.id : i32>\n}",
     ],
 )
 
@@ -1519,8 +1643,10 @@ ALL_LOW_OPS: tuple[Op, ...] = (
     low_resource,
     low_live_in,
     low_scf_yield,
+    low_scf_condition,
     low_scf_if,
     low_scf_for,
+    low_scf_while,
     low_schedule_fence,
     low_assume,
 )

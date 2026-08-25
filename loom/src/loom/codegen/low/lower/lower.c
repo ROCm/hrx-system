@@ -362,6 +362,7 @@ static bool loom_low_lower_supported_structured_source_op(
   switch (source_op->kind) {
     case LOOM_OP_SCF_IF:
     case LOOM_OP_SCF_FOR:
+    case LOOM_OP_SCF_WHILE:
       return true;
     default:
       return false;
@@ -384,6 +385,8 @@ static bool loom_low_lower_op_is_structural(const loom_module_t* module,
     case LOOM_OP_KERNEL_RETURN:
     case LOOM_OP_SCF_FOR:
     case LOOM_OP_SCF_IF:
+    case LOOM_OP_SCF_WHILE:
+    case LOOM_OP_SCF_CONDITION:
     case LOOM_OP_SCF_SCHEDULE_FENCE:
     case LOOM_OP_SCF_YIELD:
       return true;
@@ -820,6 +823,16 @@ static void loom_low_lower_mark_structural_storage_demands(
     case LOOM_OP_SCF_IF:
       loom_low_lower_mark_value_storage_required(
           context, loom_scf_if_condition(source_op));
+      return;
+    case LOOM_OP_SCF_WHILE:
+      loom_low_lower_mark_value_slice_storage_required(
+          context, loom_scf_while_iter_args(source_op));
+      return;
+    case LOOM_OP_SCF_CONDITION:
+      loom_low_lower_mark_value_storage_required(
+          context, loom_scf_condition_condition(source_op));
+      loom_low_lower_mark_value_slice_storage_required(
+          context, loom_scf_condition_forwarded(source_op));
       return;
     case LOOM_OP_SCF_YIELD:
       loom_low_lower_mark_value_slice_storage_required(
@@ -2672,6 +2685,21 @@ static iree_status_t loom_low_lower_emit_scf_yield(
                                   source_op->location, &low_yield_op);
 }
 
+static iree_status_t loom_low_lower_emit_scf_condition(
+    loom_low_lower_context_t* context, const loom_op_t* source_op) {
+  loom_value_id_t low_condition = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_low_lower_lookup_value(
+      context, loom_scf_condition_condition(source_op), &low_condition));
+  const loom_value_slice_t forwarded = loom_scf_condition_forwarded(source_op);
+  loom_value_id_t* low_forwarded = NULL;
+  IREE_RETURN_IF_ERROR(loom_low_lower_remap_values(
+      context, source_op, forwarded.values, forwarded.count, &low_forwarded));
+  loom_op_t* low_condition_op = NULL;
+  return loom_low_scf_condition_build(&context->builder, low_condition,
+                                      low_forwarded, forwarded.count,
+                                      source_op->location, &low_condition_op);
+}
+
 static iree_status_t loom_low_lower_emit_scf_if(
     loom_low_lower_context_t* context, const loom_op_t* source_op) {
   loom_value_id_t low_condition = LOOM_VALUE_ID_INVALID;
@@ -2717,13 +2745,12 @@ static iree_status_t loom_low_lower_emit_scf_if(
   return status;
 }
 
-static iree_status_t loom_low_lower_bind_for_body_args(
-    loom_low_lower_context_t* context, const loom_op_t* source_for_op,
-    loom_op_t* low_for_op) {
-  loom_block_t* source_entry =
-      loom_region_entry_block(loom_scf_for_body(source_for_op));
-  loom_block_t* low_entry =
-      loom_region_entry_block(loom_low_scf_for_body(low_for_op));
+static iree_status_t loom_low_lower_bind_region_entry_args(
+    loom_low_lower_context_t* context, const loom_region_t* source_region,
+    const loom_region_t* low_region) {
+  const loom_block_t* source_entry =
+      loom_region_const_entry_block(source_region);
+  const loom_block_t* low_entry = loom_region_const_entry_block(low_region);
   IREE_ASSERT_EQ(source_entry->arg_count, low_entry->arg_count);
   for (uint16_t i = 0; i < source_entry->arg_count; ++i) {
     IREE_RETURN_IF_ERROR(loom_low_lower_bind_value(
@@ -2777,13 +2804,52 @@ static iree_status_t loom_low_lower_emit_scf_for(
       source_op->location, &low_for_op));
   IREE_RETURN_IF_ERROR(
       loom_low_lower_bind_op_results(context, source_op, low_for_op));
-  IREE_RETURN_IF_ERROR(
-      loom_low_lower_bind_for_body_args(context, source_op, low_for_op));
+  IREE_RETURN_IF_ERROR(loom_low_lower_bind_region_entry_args(
+      context, loom_scf_for_body(source_op),
+      loom_low_scf_for_body(low_for_op)));
 
   loom_builder_ip_t saved_ip = loom_builder_enter_region(
       &context->builder, low_for_op, loom_low_scf_for_body(low_for_op));
   iree_status_t status = loom_low_lower_emit_region_ops(
       context, loom_scf_for_body(source_op), /*map_source_blocks=*/false);
+  loom_builder_restore(&context->builder, saved_ip);
+  return status;
+}
+
+static iree_status_t loom_low_lower_emit_scf_while(
+    loom_low_lower_context_t* context, const loom_op_t* source_op) {
+  const loom_value_slice_t iter_args = loom_scf_while_iter_args(source_op);
+  loom_value_id_t* low_iter_args = NULL;
+  IREE_RETURN_IF_ERROR(loom_low_lower_remap_values(
+      context, source_op, iter_args.values, iter_args.count, &low_iter_args));
+
+  loom_op_t* low_while_op = NULL;
+  IREE_RETURN_IF_ERROR(loom_low_scf_while_build(
+      &context->builder, low_iter_args, iter_args.count,
+      /*tied_results=*/NULL, /*tied_result_count=*/0, source_op->location,
+      &low_while_op));
+  IREE_RETURN_IF_ERROR(
+      loom_low_lower_bind_op_results(context, source_op, low_while_op));
+  IREE_RETURN_IF_ERROR(loom_low_lower_bind_region_entry_args(
+      context, loom_scf_while_before(source_op),
+      loom_low_scf_while_before(low_while_op)));
+  IREE_RETURN_IF_ERROR(loom_low_lower_bind_region_entry_args(
+      context, loom_scf_while_after(source_op),
+      loom_low_scf_while_after(low_while_op)));
+
+  loom_builder_ip_t saved_ip = loom_builder_enter_region(
+      &context->builder, low_while_op, loom_low_scf_while_before(low_while_op));
+  iree_status_t status =
+      loom_low_lower_emit_region_ops(context, loom_scf_while_before(source_op),
+                                     /*map_source_blocks=*/false);
+  loom_builder_restore(&context->builder, saved_ip);
+  IREE_RETURN_IF_ERROR(status);
+
+  saved_ip = loom_builder_enter_region(&context->builder, low_while_op,
+                                       loom_low_scf_while_after(low_while_op));
+  status =
+      loom_low_lower_emit_region_ops(context, loom_scf_while_after(source_op),
+                                     /*map_source_blocks=*/false);
   loom_builder_restore(&context->builder, saved_ip);
   return status;
 }
@@ -2914,10 +2980,14 @@ static iree_status_t loom_low_lower_structural_op(
     }
     case LOOM_OP_SCF_YIELD:
       return loom_low_lower_emit_scf_yield(context, source_op);
+    case LOOM_OP_SCF_CONDITION:
+      return loom_low_lower_emit_scf_condition(context, source_op);
     case LOOM_OP_SCF_IF:
       return loom_low_lower_emit_scf_if(context, source_op);
     case LOOM_OP_SCF_FOR:
       return loom_low_lower_emit_scf_for(context, source_op);
+    case LOOM_OP_SCF_WHILE:
+      return loom_low_lower_emit_scf_while(context, source_op);
     default:
       *out_handled = false;
       return iree_ok_status();

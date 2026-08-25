@@ -133,6 +133,33 @@ low.func.def target<wasm.core.simd128>(@target) abi(wasm_function) @nested_if_in
 
 // ====
 
+wasm.target<simd128> @target
+
+func.def target(@target) @while_with_iter_arg(%limit: i32, %step: i32, %seed: i32) -> (i32) {
+  %result = scf.while(%before = %seed : i32) -> (i32) {
+    %keep_going = scalar.cmpi ult, %before, %limit : i32
+    scf.condition %keep_going, %before : i1, i32
+  } do(%body: i32) {
+    %next = scalar.addi %body, %step : i32
+    scf.yield %next : i32
+  }
+  func.return %result : i32
+}
+
+// ----
+low.func.def target<wasm.core.simd128>(@target) abi(wasm_function) @while_with_iter_arg(%limit: reg<wasm.i32>, %step: reg<wasm.i32>, %seed: reg<wasm.i32>) -> (reg<wasm.i32>) asm {
+  %result = low.scf.while(%before = %seed : reg<wasm.i32>) -> (reg<wasm.i32>) {
+    %keep_going = i32.lt_u %before, %limit
+    low.scf.condition %keep_going, %before : reg<wasm.i32>, reg<wasm.i32>
+  } do(%body: reg<wasm.i32>) {
+    %next = i32.add %body, %step
+    low.scf.yield %next : reg<wasm.i32>
+  }
+  return %result
+}
+
+// ====
+
 // RUN: verify
 
 wasm.target<simd128> @target
@@ -140,6 +167,22 @@ wasm.target<simd128> @target
 low.func.def target<wasm.core.simd128>(@target) @scf_if_condition_requires_i32(%condition: reg<wasm.v128>) asm {
   // ERROR@+1: TARGET/035 {target_key="target", export_name="scf_if_condition_requires_i32", config_key="target", function_name="scf_if_condition_requires_i32", op_name="low.scf.if", actual_type="reg<wasm.v128>", type_constraint="reg<wasm.i32>"}
   low.scf.if %condition {
+  }
+  return
+}
+
+// ====
+
+// RUN: verify
+
+wasm.target<simd128> @target
+
+low.func.def target<wasm.core.simd128>(@target) @scf_while_condition_requires_i32(%condition: reg<wasm.v128>) asm {
+  low.scf.while {
+    // ERROR@+1: TARGET/035 {target_key="target", export_name="scf_while_condition_requires_i32", config_key="target", function_name="scf_while_condition_requires_i32", op_name="low.scf.condition", actual_type="reg<wasm.v128>", type_constraint="reg<wasm.i32>"}
+    low.scf.condition %condition : reg<wasm.v128>
+  } do {
+    low.scf.yield
   }
   return
 }

@@ -2274,8 +2274,9 @@ iree_status_t loom_low_allocation_coalescing_assign_structural_interval(
         }
         break;
       }
-      case LOOM_LOW_PLACEMENT_CAUSE_LOW_SCF_FOR:
-      case LOOM_LOW_PLACEMENT_CAUSE_LOW_SCF_YIELD: {
+      case LOOM_LOW_PLACEMENT_CAUSE_LOW_SCF_LOOP_ENTRY:
+      case LOOM_LOW_PLACEMENT_CAUSE_LOW_SCF_YIELD:
+      case LOOM_LOW_PLACEMENT_CAUSE_LOW_SCF_CONDITION: {
         IREE_RETURN_IF_ERROR(
             loom_low_allocation_coalescing_assign_edge_destination_interval(
                 context, interval, relation, out_assigned));

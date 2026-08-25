@@ -288,6 +288,13 @@ class LowBuilder(DialectBuilder):
         values: list[ValueRef] = ...,
         location_id: int | None = ...,
     ) -> None: ...
+    def condition(
+        self,
+        *,
+        condition: ValueRef,
+        forwarded: list[ValueRef] = ...,
+        location_id: int | None = ...,
+    ) -> None: ...
     def if_(
         self,
         *,
@@ -311,6 +318,18 @@ class LowBuilder(DialectBuilder):
         unroll_factor: ValueRef | None = ...,
         unroll_policy: str | None = ...,
         body: Region | None = ...,
+        name: str | None = ...,
+        names: Sequence[str] | None = ...,
+        result_names: Sequence[str] | None = ...,
+        location_id: int | None = ...,
+    ) -> list[ValueRef]: ...
+    def while_(
+        self,
+        *,
+        iter_args: list[ValueRef] = ...,
+        results: list[Type | TiedResultSpec],
+        before: Region | None = ...,
+        after: Region | None = ...,
         name: str | None = ...,
         names: Sequence[str] | None = ...,
         result_names: Sequence[str] | None = ...,

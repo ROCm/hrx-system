@@ -42,11 +42,13 @@ enum {
   LOOM_OP_LOW_RESOURCE = LOOM_OP_KIND(LOOM_DIALECT_LOW, 19),
   LOOM_OP_LOW_LIVE_IN = LOOM_OP_KIND(LOOM_DIALECT_LOW, 20),
   LOOM_OP_LOW_SCF_YIELD = LOOM_OP_KIND(LOOM_DIALECT_LOW, 21),
-  LOOM_OP_LOW_SCF_IF = LOOM_OP_KIND(LOOM_DIALECT_LOW, 22),
-  LOOM_OP_LOW_SCF_FOR = LOOM_OP_KIND(LOOM_DIALECT_LOW, 23),
-  LOOM_OP_LOW_SCHEDULE_FENCE = LOOM_OP_KIND(LOOM_DIALECT_LOW, 24),
-  LOOM_OP_LOW_ASSUME = LOOM_OP_KIND(LOOM_DIALECT_LOW, 25),
-  LOOM_OP_LOW_COUNT_ = 26,
+  LOOM_OP_LOW_SCF_CONDITION = LOOM_OP_KIND(LOOM_DIALECT_LOW, 22),
+  LOOM_OP_LOW_SCF_IF = LOOM_OP_KIND(LOOM_DIALECT_LOW, 23),
+  LOOM_OP_LOW_SCF_FOR = LOOM_OP_KIND(LOOM_DIALECT_LOW, 24),
+  LOOM_OP_LOW_SCF_WHILE = LOOM_OP_KIND(LOOM_DIALECT_LOW, 25),
+  LOOM_OP_LOW_SCHEDULE_FENCE = LOOM_OP_KIND(LOOM_DIALECT_LOW, 26),
+  LOOM_OP_LOW_ASSUME = LOOM_OP_KIND(LOOM_DIALECT_LOW, 27),
+  LOOM_OP_LOW_COUNT_ = 28,
 };
 
 // Function visibility. Absent (0) means private (module-internal).
@@ -710,6 +712,19 @@ iree_status_t loom_low_scf_yield_build(
     loom_location_id_t location,
     loom_op_t** out_op);
 
+// LOOM_OP_LOW_SCF_CONDITION: Terminate a low.scf.while condition region with a register predicate and loop-carried register values. Forwarded values enter the body when the predicate is true and become the loop results when it is false.
+// low.scf.condition %keep_going : reg<spirv.id : i1>
+LOOM_DEFINE_ISA(loom_low_scf_condition_isa, LOOM_OP_LOW_SCF_CONDITION)
+LOOM_DEFINE_OPERAND(loom_low_scf_condition_condition, 0)
+LOOM_DEFINE_VARIADIC_OPERANDS(loom_low_scf_condition_forwarded, 1)
+iree_status_t loom_low_scf_condition_build(
+    loom_builder_t* builder,
+    loom_value_id_t condition,
+    const loom_value_id_t* forwarded,
+    iree_host_size_t forwarded_count,
+    loom_location_id_t location,
+    loom_op_t** out_op);
+
 // LOOM_OP_LOW_SCF_IF: Conditional execution over target-low register values.
 // low.scf.if %cond {
 //   low.scf.yield
@@ -770,6 +785,29 @@ iree_status_t loom_low_scf_for_build(
     loom_location_id_t location,
     loom_op_t** out_op);
 iree_status_t loom_low_scf_for_verify(
+    const loom_module_t* module, const loom_op_t* op,
+    iree_diagnostic_emitter_t emitter);
+
+// LOOM_OP_LOW_SCF_WHILE: Condition-controlled target-low loop with explicit condition and body regions and loop-carried register state.
+// low.scf.while {
+//   low.scf.condition %condition : reg<spirv.id : i1>
+// } do {
+//   low.scf.yield
+// }
+LOOM_DEFINE_ISA(loom_low_scf_while_isa, LOOM_OP_LOW_SCF_WHILE)
+LOOM_DEFINE_VARIADIC_OPERANDS(loom_low_scf_while_iter_args, 0)
+LOOM_DEFINE_VARIADIC_RESULTS(loom_low_scf_while_results, 0)
+LOOM_DEFINE_REGION(loom_low_scf_while_before, 0)
+LOOM_DEFINE_REGION(loom_low_scf_while_after, 1)
+iree_status_t loom_low_scf_while_build(
+    loom_builder_t* builder,
+    loom_may_consume const loom_value_id_t* iter_args,
+    iree_host_size_t iter_args_count,
+    const loom_tied_result_t* tied_results,
+    iree_host_size_t tied_result_count,
+    loom_location_id_t location,
+    loom_op_t** out_op);
+iree_status_t loom_low_scf_while_verify(
     const loom_module_t* module, const loom_op_t* op,
     iree_diagnostic_emitter_t emitter);
 

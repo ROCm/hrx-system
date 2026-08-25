@@ -1012,6 +1012,73 @@ static iree_status_t loom_spirv_low_verify_scf_for(
   return iree_ok_status();
 }
 
+static iree_status_t loom_spirv_low_verify_scf_while(
+    loom_low_verify_context_t* context, loom_spirv_low_verify_state_t* state,
+    const loom_op_t* op) {
+  const loom_block_t* before_block =
+      loom_region_const_entry_block(loom_low_scf_while_before(op));
+  const loom_block_t* after_block =
+      loom_region_const_entry_block(loom_low_scf_while_after(op));
+  const loom_value_slice_t iter_args = loom_low_scf_while_iter_args(op);
+  const loom_value_slice_t results = loom_low_scf_while_results(op);
+  if (before_block == NULL || after_block == NULL ||
+      before_block->arg_count != iter_args.count ||
+      after_block->arg_count != iter_args.count ||
+      results.count != iter_args.count) {
+    return iree_ok_status();
+  }
+  for (uint16_t i = 0; i < iter_args.count; ++i) {
+    loom_spirv_value_type_t iter_arg_type = {0};
+    if (!loom_spirv_low_value_type_table_lookup(
+            &state->value_types, iter_args.values[i], &iter_arg_type)) {
+      continue;
+    }
+    IREE_RETURN_IF_ERROR(loom_spirv_low_define_or_verify_value_type(
+        context, state, op, iter_args.values[i],
+        loom_block_arg_id(before_block, i), iter_arg_type));
+    IREE_RETURN_IF_ERROR(loom_spirv_low_define_or_verify_value_type(
+        context, state, op, iter_args.values[i],
+        loom_block_arg_id(after_block, i), iter_arg_type));
+    IREE_RETURN_IF_ERROR(loom_spirv_low_define_or_verify_value_type(
+        context, state, op, iter_args.values[i], results.values[i],
+        iter_arg_type));
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t loom_spirv_low_verify_scf_condition(
+    loom_low_verify_context_t* context, loom_spirv_low_verify_state_t* state,
+    const loom_op_t* op) {
+  IREE_RETURN_IF_ERROR(loom_spirv_low_verify_bool_condition(
+      context, state, op, loom_low_scf_condition_condition(op)));
+  const loom_op_t* parent_op = op->parent_op;
+  if (parent_op == NULL || !loom_low_scf_while_isa(parent_op)) {
+    return loom_spirv_low_emit_unsupported_structural_op(context, state, op);
+  }
+  const loom_block_t* after_block =
+      loom_region_const_entry_block(loom_low_scf_while_after(parent_op));
+  const loom_value_slice_t forwarded = loom_low_scf_condition_forwarded(op);
+  const loom_value_slice_t results = loom_low_scf_while_results(parent_op);
+  if (after_block == NULL || after_block->arg_count != forwarded.count ||
+      results.count != forwarded.count) {
+    return iree_ok_status();
+  }
+  for (uint16_t i = 0; i < forwarded.count; ++i) {
+    loom_spirv_value_type_t forwarded_type = {0};
+    if (!loom_spirv_low_value_type_table_lookup(
+            &state->value_types, forwarded.values[i], &forwarded_type)) {
+      continue;
+    }
+    IREE_RETURN_IF_ERROR(loom_spirv_low_define_or_verify_value_type(
+        context, state, op, forwarded.values[i],
+        loom_block_arg_id(after_block, i), forwarded_type));
+    IREE_RETURN_IF_ERROR(loom_spirv_low_define_or_verify_value_type(
+        context, state, op, forwarded.values[i], results.values[i],
+        forwarded_type));
+  }
+  return iree_ok_status();
+}
+
 static iree_status_t loom_spirv_low_verify_scf_if_yield(
     loom_low_verify_context_t* context, loom_spirv_low_verify_state_t* state,
     const loom_op_t* op, const loom_op_t* parent_op) {
@@ -1070,6 +1137,28 @@ static iree_status_t loom_spirv_low_verify_scf_for_yield(
   return iree_ok_status();
 }
 
+static iree_status_t loom_spirv_low_verify_scf_while_yield(
+    loom_low_verify_context_t* context, loom_spirv_low_verify_state_t* state,
+    const loom_op_t* op, const loom_op_t* parent_op) {
+  const loom_block_t* before_block =
+      loom_region_const_entry_block(loom_low_scf_while_before(parent_op));
+  const loom_value_slice_t yielded_values = loom_low_scf_yield_values(op);
+  if (before_block == NULL || before_block->arg_count != yielded_values.count) {
+    return iree_ok_status();
+  }
+  for (uint16_t i = 0; i < yielded_values.count; ++i) {
+    loom_spirv_value_type_t yielded_type = {0};
+    if (!loom_spirv_low_value_type_table_lookup(
+            &state->value_types, yielded_values.values[i], &yielded_type)) {
+      continue;
+    }
+    IREE_RETURN_IF_ERROR(loom_spirv_low_define_or_verify_value_type(
+        context, state, op, yielded_values.values[i],
+        loom_block_arg_id(before_block, i), yielded_type));
+  }
+  return iree_ok_status();
+}
+
 static iree_status_t loom_spirv_low_verify_scf_yield(
     loom_low_verify_context_t* context, loom_spirv_low_verify_state_t* state,
     const loom_op_t* op) {
@@ -1082,6 +1171,9 @@ static iree_status_t loom_spirv_low_verify_scf_yield(
   }
   if (loom_low_scf_for_isa(parent_op)) {
     return loom_spirv_low_verify_scf_for_yield(context, state, op, parent_op);
+  }
+  if (loom_low_scf_while_isa(parent_op)) {
+    return loom_spirv_low_verify_scf_while_yield(context, state, op, parent_op);
   }
   return loom_spirv_low_emit_unsupported_structural_op(context, state, op);
 }
@@ -1299,6 +1391,12 @@ static iree_status_t loom_spirv_low_verify_op(
   }
   if (loom_low_scf_for_isa(op)) {
     return loom_spirv_low_verify_scf_for(context, state, op);
+  }
+  if (loom_low_scf_while_isa(op)) {
+    return loom_spirv_low_verify_scf_while(context, state, op);
+  }
+  if (loom_low_scf_condition_isa(op)) {
+    return loom_spirv_low_verify_scf_condition(context, state, op);
   }
   if (loom_low_scf_yield_isa(op)) {
     return loom_spirv_low_verify_scf_yield(context, state, op);

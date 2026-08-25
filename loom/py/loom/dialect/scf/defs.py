@@ -63,6 +63,7 @@ from loom.dsl import (
     Dialect,
     EnumCase,
     EnumDef,
+    HasParent,
     ImplicitTerminator,
     IterArgsMatchResults,
     LoopLikeInterface,
@@ -151,7 +152,7 @@ scf_yield = Op(
 #
 # Terminates the `before` region of scf.while. The first operand is the loop
 # continuation condition. The forwarded operands become the entry block
-# arguments of the `after` region on the next iteration.
+# arguments of the `after` region when the condition is true.
 
 scf_condition = Op(
     "scf.condition",
@@ -161,7 +162,7 @@ scf_condition = Op(
         Operand("condition", I1, role=OperandRole.CONTROL_CONDITION),
         Operand("forwarded", ANY, variadic=True),
     ],
-    traits=[TERMINATOR],
+    traits=[TERMINATOR, HasParent("scf.while")],
     format=[
         Ref("condition"),
         OptionalGroup(

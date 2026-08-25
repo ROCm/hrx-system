@@ -222,6 +222,22 @@ low.func.def target<spirv.logical.core>(@target) @scf_if_condition_type_mismatch
 
 spirv.target<vulkan1_3> @target
 
+low.func.def target<spirv.logical.core>(@target) @scf_while_condition_type_mismatch(%value: reg<spirv.id : i32>) {
+  low.scf.while {
+    // ERROR@+1: SPIRV/019 {function_name="scf_while_condition_type_mismatch", value_name="value", actual_value_type="s32"}
+    low.scf.condition %value : reg<spirv.id : i32>
+  } do {
+    low.scf.yield
+  }
+  low.return
+}
+
+// ====
+
+// RUN: verify
+
+spirv.target<vulkan1_3> @target
+
 low.func.def target<spirv.logical.core>(@target) @scf_if_yield_type_mismatch(%condition: reg<spirv.id : i1>, %lhs: reg<spirv.id : i32>, %rhs: reg<spirv.id : i32>) -> (reg<spirv.id : i32>) {
   %rhs_unsigned = low.op<spirv.op_bitcast.i32.u32>(%rhs) : (reg<spirv.id : i32>) -> reg<spirv.id : i32>
   %selected = low.scf.if %condition -> (reg<spirv.id : i32>) {

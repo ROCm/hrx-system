@@ -878,6 +878,7 @@ static const loom_amdgpu_source_producer_flags_t
         [LOOM_AMDGPU_OP_INDEX(LOOM_OP_SCALAR_EXTUI)] =
             LOOM_AMDGPU_SOURCE_PRODUCER_FOLLOWS_OPERAND,
         [LOOM_AMDGPU_OP_INDEX(LOOM_OP_SCALAR_BITCAST)] =
+            LOOM_AMDGPU_SOURCE_PRODUCER_FOLLOWS_OPERAND |
             LOOM_AMDGPU_SOURCE_PRODUCER_SCALAR_BITCAST,
         [LOOM_AMDGPU_OP_INDEX(LOOM_OP_SCALAR_CMPI)] =
             LOOM_AMDGPU_SOURCE_PRODUCER_I1_COMPARE |
@@ -1755,6 +1756,67 @@ static bool loom_amdgpu_block_arg_has_cfg_predecessor(
   return false;
 }
 
+// Returns true when |source_value_id| is an expression whose value depends on
+// a lane-select condition. Branch joins may otherwise scalarize uniform VGPR
+// payloads with readfirstlane, which is important for uniform address loops.
+// Chase only distribution-preserving expression producers here: an arbitrary
+// nested VGPR producer does not by itself make scalarization invalid.
+static bool loom_amdgpu_branch_payload_has_vgpr_select_dependency(
+    const loom_module_t* module, const loom_value_fact_table_t* fact_table,
+    const loom_view_region_table_t* view_regions,
+    loom_amdgpu_source_value_analysis_t* analysis,
+    loom_value_id_t source_value_id, loom_value_id_t excluded_value_id) {
+  if (source_value_id == excluded_value_id ||
+      source_value_id >= module->values.count) {
+    return false;
+  }
+  const loom_value_t* value = loom_module_value(module, source_value_id);
+  if (loom_value_is_block_arg(value)) {
+    return false;
+  }
+  const loom_op_t* defining_op = loom_value_def_op(value);
+  if (defining_op == NULL || loom_value_def_index(value) != 0) {
+    return false;
+  }
+  if (loom_scf_select_isa(defining_op)) {
+    return loom_amdgpu_analyzed_source_value_prefers_vgpr(
+        module, fact_table, view_regions, analysis, source_value_id);
+  }
+
+  const loom_trait_flags_t defining_op_traits =
+      loom_op_effective_traits(module, defining_op);
+  loom_value_id_t identity_operand = LOOM_VALUE_ID_INVALID;
+  if (loom_amdgpu_source_value_fact_identity_operand(
+          value, defining_op, defining_op_traits, source_value_id,
+          &identity_operand)) {
+    return identity_operand != LOOM_VALUE_ID_INVALID &&
+           loom_amdgpu_branch_payload_has_vgpr_select_dependency(
+               module, fact_table, view_regions, analysis, identity_operand,
+               excluded_value_id);
+  }
+
+  loom_value_id_t lhs = LOOM_VALUE_ID_INVALID;
+  loom_value_id_t rhs = LOOM_VALUE_ID_INVALID;
+  if (loom_amdgpu_distribution_transfer_binary_result_follows_operand_vgpr(
+          module, source_value_id, defining_op, &lhs, &rhs)) {
+    return loom_amdgpu_branch_payload_has_vgpr_select_dependency(
+               module, fact_table, view_regions, analysis, lhs,
+               excluded_value_id) ||
+           loom_amdgpu_branch_payload_has_vgpr_select_dependency(
+               module, fact_table, view_regions, analysis, rhs,
+               excluded_value_id);
+  }
+
+  loom_value_id_t operand = LOOM_VALUE_ID_INVALID;
+  const loom_amdgpu_source_producer_flags_t producer_flags =
+      loom_amdgpu_source_producer_flags(defining_op->kind);
+  return loom_amdgpu_source_producer_result_follows_operand_vgpr(
+             module, source_value_id, defining_op, producer_flags, &operand) &&
+         loom_amdgpu_branch_payload_has_vgpr_select_dependency(
+             module, fact_table, view_regions, analysis, operand,
+             excluded_value_id);
+}
+
 static bool loom_amdgpu_branch_arg_payload_prefers_vgpr(
     const loom_module_t* module, const loom_value_fact_table_t* fact_table,
     const loom_view_region_table_t* view_regions,
@@ -1787,9 +1849,10 @@ static bool loom_amdgpu_branch_arg_payload_prefers_vgpr(
   if (defining_op == NULL || loom_value_def_index(incoming_value) != 0) {
     return false;
   }
-  if (analysis != NULL && loom_scf_select_isa(defining_op)) {
-    return loom_amdgpu_analyzed_source_value_prefers_vgpr(
-        module, fact_table, view_regions, analysis, incoming_value_id);
+  if (analysis != NULL && loom_amdgpu_branch_payload_has_vgpr_select_dependency(
+                              module, fact_table, view_regions, analysis,
+                              incoming_value_id, excluded_value_id)) {
+    return true;
   }
   return loom_amdgpu_source_memory_access_prefers_vgpr(
       module, fact_table, view_regions, analysis, defining_op,

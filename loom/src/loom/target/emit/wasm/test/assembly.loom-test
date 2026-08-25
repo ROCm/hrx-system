@@ -184,7 +184,7 @@ Disassembly of section CODE:
   end
 
 <for_with_iter_args>:
-        .local v128, v128
+        .local v128
   local.get  3
   local.set  5
   block
@@ -197,8 +197,6 @@ Disassembly of section CODE:
   local.get  5
   local.get  4
   i32x4.add
-  local.set  6
-  local.get  6
   local.set  5
   local.get  0
   local.get  2
@@ -208,8 +206,6 @@ Disassembly of section CODE:
   end
   end
   local.get  5
-  local.set  4
-  local.get  4
   local.get  3
   i32x4.add
   local.set  4
@@ -278,15 +274,15 @@ Disassembly of section CODE:
   local.get  4
   v128.bitselect
   local.set  3
-  local.get  3
-  local.set  1
   else
   local.get  1
   local.get  2
   i32x4.mul
   local.set  1
-  end
   local.get  1
+  local.set  3
+  end
+  local.get  3
   return
   end
 
@@ -431,11 +427,11 @@ Disassembly of section CODE:
   local.get  2
   i32.add
   local.set  2
-  local.get  2
-  local.set  1
   else
-  end
   local.get  1
+  local.set  2
+  end
+  local.get  2
   return
   end
 
@@ -530,5 +526,88 @@ Disassembly of section CODE:
   local.get  0
   i32.store8  0
   local.get  0
+  return
+  end
+
+// ====
+
+// RUN: emit wasm-dis
+// REQUIRES: wasm-objdump
+
+wasm.target<simd128> @target
+
+low.func.def public target<wasm.core.simd128>(@target) abi(wasm_function) @while_with_iter_arg(%limit: reg<wasm.i32>, %step: reg<wasm.i32>, %seed: reg<wasm.i32>) -> (reg<wasm.i32>) asm {
+  %result = low.scf.while(%before = %seed : reg<wasm.i32>) -> (reg<wasm.i32>) {
+    %keep_going = i32.lt_u %before, %limit
+    low.scf.condition %keep_going, %before : reg<wasm.i32>, reg<wasm.i32>
+  } do(%body: reg<wasm.i32>) {
+    %next = i32.add %body, %step
+    low.scf.yield %next : reg<wasm.i32>
+  }
+  return %result
+}
+
+low.func.def public target<wasm.core.simd128>(@target) abi(wasm_function) @while_swap(%condition: reg<wasm.i32>, %a: reg<wasm.i32>, %b: reg<wasm.i32>) -> (reg<wasm.i32>, reg<wasm.i32>) asm {
+  %c0 = i32.const 0
+  %ignored_condition, %result_a, %result_b = low.scf.while(%before_condition = %condition : reg<wasm.i32>, %before_a = %a : reg<wasm.i32>, %before_b = %b : reg<wasm.i32>) -> (reg<wasm.i32>, reg<wasm.i32>, reg<wasm.i32>) {
+    low.scf.condition %before_condition, %before_condition, %before_a, %before_b : reg<wasm.i32>, reg<wasm.i32>, reg<wasm.i32>, reg<wasm.i32>
+  } do(%body_condition: reg<wasm.i32>, %body_a: reg<wasm.i32>, %body_b: reg<wasm.i32>) {
+    low.scf.yield %c0, %body_b, %body_a : reg<wasm.i32>, reg<wasm.i32>, reg<wasm.i32>
+  }
+  return %result_a, %result_b
+}
+
+// ----
+Disassembly of section CODE:
+
+<CODE>:
+        # 2 functions in section.
+
+<while_with_iter_arg>:
+        .local i32
+  block
+  loop
+  local.get  2
+  local.get  0
+  i32.lt_u
+  local.set  3
+  local.get  3
+  i32.eqz
+  if
+  br        2
+  end
+  local.get  2
+  local.get  1
+  i32.add
+  local.set  2
+  br        0
+  end
+  end
+  local.get  2
+  return
+  end
+
+<while_swap>:
+        .local i32
+  i32.const  0
+  local.set  3
+  block
+  loop
+  local.get  0
+  i32.eqz
+  if
+  br        2
+  end
+  local.get  3
+  local.get  2
+  local.get  1
+  local.set  2
+  local.set  1
+  local.set  0
+  br        0
+  end
+  end
+  local.get  1
+  local.get  2
   return
   end

@@ -1041,12 +1041,12 @@ static iree_status_t loom_spirv_emit_descriptor_packet(
 static iree_status_t loom_spirv_emit_low_op(loom_spirv_emit_state_t* state,
                                             const loom_op_t* op);
 
-typedef struct loom_spirv_emit_region_yield_t {
+typedef struct loom_spirv_emit_region_exit_t {
   // Region terminator op when present.
   const loom_op_t* op;
   // Label ID of the block that reaches the parent merge/continue edge.
   uint32_t predecessor_label_id;
-} loom_spirv_emit_region_yield_t;
+} loom_spirv_emit_region_exit_t;
 
 static iree_status_t loom_spirv_emit_label_id(loom_spirv_emit_state_t* state,
                                               uint32_t label_id) {
@@ -1102,8 +1102,8 @@ static const loom_op_t* loom_spirv_emit_region_terminator(
 
 static iree_status_t loom_spirv_emit_region_ops(
     loom_spirv_emit_state_t* state, const loom_region_t* region,
-    loom_spirv_emit_region_yield_t* out_yield) {
-  *out_yield = (loom_spirv_emit_region_yield_t){
+    loom_spirv_emit_region_exit_t* out_exit) {
+  *out_exit = (loom_spirv_emit_region_exit_t){
       .predecessor_label_id = state->current_label_id,
   };
   const loom_block_t* block = loom_region_const_entry_block(region);
@@ -1111,8 +1111,8 @@ static iree_status_t loom_spirv_emit_region_ops(
     return iree_ok_status();
   }
   for (const loom_op_t* op = block->first_op; op != NULL; op = op->next_op) {
-    if (loom_low_scf_yield_isa(op)) {
-      *out_yield = (loom_spirv_emit_region_yield_t){
+    if (loom_low_scf_yield_isa(op) || loom_low_scf_condition_isa(op)) {
+      *out_exit = (loom_spirv_emit_region_exit_t){
           .op = op,
           .predecessor_label_id = state->current_label_id,
       };
@@ -1120,7 +1120,7 @@ static iree_status_t loom_spirv_emit_region_ops(
     }
     IREE_RETURN_IF_ERROR(loom_spirv_emit_low_op(state, op));
   }
-  out_yield->predecessor_label_id = state->current_label_id;
+  out_exit->predecessor_label_id = state->current_label_id;
   return iree_ok_status();
 }
 
@@ -1191,20 +1191,20 @@ static iree_status_t loom_spirv_emit_scf_if(loom_spirv_emit_state_t* state,
       IREE_ARRAYSIZE(branch_operands)));
 
   IREE_RETURN_IF_ERROR(loom_spirv_emit_label_id(state, then_label_id));
-  loom_spirv_emit_region_yield_t then_yield = {0};
+  loom_spirv_emit_region_exit_t then_exit = {0};
   IREE_RETURN_IF_ERROR(
-      loom_spirv_emit_region_ops(state, then_region, &then_yield));
+      loom_spirv_emit_region_ops(state, then_region, &then_exit));
   const uint32_t then_predecessor_label_id = state->current_label_id;
   IREE_RETURN_IF_ERROR(loom_spirv_emit_branch_label(state, merge_label_id));
 
-  loom_spirv_emit_region_yield_t else_yield = {
+  loom_spirv_emit_region_exit_t else_exit = {
       .predecessor_label_id = condition_label_id,
   };
   if (else_region != NULL) {
     IREE_RETURN_IF_ERROR(loom_spirv_emit_label_id(state, else_label_id));
     IREE_RETURN_IF_ERROR(
-        loom_spirv_emit_region_ops(state, else_region, &else_yield));
-    else_yield.predecessor_label_id = state->current_label_id;
+        loom_spirv_emit_region_ops(state, else_region, &else_exit));
+    else_exit.predecessor_label_id = state->current_label_id;
     IREE_RETURN_IF_ERROR(loom_spirv_emit_branch_label(state, merge_label_id));
   }
 
@@ -1212,19 +1212,19 @@ static iree_status_t loom_spirv_emit_scf_if(loom_spirv_emit_state_t* state,
   if (results.count == 0) {
     return iree_ok_status();
   }
-  IREE_ASSERT(then_yield.op != NULL);
-  IREE_ASSERT(else_yield.op != NULL);
+  IREE_ASSERT(then_exit.op != NULL);
+  IREE_ASSERT(else_exit.op != NULL);
   const loom_value_slice_t then_values =
-      loom_low_scf_yield_values(then_yield.op);
+      loom_low_scf_yield_values(then_exit.op);
   const loom_value_slice_t else_values =
-      loom_low_scf_yield_values(else_yield.op);
+      loom_low_scf_yield_values(else_exit.op);
   IREE_ASSERT_EQ(then_values.count, results.count);
   IREE_ASSERT_EQ(else_values.count, results.count);
   for (uint16_t i = 0; i < results.count; ++i) {
     IREE_RETURN_IF_ERROR(loom_spirv_emit_scf_result_phi(
         state, results.values[i], then_values.values[i],
         then_predecessor_label_id, else_values.values[i],
-        else_yield.predecessor_label_id));
+        else_exit.predecessor_label_id));
   }
   return iree_ok_status();
 }
@@ -1418,9 +1418,9 @@ static iree_status_t loom_spirv_emit_scf_for(loom_spirv_emit_state_t* state,
       IREE_ARRAYSIZE(branch_operands)));
 
   IREE_RETURN_IF_ERROR(loom_spirv_emit_label_id(state, body_label_id));
-  loom_spirv_emit_region_yield_t body_yield = {0};
+  loom_spirv_emit_region_exit_t body_exit = {0};
   IREE_RETURN_IF_ERROR(
-      loom_spirv_emit_region_ops(state, body_region, &body_yield));
+      loom_spirv_emit_region_ops(state, body_region, &body_exit));
   IREE_RETURN_IF_ERROR(loom_spirv_emit_branch_label(state, continue_label_id));
 
   IREE_RETURN_IF_ERROR(loom_spirv_emit_label_id(state, continue_label_id));
@@ -1464,6 +1464,201 @@ static iree_status_t loom_spirv_emit_scf_for(loom_spirv_emit_state_t* state,
   return iree_ok_status();
 }
 
+static iree_status_t loom_spirv_emit_scf_while(loom_spirv_emit_state_t* state,
+                                               const loom_op_t* op) {
+  const loom_region_t* before_region = loom_low_scf_while_before(op);
+  const loom_region_t* after_region = loom_low_scf_while_after(op);
+  const loom_block_t* before_block =
+      loom_region_const_entry_block(before_region);
+  const loom_block_t* after_block = loom_region_const_entry_block(after_region);
+  const loom_op_t* condition_op =
+      loom_spirv_emit_region_terminator(before_region);
+  const loom_op_t* yield_op = loom_spirv_emit_region_terminator(after_region);
+  const loom_value_slice_t iter_args = loom_low_scf_while_iter_args(op);
+  const loom_value_slice_t results = loom_low_scf_while_results(op);
+  IREE_ASSERT(before_block != NULL);
+  IREE_ASSERT(after_block != NULL);
+  IREE_ASSERT(condition_op != NULL && loom_low_scf_condition_isa(condition_op));
+  IREE_ASSERT(yield_op != NULL && loom_low_scf_yield_isa(yield_op));
+  const loom_value_slice_t forwarded =
+      loom_low_scf_condition_forwarded(condition_op);
+  const loom_value_slice_t yielded = loom_low_scf_yield_values(yield_op);
+  IREE_ASSERT_EQ(before_block->arg_count, iter_args.count);
+  IREE_ASSERT_EQ(after_block->arg_count, iter_args.count);
+  IREE_ASSERT_EQ(forwarded.count, iter_args.count);
+  IREE_ASSERT_EQ(yielded.count, iter_args.count);
+  IREE_ASSERT_EQ(results.count, iter_args.count);
+
+  const uint32_t preheader_label_id = state->current_label_id;
+  const uint32_t header_label_id = loom_spirv_emit_allocate_id(state);
+  const uint32_t condition_label_id = loom_spirv_emit_allocate_id(state);
+  const uint32_t body_label_id = loom_spirv_emit_allocate_id(state);
+  const uint32_t continue_label_id = loom_spirv_emit_allocate_id(state);
+  const uint32_t merge_label_id = loom_spirv_emit_allocate_id(state);
+
+  loom_spirv_module_value_ref_t* initial_refs = NULL;
+  loom_spirv_module_value_ref_t* next_refs = NULL;
+  loom_spirv_module_value_ref_t* forwarded_refs = NULL;
+  uint32_t* before_phi_ids = NULL;
+  uint32_t* after_phi_ids = NULL;
+  if (iter_args.count > 0) {
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        state->scratch_arena, iter_args.count, sizeof(*initial_refs),
+        (void**)&initial_refs));
+    IREE_RETURN_IF_ERROR(
+        iree_arena_allocate_array(state->scratch_arena, iter_args.count,
+                                  sizeof(*next_refs), (void**)&next_refs));
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        state->scratch_arena, iter_args.count, sizeof(*forwarded_refs),
+        (void**)&forwarded_refs));
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        state->scratch_arena, iter_args.count, sizeof(*before_phi_ids),
+        (void**)&before_phi_ids));
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        state->scratch_arena, iter_args.count, sizeof(*after_phi_ids),
+        (void**)&after_phi_ids));
+  }
+  for (uint16_t i = 0; i < iter_args.count; ++i) {
+    IREE_RETURN_IF_ERROR(loom_spirv_emit_lookup_value(
+        state, iter_args.values[i], &initial_refs[i]));
+    before_phi_ids[i] = loom_spirv_emit_allocate_id(state);
+    after_phi_ids[i] = loom_spirv_emit_allocate_id(state);
+  }
+  for (uint16_t i = 0; i < yielded.count; ++i) {
+    const loom_value_id_t yielded_value_id = yielded.values[i];
+    bool yielded_after_arg = false;
+    for (uint16_t j = 0; j < after_block->arg_count; ++j) {
+      if (yielded_value_id != loom_block_arg_id(after_block, j)) {
+        continue;
+      }
+      IREE_ASSERT_EQ(initial_refs[i].type_id, initial_refs[j].type_id);
+      IREE_ASSERT(loom_spirv_value_type_equal(initial_refs[i].value_type,
+                                              initial_refs[j].value_type));
+      next_refs[i] = (loom_spirv_module_value_ref_t){
+          .id = after_phi_ids[j],
+          .type_id = initial_refs[j].type_id,
+          .value_type = initial_refs[j].value_type,
+      };
+      yielded_after_arg = true;
+      break;
+    }
+    if (yielded_after_arg) {
+      continue;
+    }
+    IREE_RETURN_IF_ERROR(loom_spirv_emit_lookup_or_reserve_typed_value(
+        state, yielded_value_id, initial_refs[i].type_id,
+        initial_refs[i].value_type, &next_refs[i]));
+  }
+
+  IREE_RETURN_IF_ERROR(loom_spirv_emit_branch_label(state, header_label_id));
+  IREE_RETURN_IF_ERROR(loom_spirv_emit_label_id(state, header_label_id));
+  for (uint16_t i = 0; i < iter_args.count; ++i) {
+    const loom_value_id_t before_arg_id = loom_block_arg_id(before_block, i);
+    const uint32_t operands[] = {
+        initial_refs[i].type_id, before_phi_ids[i], initial_refs[i].id,
+        preheader_label_id,      next_refs[i].id,   continue_label_id,
+    };
+    IREE_RETURN_IF_ERROR(loom_spirv_binary_write_instruction(
+        loom_spirv_emit_section(state, LOOM_SPIRV_MODULE_SECTION_FUNCTION),
+        LOOM_SPIRV_OP_PHI, operands, IREE_ARRAYSIZE(operands)));
+    const loom_spirv_module_value_ref_t before_arg_ref = {
+        .id = before_phi_ids[i],
+        .type_id = initial_refs[i].type_id,
+        .value_type = initial_refs[i].value_type,
+    };
+    IREE_RETURN_IF_ERROR(loom_spirv_emit_define_value(state, before_arg_id,
+                                                      before_arg_ref, true));
+  }
+  const uint32_t loop_merge_operands[] = {
+      merge_label_id,
+      continue_label_id,
+      LOOM_SPIRV_LOOP_CONTROL_NONE,
+  };
+  IREE_RETURN_IF_ERROR(loom_spirv_binary_write_instruction(
+      loom_spirv_emit_section(state, LOOM_SPIRV_MODULE_SECTION_FUNCTION),
+      LOOM_SPIRV_OP_LOOP_MERGE, loop_merge_operands,
+      IREE_ARRAYSIZE(loop_merge_operands)));
+  IREE_RETURN_IF_ERROR(loom_spirv_emit_branch_label(state, condition_label_id));
+
+  IREE_RETURN_IF_ERROR(loom_spirv_emit_label_id(state, condition_label_id));
+  loom_spirv_emit_region_exit_t condition_exit = {0};
+  IREE_RETURN_IF_ERROR(
+      loom_spirv_emit_region_ops(state, before_region, &condition_exit));
+  IREE_ASSERT(condition_exit.op == condition_op);
+  loom_spirv_module_value_ref_t condition_ref = {0};
+  IREE_RETURN_IF_ERROR(loom_spirv_emit_lookup_value(
+      state, loom_low_scf_condition_condition(condition_op), &condition_ref));
+  for (uint16_t i = 0; i < forwarded.count; ++i) {
+    IREE_RETURN_IF_ERROR(loom_spirv_emit_lookup_value(
+        state, forwarded.values[i], &forwarded_refs[i]));
+  }
+  const uint32_t branch_operands[] = {
+      condition_ref.id,
+      body_label_id,
+      merge_label_id,
+  };
+  IREE_RETURN_IF_ERROR(loom_spirv_binary_write_instruction(
+      loom_spirv_emit_section(state, LOOM_SPIRV_MODULE_SECTION_FUNCTION),
+      LOOM_SPIRV_OP_BRANCH_CONDITIONAL, branch_operands,
+      IREE_ARRAYSIZE(branch_operands)));
+
+  IREE_RETURN_IF_ERROR(loom_spirv_emit_label_id(state, body_label_id));
+  for (uint16_t i = 0; i < forwarded.count; ++i) {
+    IREE_ASSERT_EQ(initial_refs[i].type_id, forwarded_refs[i].type_id);
+    IREE_ASSERT(loom_spirv_value_type_equal(initial_refs[i].value_type,
+                                            forwarded_refs[i].value_type));
+    const uint32_t operands[] = {
+        forwarded_refs[i].type_id,
+        after_phi_ids[i],
+        forwarded_refs[i].id,
+        condition_exit.predecessor_label_id,
+    };
+    IREE_RETURN_IF_ERROR(loom_spirv_binary_write_instruction(
+        loom_spirv_emit_section(state, LOOM_SPIRV_MODULE_SECTION_FUNCTION),
+        LOOM_SPIRV_OP_PHI, operands, IREE_ARRAYSIZE(operands)));
+    const loom_spirv_module_value_ref_t after_arg_ref = {
+        .id = after_phi_ids[i],
+        .type_id = forwarded_refs[i].type_id,
+        .value_type = forwarded_refs[i].value_type,
+    };
+    IREE_RETURN_IF_ERROR(loom_spirv_emit_define_value(
+        state, loom_block_arg_id(after_block, i), after_arg_ref, true));
+  }
+  loom_spirv_emit_region_exit_t body_exit = {0};
+  IREE_RETURN_IF_ERROR(
+      loom_spirv_emit_region_ops(state, after_region, &body_exit));
+  IREE_ASSERT(body_exit.op == yield_op);
+  IREE_RETURN_IF_ERROR(loom_spirv_emit_branch_label(state, continue_label_id));
+
+  IREE_RETURN_IF_ERROR(loom_spirv_emit_label_id(state, continue_label_id));
+  IREE_RETURN_IF_ERROR(loom_spirv_emit_branch_label(state, header_label_id));
+
+  IREE_RETURN_IF_ERROR(loom_spirv_emit_label_id(state, merge_label_id));
+  for (uint16_t i = 0; i < results.count; ++i) {
+    uint32_t result_id = 0;
+    IREE_RETURN_IF_ERROR(loom_spirv_emit_reserve_value_ref(
+        state, results.values[i], forwarded_refs[i].type_id,
+        forwarded_refs[i].value_type, &result_id));
+    const uint32_t operands[] = {
+        forwarded_refs[i].type_id,
+        result_id,
+        forwarded_refs[i].id,
+        condition_exit.predecessor_label_id,
+    };
+    IREE_RETURN_IF_ERROR(loom_spirv_binary_write_instruction(
+        loom_spirv_emit_section(state, LOOM_SPIRV_MODULE_SECTION_FUNCTION),
+        LOOM_SPIRV_OP_PHI, operands, IREE_ARRAYSIZE(operands)));
+    const loom_spirv_module_value_ref_t result_ref = {
+        .id = result_id,
+        .type_id = forwarded_refs[i].type_id,
+        .value_type = forwarded_refs[i].value_type,
+    };
+    IREE_RETURN_IF_ERROR(loom_spirv_emit_define_value(state, results.values[i],
+                                                      result_ref, true));
+  }
+  return iree_ok_status();
+}
+
 static iree_status_t loom_spirv_emit_low_op(loom_spirv_emit_state_t* state,
                                             const loom_op_t* op) {
   if (loom_traits_are_compile_time_only(op->traits)) {
@@ -1487,8 +1682,11 @@ static iree_status_t loom_spirv_emit_low_op(loom_spirv_emit_state_t* state,
   if (loom_low_scf_for_isa(op)) {
     return loom_spirv_emit_scf_for(state, op);
   }
-  if (loom_low_scf_yield_isa(op)) {
-    IREE_CHECK_UNREACHABLE("verified SPIR-V low.scf.yield parent");
+  if (loom_low_scf_while_isa(op)) {
+    return loom_spirv_emit_scf_while(state, op);
+  }
+  if (loom_low_scf_yield_isa(op) || loom_low_scf_condition_isa(op)) {
+    IREE_CHECK_UNREACHABLE("verified SPIR-V low.scf terminator parent");
     return iree_ok_status();
   }
   if (loom_low_resource_isa(op)) {

@@ -57,6 +57,15 @@ static iree_status_t loom_low_allocation_unit_liveness_note_unit_use_at_point(
                             "low allocation unit use point exceeds u32 range");
   }
   const uint32_t end_point = point + 1u;
+  if (end_point > interval->end_point) {
+    // This storage use extends beyond the value's semantic SSA interval, so
+    // its sparse semantic segments no longer fully describe storage
+    // conflicts. Structured-loop backedges are the common case: captures are
+    // semantically used by the parent op but their storage must survive until
+    // the next nested-region iteration.
+    iree_bitmap_set(unit_liveness->values_with_incomplete_storage_segments,
+                    value_ordinal);
+  }
   for (uint32_t i = 0; i < unit_count; ++i) {
     const iree_host_size_t unit_end_point_index =
         (iree_host_size_t)unit_point_start + unit_offset + i;
@@ -389,32 +398,31 @@ loom_low_allocation_unit_liveness_note_operation_nested_uses_at_point(
 }
 
 static iree_status_t
-loom_low_allocation_unit_liveness_note_low_scf_for_backedge_uses(
+loom_low_allocation_unit_liveness_note_low_scf_loop_backedge_uses(
     loom_low_allocation_unit_liveness_t* unit_liveness,
     const loom_local_value_domain_t* value_domain,
     const loom_liveness_analysis_t* liveness,
     const loom_liveness_operation_point_t* loop_point,
     uint32_t backedge_point) {
   const loom_op_t* loop_op = loop_point->op;
-  const loom_region_t* loop_body = loom_low_scf_for_body(loop_op);
+  const bool is_for = loom_low_scf_for_isa(loop_op);
+  IREE_ASSERT(is_for || loom_low_scf_while_isa(loop_op),
+              "structured-loop backedge must belong to for or while");
+  const loom_region_t* loop_body = is_for ? loom_low_scf_for_body(loop_op)
+                                          : loom_low_scf_while_after(loop_op);
   const loom_block_t* body_block = loom_region_const_entry_block(loop_body);
-  if (body_block == NULL || body_block->arg_count == 0) {
-    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "low allocation saw malformed low.scf.for body");
-  }
+  IREE_ASSERT(body_block != NULL && (!is_for || body_block->arg_count > 0),
+              "verified structured loop must have a valid body block");
   const loom_op_t* yield = body_block->last_op;
-  if (yield == NULL || !loom_low_scf_yield_isa(yield)) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "low allocation saw low.scf.for without low.scf.yield terminator");
-  }
+  IREE_ASSERT(yield != NULL && loom_low_scf_yield_isa(yield),
+              "verified structured loop body must end in low.scf.yield");
 
-  const loom_value_slice_t iter_args = loom_low_scf_for_iter_args(loop_op);
-  if (body_block->arg_count != iter_args.count + 1) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "low allocation saw malformed low.scf.for body arguments");
-  }
+  const loom_value_slice_t iter_args =
+      is_for ? loom_low_scf_for_iter_args(loop_op)
+             : loom_low_scf_while_iter_args(loop_op);
+  const uint16_t implicit_arg_count = is_for ? 1 : 0;
+  IREE_ASSERT_EQ(body_block->arg_count, iter_args.count + implicit_arg_count,
+                 "verified structured loop body args must match iter args");
 
   // Structured loop lowering reuses captures, control values, and loop-carried
   // body arguments after the body has executed to start the next iteration or
@@ -422,23 +430,35 @@ loom_low_allocation_unit_liveness_note_low_scf_for_backedge_uses(
   IREE_RETURN_IF_ERROR(
       loom_low_allocation_unit_liveness_note_operation_nested_uses_at_point(
           unit_liveness, liveness, loop_point, backedge_point));
-  IREE_RETURN_IF_ERROR(
-      loom_low_allocation_unit_liveness_note_value_use_at_point(
-          unit_liveness, value_domain, liveness,
-          loom_block_arg_id(body_block, 0), backedge_point));
-  IREE_RETURN_IF_ERROR(
-      loom_low_allocation_unit_liveness_note_value_use_at_point(
-          unit_liveness, value_domain, liveness,
-          loom_low_scf_for_upper_bound(loop_op), backedge_point));
-  IREE_RETURN_IF_ERROR(
-      loom_low_allocation_unit_liveness_note_value_use_at_point(
-          unit_liveness, value_domain, liveness, loom_low_scf_for_step(loop_op),
-          backedge_point));
+  if (is_for) {
+    IREE_RETURN_IF_ERROR(
+        loom_low_allocation_unit_liveness_note_value_use_at_point(
+            unit_liveness, value_domain, liveness,
+            loom_block_arg_id(body_block, 0), backedge_point));
+    IREE_RETURN_IF_ERROR(
+        loom_low_allocation_unit_liveness_note_value_use_at_point(
+            unit_liveness, value_domain, liveness,
+            loom_low_scf_for_upper_bound(loop_op), backedge_point));
+    IREE_RETURN_IF_ERROR(
+        loom_low_allocation_unit_liveness_note_value_use_at_point(
+            unit_liveness, value_domain, liveness,
+            loom_low_scf_for_step(loop_op), backedge_point));
+  }
+  const loom_block_t* carried_block =
+      is_for
+          ? body_block
+          : loom_region_const_entry_block(loom_low_scf_while_before(loop_op));
+  IREE_ASSERT(carried_block != NULL,
+              "verified structured loop must have a carried-value block");
+  IREE_ASSERT_EQ(carried_block->arg_count, iter_args.count + implicit_arg_count,
+                 "verified structured loop carried args must match iter args");
   for (uint16_t i = 0; i < iter_args.count; ++i) {
     IREE_RETURN_IF_ERROR(
         loom_low_allocation_unit_liveness_note_value_use_at_point(
             unit_liveness, value_domain, liveness,
-            loom_block_arg_id(body_block, i + 1), backedge_point));
+            loom_block_arg_id(carried_block,
+                              (uint16_t)(i + implicit_arg_count)),
+            backedge_point));
   }
   return iree_ok_status();
 }
@@ -467,12 +487,16 @@ static iree_status_t loom_low_allocation_unit_liveness_note_operation_unit_uses(
     IREE_ASSERT_LT(parent_operation_index, operation_index);
     const loom_liveness_operation_point_t* parent_point =
         &liveness->operation_points[parent_operation_index];
-    if (loom_low_scf_for_isa(parent_point->op)) {
-      const loom_region_t* loop_body = loom_low_scf_for_body(parent_point->op);
+    if (loom_low_scf_for_isa(parent_point->op) ||
+        loom_low_scf_while_isa(parent_point->op)) {
+      const loom_region_t* loop_body =
+          loom_low_scf_for_isa(parent_point->op)
+              ? loom_low_scf_for_body(parent_point->op)
+              : loom_low_scf_while_after(parent_point->op);
       const loom_block_t* body_block = loom_region_const_entry_block(loop_body);
       if (body_block != NULL && loom_block_const_last_op(body_block) == op) {
         IREE_RETURN_IF_ERROR(
-            loom_low_allocation_unit_liveness_note_low_scf_for_backedge_uses(
+            loom_low_allocation_unit_liveness_note_low_scf_loop_backedge_uses(
                 unit_liveness, value_domain, liveness, parent_point,
                 operation_point->start_point));
       }

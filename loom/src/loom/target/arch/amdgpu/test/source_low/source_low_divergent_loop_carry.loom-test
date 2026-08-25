@@ -69,3 +69,89 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(64, 1, 
   s_mov_b64_exec %44
   low.br ^_bb3
 }
+
+// ====
+
+amdgpu.target<gfx11-generic> @target
+
+func.def target(@target) @while_carries_bitcast_vgpr(%pattern: f64, %mask: i64, %iteration_count: i32) -> (i64) {
+  %c0 = scalar.constant 0 : i32
+  %c1 = scalar.constant 1 : i32
+  %bits = scalar.bitcast %pattern : f64 to i64
+  %final_i, %final_bits = scf.while(%i = %c0 : i32, %state = %bits : i64) -> (i32, i64) {
+    %keep_going = scalar.cmpi slt, %i, %iteration_count : i32
+    scf.condition %keep_going, %i, %state : i1, i32, i64
+  } do(%i: i32, %state: i64) {
+    %next_state = scalar.xori %state, %mask : i64
+    %next_i = scalar.addi %i, %c1 : i32
+    scf.yield %next_i, %next_state : i32, i64
+  }
+  func.return %final_bits : i64
+}
+
+// ----
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @while_carries_bitcast_vgpr(%bits: reg<amdgpu.vgpr x2>, %mask: reg<amdgpu.sgpr x2>, %iteration_count: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr x2>) asm {
+  %c0 = s_mov_b32 0
+  %c1 = s_mov_b32 1
+  low.br ^_bb1(%c0: reg<amdgpu.sgpr>, %bits: reg<amdgpu.vgpr x2>)
+^_bb1(%i: reg<amdgpu.sgpr>, %state: reg<amdgpu.vgpr x2>):
+  %keep_going = s_cmp_lt_i32 %i, %iteration_count
+  low.cond_br %keep_going, ^_bb2, ^_bb3 : reg<amdgpu.scc>
+^_bb2:
+  %29 = slice %mask[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %30 = v_mov_b32_copy %29
+  %31 = slice %mask[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %32 = v_mov_b32_copy %31
+  %34 = slice %state[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %36 = v_xor_b32 %34, %30
+  %37 = slice %state[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %39 = v_xor_b32 %37, %32
+  %next_state = concat(%36, %39) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %next_i = s_add_u32 %i, %c1
+  low.br ^_bb1(%next_i: reg<amdgpu.sgpr>, %next_state: reg<amdgpu.vgpr x2>)
+^_bb3:
+  return %state
+}
+
+// ====
+
+amdgpu.target<gfx11-generic> @target
+
+func.def target(@target) @while_carries_nested_divergent_select(%values: vector<2xi32>, %iteration_count: i32, %limit: i32) -> (i32) {
+  %lane = vector.extract %values[0] : vector<2xi32> -> i32
+  %c0 = scalar.constant 0 : i32
+  %c1 = scalar.constant 1 : i32
+  %final_i, %final_order = scf.while(%i = %c0 : i32, %order = %c0 : i32) -> (i32, i32) {
+    %keep_going = scalar.cmpi slt, %i, %iteration_count : i32
+    scf.condition %keep_going, %i, %order : i1, i32, i32
+  } do(%i: i32, %order: i32) {
+    %less = scalar.cmpi slt, %lane, %limit : i32
+    %selected = scf.select %less, %c1, %c0 : i32
+    %next_order = scalar.subi %c1, %selected : i32
+    %next_i = scalar.addi %i, %c1 : i32
+    scf.yield %next_i, %next_order : i32, i32
+  }
+  func.return %final_order : i32
+}
+
+// ----
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @while_carries_nested_divergent_select(%values: reg<amdgpu.vgpr x2>, %iteration_count: reg<amdgpu.sgpr>, %limit: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>) asm {
+  %lane = slice %values[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %c0 = s_mov_b32 0
+  %c1 = s_mov_b32 1
+  %31 = v_mov_b32 0
+  low.br ^_bb1(%c0: reg<amdgpu.sgpr>, %31: reg<amdgpu.vgpr>)
+^_bb1(%i: reg<amdgpu.sgpr>, %order: reg<amdgpu.vgpr>):
+  %keep_going = s_cmp_lt_i32 %i, %iteration_count
+  low.cond_br %keep_going, ^_bb2, ^_bb3 : reg<amdgpu.scc>
+^_bb2:
+  %33 = v_mov_b32_copy %limit
+  %less = v_cmp_lt_i32 %lane, %33
+  %selected = v_cndmask_b32_src0_lit_src1_inline %less {imm32 = 0, true_value = 1}
+  %36 = v_mov_b32 1
+  %next_order = v_sub_nc_u32 %36, %selected
+  %next_i = s_add_u32 %i, %c1
+  low.br ^_bb1(%next_i: reg<amdgpu.sgpr>, %next_order: reg<amdgpu.vgpr>)
+^_bb3:
+  return %order
+}

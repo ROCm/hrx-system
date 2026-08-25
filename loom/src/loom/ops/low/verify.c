@@ -1708,6 +1708,60 @@ iree_status_t loom_low_scf_for_verify(const loom_module_t* module,
   return iree_ok_status();
 }
 
+iree_status_t loom_low_scf_while_verify(const loom_module_t* module,
+                                        const loom_op_t* op,
+                                        iree_diagnostic_emitter_t emitter) {
+  IREE_RETURN_IF_ERROR(loom_low_verify_nested_under_low_entry(
+      module, op, IREE_SV("low executable"), emitter, NULL));
+
+  const loom_value_slice_t iter_args = loom_low_scf_while_iter_args(op);
+  const loom_block_t* before_entry =
+      loom_low_region_entry_block_or_null(loom_low_scf_while_before(op));
+  const loom_block_t* after_entry =
+      loom_low_region_entry_block_or_null(loom_low_scf_while_after(op));
+  if (before_entry == NULL || after_entry == NULL ||
+      before_entry->arg_count != iter_args.count ||
+      after_entry->arg_count != iter_args.count) {
+    // Generated structural constraints own missing regions and block argument
+    // count diagnostics.
+    return iree_ok_status();
+  }
+
+  const loom_op_t* condition_op = before_entry->last_op;
+  if (condition_op == NULL || !loom_low_scf_condition_isa(condition_op)) {
+    // The declared region terminator constraint owns this diagnostic.
+    return iree_ok_status();
+  }
+
+  const loom_value_slice_t forwarded =
+      loom_low_scf_condition_forwarded(condition_op);
+  if (forwarded.count != after_entry->arg_count) {
+    return loom_low_emit_count_mismatch(
+        emitter, condition_op, IREE_SV("forwarded"), forwarded.count,
+        IREE_SV("after block args"), after_entry->arg_count);
+  }
+
+  for (uint16_t i = 0; i < forwarded.count; ++i) {
+    const loom_value_id_t forwarded_id = forwarded.values[i];
+    const loom_value_id_t after_arg_id = loom_block_arg_id(after_entry, i);
+    if (loom_type_equal(loom_module_value_type(module, forwarded_id),
+                        loom_module_value_type(module, after_arg_id))) {
+      continue;
+    }
+    char forwarded_name[32];
+    char after_arg_name[32];
+    loom_low_format_indexed_field_name(forwarded_name, sizeof(forwarded_name),
+                                       "forwarded", i);
+    loom_low_format_indexed_field_name(after_arg_name, sizeof(after_arg_name),
+                                       "after", i);
+    return loom_low_emit_value_type_mismatch(
+        module, emitter, condition_op, iree_make_cstring_view(forwarded_name),
+        forwarded_id, iree_make_cstring_view(after_arg_name), after_arg_id);
+  }
+
+  return iree_ok_status();
+}
+
 iree_status_t loom_low_func_def_verify(const loom_module_t* module,
                                        const loom_op_t* op,
                                        iree_diagnostic_emitter_t emitter) {

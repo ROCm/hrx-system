@@ -26,10 +26,12 @@ TEST(LowPlacementTest, ClassifiesEdgeCauses) {
       loom_low_placement_cause_is_edge(LOOM_LOW_PLACEMENT_CAUSE_LOW_CONCAT));
   EXPECT_TRUE(
       loom_low_placement_cause_is_edge(LOOM_LOW_PLACEMENT_CAUSE_LOW_BRANCH));
-  EXPECT_TRUE(
-      loom_low_placement_cause_is_edge(LOOM_LOW_PLACEMENT_CAUSE_LOW_SCF_FOR));
+  EXPECT_TRUE(loom_low_placement_cause_is_edge(
+      LOOM_LOW_PLACEMENT_CAUSE_LOW_SCF_LOOP_ENTRY));
   EXPECT_TRUE(
       loom_low_placement_cause_is_edge(LOOM_LOW_PLACEMENT_CAUSE_LOW_SCF_YIELD));
+  EXPECT_TRUE(loom_low_placement_cause_is_edge(
+      LOOM_LOW_PLACEMENT_CAUSE_LOW_SCF_CONDITION));
   EXPECT_FALSE(loom_low_placement_cause_is_edge(
       LOOM_LOW_PLACEMENT_CAUSE_SCHEDULE_PAIR_AFFINITY));
 }
