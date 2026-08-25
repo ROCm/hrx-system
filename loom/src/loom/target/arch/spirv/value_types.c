@@ -13,6 +13,8 @@ static bool loom_spirv_numeric_scalar_type_from_loom_scalar_type(
   *out_scalar_type = LOOM_SPIRV_SCALAR_TYPE_UNKNOWN;
   switch (type) {
     case LOOM_SCALAR_TYPE_I8:
+    case LOOM_SCALAR_TYPE_F8E4M3:
+    case LOOM_SCALAR_TYPE_F8E5M2:
       *out_scalar_type = LOOM_SPIRV_SCALAR_TYPE_S8;
       return true;
     case LOOM_SCALAR_TYPE_I16:
@@ -41,8 +43,6 @@ static bool loom_spirv_numeric_scalar_type_from_loom_scalar_type(
       *out_scalar_type = LOOM_SPIRV_SCALAR_TYPE_U64;
       return true;
     case LOOM_SCALAR_TYPE_I1:
-    case LOOM_SCALAR_TYPE_F8E4M3:
-    case LOOM_SCALAR_TYPE_F8E5M2:
     case LOOM_SCALAR_TYPE_COUNT_:
       return false;
   }
@@ -118,6 +118,10 @@ bool loom_spirv_value_type_from_loom_type(
             },
     };
     return true;
+  }
+  if (loom_type_element_type(type) == LOOM_SCALAR_TYPE_F8E4M3 ||
+      loom_type_element_type(type) == LOOM_SCALAR_TYPE_F8E5M2) {
+    return false;
   }
   loom_spirv_scalar_type_t scalar_type = LOOM_SPIRV_SCALAR_TYPE_UNKNOWN;
   if (!loom_spirv_numeric_scalar_type_from_loom_scalar_type(

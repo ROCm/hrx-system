@@ -11,6 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from loom.target.arch.spirv.scalar_alu import (
+    BFLOAT16_SCALAR_TYPE,
     FLOAT_SCALAR_ALU_TYPES,
     INTEGER_SCALAR_ALU_TYPE_PAIRS,
     SIGNED_INTEGER_SCALAR_ALU_TYPES,
@@ -23,6 +24,7 @@ _BIT_WIDTHS = {
     "i32": 32,
     "i64": 64,
     "f16": 16,
+    "bf16": 16,
     "f32": 32,
     "f64": 64,
 }
@@ -224,12 +226,17 @@ def _integer_value_view_conversions() -> tuple[IntegerValueViewConversion, ...]:
 def _bitcast_conversions() -> tuple[ScalarConversion, ...]:
     pairs = (
         ("i16", "f16"),
+        ("i16", "bf16"),
         ("i32", "f32"),
         ("i64", "f64"),
     )
     scalar_types = {
         scalar.source_type: scalar
-        for scalar in SIGNED_INTEGER_SCALAR_ALU_TYPES + FLOAT_SCALAR_ALU_TYPES
+        for scalar in (
+            *SIGNED_INTEGER_SCALAR_ALU_TYPES,
+            *FLOAT_SCALAR_ALU_TYPES,
+            BFLOAT16_SCALAR_TYPE,
+        )
     }
     rows: list[ScalarConversion] = []
     for lhs_type, rhs_type in pairs:

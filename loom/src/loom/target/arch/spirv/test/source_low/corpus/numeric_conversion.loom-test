@@ -817,20 +817,30 @@ low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scalar
 
 // ====
 
-// XFAIL: SPIR-V BF16 conversion and bitcast support is unavailable
 spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
 func.def target(@target) @scalar_bitcast_bf16_to_i16(%input: bf16) -> (i16) {
   %bits = scalar.bitcast %input : bf16 to i16
   func.return %bits : i16
 }
 
+// ----
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scalar_bitcast_bf16_to_i16(%input: reg<spirv.id : bf16>) -> (reg<spirv.id : i16>) asm {
+  %bits = OpBitcast.bf16.i16 %input
+  return %bits
+}
+
 // ====
 
-// XFAIL: SPIR-V BF16 conversion and bitcast support is unavailable
 spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
 func.def target(@target) @scalar_bitcast_i16_to_bf16(%input: i16) -> (bf16) {
   %half = scalar.bitcast %input : i16 to bf16
   func.return %half : bf16
+}
+
+// ----
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scalar_bitcast_i16_to_bf16(%input: reg<spirv.id : i16>) -> (reg<spirv.id : bf16>) asm {
+  %half = OpBitcast.i16.bf16 %input
+  return %half
 }
 
 // ====
@@ -914,6 +924,22 @@ func.def target(@target) @scalar_extsi_i32_to_i64(%input: i32) -> (i64) {
 // ----
 low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scalar_extsi_i32_to_i64(%input: reg<spirv.id : i32>) -> (reg<spirv.id : i64>) asm {
   %converted = OpSConvert.i32.i64 %input
+  return %converted
+}
+
+// ====
+
+spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
+func.def target(@target) @scalar_extui_i1_to_i32(%input: i1) -> (i32) {
+  %converted = scalar.extui %input : i1 to i32
+  func.return %converted : i32
+}
+
+// ----
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scalar_extui_i1_to_i32(%input: reg<spirv.id : i1>) -> (reg<spirv.id : i32>) asm {
+  %8 = OpConstant.i32 1
+  %9 = OpConstant.i32 0
+  %converted = OpSelect %input, %8, %9
   return %converted
 }
 

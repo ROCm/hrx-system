@@ -690,7 +690,7 @@ def test_generation_emits_complete_ordinary_vector_integer_conversions() -> None
 
 
 def test_generation_emits_complete_ordinary_vector_bit_layout_rows() -> None:
-    assert len(ORDINARY_VECTOR_BIT_LAYOUT_INSTRUCTIONS) == 102
+    assert len(ORDINARY_VECTOR_BIT_LAYOUT_INSTRUCTIONS) == 100
     _assert_generated_ordinary_vector_instructions(ORDINARY_VECTOR_BIT_LAYOUT_INSTRUCTIONS)
 
 

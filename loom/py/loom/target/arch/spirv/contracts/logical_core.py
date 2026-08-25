@@ -119,7 +119,10 @@ from loom.target.contracts import (
 from loom.target.low_descriptors import Descriptor
 
 _I1 = Scalar("i1")
+_I8 = Scalar("i8")
 _I32 = Scalar("i32")
+_F8E4M3 = Scalar("f8E4M3")
+_F8E5M2 = Scalar("f8E5M2")
 _INDEX = Scalar("index")
 _OFFSET = Scalar("offset")
 
@@ -301,6 +304,22 @@ def _conversion_rule(row: ScalarConversion) -> DescriptorRule:
                 operands={"input": ValueRef.operand("input")},
                 results={"dst": ValueRef.result("result")},
             ),
+        ),
+    )
+
+
+def _conversion_alias_rule(
+    source_op: Op,
+    input_type: TypePattern,
+    result_type: TypePattern,
+) -> ValueAliasRule:
+    return ValueAliasRule(
+        source_op=source_op,
+        source=ValueRef.operand("input"),
+        result=ValueRef.result("result"),
+        guards=(
+            Guard.value_type("input", input_type),
+            Guard.value_type("result", result_type),
         ),
     )
 
@@ -1452,6 +1471,10 @@ SPIRV_LOGICAL_CORE_CONTRACT_FRAGMENT = ContractFragment(
             guards=(Guard.operand_segment_count("buffers", 1),),
         ),
         *_builtin_index_rules(),
+        _conversion_alias_rule(scalar_conversion.scalar_bitcast, _F8E4M3, _I8),
+        _conversion_alias_rule(scalar_conversion.scalar_bitcast, _I8, _F8E4M3),
+        _conversion_alias_rule(scalar_conversion.scalar_bitcast, _F8E5M2, _I8),
+        _conversion_alias_rule(scalar_conversion.scalar_bitcast, _I8, _F8E5M2),
         *_conversion_rules(),
         *_scalar_binary_rules(),
         *SPIRV_ORDINARY_VECTOR_CONTRACT_CASES,
