@@ -919,57 +919,50 @@ static void loom_link_index_copy_dependency_occurrences(
   }
 }
 
-static iree_status_t loom_link_index_project_materialized_references(
+static iree_status_t loom_link_index_project_symbol_references(
     loom_link_module_index_t* index, loom_link_module_index_module_t* module,
-    const loom_module_t* source_module) {
-  iree_arena_allocator_t scratch_arena;
-  iree_arena_initialize(index->block_pool, &scratch_arena);
-
-  loom_symbol_reference_table_t table = {0};
+    const loom_symbol_reference_table_t* table) {
   uint32_t* dependency_values = NULL;
   uint8_t* dependency_source_root_region_indices_plus_one = NULL;
   loom_link_template_family_ordinal_t* template_demand_values = NULL;
   uint8_t* template_demand_source_root_region_indices_plus_one = NULL;
-  iree_status_t status =
-      loom_symbol_reference_table_build(source_module, &scratch_arena, &table);
-  if (iree_status_is_ok(status)) {
-    iree_host_size_t dependency_count = 0;
-    for (iree_host_size_t i = 0; i < table.occurrence_count; ++i) {
-      if (loom_symbol_reference_occurrence_is_dependency(
-              &table.occurrences[i])) {
-        ++dependency_count;
-      }
+  iree_status_t status = iree_ok_status();
+  iree_host_size_t dependency_count = 0;
+  for (iree_host_size_t i = 0; i < table->occurrence_count; ++i) {
+    if (loom_symbol_reference_occurrence_is_dependency(
+            &table->occurrences[i])) {
+      ++dependency_count;
     }
-    module->dependencies.root_count =
-        loom_link_index_count_dependency_occurrences(
-            &table, table.first_module_occurrence_id);
-    module->dependencies.count = dependency_count;
-    if (dependency_count > 0) {
-      status = iree_arena_allocate_array(&index->arena, dependency_count,
-                                         sizeof(*dependency_values),
-                                         (void**)&dependency_values);
-      module->dependencies.values = dependency_values;
-      if (iree_status_is_ok(status)) {
-        status = iree_arena_allocate_array(
-            &index->arena, dependency_count,
-            sizeof(*dependency_source_root_region_indices_plus_one),
-            (void**)&dependency_source_root_region_indices_plus_one);
-        module->dependencies.source_root_region_indices_plus_one =
-            dependency_source_root_region_indices_plus_one;
-      }
+  }
+  module->dependencies.root_count =
+      loom_link_index_count_dependency_occurrences(
+          table, table->first_module_occurrence_id);
+  module->dependencies.count = dependency_count;
+  if (dependency_count > 0) {
+    status = iree_arena_allocate_array(&index->arena, dependency_count,
+                                       sizeof(*dependency_values),
+                                       (void**)&dependency_values);
+    module->dependencies.values = dependency_values;
+    if (iree_status_is_ok(status)) {
+      status = iree_arena_allocate_array(
+          &index->arena, dependency_count,
+          sizeof(*dependency_source_root_region_indices_plus_one),
+          (void**)&dependency_source_root_region_indices_plus_one);
+      module->dependencies.source_root_region_indices_plus_one =
+          dependency_source_root_region_indices_plus_one;
     }
   }
 
   if (iree_status_is_ok(status)) {
-    module->template_demands.count = table.template_demands.count;
-    if (table.template_demands.count > 0) {
+    module->template_demands.count = table->template_demands.count;
+    if (table->template_demands.count > 0) {
       status = iree_arena_allocate_array(
-          &index->arena, table.template_demands.count,
+          &index->arena, table->template_demands.count,
           sizeof(*template_demand_values), (void**)&template_demand_values);
       module->template_demands.values = template_demand_values;
       if (iree_status_is_ok(status)) {
         status = iree_arena_allocate_array(
-            &index->arena, table.template_demands.count,
+            &index->arena, table->template_demands.count,
             sizeof(*template_demand_source_root_region_indices_plus_one),
             (void**)&template_demand_source_root_region_indices_plus_one);
         module->template_demands.source_root_region_indices_plus_one =
@@ -982,20 +975,20 @@ static iree_status_t loom_link_index_project_materialized_references(
   iree_host_size_t template_demand_position = 0;
   if (iree_status_is_ok(status)) {
     loom_link_index_copy_dependency_occurrences(
-        &table, table.first_module_occurrence_id, dependency_values,
+        table, table->first_module_occurrence_id, dependency_values,
         dependency_source_root_region_indices_plus_one, &dependency_position);
     for (iree_host_size_t symbol_index = 0;
-         symbol_index < table.symbol_count && iree_status_is_ok(status);
+         symbol_index < table->symbol_count && iree_status_is_ok(status);
          ++symbol_index) {
       loom_link_module_index_symbol_t* symbol =
           &index->symbols.values[module->symbol_start_ordinal + symbol_index];
       const loom_symbol_reference_symbol_occurrences_t* source =
-          &table.symbols[symbol_index];
+          &table->symbols[symbol_index];
       symbol->dependencies.first = (uint32_t)dependency_position;
       symbol->dependencies.count = loom_link_index_count_dependency_occurrences(
-          &table, source->first_outgoing_occurrence_id);
+          table, source->first_outgoing_occurrence_id);
       loom_link_index_copy_dependency_occurrences(
-          &table, source->first_outgoing_occurrence_id, dependency_values,
+          table, source->first_outgoing_occurrence_id, dependency_values,
           dependency_source_root_region_indices_plus_one, &dependency_position);
 
       symbol->template_demands.first = (uint32_t)template_demand_position;
@@ -1004,7 +997,7 @@ static iree_status_t loom_link_index_project_materialized_references(
       while (demand_id != LOOM_TEMPLATE_DEMAND_ID_INVALID &&
              iree_status_is_ok(status)) {
         const loom_template_demand_t* demand =
-            &table.template_demands.values[demand_id];
+            &table->template_demands.values[demand_id];
         loom_link_template_family_ordinal_t family_ordinal =
             LOOM_LINK_TEMPLATE_FAMILY_ORDINAL_INVALID;
         status = loom_link_index_resolve_template_family(
@@ -1020,6 +1013,22 @@ static iree_status_t loom_link_index_project_materialized_references(
         demand_id = demand->next_source_demand_id;
       }
     }
+  }
+
+  return status;
+}
+
+static iree_status_t loom_link_index_project_materialized_references(
+    loom_link_module_index_t* index, loom_link_module_index_module_t* module,
+    const loom_module_t* source_module) {
+  iree_arena_allocator_t scratch_arena;
+  iree_arena_initialize(index->block_pool, &scratch_arena);
+
+  loom_symbol_reference_table_t table = {0};
+  iree_status_t status =
+      loom_symbol_reference_table_build(source_module, &scratch_arena, &table);
+  if (iree_status_is_ok(status)) {
+    status = loom_link_index_project_symbol_references(index, module, &table);
   }
 
   iree_arena_deinitialize(&scratch_arena);
@@ -1431,25 +1440,30 @@ iree_status_t loom_link_module_index_add_text(
     iree_host_size_t* out_provider_ordinal) {
   IREE_ASSERT_ARGUMENT(index);
 
+  iree_arena_allocator_t symbol_reference_arena;
+  iree_arena_initialize(index->block_pool, &symbol_reference_arena);
+
+  loom_symbol_reference_table_t symbol_references = {0};
   loom_module_t* module = NULL;
-  IREE_RETURN_IF_ERROR(loom_text_parse(source, filename, index->context,
-                                       index->block_pool, parse_options,
-                                       &module));
-  if (!module) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "text provider '%.*s' did not parse into a module",
-                            (int)filename.size, filename.data);
+  iree_status_t status = loom_text_parse_with_symbol_references(
+      source, filename, index->context, index->block_pool, parse_options,
+      &symbol_reference_arena, &symbol_references, &module);
+  if (iree_status_is_ok(status) && !module) {
+    status =
+        iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                         "text provider '%.*s' did not parse into a module",
+                         (int)filename.size, filename.data);
   }
-  iree_status_t status = loom_link_index_validate_materialized_module(module);
-  if (!iree_status_is_ok(status)) {
-    loom_module_free(module);
-    return status;
+  if (iree_status_is_ok(status)) {
+    status = loom_link_index_validate_materialized_module(module);
   }
 
   loom_link_module_index_provider_t* provider = NULL;
-  status = loom_link_index_append_provider(index, LOOM_LINK_PROVIDER_TEXT,
-                                           filename, options, &provider);
   bool module_owned_by_index = false;
+  if (iree_status_is_ok(status)) {
+    status = loom_link_index_append_provider(index, LOOM_LINK_PROVIDER_TEXT,
+                                             filename, options, &provider);
+  }
   if (iree_status_is_ok(status)) {
     loom_link_module_index_module_t* indexed_module = NULL;
     status = loom_link_index_append_module(
@@ -1466,16 +1480,18 @@ iree_status_t loom_link_module_index_add_text(
           index, indexed_module, module);
     }
     if (iree_status_is_ok(status)) {
-      status = loom_link_index_project_materialized_references(
-          index, indexed_module, module);
+      status = loom_link_index_project_symbol_references(index, indexed_module,
+                                                         &symbol_references);
     }
     if (iree_status_is_ok(status)) {
       status = loom_link_index_project_materialized_provider_imports(
           index, indexed_module, module);
     }
   }
+
+  iree_arena_deinitialize(&symbol_reference_arena);
   if (!iree_status_is_ok(status)) {
-    if (!module_owned_by_index) {
+    if (module && !module_owned_by_index) {
       loom_module_free(module);
     }
     return status;

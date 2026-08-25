@@ -9,6 +9,7 @@
 
 #include "iree/base/api.h"
 #include "iree/base/internal/arena.h"
+#include "loom/analysis/symbol_references.h"
 #include "loom/error/diagnostic.h"
 #include "loom/format/text/low_asm.h"
 #include "loom/ir/ir.h"
@@ -75,6 +76,25 @@ iree_status_t loom_text_parse(iree_string_view_t source,
                               iree_arena_block_pool_t* block_pool,
                               const loom_text_parse_options_t* options,
                               loom_module_t** out_module);
+
+// Parses Loom IR text and returns the canonical symbol-reference analysis for
+// the parsed module snapshot.
+//
+// Parsing, diagnostics, and module ownership match loom_text_parse(). The
+// caller-provided |symbol_reference_arena| owns every array referenced by
+// |out_symbol_references|. The returned table borrows |*out_module| and remains
+// valid only while the arena is alive and the module has not been mutated.
+//
+// On a clean parse, |*out_module| and |*out_symbol_references| describe the
+// same module snapshot. On parse or infrastructure failure, |*out_module| is
+// NULL and |*out_symbol_references| is empty.
+iree_status_t loom_text_parse_with_symbol_references(
+    iree_string_view_t source, iree_string_view_t filename,
+    loom_context_t* context, iree_arena_block_pool_t* block_pool,
+    const loom_text_parse_options_t* options,
+    iree_arena_allocator_t* symbol_reference_arena,
+    loom_symbol_reference_table_t* out_symbol_references,
+    loom_module_t** out_module);
 
 #ifdef __cplusplus
 }

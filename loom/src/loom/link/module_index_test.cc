@@ -384,7 +384,7 @@ func.def public @exported(%x: i32) -> (i32) {
 }
 
 TEST_F(ModuleIndexTest, ProjectsMaterializedAndBytecodeReferenceMetadata) {
-  loom_module_t* module = Parse(IREE_SV(R"(
+  const iree_string_view_t source = IREE_SV(R"(
 func.def public @entry(%x: i32) -> (i32) {
   %y = func.call @helper(%x) : (i32) -> (i32)
   %z = template.apply<@demo.contract>(%y) : (i32) -> (i32)
@@ -400,7 +400,8 @@ template.decl @demo.contract(%x: i32) -> (i32)
 template.def<@demo.contract> @provider(%x: i32) -> (i32) {
   template.return %x : i32
 }
-)"));
+)");
+  loom_module_t* module = Parse(source);
   std::vector<uint8_t> bytes = WriteModule(module);
 
   auto verify_index = [&](const loom_link_module_index_t* index) {
@@ -489,6 +490,13 @@ template.def<@demo.contract> @provider(%x: i32) -> (i32) {
       IREE_SV("library.loombc"), /*index_options=*/nullptr, &options,
       /*out_provider_ordinal=*/nullptr));
   verify_index(bytecode_index.get());
+
+  IndexPtr text_index = CreateIndex();
+  IREE_ASSERT_OK(loom_link_module_index_add_text(
+      text_index.get(), source, IREE_SV("library.loom"),
+      /*parse_options=*/nullptr, &options,
+      /*out_provider_ordinal=*/nullptr));
+  verify_index(text_index.get());
 }
 
 TEST_F(ModuleIndexTest, ProjectsMultiRootReferenceOriginsAcrossProviders) {

@@ -1075,6 +1075,57 @@ TEST_F(ParserTest, AvailabilityOnlyUnresolvedSymbolIsAccepted) {
   loom_module_free(module);
 }
 
+TEST_F(ParserTest, ReturnsSymbolReferencesFromParsedSnapshot) {
+  const char* source =
+      "test.func @main() {\n"
+      "  test.symbol_array_attrs [@dependency] using [@provider]\n"
+      "  test.yield\n"
+      "}\n"
+      "test.record @dependency\n";
+  capture_.Reset();
+  loom_text_parse_options_t options = {
+      /*.diagnostic_sink=*/capture_.sink(),
+      /*.max_errors=*/100,
+  };
+  iree_arena_allocator_t symbol_reference_arena;
+  iree_arena_initialize(&block_pool_, &symbol_reference_arena);
+  loom_symbol_reference_table_t symbol_references = {0};
+  loom_module_t* module = nullptr;
+  IREE_ASSERT_OK(loom_text_parse_with_symbol_references(
+      iree_make_cstring_view(source), IREE_SV("test.loom"), &context_,
+      &block_pool_, &options, &symbol_reference_arena, &symbol_references,
+      &module));
+  ASSERT_TRUE(capture_.diagnostics.empty());
+  ASSERT_NE(module, nullptr);
+  EXPECT_EQ(symbol_references.module, module);
+  EXPECT_EQ(symbol_references.symbol_count, module->symbols.count);
+
+  const loom_symbol_id_t dependency_id = loom_module_find_symbol(
+      module, loom_module_lookup_string(module, IREE_SV("dependency")));
+  const loom_symbol_id_t provider_id = loom_module_find_symbol(
+      module, loom_module_lookup_string(module, IREE_SV("provider")));
+  ASSERT_NE(dependency_id, LOOM_SYMBOL_ID_INVALID);
+  ASSERT_NE(provider_id, LOOM_SYMBOL_ID_INVALID);
+
+  const loom_symbol_reference_occurrence_id_t dependency_occurrence_id =
+      symbol_references.symbols[dependency_id].first_incoming_occurrence_id;
+  const loom_symbol_reference_occurrence_id_t availability_occurrence_id =
+      symbol_references.symbols[provider_id].first_incoming_occurrence_id;
+  ASSERT_NE(dependency_occurrence_id,
+            LOOM_SYMBOL_REFERENCE_OCCURRENCE_ID_INVALID);
+  ASSERT_NE(availability_occurrence_id,
+            LOOM_SYMBOL_REFERENCE_OCCURRENCE_ID_INVALID);
+  const loom_symbol_reference_occurrence_t* dependency =
+      &symbol_references.occurrences[dependency_occurrence_id];
+  const loom_symbol_reference_occurrence_t* availability =
+      &symbol_references.occurrences[availability_occurrence_id];
+  EXPECT_EQ(dependency->role, LOOM_SYMBOL_REFERENCE_ROLE_DEPENDENCY);
+  EXPECT_EQ(availability->role, LOOM_SYMBOL_REFERENCE_ROLE_AVAILABILITY);
+
+  iree_arena_deinitialize(&symbol_reference_arena);
+  loom_module_free(module);
+}
+
 TEST_F(ParserTest, ParameterizedAttrsRoundTripInDeclarationOrder) {
   std::string text = RoundTrip(
       "test.record @target\n"
