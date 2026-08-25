@@ -41,8 +41,9 @@ constexpr size_t kLegacyContextCommandApertureCookieOffset = 0x40;
 constexpr size_t kLegacyV2ContextCommandApertureCookieOffset = 0x3c;
 constexpr size_t kCompactContextCommandApertureCookieOffset = 0x44;
 constexpr UINT kMaxDriverStorePathWarmupBytes = 4096;
-// The {0, 2} identity spans two incompatible context layouts. Captured .240
-// and .280 packages use the older layout; .314 and .329 use the modern one.
+// STX2 two-DWORD adapter info spans two incompatible context layouts.
+// Captured .240 and .280 packages use the older layout; .314 and .329 use
+// the modern one.
 constexpr uint32_t kFirstModernLegacyContextLayoutRevision = 314;
 template <typename Fn>
 Fn ResolveKmtProc(const char* name) {
@@ -708,7 +709,106 @@ bool UsesLegacyV2ContextLayout(const DriverVersion& version) {
          version.revision < kFirstModernLegacyContextLayoutRevision;
 }
 
+constexpr uint32_t kExpectedKmdVersion = 0;
+constexpr uint32_t kCompactAdapterInfoExtra = 0;
+
+bool SelectAbiFromAdapterInfo(uint32_t kmd_version, uint32_t hw_type,
+                              bool compact_prefix, uint32_t compact_extra,
+                              McdmAbi* out_abi,
+                              bool* out_stx2_disambiguation,
+                              Error* out_error) {
+  if (kmd_version != kExpectedKmdVersion) {
+    SetErrorFormat(out_error,
+                   "unsupported UMDRIVERPRIVATE adapter info "
+                   "kmd_version=%u hw_type=%s (%u)",
+                   kmd_version, HardwareTypeName(hw_type), hw_type);
+    return false;
+  }
+  if (compact_prefix && compact_extra != kCompactAdapterInfoExtra) {
+    SetErrorFormat(out_error,
+                   "unsupported UMDRIVERPRIVATE compact adapter info "
+                   "kmd_version=%u hw_type=%s (%u) extra=%u",
+                   kmd_version, HardwareTypeName(hw_type), hw_type,
+                   compact_extra);
+    return false;
+  }
+
+  const auto type = static_cast<HardwareType>(hw_type);
+  if (compact_prefix) {
+    switch (type) {
+      case HardwareType::stx2:
+      case HardwareType::stxh:
+      case HardwareType::krk1:
+        *out_abi = McdmAbi::compact;
+        *out_stx2_disambiguation = false;
+        return true;
+      case HardwareType::phx:
+      case HardwareType::stx:
+        break;
+    }
+    SetErrorFormat(out_error,
+                   "unsupported UMDRIVERPRIVATE compact adapter info "
+                   "kmd_version=%u hw_type=%s (%u)",
+                   kmd_version, HardwareTypeName(hw_type), hw_type);
+    return false;
+  }
+
+  switch (type) {
+    case HardwareType::phx:
+      *out_abi = McdmAbi::legacy_v0;
+      *out_stx2_disambiguation = false;
+      return true;
+    case HardwareType::stx2:
+      *out_abi = McdmAbi::legacy_v2;
+      *out_stx2_disambiguation = true;
+      return true;
+    case HardwareType::stxh:
+    case HardwareType::krk1:
+      *out_abi = McdmAbi::legacy;
+      *out_stx2_disambiguation = false;
+      return true;
+    case HardwareType::stx:
+      break;
+  }
+  SetErrorFormat(out_error,
+                 "unsupported UMDRIVERPRIVATE adapter info "
+                 "kmd_version=%u hw_type=%s (%u)",
+                 kmd_version, HardwareTypeName(hw_type), hw_type);
+  return false;
+}
+
+void RecordAdapterInfo(McdmAbiDiagnostics* diagnostics, uint32_t kmd_version,
+                       uint32_t hw_type, bool compact_prefix,
+                       const uint32_t* words, uint32_t word_count) {
+  diagnostics->kmd_version = kmd_version;
+  diagnostics->hw_type = hw_type;
+  diagnostics->compact_adapter_info = compact_prefix;
+  diagnostics->source = McdmAbiSource::identity_query;
+  diagnostics->identity_word_count = word_count;
+  diagnostics->accepted_identity_count = 1;
+  diagnostics->identity_accepted = true;
+  for (uint32_t i = 0; i < word_count && i < 3; ++i) {
+    diagnostics->identity_words[i] = words[i];
+  }
+}
+
 }  // namespace
+
+const char* HardwareTypeName(uint32_t hw_type) {
+  switch (static_cast<HardwareType>(hw_type)) {
+    case HardwareType::phx:
+      return "PHX";
+    case HardwareType::stx:
+      return "STX";
+    case HardwareType::stx2:
+      return "STX2";
+    case HardwareType::stxh:
+      return "STXH";
+    case HardwareType::krk1:
+      return "KRK1";
+  }
+  return "UNKNOWN";
+}
 
 bool SelectMcdmAbiForDriverVersion(McdmAbi probed_abi,
                                    bool has_driver_version,
@@ -724,15 +824,15 @@ bool SelectMcdmAbiForDriverVersion(McdmAbi probed_abi,
   }
   if (!has_driver_version) {
     SetError(out_error,
-             "ambiguous two-dword MCDM identity {0, 2}: driver package "
-             "version is unavailable");
+             "ambiguous STX2 adapter info: driver package version is "
+             "unavailable");
     return false;
   }
   if (driver_version.major != 32 || driver_version.minor != 0 ||
       driver_version.build != 203) {
     SetErrorFormat(out_error,
-                   "ambiguous two-dword MCDM identity {0, 2}: unsupported "
-                   "driver package version %u.%u.%u.%u",
+                   "ambiguous STX2 adapter info: unsupported driver package "
+                   "version %u.%u.%u.%u",
                    driver_version.major, driver_version.minor,
                    driver_version.build, driver_version.revision);
     return false;
@@ -773,17 +873,10 @@ bool QueryMcdmAbiDiagnostics(const KmtApi& api, D3DKMT_HANDLE adapter,
     return false;
   }
   McdmAbiDiagnostics diagnostics = {};
-  // Match XRT's legacy-driver negotiation: query the two-DWORD identity first.
-  // Compact drivers reject that shape with STATUS_BUFFER_TOO_SMALL, in which
-  // case we retry with the three-DWORD compact identity. Unknown identities fail
-  // closed.
-  constexpr uint32_t kLegacyV0Identity[2] = {0, 0};
-  constexpr uint32_t kLegacyV2Identity[2] = {0, 2};
-  constexpr uint32_t kLegacyV3Identity[2] = {0, 3};
-  constexpr uint32_t kLegacyV4Identity[2] = {0, 4};
-  constexpr uint32_t kCompactIdentity[3] = {0, 2, 0};
-  constexpr uint32_t kCompactV3Identity[3] = {0, 3, 0};
-  constexpr uint32_t kCompactV4Identity[3] = {0, 4, 0};
+  // Probe the historical two-DWORD XRT_UMD_ADAPTER_INFO prefix first
+  // {kmd_version, hw_type}. Compact miniports reject that size with
+  // STATUS_BUFFER_TOO_SMALL; retry the three-DWORD compact prefix
+  // {kmd_version, hw_type, 0}. Unknown hardware types fail closed.
   uint32_t legacy_data[2] = {};
   D3DKMT_QUERYADAPTERINFO query = {};
   query.hAdapter = adapter;
@@ -799,35 +892,18 @@ bool QueryMcdmAbiDiagnostics(const KmtApi& api, D3DKMT_HANDLE adapter,
   }
 
   if (legacy_status == 0) {
-    const bool is_legacy_v0 =
-        std::memcmp(legacy_data, kLegacyV0Identity,
-                    sizeof(kLegacyV0Identity)) == 0;
-    const bool is_legacy_v2 =
-        std::memcmp(legacy_data, kLegacyV2Identity,
-                    sizeof(kLegacyV2Identity)) == 0;
-    const bool is_legacy_v3 =
-        std::memcmp(legacy_data, kLegacyV3Identity,
-                    sizeof(kLegacyV3Identity)) == 0;
-    const bool is_legacy_v4 =
-        std::memcmp(legacy_data, kLegacyV4Identity,
-                    sizeof(kLegacyV4Identity)) == 0;
-    if (!is_legacy_v0 && !is_legacy_v2 && !is_legacy_v3 && !is_legacy_v4) {
-      SetErrorFormat(out_error,
-                     "unsupported two-dword MCDM identity {%u, %u}",
-                     legacy_data[0], legacy_data[1]);
+    McdmAbi probed_abi = McdmAbi::legacy;
+    bool stx2_disambiguation = false;
+    if (!SelectAbiFromAdapterInfo(legacy_data[0], legacy_data[1],
+                                  /*compact_prefix=*/false, 0, &probed_abi,
+                                  &stx2_disambiguation, out_error)) {
       return false;
     }
-    diagnostics.probed_abi = is_legacy_v0   ? McdmAbi::legacy_v0
-                             : is_legacy_v2 ? McdmAbi::legacy_v2
-                                            : McdmAbi::legacy;
-    diagnostics.selected_abi = diagnostics.probed_abi;
-    diagnostics.source = McdmAbiSource::identity_query;
-    diagnostics.identity_words[0] = legacy_data[0];
-    diagnostics.identity_words[1] = legacy_data[1];
-    diagnostics.identity_word_count = 2;
-    diagnostics.accepted_identity_count = 1;
-    diagnostics.identity_accepted = true;
-    diagnostics.driver_version_disambiguation_required = is_legacy_v2;
+    diagnostics.probed_abi = probed_abi;
+    diagnostics.selected_abi = probed_abi;
+    diagnostics.driver_version_disambiguation_required = stx2_disambiguation;
+    RecordAdapterInfo(&diagnostics, legacy_data[0], legacy_data[1],
+                      /*compact_prefix=*/false, legacy_data, 2);
     *out_diagnostics = diagnostics;
     return true;
   }
@@ -840,38 +916,27 @@ bool QueryMcdmAbiDiagnostics(const KmtApi& api, D3DKMT_HANDLE adapter,
   diagnostics.compact_query_status = compact_status;
   if (compact_status == kStatusBufferTooSmall) {
     SetError(out_error,
-             "MCDM driver rejected both three-dword and two-dword identity "
-             "queries");
+             "MCDM driver rejected both three-dword and two-dword "
+             "UMDRIVERPRIVATE adapter-info queries");
     return false;
   }
   if (compact_status != 0) {
     return CheckStatus("D3DKMTQueryAdapterInfo(UMDRIVERPRIVATE compact)",
                        compact_status, out_error);
   }
-  const bool is_compact_v2 =
-      std::memcmp(compact_data, kCompactIdentity,
-                  sizeof(kCompactIdentity)) == 0;
-  const bool is_compact_v3 =
-      std::memcmp(compact_data, kCompactV3Identity,
-                  sizeof(kCompactV3Identity)) == 0;
-  const bool is_compact_v4 =
-      std::memcmp(compact_data, kCompactV4Identity,
-                  sizeof(kCompactV4Identity)) == 0;
-  if (!is_compact_v2 && !is_compact_v3 && !is_compact_v4) {
-    SetErrorFormat(out_error,
-                   "unsupported three-dword MCDM identity {%u, %u, %u}",
-                   compact_data[0], compact_data[1], compact_data[2]);
+  McdmAbi probed_abi = McdmAbi::compact;
+  bool stx2_disambiguation = false;
+  if (!SelectAbiFromAdapterInfo(compact_data[0], compact_data[1],
+                                /*compact_prefix=*/true, compact_data[2],
+                                &probed_abi, &stx2_disambiguation,
+                                out_error)) {
     return false;
   }
-  diagnostics.selected_abi = McdmAbi::compact;
-  diagnostics.probed_abi = McdmAbi::compact;
-  diagnostics.source = McdmAbiSource::identity_query;
-  diagnostics.identity_words[0] = compact_data[0];
-  diagnostics.identity_words[1] = compact_data[1];
-  diagnostics.identity_words[2] = compact_data[2];
-  diagnostics.identity_word_count = 3;
-  diagnostics.accepted_identity_count = 1;
-  diagnostics.identity_accepted = true;
+  diagnostics.selected_abi = probed_abi;
+  diagnostics.probed_abi = probed_abi;
+  diagnostics.driver_version_disambiguation_required = stx2_disambiguation;
+  RecordAdapterInfo(&diagnostics, compact_data[0], compact_data[1],
+                    /*compact_prefix=*/true, compact_data, 3);
   *out_diagnostics = diagnostics;
   return true;
 }

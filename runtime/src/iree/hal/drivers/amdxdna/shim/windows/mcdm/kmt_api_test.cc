@@ -686,7 +686,29 @@ TEST(KmtApiTest, CompactChainChildHandleMatchesXrt221BoPrefix) {
             0);
 }
 
-TEST(KmtApiTest, ProbesLegacyV2AbiFromTwoDwordIdentity) {
+TEST(KmtApiTest, HardwareTypeNamesMatchMiniport) {
+  EXPECT_STREQ(HardwareTypeName(0), "PHX");
+  EXPECT_STREQ(HardwareTypeName(1), "STX");
+  EXPECT_STREQ(HardwareTypeName(2), "STX2");
+  EXPECT_STREQ(HardwareTypeName(3), "STXH");
+  EXPECT_STREQ(HardwareTypeName(4), "KRK1");
+  EXPECT_STREQ(HardwareTypeName(16), "UNKNOWN");
+}
+
+TEST(KmtApiTest, RejectsStxHardwareType) {
+  ResetFakes();
+  g_query_outputs[0][1] = 1;
+  KmtApi api = {};
+  api.query_adapter_info = FakeQueryAdapterInfo;
+  McdmAbi abi = McdmAbi::legacy;
+  Error error = {};
+
+  EXPECT_FALSE(QueryProbedMcdmAbi(api, 0x1234, &abi, &error));
+  EXPECT_NE(std::strstr(ErrorMessage(&error), "hw_type=STX"), nullptr);
+  EXPECT_EQ(g_query_count, 1u);
+}
+
+TEST(KmtApiTest, ProbesLegacyV2AbiFromStx2TwoDwordAdapterInfo) {
   ResetFakes();
   g_query_outputs[0][1] = 2;
   KmtApi api = {};
@@ -717,6 +739,9 @@ TEST(KmtApiTest, RecordsDiagnosticsForLegacyV2IdentityDisambiguation) {
   EXPECT_EQ(diagnostics.selected_abi, McdmAbi::legacy_v2);
   EXPECT_EQ(diagnostics.probed_abi, McdmAbi::legacy_v2);
   EXPECT_EQ(diagnostics.source, McdmAbiSource::identity_query);
+  EXPECT_EQ(diagnostics.kmd_version, 0u);
+  EXPECT_EQ(diagnostics.hw_type, static_cast<uint32_t>(HardwareType::stx2));
+  EXPECT_FALSE(diagnostics.compact_adapter_info);
   EXPECT_EQ(diagnostics.identity_word_count, 2u);
   EXPECT_EQ(diagnostics.identity_words[0], 0u);
   EXPECT_EQ(diagnostics.identity_words[1], 2u);
@@ -730,7 +755,7 @@ TEST(KmtApiTest, RecordsDiagnosticsForLegacyV2IdentityDisambiguation) {
   EXPECT_EQ(g_query_count, 1u);
 }
 
-TEST(KmtApiTest, ProbesLegacyV3AbiFromTwoDwordIdentity) {
+TEST(KmtApiTest, ProbesLegacyAbiFromStxhAdapterInfo) {
   ResetFakes();
   g_query_outputs[0][1] = 3;
   KmtApi api = {};
@@ -765,7 +790,7 @@ TEST(KmtApiTest, ProbesCompactAbiWhenLegacyShapeIsRejected) {
   EXPECT_EQ(g_query_sizes[1], 3u * sizeof(uint32_t));
 }
 
-TEST(KmtApiTest, ProbesCompactV3AbiWhenLegacyShapeIsRejected) {
+TEST(KmtApiTest, ProbesCompactAbiFromStxhAdapterInfo) {
   ResetFakes();
   g_query_statuses[0] = static_cast<NTSTATUS>(0xC0000023u);
   g_query_outputs[1][1] = 3;
@@ -780,7 +805,7 @@ TEST(KmtApiTest, ProbesCompactV3AbiWhenLegacyShapeIsRejected) {
   ASSERT_EQ(g_query_count, 2u);
 }
 
-TEST(KmtApiTest, ProbesCompactV4AbiWhenLegacyShapeIsRejected) {
+TEST(KmtApiTest, ProbesCompactAbiFromKrk1AdapterInfo) {
   ResetFakes();
   g_query_statuses[0] = static_cast<NTSTATUS>(0xC0000023u);
   g_query_outputs[1][1] = 4;
@@ -795,7 +820,8 @@ TEST(KmtApiTest, ProbesCompactV4AbiWhenLegacyShapeIsRejected) {
   ASSERT_EQ(g_query_count, 2u);
 }
 
-TEST(KmtApiTest, RecordsDiagnosticsFor314StyleLegacyIdentity) {
+TEST(KmtApiTest, RecordsDiagnosticsForStxhTwoDwordAdapterInfo) {
+  // Halo 329 looks like this: same STXH hw_type, two-DWORD query.
   ResetFakes();
   g_query_outputs[0][1] = 3;
   KmtApi api = {};
@@ -808,6 +834,9 @@ TEST(KmtApiTest, RecordsDiagnosticsFor314StyleLegacyIdentity) {
   EXPECT_EQ(diagnostics.selected_abi, McdmAbi::legacy);
   EXPECT_EQ(diagnostics.probed_abi, McdmAbi::legacy);
   EXPECT_EQ(diagnostics.source, McdmAbiSource::identity_query);
+  EXPECT_EQ(diagnostics.kmd_version, 0u);
+  EXPECT_EQ(diagnostics.hw_type, static_cast<uint32_t>(HardwareType::stxh));
+  EXPECT_FALSE(diagnostics.compact_adapter_info);
   EXPECT_EQ(diagnostics.identity_word_count, 2u);
   EXPECT_EQ(diagnostics.identity_words[0], 0u);
   EXPECT_EQ(diagnostics.identity_words[1], 3u);
@@ -819,7 +848,7 @@ TEST(KmtApiTest, RecordsDiagnosticsFor314StyleLegacyIdentity) {
   EXPECT_EQ(g_query_count, 1u);
 }
 
-TEST(KmtApiTest, RecordsDiagnosticsFor329StyleLegacyIdentity) {
+TEST(KmtApiTest, RecordsDiagnosticsForKrk1TwoDwordAdapterInfo) {
   ResetFakes();
   g_query_outputs[0][1] = 4;
   KmtApi api = {};
@@ -832,6 +861,9 @@ TEST(KmtApiTest, RecordsDiagnosticsFor329StyleLegacyIdentity) {
   EXPECT_EQ(diagnostics.selected_abi, McdmAbi::legacy);
   EXPECT_EQ(diagnostics.probed_abi, McdmAbi::legacy);
   EXPECT_EQ(diagnostics.source, McdmAbiSource::identity_query);
+  EXPECT_EQ(diagnostics.kmd_version, 0u);
+  EXPECT_EQ(diagnostics.hw_type, static_cast<uint32_t>(HardwareType::krk1));
+  EXPECT_FALSE(diagnostics.compact_adapter_info);
   EXPECT_EQ(diagnostics.identity_word_count, 2u);
   EXPECT_EQ(diagnostics.identity_words[0], 0u);
   EXPECT_EQ(diagnostics.identity_words[1], 4u);
@@ -843,7 +875,8 @@ TEST(KmtApiTest, RecordsDiagnosticsFor329StyleLegacyIdentity) {
   EXPECT_EQ(g_query_count, 1u);
 }
 
-TEST(KmtApiTest, RecordsDiagnosticsFor3760StyleCompactIdentity) {
+TEST(KmtApiTest, RecordsDiagnosticsForStxhCompactAdapterInfo) {
+  // Halo 3760 and 3930 both look like this: same STXH hw_type, compact query.
   ResetFakes();
   g_query_statuses[0] = static_cast<NTSTATUS>(0xC0000023u);
   g_query_outputs[1][1] = 3;
@@ -857,6 +890,9 @@ TEST(KmtApiTest, RecordsDiagnosticsFor3760StyleCompactIdentity) {
   EXPECT_EQ(diagnostics.selected_abi, McdmAbi::compact);
   EXPECT_EQ(diagnostics.probed_abi, McdmAbi::compact);
   EXPECT_EQ(diagnostics.source, McdmAbiSource::identity_query);
+  EXPECT_EQ(diagnostics.kmd_version, 0u);
+  EXPECT_EQ(diagnostics.hw_type, static_cast<uint32_t>(HardwareType::stxh));
+  EXPECT_TRUE(diagnostics.compact_adapter_info);
   EXPECT_EQ(diagnostics.identity_word_count, 3u);
   EXPECT_EQ(diagnostics.identity_words[0], 0u);
   EXPECT_EQ(diagnostics.identity_words[1], 3u);
@@ -871,7 +907,8 @@ TEST(KmtApiTest, RecordsDiagnosticsFor3760StyleCompactIdentity) {
   EXPECT_EQ(g_query_count, 2u);
 }
 
-TEST(KmtApiTest, RecordsDiagnosticsFor3930StyleCompactIdentity) {
+TEST(KmtApiTest, RecordsDiagnosticsForKrk1CompactAdapterInfo) {
+  // Compact KRK1 (PCI REV_20). Not what a Halo 3930 package reports.
   ResetFakes();
   g_query_statuses[0] = static_cast<NTSTATUS>(0xC0000023u);
   g_query_outputs[1][1] = 4;
@@ -885,6 +922,9 @@ TEST(KmtApiTest, RecordsDiagnosticsFor3930StyleCompactIdentity) {
   EXPECT_EQ(diagnostics.selected_abi, McdmAbi::compact);
   EXPECT_EQ(diagnostics.probed_abi, McdmAbi::compact);
   EXPECT_EQ(diagnostics.source, McdmAbiSource::identity_query);
+  EXPECT_EQ(diagnostics.kmd_version, 0u);
+  EXPECT_EQ(diagnostics.hw_type, static_cast<uint32_t>(HardwareType::krk1));
+  EXPECT_TRUE(diagnostics.compact_adapter_info);
   EXPECT_EQ(diagnostics.identity_word_count, 3u);
   EXPECT_EQ(diagnostics.identity_words[0], 0u);
   EXPECT_EQ(diagnostics.identity_words[1], 4u);
@@ -899,7 +939,7 @@ TEST(KmtApiTest, RecordsDiagnosticsFor3930StyleCompactIdentity) {
   EXPECT_EQ(g_query_count, 2u);
 }
 
-TEST(KmtApiTest, ProbesLegacyV4AbiFromTwoDwordIdentity) {
+TEST(KmtApiTest, ProbesLegacyAbiFromKrk1TwoDwordAdapterInfo) {
   ResetFakes();
   g_query_outputs[0][1] = 4;
   KmtApi api = {};
@@ -913,7 +953,7 @@ TEST(KmtApiTest, ProbesLegacyV4AbiFromTwoDwordIdentity) {
   EXPECT_EQ(g_query_count, 1u);
 }
 
-TEST(KmtApiTest, ProbesLegacyV0AbiFromZeroTwoDwordIdentity) {
+TEST(KmtApiTest, ProbesLegacyV0AbiFromPhxAdapterInfo) {
   ResetFakes();
   KmtApi api = {};
   api.query_adapter_info = FakeQueryAdapterInfo;
@@ -954,7 +994,9 @@ TEST(KmtApiTest, SubmissionPolicyFollowsNegotiatedAbiContract) {
   }
 }
 
-TEST(KmtApiTest, SelectsLegacyLayoutForPost280TwoDwordIdentityDrivers) {
+TEST(KmtApiTest, SelectsLegacyLayoutForPost280Stx2DriverVersions) {
+  // INF revision is consulted only for STX2. Halo 32.0.203.329 reports STXH
+  // and never enters this path.
   for (uint32_t revision : {314u, 329u}) {
     McdmAbi selected = McdmAbi::compact;
     Error error;
@@ -1010,7 +1052,7 @@ TEST(KmtApiTest, RejectsCompactZeroIdentityAfterLegacyShapeIsRejected) {
 
   EXPECT_FALSE(QueryProbedMcdmAbi(api, 0x1234, &abi, &error));
   EXPECT_NE(std::strstr(ErrorMessage(&error),
-                        "unsupported three-dword MCDM identity"),
+                        "unsupported UMDRIVERPRIVATE compact adapter info"),
             nullptr);
   EXPECT_EQ(g_query_count, 2u);
 }
@@ -1026,7 +1068,7 @@ TEST(KmtApiTest, RejectsUnknownTwoDwordAbiIdentity) {
 
   EXPECT_FALSE(QueryProbedMcdmAbi(api, 0x1234, &abi, &error));
   EXPECT_NE(std::strstr(ErrorMessage(&error),
-                        "unsupported two-dword MCDM identity"),
+                        "unsupported UMDRIVERPRIVATE adapter info"),
             nullptr);
   EXPECT_EQ(g_query_count, 1u);
 }
@@ -1042,7 +1084,7 @@ TEST(KmtApiTest, RejectsUnknownTwoDwordAbiMajor) {
 
   EXPECT_FALSE(QueryProbedMcdmAbi(api, 0x1234, &abi, &error));
   EXPECT_NE(std::strstr(ErrorMessage(&error),
-                        "unsupported two-dword MCDM identity"),
+                        "unsupported UMDRIVERPRIVATE adapter info"),
             nullptr);
   EXPECT_EQ(g_query_count, 1u);
 }
@@ -1059,7 +1101,7 @@ TEST(KmtApiTest, RejectsUnknownThreeDwordAbiIdentity) {
 
   EXPECT_FALSE(QueryProbedMcdmAbi(api, 0x5678, &abi, &error));
   EXPECT_NE(std::strstr(ErrorMessage(&error),
-                        "unsupported three-dword MCDM identity"),
+                        "unsupported UMDRIVERPRIVATE compact adapter info"),
             nullptr);
   EXPECT_EQ(g_query_count, 2u);
 }
@@ -1075,7 +1117,8 @@ TEST(KmtApiTest, RejectsBothAbiQueryShapesRejected) {
 
   EXPECT_FALSE(QueryProbedMcdmAbi(api, 0x5678, &abi, &error));
   EXPECT_NE(std::strstr(ErrorMessage(&error),
-                        "rejected both three-dword and two-dword identity"),
+                        "rejected both three-dword and two-dword "
+                        "UMDRIVERPRIVATE adapter-info"),
             nullptr);
   EXPECT_EQ(g_query_count, 2u);
 }

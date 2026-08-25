@@ -85,12 +85,35 @@ enum class BufferKind {
   context_private,
 };
 
+// Packet/context layout contract. Distinct from HardwareType: STXH and KRK1
+// share `legacy`, and STX2 needs the INF revision to choose between
+// `legacy_v2` and `legacy` because one hardware type shipped two layouts.
+// Driver package generations (two-DWORD vs compact, 329 vs 3760 vs 3930) are
+// also distinct from HardwareType: the same SKU keeps the same hw_type across
+// those packages. Strix Halo is always stxh (PCI REV_11), whether the miniport
+// answers with two DWORDs {0, 3} or compact {0, 3, 0}.
 enum class McdmAbi {
   legacy_v0,
   legacy_v2,
   legacy,
   compact,
 };
+
+// PCI SKU from XRT_UMD_ADAPTER_INFO.hw_type
+// (D3DKMTQueryAdapterInfo(KMTQAITYPE_UMDRIVERPRIVATE)). Not a driver-package
+// version: 329/3760/3930 on Halo all report stxh. Word 0 is kmd_version
+// (still 0 in current miniports). Compact packages reject the historical
+// two-DWORD prefix with STATUS_BUFFER_TOO_SMALL and accept three DWORDs
+// {kmd_version, hw_type, 0}.
+enum class HardwareType : uint32_t {
+  phx = 0,
+  stx = 1,
+  stx2 = 2,  // Strix B0 / PCI REV_10; Gorgon Point reuses this PCI identity.
+  stxh = 3,  // Strix Halo / PCI REV_11.
+  krk1 = 4,  // Krackan / PCI REV_20.
+};
+
+const char* HardwareTypeName(uint32_t hw_type);
 
 struct McdmSubmissionPolicy {
   bool supports_command_chaining = false;
@@ -103,6 +126,7 @@ bool SupportsHostBufferReuse(McdmAbi abi);
 
 enum class McdmAbiSource {
   unknown,
+  // D3DKMTQueryAdapterInfo(KMTQAITYPE_UMDRIVERPRIVATE) adapter-info prefix.
   identity_query,
 };
 
@@ -110,6 +134,10 @@ struct McdmAbiDiagnostics {
   McdmAbi selected_abi = McdmAbi::legacy;
   McdmAbi probed_abi = McdmAbi::legacy;
   McdmAbiSource source = McdmAbiSource::unknown;
+  uint32_t kmd_version = 0;
+  uint32_t hw_type = 0;
+  bool compact_adapter_info = false;
+  // Raw UMDRIVERPRIVATE prefix. Word 0 is kmd_version, word 1 is hw_type.
   uint32_t identity_words[3] = {};
   uint32_t identity_word_count = 0;
   uint32_t accepted_identity_count = 0;
