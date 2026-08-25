@@ -160,6 +160,7 @@ loom_cc_library(
         "types.c",
         "value/bit_count.c",
         "value/integer64.c",
+        "value/integer64_emit.c",
         "value/scalar_conversion.c",
         "value/storage.c",
         "value/vector_construct.c",
