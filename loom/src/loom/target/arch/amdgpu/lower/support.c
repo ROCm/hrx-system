@@ -1787,6 +1787,10 @@ static bool loom_amdgpu_branch_arg_payload_prefers_vgpr(
   if (defining_op == NULL || loom_value_def_index(incoming_value) != 0) {
     return false;
   }
+  if (analysis != NULL && loom_scf_select_isa(defining_op)) {
+    return loom_amdgpu_analyzed_source_value_prefers_vgpr(
+        module, fact_table, view_regions, analysis, incoming_value_id);
+  }
   return loom_amdgpu_source_memory_access_prefers_vgpr(
       module, fact_table, view_regions, analysis, defining_op,
       loom_module_value_type(module, incoming_value_id));
