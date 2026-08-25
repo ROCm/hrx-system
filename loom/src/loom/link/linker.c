@@ -110,6 +110,8 @@ struct loom_linker_t {
 typedef struct loom_linker_exact_selection_t {
   // Strictly increasing module-local source ordinals, or NULL when dense.
   const iree_host_size_t* ordinals;
+  // Omitted source symbols already projected into the target module.
+  loom_linker_source_symbol_binding_list_t bindings;
   // Output dispositions in source-selection order, or NULL when authored.
   const loom_linker_symbol_output_t* outputs;
   // Number of selected source symbols.
@@ -526,6 +528,49 @@ static iree_status_t loom_linker_map_exact_source_symbol(
       out_target_ref);
 }
 
+static iree_host_size_t loom_linker_find_source_binding(
+    loom_linker_source_symbol_binding_list_t bindings,
+    uint16_t source_symbol_id) {
+  iree_host_size_t low = 0;
+  iree_host_size_t high = bindings.count;
+  while (low < high) {
+    const iree_host_size_t middle = low + (high - low) / 2;
+    const uint32_t candidate = bindings.values[middle].source_ordinal;
+    if (candidate < source_symbol_id) {
+      low = middle + 1;
+    } else {
+      high = middle;
+    }
+  }
+  return low < bindings.count &&
+                 bindings.values[low].source_ordinal == source_symbol_id
+             ? low
+             : IREE_HOST_SIZE_MAX;
+}
+
+static iree_status_t loom_linker_map_bound_exact_source_symbol(
+    loom_linker_source_t* source, uint16_t source_symbol_id,
+    loom_symbol_ref_t* out_target_ref) {
+  const iree_host_size_t selection_ordinal =
+      loom_linker_find_exact_source_symbol(source, source_symbol_id);
+  if (selection_ordinal != IREE_HOST_SIZE_MAX) {
+    return loom_linker_resolve_source_symbol(
+        source, source_symbol_id, &source->target_symbols[selection_ordinal],
+        out_target_ref);
+  }
+  const iree_host_size_t binding_ordinal =
+      loom_linker_find_source_binding(source->exact.bindings, source_symbol_id);
+  if (binding_ordinal == IREE_HOST_SIZE_MAX) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "exact link selection missed reachable source symbol ref "
+        "{module=0, symbol=%u}",
+        (unsigned)source_symbol_id);
+  }
+  *out_target_ref = source->exact.bindings.values[binding_ordinal].target;
+  return iree_ok_status();
+}
+
 static iree_status_t loom_linker_validate_symbol_remap(
     const loom_linker_source_t* source, const loom_module_t* source_module,
     loom_module_t* target_module, loom_symbol_ref_t source_ref) {
@@ -580,6 +625,17 @@ static iree_status_t loom_linker_remap_exact_symbol(
       source, source_module, target_module, source_ref));
   return loom_linker_map_exact_source_symbol(source, source_ref.symbol_id,
                                              out_target_ref);
+}
+
+static iree_status_t loom_linker_remap_bound_exact_symbol(
+    void* user_data, const loom_module_t* source_module,
+    loom_module_t* target_module, loom_symbol_ref_t source_ref,
+    loom_symbol_ref_t* out_target_ref) {
+  loom_linker_source_t* source = (loom_linker_source_t*)user_data;
+  IREE_RETURN_IF_ERROR(loom_linker_validate_symbol_remap(
+      source, source_module, target_module, source_ref));
+  return loom_linker_map_bound_exact_source_symbol(source, source_ref.symbol_id,
+                                                   out_target_ref);
 }
 
 static iree_status_t loom_linker_remap_dense_symbol(
@@ -2278,10 +2334,14 @@ static iree_status_t loom_linker_add_exact_selection(
       .exact = selection,
   };
   source.exact.outputs = source_outputs.values;
-  source.symbol_remap = loom_ir_remap_symbol_callback_make(
-      selection.dense ? loom_linker_remap_dense_symbol
-                      : loom_linker_remap_exact_symbol,
-      &source);
+  loom_ir_remap_symbol_fn_t remap_symbol = loom_linker_remap_exact_symbol;
+  if (selection.dense) {
+    remap_symbol = loom_linker_remap_dense_symbol;
+  } else if (selection.bindings.count != 0) {
+    remap_symbol = loom_linker_remap_bound_exact_symbol;
+  }
+  source.symbol_remap =
+      loom_ir_remap_symbol_callback_make(remap_symbol, &source);
 
   iree_status_t status = iree_ok_status();
   if (out_target_symbols.count > 0) {
@@ -2347,11 +2407,16 @@ static iree_status_t loom_linker_add_exact_selection(
          j < provider_import->anchors.count && iree_status_is_ok(status); ++j) {
       const uint16_t source_symbol_id =
           (uint16_t)provider_import->anchors.ordinals[j];
-      status = selection.dense
-                   ? loom_linker_map_dense_source_symbol(
-                         &source, source_symbol_id, &target_anchors[j])
-                   : loom_linker_map_exact_source_symbol(
-                         &source, source_symbol_id, &target_anchors[j]);
+      if (selection.dense) {
+        status = loom_linker_map_dense_source_symbol(&source, source_symbol_id,
+                                                     &target_anchors[j]);
+      } else if (selection.bindings.count != 0) {
+        status = loom_linker_map_bound_exact_source_symbol(
+            &source, source_symbol_id, &target_anchors[j]);
+      } else {
+        status = loom_linker_map_exact_source_symbol(&source, source_symbol_id,
+                                                     &target_anchors[j]);
+      }
     }
     if (iree_status_is_ok(status)) {
       status = loom_link_provider_import_sink_append(
@@ -2368,6 +2433,7 @@ static iree_status_t loom_linker_add_exact_selection(
 iree_status_t loom_linker_add_module_symbols(
     loom_linker_t* linker, const loom_module_t* source_module,
     loom_linker_source_symbol_list_t source_symbols,
+    loom_linker_source_symbol_binding_list_t source_bindings,
     loom_linker_source_symbol_output_list_t source_outputs,
     loom_linker_source_provider_import_list_t provider_imports,
     loom_linker_target_symbol_list_t out_target_symbols) {
@@ -2381,6 +2447,7 @@ iree_status_t loom_linker_add_module_symbols(
       linker, source_module,
       (loom_linker_exact_selection_t){
           .ordinals = source_symbols.ordinals,
+          .bindings = source_bindings,
           .count = source_symbols.count,
       },
       source_outputs, provider_imports, out_target_symbols);

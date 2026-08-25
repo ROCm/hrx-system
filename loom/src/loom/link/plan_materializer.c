@@ -150,7 +150,8 @@ static iree_status_t loom_link_plan_materialize_module(
                                             out_target_symbols);
     } else {
       status = loom_linker_add_module_symbols(
-          linker, module->materialized_module, source_symbols, source_outputs,
+          linker, module->materialized_module, source_symbols,
+          loom_linker_source_symbol_binding_list_empty(), source_outputs,
           provider_imports, out_target_symbols);
     }
   } else {

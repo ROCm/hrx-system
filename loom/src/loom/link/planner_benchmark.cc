@@ -1112,6 +1112,7 @@ static void BenchmarkExactLink(benchmark::State& state,
     state.ResumeTiming();
     CheckStatus(loom_linker_add_module_symbols(
         linker, fixture.module(), source_symbols,
+        loom_linker_source_symbol_binding_list_empty(),
         loom_linker_source_symbol_output_list_empty(),
         loom_linker_source_provider_import_list_empty(),
         loom_linker_target_symbol_list_empty()));
