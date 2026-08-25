@@ -181,6 +181,12 @@ command.program.def public @increment_twice(%element_count: index) launch(%sourc
             mixed.launch_function_op);
   EXPECT_EQ(twice.launch_tuple_count, 1u);
   EXPECT_EQ(mixed.launch_tuple_count, 1u);
+  EXPECT_EQ(twice.launch_counts.binding_index, 3u);
+  EXPECT_EQ(twice.launch_counts.required_byte_length, 12u);
+  EXPECT_EQ(twice.launch_counts.minimum_alignment, 4u);
+  EXPECT_EQ(mixed.launch_counts.binding_index, 3u);
+  EXPECT_EQ(mixed.launch_counts.required_byte_length, 12u);
+  EXPECT_EQ(mixed.launch_counts.minimum_alignment, 4u);
 
   ASSERT_EQ(plan.dependency_count, 2u);
   ASSERT_NE(plan.dependency_units, nullptr);
@@ -344,6 +350,9 @@ command.program.def public @bodyless() launch(%output: buffer) {
   ASSERT_NE(root.entry_requirement_indices, nullptr);
   EXPECT_EQ(root.entry_requirement_indices[0], 0u);
   EXPECT_EQ(root.entry_requirement_indices[1], 1u);
+  EXPECT_EQ(root.launch_counts.binding_index, UINT32_MAX);
+  EXPECT_EQ(root.launch_counts.required_byte_length, 0u);
+  EXPECT_EQ(root.launch_counts.minimum_alignment, 0u);
 
   iree_byte_span_t data = iree_byte_span_empty();
   IREE_ASSERT_OK(loom_cmd_program_plan_serialize_root(&plan, 0, &data,
@@ -398,6 +407,7 @@ low.func.def target<cmd.core> abi(command_program) @moved_binding() {
   root.function_op = FindSymbol(module.get(), IREE_SV("moved_binding"));
   root.abi_layout.rebindable_binding_count = 1;
   root.transient.binding_index = UINT32_MAX;
+  root.launch_counts.binding_index = UINT32_MAX;
   loom_cmd_program_plan_t plan = {};
   plan.root_module = module.get();
   plan.roots = &root;

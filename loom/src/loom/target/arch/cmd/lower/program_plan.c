@@ -1003,6 +1003,19 @@ iree_status_t loom_cmd_program_plan_prepare(
       root->entry_requirement_count = build->entry_requirement_count;
       root->parameters = build->parameters;
       root->transient = build->transient;
+      root->launch_counts = (loom_cmd_program_launch_count_requirement_t){
+          .binding_index =
+              build->launch_graph.host_tuple_count != 0
+                  ? build->lower_plan.launch_count_binding.resource_index
+                  : UINT32_MAX,
+          .required_byte_length =
+              (uint64_t)build->launch_graph.host_tuple_count *
+              LOOM_CMD_PROGRAM_LAUNCH_COUNT_TUPLE_BYTE_LENGTH,
+          .minimum_alignment =
+              build->launch_graph.host_tuple_count != 0
+                  ? LOOM_CMD_PROGRAM_LAUNCH_COUNT_TUPLE_ALIGNMENT
+                  : 0,
+      };
       build->dependency_unit_indices = NULL;
       build->dependency_count = 0;
       build->entry_requirement_indices = NULL;

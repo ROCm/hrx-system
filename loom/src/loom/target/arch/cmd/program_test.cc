@@ -442,6 +442,23 @@ TEST(CmdProgramTest, RejectsMalformedLaunchCountTuple) {
                         loom_cmd_program_parse(AsByteSpan(data), &program));
 }
 
+TEST(CmdProgramTest, AcceptsStableIndirectWithoutHostCountStorage) {
+  std::vector<uint8_t> data = BuildValidProgram();
+  iree_unaligned_store_le_u32(
+      data.data() + LOOM_CMD_PROGRAM_HEADER_LAUNCH_COUNT_BINDING_INDEX_OFFSET,
+      UINT32_MAX);
+  iree_unaligned_store_le_u64(
+      data.data() + LOOM_CMD_PROGRAM_HEADER_LAUNCH_COUNT_BYTE_LENGTH_OFFSET, 0);
+  iree_unaligned_store_le_u64(
+      data.data() +
+          LOOM_CMD_PROGRAM_HEADER_LAUNCH_COUNT_MINIMUM_ALIGNMENT_OFFSET,
+      0);
+
+  loom_cmd_program_t program = {};
+  IREE_ASSERT_OK(loom_cmd_program_parse(AsByteSpan(data), &program));
+  EXPECT_EQ(program.requirements.launch_counts.binding_index, UINT32_MAX);
+}
+
 TEST(CmdProgramTest, RejectsMalformedHeader) {
   std::vector<uint8_t> data = BuildValidProgram();
   data[LOOM_CMD_PROGRAM_HEADER_MAGIC_OFFSET] ^= 0xFF;

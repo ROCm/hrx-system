@@ -85,6 +85,9 @@ typedef struct loom_cmd_program_root_t {
 
   // Aggregate issue-time storage required by command-program allocas.
   loom_cmd_transient_requirement_t transient;
+
+  // Host-produced workgroup-count storage consumed by static dispatches.
+  loom_cmd_program_launch_count_requirement_t launch_counts;
 } loom_cmd_program_root_t;
 
 // Immutable command roots and their union dependency graph.

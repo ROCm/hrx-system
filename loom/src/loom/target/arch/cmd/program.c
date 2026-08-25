@@ -724,30 +724,36 @@ static iree_status_t loom_cmd_program_validate_launch_counts(
         "command host launch-count requirement is not representable");
   }
 
-  bool found_static_dispatch = false;
+  bool found_host_count_dispatch = requirement.binding_index == UINT32_MAX;
   for (uint32_t i = 0; i < program->commands.count; ++i) {
     const loom_cmd_program_command_t command =
         loom_cmd_program_command_at(program, i);
-    if (loom_cmd_program_command_kind_base(command.kind) !=
-        LOOM_CMD_PROGRAM_COMMAND_KIND_DISPATCH_INDIRECT_STATIC) {
+    const loom_cmd_program_command_kind_t base_kind =
+        loom_cmd_program_command_kind_base(command.kind);
+    if (base_kind != LOOM_CMD_PROGRAM_COMMAND_KIND_DISPATCH_INDIRECT_STATIC &&
+        base_kind != LOOM_CMD_PROGRAM_COMMAND_KIND_DISPATCH_INDIRECT_DYNAMIC) {
       continue;
-    }
-    found_static_dispatch = true;
-    if (requirement.binding_index == UINT32_MAX) {
-      return iree_make_status(
-          IREE_STATUS_INVALID_ARGUMENT,
-          "static indirect dispatch has no host launch-count requirement");
     }
     const loom_cmd_program_buffer_ref_t buffer_ref =
         loom_cmd_program_buffer_ref_at(
             program,
             command.payload.dispatch_indirect.workgroup_count_buffer_ref);
-    uint64_t byte_end = 0;
-    if (buffer_ref.role != LOOM_CMD_PROGRAM_BUFFER_ROLE_REBINDABLE ||
-        buffer_ref.root_index != requirement.binding_index ||
-        buffer_ref.byte_length !=
+    if (buffer_ref.byte_length !=
             LOOM_CMD_PROGRAM_LAUNCH_COUNT_TUPLE_BYTE_LENGTH ||
-        !iree_checked_add_u64(buffer_ref.byte_offset, buffer_ref.byte_length,
+        buffer_ref.byte_offset %
+                LOOM_CMD_PROGRAM_LAUNCH_COUNT_TUPLE_ALIGNMENT !=
+            0) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "indirect dispatch references a malformed workgroup-count tuple");
+    }
+    if (base_kind != LOOM_CMD_PROGRAM_COMMAND_KIND_DISPATCH_INDIRECT_STATIC ||
+        buffer_ref.role != LOOM_CMD_PROGRAM_BUFFER_ROLE_REBINDABLE ||
+        buffer_ref.root_index != requirement.binding_index) {
+      continue;
+    }
+    uint64_t byte_end = 0;
+    if (!iree_checked_add_u64(buffer_ref.byte_offset, buffer_ref.byte_length,
                               &byte_end) ||
         byte_end > requirement.required_byte_length ||
         buffer_ref.byte_offset % requirement.minimum_alignment != 0) {
@@ -756,8 +762,9 @@ static iree_status_t loom_cmd_program_validate_launch_counts(
           "static indirect dispatch references inconsistent host launch "
           "counts");
     }
+    found_host_count_dispatch = true;
   }
-  if (!found_static_dispatch && requirement.binding_index != UINT32_MAX) {
+  if (!found_host_count_dispatch) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
         "host launch-count storage has no static indirect dispatch");
