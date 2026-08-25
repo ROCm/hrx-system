@@ -588,6 +588,37 @@ Disassembly of section CODE:
 
 wasm.target<simd128> @target
 
+// llvm-objdump renders Wasm's untyped select opcode as f32.select even when
+// its stack operands are i32.
+low.func.def public target<wasm.core.simd128>(@target) abi(wasm_function) @scalar_select(%condition: reg<wasm.i32>, %true_value: reg<wasm.i32>, %false_value: reg<wasm.i32>) -> (reg<wasm.i32>) asm {
+  %result = i32.select %true_value, %false_value, %condition
+  return %result
+}
+
+// ----
+Disassembly of section CODE:
+
+<CODE>:
+        # 1 functions in section.
+
+<scalar_select>:
+
+  local.get  1
+  local.get  2
+  local.get  0
+  f32.select
+  local.set  0
+  local.get  0
+  return
+  end
+
+// ====
+
+// RUN: emit wasm-dis
+// REQUIRES: wasm-objdump
+
+wasm.target<simd128> @target
+
 low.func.def public target<wasm.core.simd128>(@target) abi(wasm_function) @bulk_wide_scalar_primitives(%pattern: reg<wasm.f64>) -> (reg<wasm.i32>) asm {
   %bits = i64.reinterpret_f64 %pattern
   %shift = i64.const 8

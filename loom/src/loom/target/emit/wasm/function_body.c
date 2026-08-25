@@ -28,6 +28,7 @@ enum {
   LOOM_WASM_OPCODE_BR_IF = 0x0D,
   LOOM_WASM_OPCODE_CALL = 0x10,
   LOOM_WASM_OPCODE_RETURN = 0x0F,
+  LOOM_WASM_OPCODE_SELECT = 0x1B,
   LOOM_WASM_OPCODE_LOCAL_GET = 0x20,
   LOOM_WASM_OPCODE_LOCAL_SET = 0x21,
   LOOM_WASM_OPCODE_I32_LOAD8_U = 0x2D,
@@ -939,6 +940,8 @@ static iree_status_t loom_wasm_emit_descriptor_packet(
     case LOOM_WASM_ENCODING_F32X4_ADD:
     case LOOM_WASM_ENCODING_F32X4_MUL:
       return loom_wasm_emit_binary_stack_op(state, op, descriptor);
+    case LOOM_WASM_OPCODE_SELECT:
+      return loom_wasm_emit_ternary_stack_op(state, op, descriptor);
     case LOOM_WASM_OPCODE_I32_WRAP_I64:
     case LOOM_WASM_OPCODE_I32_REINTERPRET_F32:
     case LOOM_WASM_OPCODE_I64_REINTERPRET_F64:

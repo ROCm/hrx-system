@@ -217,3 +217,20 @@ func.def target(@target) @rejects_unsupported_structured_region_op(%selector: in
   }
   func.return %result : vector<4xi32>
 }
+
+// ====
+
+// RUN: emit source-low output=low
+
+wasm.target<simd128> @target
+
+func.def target(@target) @scalar_i32_select(%condition: i1, %true_value: i32, %false_value: i32) -> (i32) {
+  %result = scf.select %condition, %true_value, %false_value : i32
+  func.return %result : i32
+}
+
+// ----
+low.func.def target<wasm.core.simd128>(@target) abi(wasm_function) @scalar_i32_select(%condition: reg<wasm.i32>, %true_value: reg<wasm.i32>, %false_value: reg<wasm.i32>) -> (reg<wasm.i32>) asm {
+  %result = i32.select %true_value, %false_value, %condition
+  return %result
+}

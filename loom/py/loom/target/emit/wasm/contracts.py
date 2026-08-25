@@ -19,6 +19,8 @@ from loom.dialect.scalar import arithmetic as scalar_arithmetic
 from loom.dialect.scalar import bitwise as scalar_bitwise
 from loom.dialect.scalar import comparison as scalar_comparison
 from loom.dialect.scalar import conversion as scalar_conversion
+from loom.dialect.scf import ALL_SCF_OPS
+from loom.dialect.scf import defs as scf
 from loom.dialect.vector import ALL_VECTOR_OPS
 from loom.dialect.vector import defs as vector
 from loom.dsl import Op
@@ -346,6 +348,31 @@ def _select_rule(value_type: TypePattern) -> DescriptorRule:
             _value_type("true_value", value_type),
             _value_type("false_value", value_type),
             _value_type("result", value_type),
+        ),
+        emit=(
+            EmitDescriptorOp(
+                descriptor=descriptor,
+                operands={
+                    "true_value": ValueRef.operand("true_value"),
+                    "false_value": ValueRef.operand("false_value"),
+                    "condition": ValueRef.operand("condition"),
+                },
+                results={"dst": ValueRef.result("result")},
+            ),
+        ),
+    )
+
+
+def _scalar_select_rule() -> DescriptorRule:
+    descriptor = _descriptor("wasm.i32.select")
+    return DescriptorRule(
+        source_op=scf.scf_select,
+        descriptor=descriptor,
+        guards=(
+            _value_type("condition", _I1),
+            _value_type("true_value", _I32),
+            _value_type("false_value", _I32),
+            _value_type("result", _I32),
         ),
         emit=(
             EmitDescriptorOp(
@@ -731,6 +758,7 @@ WASM_CORE_SIMD128_CONTRACT_DIALECT_OPS = {
     "buffer": ALL_BUFFER_OPS,
     "index": ALL_INDEX_OPS,
     "scalar": ALL_SCALAR_OPS,
+    "scf": ALL_SCF_OPS,
     "vector": ALL_VECTOR_OPS,
 }
 
@@ -784,6 +812,7 @@ WASM_CORE_SIMD128_CONTRACT_FRAGMENT = ContractFragment(
         _masked_extui_rule(_I16, 0xFFFF),
         _const_i32_rule(scalar_conversion.scalar_constant, _I32),
         _const_i64_rule(scalar_conversion.scalar_constant, _I64),
+        _scalar_select_rule(),
         _splat_rule(),
         _select_rule(_V4I32),
         _select_rule(_V4F32),

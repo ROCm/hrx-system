@@ -182,6 +182,7 @@ _SHUFFLE_BYTE_IMMEDIATES = tuple(
 _OP_BR = 0x0C
 _OP_BR_IF = 0x0D
 _OP_RETURN = 0x0F
+_OP_SELECT = 0x1B
 _OP_I32_LOAD8_U = 0x2D
 _OP_I32_STORE8 = 0x3A
 _OP_I32_CONST = 0x41
@@ -385,6 +386,24 @@ WASM_CORE_SIMD128_DESCRIPTOR_SET = DescriptorSet(
         ),
     ),
     descriptors=(
+        Descriptor(
+            key="wasm.i32.select",
+            mnemonic="i32.select",
+            semantic_tag="integer.select.i32",
+            encoding_id=_OP_SELECT,
+            operands=(
+                _i32_result(),
+                _i32_operand("true_value"),
+                _i32_operand("false_value"),
+                _i32_operand("condition"),
+            ),
+            asm_forms=_asm(
+                results=("dst",),
+                operands=("true_value", "false_value", "condition"),
+            ),
+            schedule_class=_SCHEDULE_SCALAR_I32,
+            flags=(DescriptorFlag.DEAD_REMOVABLE,),
+        ),
         Descriptor(
             key="wasm.i32.const",
             mnemonic="i32.const",
