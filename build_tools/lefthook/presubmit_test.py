@@ -43,6 +43,119 @@ def input_scope(
 
 
 class PresubmitTest(unittest.TestCase):
+    def test_run_command_streams_success_output(self):
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            self.assertTrue(
+                presubmit.run_command(
+                    [sys.executable, "-c", "print('child output', flush=True)"],
+                    "streaming command",
+                    verbose=False,
+                )
+            )
+
+        text = output.getvalue()
+        self.assertLess(
+            text.index("[run] streaming command"), text.index("child output")
+        )
+        self.assertLess(
+            text.index("child output"), text.index("[ok] streaming command")
+        )
+
+    def test_run_command_streams_failure_output_once(self):
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            self.assertFalse(
+                presubmit.run_command(
+                    [
+                        sys.executable,
+                        "-c",
+                        "print('failure output', flush=True); raise SystemExit(3)",
+                    ],
+                    "failing command",
+                    verbose=False,
+                )
+            )
+
+        text = output.getvalue()
+        self.assertEqual(text.splitlines().count("failure output"), 1)
+        self.assertIn("[fail] failing command", text)
+        self.assertIn("exit 3", text)
+        self.assertIn("command:", text)
+
+    def test_parallel_commands_stream_success_output(self):
+        output = io.StringIO()
+        commands = [
+            [sys.executable, "-c", f"print('batch {index}', flush=True)"]
+            for index in range(2)
+        ]
+        with contextlib.redirect_stdout(output):
+            self.assertTrue(
+                presubmit.run_parallel_commands(
+                    commands,
+                    "parallel streaming commands",
+                    verbose=False,
+                    jobs=2,
+                )
+            )
+
+        text = output.getvalue()
+        self.assertIn("batch 0", text)
+        self.assertIn("batch 1", text)
+        self.assertIn("[ok] parallel streaming commands", text)
+
+    def test_run_command_batch_retains_only_a_bounded_output_tail(self):
+        output = io.StringIO()
+        with (
+            mock.patch.object(presubmit, "FAILURE_OUTPUT_TAIL_CHARACTER_LIMIT", 64),
+            contextlib.redirect_stdout(output),
+        ):
+            result = presubmit.run_command_batch(
+                [
+                    sys.executable,
+                    "-c",
+                    "print('discarded marker'); print('x' * 128); "
+                    "print('retained marker')",
+                ]
+            )
+
+        self.assertEqual(result.returncode, 0)
+        self.assertLessEqual(len(result.output_tail), 64)
+        self.assertGreater(result.omitted_output_character_count, 0)
+        self.assertNotIn("discarded marker", result.output_tail)
+        self.assertIn("retained marker", result.output_tail)
+        self.assertIn("discarded marker", output.getvalue())
+
+    def test_parallel_failure_recap_reports_the_bounded_output_tail(self):
+        output = io.StringIO()
+        commands = [
+            [
+                sys.executable,
+                "-c",
+                "print('discarded ' + 'marker'); print('x' * 128); "
+                "print('retained ' + 'marker'); raise SystemExit(3)",
+            ],
+            [sys.executable, "-c", "raise SystemExit(0)"],
+        ]
+        with (
+            mock.patch.object(presubmit, "FAILURE_OUTPUT_TAIL_CHARACTER_LIMIT", 64),
+            contextlib.redirect_stdout(output),
+        ):
+            self.assertFalse(
+                presubmit.run_parallel_commands(
+                    commands,
+                    "parallel failing commands",
+                    verbose=False,
+                    jobs=2,
+                )
+            )
+
+        text = output.getvalue()
+        self.assertEqual(text.count("discarded marker"), 1)
+        self.assertEqual(text.count("retained marker"), 2)
+        self.assertIn("earlier output characters", text)
+        self.assertIn("full output was streamed above", text)
+
     def test_commit_scope_excludes_head_only_paths(self):
         with tempfile.TemporaryDirectory() as temporary_directory:
             repo_root = Path(temporary_directory)

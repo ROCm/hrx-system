@@ -231,8 +231,8 @@ iree_runtime_cc_library(
     deps = [
         ":internal",
         ":path",
-        "//build_tools:dl",
-        "//build_tools:pthreads",
+        "//build_tools/bazel:dl",
+        "//build_tools/bazel:pthreads",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/threading",
     ],
@@ -363,7 +363,7 @@ iree_runtime_cc_library(
     deps = [
         ":internal",
         ":memory",
-        "//build_tools:rt",
+        "//build_tools/bazel:rt",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/threading",
     ],

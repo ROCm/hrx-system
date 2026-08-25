@@ -25,7 +25,7 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Callable, Iterable
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
+REPO_ROOT = Path(__file__).resolve().parents[2]
 
 # Minimal TheRock artifact closure used by HRX CI. Platform selection is handled
 # by the TheRock run prefix, not by changing component names here.

@@ -74,7 +74,7 @@ hrx_cc_library(
     textual_hdrs = ["//build_tools/amdgpu:elf_machine_map.inl"],
     deps = [
         ":function_attributes",
-        "//build_tools:pthreads",
+        "//build_tools/bazel:pthreads",
         "//libhrx/src/libhrx:hrx_static",
         "//runtime/src/iree/async",
         "//runtime/src/iree/async/util:proactor_pool",

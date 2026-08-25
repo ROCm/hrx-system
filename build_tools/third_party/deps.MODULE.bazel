@@ -55,6 +55,8 @@ http_archive(
 http_archive(
     name = "flatcc",
     build_file = "//build_tools/third_party/flatcc:flatcc.BUILD.bazel",
+    patch_args = ["-p1"],
+    patches = ["//build_tools/third_party/flatcc:xxhash_msvc_restrict.patch"],
     sha256 = "f77f842e996f5bbfa25305a7b38b40d1325fb44154f2bf9880c58356ece92c62",
     strip_prefix = "flatcc-9362cd00f0007d8cbee7bff86e90fb4b6b227ff3",
     url = "https://github.com/dvidelabs/flatcc/archive/9362cd00f0007d8cbee7bff86e90fb4b6b227ff3.tar.gz",

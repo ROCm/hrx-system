@@ -6,26 +6,31 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
 
+from build_tools.cmake.test_environment import configured_cmake_arguments
+
 sys.dont_write_bytecode = True
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
-FIXTURE_SOURCE_DIR = REPO_ROOT / "build_tools/cmake/testdata/data_dependencies"
+REPO_ROOT = Path(__file__).resolve().parents[2]
+FIXTURE_SOURCE_DIR = Path(__file__).resolve().parent / "testdata/data_dependencies"
+CMAKE_COMMAND = os.environ["IREE_TEST_CMAKE_COMMAND"]
 
 
 def configure_fixture(build_dir: Path, *cmake_args: str) -> subprocess.CompletedProcess:
     return subprocess.run(
         [
-            "cmake",
+            CMAKE_COMMAND,
             "-S",
             str(FIXTURE_SOURCE_DIR),
             "-B",
             str(build_dir),
+            *configured_cmake_arguments(),
             f"-DIREE_REPO_ROOT={REPO_ROOT}",
             *cmake_args,
         ],
@@ -49,7 +54,7 @@ class CMakeDataDependenciesTest(unittest.TestCase):
 
             build_result = subprocess.run(
                 [
-                    "cmake",
+                    CMAKE_COMMAND,
                     "--build",
                     str(build_dir),
                     "--target",

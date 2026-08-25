@@ -159,7 +159,7 @@ jobs:
         if: matrix.fetch_rocm
         run: |
           python -m pip install --upgrade boto3 zstandard
-          python build_tools/ci_core_windows.py fetch-rocm
+          python build_tools/ci/ci_core_windows.py fetch-rocm
 
       - name: Install developer tools
         shell: pwsh

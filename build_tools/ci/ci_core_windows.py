@@ -24,12 +24,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Mapping
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
+REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from build_tools import ci_core_common as common
-from build_tools.ci_core_common import (
+from build_tools.ci import ci_core_common as common
+from build_tools.ci.ci_core_common import (
     CORE_CTEST_EXCLUDE_REGEXES,
     checked_dest,
     cmake_options_from_env,

@@ -15,7 +15,7 @@ unversioned_rocm_root="${HRX_ROCM_ROOT}"
 
 python3 -m venv "${HRX_OUTPUT_DIR}/python"
 "${HRX_PYTHON}" -m pip install --upgrade pip boto3 zstandard
-"${HRX_PYTHON}" build_tools/ci_core_linux.py fetch-rocm
+"${HRX_PYTHON}" build_tools/ci/ci_core_linux.py fetch-rocm
 
 append_path() {
   local path="$1"

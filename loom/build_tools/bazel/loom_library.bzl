@@ -6,6 +6,7 @@
 
 """Public rules for reusable Loom source and kernel libraries."""
 
+load("@rules_shell//shell:sh_test.bzl", "sh_test")
 load("//build_tools/bazel:cc_attrs.bzl", "cc_attrs")
 load("//build_tools/bazel:requirements.bzl", "apply_test_requirements")
 
@@ -306,7 +307,7 @@ def _write_test_launcher(ctx, tool, input_file, tool_args):
     )
     return output
 
-def _loom_execution_test_impl(ctx):
+def _loom_execution_test_launcher_impl(ctx):
     tool = ctx.toolchains[_LOOM_TEST_TOOLCHAIN_TYPE].tool
     libraries = [dep[LoomLibraryInfo] for dep in ctx.attr.libraries]
     library_modules = [library.module for library in libraries]
@@ -336,8 +337,8 @@ def _loom_execution_test_impl(ctx):
         ),
     ]
 
-_loom_execution_test = rule(
-    implementation = _loom_execution_test_impl,
+_loom_execution_test_launcher = rule(
+    implementation = _loom_execution_test_launcher_impl,
     attrs = {
         "libraries": attr.label_list(
             providers = [LoomLibraryInfo],
@@ -356,12 +357,12 @@ _loom_execution_test = rule(
             doc = "Authored Loom source containing correctness cases.",
         ),
     },
-    doc = "Executes one authored Loom source through one execution profile.",
-    test = True,
+    doc = "Generates a launcher for one authored Loom execution profile.",
+    executable = True,
     toolchains = [_LOOM_TEST_TOOLCHAIN_TYPE],
 )
 
-def _loom_format_test_impl(ctx):
+def _loom_format_test_launcher_impl(ctx):
     tool = ctx.toolchains[_LOOM_FORMAT_TOOLCHAIN_TYPE].tool
     output = _write_test_launcher(ctx, tool, ctx.file.src, ["--check"])
     return [
@@ -372,8 +373,8 @@ def _loom_format_test_impl(ctx):
         ),
     ]
 
-_loom_format_test = rule(
-    implementation = _loom_format_test_impl,
+_loom_format_test_launcher = rule(
+    implementation = _loom_format_test_launcher_impl,
     attrs = {
         "src": attr.label(
             allow_single_file = [".loom"],
@@ -381,12 +382,12 @@ _loom_format_test = rule(
             doc = "Canonical Loom text source to verify.",
         ),
     },
-    doc = "Verifies that one Loom source file is canonical and valid.",
-    test = True,
+    doc = "Generates a launcher that verifies one canonical Loom source.",
+    executable = True,
     toolchains = [_LOOM_FORMAT_TOOLCHAIN_TYPE],
 )
 
-def _loom_lint_test_impl(ctx):
+def _loom_lint_test_launcher_impl(ctx):
     tool = ctx.toolchains[_LOOM_LINT_TOOLCHAIN_TYPE].tool
     output = _write_test_launcher(ctx, tool, ctx.file.src, [])
     return [
@@ -397,8 +398,8 @@ def _loom_lint_test_impl(ctx):
         ),
     ]
 
-_loom_lint_test = rule(
-    implementation = _loom_lint_test_impl,
+_loom_lint_test_launcher = rule(
+    implementation = _loom_lint_test_launcher_impl,
     attrs = {
         "src": attr.label(
             allow_single_file = [".loom"],
@@ -406,12 +407,12 @@ _loom_lint_test = rule(
             doc = "Authored Loom text source to check.",
         ),
     },
-    doc = "Checks authoring policy in one Loom source file.",
-    test = True,
+    doc = "Generates a launcher that checks one Loom source file.",
+    executable = True,
     toolchains = [_LOOM_LINT_TOOLCHAIN_TYPE],
 )
 
-def _loom_plan_test_impl(ctx):
+def _loom_plan_test_launcher_impl(ctx):
     tool = ctx.toolchains[_LOOM_BENCHMARK_TOOLCHAIN_TYPE].tool
     module = ctx.attr.library[LoomLibraryInfo].module
     output = _write_test_launcher(
@@ -432,8 +433,8 @@ def _loom_plan_test_impl(ctx):
         ),
     ]
 
-_loom_plan_test = rule(
-    implementation = _loom_plan_test_impl,
+_loom_plan_test_launcher = rule(
+    implementation = _loom_plan_test_launcher_impl,
     attrs = {
         "library": attr.label(
             mandatory = True,
@@ -441,12 +442,12 @@ _loom_plan_test = rule(
             doc = "Kernel library whose check.benchmark work graph is planned.",
         ),
     },
-    doc = "Plans every benchmark declared by a Loom kernel library.",
-    test = True,
+    doc = "Generates a launcher that plans every declared Loom benchmark.",
+    executable = True,
     toolchains = [_LOOM_BENCHMARK_TOOLCHAIN_TYPE],
 )
 
-def _loom_compilation_test_impl(ctx):
+def _loom_compilation_test_launcher_impl(ctx):
     compilation = ctx.attr.compilation[LoomCompilationInfo]
     output = ctx.actions.declare_file(ctx.label.name + ".sh")
     content = (
@@ -473,8 +474,8 @@ def _loom_compilation_test_impl(ctx):
         ),
     ]
 
-_loom_compilation_test = rule(
-    implementation = _loom_compilation_test_impl,
+_loom_compilation_test_launcher = rule(
+    implementation = _loom_compilation_test_launcher_impl,
     attrs = {
         "compilation": attr.label(
             mandatory = True,
@@ -482,9 +483,31 @@ _loom_compilation_test = rule(
             doc = "Target compilation whose outputs must be non-empty.",
         ),
     },
-    doc = "Verifies that a target compilation emitted its promised outputs.",
-    test = True,
+    doc = "Generates a launcher that verifies target compilation outputs.",
+    executable = True,
 )
+
+def _declare_launcher_test(name, launcher_rule, launcher_attrs, test_kwargs):
+    """Wraps a generated shell launcher in rules_shell's platform runner."""
+    launcher_name = name + "_launcher"
+    launcher_kwargs = dict(launcher_attrs)
+    launcher_kwargs.update({
+        "name": launcher_name,
+        "tags": test_kwargs.get("tags", []) + ["manual"],
+        "testonly": True,
+        "visibility": ["//visibility:private"],
+    })
+    target_compatible_with = test_kwargs.get("target_compatible_with")
+    if target_compatible_with != None:
+        launcher_kwargs["target_compatible_with"] = target_compatible_with
+    launcher_rule(**launcher_kwargs)
+
+    sh_test(
+        name = name,
+        srcs = [":" + launcher_name],
+        data = [":" + launcher_name],
+        **test_kwargs
+    )
 
 def loom_compile(
         name,
@@ -537,15 +560,17 @@ def _declare_execution_test(name, src, libraries, profile, tags):
         test_kwargs.get("tags"),
         resource_group,
     )
-    _loom_execution_test(
+    test_kwargs["visibility"] = ["//visibility:private"]
+    _declare_launcher_test(
         name = name,
-        libraries = libraries,
-        profile_name = profile.name,
-        runner_args = profile.runner_args,
-        src = src,
-        testonly = True,
-        visibility = ["//visibility:private"],
-        **test_kwargs
+        launcher_rule = _loom_execution_test_launcher,
+        launcher_attrs = {
+            "libraries": libraries,
+            "profile_name": profile.name,
+            "runner_args": profile.runner_args,
+            "src": src,
+        },
+        test_kwargs = test_kwargs,
     )
 
 def _declare_library(
@@ -571,30 +596,39 @@ def _declare_library(
     tests = []
     for index, src in enumerate(srcs):
         lint_test_name = "%s_lint_%d_test" % (name, index)
-        _loom_lint_test(
+        _declare_launcher_test(
             name = lint_test_name,
-            src = src,
-            tags = tags + ["hostonly"],
-            visibility = ["//visibility:private"],
+            launcher_rule = _loom_lint_test_launcher,
+            launcher_attrs = {"src": src},
+            test_kwargs = {
+                "tags": tags + ["hostonly"],
+                "visibility": ["//visibility:private"],
+            },
         )
         tests.append(lint_test_name)
 
         test_name = "%s_format_%d_test" % (name, index)
-        _loom_format_test(
+        _declare_launcher_test(
             name = test_name,
-            src = src,
-            tags = tags + ["hostonly"],
-            visibility = ["//visibility:private"],
+            launcher_rule = _loom_format_test_launcher,
+            launcher_attrs = {"src": src},
+            test_kwargs = {
+                "tags": tags + ["hostonly"],
+                "visibility": ["//visibility:private"],
+            },
         )
         tests.append(test_name)
 
     if plan_benchmarks:
         plan_test_name = name + "_plan_test"
-        _loom_plan_test(
+        _declare_launcher_test(
             name = plan_test_name,
-            library = ":" + name,
-            tags = tags + ["hostonly"],
-            visibility = ["//visibility:private"],
+            launcher_rule = _loom_plan_test_launcher,
+            launcher_attrs = {"library": ":" + name},
+            test_kwargs = {
+                "tags": tags + ["hostonly"],
+                "visibility": ["//visibility:private"],
+            },
         )
         tests.append(plan_test_name)
 
@@ -651,11 +685,14 @@ def _declare_library(
             visibility = ["//visibility:private"],
         )
         compile_test_name = compile_name + "_test"
-        _loom_compilation_test(
+        _declare_launcher_test(
             name = compile_test_name,
-            compilation = ":" + compile_name,
-            tags = tags + ["hostonly"],
-            visibility = ["//visibility:private"],
+            launcher_rule = _loom_compilation_test_launcher,
+            launcher_attrs = {"compilation": ":" + compile_name},
+            test_kwargs = {
+                "tags": tags + ["hostonly"],
+                "visibility": ["//visibility:private"],
+            },
         )
         tests.append(compile_test_name)
 

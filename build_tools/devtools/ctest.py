@@ -18,6 +18,7 @@ from pathlib import Path
 from build_tools.devtools.command_plan import CommandStep, quote_command
 
 BUILD_TARGETS_CATALOG_FILENAME = "iree_ctest_build_targets.json"
+REFRESH_TARGET = "iree-ctest-refresh"
 MAX_BUILD_COMMAND_LENGTH = 8192
 
 
@@ -156,6 +157,19 @@ def ctest_run_command(
     ]
 
 
+def cmake_refresh_command(
+    cmake: str,
+    build_dir: Path,
+    *,
+    build_config: str | None = None,
+) -> list[str]:
+    command = [cmake, "--build", str(build_dir)]
+    if build_config:
+        command.extend(["--config", build_config])
+    command.extend(["--target", REFRESH_TARGET])
+    return command
+
+
 def _command_length(arguments: list[str]) -> int:
     return sum(len(argument) + 1 for argument in arguments)
 
@@ -204,8 +218,22 @@ class CTestBuildAndRunStep:
     env: dict[str, str] | None = None
 
     def describe(self) -> str:
+        command_env = self.env if self.env is not None else os.environ
+        build_config = ctest_build_config(self.arguments)
+        if build_config is None:
+            build_config = command_env.get("CTEST_CONFIGURATION_TYPE")
         return "\n".join(
             [
+                CommandStep(
+                    cmake_refresh_command(
+                        self.cmake,
+                        self.build_dir,
+                        build_config=build_config,
+                    ),
+                    cwd=self.cwd,
+                    env=self.env,
+                    label="refresh the CMake test graph",
+                ).describe(),
                 CommandStep(
                     ctest_selection_command(
                         self.ctest,
@@ -242,6 +270,34 @@ class CTestBuildAndRunStep:
         )
 
     def run(self, verbose: bool = False) -> int:
+        command_env = self.env if self.env is not None else os.environ
+        build_config = ctest_build_config(self.arguments)
+        if build_config is None:
+            build_config = command_env.get("CTEST_CONFIGURATION_TYPE")
+        refresh_command = cmake_refresh_command(
+            self.cmake,
+            self.build_dir,
+            build_config=build_config,
+        )
+        if verbose:
+            print("dev.py: refresh CMake test graph")
+            print("  " + quote_command(refresh_command))
+            sys.stdout.flush()
+        try:
+            refresh_result = subprocess.run(
+                refresh_command,
+                cwd=self.cwd,
+                env=self.env,
+            )
+        except OSError as exc:
+            print(
+                f"dev.py: failed to run {quote_command(refresh_command)}: {exc}",
+                file=sys.stderr,
+            )
+            return 127
+        if refresh_result.returncode != 0:
+            return refresh_result.returncode
+
         select_command = ctest_selection_command(
             self.ctest,
             self.build_dir,
@@ -290,10 +346,6 @@ class CTestBuildAndRunStep:
                 selection_result.stdout,
                 build_target_catalog_payload,
             )
-            command_env = self.env if self.env is not None else os.environ
-            build_config = ctest_build_config(self.arguments)
-            if build_config is None:
-                build_config = command_env.get("CTEST_CONFIGURATION_TYPE")
             build_commands = cmake_build_commands(
                 self.cmake,
                 self.build_dir,

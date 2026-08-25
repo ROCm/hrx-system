@@ -17,9 +17,9 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from build_tools import ci_core_linux
+from build_tools.ci import ci_core_linux
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
+REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 class FakeS3:
@@ -65,7 +65,7 @@ class CiCoreLinuxTest(unittest.TestCase):
         env = os.environ.copy()
         env.pop("PYTHONPATH", None)
         result = subprocess.run(
-            [sys.executable, "build_tools/ci_core_linux.py", "--help"],
+            [sys.executable, "build_tools/ci/ci_core_linux.py", "--help"],
             cwd=REPO_ROOT,
             env=env,
             stdout=subprocess.PIPE,

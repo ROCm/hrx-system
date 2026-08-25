@@ -19,6 +19,31 @@ from build_tools.devtools import bazel as bazel_dev
 
 
 class BazelTest(unittest.TestCase):
+    def test_bazel_output_path_uses_configured_executable(self):
+        executable_path = Path("C:/b/execroot/bazel-out/bin/pkg/tool.exe")
+        metadata = bazel_dev.BazelLaunchMetadata(executable_path=executable_path)
+        with mock.patch.object(
+            bazel_dev,
+            "resolve_bazel_launch_metadata",
+            return_value=(0, metadata),
+        ) as resolve_metadata:
+            result = bazel_dev.resolve_bazel_output_path(
+                bazel="bazel",
+                target="//pkg:tool",
+                bazel_args=["--config=asan"],
+                cwd=bazel_dev.REPO_ROOT,
+                env=None,
+            )
+
+        self.assertEqual(result, executable_path)
+        resolve_metadata.assert_called_once_with(
+            bazel="bazel",
+            target="//pkg:tool",
+            bazel_args=["--config=asan"],
+            cwd=bazel_dev.REPO_ROOT,
+            env=None,
+        )
+
     def test_bazel_launch_metadata_queries_graph_providers(self):
         execution_root = bazel_dev.REPO_ROOT / ".tmp/test-execution-root"
         completed = subprocess.CompletedProcess(

@@ -85,6 +85,12 @@ iree_register_test_build_targets(
   TARGETS tool_backed_root
 )
 
+set(IREE_TEST_METADATA_EXTENSION_FILE "" CACHE FILEPATH
+  "Optional CMake test metadata fixture extension")
+if(IREE_TEST_METADATA_EXTENSION_FILE)
+  include("${IREE_TEST_METADATA_EXTENSION_FILE}")
+endif()
+
 option(IREE_TEST_ADD_UNMANAGED_TEST "Add a test without build metadata" OFF)
 if(IREE_TEST_ADD_UNMANAGED_TEST)
   add_test(NAME unmanaged COMMAND "${CMAKE_COMMAND}" -E true)

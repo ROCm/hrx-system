@@ -149,7 +149,7 @@ jobs:
 
       - name: Extract package artifacts
         run: |
-          "${HRX_PYTHON}" build_tools/ci_core_linux.py extract-packages
+          "${HRX_PYTHON}" build_tools/ci/ci_core_linux.py extract-packages
 
       - name: Report ROCm environment
         id: rocm_environment
@@ -163,4 +163,4 @@ jobs:
         if: ${{ steps.rocm_environment.outcome == 'success' }}
         continue-on-error: ${{ inputs.experimental }}
         run: |
-          "${HRX_PYTHON}" build_tools/ci_core_linux.py test
+          "${HRX_PYTHON}" build_tools/ci/ci_core_linux.py test

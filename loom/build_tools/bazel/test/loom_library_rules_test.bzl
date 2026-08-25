@@ -173,7 +173,7 @@ def _test_execution_profile_consumes_source_and_dependency_archive(name, **kwarg
             "timeout": "short",
         },
         impl = _test_execution_profile_consumes_source_and_dependency_archive_impl,
-        target = ":profiled_library_execute_reference_test",
+        target = ":profiled_library_execute_reference_test_launcher",
         **kwargs
     )
 
@@ -211,7 +211,7 @@ def _test_resource_profile_preserves_direct_execution(name, **kwargs):
             "timeout": "short",
         },
         impl = _test_resource_profile_preserves_direct_execution_impl,
-        target = ":profiled_library_execute_serialized_reference_test",
+        target = ":profiled_library_execute_serialized_reference_test_launcher",
         **kwargs
     )
 

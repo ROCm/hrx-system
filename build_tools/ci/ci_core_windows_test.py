@@ -18,9 +18,9 @@ from argparse import Namespace
 from pathlib import Path
 from unittest import mock
 
-from build_tools import ci_core_common, ci_core_windows
+from build_tools.ci import ci_core_common, ci_core_windows
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
+REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 class FakeS3:
@@ -42,7 +42,7 @@ class CiCoreWindowsTest(unittest.TestCase):
         env = os.environ.copy()
         env.pop("PYTHONPATH", None)
         result = subprocess.run(
-            [sys.executable, "build_tools/ci_core_windows.py", "--help"],
+            [sys.executable, "build_tools/ci/ci_core_windows.py", "--help"],
             cwd=REPO_ROOT,
             env=env,
             stdout=subprocess.PIPE,
@@ -170,14 +170,15 @@ class CiCoreWindowsTest(unittest.TestCase):
             source = root / "source"
             source.mkdir()
             real_file = source / "real.py"
-            real_file.write_text("value = 1\n")
+            fixture_contents = b"value = 1\n"
+            real_file.write_bytes(fixture_contents)
             self._symlink_or_skip(real_file, source / "link.py")
             zip_path = root / "archive.zip"
 
             ci_core_windows.create_zip(source, zip_path)
 
             with zipfile.ZipFile(zip_path) as zf:
-                self.assertEqual(zf.read("link.py").decode(), "value = 1\n")
+                self.assertEqual(zf.read("link.py"), fixture_contents)
 
     def test_rocm_artifact_variant_from_configure_log(self):
         self.assertEqual(

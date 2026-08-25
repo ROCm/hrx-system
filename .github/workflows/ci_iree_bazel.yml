@@ -181,10 +181,19 @@ jobs:
           compression-level: 0
 
   windows_bazel:
-    name: Windows / Repository / MSVC + ROCm
+    name: ${{ matrix.name }}
     runs-on: azure-windows-scale-rocm
     timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows / Repository / clang-cl + ROCm
+            host_toolchain: clang-cl
+          - name: Windows / Repository / MSVC + ROCm
+            host_toolchain: msvc
     env:
+      BAZEL_LLVM: ${{ github.workspace }}\build\iree-bazel-windows\rocm-root\lib\llvm
       HRX_ARTIFACT_SET: core
       HRX_DOWNLOAD_CACHE_DIR: ${{ github.workspace }}\build\iree-bazel-windows\downloads
       HRX_OUTPUT_DIR: ${{ github.workspace }}\build\iree-bazel-windows
@@ -204,7 +213,7 @@ jobs:
       - name: Fetch ROCm toolchain
         run: |
           python -m pip install --upgrade boto3 zstandard
-          python build_tools/ci_core_windows.py fetch-rocm
+          python build_tools/ci/ci_core_windows.py fetch-rocm
 
       - name: Install developer tools
         shell: pwsh
@@ -212,6 +221,10 @@ jobs:
           $bazelOutputRoot = (Join-Path $env:SystemDrive "b").Replace('\', '/')
           "startup --output_user_root=$bazelOutputRoot" |
             Out-File -FilePath .bazelrc.local -Encoding ascii -Append
+          if ("${{ matrix.host_toolchain }}" -eq "msvc") {
+            "build --config=windows-msvc" |
+              Out-File -FilePath .bazelrc.local -Encoding ascii -Append
+          }
           python --version
           python dev.py bazel setup --venv
           "$PWD\.venv\Scripts" | Out-File -FilePath $env:GITHUB_PATH -Append
@@ -223,16 +236,25 @@ jobs:
           for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do set "VS_INSTALL=%%i"
           if not defined VS_INSTALL exit /b 1
           call "%VS_INSTALL%\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64
-          set "CC=cl.exe"
-          set "CXX=cl.exe"
-          set "AR=lib.exe"
+          if "${{ matrix.host_toolchain }}"=="msvc" (
+            set "CC=cl.exe"
+            set "CXX=cl.exe"
+            set "AR=lib.exe"
+          ) else (
+            if not exist "%BAZEL_LLVM%\bin\clang-cl.exe" exit /b 1
+            if not exist "%BAZEL_LLVM%\bin\lld-link.exe" exit /b 1
+            if not exist "%BAZEL_LLVM%\bin\llvm-lib.exe" exit /b 1
+            set "CC=%BAZEL_LLVM%\bin\clang-cl.exe"
+            set "CXX=%BAZEL_LLVM%\bin\clang-cl.exe"
+            set "AR=%BAZEL_LLVM%\bin\llvm-lib.exe"
+          )
           python build_tools/devtools/ci.py iree-bazel-repository-integration --amdgpu-target gfx11-generic --bazel-profile-dir "%RUNNER_TEMP%\bazel-profiles" --keep-going
 
       - name: Upload Bazel profiles
         if: ${{ always() && steps.iree_bazel_ci.outcome != 'skipped' }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: bazel-profiles-iree-bazel-repository-integration-attempt-${{ github.run_attempt }}
+          name: bazel-profiles-iree-bazel-repository-integration-${{ matrix.host_toolchain }}-attempt-${{ github.run_attempt }}
           path: ${{ runner.temp }}\bazel-profiles\*.profile.gz
           if-no-files-found: error
           compression-level: 0

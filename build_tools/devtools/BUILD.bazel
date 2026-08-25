@@ -212,7 +212,6 @@ py_test(
         "ctest_test.py",
         "environment.py",
     ],
-    data = ["//build_tools:cmake_test_metadata_fixture"],
     main = "ctest_test.py",
 )
 

@@ -9,6 +9,13 @@
 # directories.
 
 enable_testing(iree)
+
+# Empty root used to refresh the generated build graph before selecting CTests.
+# Every generated target participates in CMake's normal regeneration check, so
+# this is a no-op when the graph is current and regenerates stale CTest metadata
+# before the selective test runner reads it.
+add_custom_target(iree-ctest-refresh)
+
 # A property is apparently the only way to get an uncached global variable.
 set_property(GLOBAL PROPERTY IREE_TEST_TMPDIRS "")
 set_property(GLOBAL PROPERTY IREE_TEST_RESOURCE_BUILD_TARGETS "")

@@ -5,10 +5,14 @@
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 # bazel-to-cmake: skip
-# CMake consumes the independent adapter in flatcc.cmake; this package only
-# exports inputs for the Bazel archive repository.
 
-exports_files([
-    "flatcc.BUILD.bazel",
-    "xxhash_msvc_restrict.patch",
-])
+load("@rules_python//python:defs.bzl", "py_test")
+
+py_test(
+    name = "msvc_response_file_test",
+    srcs = [
+        "msvc_response_file.py",
+        "msvc_response_file_test.py",
+    ],
+    main = "msvc_response_file_test.py",
+)

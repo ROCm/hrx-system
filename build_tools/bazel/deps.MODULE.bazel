@@ -8,11 +8,17 @@
 
 bazel_dep(name = "bazel_skylib", version = "1.9.0")
 bazel_dep(name = "platforms", version = "1.0.0")
-bazel_dep(name = "rules_cc", version = "0.2.17")
+bazel_dep(name = "rules_cc", version = "0.2.21")
 bazel_dep(name = "rules_python", version = "2.1.0")
 bazel_dep(name = "rules_shell", version = "0.6.1")
 
 bazel_dep(name = "rules_testing", version = "0.9.0", dev_dependency = True)
+
+cc_configure = use_extension(
+    "@rules_cc//cc:extensions.bzl",
+    "cc_configure_extension",
+)
+use_repo(cc_configure, "local_config_cc")
 
 python = use_extension("@rules_python//python/extensions:python.bzl", "python")
 python.defaults(python_version = "3.12")
