@@ -69,6 +69,10 @@ typedef struct loom_bytecode_encoding_metadata_t {
 typedef struct loom_bytecode_op_metadata_t {
   // Borrowed registered operation name view from the module STRINGS table.
   iree_string_view_t name;
+  // Context-owned operation vtable resolved during bytecode validation.
+  const loom_op_vtable_t* vtable;
+  // Dense context-local operation kind resolved during bytecode validation.
+  loom_op_kind_t kind;
 } loom_bytecode_op_metadata_t;
 
 // Validated independently bounded root-region payload.
@@ -117,8 +121,9 @@ typedef struct loom_bytecode_symbol_metadata_t {
   iree_string_view_t import_module;
   // Borrowed source symbol name for imports, or empty when not imported.
   iree_string_view_t import_symbol;
-  // Borrowed defining op name for function/global/record symbols.
-  iree_string_view_t defining_op_name;
+  // Module-local OPS ordinal of the defining operation, or UINT32_MAX for
+  // symbols without a defining operation.
+  uint32_t defining_op_ordinal;
   // Function-like calling convention byte, or zero for non-function symbols.
   uint8_t calling_convention;
   // Function-like purity byte, or zero for non-function symbols.

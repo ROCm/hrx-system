@@ -317,11 +317,11 @@ static iree_status_t loom_bytecode_reader_skip_global_payload(
       &vtable));
   reader->view.symbols.defining_op_ordinals[symbol_index] =
       (uint32_t)(op_table_index_plus1 - 1);
+  symbol_metadata->defining_op_ordinal = (uint32_t)(op_table_index_plus1 - 1);
   IREE_RETURN_IF_ERROR(loom_bytecode_symbol_validate_global_vtable(
       &reader->decoder, symbol_index, vtable, op_ref_offset));
   IREE_RETURN_IF_ERROR(loom_bytecode_reader_validate_symbol_definition_flags(
       reader, symbol_index, symbol_flags, vtable, op_ref_offset));
-  symbol_metadata->defining_op_name = loom_op_vtable_name(vtable);
   symbol_metadata->interfaces = vtable->symbol_def->interfaces;
 
   IREE_RETURN_IF_ERROR(
@@ -446,11 +446,11 @@ static iree_status_t loom_bytecode_reader_skip_record_payload(
       &vtable));
   reader->view.symbols.defining_op_ordinals[symbol_index] =
       (uint32_t)(op_table_index_plus1 - 1);
+  symbol_metadata->defining_op_ordinal = (uint32_t)(op_table_index_plus1 - 1);
   IREE_RETURN_IF_ERROR(loom_bytecode_symbol_validate_record_vtable(
       &reader->decoder, symbol_index, vtable, op_ref_offset));
   IREE_RETURN_IF_ERROR(loom_bytecode_reader_validate_symbol_definition_flags(
       reader, symbol_index, symbol_flags, vtable, op_ref_offset));
-  symbol_metadata->defining_op_name = loom_op_vtable_name(vtable);
   symbol_metadata->interfaces = vtable->symbol_def->interfaces;
 
   IREE_RETURN_IF_ERROR(
@@ -682,6 +682,7 @@ loom_bytecode_symbol_decode(loom_bytecode_symbol_validator_t* reader,
   loom_bytecode_symbol_metadata_t* symbol_metadata = out_metadata;
   symbol_metadata->entry_offset = entry_offset;
   symbol_metadata->template_family_symbol_ordinal = UINT32_MAX;
+  symbol_metadata->defining_op_ordinal = UINT32_MAX;
   uint64_t name_offset =
       loom_bytecode_reader_cursor_absolute_position(&table->cursor);
   uint64_t name_id = 0;
@@ -838,6 +839,7 @@ loom_bytecode_symbol_decode(loom_bytecode_symbol_validator_t* reader,
         &unused_vtable));
     reader->view.symbols.defining_op_ordinals[symbol_index] =
         (uint32_t)(op_table_index_plus1 - 1);
+    symbol_metadata->defining_op_ordinal = (uint32_t)(op_table_index_plus1 - 1);
     if (!unused_vtable->func_like) {
       return loom_bytecode_reader_emit_invalid_field(
           &reader->decoder, IREE_SV("SYMBOLS"), IREE_SV("symbol"), symbol_index,
@@ -846,7 +848,6 @@ loom_bytecode_symbol_decode(loom_bytecode_symbol_validator_t* reader,
     }
     IREE_RETURN_IF_ERROR(loom_bytecode_reader_validate_symbol_definition_flags(
         reader, symbol_index, flags, unused_vtable, op_ref_offset));
-    symbol_metadata->defining_op_name = loom_op_vtable_name(unused_vtable);
     symbol_metadata->interfaces = unused_vtable->symbol_def->interfaces;
     IREE_RETURN_IF_ERROR(
         loom_bytecode_source_trivia_validate(&reader->decoder, &table->cursor));

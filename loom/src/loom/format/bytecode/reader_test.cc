@@ -3211,8 +3211,10 @@ TEST_F(ReaderTest, ReadsFunctionModuleIndex) {
   EXPECT_EQ(symbol.visibility, LOOM_BYTECODE_SYMBOL_VISIBILITY_PUBLIC);
   EXPECT_TRUE(
       iree_all_bits_set(symbol.flags, LOOM_BYTECODE_SYMBOL_FLAG_PUBLIC));
-  EXPECT_TRUE(
-      iree_string_view_equal(symbol.defining_op_name, IREE_SV("test.func")));
+  ASSERT_LT(symbol.defining_op_ordinal, module_metadata.ops.count);
+  EXPECT_TRUE(iree_string_view_equal(
+      module_metadata.ops.entries[symbol.defining_op_ordinal].name,
+      IREE_SV("test.func")));
   EXPECT_EQ(symbol.argument_count, 1u);
   EXPECT_EQ(symbol.result_count, 1u);
   ASSERT_EQ(symbol.region_payload_count, 1u);
@@ -3907,8 +3909,10 @@ TEST_F(ReaderTest, ReadsImportOffsetTableInIndex) {
       iree_string_view_equal(symbol.import_module, IREE_SV("kernel_lib")));
   EXPECT_TRUE(
       iree_string_view_equal(symbol.import_symbol, IREE_SV("extern_f")));
-  EXPECT_TRUE(
-      iree_string_view_equal(symbol.defining_op_name, IREE_SV("func.decl")));
+  ASSERT_LT(symbol.defining_op_ordinal, module_metadata.ops.count);
+  EXPECT_TRUE(iree_string_view_equal(
+      module_metadata.ops.entries[symbol.defining_op_ordinal].name,
+      IREE_SV("func.decl")));
   EXPECT_EQ(symbol.argument_count, 1u);
   EXPECT_EQ(symbol.result_count, 1u);
   EXPECT_EQ(symbol.region_payload_count, 0u);

@@ -115,12 +115,17 @@ static void loom_bytecode_symbol_policy_resolve_defining_op(
     loom_bytecode_symbol_policy_materializer_t* materializer,
     iree_host_size_t symbol_ordinal, uint64_t op_table_index_plus1,
     const loom_op_vtable_t** out_vtable, loom_op_kind_t* out_kind) {
-  (void)op_table_index_plus1;
   const loom_bytecode_symbol_metadata_t* metadata =
       loom_bytecode_selected_symbol_metadata(materializer, symbol_ordinal);
-  *out_vtable = loom_context_lookup_op_by_name(
-      materializer->context, metadata->defining_op_name, out_kind);
-  IREE_ASSERT(*out_vtable != NULL);
+  IREE_ASSERT(op_table_index_plus1 != 0);
+  IREE_ASSERT(metadata->defining_op_ordinal == op_table_index_plus1 - 1);
+  IREE_ASSERT(metadata->defining_op_ordinal <
+              materializer->tables->metadata->ops.count);
+  const loom_bytecode_op_metadata_t* op_metadata =
+      &materializer->tables->metadata->ops
+           .entries[metadata->defining_op_ordinal];
+  *out_vtable = op_metadata->vtable;
+  *out_kind = op_metadata->kind;
 }
 
 static iree_status_t loom_bytecode_symbol_policy_value_scope_initialize_fresh(
@@ -209,7 +214,6 @@ void loom_bytecode_selected_symbol_materializer_initialize(
     loom_bytecode_selected_symbol_materializer_t* out_materializer) {
   *out_materializer = (loom_bytecode_selected_symbol_materializer_t){
       .decoder = *decoder,
-      .context = tables->context,
       .arena = tables->scratch_arena,
       .output_module = tables->output_module,
       .low_repr_environment = *low_repr_environment,

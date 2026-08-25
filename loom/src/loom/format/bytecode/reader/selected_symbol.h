@@ -30,8 +30,6 @@ typedef struct loom_bytecode_selected_symbol_t {
 typedef struct loom_bytecode_selected_symbol_materializer_t {
   // Bounded decoder copied from the owning selected read.
   loom_bytecode_reader_decoder_t decoder;
-  // Finalized dialect and attribute registry context.
-  loom_context_t* context;
   // Resettable storage for one symbol payload at a time.
   iree_arena_allocator_t* arena;
   // Module receiving compact selected symbols and body IR.
