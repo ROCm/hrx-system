@@ -27,7 +27,6 @@
 #include "iree/hal/drivers/amdgpu/queue_affinity.h"
 #include "iree/hal/drivers/amdgpu/semaphore.h"
 #include "iree/hal/drivers/amdgpu/system.h"
-#include "iree/hal/drivers/amdgpu/system_event.h"
 #include "iree/hal/drivers/amdgpu/util/epoch_signal_table.h"
 #include "iree/hal/drivers/amdgpu/util/kfd.h"
 #include "iree/hal/drivers/amdgpu/util/notification_ring.h"
@@ -2117,12 +2116,6 @@ iree_status_t iree_hal_amdgpu_logical_device_create(
   }
 
   if (iree_status_is_ok(status)) {
-    status = iree_hal_amdgpu_system_event_register_device(
-        &logical_device->system->libhsa, logical_device,
-        logical_device->host_allocator);
-  }
-
-  if (iree_status_is_ok(status)) {
     *out_device = (iree_hal_device_t*)logical_device;
   } else {
     iree_hal_device_release((iree_hal_device_t*)logical_device);
@@ -2137,10 +2130,6 @@ static void iree_hal_amdgpu_logical_device_destroy(
       iree_hal_amdgpu_logical_device_cast(base_device);
   iree_allocator_t host_allocator = iree_hal_device_host_allocator(base_device);
   IREE_TRACE_ZONE_BEGIN(z0);
-
-  // Stop callbacks from entering device state while keeping its agents claimed
-  // until every HSA queue has been destroyed.
-  iree_hal_amdgpu_system_event_begin_device_teardown(logical_device);
 
   iree_hal_amdgpu_profile_counter_session_t* counter_session =
       logical_device->profiling.counter_session;
@@ -2187,7 +2176,6 @@ static void iree_hal_amdgpu_logical_device_destroy(
     iree_hal_amdgpu_physical_device_deinitialize(
         logical_device->physical_devices[i]);
   }
-  iree_hal_amdgpu_system_event_unregister_device(logical_device);
 
   iree_hal_allocator_release(logical_device->device_allocator);
   iree_hal_channel_provider_release(logical_device->channel_provider);
