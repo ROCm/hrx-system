@@ -83,6 +83,7 @@ loom_cc_library(
     loom::pass::types
     loom::target::function_version
     loom::target::pass_environment
+    loom::util::cfg_graph
     loom::util::dominance
   PUBLIC
 )

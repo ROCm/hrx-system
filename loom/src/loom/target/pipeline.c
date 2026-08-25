@@ -164,8 +164,7 @@ static iree_status_t loom_target_pipeline_build_for_target_functions(
                                 (void*)&body, out_for_op);
 }
 
-static iree_status_t
-loom_target_pipeline_build_cleanup_expanded_target_function(
+static iree_status_t loom_target_pipeline_build_canonicalize_body(
     loom_builder_t* builder, void* user_data) {
   (void)user_data;
   return loom_target_pipeline_build_run(builder, IREE_SV("canonicalize"));
@@ -177,8 +176,7 @@ loom_target_pipeline_build_cleanup_expanded_target_functions(
   (void)user_data;
   loom_op_t* for_op = NULL;
   return loom_target_pipeline_build_for_target_functions(
-      builder, loom_target_pipeline_build_cleanup_expanded_target_function,
-      NULL, &for_op);
+      builder, loom_target_pipeline_build_canonicalize_body, NULL, &for_op);
 }
 
 static iree_status_t loom_target_pipeline_build_authoring_expansion_iteration(
@@ -332,7 +330,16 @@ loom_target_pipeline_build_source_safe_normalization_after_legalize(
       builder, IREE_SV("vector-memory-to-scalar")));
   IREE_RETURN_IF_ERROR(loom_target_pipeline_build_run(
       builder, IREE_SV("linearize-view-accesses")));
-  return loom_target_pipeline_build_cleanup(builder);
+  IREE_RETURN_IF_ERROR(loom_target_pipeline_build_cleanup(builder));
+
+  // CSE may replace a branch predicate and leave assumptions on a newly
+  // unreachable edge. Recanonicalize only when CSE changed the function so
+  // dead edges and their contradictory assumptions are removed before target
+  // verification.
+  loom_op_t* if_changed_op = NULL;
+  return loom_pass_ir_build_if_changed(
+      builder, loom_target_pipeline_build_canonicalize_body, NULL,
+      &if_changed_op);
 }
 
 static iree_status_t

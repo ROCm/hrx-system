@@ -1477,6 +1477,16 @@ def _exec_state_read(field_name: str = "exec_in") -> Operand:
     )
 
 
+def _exec_value_read(field_name: str = "exec_in") -> Operand:
+    return Operand(
+        field_name,
+        OperandRole.IMPLICIT,
+        _EXEC_ALT,
+        flags=(OperandFlag.IMPLICIT, OperandFlag.STATE_READ),
+        unit_count=1,
+    )
+
+
 def _mode_state_read(field_name: str = "mode_in") -> Operand:
     return Operand(
         field_name,
@@ -1957,7 +1967,7 @@ def _manual_scalar_descriptors(
                     encoding_field_id=amdgpu_encoding_field_id("SDST"),
                     unit_count=2,
                 ),
-                _exec_state_read(),
+                _exec_value_read(),
             ),
             encoding_field_values=(
                 EncodingFieldValue(
@@ -3460,6 +3470,7 @@ __all__ = (
     "_destructive_accumulator_constraints",
     "_exec_clobber",
     "_exec_state_read",
+    "_exec_value_read",
     "_f32_bits",
     "_generic_atomic_effects",
     "_generic_memory_effect",
