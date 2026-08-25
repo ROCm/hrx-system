@@ -14,6 +14,71 @@ low.func.def target<x86.scalar.core>(@x86_target) @x86_fragment(%source: reg<x86
 
 // ====
 
+x86.target<avx2> @x86_target
+
+low.func.def target<x86.avx2.core>(@x86_target) @x86_fragment(%input: reg<x86.xmm>) -> (reg<x86.gpr32>) asm {
+  %result = vmovd.gpr32.xmm %input
+  return %result
+}
+
+// ----
+  vmovd eax, xmm0
+  ret
+
+// ====
+
+x86.target<avx2> @x86_target
+
+low.func.def target<x86.avx2.core>(@x86_target) @x86_fragment(%input: reg<x86.gpr32>) -> (reg<x86.xmm>) asm {
+  %result = vmovd.xmm.gpr32 %input
+  return %result
+}
+
+// ----
+  vmovd xmm0, eax
+  ret
+
+// ====
+
+x86.target<avx2> @x86_target
+
+low.func.def target<x86.avx2.core>(@x86_target) @x86_fragment(%input: reg<x86.xmm>) -> (reg<x86.gpr64>) asm {
+  %result = vmovq.gpr64.xmm %input
+  return %result
+}
+
+// ----
+  vmovq rax, xmm0
+  ret
+
+// ====
+
+x86.target<avx2> @x86_target
+
+low.func.def target<x86.avx2.core>(@x86_target) @x86_fragment(%input: reg<x86.gpr64>) -> (reg<x86.xmm>) asm {
+  %result = vmovq.xmm.gpr64 %input
+  return %result
+}
+
+// ----
+  vmovq xmm0, rax
+  ret
+
+// ====
+
+x86.target<scalar> @x86_target
+
+low.func.def target<x86.scalar.core>(@x86_target) @x86_fragment(%input: reg<x86.gpr64>) -> (reg<x86.gpr32>) asm {
+  %result = mov.trunc.gpr32.gpr64 %input
+  return %result
+}
+
+// ----
+  mov eax, eax
+  ret
+
+// ====
+
 x86.target<avx512> @x86_target
 
 low.func.def target<x86.avx512.core>(@x86_target) @x86_fragment(%base: reg<x86.gpr64>, %lhs: reg<x86.zmm>, %rhs: reg<x86.zmm>) asm {

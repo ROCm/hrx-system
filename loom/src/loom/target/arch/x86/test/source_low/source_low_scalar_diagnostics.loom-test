@@ -59,3 +59,13 @@ func.def target(@target) @index_scale_16_shift_rejected(%value: index) -> (index
   %result = index.shli %value, %amount : index
   func.return %result : index
 }
+
+// ====
+
+x86.target<avx2> @target
+
+func.def target(@target) @fp8_bits_do_not_imply_fp8_arithmetic(%lhs: f8E4M3, %rhs: f8E4M3) -> (f8E4M3) {
+  // ERROR@+1: LOWERING/036 {op_name="scalar.addf", element_type="f8E4M3"}
+  %result = scalar.addf %lhs, %rhs : f8E4M3
+  func.return %result : f8E4M3
+}

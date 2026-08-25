@@ -192,6 +192,47 @@ static iree_status_t loom_x86_append_operand(
                                loom_op_const_operands(op)[operand_index]);
 }
 
+static iree_status_t loom_x86_append_gpr32_value(
+    const loom_native_assembly_packet_context_t* context,
+    loom_value_id_t value_id) {
+  const loom_low_allocation_assignment_t* assignment =
+      loom_x86_map_assignment(context, value_id);
+  if (assignment->location_count != 1) {
+    return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
+                            "x86 assembly multi-register i32 value %" PRIu32
+                            " is not supported",
+                            assignment->value_id);
+  }
+  loom_x86_register_class_t register_class_kind = 0;
+  IREE_RETURN_IF_ERROR(
+      loom_x86_register_class_kind(context, assignment, &register_class_kind));
+  if (register_class_kind != LOOM_X86_REGISTER_CLASS_GPR32 &&
+      register_class_kind != LOOM_X86_REGISTER_CLASS_GPR64) {
+    return iree_make_status(
+        IREE_STATUS_UNIMPLEMENTED,
+        "x86 assembly i32 projection requires a GPR allocation");
+  }
+  if (assignment->location_base >= IREE_ARRAYSIZE(kX86Gpr32Names)) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "x86 GPR index %" PRIu32 " is out of range",
+                            assignment->location_base);
+  }
+  return iree_string_builder_append_cstring(
+      context->builder, kX86Gpr32Names[assignment->location_base]);
+}
+
+static iree_status_t loom_x86_append_gpr32_operand(
+    const loom_native_assembly_packet_context_t* context,
+    iree_host_size_t operand_index) {
+  const loom_op_t* op = context->packet->node->op;
+  if (operand_index >= op->operand_count) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "x86 assembly operand index is out of range");
+  }
+  return loom_x86_append_gpr32_value(context,
+                                     loom_op_const_operands(op)[operand_index]);
+}
+
 static iree_status_t loom_x86_append_gpr8_value(
     const loom_native_assembly_packet_context_t* context,
     loom_value_id_t value_id) {
@@ -681,6 +722,24 @@ static iree_status_t loom_x86_append_cmp_setcc_packet(
   return loom_x86_append_gpr8_result(context, 0);
 }
 
+static iree_status_t loom_x86_append_truncate_packet(
+    const loom_native_assembly_packet_context_t* context) {
+  const loom_op_t* op = context->packet->node->op;
+  if (op->result_count != 1 || op->operand_count != 1) {
+    const iree_string_view_t key = loom_x86_descriptor_key(context);
+    return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
+                            "x86 truncate descriptor '%.*s' has an unsupported "
+                            "operand shape",
+                            (int)key.size, key.data);
+  }
+  IREE_RETURN_IF_ERROR(
+      iree_string_builder_append_cstring(context->builder, "mov "));
+  IREE_RETURN_IF_ERROR(loom_x86_append_result(context, 0));
+  IREE_RETURN_IF_ERROR(
+      iree_string_builder_append_cstring(context->builder, ", "));
+  return loom_x86_append_gpr32_operand(context, 0);
+}
+
 static iree_status_t loom_x86_append_lea_packet(
     const loom_native_assembly_packet_context_t* context) {
   const loom_op_t* op = context->packet->node->op;
@@ -1141,6 +1200,9 @@ static iree_status_t loom_x86_append_descriptor_packet(
   const iree_string_view_t mnemonic = loom_x86_descriptor_mnemonic(context);
   if (iree_string_view_starts_with(mnemonic, IREE_SV("cmp.set"))) {
     return loom_x86_append_cmp_setcc_packet(context);
+  }
+  if (iree_string_view_equal(mnemonic, IREE_SV("mov.trunc"))) {
+    return loom_x86_append_truncate_packet(context);
   }
   if (iree_string_view_equal(mnemonic, IREE_SV("lea"))) {
     return loom_x86_append_lea_packet(context);

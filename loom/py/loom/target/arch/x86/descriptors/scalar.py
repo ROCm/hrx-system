@@ -213,6 +213,22 @@ def _gpr32_to_gpr64_extend_descriptor(
     )
 
 
+def _gpr64_to_gpr32_truncate_descriptor() -> Descriptor:
+    return Descriptor(
+        key="x86.scalar.mov.trunc.gpr32.gpr64",
+        mnemonic="mov.trunc",
+        semantic_tag="integer.trunc.i64.i32",
+        operands=(_gpr32_result(), _gpr64_operand("src")),
+        asm_forms=_asm(
+            mnemonic="mov.trunc.gpr32.gpr64",
+            results=("dst",),
+            operands=("src",),
+        ),
+        schedule_class=_SCHEDULE_SCALAR,
+        flags=(DescriptorFlag.DEAD_REMOVABLE,),
+    )
+
+
 def _gpr32_compare_descriptor(
     *,
     predicate: str,
@@ -381,6 +397,7 @@ X86_SCALAR_SUFFIX_DESCRIPTORS = (
         mnemonic="shr",
         semantic_tag="integer.shru.i64",
     ),
+    _gpr64_to_gpr32_truncate_descriptor(),
     *(
         _gpr32_compare_descriptor(
             predicate=predicate,
