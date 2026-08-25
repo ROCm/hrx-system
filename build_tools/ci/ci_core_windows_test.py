@@ -170,14 +170,15 @@ class CiCoreWindowsTest(unittest.TestCase):
             source = root / "source"
             source.mkdir()
             real_file = source / "real.py"
-            real_file.write_text("value = 1\n")
+            fixture_contents = b"value = 1\n"
+            real_file.write_bytes(fixture_contents)
             self._symlink_or_skip(real_file, source / "link.py")
             zip_path = root / "archive.zip"
 
             ci_core_windows.create_zip(source, zip_path)
 
             with zipfile.ZipFile(zip_path) as zf:
-                self.assertEqual(zf.read("link.py").decode(), "value = 1\n")
+                self.assertEqual(zf.read("link.py"), fixture_contents)
 
     def test_rocm_artifact_variant_from_configure_log(self):
         self.assertEqual(

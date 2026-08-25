@@ -208,7 +208,7 @@ class AmdgpuDeviceBinariesTest(unittest.TestCase):
             command for command in commands if "-emit-llvm" in command
         )
         link_command = next(
-            command for command in commands if command[0] == "/tools/lld"
+            command for command in commands if Path(command[0]) == toolchain.lld
         )
         self.assertIn("-march=gfx1250", compile_command)
         self.assertLess(

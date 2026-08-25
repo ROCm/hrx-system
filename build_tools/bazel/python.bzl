@@ -24,4 +24,7 @@ def iree_py_binary(**kwargs):
 def iree_py_test(**kwargs):
     if "python_version" not in kwargs:
         kwargs["python_version"] = "3.12"
+    kwargs["deps"] = kwargs.get("deps", []) + [
+        Label("//build_tools/bazel:python_test_environment"),
+    ]
     _py_test(**kwargs)
