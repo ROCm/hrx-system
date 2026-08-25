@@ -55,7 +55,7 @@ static void AppendFormatted(std::string& target, const char* format,
 static std::string BuildCatalogSource(uint32_t root_count,
                                       uint32_t values_per_root,
                                       std::vector<std::string>* root_names) {
-  constexpr uint32_t kOperationsPerSourceLine = 4;
+  constexpr uint32_t kOperationsPerSourceLine = 128;
   root_names->clear();
   root_names->reserve(root_count);
 
@@ -106,8 +106,11 @@ static std::string BuildCatalogSource(uint32_t root_count,
 
 class LinkCatalogFixture {
  public:
-  LinkCatalogFixture(uint32_t root_count, uint32_t values_per_root)
-      : root_count_(root_count), values_per_root_(values_per_root) {}
+  LinkCatalogFixture(uint32_t root_count, uint32_t values_per_root,
+                     loomc_source_format_t source_format)
+      : root_count_(root_count),
+        values_per_root_(values_per_root),
+        source_format_(source_format) {}
 
   iree_status_t Initialize() {
     loomc_context_t* context = nullptr;
@@ -115,7 +118,7 @@ class LinkCatalogFixture {
         /*options=*/nullptr, loom_allocator(), &context)));
     context_.reset(context);
 
-    source_text_ =
+    std::string source_text =
         BuildCatalogSource(root_count_, values_per_root_, &root_names_);
     const loomc_source_options_t source_options = {
         /*.type=*/LOOMC_STRUCTURE_TYPE_SOURCE_OPTIONS,
@@ -124,7 +127,7 @@ class LinkCatalogFixture {
         /*.format=*/LOOMC_SOURCE_FORMAT_TEXT,
         /*.identifier=*/loomc_make_cstring_view("link_catalog.loom"),
         /*.contents=*/
-        loomc_make_byte_span(source_text_.data(), source_text_.size()),
+        loomc_make_byte_span(source_text.data(), source_text.size()),
         /*.storage=*/LOOMC_SOURCE_STORAGE_COPY,
         /*.release=*/nullptr,
         /*.release_user_data=*/nullptr,
@@ -132,7 +135,46 @@ class LinkCatalogFixture {
     loomc_source_t* source = nullptr;
     IREE_RETURN_IF_ERROR(to_iree_status(
         loomc_source_create(&source_options, loom_allocator(), &source)));
-    source_.reset(source);
+    SourcePtr text_source(source);
+
+    if (source_format_ == LOOMC_SOURCE_FORMAT_TEXT) {
+      source_.reset(text_source.release());
+    } else if (source_format_ == LOOMC_SOURCE_FORMAT_BYTECODE) {
+      loomc_workspace_t* workspace = nullptr;
+      IREE_RETURN_IF_ERROR(to_iree_status(loomc_workspace_create(
+          /*options=*/nullptr, loom_allocator(), &workspace)));
+      WorkspacePtr workspace_ptr(workspace);
+
+      loomc_module_t* module = nullptr;
+      loomc_result_t* result = nullptr;
+      iree_status_t status =
+          to_iree_status(loomc_module_deserialize_from_source(
+              context_.get(), workspace_ptr.get(), text_source.get(),
+              /*options=*/nullptr, loom_allocator(), &module, &result));
+      ModulePtr module_ptr(module);
+      ResultPtr result_ptr(result);
+      IREE_RETURN_IF_ERROR(status);
+      IREE_RETURN_IF_ERROR(
+          RequireSucceededResult(result_ptr.get(), "catalog parsing"));
+
+      const loomc_module_serialize_options_t serialize_options = {
+          /*.type=*/LOOMC_STRUCTURE_TYPE_MODULE_SERIALIZE_OPTIONS,
+          /*.structure_size=*/sizeof(serialize_options),
+          /*.next=*/nullptr,
+          /*.format=*/LOOMC_SOURCE_FORMAT_BYTECODE,
+          /*.identifier=*/loomc_make_cstring_view("link_catalog.loombc"),
+          /*.text_presentation=*/LOOMC_MODULE_TEXT_PRESENTATION_DEFAULT,
+      };
+      loomc_source_t* bytecode_source = nullptr;
+      IREE_RETURN_IF_ERROR(to_iree_status(loomc_module_serialize_to_source(
+          module_ptr.get(), &serialize_options, loom_allocator(),
+          &bytecode_source)));
+      source_.reset(bytecode_source);
+    } else {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "catalog source format must be text or bytecode");
+    }
+    source_size_ = loomc_source_contents(source_.get()).data_length;
 
     loomc_linker_t* linker = nullptr;
     IREE_RETURN_IF_ERROR(to_iree_status(loomc_linker_create(
@@ -262,19 +304,34 @@ class LinkCatalogFixture {
 
   uint32_t values_per_root() const { return values_per_root_; }
 
-  size_t source_size() const { return source_text_.size(); }
+  size_t source_size() const { return source_size_; }
+
+  loomc_source_format_t source_format() const { return source_format_; }
 
   uint64_t catalog_value_count() const {
     return (uint64_t)root_count_ * ((uint64_t)values_per_root_ + 3u) + 1u;
   }
 
+  uint64_t catalog_operation_count() const {
+    return catalog_value_count() + (uint64_t)root_count_ + 1u;
+  }
+
+  uint64_t selected_body_operation_count() const {
+    return (uint64_t)values_per_root_ + 4u;
+  }
+
+  uint64_t selected_operation_count() const {
+    return selected_body_operation_count() + 2u;
+  }
+
  private:
   uint32_t root_count_ = 0;
   uint32_t values_per_root_ = 0;
+  loomc_source_format_t source_format_ = LOOMC_SOURCE_FORMAT_UNKNOWN;
+  size_t source_size_ = 0;
   ContextPtr context_;
   SourcePtr source_;
   LinkerPtr linker_;
-  std::string source_text_;
   std::vector<std::string> root_names_;
 };
 
@@ -282,9 +339,24 @@ static void SetCatalogCounters(benchmark::State& state,
                                const LinkCatalogFixture& fixture) {
   state.counters["catalog_roots"] = (double)fixture.root_count();
   state.counters["catalog_symbols"] = (double)fixture.root_count() + 1.0;
+  state.counters["catalog_body_ops"] = (double)fixture.catalog_value_count();
+  state.counters["catalog_ir_ops"] = (double)fixture.catalog_operation_count();
   state.counters["catalog_ssa_values"] = (double)fixture.catalog_value_count();
+  state.counters["input_bytecode"] =
+      fixture.source_format() == LOOMC_SOURCE_FORMAT_BYTECODE ? 1.0 : 0.0;
   state.counters["source_bytes"] = (double)fixture.source_size();
+  state.counters["source_bytes/root"] =
+      (double)fixture.source_size() / (double)fixture.root_count();
   state.counters["values/root"] = (double)fixture.values_per_root();
+}
+
+static void SetSelectedClosureCounters(benchmark::State& state,
+                                       const LinkCatalogFixture& fixture) {
+  state.counters["selected_body_ops"] =
+      (double)fixture.selected_body_operation_count();
+  state.counters["selected_functions"] = 2.0;
+  state.counters["selected_ir_ops"] =
+      (double)fixture.selected_operation_count();
 }
 
 static void SetWorkspaceCounters(benchmark::State& state,
@@ -332,9 +404,10 @@ static void ReleaseBatch(std::vector<ModulePtr>* modules,
   }
 }
 
-static void BM_LinkIndexBuild(benchmark::State& state) {
-  LinkCatalogFixture fixture((uint32_t)state.range(0),
-                             (uint32_t)state.range(1));
+static void BM_LinkIndexBuildForFormat(benchmark::State& state,
+                                       loomc_source_format_t source_format) {
+  LinkCatalogFixture fixture((uint32_t)state.range(0), (uint32_t)state.range(1),
+                             source_format);
   if (SkipOnError(state, fixture.Initialize())) {
     return;
   }
@@ -358,9 +431,18 @@ static void BM_LinkIndexBuild(benchmark::State& state) {
       benchmark::Counter(index_count, benchmark::Counter::kIsRate);
 }
 
-static void BM_SelectiveLinkBatch(benchmark::State& state) {
-  LinkCatalogFixture fixture((uint32_t)state.range(0),
-                             (uint32_t)state.range(1));
+static void BM_LinkIndexBuild(benchmark::State& state) {
+  BM_LinkIndexBuildForFormat(state, LOOMC_SOURCE_FORMAT_TEXT);
+}
+
+static void BM_LinkIndexBuildBytecode(benchmark::State& state) {
+  BM_LinkIndexBuildForFormat(state, LOOMC_SOURCE_FORMAT_BYTECODE);
+}
+
+static void BM_SelectiveLinkBatchForFormat(
+    benchmark::State& state, loomc_source_format_t source_format) {
+  LinkCatalogFixture fixture((uint32_t)state.range(0), (uint32_t)state.range(1),
+                             source_format);
   if (SkipOnError(state, fixture.Initialize())) {
     return;
   }
@@ -404,16 +486,25 @@ static void BM_SelectiveLinkBatch(benchmark::State& state) {
 
   SetCatalogCounters(state, fixture);
   SetWorkspaceCounters(state, before, after);
-  state.counters["selected_functions"] = 2.0;
+  SetSelectedClosureCounters(state, fixture);
   state.SetItemsProcessed(total_links);
   state.counters["links/batch"] = (double)links_per_batch;
   state.counters["links/s"] =
       benchmark::Counter(total_links, benchmark::Counter::kIsRate);
 }
 
-static void BM_IndexOnceAndSelectiveLinkBatch(benchmark::State& state) {
-  LinkCatalogFixture fixture((uint32_t)state.range(0),
-                             (uint32_t)state.range(1));
+static void BM_SelectiveLinkBatch(benchmark::State& state) {
+  BM_SelectiveLinkBatchForFormat(state, LOOMC_SOURCE_FORMAT_TEXT);
+}
+
+static void BM_SelectiveLinkBatchBytecode(benchmark::State& state) {
+  BM_SelectiveLinkBatchForFormat(state, LOOMC_SOURCE_FORMAT_BYTECODE);
+}
+
+static void BM_IndexOnceAndSelectiveLinkBatchForFormat(
+    benchmark::State& state, loomc_source_format_t source_format) {
+  LinkCatalogFixture fixture((uint32_t)state.range(0), (uint32_t)state.range(1),
+                             source_format);
   if (SkipOnError(state, fixture.Initialize())) {
     return;
   }
@@ -446,17 +537,27 @@ static void BM_IndexOnceAndSelectiveLinkBatch(benchmark::State& state) {
 
   SetCatalogCounters(state, fixture);
   SetWorkspaceCounters(state, before, after);
-  state.counters["selected_functions"] = 2.0;
+  SetSelectedClosureCounters(state, fixture);
   state.SetItemsProcessed(total_links);
   state.counters["links/batch"] = (double)links_per_batch;
   state.counters["links/s"] =
       benchmark::Counter(total_links, benchmark::Counter::kIsRate);
 }
 
+static void BM_IndexOnceAndSelectiveLinkBatch(benchmark::State& state) {
+  BM_IndexOnceAndSelectiveLinkBatchForFormat(state, LOOMC_SOURCE_FORMAT_TEXT);
+}
+
+static void BM_IndexOnceAndSelectiveLinkBatchBytecode(benchmark::State& state) {
+  BM_IndexOnceAndSelectiveLinkBatchForFormat(state,
+                                             LOOMC_SOURCE_FORMAT_BYTECODE);
+}
+
 static void CatalogScales(benchmark::Benchmark* benchmark) {
   for (int64_t root_count : {1, 16, 64, 512}) {
     benchmark->Args({root_count, 256});
   }
+  benchmark->Args({4096, 512});
 }
 
 static void SelectiveLinkScales(benchmark::Benchmark* benchmark) {
@@ -465,30 +566,59 @@ static void SelectiveLinkScales(benchmark::Benchmark* benchmark) {
       benchmark->Args({root_count, 256, links_per_batch});
     }
   }
+  benchmark->Args({4096, 512, 80});
+  benchmark->Args({4096, 512, 388});
 }
 
 static void BM_LinkIndexBuild_Smoke(benchmark::State& state) {
   BM_LinkIndexBuild(state);
 }
 
+static void BM_LinkIndexBuildBytecode_Smoke(benchmark::State& state) {
+  BM_LinkIndexBuildBytecode(state);
+}
+
 static void BM_SelectiveLinkBatch_Smoke(benchmark::State& state) {
   BM_SelectiveLinkBatch(state);
+}
+
+static void BM_SelectiveLinkBatchBytecode_Smoke(benchmark::State& state) {
+  BM_SelectiveLinkBatchBytecode(state);
 }
 
 BENCHMARK(BM_LinkIndexBuild)
     ->Apply(CatalogScales)
     ->ArgNames({"catalog_roots", "values_per_root"});
+BENCHMARK(BM_LinkIndexBuildBytecode)
+    ->Apply(CatalogScales)
+    ->ArgNames({"catalog_roots", "values_per_root"});
 BENCHMARK(BM_SelectiveLinkBatch)
+    ->Apply(SelectiveLinkScales)
+    ->ArgNames({"catalog_roots", "values_per_root", "links_per_batch"});
+BENCHMARK(BM_SelectiveLinkBatchBytecode)
     ->Apply(SelectiveLinkScales)
     ->ArgNames({"catalog_roots", "values_per_root", "links_per_batch"});
 BENCHMARK(BM_IndexOnceAndSelectiveLinkBatch)
     ->Args({512, 256, 388})
+    ->Args({4096, 512, 80})
+    ->Args({4096, 512, 388})
+    ->ArgNames({"catalog_roots", "values_per_root", "links_per_batch"});
+BENCHMARK(BM_IndexOnceAndSelectiveLinkBatchBytecode)
+    ->Args({512, 256, 388})
+    ->Args({4096, 512, 80})
+    ->Args({4096, 512, 388})
     ->ArgNames({"catalog_roots", "values_per_root", "links_per_batch"});
 
 BENCHMARK(BM_LinkIndexBuild_Smoke)
     ->Args({16, 16})
     ->ArgNames({"catalog_roots", "values_per_root"});
+BENCHMARK(BM_LinkIndexBuildBytecode_Smoke)
+    ->Args({16, 16})
+    ->ArgNames({"catalog_roots", "values_per_root"});
 BENCHMARK(BM_SelectiveLinkBatch_Smoke)
+    ->Args({16, 16, 4})
+    ->ArgNames({"catalog_roots", "values_per_root", "links_per_batch"});
+BENCHMARK(BM_SelectiveLinkBatchBytecode_Smoke)
     ->Args({16, 16, 4})
     ->ArgNames({"catalog_roots", "values_per_root", "links_per_batch"});
 
