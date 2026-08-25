@@ -182,6 +182,7 @@ iree_execution_test_suite(
         "test/spirv_vulkan_hal_actual.loom",
         "test/spirv_vulkan_integer_hal_actual.loom",
         "test/spirv_vulkan_quantized_hal_actual.loom",
+        "//loom/src/loom/tooling/execution/hal:testdata/buffer_bulk_hal_actual.loom",
         "//loom/src/loom/tooling/execution/hal:testdata/dynamic_workgroup_hal_actual.loom",
         "//loom/src/loom/tooling/execution/hal:testdata/launch_schedule_hal_actual.loom",
     ],

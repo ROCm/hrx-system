@@ -17,6 +17,7 @@ package(
 )
 
 exports_files([
+    "testdata/buffer_bulk_hal_actual.loom",
     "testdata/dynamic_workgroup_hal_actual.loom",
     "testdata/launch_schedule_hal_actual.loom",
 ])

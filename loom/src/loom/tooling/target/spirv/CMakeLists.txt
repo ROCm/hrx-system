@@ -186,6 +186,7 @@ iree_execution_test_suite(
   TOOLS
     "iree-test-loom=loom::tools::iree-test-loom"
   DATA
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/tooling/execution/hal/testdata/buffer_bulk_hal_actual.loom"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/tooling/execution/hal/testdata/dynamic_workgroup_hal_actual.loom"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/tooling/execution/hal/testdata/launch_schedule_hal_actual.loom"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/tooling/target/spirv/test/spirv_vulkan_coop_hal_actual.loom"

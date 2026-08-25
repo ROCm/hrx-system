@@ -23,6 +23,29 @@
       }
     },
     {
+      "name": "runs spirv vulkan bulk buffer operations",
+      "run": {
+        "tool": "iree-test-loom",
+        "args": [
+          "{srcdir}/../../../execution/hal/testdata/buffer_bulk_hal_actual.loom",
+          "--device=vulkan",
+          "--vulkan_validation_layers=false"
+        ]
+      },
+      "stdout": {
+        "contains": {
+          "unordered": [
+            "\"format\":\"loom.test.v0\"",
+            "\"case\":\"buffer_copy_bytes_case\"",
+            "\"case\":\"buffer_fill_bytes_case\"",
+            "\"case\":\"buffer_compare_bytes_case\"",
+            "\"case\":\"buffer_zero_length_ranges_case\"",
+            "\"failed_sample_count\":0"
+          ]
+        }
+      }
+    },
+    {
       "name": "runs spirv vulkan scalar case",
       "run": {
         "tool": "iree-test-loom",
