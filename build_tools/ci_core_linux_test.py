@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import io
+import json
 import os
 import subprocess
 import sys
@@ -128,6 +129,37 @@ class CiCoreLinuxTest(unittest.TestCase):
     def test_s3_cache_path_rejects_unsafe_keys(self):
         with self.assertRaisesRegex(RuntimeError, "Unsafe S3 key"):
             ci_core_linux.s3_cache_path(Path("/tmp/cache"), "bucket", "../evil")
+
+    def test_rocm_manifest_carries_immutable_artifact_identity(self):
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            manifest_path = Path(temporary_dir) / "manifest.json"
+            ci_core_linux.common.write_rocm_manifest(
+                manifest_path,
+                release_type="nightly",
+                run_id="123456",
+                platform_name="linux",
+                bucket="therock-nightly-artifacts",
+                artifact_variant="release",
+                artifact_set="core-with-llvm-dev",
+                artifacts=[],
+            )
+
+            manifest = json.loads(manifest_path.read_text())
+
+        self.assertEqual(
+            manifest["artifact_identity"],
+            "nightly-123456-linux-release-core-with-llvm-dev",
+        )
+
+    def test_rocm_artifact_identity_rejects_path_components(self):
+        with self.assertRaisesRegex(RuntimeError, "Unsafe ROCm artifact identity"):
+            ci_core_linux.common.rocm_artifact_identity(
+                release_type="nightly",
+                run_id="../123456",
+                platform_name="linux",
+                artifact_variant="release",
+                artifact_set="core",
+            )
 
     def test_upstream_hip_artifact_set_includes_llvm_development_files(self):
         self.assertIn(

@@ -11,6 +11,8 @@ set -euo pipefail
 : "${HRX_PYTHON:?}"
 : "${HRX_ROCM_ROOT:?}"
 
+unversioned_rocm_root="${HRX_ROCM_ROOT}"
+
 python3 -m venv "${HRX_OUTPUT_DIR}/python"
 "${HRX_PYTHON}" -m pip install --upgrade pip boto3 zstandard
 "${HRX_PYTHON}" build_tools/ci_core_linux.py fetch-rocm
@@ -34,6 +36,39 @@ export_env() {
     echo "${name}=${value}"
   fi
 }
+
+rebase_rocm_env_path() {
+  local name="$1"
+  local value="${!name:-}"
+  if [[ "${value}" == "${unversioned_rocm_root}" || \
+        "${value}" == "${unversioned_rocm_root}/"* ]]; then
+    export_env "${name}" "${HRX_ROCM_ROOT}${value#"${unversioned_rocm_root}"}"
+  fi
+}
+
+# Bazel's local C++ toolchain repository tracks the compiler path but not the
+# contents of a compiler installed outside its repository graph. Give each
+# immutable TheRock artifact set its own root so a nightly transition cannot
+# reuse a toolchain or compile action created for a different compiler.
+rocm_artifact_identity="$(
+  "${HRX_PYTHON}" -c \
+    'import json, pathlib, sys; print(json.loads(pathlib.Path(sys.argv[1]).read_text())["artifact_identity"])' \
+    "${unversioned_rocm_root}/.hrx-rocm-artifacts.json"
+)"
+versioned_rocm_root="${unversioned_rocm_root}-${rocm_artifact_identity}"
+if [[ -e "${versioned_rocm_root}" ]]; then
+  echo "Versioned ROCm root already exists: ${versioned_rocm_root}" >&2
+  exit 1
+fi
+mv -- "${unversioned_rocm_root}" "${versioned_rocm_root}"
+HRX_ROCM_ROOT="${versioned_rocm_root}"
+export_env "HRX_ROCM_ROOT" "${HRX_ROCM_ROOT}"
+
+# Preserve explicit system toolchains while relocating paths selected from the
+# fetched ROCm root.
+for name in AR CC CXX IREE_CLANG_TIDY_LLVM_ROOT IREE_ROCM_PATH; do
+  rebase_rocm_env_path "${name}"
+done
 
 # Keep the ROCm LLVM directory off PATH. Workflows select their host compiler
 # explicitly; AMDGPU device compilation receives this root through explicit

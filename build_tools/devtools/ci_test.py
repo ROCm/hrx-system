@@ -8,7 +8,11 @@ from __future__ import annotations
 
 import contextlib
 import io
+import os
 import re
+import shlex
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -1041,6 +1045,89 @@ class CiTest(unittest.TestCase):
         self.assertNotIn("strategy:", block)
         self.assertNotIn("/ Sanitizers", block)
         self.assertNotRegex(block, r"iree-bazel-vulkan-(asan|msan|tsan|ubsan)")
+
+    @unittest.skipUnless(sys.platform.startswith("linux"), "Linux CI toolchain setup")
+    def test_fetch_toolchain_versions_root_and_rebases_rocm_paths(self):
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            root = Path(temporary_dir)
+            output_dir = root / "output"
+            rocm_root = output_dir / "rocm-root"
+            github_env = root / "github-env"
+            github_path = root / "github-path"
+            fake_bin = root / "bin"
+            fake_bin.mkdir()
+            fake_python = fake_bin / "python3"
+            fake_python.write_text(
+                """#!/usr/bin/env bash
+set -euo pipefail
+if [[ "$1" == "-m" && "$2" == "venv" ]]; then
+  mkdir -p "$3/bin"
+  cp "$0" "$3/bin/python3"
+elif [[ "$1" == "-m" && "$2" == "pip" ]]; then
+  exit 0
+elif [[ "$1" == "build_tools/ci_core_linux.py" && "$2" == "fetch-rocm" ]]; then
+  mkdir -p "${HRX_ROCM_ROOT}/lib/llvm/bin"
+  printf '%s\n' \
+    '{"artifact_identity":"nightly-123456-linux-release-core"}' \
+    >"${HRX_ROCM_ROOT}/.hrx-rocm-artifacts.json"
+elif [[ "$1" == "-c" ]]; then
+  exec __REAL_PYTHON__ "$@"
+else
+  exit 1
+fi
+""".replace("__REAL_PYTHON__", shlex.quote(sys.executable))
+            )
+            fake_python.chmod(0o755)
+
+            env = os.environ.copy()
+            env.update(
+                {
+                    "AR": "ar",
+                    "CC": os.fspath(rocm_root / "lib/llvm/bin/clang"),
+                    "CXX": os.fspath(rocm_root / "lib/llvm/bin/clang++"),
+                    "GITHUB_ENV": os.fspath(github_env),
+                    "GITHUB_PATH": os.fspath(github_path),
+                    "HRX_OUTPUT_DIR": os.fspath(output_dir),
+                    "HRX_PYTHON": os.fspath(output_dir / "python/bin/python3"),
+                    "HRX_ROCM_ROOT": os.fspath(rocm_root),
+                    "IREE_CLANG_TIDY_LLVM_ROOT": os.fspath(rocm_root / "lib/llvm"),
+                    "IREE_ROCM_PATH": os.fspath(rocm_root),
+                    "PATH": f"{fake_bin}:{env['PATH']}",
+                }
+            )
+            subprocess.run(
+                ["bash", ".github/scripts/fetch_rocm_toolchain.sh"],
+                env=env,
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+            )
+
+            versioned_rocm_root = Path(f"{rocm_root}-nightly-123456-linux-release-core")
+            exported_env = dict(
+                line.split("=", 1) for line in github_env.read_text().splitlines()
+            )
+            self.assertFalse(rocm_root.exists())
+            self.assertTrue(versioned_rocm_root.is_dir())
+            self.assertEqual(exported_env["HRX_ROCM_ROOT"], str(versioned_rocm_root))
+            self.assertEqual(
+                exported_env["CC"], str(versioned_rocm_root / "lib/llvm/bin/clang")
+            )
+            self.assertEqual(
+                exported_env["CXX"],
+                str(versioned_rocm_root / "lib/llvm/bin/clang++"),
+            )
+            self.assertNotIn("AR", exported_env)
+            self.assertEqual(
+                exported_env["IREE_CLANG_TIDY_LLVM_ROOT"],
+                str(versioned_rocm_root / "lib/llvm"),
+            )
+            self.assertEqual(exported_env["IREE_ROCM_PATH"], str(versioned_rocm_root))
+            self.assertEqual(
+                exported_env["IREE_HAL_AMDGPU_LIBHSA_PATH"],
+                str(versioned_rocm_root / "lib/libhsa-runtime64.so.1"),
+            )
 
     def test_core_gpu_workflow_routes_exact_gpu_labels(self):
         block = self.workflow_job_block(
