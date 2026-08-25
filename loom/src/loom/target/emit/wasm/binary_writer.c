@@ -95,6 +95,22 @@ iree_status_t loom_wasm_binary_write_i32_leb(loom_wasm_binary_writer_t* writer,
   return iree_ok_status();
 }
 
+iree_status_t loom_wasm_binary_write_i64_leb(loom_wasm_binary_writer_t* writer,
+                                             int64_t value) {
+  bool more = true;
+  while (more) {
+    uint8_t byte = (uint8_t)(value & 0x7F);
+    value >>= 7;
+    const bool sign_bit_set = (byte & 0x40u) != 0;
+    more = !((value == 0 && !sign_bit_set) || (value == -1 && sign_bit_set));
+    if (more) {
+      byte |= 0x80u;
+    }
+    IREE_RETURN_IF_ERROR(loom_wasm_binary_write_u8(writer, byte));
+  }
+  return iree_ok_status();
+}
+
 iree_status_t loom_wasm_binary_write_u64_le(loom_wasm_binary_writer_t* writer,
                                             uint64_t value) {
   uint8_t data[8] = {

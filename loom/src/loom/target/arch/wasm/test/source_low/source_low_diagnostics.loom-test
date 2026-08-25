@@ -50,3 +50,13 @@ func.def target(@target) @rejects_wasm32_address_overflow(%input: buffer, %i: in
   %loaded = vector.load %input_view[%bounded_i] : view<1073741828xi32> -> vector<4xi32>
   func.return %loaded : vector<4xi32>
 }
+
+// ====
+
+wasm.target<simd128> @target
+
+func.def target(@target) @fp8_bits_do_not_imply_fp8_arithmetic(%lhs: f8E4M3, %rhs: f8E4M3) -> (f8E4M3) {
+  // ERROR@+1: LOWERING/036 {op_name="scalar.addf", element_type="f8E4M3"}
+  %result = scalar.addf %lhs, %rhs : f8E4M3
+  func.return %result : f8E4M3
+}

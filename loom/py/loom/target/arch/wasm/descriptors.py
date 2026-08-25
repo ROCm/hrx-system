@@ -54,6 +54,7 @@ _RESOURCE_CONTROL = "wasm.control"
 
 _SCHEDULE_CONST = "wasm.const"
 _SCHEDULE_SCALAR_I32 = "wasm.scalar.i32"
+_SCHEDULE_SCALAR_I64 = "wasm.scalar.i64"
 _SCHEDULE_SCALAR_F32 = "wasm.scalar.f32"
 _SCHEDULE_SIMD_I32X4 = "wasm.simd.i32x4"
 _SCHEDULE_SIMD_F32X4 = "wasm.simd.f32x4"
@@ -62,7 +63,9 @@ _SCHEDULE_MEMORY_STORE = "wasm.memory.store"
 _SCHEDULE_CONTROL = "wasm.control"
 
 _I32_ALT = (RegClassAlt(_REG_I32),)
+_I64_ALT = (RegClassAlt(_REG_I64),)
 _F32_ALT = (RegClassAlt(_REG_F32),)
+_F64_ALT = (RegClassAlt(_REG_F64),)
 _V128_ALT = (RegClassAlt(_REG_V128),)
 
 
@@ -89,6 +92,14 @@ def _i32_operand(field_name: str) -> Operand:
     return Operand(field_name, OperandRole.OPERAND, _I32_ALT)
 
 
+def _i64_result(field_name: str = "dst") -> Operand:
+    return Operand(field_name, OperandRole.RESULT, _I64_ALT)
+
+
+def _i64_operand(field_name: str) -> Operand:
+    return Operand(field_name, OperandRole.OPERAND, _I64_ALT)
+
+
 def _i32_predicate(field_name: str) -> Operand:
     return Operand(field_name, OperandRole.PREDICATE, _I32_ALT)
 
@@ -103,6 +114,10 @@ def _f32_result(field_name: str = "dst") -> Operand:
 
 def _f32_operand(field_name: str) -> Operand:
     return Operand(field_name, OperandRole.OPERAND, _F32_ALT)
+
+
+def _f64_operand(field_name: str) -> Operand:
+    return Operand(field_name, OperandRole.OPERAND, _F64_ALT)
 
 
 def _v128_result(field_name: str = "dst") -> Operand:
@@ -123,6 +138,14 @@ _I32_VALUE_IMMEDIATE = Immediate(
     bit_width=32,
     signed_min=-(2**31),
     unsigned_max=(2**32) - 1,
+)
+
+_I64_VALUE_IMMEDIATE = Immediate(
+    "i64_value",
+    ImmediateKind.SIGNED,
+    bit_width=64,
+    signed_min=-(2**63),
+    unsigned_max=(2**63) - 1,
 )
 
 _V128_LO_IMMEDIATE = Immediate(
@@ -162,11 +185,23 @@ _OP_RETURN = 0x0F
 _OP_I32_LOAD8_U = 0x2D
 _OP_I32_STORE8 = 0x3A
 _OP_I32_CONST = 0x41
+_OP_I64_CONST = 0x42
+_OP_I32_EQ = 0x46
 _OP_I32_LT_U = 0x49
 _OP_I32_ADD = 0x6A
 _OP_I32_SUB = 0x6B
 _OP_I32_MUL = 0x6C
+_OP_I32_AND = 0x71
+_OP_I32_OR = 0x72
+_OP_I32_SHL = 0x74
+_OP_I32_SHR_U = 0x76
+_OP_I64_OR = 0x84
+_OP_I64_SHL = 0x86
+_OP_I64_SHR_U = 0x88
 _OP_F32_ADD = 0x92
+_OP_I32_WRAP_I64 = 0xA7
+_OP_I32_REINTERPRET_F32 = 0xBC
+_OP_I64_REINTERPRET_F64 = 0xBD
 _OP_SIMD_PREFIX = 0xFD
 
 
@@ -297,6 +332,13 @@ WASM_CORE_SIMD128_DESCRIPTOR_SET = DescriptorSet(
             model_quality=ModelQuality.ESTIMATED,
         ),
         ScheduleClass(
+            _SCHEDULE_SCALAR_I64,
+            latency_kind=LatencyKind.ESTIMATE,
+            latency_cycles=1,
+            issue_uses=(IssueUse(_RESOURCE_SCALAR, cycles=1, units=1),),
+            model_quality=ModelQuality.ESTIMATED,
+        ),
+        ScheduleClass(
             _SCHEDULE_SCALAR_F32,
             latency_kind=LatencyKind.ESTIMATE,
             latency_cycles=1,
@@ -356,6 +398,18 @@ WASM_CORE_SIMD128_DESCRIPTOR_SET = DescriptorSet(
             flags=(DescriptorFlag.DEAD_REMOVABLE,),
         ),
         Descriptor(
+            key="wasm.i64.const",
+            mnemonic="i64.const",
+            semantic_tag="integer.const.i64",
+            encoding_id=_OP_I64_CONST,
+            operands=(_i64_result(),),
+            op_kind=DescriptorOpKind.CONST,
+            immediates=(_I64_VALUE_IMMEDIATE,),
+            asm_forms=_asm(results=("dst",), immediates=("i64_value",)),
+            schedule_class=_SCHEDULE_CONST,
+            flags=(DescriptorFlag.DEAD_REMOVABLE,),
+        ),
+        Descriptor(
             key="wasm.i32.add",
             mnemonic="i32.add",
             semantic_tag="integer.add.i32",
@@ -386,6 +440,86 @@ WASM_CORE_SIMD128_DESCRIPTOR_SET = DescriptorSet(
             flags=(DescriptorFlag.DEAD_REMOVABLE,),
         ),
         Descriptor(
+            key="wasm.i32.and",
+            mnemonic="i32.and",
+            semantic_tag="integer.and.i32",
+            encoding_id=_OP_I32_AND,
+            operands=(_i32_result(), _i32_operand("lhs"), _i32_operand("rhs")),
+            asm_forms=_asm(results=("dst",), operands=("lhs", "rhs")),
+            schedule_class=_SCHEDULE_SCALAR_I32,
+            flags=(DescriptorFlag.DEAD_REMOVABLE,),
+        ),
+        Descriptor(
+            key="wasm.i32.or",
+            mnemonic="i32.or",
+            semantic_tag="integer.or.i32",
+            encoding_id=_OP_I32_OR,
+            operands=(_i32_result(), _i32_operand("lhs"), _i32_operand("rhs")),
+            asm_forms=_asm(results=("dst",), operands=("lhs", "rhs")),
+            schedule_class=_SCHEDULE_SCALAR_I32,
+            flags=(DescriptorFlag.DEAD_REMOVABLE,),
+        ),
+        Descriptor(
+            key="wasm.i32.shl",
+            mnemonic="i32.shl",
+            semantic_tag="integer.shl.i32",
+            encoding_id=_OP_I32_SHL,
+            operands=(_i32_result(), _i32_operand("lhs"), _i32_operand("rhs")),
+            asm_forms=_asm(results=("dst",), operands=("lhs", "rhs")),
+            schedule_class=_SCHEDULE_SCALAR_I32,
+            flags=(DescriptorFlag.DEAD_REMOVABLE,),
+        ),
+        Descriptor(
+            key="wasm.i32.shr_u",
+            mnemonic="i32.shr_u",
+            semantic_tag="integer.shru.i32",
+            encoding_id=_OP_I32_SHR_U,
+            operands=(_i32_result(), _i32_operand("lhs"), _i32_operand("rhs")),
+            asm_forms=_asm(results=("dst",), operands=("lhs", "rhs")),
+            schedule_class=_SCHEDULE_SCALAR_I32,
+            flags=(DescriptorFlag.DEAD_REMOVABLE,),
+        ),
+        Descriptor(
+            key="wasm.i64.or",
+            mnemonic="i64.or",
+            semantic_tag="integer.or.i64",
+            encoding_id=_OP_I64_OR,
+            operands=(_i64_result(), _i64_operand("lhs"), _i64_operand("rhs")),
+            asm_forms=_asm(results=("dst",), operands=("lhs", "rhs")),
+            schedule_class=_SCHEDULE_SCALAR_I64,
+            flags=(DescriptorFlag.DEAD_REMOVABLE,),
+        ),
+        Descriptor(
+            key="wasm.i64.shl",
+            mnemonic="i64.shl",
+            semantic_tag="integer.shl.i64",
+            encoding_id=_OP_I64_SHL,
+            operands=(_i64_result(), _i64_operand("lhs"), _i64_operand("rhs")),
+            asm_forms=_asm(results=("dst",), operands=("lhs", "rhs")),
+            schedule_class=_SCHEDULE_SCALAR_I64,
+            flags=(DescriptorFlag.DEAD_REMOVABLE,),
+        ),
+        Descriptor(
+            key="wasm.i64.shr_u",
+            mnemonic="i64.shr_u",
+            semantic_tag="integer.shru.i64",
+            encoding_id=_OP_I64_SHR_U,
+            operands=(_i64_result(), _i64_operand("lhs"), _i64_operand("rhs")),
+            asm_forms=_asm(results=("dst",), operands=("lhs", "rhs")),
+            schedule_class=_SCHEDULE_SCALAR_I64,
+            flags=(DescriptorFlag.DEAD_REMOVABLE,),
+        ),
+        Descriptor(
+            key="wasm.i32.eq",
+            mnemonic="i32.eq",
+            semantic_tag="integer.cmp.eq.i32",
+            encoding_id=_OP_I32_EQ,
+            operands=(_i32_result(), _i32_operand("lhs"), _i32_operand("rhs")),
+            asm_forms=_asm(results=("dst",), operands=("lhs", "rhs")),
+            schedule_class=_SCHEDULE_SCALAR_I32,
+            flags=(DescriptorFlag.DEAD_REMOVABLE,),
+        ),
+        Descriptor(
             key="wasm.i32.lt_u",
             mnemonic="i32.lt_u",
             semantic_tag="integer.cmp.lt.u32",
@@ -403,6 +537,36 @@ WASM_CORE_SIMD128_DESCRIPTOR_SET = DescriptorSet(
             operands=(_f32_result(), _f32_operand("lhs"), _f32_operand("rhs")),
             asm_forms=_asm(results=("dst",), operands=("lhs", "rhs")),
             schedule_class=_SCHEDULE_SCALAR_F32,
+            flags=(DescriptorFlag.DEAD_REMOVABLE,),
+        ),
+        Descriptor(
+            key="wasm.i32.reinterpret_f32",
+            mnemonic="i32.reinterpret_f32",
+            semantic_tag="bitcast.f32.i32",
+            encoding_id=_OP_I32_REINTERPRET_F32,
+            operands=(_i32_result(), _f32_operand("input")),
+            asm_forms=_asm(results=("dst",), operands=("input",)),
+            schedule_class=_SCHEDULE_SCALAR_I32,
+            flags=(DescriptorFlag.DEAD_REMOVABLE,),
+        ),
+        Descriptor(
+            key="wasm.i32.wrap_i64",
+            mnemonic="i32.wrap_i64",
+            semantic_tag="integer.trunc.i64.i32",
+            encoding_id=_OP_I32_WRAP_I64,
+            operands=(_i32_result(), _i64_operand("input")),
+            asm_forms=_asm(results=("dst",), operands=("input",)),
+            schedule_class=_SCHEDULE_SCALAR_I32,
+            flags=(DescriptorFlag.DEAD_REMOVABLE,),
+        ),
+        Descriptor(
+            key="wasm.i64.reinterpret_f64",
+            mnemonic="i64.reinterpret_f64",
+            semantic_tag="bitcast.f64.i64",
+            encoding_id=_OP_I64_REINTERPRET_F64,
+            operands=(_i64_result(), _f64_operand("input")),
+            asm_forms=_asm(results=("dst",), operands=("input",)),
+            schedule_class=_SCHEDULE_SCALAR_I64,
             flags=(DescriptorFlag.DEAD_REMOVABLE,),
         ),
         Descriptor(

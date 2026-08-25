@@ -536,6 +536,110 @@ Disassembly of section CODE:
 
 wasm.target<simd128> @target
 
+low.func.def public target<wasm.core.simd128>(@target) abi(wasm_function) @bulk_scalar_primitives(%lhs: reg<wasm.i32>, %rhs: reg<wasm.i32>, %pattern: reg<wasm.f32>) -> (reg<wasm.i32>) asm {
+  %bits = i32.reinterpret_f32 %pattern
+  %masked = i32.and %lhs, %rhs
+  %combined = i32.or %masked, %rhs
+  %shifted_left = i32.shl %combined, %lhs
+  %shifted_right = i32.shr_u %bits, %rhs
+  %equal = i32.eq %shifted_left, %shifted_right
+  return %equal
+}
+
+// ----
+Disassembly of section CODE:
+
+<CODE>:
+        # 1 functions in section.
+
+<bulk_scalar_primitives>:
+        .local i32, i32
+  local.get  2
+  i32.reinterpret_f32
+  local.set  3
+  local.get  0
+  local.get  1
+  i32.and
+  local.set  4
+  local.get  4
+  local.get  1
+  i32.or
+  local.set  4
+  local.get  4
+  local.get  0
+  i32.shl
+  local.set  0
+  local.get  3
+  local.get  1
+  i32.shr_u
+  local.set  1
+  local.get  0
+  local.get  1
+  i32.eq
+  local.set  0
+  local.get  0
+  return
+  end
+
+// ====
+
+// RUN: emit wasm-dis
+// REQUIRES: wasm-objdump
+
+wasm.target<simd128> @target
+
+low.func.def public target<wasm.core.simd128>(@target) abi(wasm_function) @bulk_wide_scalar_primitives(%pattern: reg<wasm.f64>) -> (reg<wasm.i32>) asm {
+  %bits = i64.reinterpret_f64 %pattern
+  %shift = i64.const 8
+  %negative = i64.const -1
+  %shifted_left = i64.shl %bits, %shift
+  %combined = i64.or %shifted_left, %negative
+  %shifted_right = i64.shr_u %combined, %shift
+  %result = i32.wrap_i64 %shifted_right
+  return %result
+}
+
+// ----
+Disassembly of section CODE:
+
+<CODE>:
+        # 1 functions in section.
+
+<bulk_wide_scalar_primitives>:
+        .local i64, i64, i64, i32
+  local.get  0
+  i64.reinterpret_f64
+  local.set  1
+  i64.const  8
+  local.set  2
+  i64.const  -1
+  local.set  3
+  local.get  1
+  local.get  2
+  i64.shl
+  local.set  1
+  local.get  1
+  local.get  3
+  i64.or
+  local.set  1
+  local.get  1
+  local.get  2
+  i64.shr_u
+  local.set  1
+  local.get  1
+  i32.wrap_i64
+  local.set  4
+  local.get  4
+  return
+  end
+
+// ====
+
+// RUN: emit wasm-dis
+// REQUIRES: wasm-objdump
+
+wasm.target<simd128> @target
+
 low.func.def public target<wasm.core.simd128>(@target) abi(wasm_function) @while_with_iter_arg(%limit: reg<wasm.i32>, %step: reg<wasm.i32>, %seed: reg<wasm.i32>) -> (reg<wasm.i32>) asm {
   %result = low.scf.while(%before = %seed : reg<wasm.i32>) -> (reg<wasm.i32>) {
     %keep_going = i32.lt_u %before, %limit
