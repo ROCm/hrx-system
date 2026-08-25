@@ -35,6 +35,8 @@ typedef enum loom_template_provider_kind_e {
 
 typedef struct loom_template_provider_summary_t
     loom_template_provider_summary_t;
+typedef struct loom_template_provider_contract_t
+    loom_template_provider_contract_t;
 typedef struct loom_template_provider_slice_t loom_template_provider_slice_t;
 typedef struct loom_template_provider_catalog_bucket_t
     loom_template_provider_catalog_bucket_t;
@@ -107,6 +109,45 @@ typedef struct loom_template_provider_summary_t {
   // Immutable target identity requirement, or NULL when target-independent.
   const loom_target_facts_t* target_facts;
 } loom_template_provider_summary_t;
+
+// Representation-independent applicability contract for an external provider.
+//
+// Predicate VALUE arguments are signature ordinals: arguments first, followed
+// by results. Binding translates them into the linked family's value domain.
+typedef struct loom_template_provider_contract_t {
+  // Provider implementation kind.
+  loom_template_provider_kind_t kind;
+
+  // True when the provider has an implementation body.
+  bool has_body;
+
+  // Number of signature arguments.
+  uint16_t argument_count;
+
+  // Number of signature results.
+  uint16_t result_count;
+
+  // Number of signature-local predicates.
+  uint16_t predicate_count;
+
+  // Number of resolved target conditions.
+  uint16_t target_condition_count;
+
+  // Borrowed provider symbol name.
+  iree_string_view_t name;
+
+  // Provider priority used to rank applicable implementations.
+  int64_t priority;
+
+  // Borrowed predicates whose VALUE arguments are signature ordinals.
+  const loom_predicate_t* predicates;
+
+  // Borrowed resolved target-condition conjunction.
+  const loom_target_condition_t* target_conditions;
+
+  // Immutable target identity requirement, or NULL when target-independent.
+  const loom_target_facts_t* target_facts;
+} loom_template_provider_contract_t;
 
 // Borrowed provider result range.
 typedef struct loom_template_provider_slice_t {
@@ -188,6 +229,18 @@ iree_status_t loom_template_provider_catalog_build(
 // bound summary is queried.
 iree_status_t loom_template_provider_summary_bind_family(
     const loom_template_provider_summary_t* source,
+    const loom_module_t* target_module, loom_symbol_ref_t target_family,
+    loom_symbol_ref_t target_symbol, iree_host_size_t origin_ordinal,
+    iree_arena_allocator_t* arena,
+    loom_template_provider_summary_t* out_provider);
+
+// Binds a representation-independent provider contract to a linked family.
+//
+// |target_symbol| is the already-linked target witness when available and may
+// be null when |contract| carries immutable target facts. Contract-owned names,
+// conditions, and target facts must remain live while the result is queried.
+iree_status_t loom_template_provider_contract_bind_family(
+    const loom_template_provider_contract_t* contract,
     const loom_module_t* target_module, loom_symbol_ref_t target_family,
     loom_symbol_ref_t target_symbol, iree_host_size_t origin_ordinal,
     iree_arena_allocator_t* arena,

@@ -240,21 +240,34 @@ loom_cc_test(
 )
 
 loom_cc_library(
+    name = "bytecode_template_contract",
+    srcs = ["bytecode_template_contract.c"],
+    hdrs = ["bytecode_template_contract.h"],
+    deps = [
+        "//loom/src/loom/analysis:template_provider_catalog",
+        "//loom/src/loom/format/bytecode:index",
+        "//loom/src/loom/format/bytecode:varint",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops/target",
+        "//loom/src/loom/target:condition",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
     name = "template_candidate_loader",
     srcs = ["template_candidate_loader.c"],
     hdrs = ["template_candidate_loader.h"],
     deps = [
+        ":bytecode_template_contract",
         ":module_index",
         ":plan_materializer",
         ":planner",
         "//loom/src/loom/analysis:symbol_facts",
         "//loom/src/loom/analysis:template_provider_catalog",
-        "//loom/src/loom/format/bytecode:symbol_header_reader",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:func_symbol_facts",
-        "//loom/src/loom/ops:op_defs",
-        "//loom/src/loom/ops/target",
-        "//loom/src/loom/target:condition",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
     ],
@@ -293,6 +306,7 @@ loom_cc_test(
         "//loom/src/loom/ops:op_defs",
         "//loom/src/loom/ops:op_registry",
         "//loom/src/loom/ops/module",
+        "//loom/src/loom/ops/test",
         "//loom/src/loom/verify",
         "//runtime/src/iree/base/internal:arena",
         "//runtime/src/iree/io:stream",

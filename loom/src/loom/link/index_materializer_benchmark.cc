@@ -32,25 +32,23 @@ static void CheckStatus(iree_status_t status) {
   }
 }
 
+enum class TemplateProviderContractShape {
+  kPriorityOnly,
+  kComplete,
+};
+
 class TemplateCatalogFixture {
  public:
-  explicit TemplateCatalogFixture(uint32_t provider_count)
-      : provider_count_(provider_count) {
+  TemplateCatalogFixture(uint32_t provider_count,
+                         TemplateProviderContractShape contract_shape)
+      : provider_count_(provider_count), contract_shape_(contract_shape) {
     iree_arena_block_pool_initialize(64 * 1024, iree_allocator_system(),
                                      &block_pool_);
     loom_context_initialize(iree_allocator_system(), &context_);
     CheckStatus(loom_op_registry_register_all_dialects(&context_));
     CheckStatus(loom_context_finalize(&context_));
 
-    root_module_ = ParseModule(R"(
-template.decl @benchmark.choose(%value: i32) -> (i32)
-
-func.def public @entry(%value: i32) -> (i32) {
-  %result = template.apply<@benchmark.choose>(%value) : (i32) -> (i32)
-  func.return %result : i32
-}
-)",
-                               IREE_SV("root.loom"));
+    root_module_ = ParseModule(BuildRootSource(), IREE_SV("root.loom"));
     library_module_ =
         ParseModule(BuildLibrarySource(), IREE_SV("library.loom"));
     library_bytecode_ = WriteModule(library_module_);
@@ -138,16 +136,54 @@ func.def public @entry(%value: i32) -> (i32) {
     return std::string(name, static_cast<size_t>(length));
   }
 
+  std::string BuildRootSource() const {
+    if (contract_shape_ == TemplateProviderContractShape::kComplete) {
+      return R"(
+target.generic<reference> @request_target {subgroup_size = 64}
+
+template.decl @benchmark.choose(%value: i32) -> (i32)
+
+func.def public target(@request_target) @entry(%value: i32) -> (i32) where [range(%value, 32, 32)] {
+  %result = template.apply<@benchmark.choose>(%value) : (i32) -> (i32)
+  func.return %result : i32
+}
+)";
+    }
+    return R"(
+template.decl @benchmark.choose(%value: i32) -> (i32)
+
+func.def public @entry(%value: i32) -> (i32) {
+  %result = template.apply<@benchmark.choose>(%value) : (i32) -> (i32)
+  func.return %result : i32
+}
+)";
+  }
+
   std::string BuildLibrarySource() const {
     std::string source =
         "template.decl @benchmark.choose(%value: i32) -> (i32)\n\n";
-    source.reserve(source.size() + provider_count_ * 180u);
+    if (contract_shape_ == TemplateProviderContractShape::kComplete) {
+      source.insert(0, "target.generic<reference> @provider_target\n\n");
+    }
+    source.reserve(source.size() + provider_count_ * 260u);
     for (uint32_t i = 0; i < provider_count_; ++i) {
       const std::string name = ProviderName(i);
-      source.append("template.def<@benchmark.choose> priority(");
+      source.append("template.def<@benchmark.choose> ");
+      if (contract_shape_ == TemplateProviderContractShape::kComplete) {
+        source.append(
+            "target(@provider_target) requires [#target.subgroup.size<64>] ");
+      }
+      source.append("priority(");
       source.append(std::to_string(i + 1));
       source.append(") @");
       source.append(name);
+      if (contract_shape_ == TemplateProviderContractShape::kComplete) {
+        source.append(
+            "(%value: i32) -> (i32) where [mul(%value, 16)] {\n"
+            "  template.return %value : i32\n"
+            "}\n\n");
+        continue;
+      }
       source.append(
           "(%value: i32) -> (i32) {\n"
           "  template.return %value : i32\n"
@@ -201,6 +237,7 @@ func.def public @entry(%value: i32) -> (i32) {
   }
 
   uint32_t provider_count_;
+  TemplateProviderContractShape contract_shape_;
   iree_arena_block_pool_t block_pool_ = {};
   loom_context_t context_ = {};
   loom_module_t* root_module_ = nullptr;
@@ -211,8 +248,10 @@ func.def public @entry(%value: i32) -> (i32) {
       LOOM_LINK_MODULE_INDEX_INVALID_ORDINAL;
 };
 
-static void BM_IndexMaterialize_SelectOneTemplate(benchmark::State& state) {
-  TemplateCatalogFixture fixture(static_cast<uint32_t>(state.range(0)));
+static void RunSelectOneTemplateBenchmark(
+    benchmark::State& state, TemplateProviderContractShape contract_shape) {
+  TemplateCatalogFixture fixture(static_cast<uint32_t>(state.range(0)),
+                                 contract_shape);
   iree_host_size_t selected_symbol_count = 0;
   for (auto _ : state) {
     loom_link_index_materialization_t materialization = fixture.Materialize();
@@ -233,11 +272,25 @@ static void BM_IndexMaterialize_SelectOneTemplate(benchmark::State& state) {
   state.SetComplexityN(fixture.provider_count());
 }
 
+static void BM_IndexMaterialize_SelectOneTemplate(benchmark::State& state) {
+  RunSelectOneTemplateBenchmark(state,
+                                TemplateProviderContractShape::kPriorityOnly);
+}
+
+static void BM_IndexMaterialize_SelectOneConstrainedTemplate(
+    benchmark::State& state) {
+  RunSelectOneTemplateBenchmark(state,
+                                TemplateProviderContractShape::kComplete);
+}
+
 static void CatalogScales(benchmark::Benchmark* benchmark) {
   benchmark->Arg(1)->Arg(16)->Arg(64)->Arg(512)->Arg(4096);
 }
 
 BENCHMARK(BM_IndexMaterialize_SelectOneTemplate)
+    ->Apply(CatalogScales)
+    ->Complexity(benchmark::oN);
+BENCHMARK(BM_IndexMaterialize_SelectOneConstrainedTemplate)
     ->Apply(CatalogScales)
     ->Complexity(benchmark::oN);
 

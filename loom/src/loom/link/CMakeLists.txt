@@ -265,12 +265,32 @@ loom_cc_test(
 
 loom_cc_library(
   NAME
+    bytecode_template_contract
+  HDRS
+    "bytecode_template_contract.h"
+  SRCS
+    "bytecode_template_contract.c"
+  DEPS
+    iree::base
+    iree::base::internal::arena
+    loom::analysis::template_provider_catalog
+    loom::format::bytecode::index
+    loom::format::bytecode::varint
+    loom::ops::op_defs
+    loom::ops::target
+    loom::target::condition
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
     template_candidate_loader
   HDRS
     "template_candidate_loader.h"
   SRCS
     "template_candidate_loader.c"
   DEPS
+    ::bytecode_template_contract
     ::module_index
     ::plan_materializer
     ::planner
@@ -278,12 +298,8 @@ loom_cc_library(
     iree::base::internal::arena
     loom::analysis::symbol_facts
     loom::analysis::template_provider_catalog
-    loom::format::bytecode::symbol_header_reader
     loom::ir
     loom::ops::func_symbol_facts
-    loom::ops::op_defs
-    loom::ops::target
-    loom::target::condition
   PUBLIC
 )
 
@@ -329,6 +345,7 @@ loom_cc_test(
     loom::ops::module
     loom::ops::op_defs
     loom::ops::op_registry
+    loom::ops::test
     loom::verify
 )
 

@@ -158,27 +158,19 @@ typedef struct loom_bytecode_symbol_metadata_t {
   const loom_predicate_t* predicates;
   // Number of retained predicate entries.
   uint16_t predicate_count;
-  // Arena-owned seekable function/global/record attribute payloads.
+  // Arena-owned attribute payloads required by retained linker contracts.
   const loom_bytecode_symbol_attribute_metadata_t* attributes;
-  // Number of seekable attribute payloads.
+  // Number of retained attribute payloads.
   uint8_t attribute_count;
+  // Retained template target attribute ordinal plus one, or zero when absent.
+  uint8_t template_target_attribute_ordinal_plus_one;
+  // Retained template requires attribute ordinal plus one, or zero when absent.
+  uint8_t template_requires_attribute_ordinal_plus_one;
   // First entry in the module's root-region payload array.
   uint32_t first_region_payload_index;
   // Number of independently bounded root-region payloads.
   uint8_t region_payload_count;
 } loom_bytecode_symbol_metadata_t;
-
-// Looks up one authored attribute payload by defining-op descriptor slot.
-static inline const loom_bytecode_symbol_attribute_metadata_t*
-loom_bytecode_symbol_metadata_lookup_attribute(
-    const loom_bytecode_symbol_metadata_t* metadata, uint8_t attribute_index) {
-  for (uint8_t i = 0; i < metadata->attribute_count; ++i) {
-    if (metadata->attributes[i].attribute_index == attribute_index) {
-      return &metadata->attributes[i];
-    }
-  }
-  return NULL;
-}
 
 // One compile-time provider import and its slice in the module anchor array.
 typedef struct loom_bytecode_provider_import_metadata_t {

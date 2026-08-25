@@ -452,24 +452,6 @@ loom_cc_test(
 )
 
 loom_cc_test(
-    name = "selected_function_header_test",
-    srcs = ["selected_function_header_test.cc"],
-    deps = [
-        "//loom/src/loom/format/bytecode:index",
-        "//loom/src/loom/format/bytecode:reader",
-        "//loom/src/loom/format/bytecode:symbol_header_reader",
-        "//loom/src/loom/format/bytecode:writer",
-        "//loom/src/loom/format/text:parser",
-        "//loom/src/loom/ir",
-        "//loom/src/loom/ops/template",
-        "//runtime/src/iree/base/internal:arena",
-        "//runtime/src/iree/io:stream",
-        "//runtime/src/iree/testing:gtest",
-        "//runtime/src/iree/testing:gtest_main",
-    ],
-)
-
-loom_cc_test(
     name = "selected_tables_test",
     srcs = ["selected_tables_test.cc"],
     deps = [
