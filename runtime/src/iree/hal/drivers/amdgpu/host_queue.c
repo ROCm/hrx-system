@@ -507,14 +507,6 @@ static void iree_hal_amdgpu_host_queue_request_completion_thread_stop(
   }
 }
 
-void iree_hal_amdgpu_host_queue_fail(iree_hal_amdgpu_host_queue_t* queue,
-                                     iree_status_t status) {
-  IREE_ASSERT_ARGUMENT(queue);
-  if (iree_hal_amdgpu_host_queue_store_error(queue, status)) {
-    iree_hal_amdgpu_host_queue_request_completion_thread_stop(queue);
-  }
-}
-
 iree_status_t iree_hal_amdgpu_host_queue_wait_for_setup_epoch(
     iree_hal_amdgpu_host_queue_t* queue, uint64_t epoch) {
   IREE_ASSERT_ARGUMENT(queue);
@@ -725,11 +717,6 @@ static int iree_hal_amdgpu_host_queue_completion_thread_main(void* entry_arg) {
       if (signal_index == IREE_HAL_AMDGPU_COMPLETION_WAIT_STOP_SIGNAL ||
           iree_hal_amdgpu_host_queue_has_error(queue)) {
         iree_hal_amdgpu_host_queue_drain_completions(queue);
-        if (iree_hal_amdgpu_host_queue_has_error(queue)) {
-          iree_hal_amdgpu_host_queue_cancel_pending(
-              queue, IREE_STATUS_ABORTED,
-              "AMDGPU queue stopped after an unrecoverable device error");
-        }
         keep_running = false;
       } else if (IREE_UNLIKELY(signal_index >=
                                IREE_HAL_AMDGPU_COMPLETION_WAIT_SIGNAL_COUNT)) {
@@ -771,7 +758,9 @@ static void iree_hal_amdgpu_host_queue_error_callback(hsa_status_t status,
   // First-error-wins: store the error with release semantics so the status
   // payload (heap-allocated string, backtrace) is visible to any thread that
   // loads with acquire. If another error already won the race, free ours.
-  iree_hal_amdgpu_host_queue_fail(queue, error);
+  if (iree_hal_amdgpu_host_queue_store_error(queue, error)) {
+    iree_hal_amdgpu_host_queue_request_completion_thread_stop(queue);
+  }
 }
 
 iree_status_t iree_hal_amdgpu_host_queue_initialize(
