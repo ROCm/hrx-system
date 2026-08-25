@@ -1018,6 +1018,20 @@ void loom_value_facts_shli(const loom_value_facts_t* lhs,
     return;
   }
   int64_t shift = rhs_lo;
+  if (shift == 63) {
+    // Only the source low bit survives a 64-bit shift by 63. Construct exact
+    // results from raw bits and avoid representing 2^63 as a signed factor.
+    uint64_t lhs_bits = 0;
+    if (loom_value_facts_as_exact_raw_bits(lhs_facts, 64, &lhs_bits)) {
+      *out = loom_value_facts_make_signed_raw_bits(lhs_bits << 63, 64);
+    } else if (lhs_divisor % 2 == 0) {
+      *out = loom_value_facts_exact_i64(0);
+    } else {
+      *out = loom_value_facts_make(INT64_MIN, 0, 1);
+    }
+    loom_value_facts_propagate_binary_distribution(lhs_facts, rhs_facts, out);
+    return;
+  }
   int64_t factor = (int64_t)1 << shift;
 
   // Divisor: lhs_divisor * 2^shift. Computed before range.
@@ -1053,6 +1067,18 @@ void loom_value_facts_shrui(const loom_value_facts_t* lhs,
     return;
   }
   int64_t shift = rhs_lo;
+  if (shift == 63) {
+    // A 64-bit logical shift by 63 extracts the source sign bit.
+    if (lhs_lo >= 0) {
+      *out = loom_value_facts_exact_i64(0);
+    } else if (lhs_hi < 0) {
+      *out = loom_value_facts_exact_i64(1);
+    } else {
+      *out = loom_value_facts_make(0, 1, 1);
+    }
+    loom_value_facts_propagate_binary_distribution(lhs_facts, rhs_facts, out);
+    return;
+  }
   int64_t factor = (int64_t)1 << shift;
 
   // Divisor: independent of sign. Computed before range check.
@@ -1086,6 +1112,18 @@ void loom_value_facts_shrsi(const loom_value_facts_t* lhs,
     return;
   }
   int64_t shift = rhs_lo;
+  if (shift == 63) {
+    // A 64-bit arithmetic shift by 63 replicates the source sign bit.
+    if (lhs_lo >= 0) {
+      *out = loom_value_facts_exact_i64(0);
+    } else if (lhs_hi < 0) {
+      *out = loom_value_facts_exact_i64(-1);
+    } else {
+      *out = loom_value_facts_make(-1, 0, 1);
+    }
+    loom_value_facts_propagate_binary_distribution(lhs_facts, rhs_facts, out);
+    return;
+  }
   // Arithmetic right shift preserves sign.
   int64_t lo = lhs_lo >> shift;
   int64_t hi = lhs_hi >> shift;

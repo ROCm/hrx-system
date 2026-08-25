@@ -1205,6 +1205,61 @@ TEST(ShliTransfer, NonExactShiftAmount) {
   EXPECT_TRUE(loom_value_facts_is_unknown(out));
 }
 
+TEST(ShliTransfer, SignBitShift) {
+  loom_value_facts_t shift = loom_value_facts_exact_i64(63);
+  loom_value_facts_t out;
+
+  loom_value_facts_t odd = loom_value_facts_exact_i64(1);
+  loom_value_facts_shli(&odd, &shift, &out);
+  EXPECT_TRUE(loom_value_facts_is_exact(out));
+  EXPECT_EQ(out.range_lo, INT64_MIN);
+
+  loom_value_facts_t even = loom_value_facts_exact_i64(2);
+  loom_value_facts_shli(&even, &shift, &out);
+  EXPECT_TRUE(loom_value_facts_is_exact(out));
+  EXPECT_EQ(out.range_lo, 0);
+}
+
+TEST(ShruiTransfer, SignBitShift) {
+  loom_value_facts_t shift = loom_value_facts_exact_i64(63);
+  loom_value_facts_t out;
+
+  loom_value_facts_t non_negative = loom_value_facts_make(0, INT64_MAX, 1);
+  loom_value_facts_shrui(&non_negative, &shift, &out);
+  EXPECT_TRUE(loom_value_facts_is_exact(out));
+  EXPECT_EQ(out.range_lo, 0);
+
+  loom_value_facts_t negative = loom_value_facts_make(INT64_MIN, -1, 1);
+  loom_value_facts_shrui(&negative, &shift, &out);
+  EXPECT_TRUE(loom_value_facts_is_exact(out));
+  EXPECT_EQ(out.range_lo, 1);
+
+  loom_value_facts_t unknown = loom_value_facts_unknown();
+  loom_value_facts_shrui(&unknown, &shift, &out);
+  EXPECT_EQ(out.range_lo, 0);
+  EXPECT_EQ(out.range_hi, 1);
+}
+
+TEST(ShrsiTransfer, SignBitShift) {
+  loom_value_facts_t shift = loom_value_facts_exact_i64(63);
+  loom_value_facts_t out;
+
+  loom_value_facts_t non_negative = loom_value_facts_make(0, INT64_MAX, 1);
+  loom_value_facts_shrsi(&non_negative, &shift, &out);
+  EXPECT_TRUE(loom_value_facts_is_exact(out));
+  EXPECT_EQ(out.range_lo, 0);
+
+  loom_value_facts_t negative = loom_value_facts_make(INT64_MIN, -1, 1);
+  loom_value_facts_shrsi(&negative, &shift, &out);
+  EXPECT_TRUE(loom_value_facts_is_exact(out));
+  EXPECT_EQ(out.range_lo, -1);
+
+  loom_value_facts_t unknown = loom_value_facts_unknown();
+  loom_value_facts_shrsi(&unknown, &shift, &out);
+  EXPECT_EQ(out.range_lo, -1);
+  EXPECT_EQ(out.range_hi, 0);
+}
+
 //===----------------------------------------------------------------------===//
 // Transfer functions: negi / absi
 //===----------------------------------------------------------------------===//
