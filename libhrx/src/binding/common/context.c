@@ -8,6 +8,7 @@
 
 #include "common/internal.h"
 #include "common/stream.h"
+#include "iree/base/internal/math.h"
 
 //===----------------------------------------------------------------------===//
 // Global state
@@ -48,6 +49,44 @@ static iree_status_t iree_hal_streaming_context_synchronize_streams(
     iree_hal_streaming_context_t* context, bool include_non_blocking_streams,
     bool flush_before_wait);
 
+iree_hal_streaming_timestamp_domain_t iree_hal_streaming_query_timestamp_domain(
+    const iree_hal_device_spec_t* spec) {
+  const iree_hal_streaming_timestamp_domain_t none = {0};
+  if (!spec) return none;
+  const iree_hal_device_timing_spec_t* timing =
+      iree_hal_device_spec_timing(spec);
+  if (!iree_all_bits_set(timing->flags,
+                         IREE_HAL_DEVICE_TIMING_SPEC_FLAG_DEVICE_TIMESTAMPS)) {
+    return none;
+  }
+  const iree_hal_device_queue_spec_t* queues =
+      iree_hal_device_spec_queues(spec);
+  if (queues->family_count != 1) return none;
+  const iree_hal_queue_family_spec_t* family = &queues->families[0];
+  // Exactly one physical device: the header guarantees a single comparable
+  // domain only for one family covering one physical device.
+  if (iree_math_count_ones_u64(family->physical_device_affinity) != 1) {
+    return none;
+  }
+  // The flag comes from the device-scope summary and the numbers from the
+  // family, which is sound only while the two describe the same domain. On a
+  // single-family device they must, so facets that disagree contradict the
+  // device's own facts and name no domain to convert with.
+  if (timing->timestamp_frequency_hz != family->timestamp_frequency_hz ||
+      timing->timestamp_valid_bits != family->timestamp_valid_bits) {
+    return none;
+  }
+  if (family->timestamp_frequency_hz == 0 ||
+      family->timestamp_valid_bits == 0 || family->timestamp_valid_bits > 64) {
+    return none;
+  }
+  const iree_hal_streaming_timestamp_domain_t domain = {
+      .frequency_hz = family->timestamp_frequency_hz,
+      .valid_bits = family->timestamp_valid_bits,
+  };
+  return domain;
+}
+
 iree_status_t iree_hal_streaming_context_create(
     iree_hal_streaming_device_t* device_entry,
     iree_hal_streaming_context_flags_t flags, iree_allocator_t host_allocator,
@@ -76,6 +115,8 @@ iree_status_t iree_hal_streaming_context_create(
   context->queue_affinity = IREE_HAL_QUEUE_AFFINITY_ANY;
   context->device_allocator =
       iree_hal_device_allocator(device_entry->hal_device);
+  context->timestamp_domain = iree_hal_streaming_query_timestamp_domain(
+      iree_hal_device_spec(device_entry->hal_device));
   context->flags = flags;
   context->default_stream = NULL;
   context->next_capture_id = 1;
@@ -121,6 +162,10 @@ iree_status_t iree_hal_streaming_context_create(
 
   // Initialize buffer mapping table.
   hrx_buffer_table_initialize(&context->buffer_table);
+
+  // Initialize the device timestamp slot pool.
+  iree_hal_streaming_event_timestamp_pool_initialize(
+      context->device_allocator, host_allocator, &context->timestamp_pool);
 
   // Initialize symbol map with global registry as the backing store.
   iree_status_t status = iree_hal_streaming_context_symbol_map_initialize(
@@ -205,20 +250,39 @@ static void iree_hal_streaming_context_destroy(
   iree_hal_streaming_stream_t* default_stream = context->default_stream;
   context->default_stream = NULL;
 
-  // Detach every stream while holding the same locks used to acquire an
-  // operation-scoped context reference. Once detached, new operations fail
-  // before touching context-owned state. Release list references outside the
-  // list lock because the last release may destroy a stream.
+  // Emptying the list under its own mutex is what takes the streams out of
+  // reach of every other reader: they all walk the list under this lock and now
+  // find nothing. It also disarms unregistration, whose scan of the emptied
+  // list matches no stream and so writes nothing, which leaves registration as
+  // the only writer that could still reach the array - and that cannot run
+  // either. A context reaches destruction in one of two states, and neither
+  // admits a registration: unpublished, which is how
+  // iree_hal_streaming_context_create disposes of a context it failed to finish
+  // building and where no thread but that one can name it; or published with
+  // its last reference gone, and registering runs under a reference. The array
+  // is therefore stable for the walk below.
   iree_slim_mutex_lock(&context->stream_list_mutex);
   const iree_host_size_t detached_stream_count = context->stream_count;
   context->stream_count = 0;
+  iree_slim_mutex_unlock(&context->stream_list_mutex);
+
+  // Detach under each stream's own mutex, which is the lock
+  // iree_hal_streaming_stream_retain_context reads the context under, so no
+  // reader can be part way through that read when the field is cleared. A
+  // reader that gets there first is refused anyway: it retains through
+  // iree_hal_streaming_context_try_retain, which fails once the last reference
+  // is gone, and an unpublished context has no such reader to refuse. The list
+  // mutex is not held: end_capture holds a stream mutex while walking the list,
+  // and taking these in the other order deadlocks against it. The list still
+  // holds its reference to every stream, so none can be destroyed while the
+  // loop runs; those references are released afterwards, outside both locks,
+  // because the last one destroys the stream.
   for (iree_host_size_t i = 0; i < detached_stream_count; ++i) {
     iree_hal_streaming_stream_t* stream = context->streams[i];
     iree_slim_mutex_lock(&stream->mutex);
     if (stream->context == context) stream->context = NULL;
     iree_slim_mutex_unlock(&stream->mutex);
   }
-  iree_slim_mutex_unlock(&context->stream_list_mutex);
   for (iree_host_size_t i = 0; i < detached_stream_count; ++i) {
     iree_hal_streaming_stream_release(context->streams[i]);
   }
@@ -231,6 +295,12 @@ static void iree_hal_streaming_context_destroy(
     iree_allocator_free(context->host_allocator, context->streams);
   }
   iree_slim_mutex_deinitialize(&context->stream_list_mutex);
+
+  // A record draws its slot from the pool of the recording event's own context
+  // and every event retains that context, so reaching here means every event
+  // that could hold a slot from this pool is gone and every slot is back.
+  iree_hal_streaming_event_timestamp_pool_deinitialize(
+      &context->timestamp_pool);
 
   iree_status_ignore(context->loop_status);
   iree_hal_allocator_release(context->device_allocator);

@@ -25,3 +25,16 @@ HRX_CTS_TEST_ATTRIBUTE_KERNEL void hrx_transform_nested_pointers(
     pointers.output[i] = pointers.input[i] * scale + offset;
   }
 }
+
+// Occupies the device for a duration scaling with |iterations| by stepping a
+// linear congruential recurrence. Each step consumes the previous accumulator,
+// so the chain cannot be vectorized or reassociated: it retires no faster than
+// one step per engine cycle however wide the device is.
+HRX_CTS_TEST_ATTRIBUTE_KERNEL void hrx_spin_dependent_chain(
+    unsigned long long* output, unsigned long long iterations) {
+  unsigned long long accumulator = 1;
+  for (unsigned long long i = 0; i < iterations; ++i) {
+    accumulator = accumulator * 6364136223846793005ULL + 1442695040888963407ULL;
+  }
+  output[0] = accumulator;
+}

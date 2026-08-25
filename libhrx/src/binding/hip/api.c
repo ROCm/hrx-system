@@ -11651,11 +11651,16 @@ HIPAPI hipError_t hipEventDestroy(hipEvent_t event) {
 //
 // Returns:
 //  - hipSuccess: Event recorded successfully.
-//  - hipErrorInvalidValue: event is NULL or invalid.
-//  - hipErrorInvalidResourceHandle: Invalid stream handle.
-//  - hipErrorInvalidContext: No active HIP context.
+//  - hipErrorInvalidValue: A queue operation this record submits was rejected.
+//  - hipErrorInvalidHandle: The event or the stream is not a live handle, or
+//    the stream belongs to a context other than the one that created the
+//    event.
+//  - hipErrorContextIsDestroyed: The stream's context has been destroyed.
+//  - hipErrorNoDevice: No device is visible to the runtime.
 //  - hipErrorNotInitialized: HIP runtime not initialized.
-//  - hipErrorLaunchFailure: Previous kernel launch failed.
+//  - hipErrorOutOfMemory: An allocation this record needs failed - a timed
+//    record's tick slot, or the capture dependency list a captured record
+//    grows - or the stream's timeline values ran out.
 //  - hipErrorUnknown: Internal error during recording.
 //
 // Synchronization: This operation is asynchronous.
@@ -11664,8 +11669,19 @@ HIPAPI hipError_t hipEventDestroy(hipEvent_t event) {
 // - The event captures the current position in the stream's command queue.
 // - All previously enqueued operations in the stream must complete before
 //   the event is signaled.
-// - If stream is NULL, uses the default stream.
-// - Graph capture: Supported. Creates event node when capturing.
+// - The record submits the work already recorded on the stream before
+//   enqueueing itself, so a failure to submit that work is reported here.
+//   Neither step happens while the stream is capturing.
+// - If stream is NULL, uses the current context's default stream.
+// - The stream must belong to the context that created the event, whether or
+//   not it is capturing. This binding refuses the pair itself, ahead of the
+//   record, so a capturing stream is held to the rule as well even though the
+//   streaming layer's record accepts one from any context.
+// - Graph capture: Supported. A record made on a capturing stream snapshots
+//   the stream's dependency frontier onto the event and associates the event
+//   with the graph being captured, so that a later wait on the event joins
+//   that capture. No node is created, no queue point is named, and nothing is
+//   submitted.
 // - The event can be waited on by other streams using hipStreamWaitEvent().
 // - The event can be queried with hipEventQuery() or synchronized with
 //   hipEventSynchronize().
@@ -11675,8 +11691,8 @@ HIPAPI hipError_t hipEventDestroy(hipEvent_t event) {
 // Warning: Recording an event multiple times overwrites the previous
 // recording. Wait for the event to complete before re-recording.
 //
-// Note: Use hipEventElapsedTime() to measure time between two events
-// recorded in the same stream.
+// Note: Use hipEventElapsedTime() to measure the interval between two records;
+// records made on different streams of one device share a clock.
 HIPAPI hipError_t hipEventRecord(hipEvent_t event, hipStream_t stream) {
   IREE_TRACE_ZONE_BEGIN(z0);
 
@@ -11723,6 +11739,8 @@ HIPAPI hipError_t hipEventRecord(hipEvent_t event, hipStream_t stream) {
 //  - hipErrorLaunchFailure: A kernel launch associated with event failed.
 //  - hipErrorIllegalAddress: Invalid memory access in associated operations.
 //  - hipErrorNotInitialized: HIP runtime not initialized.
+//  - hipErrorCapturedEvent: The event's last record went into a stream
+//    capture, which names a dependency frontier and no queue point.
 //
 // Synchronization: This operation blocks the host thread until the event
 // completes.
@@ -11736,7 +11754,9 @@ HIPAPI hipError_t hipEventRecord(hipEvent_t event, hipStream_t stream) {
 //
 // Performance note: For polling without blocking, use hipEventQuery.
 //
-// Graph capture: Not supported. Returns hipErrorStreamCaptureUnsupported.
+// Graph capture: An event whose last record went into a stream capture is
+// refused with hipErrorCapturedEvent, and a stream of the current context
+// capturing into that graph is invalidated.
 //
 // See also: hipEventQuery, hipEventRecord, hipStreamSynchronize.
 HIPAPI hipError_t hipEventSynchronize(hipEvent_t event) {
@@ -11763,9 +11783,11 @@ HIPAPI hipError_t hipEventSynchronize(hipEvent_t event) {
     HIP_RETURN_ERROR(init_result);
   }
 
-  if (streaming_event->capture_graph) {
-    iree_hip_context_invalidate_capture_graph(context,
-                                              streaming_event->capture_graph);
+  iree_hal_streaming_graph_t* capture_graph =
+      iree_hal_streaming_event_acquire_capture_graph(streaming_event);
+  if (capture_graph) {
+    iree_hip_context_invalidate_capture_graph(context, capture_graph);
+    iree_hal_streaming_graph_release(capture_graph);
     iree_hal_streaming_event_release(streaming_event);
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(hipErrorCapturedEvent);
@@ -11789,9 +11811,14 @@ HIPAPI hipError_t hipEventSynchronize(hipEvent_t event) {
 //  - hipErrorInvalidResourceHandle: Invalid event handle.
 //  - hipErrorLaunchFailure: A kernel launch associated with event failed.
 //  - hipErrorNotInitialized: HIP runtime not initialized.
+//  - hipErrorCapturedEvent: The event's last record went into a stream
+//    capture, which names a dependency frontier and no queue point.
 //
-// Synchronization: This operation is non-blocking. Returns immediately with
-// the current status.
+// Synchronization: Never waits for a record to complete; an event whose record
+// is still outstanding is reported as hipErrorNotReady. Refusing a captured
+// event takes a reference to the graph that capture is building and drops it
+// again, and dropping the last reference frees the host allocations the graph
+// owns, which synchronizes every context.
 //
 // Event behavior:
 // - Checks if all operations before the event recording have completed.
@@ -11807,7 +11834,9 @@ HIPAPI hipError_t hipEventSynchronize(hipEvent_t event) {
 // }
 // ```
 //
-// Graph capture: Not supported. Returns hipErrorStreamCaptureUnsupported.
+// Graph capture: An event whose last record went into a stream capture is
+// refused with hipErrorCapturedEvent, and a stream of the current context
+// capturing into that graph is invalidated.
 //
 // See also: hipEventSynchronize, hipEventRecord, hipStreamQuery.
 HIPAPI hipError_t hipEventQuery(hipEvent_t event) {
@@ -11826,9 +11855,11 @@ HIPAPI hipError_t hipEventQuery(hipEvent_t event) {
     HIP_RETURN_ERROR(init_result);
   }
 
-  if (streaming_event->capture_graph) {
-    iree_hip_context_invalidate_capture_graph(context,
-                                              streaming_event->capture_graph);
+  iree_hal_streaming_graph_t* capture_graph =
+      iree_hal_streaming_event_acquire_capture_graph(streaming_event);
+  if (capture_graph) {
+    iree_hip_context_invalidate_capture_graph(context, capture_graph);
+    iree_hal_streaming_graph_release(capture_graph);
     iree_hal_streaming_event_release(streaming_event);
     HIP_RETURN_ERROR(hipErrorCapturedEvent);
   }
@@ -11844,6 +11875,27 @@ HIPAPI hipError_t hipEventQuery(hipEvent_t event) {
   return result;
 }
 
+// Invalidates the stream capture |event|'s last record went into. An event
+// that names no capture invalidates nothing: one whose last record was
+// submitted, and one that has never been recorded.
+//
+// The graph identifies the capture and the context only narrows which streams
+// are searched for it, so this searches the event's own context: the one
+// hipEventElapsedTime has already established both of its events share. The
+// streams searched are then a property of the pair being measured, and an
+// entry point that resolves no current context needs none. hipEventQuery and
+// hipEventSynchronize search the current context instead, which
+// iree_hip_ensure_context hands them when they initialize the runtime. A
+// capture recorded on a stream belonging to neither context is found by none
+// of the three.
+static void iree_hip_invalidate_event_capture(
+    iree_hal_streaming_event_t* event) {
+  iree_hal_streaming_graph_t* capture_graph =
+      iree_hal_streaming_event_acquire_capture_graph(event);
+  iree_hip_context_invalidate_capture_graph(event->context, capture_graph);
+  iree_hal_streaming_graph_release(capture_graph);
+}
+
 // Computes elapsed time between two events.
 //
 // Parameters:
@@ -11853,19 +11905,34 @@ HIPAPI hipError_t hipEventQuery(hipEvent_t event) {
 //
 // Returns:
 //  - hipSuccess: Time computed successfully.
-//  - hipErrorInvalidValue: ms is NULL or events are NULL.
-//  - hipErrorInvalidResourceHandle: Invalid event handles.
-//  - hipErrorNotReady: One or both events have not completed.
-//  - hipErrorInvalidHandle: Events created with hipEventDisableTiming.
+//  - hipErrorInvalidValue: ms is NULL.
+//  - hipErrorInvalidHandle: An event handle is not a live handle, the two
+//    events belong to different contexts, an event was created with
+//    hipEventDisableTiming, or an event carries no submitted record.
+//  - hipErrorNotReady: One or both records have not been reached.
+//  - hipErrorCapturedEvent: An event's last record went into a stream capture,
+//    which names a dependency frontier and no queue point.
+//  - hipErrorNotSupported: The device advertises no timestamp domain, so no
+//    clock the two records share can measure the interval between them.
 //
-// Synchronization: This operation may block if events have not completed.
+// Synchronization: Never waits for a record to complete; an event whose record
+// is still outstanding is reported as hipErrorNotReady. Refusing a captured
+// pair invalidates that capture, and dropping the last reference to the graph
+// it was building frees the host allocations the graph owns, which
+// synchronizes every context.
 //
 // Timing behavior:
-// - Both events must be recorded in the same stream.
 // - Stop event must be recorded after start event.
 // - Events must not have hipEventDisableTiming flag.
-// - Returns time in milliseconds with ~0.5 microsecond resolution.
+// - The interval covers the device work between the two records, measured
+//   from the device clock ticks they captured; it is not a measure of how
+//   long the host took to issue them.
+// - Records made on different streams of one device share a clock and can be
+//   differenced.
+// - Resolution is the device's timestamp period.
 // - Time measurement includes all operations between events.
+// - A failure of the timeline a record names, or of reading a tick back, is
+//   reported with the code that failure maps to and not as a bad handle.
 //
 // Multi-GPU: Both events must be from the same device.
 //
@@ -11878,8 +11945,6 @@ HIPAPI hipError_t hipEventQuery(hipEvent_t event) {
 // float milliseconds;
 // hipEventElapsedTime(&milliseconds, start, stop);
 // ```
-//
-// Warning: Events must be recorded in the same stream for accurate timing.
 //
 // See also: hipEventCreate, hipEventRecord, hipEventSynchronize.
 HIPAPI hipError_t hipEventElapsedTime(float* ms, hipEvent_t start,
@@ -11909,13 +11974,15 @@ HIPAPI hipError_t hipEventElapsedTime(float* ms, hipEvent_t start,
       IREE_HAL_STREAMING_EVENT_TIMING_UNTIMED;
   iree_status_t status = iree_hal_streaming_event_elapsed_time(
       ms, start_event, stop_event, &timing);
-  iree_hal_streaming_event_release(stop_event);
-  iree_hal_streaming_event_release(start_event);
   if (!iree_status_is_ok(status)) {
     // The timeline a record names has failed; the event handles are fine.
     result = iree_status_to_hip_result(status);
+    iree_hal_streaming_event_release(stop_event);
+    iree_hal_streaming_event_release(start_event);
     HIP_RETURN_ERROR(result);
   }
+  // Both events stay held across the outcomes below: refusing a captured pair
+  // reaches back into each event for the capture it names.
   result = hipErrorInvalidHandle;
   switch (timing) {
     case IREE_HAL_STREAMING_EVENT_TIMING_MEASURED:
@@ -11929,7 +11996,23 @@ HIPAPI hipError_t hipEventElapsedTime(float* ms, hipEvent_t start,
       // handle here, not a bad value.
       result = hipErrorInvalidHandle;
       break;
+    case IREE_HAL_STREAMING_EVENT_TIMING_CAPTURED:
+      // Measuring a captured event is not something a capture can express, so
+      // the capture it belongs to is invalidated and the pair refused, which
+      // is how hipEventQuery and hipEventSynchronize answer a captured event
+      // too. Either event may be the captured one and an event whose last
+      // record was submitted names no capture, so both are offered and one
+      // naming no capture invalidates nothing.
+      iree_hip_invalidate_event_capture(start_event);
+      iree_hip_invalidate_event_capture(stop_event);
+      result = hipErrorCapturedEvent;
+      break;
+    case IREE_HAL_STREAMING_EVENT_TIMING_UNSUPPORTED:
+      result = hipErrorNotSupported;
+      break;
   }
+  iree_hal_streaming_event_release(stop_event);
+  iree_hal_streaming_event_release(start_event);
   HIP_RETURN_ERROR(result);
 }
 
@@ -20778,7 +20861,8 @@ hipGraphExecKernelNodeSetParams(hipGraphExec_t graphExec, hipGraphNode_t node,
 HIPAPI hipError_t hipGraphExecChildGraphNodeSetParams(hipGraphExec_t graphExec,
                                                       hipGraphNode_t node,
                                                       hipGraph_t childGraph) {
-  if (!graphExec || !node || !childGraph) {
+  if (!graphExec || !node || !childGraph ||
+      !iree_hip_graph_handle_is_live(childGraph)) {
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
   iree_hal_streaming_graph_exec_t* exec = NULL;
@@ -20794,10 +20878,6 @@ HIPAPI hipError_t hipGraphExecChildGraphNodeSetParams(hipGraphExec_t graphExec,
     iree_hal_streaming_graph_exec_release(exec);
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
-  if ((iree_hal_streaming_graph_t*)childGraph == stream_node->graph) {
-    iree_hal_streaming_graph_exec_release(exec);
-    HIP_RETURN_ERROR(hipErrorInvalidValue);
-  }
   iree_hal_streaming_graph_t* old_child_graph =
       stream_node->attrs.child_graph.graph;
   iree_hal_streaming_graph_t* new_child_graph =
@@ -20806,6 +20886,19 @@ HIPAPI hipError_t hipGraphExecChildGraphNodeSetParams(hipGraphExec_t graphExec,
       old_child_graph->node_count != new_child_graph->node_count) {
     iree_hal_streaming_graph_exec_release(exec);
     HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
+  // The rule iree_hal_streaming_graph_add_child_graph_node holds a template's
+  // child graph node to, applied where an instantiated executable's node is
+  // retargeted. The rebuild below instantiates |new_child_graph| in the context
+  // that graph belongs to and folds its blocks into |exec|, so a child of
+  // another context would leave |exec| holding event record blocks naming that
+  // context's events; a launch on a stream of |exec|'s own context breaks on
+  // the first of them with the blocks ahead of it already submitted.
+  iree_status_t validate_status = iree_hal_streaming_graph_validate_child_graph(
+      stream_node->graph, new_child_graph);
+  if (!iree_status_is_ok(validate_status)) {
+    iree_hal_streaming_graph_exec_release(exec);
+    HIP_RETURN_STATUS(validate_status, hipErrorInvalidValue);
   }
   iree_hal_streaming_graph_retain(new_child_graph);
   stream_node->attrs.child_graph.graph = new_child_graph;

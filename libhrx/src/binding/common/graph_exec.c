@@ -167,6 +167,11 @@ typedef struct iree_hal_streaming_graph_exec_t {
   // Immutable block list created during instantiate.
   iree_hal_streaming_graph_block_t** blocks;
   uint32_t block_count;
+  // True when |blocks|, or the blocks of a child-graph executable they launch,
+  // hold an event record. Every such record names an event of |context|, so a
+  // launch on a stream of any other context would have every one of its
+  // records refused.
+  bool records_events;
   // Number of graph nodes present when this executable was instantiated.
   iree_host_size_t instantiated_node_count;
   // Number of HIP-visible graph nodes present at instantiation/update time.
@@ -640,6 +645,7 @@ iree_status_t iree_hal_streaming_graph_exec_create(
                         &exec->arena_allocator);
   exec->blocks = NULL;
   exec->block_count = 0;
+  exec->records_events = false;
   exec->instantiated_node_count = 0;
   exec->instantiated_visible_node_count = 0;
   exec->node_disabled_states = NULL;
@@ -746,6 +752,7 @@ static void iree_hal_streaming_graph_exec_initialize_compiled_state(
                         &exec->arena_allocator);
   exec->blocks = NULL;
   exec->block_count = 0;
+  exec->records_events = false;
   exec->instantiated_node_count = 0;
   exec->instantiated_visible_node_count = 0;
   exec->semaphores = NULL;
@@ -770,6 +777,7 @@ static void iree_hal_streaming_graph_exec_deinitialize_compiled_state(
   iree_arena_deinitialize(&exec->arena_allocator);
   exec->blocks = NULL;
   exec->block_count = 0;
+  exec->records_events = false;
   exec->instantiated_node_count = 0;
   exec->instantiated_visible_node_count = 0;
   exec->semaphores = NULL;
@@ -786,6 +794,7 @@ static void iree_hal_streaming_graph_exec_move_compiled_state(
   target->arena_allocator = source->arena_allocator;
   target->blocks = source->blocks;
   target->block_count = source->block_count;
+  target->records_events = source->records_events;
   target->instantiated_node_count = source->instantiated_node_count;
   target->instantiated_visible_node_count =
       source->instantiated_visible_node_count;
@@ -800,6 +809,7 @@ static void iree_hal_streaming_graph_exec_move_compiled_state(
 
   source->blocks = NULL;
   source->block_count = 0;
+  source->records_events = false;
   source->instantiated_node_count = 0;
   source->instantiated_visible_node_count = 0;
   source->semaphores = NULL;
@@ -981,6 +991,18 @@ iree_status_t iree_hal_streaming_graph_exec_set_event_node_event(
        type != IREE_HAL_STREAMING_GRAPH_NODE_TYPE_EVENT_WAIT)) {
     IREE_TRACE_ZONE_END(z0);
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT);
+  }
+  // The same rule iree_hal_streaming_graph_add_event_node holds the template
+  // to, applied to the executable an event node is retargeted in. On a record
+  // node it is what lets a launch answer for every record block by comparing
+  // one pair of contexts, and an event of another context would be refused at
+  // the record itself anyway. A wait node is held to it because that function
+  // holds both node types to it: retargeting is another way of naming a node's
+  // event, and it must not seat one the template would have refused.
+  if (event->context != exec->context) {
+    IREE_TRACE_ZONE_END(z0);
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "event must belong to the graph context");
   }
 
   const iree_hal_streaming_graph_block_type_t block_type =
@@ -1253,6 +1275,11 @@ static iree_status_t iree_hal_streaming_graph_create_event_block(
   out_ptrs->attrs->event.source_node = source_node;
   out_ptrs->attrs->event.event = event;
   iree_hal_streaming_event_retain(event);
+  // The one place a record block is built, and so where |exec| learns it holds
+  // one. A launch reads this to answer for every record at once.
+  if (type == IREE_HAL_STREAMING_GRAPH_BLOCK_TYPE_EVENT_RECORD) {
+    exec->records_events = true;
+  }
 
   *out_block = block;
   IREE_TRACE_ZONE_END(z0);
@@ -1404,6 +1431,10 @@ static iree_status_t iree_hal_streaming_graph_create_child_graph_block(
       signal_semaphore_count, &block, out_ptrs);
   if (iree_status_is_ok(status)) {
     out_ptrs->attrs->child_graph.exec = child_exec;
+    // A launch of |exec| walks the child's blocks too, so the records they hold
+    // are records of this launch. The child instantiated above already carries
+    // its own children's, which makes the property transitive.
+    exec->records_events |= child_exec->records_events;
     *out_block = block;
   } else {
     iree_hal_streaming_graph_exec_release(child_exec);
@@ -1907,11 +1938,98 @@ iree_status_t iree_hal_streaming_graph_exec_instantiate_from_template(
   return iree_ok_status();
 }
 
+// Cells one chunk of the dropped-graph list holds. The first chunk lives in
+// the launching frame, so this is also how many references a launch drops
+// without reaching the heap.
+#define IREE_HAL_STREAMING_DROPPED_GRAPH_CHUNK_CAPACITY 16
+
+// Capture graph references dropped by the event records a launch enqueues.
+// Releasing the last reference to a captured graph frees the allocations the
+// graph owns, which synchronizes every context and relocks the stream the
+// launch submits on; the launch collects the references here and releases them
+// once it has dropped its locks.
+//
+// Storage is chunked and never moves, so a cell handed out stays valid for the
+// life of the list.
+typedef struct iree_hal_streaming_dropped_graph_chunk_t {
+  // Next chunk, NULL at the tail.
+  struct iree_hal_streaming_dropped_graph_chunk_t* next;
+  // Number of cells in |graphs| that are part of the list.
+  iree_host_size_t count;
+  // Owned references, NULL for a cell whose record never committed.
+  iree_hal_streaming_graph_t*
+      graphs[IREE_HAL_STREAMING_DROPPED_GRAPH_CHUNK_CAPACITY];
+} iree_hal_streaming_dropped_graph_chunk_t;
+
+typedef struct iree_hal_streaming_dropped_graph_list_t {
+  // Allocator the heap chunks come from.
+  iree_allocator_t host_allocator;
+  // Chunk cells are added to, never NULL; |first| until the list grows.
+  iree_hal_streaming_dropped_graph_chunk_t* tail;
+  // Storage covering launches dropping no more references than it holds,
+  // living in the launching frame.
+  iree_hal_streaming_dropped_graph_chunk_t first;
+} iree_hal_streaming_dropped_graph_list_t;
+
+// Prepares |out_list| to collect references, growing from |host_allocator|.
+static void iree_hal_streaming_dropped_graph_list_initialize(
+    iree_allocator_t host_allocator,
+    iree_hal_streaming_dropped_graph_list_t* out_list) {
+  out_list->host_allocator = host_allocator;
+  out_list->tail = &out_list->first;
+  out_list->first.next = NULL;
+  out_list->first.count = 0;
+}
+
+// Adds an empty cell to |list| and returns it. The cell counts as part of the
+// list from here: deinitializing releases whatever it holds, and a cell left
+// NULL releases nothing. Growing is the only step that can fail and it runs
+// before the record that displaces a reference is enqueued, so a failure drops
+// nothing. The cell stays valid for the life of the list.
+IREE_MUST_USE_RESULT static iree_status_t
+iree_hal_streaming_dropped_graph_list_push_empty(
+    iree_hal_streaming_dropped_graph_list_t* list,
+    iree_hal_streaming_graph_t*** out_cell) {
+  *out_cell = NULL;
+  iree_hal_streaming_dropped_graph_chunk_t* tail = list->tail;
+  if (tail->count == IREE_ARRAYSIZE(tail->graphs)) {
+    iree_hal_streaming_dropped_graph_chunk_t* chunk = NULL;
+    IREE_RETURN_IF_ERROR(iree_allocator_malloc(list->host_allocator,
+                                               sizeof(*chunk), (void**)&chunk));
+    tail->next = chunk;
+    list->tail = chunk;
+    tail = chunk;
+  }
+  iree_hal_streaming_graph_t** cell = &tail->graphs[tail->count++];
+  *cell = NULL;
+  *out_cell = cell;
+  return iree_ok_status();
+}
+
+// Releases every reference |list| collected and frees the chunks it grew into.
+// The list is dead afterwards: the launch that initialized it is the only
+// owner and it deinitializes once, on its way out.
+static void iree_hal_streaming_dropped_graph_list_deinitialize(
+    iree_hal_streaming_dropped_graph_list_t* list) {
+  iree_hal_streaming_dropped_graph_chunk_t* chunk = &list->first;
+  while (chunk) {
+    for (iree_host_size_t i = 0; i < chunk->count; ++i) {
+      iree_hal_streaming_graph_release(chunk->graphs[i]);
+    }
+    iree_hal_streaming_dropped_graph_chunk_t* next = chunk->next;
+    if (chunk != &list->first) {
+      iree_allocator_free(list->host_allocator, chunk);
+    }
+    chunk = next;
+  }
+}
+
 static iree_status_t iree_hal_streaming_graph_exec_submit_blocks_locked(
     iree_hal_streaming_graph_exec_t* exec, iree_hal_streaming_stream_t* stream,
     uint64_t launch_stream_tail_value,
     iree_hal_semaphore_list_t external_wait_semaphores,
-    iree_hal_semaphore_list_t external_signal_semaphores);
+    iree_hal_semaphore_list_t external_signal_semaphores,
+    iree_hal_streaming_dropped_graph_list_t* dropped_graphs);
 
 static iree_status_t iree_hal_streaming_graph_host_callback(
     void* user_data, const uint64_t args[4],
@@ -1927,14 +2045,25 @@ static iree_status_t iree_hal_streaming_graph_host_callback(
   return iree_ok_status();
 }
 
+// Submits |block| on |stream| behind |wait_semaphores|, signaling
+// |signal_semaphores| when it completes. |launch_stream_tail_value| and
+// |dropped_graphs| are meaningful only to a child graph block, which carries
+// them down into the child's own walk, and |record_point| only to an event
+// record block, which receives it describing the point the record signals and
+// leaves it owning what it names.
 static iree_status_t iree_hal_streaming_graph_submit_block(
     iree_hal_streaming_graph_block_t* block,
     const iree_hal_streaming_graph_block_ptrs_t* ptrs,
     iree_hal_streaming_stream_t* stream, uint64_t launch_stream_tail_value,
     iree_hal_semaphore_list_t wait_semaphores,
-    iree_hal_semaphore_list_t signal_semaphores) {
+    iree_hal_semaphore_list_t signal_semaphores,
+    iree_hal_streaming_recorded_point_t* record_point,
+    iree_hal_streaming_dropped_graph_list_t* dropped_graphs) {
   switch (block->type) {
     case IREE_HAL_STREAMING_GRAPH_BLOCK_TYPE_EVENT_RECORD:
+      return iree_hal_streaming_event_enqueue_record(
+          ptrs->attrs->event.event, stream, wait_semaphores, signal_semaphores,
+          record_point);
     case IREE_HAL_STREAMING_GRAPH_BLOCK_TYPE_EVENT_WAIT:
     case IREE_HAL_STREAMING_GRAPH_BLOCK_TYPE_QUEUE_BARRIER: {
       const iree_hal_execute_flags_t flags =
@@ -2001,7 +2130,7 @@ static iree_status_t iree_hal_streaming_graph_submit_block(
       // the tail carries down unchanged.
       return iree_hal_streaming_graph_exec_submit_blocks_locked(
           child_exec, stream, launch_stream_tail_value, wait_semaphores,
-          signal_semaphores);
+          signal_semaphores, dropped_graphs);
     }
     default:
       return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
@@ -2020,7 +2149,8 @@ static iree_status_t iree_hal_streaming_graph_exec_submit_blocks_locked(
     iree_hal_streaming_graph_exec_t* exec, iree_hal_streaming_stream_t* stream,
     uint64_t launch_stream_tail_value,
     iree_hal_semaphore_list_t external_wait_semaphores,
-    iree_hal_semaphore_list_t external_signal_semaphores) {
+    iree_hal_semaphore_list_t external_signal_semaphores,
+    iree_hal_streaming_dropped_graph_list_t* dropped_graphs) {
   enum {
     IREE_HAL_STREAMING_GRAPH_STACK_BASE_VALUE_COUNT = 64,
     IREE_HAL_STREAMING_GRAPH_STACK_SEMAPHORE_COUNT = 16,
@@ -2216,38 +2346,46 @@ static iree_status_t iree_hal_streaming_graph_exec_submit_blocks_locked(
         .payload_values = signal_vals,
     };
     if (iree_status_is_ok(status)) {
-      // Sampled before the submission so the timestamp reflects when the launch
-      // issued the record.
-      const iree_time_t record_time_ns =
-          block_records_event ? iree_time_now() : 0;
-      status = iree_hal_streaming_graph_submit_block(
-          block, &ptrs, stream, launch_stream_tail_value, wait_semaphores,
-          signal_semaphores);
-      // A rejected block signals nothing, so the event keeps its old point. The
-      // commit stays inside this iteration because later blocks in the same
-      // launch wait on the committed point. The recording stream is left alone:
-      // it carries capture state and a launch is not a capture.
-      if (block_records_event && iree_status_is_ok(status)) {
+      iree_hal_streaming_recorded_point_t record_point = {0};
+      iree_hal_streaming_graph_t** dropped_capture_graph = NULL;
+      if (block_records_event) {
         // The block's first signal is the point the record names. When that
         // signal is the launching stream's own timeline the point is exactly a
         // stream point; otherwise it is internal to the launch and all that is
         // known about the stream is that the launch waited behind its tail.
         const bool signals_launch_stream_timeline =
             signal_sems[0] == stream->timeline_semaphore;
-        const iree_hal_streaming_recorded_point_t recorded_point = {
+        record_point = (iree_hal_streaming_recorded_point_t){
             .semaphore = signal_sems[0],
             .value = signal_vals[0],
             .ordered_after_stream_id = stream->stream_id,
             .ordered_after_stream_value = signals_launch_stream_timeline
                                               ? signal_vals[0]
                                               : launch_stream_tail_value,
-            .record_time_ns = record_time_ns,
         };
-        iree_hal_streaming_event_commit_recorded_point(ptrs.attrs->event.event,
-                                                       recorded_point);
+        // Room for the capture graph reference the record ends is claimed
+        // before the record is enqueued, so the commit below always has
+        // somewhere to put it. Nothing has been dropped yet, so a failure here
+        // loses nothing.
+        status = iree_hal_streaming_dropped_graph_list_push_empty(
+            dropped_graphs, &dropped_capture_graph);
+      }
+      if (iree_status_is_ok(status)) {
+        status = iree_hal_streaming_graph_submit_block(
+            block, &ptrs, stream, launch_stream_tail_value, wait_semaphores,
+            signal_semaphores, &record_point, dropped_graphs);
+        // A rejected block signals nothing, so the event keeps its old point.
+        // The commit stays inside this iteration because later blocks in the
+        // same launch wait on the committed point. The recording stream is
+        // left alone: it carries capture state and a launch is not a capture.
+        if (block_records_event && iree_status_is_ok(status)) {
+          *dropped_capture_graph =
+              iree_hal_streaming_event_commit_recorded_point(
+                  ptrs.attrs->event.event, record_point);
+        }
       }
     }
-    iree_hal_semaphore_release(event_wait_point.semaphore);
+    iree_hal_streaming_event_release_recorded_point(&event_wait_point);
     if (free_value_array) {
       iree_allocator_free(exec->host_allocator, value_array);
     }
@@ -2298,6 +2436,20 @@ iree_status_t iree_hal_streaming_graph_exec_launch(
     IREE_TRACE_ZONE_END(z0);
     return iree_ok_status();
   }
+  // Every record this executable holds names an event of |exec->context|, so on
+  // a stream of any other context iree_hal_streaming_event_enqueue_record would
+  // refuse each of them in turn. Deciding the same question here refuses the
+  // launch before it submits any of the graph, where the walk below breaks on
+  // the first refusal and leaves the blocks ahead of the record in flight with
+  // nothing signaling the launching stream's timeline.
+  if (exec->records_events && stream->context != exec->context) {
+    iree_slim_mutex_unlock(&exec->mutex);
+    IREE_TRACE_ZONE_END(z0);
+    return iree_make_status(
+        IREE_STATUS_INCOMPATIBLE,
+        "an event can only be recorded on a stream of the context that "
+        "created it");
+  }
   if (exec->has_unfreed_graph_alloc_nodes && exec->launch_count > 0 &&
       !iree_all_bits_set(
           exec->flags,
@@ -2345,6 +2497,13 @@ iree_status_t iree_hal_streaming_graph_exec_launch(
     }
   }
 
+  // Event records this launch enqueues end their events' capture associations.
+  // The references they drop are collected here and released once the locks
+  // below have been dropped.
+  iree_hal_streaming_dropped_graph_list_t dropped_graphs;
+  iree_hal_streaming_dropped_graph_list_initialize(exec->host_allocator,
+                                                   &dropped_graphs);
+
   iree_slim_mutex_lock(&stream->mutex);
 
   // Reserve the next stream timeline value while holding the stream lock so
@@ -2374,7 +2533,8 @@ iree_status_t iree_hal_streaming_graph_exec_launch(
   };
   if (iree_status_is_ok(status)) {
     status = iree_hal_streaming_graph_exec_submit_blocks_locked(
-        exec, stream, stream_wait_value, wait_semaphores, signal_semaphores);
+        exec, stream, stream_wait_value, wait_semaphores, signal_semaphores,
+        &dropped_graphs);
   }
 
   if (iree_status_is_ok(status)) {
@@ -2391,6 +2551,11 @@ iree_status_t iree_hal_streaming_graph_exec_launch(
 
   iree_slim_mutex_unlock(&stream->mutex);
   iree_slim_mutex_unlock(&exec->mutex);
+  // The last reference to a captured graph frees the allocations it owns, which
+  // synchronizes every context and relocks this stream, so the references the
+  // launch's records ended are dropped here. The records that ended them were
+  // enqueued whatever a later block did, so this runs on both paths.
+  iree_hal_streaming_dropped_graph_list_deinitialize(&dropped_graphs);
   IREE_TRACE_ZONE_END(z0);
   return status;
 }

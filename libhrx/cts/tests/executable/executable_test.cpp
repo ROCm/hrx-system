@@ -12,6 +12,17 @@
 
 namespace {
 
+// Kernels defined by libhrx/cts/tests/executable/executable_kernels.c, the
+// source compiled into the HSACO this test loads. Nothing else in that source
+// becomes an export, so these names are the loaded executable's whole export
+// table.
+constexpr const char* kFixtureKernelNames[] = {
+    "hrx_noop",
+    "hrx_store_output",
+    "hrx_transform_nested_pointers",
+    "hrx_spin_dependent_chain",
+};
+
 std::string gpu_architecture(hrx_device_t device) {
   std::array<char, 64> arch = {};
   REQUIRE_OK(hrx().device_get_property(device, HRX_DEVICE_PROPERTY_ARCHITECTURE,
@@ -51,7 +62,21 @@ TEST_CASE_METHOD(HrxTestFixture, "executable_load_lookup_dispatch") {
 
   size_t export_count = 0;
   REQUIRE_OK(hrx().executable_export_count(executable, &export_count));
-  REQUIRE(export_count == 3);
+  REQUIRE(export_count == std::size(kFixtureKernelNames));
+
+  // A count says nothing about which kernels it counted. Resolving every
+  // fixture name to an ordinal of its own pairs with it to say the export table
+  // is exactly this set.
+  std::array<bool, std::size(kFixtureKernelNames)> ordinal_seen = {};
+  for (const char* kernel_name : kFixtureKernelNames) {
+    INFO("kernel " << kernel_name);
+    uint32_t ordinal = UINT32_MAX;
+    REQUIRE_OK(hrx().executable_lookup_export_by_name(executable, kernel_name,
+                                                      &ordinal));
+    REQUIRE(ordinal < export_count);
+    REQUIRE(!ordinal_seen[ordinal]);
+    ordinal_seen[ordinal] = true;
+  }
 
   uint32_t noop_ordinal = UINT32_MAX;
   REQUIRE_OK(hrx().executable_lookup_export_by_name(executable, "hrx_noop",

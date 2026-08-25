@@ -888,6 +888,70 @@ iree_status_t iree_hal_streaming_stream_wait_submitted(
   return iree_ok_status();
 }
 
+// Joins |stream| to the capture |event|'s last capture-time record belongs to,
+// adopting |capture_graph| as |stream|'s own capture when the stream is not
+// already capturing and then adding the event's dependency frontier to the
+// stream's.
+//
+// |capture_graph| is borrowed for the call; a stream that adopts it takes its
+// own reference.
+static iree_status_t iree_hal_streaming_stream_wait_captured_event(
+    iree_hal_streaming_stream_t* stream, iree_hal_streaming_event_t* event,
+    iree_hal_streaming_graph_t* capture_graph) {
+  bool adopt_capture_graph = false;
+  iree_slim_mutex_lock(&stream->mutex);
+  if (stream->capture_status == IREE_HAL_STREAMING_CAPTURE_STATUS_NONE) {
+    adopt_capture_graph = true;
+  } else if (stream->capture_graph != capture_graph) {
+    iree_slim_mutex_unlock(&stream->mutex);
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "event wait crosses different active capture graphs");
+  }
+  iree_slim_mutex_unlock(&stream->mutex);
+
+  if (adopt_capture_graph) {
+    IREE_RETURN_IF_ERROR(iree_hal_streaming_stream_flush(stream));
+
+    unsigned long long capture_id = 0;
+    if (!event->recording_stream) {
+      IREE_RETURN_IF_ERROR(iree_hal_streaming_context_allocate_capture_id(
+          stream->context, &capture_id));
+    }
+
+    iree_slim_mutex_lock(&stream->mutex);
+    if (stream->capture_status == IREE_HAL_STREAMING_CAPTURE_STATUS_NONE) {
+      stream->capture_graph = capture_graph;
+      stream->capture_graph_owned = true;
+      stream->capture_origin = false;
+      stream->capture_joined_to_origin = false;
+      if (event->recording_stream) {
+        stream->capture_mode = event->recording_stream->capture_mode;
+        stream->capture_id = event->recording_stream->capture_id;
+        stream->capture_owner_thread_id =
+            event->recording_stream->capture_owner_thread_id;
+      } else {
+        stream->capture_mode = IREE_HAL_STREAMING_CAPTURE_MODE_GLOBAL;
+        stream->capture_id = capture_id;
+        stream->capture_owner_thread_id = 0;
+      }
+      iree_hal_streaming_graph_retain(stream->capture_graph);
+      iree_hal_streaming_stream_set_capture_status(
+          stream, IREE_HAL_STREAMING_CAPTURE_STATUS_ACTIVE);
+    } else if (stream->capture_graph != capture_graph) {
+      iree_slim_mutex_unlock(&stream->mutex);
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "event wait crosses different active capture graphs");
+    }
+    iree_slim_mutex_unlock(&stream->mutex);
+  }
+
+  return iree_hal_streaming_update_capture_dependencies(
+      stream, event->capture_dependencies, event->capture_dependency_count,
+      IREE_HAL_STREAMING_CAPTURE_DEPENDENCIES_ADD);
+}
+
 iree_status_t iree_hal_streaming_stream_wait_event(
     iree_hal_streaming_stream_t* stream, iree_hal_streaming_event_t* event,
     bool capture_external_wait) {
@@ -911,66 +975,21 @@ iree_status_t iree_hal_streaming_stream_wait_event(
     return iree_ok_status();
   }
 
-  // A wait on an event recorded during capture joins the recording graph.
-  if (event->capture_graph) {
-    bool adopt_capture_graph = false;
-    iree_slim_mutex_lock(&stream->mutex);
-    if (stream->capture_status == IREE_HAL_STREAMING_CAPTURE_STATUS_NONE) {
-      adopt_capture_graph = true;
-    } else if (stream->capture_graph != event->capture_graph) {
-      iree_slim_mutex_unlock(&stream->mutex);
-      IREE_TRACE_ZONE_END(z0);
-      return iree_make_status(
-          IREE_STATUS_INVALID_ARGUMENT,
-          "event wait crosses different active capture graphs");
-    }
-    iree_slim_mutex_unlock(&stream->mutex);
-
-    if (adopt_capture_graph) {
-      IREE_RETURN_AND_END_ZONE_IF_ERROR(
-          z0, iree_hal_streaming_stream_flush(stream));
-
-      unsigned long long capture_id = 0;
-      if (!event->recording_stream) {
-        IREE_RETURN_AND_END_ZONE_IF_ERROR(
-            z0, iree_hal_streaming_context_allocate_capture_id(stream->context,
-                                                               &capture_id));
-      }
-
-      iree_slim_mutex_lock(&stream->mutex);
-      if (stream->capture_status == IREE_HAL_STREAMING_CAPTURE_STATUS_NONE) {
-        stream->capture_graph = event->capture_graph;
-        stream->capture_graph_owned = true;
-        stream->capture_origin = false;
-        stream->capture_joined_to_origin = false;
-        if (event->recording_stream) {
-          stream->capture_mode = event->recording_stream->capture_mode;
-          stream->capture_id = event->recording_stream->capture_id;
-          stream->capture_owner_thread_id =
-              event->recording_stream->capture_owner_thread_id;
-        } else {
-          stream->capture_mode = IREE_HAL_STREAMING_CAPTURE_MODE_GLOBAL;
-          stream->capture_id = capture_id;
-          stream->capture_owner_thread_id = 0;
-        }
-        iree_hal_streaming_graph_retain(stream->capture_graph);
-        iree_hal_streaming_stream_set_capture_status(
-            stream, IREE_HAL_STREAMING_CAPTURE_STATUS_ACTIVE);
-      } else if (stream->capture_graph != event->capture_graph) {
-        iree_slim_mutex_unlock(&stream->mutex);
-        IREE_TRACE_ZONE_END(z0);
-        return iree_make_status(
-            IREE_STATUS_INVALID_ARGUMENT,
-            "event wait crosses different active capture graphs");
-      }
-      iree_slim_mutex_unlock(&stream->mutex);
-    }
-
-    IREE_RETURN_AND_END_ZONE_IF_ERROR(
-        z0, iree_hal_streaming_update_capture_dependencies(
-                stream, event->capture_dependencies,
-                event->capture_dependency_count,
-                IREE_HAL_STREAMING_CAPTURE_DEPENDENCIES_ADD));
+  // A capture-time record leaves the event naming the graph it was captured
+  // into. A wait on such an event joins that capture and submits no timeline
+  // wait. The association is read once and held for the whole branch, so the
+  // graph the branch works from cannot be freed underneath it.
+  iree_hal_streaming_graph_t* capture_graph =
+      iree_hal_streaming_event_acquire_capture_graph(event);
+  if (capture_graph) {
+    const iree_status_t capture_status =
+        iree_hal_streaming_stream_wait_captured_event(stream, event,
+                                                      capture_graph);
+    // Released with no lock held: the last reference to a graph frees the
+    // allocations it owns, which synchronizes every context and relocks this
+    // stream.
+    iree_hal_streaming_graph_release(capture_graph);
+    IREE_RETURN_AND_END_ZONE_IF_ERROR(z0, capture_status);
     IREE_TRACE_ZONE_END(z0);
     return iree_ok_status();
   }
@@ -1066,7 +1085,7 @@ iree_status_t iree_hal_streaming_stream_wait_event(
     iree_slim_mutex_unlock(&stream->mutex);
   }
 
-  iree_hal_semaphore_release(recorded_point.semaphore);
+  iree_hal_streaming_event_release_recorded_point(&recorded_point);
 
   // The reservation holds the dependency slot from before the submission so a
   // concurrent reservation for the same source stream cannot displace it. It
