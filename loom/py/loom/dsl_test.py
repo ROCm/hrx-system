@@ -117,7 +117,6 @@ from loom.dsl import (
     EnumDef,
     FreshResult,
     FuncLikeInterface,
-    FuncLikeInterfaceFlag,
     HasAllStaticRankOneVector,
     HasAllStaticVector,
     HasAncestor,
@@ -1020,14 +1019,6 @@ class TestInterfaces:
         assert CallLikeKind.SEMANTIC.value == "semantic"
         assert CallLikeKind.LOW_INTERNAL.value == "low_internal"
         assert CallLikeKind.LOW_INVOKE.value == "low_invoke"
-
-    def test_func_like_interface_flags(self) -> None:
-        interface = FuncLikeInterface(
-            callee="callee",
-            flags=(FuncLikeInterfaceFlag.KERNEL_ENTRY,),
-        )
-
-        assert interface.flags == (FuncLikeInterfaceFlag.KERNEL_ENTRY,)
 
     def test_target_like_interface_defaults_to_no_extensions(self) -> None:
         interface = TargetLikeInterface(symbol="symbol", selector="kind")
@@ -3332,6 +3323,14 @@ class TestSymbolKernelContract:
                 name="kernel",
                 interfaces=["kernel"],
                 kernel_contract=SymbolKernelContract(workload_region="config"),
+            )
+
+    def test_kernel_entry_interface_requires_device_abi(self) -> None:
+        with _raises(ValueError, match="requires the func_like interface"):
+            SymbolDefinition(
+                field="callee",
+                name="kernel entry",
+                interfaces=["kernel_entry"],
             )
 
     def test_operand_backed_signature_owns_every_operand(self) -> None:

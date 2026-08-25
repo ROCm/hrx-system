@@ -21,7 +21,6 @@ from loom.dsl import (
     CallLikeKind,
     EffectKind,
     FuncLikeInterface,
-    FuncLikeInterfaceFlag,
     LoopLikeInterface,
     MemoryAccessInterface,
     MemoryAccessOperationKind,
@@ -171,7 +170,6 @@ INTERFACES: tuple[InterfaceSpec, ...] = (
             InterfaceFieldSpec("template_family", "template_family_attr_index", "attr"),
             InterfaceFieldSpec("priority", "priority_attr_index", "attr"),
             InterfaceFieldSpec("args", "args_operand_field_index", "operand"),
-            InterfaceFieldSpec("flags", "flags", "func_like_flags"),
         ),
     ),
     InterfaceSpec(
@@ -363,13 +361,6 @@ def _resolve_interface_field(
         if not isinstance(py_value, CallLikeKind):
             raise ValueError(f"{interface_name} field {field_spec.py_field!r}: expected CallLikeKind, got {py_value!r}")
         return CALL_LIKE_KIND_MAP[py_value]
-    if field_spec.kind == "func_like_flags":
-        if not isinstance(py_value, tuple) or not all(isinstance(flag, FuncLikeInterfaceFlag) for flag in py_value):
-            raise ValueError(f"{interface_name} field {field_spec.py_field!r}: expected tuple[FuncLikeInterfaceFlag, ...], got {py_value!r}")
-        flag_names = {
-            FuncLikeInterfaceFlag.KERNEL_ENTRY: "LOOM_FUNC_LIKE_FLAG_KERNEL_ENTRY",
-        }
-        return " | ".join(flag_names[flag] for flag in py_value) or "0"
     if field_spec.kind == "c_ptr":
         if isinstance(iface, TargetLikeInterface) and field_spec.py_field == "descriptor" and iface.bundle_table is not None:
             descriptor = iface.descriptor or f"{c_prefix(op)}_target_like_descriptor"
@@ -630,6 +621,9 @@ def emit_interface_vtable(op: Op, spec: InterfaceSpec, lines: list[str]) -> None
         value_str = _resolve_interface_field(op, iface, field_spec, spec.name)
         lines.append(f"    .{field_spec.c_field} = {value_str},")
     if isinstance(iface, FuncLikeInterface):
+        implements_kernel_entry = op.symbol_def is not None and "kernel_entry" in op.symbol_def.interfaces
+        func_like_flags = "LOOM_FUNC_LIKE_FLAG_KERNEL_ENTRY" if implements_kernel_entry else "0"
+        lines.append(f"    .flags = {func_like_flags},")
         layout = compute_layout(op)
         segment_count = len(op.operands) if iface.args is not None and layout.segmented_operands else 0
         lines.append(f"    .args_operand_segment_count = {segment_count},")

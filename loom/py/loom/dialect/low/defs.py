@@ -81,7 +81,6 @@ from loom.dsl import (
     EnumCase,
     EnumDef,
     FuncLikeInterface,
-    FuncLikeInterfaceFlag,
     HasParent,
     ImplicitTerminator,
     IterArgsMatchResults,
@@ -493,7 +492,6 @@ _KERNEL_FUNC_LIKE_COMMON: dict[str, Any] = dict(
     export_symbol="export_symbol",
     export_linkage="export_linkage",
     predicates="predicates",
-    flags=(FuncLikeInterfaceFlag.KERNEL_ENTRY,),
 )
 
 # ============================================================================
@@ -554,7 +552,7 @@ low_kernel_def = Op(
     symbol_def=SymbolDefinition(
         field="callee",
         name="function",
-        interfaces=["func_like"],
+        interfaces=["func_like", "kernel_entry"],
         bytecode_kind="LOOM_SYMBOL_FUNC_DEF",
         fact_domain="loom_func_symbol_fact_domain",
         retain="retain",

@@ -58,6 +58,8 @@ enum loom_symbol_interface_bits_e {
   LOOM_SYMBOL_INTERFACE_TEMPLATE_FAMILY = 1u << 10,
   // Symbol defines a concrete compile-time template implementation.
   LOOM_SYMBOL_INTERFACE_TEMPLATE_PROVIDER = 1u << 11,
+  // Symbol defines or declares an executable kernel entry ABI.
+  LOOM_SYMBOL_INTERFACE_KERNEL_ENTRY = 1u << 12,
 };
 
 enum loom_symbol_reference_role_e {
