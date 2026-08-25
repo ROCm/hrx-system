@@ -334,6 +334,33 @@ def test_verifier_runs_declarative_constraints() -> None:
     assert _diagnostic_text_contains(diagnostics, "SameType constraint violated")
 
 
+def test_python_verifier_checks_condition_forwarding() -> None:
+    from loom.builders import default_ops
+
+    parser = Parser()
+    parser.register_ops(default_ops())
+    parser.register_types(ALL_BUILTIN_TYPES)
+    module = parser.parse(
+        """
+func.def @f(%condition: i1, %initial: index) -> (index) {
+  %result = scf.while(%before = %initial : index) -> (index) {
+    scf.condition %condition : i1
+  } do(%body: index) {
+    scf.yield %body : index
+  }
+  func.return %result : index
+}
+"""
+    )
+
+    diagnostics = verify_module(module)
+
+    assert _diagnostic_text_contains(
+        diagnostics,
+        "ConditionForwardedCountMatchesBlockArgs constraint violated",
+    )
+
+
 def test_verifier_defers_template_ancestor_requirement() -> None:
     diagnostics = _verify_required_ancestor_in_template(
         Operation(name="test.requires_context")

@@ -399,9 +399,8 @@ loom_bstring_t loom_keyword_bstring(loom_keyword_id_t keyword_id);
 // verifier checks. Each op's vtable points to an array of constraint
 // entries. The verifier walks the array, interpreting each by kind.
 //
-// Per-op cost: 16 bytes .rodata per constraint, zero .text. The
-// interpreter is one switch statement (~12 cases). Adding constraint
-// kinds adds a case to the switch, not code per op.
+// Per-op cost: 10 bytes .rodata per constraint, zero .text. Adding constraint
+// kinds extends one shared interpreter, not every op's generated code.
 //
 // Field reference categories.
 enum loom_field_category_e {
@@ -510,6 +509,22 @@ enum loom_constraint_relation_e {
   // the same position. Args: (region field, variadic value field | region
   // field). Used by BlockArgsMatchTypes and BlockArgsMatchElementTypes.
   LOOM_RELATION_REGION_ARG_MATCH,
+
+  // The number of values forwarded after a condition region terminator's
+  // leading predicate matches another region's entry block argument count.
+  // The third arg names the value field that validates the target block args;
+  // malformed target args are diagnosed by their own region constraints.
+  // Args: (condition region field, target region field, target variadic value
+  // field). Used by ConditionForwardedCountMatchesBlockArgs.
+  LOOM_RELATION_CONDITION_FORWARD_COUNT,
+
+  // Each value forwarded after a condition region terminator's leading
+  // predicate has the same type as the corresponding entry block argument of
+  // another region. The third arg names the value field that validates the
+  // target block args. Args: (condition region field, target region field,
+  // target variadic value field). Used by
+  // ConditionForwardedTypesMatchBlockArgs.
+  LOOM_RELATION_CONDITION_FORWARD_MATCH,
 
   // A region's terminator (yield) operand count matches the element
   // count of a variadic value field. Args: (region field, variadic

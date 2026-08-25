@@ -38,6 +38,8 @@ const char* loom_constraint_relation_name(loom_constraint_relation_t relation) {
       [LOOM_RELATION_ATTR_IN_RANGE_RANK] = "AttrInRangeRank",
       [LOOM_RELATION_REGION_ARG_COUNT] = "RegionArgCount",
       [LOOM_RELATION_REGION_ARG_MATCH] = "RegionArgMatch",
+      [LOOM_RELATION_CONDITION_FORWARD_COUNT] = "ConditionForwardCount",
+      [LOOM_RELATION_CONDITION_FORWARD_MATCH] = "ConditionForwardMatch",
       [LOOM_RELATION_YIELD_COUNT] = "YieldCount",
       [LOOM_RELATION_YIELD_MATCH] = "YieldMatch",
       [LOOM_RELATION_VARIADIC_MATCH] = "VariadicMatch",

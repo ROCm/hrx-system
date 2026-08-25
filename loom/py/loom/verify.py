@@ -32,6 +32,7 @@ from loom.ir import (
     Module,
     Operation,
     PoolType,
+    Region,
     RegisterType,
     ScalarType,
     ScalarTypeKind,
@@ -42,6 +43,7 @@ from loom.ir import (
     SymbolNameSet,
     Type,
     TypeKind,
+    Value,
 )
 
 __all__ = [
@@ -85,6 +87,14 @@ class VerifierRegistry:
     def layout(self, op_decl: Op) -> FieldLayout:
         """Return the positional field layout for an op declaration."""
         return self.layout_by_name[op_decl.name]
+
+
+@dataclass(frozen=True, slots=True)
+class _ConstraintRegionValue:
+    """Resolved region data consumed by declarative constraint predicates."""
+
+    entry_args: tuple[Value | None, ...] | None
+    terminator_operands: tuple[Value | None, ...] | None
 
 
 @dataclass(slots=True)
@@ -609,11 +619,18 @@ class ModuleVerifier:
                     case FieldKind.ATTR:
                         values[field_name] = operation.attributes.get(field_name)
                     case FieldKind.REGION:
-                        values[field_name] = (
-                            resolved.regions(field_name)
-                            if field_desc.variadic
-                            else resolved.region(field_name)
-                        )
+                        region_decl = op_decl.regions[field_desc.index]
+                        if field_desc.variadic:
+                            values[field_name] = [
+                                self._constraint_region_value(
+                                    region, region_decl.terminator
+                                )
+                                for region in resolved.regions(field_name)
+                            ]
+                        else:
+                            values[field_name] = self._constraint_region_value(
+                                resolved.region(field_name), region_decl.terminator
+                            )
                     case FieldKind.SUCCESSOR:
                         values[field_name] = (
                             resolved.successors(field_name)
@@ -628,6 +645,42 @@ class ModuleVerifier:
             )
             return None
         return values
+
+    def _constraint_region_value(
+        self,
+        region: Region | None,
+        expected_terminator: str | None,
+    ) -> _ConstraintRegionValue:
+        """Resolves a region without hiding structural failures from its owner."""
+        if region is None or not region.blocks:
+            return _ConstraintRegionValue(None, None)
+        entry_block = region.blocks[0]
+        entry_args = tuple(
+            self.module.values[value_id]
+            if 0 <= value_id < len(self.module.values)
+            else None
+            for value_id in entry_block.arg_ids
+        )
+        if not entry_block.ops:
+            return _ConstraintRegionValue(entry_args, None)
+        terminator = entry_block.ops[-1]
+        terminator_decl = self.registry.op(terminator.name)
+        if (
+            terminator_decl is None
+            or not terminator_decl.is_terminator
+            or (
+                expected_terminator is not None
+                and terminator.name != expected_terminator
+            )
+        ):
+            return _ConstraintRegionValue(entry_args, None)
+        terminator_operands = tuple(
+            self.module.values[value_id]
+            if 0 <= value_id < len(self.module.values)
+            else None
+            for value_id in terminator.operands
+        )
+        return _ConstraintRegionValue(entry_args, terminator_operands)
 
     def _verify_symbol_refs(
         self,

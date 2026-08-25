@@ -151,7 +151,7 @@ func.def @while_after_arg_type_mismatch(%cond: i1, %init: index) -> (index) {
 // scf.condition forwards one value for each after-region entry block arg.
 func.def @while_condition_forward_count_mismatch(%cond: i1, %init: index) -> (index) {
   %r = scf.while(%before = %init : index) -> (index) {
-    // ERROR@+1: STRUCTURE/013 "forwarded" "0" "after block args" "1"
+    // ERROR@+1: STRUCTURE/013 "forwarded" "0" "target block args" "1"
     scf.condition %cond : i1
   } do(%body: index) {
     scf.yield %body : index
@@ -164,7 +164,7 @@ func.def @while_condition_forward_count_mismatch(%cond: i1, %init: index) -> (in
 // scf.condition forwarded values must match the after-region block arg types.
 func.def @while_condition_forward_type_mismatch(%cond: i1, %init: index, %wrong: f32) -> (index) {
   %r = scf.while(%before = %init : index) -> (index) {
-    // ERROR@+1: TYPE/001 "forwarded[0]" "after[0]"
+    // ERROR@+1: TYPE/001 "forwarded[0]" "target[0]"
     scf.condition %cond, %wrong : i1, f32
   } do(%body: index) {
     scf.yield %body : index

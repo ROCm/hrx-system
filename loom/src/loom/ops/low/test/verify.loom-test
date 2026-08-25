@@ -634,7 +634,7 @@ test.target<low_core> @test_target
 
 low.func.def target<test.low.core>(@test_target) @while_condition_forward_count_mismatch(%condition: reg<test.i32>, %init: reg<test.i32>) -> (reg<test.i32>) {
   %result = low.scf.while(%before = %init : reg<test.i32>) -> (reg<test.i32>) {
-    // ERROR@+1: STRUCTURE/013 "forwarded" "0" "after block args" "1"
+    // ERROR@+1: STRUCTURE/013 "forwarded" "0" "target block args" "1"
     low.scf.condition %condition : reg<test.i32>
   } do(%body: reg<test.i32>) {
     low.scf.yield %body : reg<test.i32>
@@ -648,7 +648,7 @@ test.target<low_core> @test_target
 
 low.func.def target<test.low.core>(@test_target) @while_condition_forward_type_mismatch(%condition: reg<test.i32>, %init: reg<test.i32>, %wrong: reg<test.ptr>) -> (reg<test.i32>) {
   %result = low.scf.while(%before = %init : reg<test.i32>) -> (reg<test.i32>) {
-    // ERROR@+1: TYPE/001 "forwarded[0]" "after[0]"
+    // ERROR@+1: TYPE/001 "forwarded[0]" "target[0]"
     low.scf.condition %condition, %wrong : reg<test.i32>, reg<test.ptr>
   } do(%body: reg<test.i32>) {
     low.scf.yield %body : reg<test.i32>

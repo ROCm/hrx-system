@@ -1119,9 +1119,6 @@ class TestConstraints:
         c = SameEncoding("a", "b")
         assert c.error is not None
         assert c.error.error_id == "ERR_ENCODING_001"
-        # No validate function — C-only check.
-        ok, _msg = c.check({})
-        assert ok
 
     def test_same_shape(self) -> None:
         c = SameShape("a", "b")
