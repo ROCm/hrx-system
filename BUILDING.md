@@ -10,6 +10,11 @@ This repository has two supported build systems:
 CMake, CTest, and project scripts. Anything `dev.py` does must also be possible
 with the underlying tools directly.
 
+Build-system integration follows the same ownership boundary. Tests that
+configure or drive CMake are registered only in CTest; the Bazel build and test
+graphs neither invoke CMake nor require it to be installed. Bazel-to-CMake
+conversion is an explicit source-generation and presubmit step.
+
 ## Quick Start
 
 Bazel source-tree build:
@@ -39,129 +44,6 @@ or:
 
 ```bash
 python dev.py cmake hook
-```
-
-## Windows Host Builds
-
-Windows builds require an x64 MSVC ABI environment even when `clang-cl` is the
-host compiler. Install Python 3.12, Visual Studio 2022 Build Tools with the x64
-C++ tools and a Windows SDK, and Ninja. Install LLVM separately when building
-with `clang-cl`. The CI CMake version is 3.31.6; using that version locally
-removes an otherwise unhelpful source of generator differences.
-
-Start from an x64 Visual Studio developer shell so `INCLUDE`, `LIB`, the SDK
-tools, and the MSVC linker are available. Git for Windows also ships a Unix
-program named `link.exe`, so compiler activation order is load-bearing:
-
-```powershell
-where.exe cl
-where.exe link
-```
-
-The first `link.exe` must be the MSVC linker, not Git's `usr\bin\link.exe`.
-Create the repository tool environment and add the CI-pinned CMake plus Ninja:
-
-```powershell
-python dev.py cmake setup --venv
-.\.venv\Scripts\python.exe -m pip install --upgrade cmake==3.31.6 ninja
-python dev.py cmake doctor
-```
-
-Keep Windows build trees short and keep one tree per compiler. The `C:\b` CMake
-trees below remain within the legacy Win32 path limit and do not require the
-machine-wide `LongPathsEnabled` policy. Bazel has a different host contract:
-its managed Python runfiles exceed the legacy limit and use symbolic links, so
-Windows Bazel hosts require `LongPathsEnabled` plus Developer Mode or an
-equivalent symbolic-link policy. Provision both policies in the base image for
-CI runners that cannot elevate during a job. `python dev.py bazel configure`
-and `python dev.py bazel doctor` diagnose those capabilities.
-
-Windows Bazel builds use `clang-cl` by default and require `BAZEL_LLVM` to name
-the LLVM installation root. The MSVC ABI tools and SDK still come from the
-active Visual Studio developer environment. Configure once, then build the
-normal Loom tool surface:
-
-```powershell
-$env:BAZEL_LLVM = 'C:\Program Files\LLVM'
-python dev.py bazel setup --venv
-python dev.py bazel configure
-python dev.py bazel build `
-  //loom/src/loom/tools/iree-run-loom `
-  //loom/src/loom/tools/loom-compile `
-  //loom/binding/c:loomc
-```
-
-Use the explicit MSVC lane when checking both host compilers. It clears the
-clang-cl execution-platform selection while preserving the same configured
-feature and dependency graph:
-
-```powershell
-python dev.py bazel build `
-  //loom/src/loom/tools/iree-run-loom `
-  //loom/src/loom/tools/loom-compile `
-  //loom/binding/c:loomc `
-  --config=windows-msvc
-```
-
-The following is the host-only Loom baseline: it builds the VM and x86 target
-paths without requiring ROCm, Vulkan, WebGPU, or libHRX.
-
-```powershell
-$baseOptions = @(
-  '-GNinja'
-  '-DCMAKE_BUILD_TYPE=RelWithDebInfo'
-  '-DIREE_BUILD_TESTS=ON'
-  '-DIREE_BUILD_BENCHMARKS=ON'
-  '-DLIBHRX_BUILD=OFF'
-  '-DIREE_DEPENDENCY_MODE=pinned'
-  '-DIREE_HAL_DRIVER_AMDGPU=OFF'
-  '-DIREE_HAL_DRIVER_HIP=OFF'
-  '-DIREE_HAL_DRIVER_VULKAN=OFF'
-  '-DIREE_HAL_DRIVER_WEBGPU=OFF'
-  '-DLOOM_TARGET_AMDGPU=OFF'
-  '-DLOOM_TARGET_SPIRV=OFF'
-  '-DLOOM_TARGET_WASM=OFF'
-)
-
-$llvmBin = 'C:\Program Files\LLVM\bin'
-$env:PATH = "$llvmBin;$env:PATH"
-$env:CC = "$llvmBin\clang-cl.exe"
-$env:CXX = "$llvmBin\clang-cl.exe"
-$env:AR = "$llvmBin\llvm-lib.exe"
-python dev.py --cmake-build-dir C:\b\hrx-clang cmake configure @baseOptions
-python dev.py --cmake-build-dir C:\b\hrx-clang cmake build `
-  loom-compile iree-run-loom loom-check loom-format loom-opt loom-link `
-  iree-test-loom iree-benchmark-loom --parallel 8
-python dev.py --cmake-build-dir C:\b\hrx-clang cmake test `
-  -R '^loom/tools/(.*execution_test|loom-check/test/.*)$' -j 8
-```
-
-Reset the compiler selection for the distinct MSVC tree. The separate build
-directory, rather than shell state, keeps compiler identities from leaking
-across configurations:
-
-```powershell
-$env:CC = 'cl.exe'
-$env:CXX = 'cl.exe'
-$env:AR = 'lib.exe'
-python dev.py --cmake-build-dir C:\b\hrx-msvc cmake configure @baseOptions
-python dev.py --cmake-build-dir C:\b\hrx-msvc cmake build `
-  loom-compile iree-run-loom loom-check loom-format loom-opt loom-link `
-  iree-test-loom iree-benchmark-loom --parallel 8
-python dev.py --cmake-build-dir C:\b\hrx-msvc cmake test `
-  -R '^loom/tools/(.*execution_test|loom-check/test/.*)$' -j 8
-```
-
-Repository-wide Loom hygiene has a broader compiler-capability contract than
-the host-only smoke: `loom-format` verifies every tracked standalone module
-with the AMDGPU, IREE VM, LLVM IR, SPIR-V, and x86 target descriptors. A CMake
-tree used for `cmake precommit` therefore needs AMDGPU and SPIR-V target support
-even when their HAL drivers remain disabled:
-
-```powershell
-python dev.py --cmake-build-dir C:\b\hrx-clang-presubmit cmake configure `
-  @baseOptions -DLOOM_TARGET_AMDGPU=ON -DLOOM_TARGET_SPIRV=ON
-python dev.py --cmake-build-dir C:\b\hrx-clang-presubmit cmake precommit
 ```
 
 ## Command Shape
@@ -638,3 +520,150 @@ ctest --test-dir build/cmake --output-on-failure -R hrx
 In the raw pipeline, `selected-root-a selected-root-b` stands for the stable
 union produced by joining the selected CTest names with the validated
 `iree_ctest_build_targets.json` catalog generated beside the CTest files.
+
+## Platform-Specific Host Builds
+
+### Windows
+
+Windows builds require an x64 MSVC ABI environment even when `clang-cl` is the
+host compiler. Install Python 3.12, Visual Studio 2022 Build Tools with the x64
+C++ tools and a Windows SDK, and Ninja. Install LLVM separately when building
+with `clang-cl`. The CI CMake version is 3.31.6; using that version locally
+removes an otherwise unhelpful source of generator differences.
+
+Start from an x64 Visual Studio developer shell so `INCLUDE`, `LIB`, the SDK
+tools, and the MSVC linker are available. Git for Windows also ships a Unix
+program named `link.exe`, so compiler activation order is load-bearing:
+
+```powershell
+where.exe cl
+where.exe link
+```
+
+The first `link.exe` must be the MSVC linker, not Git's `usr\bin\link.exe`.
+Create the repository tool environment and add the CI-pinned CMake plus Ninja:
+
+```powershell
+python dev.py cmake setup --venv
+.\.venv\Scripts\python.exe -m pip install --upgrade cmake==3.31.6 ninja
+python dev.py cmake doctor
+```
+
+Keep Windows build trees short and keep one tree per compiler. The `C:\b` CMake
+trees below remain within the legacy Win32 path limit and do not require the
+machine-wide `LongPathsEnabled` policy. Bazel has a different host contract:
+its managed Python runfiles exceed the legacy limit and use symbolic links, so
+Windows Bazel hosts require `LongPathsEnabled` plus Developer Mode or an
+equivalent symbolic-link policy. Provision both policies in the base image for
+CI runners that cannot elevate during a job. `python dev.py bazel configure`
+and `python dev.py bazel doctor` diagnose those capabilities.
+
+Windows Firewall displays an interactive approval prompt when a newly built
+executable begins listening for inbound connections. Approving one executable
+is not durable because build output paths change across configurations and
+rebuilds. On an unattended development or CI host, disable listening
+notifications for every network profile from a normal PowerShell session with
+one elevated command:
+
+```powershell
+Start-Process powershell.exe -Verb RunAs -Wait -ArgumentList '-NoProfile','-Command','Set-NetFirewallProfile -Profile Domain,Private,Public -NotifyOnListen False'
+```
+
+This leaves Windows Firewall enabled and does not add an inbound allow rule;
+remote connections remain subject to the active firewall policy. Verify the
+effective setting with:
+
+```powershell
+Get-NetFirewallProfile | Select-Object Name, Enabled, NotifyOnListen
+```
+
+Restore the interactive notifications with the same command and
+`-NotifyOnListen True`.
+
+Windows Bazel builds use `clang-cl` by default and require `BAZEL_LLVM` to name
+the LLVM installation root. The MSVC ABI tools and SDK still come from the
+active Visual Studio developer environment. Configure once, then build the
+normal Loom tool surface:
+
+```powershell
+$env:BAZEL_LLVM = 'C:\Program Files\LLVM'
+python dev.py bazel setup --venv
+python dev.py bazel configure
+python dev.py bazel build `
+  //loom/src/loom/tools/iree-run-loom `
+  //loom/src/loom/tools/loom-compile `
+  //loom/binding/c:loomc
+```
+
+Use the explicit MSVC lane when checking both host compilers. It clears the
+clang-cl execution-platform selection while preserving the same configured
+feature and dependency graph:
+
+```powershell
+python dev.py bazel build `
+  //loom/src/loom/tools/iree-run-loom `
+  //loom/src/loom/tools/loom-compile `
+  //loom/binding/c:loomc `
+  --config=windows-msvc
+```
+
+The following is the host-only Loom baseline: it builds the VM and x86 target
+paths without requiring ROCm, Vulkan, WebGPU, or libHRX.
+
+```powershell
+$baseOptions = @(
+  '-GNinja'
+  '-DCMAKE_BUILD_TYPE=RelWithDebInfo'
+  '-DIREE_BUILD_TESTS=ON'
+  '-DIREE_BUILD_BENCHMARKS=ON'
+  '-DLIBHRX_BUILD=OFF'
+  '-DIREE_DEPENDENCY_MODE=pinned'
+  '-DIREE_HAL_DRIVER_AMDGPU=OFF'
+  '-DIREE_HAL_DRIVER_HIP=OFF'
+  '-DIREE_HAL_DRIVER_VULKAN=OFF'
+  '-DIREE_HAL_DRIVER_WEBGPU=OFF'
+  '-DLOOM_TARGET_AMDGPU=OFF'
+  '-DLOOM_TARGET_SPIRV=OFF'
+  '-DLOOM_TARGET_WASM=OFF'
+)
+
+$llvmBin = 'C:\Program Files\LLVM\bin'
+$env:PATH = "$llvmBin;$env:PATH"
+$env:CC = "$llvmBin\clang-cl.exe"
+$env:CXX = "$llvmBin\clang-cl.exe"
+$env:AR = "$llvmBin\llvm-lib.exe"
+python dev.py --cmake-build-dir C:\b\hrx-clang cmake configure @baseOptions
+python dev.py --cmake-build-dir C:\b\hrx-clang cmake build `
+  loom-compile iree-run-loom loom-check loom-format loom-opt loom-link `
+  iree-test-loom iree-benchmark-loom --parallel 8
+python dev.py --cmake-build-dir C:\b\hrx-clang cmake test `
+  -R '^loom/tools/(.*execution_test|loom-check/test/.*)$' -j 8
+```
+
+Reset the compiler selection for the distinct MSVC tree. The separate build
+directory, rather than shell state, keeps compiler identities from leaking
+across configurations:
+
+```powershell
+$env:CC = 'cl.exe'
+$env:CXX = 'cl.exe'
+$env:AR = 'lib.exe'
+python dev.py --cmake-build-dir C:\b\hrx-msvc cmake configure @baseOptions
+python dev.py --cmake-build-dir C:\b\hrx-msvc cmake build `
+  loom-compile iree-run-loom loom-check loom-format loom-opt loom-link `
+  iree-test-loom iree-benchmark-loom --parallel 8
+python dev.py --cmake-build-dir C:\b\hrx-msvc cmake test `
+  -R '^loom/tools/(.*execution_test|loom-check/test/.*)$' -j 8
+```
+
+Repository-wide Loom hygiene has a broader compiler-capability contract than
+the host-only smoke: `loom-format` verifies every tracked standalone module
+with the AMDGPU, IREE VM, LLVM IR, SPIR-V, and x86 target descriptors. A CMake
+tree used for `cmake precommit` therefore needs AMDGPU and SPIR-V target support
+even when their HAL drivers remain disabled:
+
+```powershell
+python dev.py --cmake-build-dir C:\b\hrx-clang-presubmit cmake configure `
+  @baseOptions -DLOOM_TARGET_AMDGPU=ON -DLOOM_TARGET_SPIRV=ON
+python dev.py --cmake-build-dir C:\b\hrx-clang-presubmit cmake precommit
+```
