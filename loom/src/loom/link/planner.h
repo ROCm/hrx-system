@@ -47,6 +47,14 @@ typedef enum loom_link_plan_test_symbol_policy_e {
   LOOM_LINK_PLAN_TEST_SYMBOL_STRIP = 1,
 } loom_link_plan_test_symbol_policy_t;
 
+// Policy for projecting dependencies reached through symbol references.
+typedef enum loom_link_plan_dependency_policy_e {
+  // Retain complete referenced symbols for ordinary source composition.
+  LOOM_LINK_PLAN_DEPENDENCY_COMPLETE = 0,
+  // Preserve the exact semantic interfaces requested by each reference.
+  LOOM_LINK_PLAN_DEPENDENCY_REQUESTED_FACETS = 1,
+} loom_link_plan_dependency_policy_t;
+
 // Reason a planned symbol is live.
 typedef enum loom_link_plan_live_reason_e {
   // Selected because archive mode includes every linkable symbol.
@@ -108,6 +116,8 @@ typedef struct loom_link_plan_options_t {
     // Root facet requests in caller-defined stable order.
     const loom_link_plan_root_facet_t* values;
   } root_facets;
+  // Dependency projection policy. Zero defaults to complete source symbols.
+  loom_link_plan_dependency_policy_t dependency_policy;
 } loom_link_plan_options_t;
 
 // One live symbol selection in a plan.

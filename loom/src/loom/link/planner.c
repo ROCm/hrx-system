@@ -973,24 +973,56 @@ static iree_status_t loom_link_plan_select_global_reference(
 // Closure expansion
 //===----------------------------------------------------------------------===//
 
+// Maps one authored symbol-reference contract to the semantic provider
+// projection needed by that use. Logical launches consume configuration but
+// not implementation, while physical dispatches consume only the entry
+// contract. Every other reference retains the complete-symbol behavior.
+static loom_link_plan_facet_request_t loom_link_plan_dependency_facet_request(
+    const loom_link_plan_options_t* options,
+    loom_symbol_interface_flags_t target_interfaces) {
+  if (!options ||
+      options->dependency_policy == LOOM_LINK_PLAN_DEPENDENCY_COMPLETE) {
+    return (loom_link_plan_facet_request_t){
+        .mode = LOOM_LINK_PLAN_FACET_REQUEST_COMPLETE,
+    };
+  }
+  IREE_ASSERT(options->dependency_policy ==
+              LOOM_LINK_PLAN_DEPENDENCY_REQUESTED_FACETS);
+  const bool requests_kernel =
+      iree_any_bit_set(target_interfaces, LOOM_SYMBOL_INTERFACE_KERNEL);
+  const bool requests_kernel_entry =
+      iree_any_bit_set(target_interfaces, LOOM_SYMBOL_INTERFACE_KERNEL_ENTRY);
+  IREE_ASSERT(!(requests_kernel && requests_kernel_entry));
+  if (requests_kernel) {
+    return (loom_link_plan_facet_request_t){
+        .mode = LOOM_LINK_PLAN_FACET_REQUEST_EXACT,
+        .kind = LOOM_LINK_SYMBOL_FACET_KERNEL_CONFIGURATION,
+    };
+  }
+  return (loom_link_plan_facet_request_t){
+      .mode = requests_kernel_entry ? LOOM_LINK_PLAN_FACET_REQUEST_PRIMARY
+                                    : LOOM_LINK_PLAN_FACET_REQUEST_COMPLETE,
+  };
+}
+
 static iree_status_t loom_link_plan_select_dependency_target(
     loom_link_plan_t* plan, const loom_link_plan_options_t* options,
     const loom_link_module_index_module_t* module, uint32_t target_symbol_id,
+    loom_symbol_interface_flags_t target_interfaces,
     loom_link_plan_live_cause_t cause) {
   IREE_ASSERT_LT(target_symbol_id, module->symbol_count);
   const loom_link_module_index_symbol_t* target =
       loom_link_module_index_symbol_at(
           plan->index, module->symbol_start_ordinal + target_symbol_id);
   IREE_ASSERT(target);
+  const loom_link_plan_facet_request_t request =
+      loom_link_plan_dependency_facet_request(options, target_interfaces);
   if (target->identity == LOOM_LINK_SYMBOL_IDENTITY_GLOBAL) {
-    const loom_link_plan_facet_request_t request = {
-        .mode = LOOM_LINK_PLAN_FACET_REQUEST_COMPLETE,
-    };
     return loom_link_plan_select_global_reference(plan, options, target,
                                                   request, cause);
   }
-  return loom_link_plan_select_required_symbol(
-      plan, options, target, cause,
+  return loom_link_plan_select_required_symbol_facets(
+      plan, options, target, request, cause,
       /*out_new_symbol_plan_ordinal=*/NULL);
 }
 
@@ -1000,11 +1032,13 @@ static iree_status_t loom_link_plan_expand_module_dependencies(
     loom_link_plan_live_cause_t cause) {
   const uint32_t count = module->dependencies.root_count;
   const uint32_t* dependencies = module->dependencies.values;
+  const loom_symbol_interface_flags_t* target_interfaces =
+      module->dependencies.target_interfaces;
   for (uint32_t i = 0; i < count; ++i) {
     IREE_ASSERT_EQ(module->dependencies.source_root_region_indices_plus_one[i],
                    0);
     IREE_RETURN_IF_ERROR(loom_link_plan_select_dependency_target(
-        plan, options, module, dependencies[i], cause));
+        plan, options, module, dependencies[i], target_interfaces[i], cause));
   }
   return iree_ok_status();
 }
@@ -1017,6 +1051,8 @@ static iree_status_t loom_link_plan_expand_symbol_facet_dependencies(
   if (symbol->dependencies.count == 0) return iree_ok_status();
   const uint32_t first = symbol->dependencies.first;
   const uint32_t* dependencies = module->dependencies.values + first;
+  const loom_symbol_interface_flags_t* target_interfaces =
+      module->dependencies.target_interfaces + first;
   for (uint32_t i = 0; i < symbol->dependencies.count; ++i) {
     const uint8_t source_root_region_index_plus_one =
         module->dependencies.source_root_region_indices_plus_one[first + i];
@@ -1026,7 +1062,7 @@ static iree_status_t loom_link_plan_expand_symbol_facet_dependencies(
     IREE_ASSERT_NE(source_kind, LOOM_LINK_SYMBOL_FACET_INVALID);
     if (source_kind != kind) continue;
     IREE_RETURN_IF_ERROR(loom_link_plan_select_dependency_target(
-        plan, options, module, dependencies[i], cause));
+        plan, options, module, dependencies[i], target_interfaces[i], cause));
   }
   return iree_ok_status();
 }
@@ -1121,6 +1157,8 @@ static iree_status_t loom_link_plan_expand_complete_symbol(
     const uint32_t dependency_first = symbol->dependencies.first;
     const uint32_t* dependencies =
         module->dependencies.values + dependency_first;
+    const loom_symbol_interface_flags_t* target_interfaces =
+        module->dependencies.target_interfaces + dependency_first;
     for (uint32_t i = 0; i < symbol->dependencies.count; ++i) {
       const uint8_t source_root_region_index_plus_one =
           module->dependencies
@@ -1133,7 +1171,7 @@ static iree_status_t loom_link_plan_expand_complete_symbol(
           loom_link_plan_facet_dependency_cause(plan, symbol_plan_ordinal,
                                                 source_kind);
       IREE_RETURN_IF_ERROR(loom_link_plan_select_dependency_target(
-          plan, options, module, dependencies[i], cause));
+          plan, options, module, dependencies[i], target_interfaces[i], cause));
     }
   }
 
