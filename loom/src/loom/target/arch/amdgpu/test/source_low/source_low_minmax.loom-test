@@ -131,8 +131,8 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @vector_
 
 amdgpu.target<gfx11-generic> @target
 func.def target(@target) @index_minmax_sgpr(%lhs0: index, %rhs0: index) -> (index) {
-  %lhs = index.assume %lhs0 [range(%lhs0, 0, 1024)] : index
-  %rhs = index.assume %rhs0 [range(%rhs0, 0, 1024)] : index
+  %lhs = index.assume %lhs0 [range(%lhs0, -1024, 1024)] : index
+  %rhs = index.assume %rhs0 [range(%rhs0, -1024, 1024)] : index
   %min = index.min %lhs, %rhs : index
   %max = index.max %lhs, %rhs : index
   %sum = index.add %min, %max : index

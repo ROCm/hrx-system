@@ -65,8 +65,8 @@ func.def target(@target) @vector_f32_clampf_ordered(%input: vector<2xf32>, %lowe
 
 spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
 func.def target(@target) @index_minmax_sgpr(%lhs0: index, %rhs0: index) -> (index) {
-  %lhs = index.assume %lhs0 [range(%lhs0, 0, 1024)] : index
-  %rhs = index.assume %rhs0 [range(%rhs0, 0, 1024)] : index
+  %lhs = index.assume %lhs0 [range(%lhs0, -1024, 1024)] : index
+  %rhs = index.assume %rhs0 [range(%rhs0, -1024, 1024)] : index
   %min = index.min %lhs, %rhs : index
   %max = index.max %lhs, %rhs : index
   %sum = index.add %min, %max : index
