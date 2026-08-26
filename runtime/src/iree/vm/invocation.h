@@ -65,8 +65,9 @@ IREE_API_EXPORT iree_status_t iree_vm_invoke(iree_vm_invocation_t* invocation,
 // arguments are consumed on every return. Result storage must contain no live
 // variant owners on entry. OK+SUSPENDED leaves results untouched.
 // OK+COMPLETED initializes every result. Non-OK leaves results and
-// |out_outcome| untouched, unwinds all actual owners, and returns the
-// invocation to idle.
+// |out_outcome| untouched. Rejection before a new operation begins preserves
+// the current driver state; failure after one begins unwinds its actual owners
+// and returns the invocation to idle.
 IREE_API_EXPORT iree_status_t iree_vm_invocation_start(
     iree_vm_invocation_t* invocation, iree_vm_function_t function,
     iree_vm_variant_span_t arguments, iree_vm_variant_span_t results,

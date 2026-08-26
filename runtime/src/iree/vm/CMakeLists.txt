@@ -96,6 +96,17 @@ iree_cc_test(
     iree::testing::gtest_main
 )
 
+iree_cc_fuzz(
+  NAME
+    invocation_fuzz
+  SRCS
+    "invocation_fuzz.cc"
+  DEPS
+    ::execution_test_provider
+    ::vm
+    iree::base
+)
+
 iree_cc_binary_benchmark(
   NAME
     execution_benchmark

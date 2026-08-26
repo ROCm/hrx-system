@@ -6,6 +6,7 @@
 
 load("//runtime/build_tools/bazel:cc.bzl", "iree_runtime_cc_library")
 load("//runtime/build_tools/bazel:cc_benchmark.bzl", "iree_runtime_cc_benchmark")
+load("//runtime/build_tools/bazel:cc_fuzz.bzl", "iree_runtime_cc_fuzz")
 load("//runtime/build_tools/bazel:cc_test.bzl", "iree_runtime_cc_test")
 
 package(
@@ -92,6 +93,16 @@ iree_runtime_cc_test(
         "//runtime/src/iree/base/internal:fpu_state",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_fuzz(
+    name = "invocation_fuzz",
+    srcs = ["invocation_fuzz.cc"],
+    deps = [
+        ":execution_test_provider",
+        ":vm",
+        "//runtime/src/iree/base",
     ],
 )
 
