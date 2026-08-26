@@ -228,13 +228,12 @@ static loom_value_id_t loom_cmd_transient_resolve_root_value(
   return LOOM_VALUE_ID_INVALID;
 }
 
-static void loom_cmd_transient_mark_launch_uses(
-    loom_cmd_transient_build_t* build, const loom_op_t* launch_op,
+static void loom_cmd_transient_mark_value_uses(
+    loom_cmd_transient_build_t* build, loom_cmd_schedule_value_slice_t values,
     iree_host_size_t wave_index) {
-  const loom_value_slice_t arguments = loom_kernel_launch_arguments(launch_op);
-  for (uint16_t i = 0; i < arguments.count; ++i) {
+  for (uint16_t i = 0; i < values.count; ++i) {
     const loom_value_id_t root_value =
-        loom_cmd_transient_resolve_root_value(build, arguments.values[i]);
+        loom_cmd_transient_resolve_root_value(build, values.values[i]);
     if (root_value == LOOM_VALUE_ID_INVALID) continue;
     loom_cmd_transient_allocation_t* allocation =
         loom_cmd_transient_find_mutable_allocation(build, root_value);
@@ -245,6 +244,17 @@ static void loom_cmd_transient_mark_launch_uses(
   }
 }
 
+static void loom_cmd_transient_mark_command_uses(
+    loom_cmd_transient_build_t* build,
+    const loom_cmd_schedule_command_t* command, iree_host_size_t wave_index) {
+  loom_cmd_transient_mark_value_uses(build, command->arguments, wave_index);
+  if (command->kind ==
+      LOOM_CMD_SCHEDULE_COMMAND_KIND_KERNEL_DISPATCH_INDIRECT) {
+    loom_cmd_transient_mark_value_uses(
+        build, command->count_inputs.workgroup_counts, wave_index);
+  }
+}
+
 static void loom_cmd_transient_mark_scheduled_uses(
     loom_cmd_transient_build_t* build,
     const loom_cmd_schedule_plan_t* schedule) {
@@ -252,8 +262,8 @@ static void loom_cmd_transient_mark_scheduled_uses(
        ++wave_index) {
     const loom_cmd_schedule_wave_t wave = schedule->waves[wave_index];
     for (iree_host_size_t i = 0; i < wave.command_count; ++i) {
-      loom_cmd_transient_mark_launch_uses(
-          build, schedule->commands[wave.command_offset + i], wave_index);
+      loom_cmd_transient_mark_command_uses(
+          build, &schedule->commands[wave.command_offset + i], wave_index);
     }
   }
 }

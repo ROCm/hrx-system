@@ -37,12 +37,12 @@ typedef struct loom_cmd_schedule_frame_t {
   loom_cmd_schedule_mode_t mode;
 } loom_cmd_schedule_frame_t;
 
-typedef struct loom_cmd_schedule_command_t {
-  // Source command operation.
-  const loom_op_t* op;
+typedef struct loom_cmd_schedule_command_build_t {
+  // Classified issue command.
+  loom_cmd_schedule_command_t command;
   // Wave assigned while traversing the structured schedule.
   iree_host_size_t wave_index;
-} loom_cmd_schedule_command_t;
+} loom_cmd_schedule_command_build_t;
 
 typedef struct loom_cmd_schedule_build_t {
   // Source module used to inspect operation traits and names.
@@ -56,11 +56,15 @@ typedef struct loom_cmd_schedule_build_t {
   // Number of allocated traversal frames.
   iree_host_size_t frame_capacity;
   // Commands accumulated in source traversal order.
-  loom_cmd_schedule_command_t* commands;
+  loom_cmd_schedule_command_build_t* commands;
   // Number of accumulated commands.
   iree_host_size_t command_count;
   // Number of allocated command rows.
   iree_host_size_t command_capacity;
+  // Number of logical kernel launch commands.
+  iree_host_size_t kernel_launch_count;
+  // Total number of device-ABI argument values across all commands.
+  iree_host_size_t argument_value_count;
   // Allocation definitions accumulated in source traversal order.
   loom_cmd_schedule_allocation_t* allocations;
   // Number of accumulated allocation definitions.
@@ -134,12 +138,53 @@ static void loom_cmd_schedule_commit_child_span(
   }
 }
 
+static loom_cmd_schedule_value_slice_t loom_cmd_schedule_value_slice(
+    loom_value_slice_t source) {
+  return (loom_cmd_schedule_value_slice_t){
+      .values = source.values,
+      .count = source.count,
+  };
+}
+
 static iree_status_t loom_cmd_schedule_append_command(
     loom_cmd_schedule_build_t* build, loom_cmd_schedule_frame_t* frame,
     const loom_op_t* op) {
+  loom_cmd_schedule_command_t command = {
+      .source_op = op,
+  };
+  if (loom_kernel_launch_isa(op)) {
+    command.callee = loom_kernel_launch_callee(op);
+    command.arguments =
+        loom_cmd_schedule_value_slice(loom_kernel_launch_arguments(op));
+    command.kind = LOOM_CMD_SCHEDULE_COMMAND_KIND_KERNEL_LAUNCH;
+    command.count_inputs.workloads =
+        loom_cmd_schedule_value_slice(loom_kernel_launch_workloads(op));
+    ++build->kernel_launch_count;
+  } else {
+    IREE_ASSERT(loom_kernel_dispatch_isa(op));
+    command.callee = loom_kernel_dispatch_callee(op);
+    command.arguments =
+        loom_cmd_schedule_value_slice(loom_kernel_dispatch_arguments(op));
+    command.count_inputs.workgroup_counts = loom_cmd_schedule_value_slice(
+        loom_kernel_dispatch_workgroup_counts(op));
+    const loom_cmd_schedule_value_slice_t counts =
+        command.count_inputs.workgroup_counts;
+    IREE_ASSERT_GT(counts.count, 0u);
+    const loom_type_t first_count_type =
+        loom_module_value_type(build->module, counts.values[0]);
+    command.kind = loom_type_is_view(first_count_type)
+                       ? LOOM_CMD_SCHEDULE_COMMAND_KIND_KERNEL_DISPATCH_INDIRECT
+                       : LOOM_CMD_SCHEDULE_COMMAND_KIND_KERNEL_DISPATCH_DIRECT;
+  }
+  if (!iree_host_size_checked_add(build->argument_value_count,
+                                  command.arguments.count,
+                                  &build->argument_value_count)) {
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "command schedule argument table is too large");
+  }
   IREE_RETURN_IF_ERROR(loom_cmd_schedule_reserve_commands(build, 1));
-  build->commands[build->command_count++] = (loom_cmd_schedule_command_t){
-      .op = op,
+  build->commands[build->command_count++] = (loom_cmd_schedule_command_build_t){
+      .command = command,
       .wave_index = loom_cmd_schedule_child_base_wave(frame),
   };
   loom_cmd_schedule_commit_child_span(frame, 1);
@@ -213,7 +258,7 @@ static iree_status_t loom_cmd_schedule_build_commands(
     } else if (loom_kernel_launch_concurrent_isa(op)) {
       child_region = loom_kernel_launch_concurrent_body(op);
       child_mode = LOOM_CMD_SCHEDULE_MODE_CONCURRENT;
-    } else if (loom_kernel_launch_isa(op)) {
+    } else if (loom_kernel_launch_isa(op) || loom_kernel_dispatch_isa(op)) {
       IREE_RETURN_IF_ERROR(loom_cmd_schedule_append_command(build, frame, op));
       continue;
     } else if (loom_buffer_alloca_isa(op)) {
@@ -248,7 +293,7 @@ static iree_status_t loom_cmd_schedule_group_waves(
     loom_cmd_schedule_build_t* build, iree_host_size_t wave_count,
     loom_cmd_schedule_plan_t* out_plan) {
   loom_cmd_schedule_wave_t* waves = NULL;
-  const loom_op_t** commands = NULL;
+  loom_cmd_schedule_command_t* commands = NULL;
   iree_host_size_t* write_offsets = NULL;
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
       build->arena, wave_count, sizeof(*waves), (void**)&waves));
@@ -273,13 +318,15 @@ static iree_status_t loom_cmd_schedule_group_waves(
   }
   IREE_ASSERT_EQ(command_offset, build->command_count);
   for (iree_host_size_t i = 0; i < build->command_count; ++i) {
-    const loom_cmd_schedule_command_t command = build->commands[i];
-    commands[write_offsets[command.wave_index]++] = command.op;
+    const loom_cmd_schedule_command_build_t command = build->commands[i];
+    commands[write_offsets[command.wave_index]++] = command.command;
   }
 
   *out_plan = (loom_cmd_schedule_plan_t){
       .commands = commands,
       .command_count = build->command_count,
+      .kernel_launch_count = build->kernel_launch_count,
+      .argument_value_count = build->argument_value_count,
       .waves = waves,
       .wave_count = wave_count,
       .allocations = build->allocations,

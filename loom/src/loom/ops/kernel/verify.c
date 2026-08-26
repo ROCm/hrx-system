@@ -121,8 +121,8 @@ static iree_status_t loom_kernel_verify_launch_config_purity(
                           IREE_ARRAYSIZE(params));
 }
 
-static iree_status_t loom_kernel_emit_launch_related(
-    iree_diagnostic_emitter_t emitter, const loom_op_t* launch_op,
+static iree_status_t loom_kernel_emit_entry_related(
+    iree_diagnostic_emitter_t emitter, const loom_op_t* use_op,
     const loom_op_t* definition_op, const loom_error_def_t* error,
     const loom_diagnostic_param_t* params, iree_host_size_t param_count) {
   loom_diagnostic_related_op_t related_ops[] = {{
@@ -130,7 +130,7 @@ static iree_status_t loom_kernel_emit_launch_related(
       .op = definition_op,
   }};
   loom_diagnostic_emission_t emission = {
-      .op = launch_op,
+      .op = use_op,
       .error = error,
       .params = params,
       .param_count = param_count,
@@ -140,7 +140,7 @@ static iree_status_t loom_kernel_emit_launch_related(
   return iree_diagnostic_emit(emitter, &emission);
 }
 
-static bool loom_kernel_launch_type_matches(
+static bool loom_kernel_entry_type_matches(
     const loom_module_t* module, loom_type_t actual_type,
     loom_type_t expected_type, const loom_type_value_remap_t* value_remap) {
   if (loom_type_kind(actual_type) == LOOM_TYPE_TENSOR &&
@@ -151,7 +151,7 @@ static bool loom_kernel_launch_type_matches(
                                            value_remap);
 }
 
-static iree_status_t loom_kernel_verify_launch_operand_group(
+static iree_status_t loom_kernel_verify_entry_operand_group(
     const loom_module_t* module, const loom_op_t* launch_op,
     const loom_op_t* definition_op, iree_diagnostic_emitter_t emitter,
     iree_string_view_t actual_field_name,
@@ -165,9 +165,9 @@ static iree_status_t loom_kernel_verify_launch_operand_group(
         loom_param_string(expected_field_name),
         loom_param_u32(expected_value_count),
     };
-    return loom_kernel_emit_launch_related(emitter, launch_op, definition_op,
-                                           LOOM_ERR_STRUCTURE_013, params,
-                                           IREE_ARRAYSIZE(params));
+    return loom_kernel_emit_entry_related(emitter, launch_op, definition_op,
+                                          LOOM_ERR_STRUCTURE_013, params,
+                                          IREE_ARRAYSIZE(params));
   }
 
   loom_type_value_remap_t value_remap = {
@@ -180,8 +180,8 @@ static iree_status_t loom_kernel_verify_launch_operand_group(
         loom_module_value_type(module, actual_values.values[i]);
     loom_type_t expected_type =
         loom_module_value_type(module, expected_values[i]);
-    if (loom_kernel_launch_type_matches(module, actual_type, expected_type,
-                                        &value_remap)) {
+    if (loom_kernel_entry_type_matches(module, actual_type, expected_type,
+                                       &value_remap)) {
       continue;
     }
 
@@ -200,9 +200,9 @@ static iree_status_t loom_kernel_verify_launch_operand_group(
         loom_param_string(iree_make_cstring_view(expected_name)),
         loom_param_type(expected_type),
     };
-    return loom_kernel_emit_launch_related(emitter, launch_op, definition_op,
-                                           LOOM_ERR_TYPE_001, params,
-                                           IREE_ARRAYSIZE(params));
+    return loom_kernel_emit_entry_related(emitter, launch_op, definition_op,
+                                          LOOM_ERR_TYPE_001, params,
+                                          IREE_ARRAYSIZE(params));
   }
   return iree_ok_status();
 }
@@ -1231,6 +1231,109 @@ iree_status_t loom_kernel_decl_verify(const loom_module_t* module,
       loom_kernel_decl_export_linkage_ATTR_INDEX);
 }
 
+iree_status_t loom_kernel_entry_decl_verify(const loom_module_t* module,
+                                            const loom_op_t* op,
+                                            iree_diagnostic_emitter_t emitter) {
+  (void)module;
+  IREE_RETURN_IF_ERROR(loom_kernel_verify_positive_u32_attr(
+      emitter, op, loom_kernel_entry_decl_workgroup_size_x_ATTR_INDEX,
+      loom_kernel_entry_decl_workgroup_size_x(op),
+      IREE_SV("workgroup_size_x")));
+  IREE_RETURN_IF_ERROR(loom_kernel_verify_positive_u32_attr(
+      emitter, op, loom_kernel_entry_decl_workgroup_size_y_ATTR_INDEX,
+      loom_kernel_entry_decl_workgroup_size_y(op),
+      IREE_SV("workgroup_size_y")));
+  IREE_RETURN_IF_ERROR(loom_kernel_verify_positive_u32_attr(
+      emitter, op, loom_kernel_entry_decl_workgroup_size_z_ATTR_INDEX,
+      loom_kernel_entry_decl_workgroup_size_z(op),
+      IREE_SV("workgroup_size_z")));
+
+  const uint16_t cluster_attr_indices[] = {
+      loom_kernel_entry_decl_workgroup_cluster_size_x_ATTR_INDEX,
+      loom_kernel_entry_decl_workgroup_cluster_size_y_ATTR_INDEX,
+      loom_kernel_entry_decl_workgroup_cluster_size_z_ATTR_INDEX,
+  };
+  const iree_string_view_t cluster_attr_names[] = {
+      IREE_SV("workgroup_cluster_size_x"),
+      IREE_SV("workgroup_cluster_size_y"),
+      IREE_SV("workgroup_cluster_size_z"),
+  };
+  const int64_t cluster_sizes[] = {
+      loom_kernel_entry_decl_workgroup_cluster_size_x(op),
+      loom_kernel_entry_decl_workgroup_cluster_size_y(op),
+      loom_kernel_entry_decl_workgroup_cluster_size_z(op),
+  };
+  uint32_t present_count = 0;
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(cluster_attr_indices); ++i) {
+    present_count +=
+        loom_kernel_optional_attr_is_present(op, cluster_attr_indices[i]);
+  }
+  if (present_count != 0 && present_count != 3) {
+    return loom_kernel_emit_integer_field_constraint(
+        emitter, op, IREE_SV("cluster dimension count"), present_count,
+        IREE_SV("zero or three"));
+  }
+  if (present_count == 0) return iree_ok_status();
+
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(cluster_attr_indices); ++i) {
+    IREE_RETURN_IF_ERROR(loom_kernel_verify_positive_u32_attr(
+        emitter, op, cluster_attr_indices[i], cluster_sizes[i],
+        cluster_attr_names[i]));
+  }
+  if (cluster_sizes[0] == 1 && cluster_sizes[1] == 1 && cluster_sizes[2] == 1) {
+    return loom_kernel_emit_attribute_value_constraint(
+        emitter, op, IREE_SV("workgroup_cluster_size_x"), cluster_sizes[0],
+        IREE_SV("omitted when the complete cluster shape is 1x1x1"));
+  }
+  const uint64_t cluster_size_xy =
+      (uint64_t)cluster_sizes[0] * (uint64_t)cluster_sizes[1];
+  if (cluster_size_xy > UINT32_MAX ||
+      cluster_sizes[2] > UINT32_MAX / cluster_size_xy) {
+    return loom_kernel_emit_attribute_value_constraint(
+        emitter, op, IREE_SV("workgroup_cluster_size_z"), cluster_sizes[2],
+        IREE_SV("a value whose product with x and y fits u32"));
+  }
+  return iree_ok_status();
+}
+
+static bool loom_kernel_is_indirect_workgroup_count_type(loom_type_t type) {
+  return loom_type_is_view(type) && loom_type_rank(type) == 1 &&
+         !loom_type_dim_is_dynamic_at(type, 0) &&
+         loom_type_dim_static_size_at(type, 0) == 3 &&
+         loom_type_element_type(type) == LOOM_SCALAR_TYPE_I32 &&
+         !loom_type_has_encoding(type);
+}
+
+static iree_status_t loom_kernel_verify_dispatch_workgroup_counts(
+    const loom_module_t* module, const loom_op_t* op,
+    iree_diagnostic_emitter_t emitter) {
+  const loom_value_slice_t counts = loom_kernel_dispatch_workgroup_counts(op);
+  if (counts.count == 0 || counts.count > 3) {
+    return loom_kernel_emit_integer_field_constraint(
+        emitter, op, IREE_SV("workgroup count operand count"), counts.count,
+        IREE_SV("one to three"));
+  }
+
+  const loom_type_t first_type =
+      loom_module_value_type(module, counts.values[0]);
+  if (counts.count == 1 &&
+      loom_kernel_is_indirect_workgroup_count_type(first_type)) {
+    return iree_ok_status();
+  }
+  for (uint16_t i = 0; i < counts.count; ++i) {
+    const loom_type_t type = loom_module_value_type(module, counts.values[i]);
+    if (loom_type_is_scalar(type) &&
+        loom_type_element_type(type) == LOOM_SCALAR_TYPE_INDEX) {
+      continue;
+    }
+    return loom_kernel_emit_operand_constraint(
+        emitter, op, IREE_SV("workgroup_counts"), type,
+        counts.count == 1 ? IREE_SV("index or dense view<3xi32>")
+                          : IREE_SV("index"));
+  }
+  return iree_ok_status();
+}
+
 iree_status_t loom_kernel_launch_verify(const loom_module_t* module,
                                         const loom_op_t* op,
                                         iree_diagnostic_emitter_t emitter) {
@@ -1240,7 +1343,7 @@ iree_status_t loom_kernel_launch_verify(const loom_module_t* module,
   loom_value_slice_t workloads = loom_kernel_launch_workloads(op);
   loom_value_slice_t workload_args =
       loom_kernel_workload_arg_ids(module, symbol->defining_op);
-  IREE_RETURN_IF_ERROR(loom_kernel_verify_launch_operand_group(
+  IREE_RETURN_IF_ERROR(loom_kernel_verify_entry_operand_group(
       module, op, symbol->defining_op, emitter, IREE_SV("workload"),
       IREE_SV("kernel workload"), workloads, workload_args.values,
       workload_args.count,
@@ -1251,10 +1354,32 @@ iree_status_t loom_kernel_launch_verify(const loom_module_t* module,
   const loom_value_id_t* argument_ids =
       loom_func_like_arg_ids(kernel, &argument_count);
   loom_value_slice_t arguments = loom_kernel_launch_arguments(op);
-  return loom_kernel_verify_launch_operand_group(
+  return loom_kernel_verify_entry_operand_group(
       module, op, symbol->defining_op, emitter, IREE_SV("argument"),
       IREE_SV("kernel ABI argument"), arguments, argument_ids, argument_count,
       workloads.count);
+}
+
+iree_status_t loom_kernel_dispatch_verify(const loom_module_t* module,
+                                          const loom_op_t* op,
+                                          iree_diagnostic_emitter_t emitter) {
+  IREE_RETURN_IF_ERROR(
+      loom_kernel_verify_dispatch_workgroup_counts(module, op, emitter));
+
+  const loom_symbol_ref_t callee = loom_kernel_dispatch_callee(op);
+  const loom_symbol_t* symbol = &module->symbols.entries[callee.symbol_id];
+  const loom_func_like_t entry =
+      loom_func_like_cast(module, symbol->defining_op);
+  uint16_t argument_count = 0;
+  const loom_value_id_t* argument_ids =
+      loom_func_like_arg_ids(entry, &argument_count);
+  const loom_value_slice_t arguments = loom_kernel_dispatch_arguments(op);
+  const loom_value_slice_t workgroup_counts =
+      loom_kernel_dispatch_workgroup_counts(op);
+  return loom_kernel_verify_entry_operand_group(
+      module, op, symbol->defining_op, emitter, IREE_SV("argument"),
+      IREE_SV("kernel entry ABI argument"), arguments, argument_ids,
+      argument_count, workgroup_counts.count);
 }
 
 iree_status_t loom_kernel_launch_yield_verify(
@@ -1279,6 +1404,7 @@ iree_status_t loom_kernel_launch_schedule_verify(
   loom_op_t* child_op = NULL;
   loom_block_for_each_op(block, child_op) {
     if (loom_kernel_launch_isa(child_op) ||
+        loom_kernel_dispatch_isa(child_op) ||
         loom_kernel_launch_serial_isa(child_op) ||
         loom_kernel_launch_concurrent_isa(child_op) ||
         loom_kernel_launch_yield_isa(child_op)) {

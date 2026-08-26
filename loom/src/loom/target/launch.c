@@ -166,11 +166,6 @@ iree_status_t loom_target_require_concrete_hal_kernel_launch(
                           (int)consumer_name.size, consumer_name.data);
 }
 
-static bool loom_target_dispatch_workgroup_count_is_concrete(
-    const loom_target_dispatch_workgroup_count_t* count) {
-  return count->x != 0 && count->y != 0 && count->z != 0;
-}
-
 static iree_status_t loom_target_validate_dispatch_workgroup_count_limits(
     const loom_target_workgroup_count_limit_t* limit,
     const loom_target_dispatch_workgroup_count_t* selected) {
@@ -248,10 +243,12 @@ iree_status_t loom_target_validate_hal_dispatch_workgroup_count(
     const loom_target_snapshot_t* snapshot,
     const loom_target_hal_kernel_abi_t* hal_kernel,
     const loom_target_dispatch_workgroup_count_t* workgroup_count) {
-  if (!loom_target_dispatch_workgroup_count_is_concrete(workgroup_count)) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "HAL dispatch workgroup count must be all non-zero");
+  // HAL defines a zero count in any dimension as an empty dispatch. The tuple
+  // is already materialized here, so zero is a value rather than an unresolved
+  // analysis state and requires no target-limit validation.
+  if (workgroup_count->x == 0 || workgroup_count->y == 0 ||
+      workgroup_count->z == 0) {
+    return iree_ok_status();
   }
   IREE_RETURN_IF_ERROR(loom_target_validate_dispatch_workgroup_count_limits(
       &snapshot->max_workgroup_count, workgroup_count));

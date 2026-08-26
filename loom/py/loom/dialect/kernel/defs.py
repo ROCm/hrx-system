@@ -67,7 +67,6 @@ from loom.dsl import (
     EnumCase,
     EnumDef,
     FuncLikeInterface,
-    FuncLikeInterfaceFlag,
     HasAncestor,
     HasParent,
     ImplicitTerminator,
@@ -274,6 +273,34 @@ _ENTRY_LAUNCH_FORMAT: list[FormatElement] = [
     ),
 ]
 
+_ENTRY_EXECUTION_CONSTRAINTS_FORMAT: list[FormatElement] = [
+    kw("where"),
+    LBRACKET,
+    Clause(
+        "workgroup_size",
+        Attr("workgroup_size_x"),
+        COMMA,
+        Attr("workgroup_size_y"),
+        COMMA,
+        Attr("workgroup_size_z"),
+    ),
+    OptionalGroup(
+        [
+            COMMA,
+            Clause(
+                "cluster_size",
+                Attr("workgroup_cluster_size_x"),
+                COMMA,
+                Attr("workgroup_cluster_size_y"),
+                COMMA,
+                Attr("workgroup_cluster_size_z"),
+            ),
+        ],
+        anchor="workgroup_cluster_size_x",
+    ),
+    RBRACKET,
+]
+
 _ENTRY_ATTRS = [
     AttrDef("callee", "symbol"),
     AttrDef(
@@ -299,7 +326,7 @@ kernel_def = Op(
     symbol_def=SymbolDefinition(
         field="callee",
         name="kernel",
-        interfaces=["func_like", "kernel"],
+        interfaces=["func_like", "kernel", "kernel_entry"],
         bytecode_kind="LOOM_SYMBOL_FUNC_DEF",
         fact_domain="loom_func_symbol_fact_domain",
         retain="retain",
@@ -329,7 +356,6 @@ kernel_def = Op(
             export_linkage="export_linkage",
             predicates="predicates",
             body="body",
-            flags=(FuncLikeInterfaceFlag.KERNEL_ENTRY,),
         )
     ],
     verify="loom_kernel_def_verify",
@@ -1872,6 +1898,65 @@ kernel_decl = Op(
     ],
 )
 
+kernel_entry_decl = Op(
+    "kernel.entry.decl",
+    group=kernel_ops,
+    phase=OpPhase.EXECUTABLE,
+    doc=(
+        "Bodyless declaration of an executable kernel entry. The declaration "
+        "owns the exact target execution geometry and device ABI but has no "
+        "workload-to-workgroup configuration contract or implementation body."
+    ),
+    traits=[SYMBOL_DEFINE],
+    operands=[
+        Operand("args", ANY, variadic=True),
+    ],
+    attrs=[
+        AttrDef("callee", "symbol"),
+        AttrDef(
+            "target",
+            "symbol",
+            optional=True,
+            symbol_ref=SymbolReference("target", ["target"]),
+        ),
+        AttrDef("workgroup_size_x", ATTR_TYPE_I64),
+        AttrDef("workgroup_size_y", ATTR_TYPE_I64),
+        AttrDef("workgroup_size_z", ATTR_TYPE_I64),
+        AttrDef("workgroup_cluster_size_x", ATTR_TYPE_I64, optional=True),
+        AttrDef("workgroup_cluster_size_y", ATTR_TYPE_I64, optional=True),
+        AttrDef("workgroup_cluster_size_z", ATTR_TYPE_I64, optional=True),
+        AttrDef("retain", "enum", enum_def=Retain, optional=True),
+    ],
+    symbol_def=SymbolDefinition(
+        field="callee",
+        name="kernel entry",
+        interfaces=["func_like", "kernel_entry"],
+        bytecode_kind="LOOM_SYMBOL_FUNC_DECL",
+        fact_domain="loom_func_symbol_fact_domain",
+        retain="retain",
+        flags=[SymbolDefinitionFlag.DECLARATION],
+    ),
+    interfaces=[
+        FuncLikeInterface(
+            callee="callee",
+            target="target",
+            args="args",
+        )
+    ],
+    verify="loom_kernel_entry_decl_verify",
+    format=[
+        *_ENTRY_RETAIN_FORMAT,
+        *_ENTRY_TARGET_FORMAT,
+        SymbolRef("callee"),
+        Scope([FuncArgs("args")]),
+        *_ENTRY_EXECUTION_CONSTRAINTS_FORMAT,
+    ],
+    examples=[
+        "kernel.entry.decl @fill(%count: index, %output: buffer) where [workgroup_size(256, 1, 1)]",
+        "kernel.entry.decl target(@gfx1250) @clustered(%output: buffer) where [workgroup_size(256, 1, 1), cluster_size(2, 1, 1)]",
+    ],
+)
+
 kernel_launch = Op(
     "kernel.launch",
     group=kernel_ops,
@@ -1921,6 +2006,58 @@ kernel_launch = Op(
         "kernel.launch @fill[%count](%count, %output) : [index](index, buffer)",
         "kernel.launch @no_workload(%output) : (buffer)",
         "kernel.launch @no_arguments[%count]() : [index]()",
+    ],
+)
+
+kernel_dispatch = Op(
+    "kernel.dispatch",
+    group=kernel_ops,
+    phase=OpPhase.EXECUTABLE,
+    doc=("Dispatch a configured kernel entry with exact workgroup counts and device-ABI operands. Counts are one to three index values or one dense view<3xi32> for indirect dispatch."),
+    operands=[
+        Operand("workgroup_counts", ANY, variadic=True),
+        Operand("arguments", ANY, variadic=True),
+    ],
+    attrs=[
+        AttrDef(
+            "callee",
+            "symbol",
+            symbol_ref=SymbolReference("kernel entry", ["kernel_entry"]),
+        ),
+    ],
+    traits=[UNKNOWN_EFFECTS, COMMAND_EFFECT, NoAncestor("kernel.def")],
+    interfaces=[
+        CallLikeInterface(
+            callee="callee",
+            operands="arguments",
+            results=None,
+            kind=CallLikeKind.SEMANTIC,
+        )
+    ],
+    verify="loom_kernel_dispatch_verify",
+    format=[
+        SymbolRef("callee"),
+        GLUE,
+        LBRACKET,
+        Refs("workgroup_counts"),
+        RBRACKET,
+        GLUE,
+        LPAREN,
+        Refs("arguments"),
+        RPAREN,
+        COLON,
+        LBRACKET,
+        TypesOf("workgroup_counts"),
+        RBRACKET,
+        GLUE,
+        LPAREN,
+        TypesOf("arguments"),
+        RPAREN,
+    ],
+    examples=[
+        "kernel.dispatch @fill[%count](%count, %output) : [index](index, buffer)",
+        "kernel.dispatch @fill[%x, %y, %z](%count, %output) : [index, index, index](index, buffer)",
+        "kernel.dispatch @fill[%counts](%count, %output) : [view<3xi32>](index, buffer)",
     ],
 )
 
@@ -2031,7 +2168,9 @@ ALL_KERNEL_OPS: tuple[Op, ...] = (
     kernel_cluster_size,
     kernel_cluster_count,
     kernel_decl,
+    kernel_entry_decl,
     kernel_launch,
+    kernel_dispatch,
     kernel_launch_yield,
     kernel_launch_serial,
     kernel_launch_concurrent,

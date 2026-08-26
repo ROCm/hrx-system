@@ -654,34 +654,13 @@ static iree_status_t loom_cmd_serialize_dispatch(
     command.payload.dispatch_indirect.entry_index = entry->payload.index;
     command.payload.dispatch_indirect.workgroup_count_buffer_ref =
         workgroup_count->payload.index;
-    if (base_kind == LOOM_CMD_PROGRAM_COMMAND_KIND_DISPATCH_INDIRECT_STATIC) {
-      const loom_cmd_program_buffer_ref_t buffer_ref =
-          build->buffer_refs.values[workgroup_count->payload.index];
-      IREE_ASSERT_EQ(buffer_ref.role, LOOM_CMD_PROGRAM_BUFFER_ROLE_REBINDABLE);
-      IREE_ASSERT_EQ(buffer_ref.byte_length,
-                     LOOM_CMD_PROGRAM_LAUNCH_COUNT_TUPLE_BYTE_LENGTH);
-      IREE_ASSERT_EQ(buffer_ref.byte_offset %
-                         LOOM_CMD_PROGRAM_LAUNCH_COUNT_TUPLE_ALIGNMENT,
-                     0u);
-      loom_cmd_program_launch_count_requirement_t* requirement =
-          &build->requirements.launch_counts;
-      if (requirement->binding_index == UINT32_MAX) {
-        requirement->binding_index = buffer_ref.root_index;
-      } else {
-        IREE_ASSERT_EQ(requirement->binding_index, buffer_ref.root_index);
-      }
-      uint64_t byte_end = 0;
-      if (!iree_checked_add_u64(buffer_ref.byte_offset, buffer_ref.byte_length,
-                                &byte_end)) {
-        return iree_make_status(
-            IREE_STATUS_OUT_OF_RANGE,
-            "command launch-count table exceeds 64-bit offsets");
-      }
-      requirement->required_byte_length =
-          iree_max(requirement->required_byte_length, byte_end);
-      requirement->minimum_alignment =
-          LOOM_CMD_PROGRAM_LAUNCH_COUNT_TUPLE_ALIGNMENT;
-    }
+    const loom_cmd_program_buffer_ref_t buffer_ref =
+        build->buffer_refs.values[workgroup_count->payload.index];
+    IREE_ASSERT_EQ(buffer_ref.byte_length,
+                   LOOM_CMD_PROGRAM_LAUNCH_COUNT_TUPLE_BYTE_LENGTH);
+    IREE_ASSERT_EQ(
+        buffer_ref.byte_offset % LOOM_CMD_PROGRAM_LAUNCH_COUNT_TUPLE_ALIGNMENT,
+        0u);
     argument_start = 3;
   }
   IREE_RETURN_IF_ERROR(loom_cmd_serialize_flatten_arguments(
@@ -1146,11 +1125,11 @@ iree_status_t loom_cmd_program_plan_serialize_root(
                   root->abi_layout.rebindable_binding_count,
               .executable_count = root->abi_layout.executable_count,
               .entry_count = root->abi_layout.entry_count,
+              .launch_counts = root->launch_counts,
           },
       .parameter_requirements = parameter_requirements,
       .transient_requirement = transient_requirement,
   };
-  build.requirements.launch_counts.binding_index = UINT32_MAX;
   if (iree_status_is_ok(status) && build.value_count != 0) {
     status =
         iree_arena_allocate_array(&arena, build.value_count,

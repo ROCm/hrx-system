@@ -85,7 +85,6 @@ from loom.dsl import (
     EnumCase,
     EnumDef,
     FuncLikeInterface,
-    FuncLikeInterfaceFlag,
     HasParent,
     IterArgsMatchResults,
     KeyedModuleRecord,
@@ -2623,13 +2622,18 @@ def test_generate_tables_emits_func_like_flags() -> None:
     op = Op(
         "test.kernel",
         group=Dialect("test"),
+        traits=[SYMBOL_DEFINE],
         attrs=[AttrDef("callee", ATTR_TYPE_SYMBOL)],
         operands=[Operand("args", ANY, variadic=True)],
+        symbol_def=SymbolDefinition(
+            field="callee",
+            name="kernel entry",
+            interfaces=["func_like", "kernel_entry"],
+        ),
         interfaces=[
             FuncLikeInterface(
                 callee="callee",
                 args="args",
-                flags=(FuncLikeInterfaceFlag.KERNEL_ENTRY,),
             )
         ],
         format=[FuncArgs("args")],

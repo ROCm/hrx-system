@@ -17,6 +17,46 @@
 extern "C" {
 #endif
 
+// Semantic issue-command kind classified during schedule traversal.
+typedef enum loom_cmd_schedule_command_kind_e {
+  // Logical workload launch requiring configuration and a kernel body.
+  LOOM_CMD_SCHEDULE_COMMAND_KIND_KERNEL_LAUNCH = 0,
+  // Configured entry dispatch with one to three direct count values.
+  LOOM_CMD_SCHEDULE_COMMAND_KIND_KERNEL_DISPATCH_DIRECT = 1,
+  // Configured entry dispatch reading one indirect count view.
+  LOOM_CMD_SCHEDULE_COMMAND_KIND_KERNEL_DISPATCH_INDIRECT = 2,
+} loom_cmd_schedule_command_kind_t;
+
+// Borrowed source SSA values retained by one prepared issue row.
+typedef struct loom_cmd_schedule_value_slice_t {
+  // Source value IDs in authored order.
+  const loom_value_id_t* values;
+  // Number of entries in |values|.
+  uint16_t count;
+} loom_cmd_schedule_value_slice_t;
+
+// One issue command classified while traversing the structured schedule.
+//
+// The row borrows all source storage. Consumers use this prepared shape rather
+// than repeatedly identifying operations and decoding their operand segments.
+typedef struct loom_cmd_schedule_command_t {
+  // Source issue operation.
+  const loom_op_t* source_op;
+  // Referenced logical kernel or configured entry symbol.
+  loom_symbol_ref_t callee;
+  // Device-ABI argument values in authored order.
+  loom_cmd_schedule_value_slice_t arguments;
+  // Classified source issue semantics.
+  loom_cmd_schedule_command_kind_t kind;
+  // Kind-specific values used to derive physical workgroup counts.
+  union {
+    // Logical workload values for KERNEL_LAUNCH.
+    loom_cmd_schedule_value_slice_t workloads;
+    // Physical count values for either KERNEL_DISPATCH kind.
+    loom_cmd_schedule_value_slice_t workgroup_counts;
+  } count_inputs;
+} loom_cmd_schedule_command_t;
+
 // One contiguous wave in a portable command schedule.
 //
 // Commands in a wave retain source traversal order but have no dependency
@@ -41,9 +81,13 @@ typedef struct loom_cmd_schedule_allocation_t {
 // All storage is owned by the arena passed to loom_cmd_schedule_plan_build.
 typedef struct loom_cmd_schedule_plan_t {
   // Source commands grouped contiguously by wave.
-  const loom_op_t* const* commands;
+  const loom_cmd_schedule_command_t* commands;
   // Total number of source commands.
   iree_host_size_t command_count;
+  // Number of logical kernel launch commands.
+  iree_host_size_t kernel_launch_count;
+  // Total number of device-ABI argument values across all commands.
+  iree_host_size_t argument_value_count;
   // Ordered wave table.
   const loom_cmd_schedule_wave_t* waves;
   // Number of ordered waves.
@@ -65,7 +109,8 @@ typedef struct loom_cmd_schedule_plan_t {
 // definition through last use. Pure leaf dataflow is ignored because it emits
 // no command; the launch plan owns any values it contributes to dispatch
 // metadata. Other residual source operations must have been specialized away
-// and are rejected.
+// and are rejected. Issue rows classify launch and direct/indirect dispatch
+// forms once so later command planning never needs to rediscover them.
 iree_status_t loom_cmd_schedule_plan_build(const loom_module_t* module,
                                            loom_region_t* program_body,
                                            iree_arena_allocator_t* arena,

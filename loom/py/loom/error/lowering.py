@@ -558,6 +558,86 @@ ERR_LOWERING_050 = ErrorDef(
     ),
 )
 
+# ERR_LOWERING_051: Command dispatch count is not statically representable.
+ERR_LOWERING_051 = ErrorDef(
+    domain=ErrorDomain.LOWERING,
+    code=51,
+    severity=Severity.ERROR,
+    summary="Command dispatch workgroup count is not statically representable.",
+    message=(
+        "command-program preparation requires workgroup-count dimension "
+        "{dimension} of @{kernel_name} to be {requirement}"
+    ),
+    params=(
+        ErrorParam("kernel_name", ParamKind.STRING),
+        ErrorParam("dimension", ParamKind.U32),
+        ErrorParam("requirement", ParamKind.STRING),
+    ),
+    fix_hint=(
+        "Specialize each direct count to an exact unsigned 32-bit value or "
+        "provide a dense view<3xi32> for indirect dispatch"
+    ),
+)
+
+# ERR_LOWERING_052: Command dispatch argument is not statically representable.
+ERR_LOWERING_052 = ErrorDef(
+    domain=ErrorDomain.LOWERING,
+    code=52,
+    severity=Severity.ERROR,
+    summary="Command dispatch argument is not statically representable.",
+    message=(
+        "command-program preparation cannot encode argument {argument_index} "
+        "of @{kernel_name} with type {actual_type}; it requires {requirement}"
+    ),
+    params=(
+        ErrorParam("kernel_name", ParamKind.STRING),
+        ErrorParam("argument_index", ParamKind.U32),
+        ErrorParam("actual_type", ParamKind.TYPE),
+        ErrorParam("requirement", ParamKind.STRING),
+    ),
+    fix_hint=(
+        "Pass buffer or view ranges, or specialize scalar ABI arguments to "
+        "exact values before preparing the command program"
+    ),
+)
+
+# ERR_LOWERING_053: Command-produced dispatch counts have no preceding wave.
+ERR_LOWERING_053 = ErrorDef(
+    domain=ErrorDomain.LOWERING,
+    code=53,
+    severity=Severity.ERROR,
+    summary="Command-produced dispatch workgroup counts need an earlier wave.",
+    message=(
+        "command-program preparation cannot dispatch @{kernel_name} from "
+        "dynamic workgroup counts without a preceding execution wave"
+    ),
+    params=(ErrorParam("kernel_name", ParamKind.STRING),),
+    fix_hint=(
+        "Place the count-producing command in an earlier serial execution "
+        "wave so an execution barrier precedes the indirect dispatch"
+    ),
+)
+
+# ERR_LOWERING_054: Indirect dispatch count storage cannot be placed.
+ERR_LOWERING_054 = ErrorDef(
+    domain=ErrorDomain.LOWERING,
+    code=54,
+    severity=Severity.ERROR,
+    summary="Indirect dispatch workgroup-count storage cannot be placed.",
+    message=(
+        "command-program preparation cannot place the workgroup-count view "
+        "for @{kernel_name}; it requires {requirement}"
+    ),
+    params=(
+        ErrorParam("kernel_name", ParamKind.STRING),
+        ErrorParam("requirement", ParamKind.STRING),
+    ),
+    fix_hint=(
+        "Use an exactly placed dense view<3xi32> rooted in a program buffer "
+        "binding, immutable parameter root, or command buffer.alloca"
+    ),
+)
+
 ALL_LOWERING_ERRORS: tuple[ErrorDef, ...] = (
     ERR_LOWERING_022,
     ERR_LOWERING_023,
@@ -586,4 +666,8 @@ ALL_LOWERING_ERRORS: tuple[ErrorDef, ...] = (
     ERR_LOWERING_048,
     ERR_LOWERING_049,
     ERR_LOWERING_050,
+    ERR_LOWERING_051,
+    ERR_LOWERING_052,
+    ERR_LOWERING_053,
+    ERR_LOWERING_054,
 )

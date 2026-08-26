@@ -551,9 +551,9 @@ void loom_value_facts_eval_float_to_integer(
   }
 }
 
-static bool loom_float_facts_as_exact_bits(loom_scalar_type_t scalar_type,
-                                           loom_value_facts_t facts,
-                                           uint64_t* out_bits) {
+bool loom_value_facts_as_exact_float_bits(loom_scalar_type_t scalar_type,
+                                          loom_value_facts_t facts,
+                                          uint64_t* out_bits) {
   double value = 0.0;
   if (!loom_value_facts_as_exact_float(scalar_type, facts, &value) ||
       isnan(value)) {
@@ -667,7 +667,7 @@ void loom_value_facts_eval_scalar_bitcast(
   bool has_bits = source_bit_count > 0 && source_bit_count == result_bit_count;
   if (has_bits && loom_scalar_type_is_float(source_type)) {
     has_bits =
-        loom_float_facts_as_exact_bits(source_type, *source_facts, &bits);
+        loom_value_facts_as_exact_float_bits(source_type, *source_facts, &bits);
   } else if (has_bits) {
     has_bits = loom_value_facts_as_exact_raw_bits(*source_facts,
                                                   source_bit_count, &bits);
