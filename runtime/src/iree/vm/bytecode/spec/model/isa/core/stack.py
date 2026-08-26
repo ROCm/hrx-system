@@ -17,11 +17,14 @@ from model.isa import (
     RefNullPolicy,
     RefOwnership,
     RuntimeRefPolicy,
+    StateResource,
 )
 from model.isa.declarations import (
     core_instruction,
     instruction_field,
     ref_register,
+    state_read,
+    state_write,
     value_register,
     zero_padding,
 )
@@ -194,6 +197,7 @@ STACK_LOAD = core_instruction(
         zero_padding("zero_padding_u8", 5, 3),
     ),
     constraints=(_lane_range_constraint("dst_v8", "format_u8"),),
+    state_effects=(state_read(StateResource.FRAME_LOCALS, "base_u16"),),
     semantics=_semantics(
         description=(
             "Loads the format-selected lane group from the statically selected "
@@ -255,6 +259,7 @@ STACK_STORE = core_instruction(
         ),
     ),
     constraints=(_lane_range_constraint("src_v8", "format_u8"),),
+    state_effects=(state_write(StateResource.FRAME_LOCALS, "base_u16"),),
     semantics=_semantics(
         description=(
             "Stores the low bits of consecutive source value registers into "
@@ -368,6 +373,11 @@ def _indexed_stack_access(*, load: bool) -> Instruction:
         family_id=FAMILY.entity_id,
         fields=fields,
         constraints=(_lane_range_constraint(register_name, "format_u8"),),
+        state_effects=(
+            state_read(StateResource.FRAME_LOCALS, "base_u16")
+            if load
+            else state_write(StateResource.FRAME_LOCALS, "base_u16"),
+        ),
         semantics=_semantics(
             description=(
                 f"{action.capitalize()} one format-selected lane group {direction} "
@@ -455,6 +465,7 @@ STACK_FILL = core_instruction(
             ((1, 2, 4, 8),),
         ),
     ),
+    state_effects=(state_write(StateResource.FRAME_LOCALS, "target_base_u16"),),
     semantics=_semantics(
         description=(
             "Repeats the low one, two, four, or eight little-endian bytes of "
@@ -495,6 +506,10 @@ STACK_COPY = core_instruction(
         _range_base("target_u16", 2, "length_u16", "Static local-byte target base."),
         _range_base("source_u16", 4, "length_u16", "Static local-byte source base."),
         _range_length("length_u16", 6),
+    ),
+    state_effects=(
+        state_read(StateResource.FRAME_LOCALS, "source_u16"),
+        state_write(StateResource.FRAME_LOCALS, "target_u16"),
     ),
     semantics=_semantics(
         description=(
@@ -539,6 +554,10 @@ STACK_COMPARE = core_instruction(
         _range_base("lhs_u16", 2, "length_u16", "Static left range base."),
         _range_base("rhs_u16", 4, "length_u16", "Static right range base."),
         _range_length("length_u16", 6),
+    ),
+    state_effects=(
+        state_read(StateResource.FRAME_LOCALS, "lhs_u16"),
+        state_read(StateResource.FRAME_LOCALS, "rhs_u16"),
     ),
     semantics=_semantics(
         description=(
@@ -595,6 +614,7 @@ STACK_COPY_RODATA = core_instruction(
             (FieldReference("rodata_u16"), FieldReference("length_u16")),
         ),
     ),
+    state_effects=(state_write(StateResource.FRAME_LOCALS, "target_u16"),),
     semantics=_semantics(
         description=(
             "Copies a statically selected immutable module-rodata range into "
@@ -695,6 +715,18 @@ def _buffer_copy(*, from_buffer: bool) -> Instruction:
         byte_length=8,
         family_id=FAMILY.entity_id,
         fields=fields,
+        state_effects=(
+            (
+                state_read(StateResource.BUFFER, "buffer_r8")
+                if from_buffer
+                else state_read(StateResource.FRAME_LOCALS, "source_u16")
+            ),
+            (
+                state_write(StateResource.FRAME_LOCALS, "target_u16")
+                if from_buffer
+                else state_write(StateResource.BUFFER, "buffer_r8")
+            ),
+        ),
         semantics=_semantics(
             description=(
                 f"Copies between a statically verified local range and a "
@@ -814,6 +846,7 @@ def _repeated_constant(*, cell_byte_length: int, opcode: int) -> Instruction:
                 ANY_BITS.entity_id,
             ),
         ),
+        state_effects=(state_write(StateResource.FRAME_LOCALS, "target_u16"),),
         semantics=_semantics(
             description=(
                 f"Sign-extends immediate_i16 to {cell_name} and writes "
@@ -893,6 +926,7 @@ def _fixed_pack(
                 array_length=lane_count,
             ),
         ),
+        state_effects=(state_write(StateResource.FRAME_LOCALS, "target_u16"),),
         semantics=_semantics(
             description=(
                 f"Zero-extends each of {lane_count} encoded u{immediate_bit_width} "

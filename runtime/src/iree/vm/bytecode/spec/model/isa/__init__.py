@@ -70,6 +70,68 @@ class Suspension(enum.Enum):
     TARGET_DEPENDENT = "target_dependent"
 
 
+class StateAccess(enum.Enum):
+    """Kind of access an instruction may make to architectural state."""
+
+    UNKNOWN = "unknown"
+    READ = "read"
+    WRITE = "write"
+    ALLOCATE = "allocate"
+    RELEASE = "release"
+    SYNCHRONIZE = "synchronize"
+
+
+class StateResource(enum.Enum):
+    """Non-register architectural state resource affected by an instruction."""
+
+    ANY = "any"
+    INVOCATION_ARGUMENTS = "invocation.arguments"
+    INVOCATION_RESULTS = "invocation.results"
+    FRAME_LOCALS = "frame.locals"
+    PROCESS_GLOBALS = "process.globals"
+    BUFFER = "buffer"
+    HAL_DEVICE = "hal.device"
+    HAL_DEVICE_GROUP = "hal.device_group"
+    HAL_EXECUTABLE = "hal.executable"
+    HAL_POOL = "hal.pool"
+    HAL_COMMAND_BUFFER = "hal.command_buffer"
+    HAL_QUEUE = "hal.queue"
+    HAL_SEMAPHORE = "hal.semaphore"
+    HAL_CHANNEL = "hal.channel"
+    IO_FILE = "io.file"
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class StateEffect:
+    """One conservative may-effect on non-register architectural state.
+
+    Effects include state changes scheduled for deferred execution. Resource
+    fields name the encoded fields that identify the affected resource. An
+    empty field tuple denotes implicit or domain-wide state.
+    """
+
+    access: StateAccess
+    resource: StateResource
+    resource_fields: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.access, StateAccess):
+            raise ValueError("invalid state access")
+        if not isinstance(self.resource, StateResource):
+            raise ValueError("invalid state resource")
+        is_unknown = self.access == StateAccess.UNKNOWN
+        is_any_resource = self.resource == StateResource.ANY
+        if is_unknown != is_any_resource:
+            raise ValueError("unknown state access and any resource must be paired")
+        if is_any_resource and self.resource_fields:
+            raise ValueError("any-resource state effect cannot name resource fields")
+        if len(set(self.resource_fields)) != len(self.resource_fields):
+            raise ValueError("duplicate state-effect resource field")
+        for field_name in self.resource_fields:
+            if not _FIELD_PATTERN.fullmatch(field_name):
+                raise ValueError(f"invalid state-effect resource field {field_name!r}")
+
+
 class RefNullPolicy(enum.Enum):
     """Dynamic null/type interpretation of a ref operand or result."""
 
@@ -277,6 +339,7 @@ class Instruction(Entity):
     constraints: tuple[RuleUse, ...]
     control_flow: ControlFlow
     suspension: Suspension
+    state_effects: tuple[StateEffect, ...]
     semantics: InstructionSemantics
 
     def referenced_entity_ids(self) -> tuple[str, ...]:
@@ -325,6 +388,28 @@ class Instruction(Entity):
         elif not self.semantics.success:
             raise ValueError(f"{self.entity_id}: missing success behavior")
 
+        state_effect_keys: set[tuple[StateAccess, StateResource, frozenset[str]]] = (
+            set()
+        )
+        for state_effect in self.state_effects:
+            if not isinstance(state_effect, StateEffect):
+                raise ValueError(f"{self.entity_id}: invalid state effect")
+            key = (
+                state_effect.access,
+                state_effect.resource,
+                frozenset(state_effect.resource_fields),
+            )
+            if key in state_effect_keys:
+                raise ValueError(f"{self.entity_id}: duplicate state effect {key}")
+            state_effect_keys.add(key)
+        if len(self.state_effects) > 1 and any(
+            state_effect.access == StateAccess.UNKNOWN
+            for state_effect in self.state_effects
+        ):
+            raise ValueError(
+                f"{self.entity_id}: unknown state effect must be the only effect"
+            )
+
         for other in specification.entities:
             if not isinstance(other, Instruction) or other is self:
                 continue
@@ -372,6 +457,20 @@ class Instruction(Entity):
             raise ValueError(f"{self.entity_id}: uncovered bytes {uncovered}")
 
         frozen_field_names = frozenset(field_names)
+        fields_by_name = {field.name: field for field in self.fields}
+        for state_effect in self.state_effects:
+            for field_name in state_effect.resource_fields:
+                field = fields_by_name.get(field_name)
+                if field is None:
+                    raise ValueError(
+                        f"{self.entity_id}: state effect references unknown field "
+                        f"{field_name}"
+                    )
+                if field.role == InstructionFieldRole.PADDING:
+                    raise ValueError(
+                        f"{self.entity_id}: state effect references padding field "
+                        f"{field_name}"
+                    )
         for field in self.fields:
             runtime_ref_policy = field.runtime_ref_policy
             if runtime_ref_policy is not None:

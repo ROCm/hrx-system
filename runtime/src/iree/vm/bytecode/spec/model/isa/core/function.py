@@ -12,11 +12,14 @@ from model.isa import (
     InstructionFamily,
     InstructionFieldRole,
     InstructionSemantics,
+    StateResource,
 )
 from model.isa.declarations import (
     core_instruction,
     function_register,
     instruction_field,
+    state_read,
+    state_write,
     value_register,
     zero_padding,
 )
@@ -108,6 +111,7 @@ FUNC_NULL = core_instruction(
         ),
         _zero_u16(),
     ),
+    state_effects=(),
     semantics=_semantics(
         "Replaces dst_f8 with the all-zero canonical null function carrier.",
         (
@@ -143,6 +147,7 @@ FUNC_COMPARE_NULL = core_instruction(
         ),
         zero_padding("zero_padding_u8", 3, 1),
     ),
+    state_effects=(),
     semantics=_semantics(
         "Tests whether both 64-bit lanes of src_f8 are zero.",
         (
@@ -181,6 +186,7 @@ FUNC_COPY = core_instruction(
         ),
         zero_padding("zero_padding_u8", 3, 1),
     ),
+    state_effects=(),
     semantics=_semantics(
         "Copies all 16 bytes of src_f8 to dst_f8; the registers may alias.",
         (
@@ -250,6 +256,7 @@ FUNC_ADDRESS = core_instruction(
             ),
         ),
     ),
+    state_effects=(),
     semantics=_semantics(
         (
             "Materializes a complete function carrier from immutable linked "
@@ -314,6 +321,7 @@ FUNC_IMPORT_RESOLVED = core_instruction(
             (RuleUse(IMPORT_ORDINAL_OPTIONAL.entity_id),),
         ),
     ),
+    state_effects=(),
     semantics=_semantics(
         (
             "Reads immutable linked state for an optional function import and "
@@ -368,6 +376,7 @@ FUNC_STACK_LOAD = core_instruction(
         ),
         _local_ordinal(),
     ),
+    state_effects=(state_read(StateResource.FRAME_LOCALS, "local_ordinal_u16"),),
     semantics=_semantics(
         (
             "Copies one complete zero-initialized 16-byte function-local cell "
@@ -403,6 +412,7 @@ FUNC_STACK_STORE = core_instruction(
         ),
         _local_ordinal(),
     ),
+    state_effects=(state_write(StateResource.FRAME_LOCALS, "local_ordinal_u16"),),
     semantics=_semantics(
         "Copies all 16 bytes of src_f8 into one function-local cell.",
         (

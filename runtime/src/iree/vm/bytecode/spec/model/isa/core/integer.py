@@ -116,6 +116,7 @@ def _binary(
             _value("lhs_v8", 2, InstructionFieldRole.OPERAND),
             _value("rhs_v8", 3, InstructionFieldRole.OPERAND),
         ),
+        state_effects=(),
         semantics=_common_semantics(
             description=description,
             verification=(
@@ -409,6 +410,7 @@ def _division(
             _value("lhs_v8", 2, InstructionFieldRole.OPERAND),
             _value("rhs_v8", 3, InstructionFieldRole.OPERAND),
         ),
+        state_effects=(),
         semantics=_common_semantics(
             description=(
                 f"Computes the {interpretation} {width}-bit {operation}."
@@ -492,6 +494,7 @@ def _unary(
             _value("src_v8", 2, InstructionFieldRole.OPERAND),
             zero_padding("zero_padding_u8", 3, 1),
         ),
+        state_effects=(),
         semantics=_common_semantics(
             description=description,
             verification=(
@@ -613,6 +616,7 @@ def _comparison(*, opcode: int, width: int) -> Instruction:
             _field_selector("predicate_u8", 4, table.entity_id),
             zero_padding("zero_padding_u8", 5, 3),
         ),
+        state_effects=(),
         semantics=_common_semantics(
             description=(
                 f"Compares the low {width} bits using eq, ne, signed lt/le/gt/ge, "
@@ -686,6 +690,7 @@ def _lea(*, opcode: int, width: int) -> Instruction:
                 (RuleUse(ANY_BITS.entity_id),),
             ),
         ),
+        state_effects=(),
         semantics=_common_semantics(
             description=(
                 f"Computes base + index * scale_u8 + sign_extend(offset_i16) "
@@ -739,6 +744,7 @@ def _ceildiv(*, opcode: int, width: int) -> Instruction:
                 (RuleUse(ALLOWED_RANGE.entity_id, (0, width - 1)),),
             ),
         ),
+        state_effects=(),
         semantics=_common_semantics(
             description=(
                 f"Computes exact mathematical ceil(unsigned(src) / 2^log2) over "
@@ -893,6 +899,7 @@ def _bitstream(*, opcode: int, mnemonic: str, mode: str, signed: bool) -> Instru
         family_id=FAMILY.entity_id,
         fields=fields,
         constraints=constraints,
+        state_effects=(),
         semantics=_common_semantics(
             description=description,
             verification=(

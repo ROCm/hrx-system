@@ -18,6 +18,7 @@ from model.isa import (
     RefNullPolicy,
     RefOwnership,
     RuntimeRefPolicy,
+    StateResource,
     Suspension,
 )
 from model.isa.declarations import (
@@ -25,6 +26,9 @@ from model.isa.declarations import (
     function_register,
     instruction_field,
     ref_register,
+    state_read,
+    state_unknown,
+    state_write,
     value_register,
     zero_padding,
 )
@@ -149,6 +153,7 @@ CONTROL_BLOCK = core_instruction(
     family_id=FAMILY.entity_id,
     fields=(zero_padding("zero_padding_u8", 1, 3),),
     control_flow=ControlFlow.BLOCK,
+    state_effects=(),
     semantics=InstructionSemantics(
         description=(
             "Marks a legal branch, switch, or yield destination without "
@@ -179,6 +184,10 @@ CONTROL_RETURN = core_instruction(
     fields=(zero_padding("zero_padding_u8", 1, 3),),
     constraints=(RuleUse(CONTROL_RETURN_SIGNATURE.entity_id),),
     control_flow=ControlFlow.RETURN,
+    state_effects=(
+        state_read(StateResource.INVOCATION_RESULTS),
+        state_write(StateResource.INVOCATION_RESULTS),
+    ),
     semantics=InstructionSemantics(
         description=(
             "Completes the current function by validating every direct and "
@@ -242,6 +251,7 @@ CONTROL_YIELD_S32 = core_instruction(
     fields=(zero_padding("zero_padding_u8", 1, 3), _target_s32()),
     control_flow=ControlFlow.YIELD,
     suspension=Suspension.ALWAYS,
+    state_effects=(),
     semantics=InstructionSemantics(
         description=(
             "Ends the physical block, durably records one explicit continuation "
@@ -366,6 +376,7 @@ def _branch(
         family_id=FAMILY.entity_id,
         fields=tuple(fields),
         control_flow=control_flow,
+        state_effects=(),
         semantics=InstructionSemantics(
             description=description,
             verification=verification,
@@ -460,6 +471,7 @@ CONTROL_SWITCH = core_instruction(
         ),
     ),
     control_flow=ControlFlow.SWITCH,
+    state_effects=(),
     semantics=InstructionSemantics(
         description=(
             "Treats the complete selector cell as unsigned, selects a verified "
@@ -551,6 +563,7 @@ CONTROL_CALL = core_instruction(
     ),
     control_flow=ControlFlow.CALL,
     suspension=Suspension.TARGET_DEPENDENT,
+    state_effects=(state_unknown(),),
     semantics=InstructionSemantics(
         description=(
             "Invokes a function in the current linked module or its resolved-"
@@ -670,6 +683,7 @@ CONTROL_CALL_INDIRECT = core_instruction(
     ),
     control_flow=ControlFlow.CALL,
     suspension=Suspension.TARGET_DEPENDENT,
+    state_effects=(state_unknown(),),
     semantics=InstructionSemantics(
         description=(
             "Invokes a first-class function value in the current process after "
@@ -773,6 +787,7 @@ CONTROL_ASSERT = core_instruction(
         _diagnostic_message(),
         zero_padding("zero_padding_u8", 3, 1),
     ),
+    state_effects=(state_read(StateResource.BUFFER, "message_r8_nullable"),),
     semantics=InstructionSemantics(
         description=(
             "Continues when the complete condition cell is nonzero and otherwise "
@@ -836,6 +851,7 @@ CONTROL_FAIL = core_instruction(
         zero_padding("zero_padding_u8", 3, 1),
     ),
     control_flow=ControlFlow.FAIL,
+    state_effects=(state_read(StateResource.BUFFER, "message_r8_nullable"),),
     semantics=InstructionSemantics(
         description=(
             "Unconditionally terminates the invocation with status_u8 and "

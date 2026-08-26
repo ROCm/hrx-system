@@ -19,10 +19,15 @@ from model.isa import (
     RefNullPolicy,
     RefOwnership,
     RuntimeRefPolicy,
+    StateResource,
 )
 from model.isa.declarations import (
     hal_instruction,
     instruction_field,
+    state_allocate,
+    state_read,
+    state_synchronize,
+    state_write,
     value_register,
     zero_padding,
 )
@@ -292,6 +297,10 @@ HAL_CMD_CREATE = hal_instruction(
         ),
         zero_padding("zero_padding_u8", 14, 2),
     ),
+    state_effects=(
+        state_read(StateResource.HAL_DEVICE, "device_r8"),
+        state_allocate(StateResource.HAL_COMMAND_BUFFER, "dst_r8"),
+    ),
     semantics=InstructionSemantics(
         description=(
             "Creates one non-rerecordable command buffer and begins recording "
@@ -366,6 +375,7 @@ HAL_CMD_FINALIZE = hal_instruction(
         hal_ref("command_buffer_r8", 2, "hal.command_buffer"),
         zero_padding("zero_padding_u8", 3, 1),
     ),
+    state_effects=(state_write(StateResource.HAL_COMMAND_BUFFER, "command_buffer_r8"),),
     semantics=InstructionSemantics(
         description="Ends recording permanently while retaining the VM ref owner.",
         verification=(
@@ -477,6 +487,26 @@ HAL_CMD_EXECUTION_BARRIER = hal_instruction(
         ),
     ),
     range_groups=(MEMORY_BARRIER_RANGE, BUFFER_BARRIER_RANGE),
+    state_effects=(
+        state_read(
+            StateResource.FRAME_LOCALS,
+            "memory_source_scope_base_u16",
+            "memory_target_scope_base_u16",
+            "buffer_source_scope_base_u16",
+            "buffer_target_scope_base_u16",
+            "buffer_ref_base_u16",
+            "buffer_slot_base_u16",
+            "buffer_offset_base_u16",
+            "buffer_length_base_u16",
+        ),
+        state_write(StateResource.HAL_COMMAND_BUFFER, "command_buffer_r8"),
+        state_synchronize(StateResource.HAL_COMMAND_BUFFER, "command_buffer_r8"),
+        state_synchronize(
+            StateResource.BUFFER,
+            "buffer_ref_base_u16",
+            "buffer_slot_base_u16",
+        ),
+    ),
     semantics=InstructionSemantics(
         description=(
             "Records independent global-memory and direct-or-slot buffer dependency "
@@ -553,6 +583,14 @@ HAL_CMD_ADVISE_BUFFER = hal_instruction(
         _value("arg1_v8", 13, "Reserved zero dynamic advice argument one."),
         zero_padding("zero_padding1_u8", 14, 2),
     ),
+    state_effects=(
+        state_write(StateResource.HAL_COMMAND_BUFFER, "command_buffer_r8"),
+        state_write(
+            StateResource.BUFFER,
+            "buffer_r8_nullable",
+            "buffer_slot_v8",
+        ),
+    ),
     semantics=InstructionSemantics(
         description=(
             "Records a provider-defined no-flag advice operation; version zero "
@@ -626,6 +664,14 @@ HAL_CMD_FILL_BUFFER = hal_instruction(
         zero_padding("zero_padding_u8", 9, 3),
         _zero_u32("flags_u32", 12),
     ),
+    state_effects=(
+        state_write(StateResource.HAL_COMMAND_BUFFER, "command_buffer_r8"),
+        state_write(
+            StateResource.BUFFER,
+            "target_buffer_r8_nullable",
+            "target_slot_v8",
+        ),
+    ),
     semantics=InstructionSemantics(
         description=(
             "Records one direct-or-slot fill using explicit low-byte extraction, "
@@ -694,6 +740,15 @@ HAL_CMD_UPDATE_BUFFER = hal_instruction(
         _value("target_length_v8", 8, "Exact source/target byte length."),
         zero_padding("zero_padding_u8", 9, 3),
         _zero_u32("flags_u32", 12),
+    ),
+    state_effects=(
+        state_read(StateResource.BUFFER, "source_vm_buffer_r8"),
+        state_write(StateResource.HAL_COMMAND_BUFFER, "command_buffer_r8"),
+        state_write(
+            StateResource.BUFFER,
+            "target_buffer_r8_nullable",
+            "target_slot_v8",
+        ),
     ),
     semantics=InstructionSemantics(
         description=(
@@ -778,6 +833,19 @@ HAL_CMD_COPY_BUFFER = hal_instruction(
         _value("length_v8", 9, "Exact copy byte length."),
         zero_padding("zero_padding_u8", 10, 2),
         _zero_u32("flags_u32", 12),
+    ),
+    state_effects=(
+        state_write(StateResource.HAL_COMMAND_BUFFER, "command_buffer_r8"),
+        state_read(
+            StateResource.BUFFER,
+            "source_buffer_r8_nullable",
+            "source_slot_v8",
+        ),
+        state_write(
+            StateResource.BUFFER,
+            "target_buffer_r8_nullable",
+            "target_slot_v8",
+        ),
     ),
     semantics=InstructionSemantics(
         description=(
@@ -887,6 +955,21 @@ HAL_CMD_COLLECTIVE = hal_instruction(
                 "reduction",
                 (0x01, 0x3E, 0x01, 0x01, 0x3E, 0x3E, 0x01, 0x01, 0x01),
             ),
+        ),
+    ),
+    state_effects=(
+        state_write(StateResource.HAL_COMMAND_BUFFER, "command_buffer_r8"),
+        state_read(StateResource.HAL_CHANNEL, "channel_r8"),
+        state_synchronize(StateResource.HAL_CHANNEL, "channel_r8"),
+        state_read(
+            StateResource.BUFFER,
+            "send_buffer_r8_nullable",
+            "send_slot_v8",
+        ),
+        state_write(
+            StateResource.BUFFER,
+            "recv_buffer_r8_nullable",
+            "recv_slot_v8",
         ),
     ),
     semantics=InstructionSemantics(
@@ -1099,6 +1182,21 @@ HAL_CMD_DISPATCH = hal_instruction(
         _flags("flags_u32", 24, 0x00000020),
     ),
     range_groups=(DISPATCH_BINDING_RANGE,),
+    state_effects=(
+        state_read(
+            StateResource.FRAME_LOCALS,
+            "launch_base_u16",
+            "constant_base_u16",
+            "binding_buffer_base_u16",
+            "binding_slot_base_u16",
+            "binding_offset_base_u16",
+            "binding_length_base_u16",
+        ),
+        state_write(StateResource.HAL_COMMAND_BUFFER, "command_buffer_r8"),
+        state_synchronize(StateResource.HAL_COMMAND_BUFFER, "command_buffer_r8"),
+        state_read(StateResource.BUFFER, "binding_buffer_base_u16"),
+        state_write(StateResource.BUFFER, "binding_buffer_base_u16"),
+    ),
     semantics=InstructionSemantics(
         description=(
             "Preflights a complete static-count table dispatch, optionally records "
@@ -1185,6 +1283,26 @@ HAL_CMD_DISPATCH_INDIRECT_COUNT = hal_instruction(
         _flags("flags_u32", 28, 0x00000023, required_one_mask=0x00000003),
     ),
     range_groups=(DISPATCH_BINDING_RANGE,),
+    state_effects=(
+        state_read(
+            StateResource.FRAME_LOCALS,
+            "launch_base_u16",
+            "constant_base_u16",
+            "binding_buffer_base_u16",
+            "binding_slot_base_u16",
+            "binding_offset_base_u16",
+            "binding_length_base_u16",
+        ),
+        state_read(
+            StateResource.BUFFER,
+            "workgroup_count_buffer_r8_nullable",
+            "workgroup_count_slot_v8",
+        ),
+        state_write(StateResource.HAL_COMMAND_BUFFER, "command_buffer_r8"),
+        state_synchronize(StateResource.HAL_COMMAND_BUFFER, "command_buffer_r8"),
+        state_read(StateResource.BUFFER, "binding_buffer_base_u16"),
+        state_write(StateResource.BUFFER, "binding_buffer_base_u16"),
+    ),
     semantics=InstructionSemantics(
         description=(
             "Preflights a table dispatch whose three counts come from one exact "
@@ -1267,6 +1385,7 @@ HAL_CMD_DEBUG_GROUP_BEGIN = hal_instruction(
             (RuleUse(ANY_BITS.entity_id),),
         ),
     ),
+    state_effects=(state_write(StateResource.HAL_COMMAND_BUFFER, "command_buffer_r8"),),
     semantics=InstructionSemantics(
         description=(
             "Begins one nested diagnostic group with copied label bytes, explicit "
@@ -1314,6 +1433,7 @@ HAL_CMD_DEBUG_GROUP_END = hal_instruction(
         hal_ref("command_buffer_r8", 2, "hal.command_buffer"),
         zero_padding("zero_padding_u8", 3, 1),
     ),
+    state_effects=(state_write(StateResource.HAL_COMMAND_BUFFER, "command_buffer_r8"),),
     semantics=InstructionSemantics(
         description="Closes the innermost HAL-managed debug group.",
         verification=(

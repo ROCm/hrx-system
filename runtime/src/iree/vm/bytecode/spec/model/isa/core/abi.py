@@ -16,12 +16,16 @@ from model.isa import (
     RefNullPolicy,
     RefOwnership,
     RuntimeRefPolicy,
+    StateEffect,
+    StateResource,
 )
 from model.isa.declarations import (
     core_instruction,
     function_register,
     instruction_field,
     ref_register,
+    state_read,
+    state_write,
     value_register,
 )
 from model.isa.validation import ABI_SLOT
@@ -110,6 +114,7 @@ VALUE_ABI_ARGUMENT_LOAD = core_instruction(
         ),
         _slot("argument.value"),
     ),
+    state_effects=(state_read(StateResource.INVOCATION_ARGUMENTS, "slot_u16"),),
     semantics=_semantics(
         (
             "Copies all 64 bits from one value argument overflow slot into "
@@ -141,6 +146,7 @@ VALUE_ABI_RESULT_STORE = core_instruction(
         ),
         _slot("result.value"),
     ),
+    state_effects=(state_write(StateResource.INVOCATION_RESULTS, "slot_u16"),),
     semantics=_semantics(
         ("Copies all 64 bits of src_v8 into one private value result overflow slot."),
         "result.value",
@@ -172,6 +178,7 @@ def _ref_abi_instruction(
     description: str,
     success: tuple[str, ...],
     ownership: tuple[str, ...],
+    state_effects: tuple[StateEffect, ...],
     assembly: str,
     pseudocode: str,
 ) -> Instruction:
@@ -197,6 +204,7 @@ def _ref_abi_instruction(
             ),
             _slot(packet_contract),
         ),
+        state_effects=state_effects,
         semantics=_semantics(
             description,
             packet_contract,
@@ -233,6 +241,7 @@ REF_ABI_ARGUMENT_LOAD_BORROW = _ref_abi_instruction(
         "The paused caller and argument packet dominate the borrow's complete "
         "callee lifetime, including nested callee suspension.",
     ),
+    state_effects=(state_read(StateResource.INVOCATION_ARGUMENTS, "slot_u16"),),
     assembly="%r<dst> = ref.abi.argument.load.borrow <slot>",
     pseudocode=(
         "source = frame.argument_ref_slots[slot_u16];\n"
@@ -266,6 +275,10 @@ REF_ABI_ARGUMENT_LOAD_MOVE = _ref_abi_instruction(
         "An owner transfers one release obligation; an internal borrow remains "
         "borrowed under its existing dominating lifetime; a previous owned "
         "destination is released.",
+    ),
+    state_effects=(
+        state_read(StateResource.INVOCATION_ARGUMENTS, "slot_u16"),
+        state_write(StateResource.INVOCATION_ARGUMENTS, "slot_u16"),
     ),
     assembly="%r<dst> = ref.abi.argument.load.move <slot>",
     pseudocode=(
@@ -303,6 +316,7 @@ REF_ABI_RESULT_STORE_MOVE = _ref_abi_instruction(
         "publication. An owned source transfers its existing obligation. The "
         "old result owner, if any, is released only after the new state is safe.",
     ),
+    state_effects=(state_write(StateResource.INVOCATION_RESULTS, "slot_u16"),),
     assembly="ref.abi.result.store.move %r<src>, <slot>",
     pseudocode=(
         "source = refs[src_r8];\n"
@@ -330,6 +344,7 @@ def _function_abi_instruction(
     packet_contract: str,
     description: str,
     success: tuple[str, ...],
+    state_effects: tuple[StateEffect, ...],
     assembly: str,
     pseudocode: str,
 ) -> Instruction:
@@ -350,6 +365,7 @@ def _function_abi_instruction(
             ),
             _slot(packet_contract),
         ),
+        state_effects=state_effects,
         semantics=_semantics(
             description,
             packet_contract,
@@ -374,6 +390,7 @@ FUNC_ABI_ARGUMENT_LOAD = _function_abi_instruction(
         "Copies one complete 16-byte function argument overflow slot into dst_f8."
     ),
     success=("dst_f8 receives an exact copy of argument_function_slots[slot_u16].",),
+    state_effects=(state_read(StateResource.INVOCATION_ARGUMENTS, "slot_u16"),),
     assembly="%f<dst> = func.abi.argument.load <slot>",
     pseudocode=(
         "functions[dst_f8] = frame.argument_function_slots[slot_u16];\npc = pc + 4;"
@@ -397,6 +414,7 @@ FUNC_ABI_RESULT_STORE = _function_abi_instruction(
         "repeated stores are valid and the last executed store wins.",
         "control.return validates the complete result packet before publication.",
     ),
+    state_effects=(state_write(StateResource.INVOCATION_RESULTS, "slot_u16"),),
     assembly="func.abi.result.store %f<src>, <slot>",
     pseudocode=(
         "frame.result_function_slots[slot_u16] = functions[src_f8];\npc = pc + 4;"

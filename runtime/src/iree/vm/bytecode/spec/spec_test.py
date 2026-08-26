@@ -46,6 +46,9 @@ from model.isa import (  # noqa: E402
     InstructionField,
     InstructionFieldRole,
     InstructionSemantics,
+    StateAccess,
+    StateEffect,
+    StateResource,
     Suspension,
 )
 
@@ -152,6 +155,7 @@ class SpecificationModelTest(unittest.TestCase):
             constraints=(),
             control_flow=ControlFlow.RETURN,
             suspension=Suspension.NEVER,
+            state_effects=(),
             semantics=InstructionSemantics(
                 description="Returns.",
                 verification=("Padding is valid.",),
@@ -684,6 +688,7 @@ class SpecificationModelTest(unittest.TestCase):
             constraints=(),
             control_flow=ControlFlow.SEQUENTIAL,
             suspension=Suspension.NEVER,
+            state_effects=(),
             semantics=InstructionSemantics(
                 description="Copies all 64 bits without interpretation.",
                 verification=("Validate both register ordinals.",),
@@ -763,6 +768,120 @@ class SpecificationModelTest(unittest.TestCase):
                         semantics=dataclasses.replace(
                             terminal_failure.semantics,
                             failures=(),
+                        ),
+                    ),
+                ),
+            )
+
+        read_effect = StateEffect(
+            StateAccess.READ,
+            StateResource.FRAME_LOCALS,
+            ("src_v8",),
+        )
+        Specification(
+            "iree.vm.bytecode",
+            (CORE_0,),
+            (
+                u8,
+                register_rule,
+                zero_rule,
+                family,
+                dataclasses.replace(instruction, state_effects=(read_effect,)),
+            ),
+        )
+        with self.assertRaisesRegex(ValueError, "duplicate state effect"):
+            Specification(
+                "iree.vm.bytecode",
+                (CORE_0,),
+                (
+                    u8,
+                    register_rule,
+                    zero_rule,
+                    family,
+                    dataclasses.replace(
+                        instruction,
+                        state_effects=(read_effect, read_effect),
+                    ),
+                ),
+            )
+        with self.assertRaisesRegex(
+            ValueError,
+            "unknown state effect must be the only effect",
+        ):
+            Specification(
+                "iree.vm.bytecode",
+                (CORE_0,),
+                (
+                    u8,
+                    register_rule,
+                    zero_rule,
+                    family,
+                    dataclasses.replace(
+                        instruction,
+                        state_effects=(
+                            StateEffect(StateAccess.UNKNOWN, StateResource.ANY),
+                            read_effect,
+                        ),
+                    ),
+                ),
+            )
+        with self.assertRaisesRegex(
+            ValueError,
+            "unknown state access and any resource must be paired",
+        ):
+            StateEffect(StateAccess.UNKNOWN, StateResource.FRAME_LOCALS)
+        with self.assertRaisesRegex(
+            ValueError,
+            "unknown state access and any resource must be paired",
+        ):
+            StateEffect(StateAccess.READ, StateResource.ANY)
+        with self.assertRaisesRegex(
+            ValueError,
+            "any-resource state effect cannot name resource fields",
+        ):
+            StateEffect(
+                StateAccess.UNKNOWN,
+                StateResource.ANY,
+                ("src_v8",),
+            )
+        with self.assertRaisesRegex(ValueError, "unknown field missing_v8"):
+            Specification(
+                "iree.vm.bytecode",
+                (CORE_0,),
+                (
+                    u8,
+                    register_rule,
+                    zero_rule,
+                    family,
+                    dataclasses.replace(
+                        instruction,
+                        state_effects=(
+                            StateEffect(
+                                StateAccess.WRITE,
+                                StateResource.FRAME_LOCALS,
+                                ("missing_v8",),
+                            ),
+                        ),
+                    ),
+                ),
+            )
+        with self.assertRaisesRegex(ValueError, "references padding field"):
+            Specification(
+                "iree.vm.bytecode",
+                (CORE_0,),
+                (
+                    u8,
+                    register_rule,
+                    zero_rule,
+                    family,
+                    dataclasses.replace(
+                        instruction,
+                        state_effects=(
+                            StateEffect(
+                                StateAccess.READ,
+                                StateResource.FRAME_LOCALS,
+                                ("zero_padding_u8",),
+                            ),
                         ),
                     ),
                 ),

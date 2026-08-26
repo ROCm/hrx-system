@@ -17,11 +17,15 @@ from model.isa import (
     RefNullPolicy,
     RefOwnership,
     RuntimeRefPolicy,
+    StateResource,
 )
 from model.isa.declarations import (
     core_instruction,
     instruction_field,
     ref_register,
+    state_allocate,
+    state_read,
+    state_write,
     value_register,
     zero_padding,
 )
@@ -253,6 +257,7 @@ BUFFER_ALLOCATE = core_instruction(
         ),
         zero_padding("zero_padding_u8", 3, 1),
     ),
+    state_effects=(state_allocate(StateResource.BUFFER, "dst_r8"),),
     semantics=_semantics(
         description=(
             "Allocates one distinct non-null buffer with immutable READ|WRITE "
@@ -316,6 +321,7 @@ BUFFER_LENGTH = core_instruction(
         _buffer_ref("buffer_r8", 2),
         zero_padding("zero_padding_u8", 3, 1),
     ),
+    state_effects=(),
     semantics=_semantics(
         description=(
             "Returns the exact immutable logical byte length without inspecting "
@@ -364,6 +370,10 @@ BUFFER_SUBSPAN = core_instruction(
             "Unsigned 64-bit view byte length.",
         ),
         zero_padding("zero_padding_u8", 5, 3),
+    ),
+    state_effects=(
+        state_read(StateResource.BUFFER, "buffer_r8"),
+        state_allocate(StateResource.BUFFER, "dst_r8"),
     ),
     semantics=_semantics(
         description=(
@@ -518,6 +528,11 @@ def _buffer_lane_access(*, load: bool) -> Instruction:
         family_id=FAMILY.entity_id,
         fields=fields,
         constraints=(_lane_range_constraint(value_field),),
+        state_effects=(
+            state_read(StateResource.BUFFER, "buffer_r8")
+            if load
+            else state_write(StateResource.BUFFER, "buffer_r8"),
+        ),
         semantics=_semantics(
             description=(
                 "Transfers a memory.format lane group at unsigned(base_v8) + "
@@ -761,6 +776,10 @@ def _atomic_apply(*, reduce: bool) -> Instruction:
         family_id=FAMILY.entity_id,
         fields=fields,
         constraints=(_atomic_carrier_constraint(),),
+        state_effects=(
+            state_read(StateResource.BUFFER, "buffer_r8"),
+            state_write(StateResource.BUFFER, "buffer_r8"),
+        ),
         semantics=_semantics(
             description=(
                 "Atomically applies the selected integer or floating update to "
@@ -880,6 +899,10 @@ BUFFER_ATOMIC_CMPXCHG = core_instruction(
             ),
         ),
     ),
+    state_effects=(
+        state_read(StateResource.BUFFER, "buffer_r8"),
+        state_write(StateResource.BUFFER, "buffer_r8"),
+    ),
     semantics=_semantics(
         description=(
             "Performs one strong, non-spurious exact-bit compare-exchange on a "
@@ -960,6 +983,7 @@ BUFFER_FILL = core_instruction(
         ),
         _u16_zero("zero_padding_u16", 6),
     ),
+    state_effects=(state_write(StateResource.BUFFER, "buffer_r8"),),
     semantics=_semantics(
         description=(
             "Repeats the low one, two, four, or eight little-endian bytes of "
@@ -1032,6 +1056,10 @@ BUFFER_COPY = core_instruction(
             "length_v8", 5, InstructionFieldRole.OPERAND, "Unsigned byte length."
         ),
         _u16_zero("zero_padding_u16", 6),
+    ),
+    state_effects=(
+        state_read(StateResource.BUFFER, "source_r8"),
+        state_write(StateResource.BUFFER, "target_r8"),
     ),
     semantics=_semantics(
         description=(
@@ -1124,6 +1152,10 @@ BUFFER_COMPARE = core_instruction(
             "length_v8", 6, InstructionFieldRole.OPERAND, "Unsigned byte length."
         ),
         zero_padding("zero_padding_u8", 7, 1),
+    ),
+    state_effects=(
+        state_read(StateResource.BUFFER, "lhs_r8"),
+        state_read(StateResource.BUFFER, "rhs_r8"),
     ),
     semantics=_semantics(
         description=(
@@ -1223,6 +1255,7 @@ BUFFER_COPY_RODATA = core_instruction(
             (FieldReference("rodata_u16"),),
         ),
     ),
+    state_effects=(state_write(StateResource.BUFFER, "target_r8"),),
     semantics=_semantics(
         description=(
             "Copies a dynamically sized immutable module-rodata range into a "
@@ -1287,6 +1320,7 @@ BUFFER_RODATA_LOAD = core_instruction(
             RODATA_ORDINAL.entity_id,
         ),
     ),
+    state_effects=(),
     semantics=_semantics(
         description=(
             "Publishes an internal borrow of the complete immutable READ-only "

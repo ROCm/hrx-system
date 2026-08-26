@@ -20,6 +20,9 @@ from model.isa import (
     InstructionRangeGroup,
     InstructionSemantics,
     RuntimeRefPolicy,
+    StateAccess,
+    StateEffect,
+    StateResource,
     Suspension,
 )
 from model.isa.validation import (
@@ -66,6 +69,7 @@ def core_instruction(
     byte_length: int,
     family_id: str,
     fields: tuple[InstructionField, ...],
+    state_effects: tuple[StateEffect, ...],
     semantics: InstructionSemantics,
     since: Version = CORE_0,
     range_groups: tuple[InstructionRangeGroup, ...] = (),
@@ -88,6 +92,7 @@ def core_instruction(
         constraints=constraints,
         control_flow=control_flow,
         suspension=suspension,
+        state_effects=state_effects,
         semantics=semantics,
     )
 
@@ -101,6 +106,7 @@ def hal_instruction(
     byte_length: int,
     family_id: str,
     fields: tuple[InstructionField, ...],
+    state_effects: tuple[StateEffect, ...],
     semantics: InstructionSemantics,
     since: Version = HAL_0,
     range_groups: tuple[InstructionRangeGroup, ...] = (),
@@ -123,8 +129,60 @@ def hal_instruction(
         constraints=constraints,
         control_flow=control_flow,
         suspension=suspension,
+        state_effects=state_effects,
         semantics=semantics,
     )
+
+
+def state_read(
+    resource: StateResource,
+    *resource_fields: str,
+) -> StateEffect:
+    """Declares a possible read from one architectural state resource."""
+
+    return StateEffect(StateAccess.READ, resource, resource_fields)
+
+
+def state_unknown() -> StateEffect:
+    """Declares effects that may alias any architectural state resource."""
+
+    return StateEffect(StateAccess.UNKNOWN, StateResource.ANY)
+
+
+def state_write(
+    resource: StateResource,
+    *resource_fields: str,
+) -> StateEffect:
+    """Declares a possible write to one architectural state resource."""
+
+    return StateEffect(StateAccess.WRITE, resource, resource_fields)
+
+
+def state_allocate(
+    resource: StateResource,
+    *resource_fields: str,
+) -> StateEffect:
+    """Declares creation of one independently tracked resource lifetime."""
+
+    return StateEffect(StateAccess.ALLOCATE, resource, resource_fields)
+
+
+def state_release(
+    resource: StateResource,
+    *resource_fields: str,
+) -> StateEffect:
+    """Declares invalidation of one independently tracked resource lifetime."""
+
+    return StateEffect(StateAccess.RELEASE, resource, resource_fields)
+
+
+def state_synchronize(
+    resource: StateResource,
+    *resource_fields: str,
+) -> StateEffect:
+    """Declares an ordering or completion dependency on one state resource."""
+
+    return StateEffect(StateAccess.SYNCHRONIZE, resource, resource_fields)
 
 
 def value_register(

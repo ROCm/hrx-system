@@ -94,6 +94,7 @@ def _conversion(
             ),
             _selector_field(selector_name),
         ),
+        state_effects=(),
         semantics=InstructionSemantics(
             description=description,
             verification=(

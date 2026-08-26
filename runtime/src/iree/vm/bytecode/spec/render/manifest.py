@@ -60,6 +60,7 @@ def render_completeness_manifest(
                 "field_count": len(instruction.fields),
                 "range_group_count": len(instruction.range_groups),
                 "constraint_count": len(instruction.constraints),
+                "state_effect_count": len(instruction.state_effects),
                 "coverage": {
                     "summary": bool(instruction.summary.strip()),
                     "encoding": instruction.byte_length > 0
@@ -77,6 +78,7 @@ def render_completeness_manifest(
                     ),
                     "ownership": semantics.ownership is not None,
                     "control_and_suspension": True,
+                    "state_effects": instruction.state_effects is not None,
                     "assembly": bool(semantics.assembly),
                     "pseudocode": bool(semantics.pseudocode.strip()),
                 },

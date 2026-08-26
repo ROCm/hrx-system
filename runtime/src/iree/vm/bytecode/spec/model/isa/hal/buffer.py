@@ -16,11 +16,17 @@ from model.isa import (
     RefNullPolicy,
     RefOwnership,
     RuntimeRefPolicy,
+    StateResource,
 )
 from model.isa.declarations import (
     hal_instruction,
     instruction_field,
     ref_register,
+    state_allocate,
+    state_read,
+    state_release,
+    state_synchronize,
+    state_write,
     value_register,
     zero_padding,
 )
@@ -96,6 +102,10 @@ HAL_BUFFER_ALLOCATE = hal_instruction(
             "Unsigned requested allocation size in device bytes.",
         ),
         zero_u16("zero_padding_u16", 10),
+    ),
+    state_effects=(
+        state_read(StateResource.HAL_DEVICE, "device_r8"),
+        state_allocate(StateResource.BUFFER, "dst_r8"),
     ),
     semantics=InstructionSemantics(
         description=(
@@ -184,6 +194,11 @@ HAL_BUFFER_MAP = hal_instruction(
             (RuleUse(ALLOWED_VALUES.entity_id, ((1, 2, 3),)),),
         ),
         zero_padding("zero_padding_u8", 7, 1),
+    ),
+    state_effects=(
+        state_read(StateResource.BUFFER, "source_buffer_r8"),
+        state_synchronize(StateResource.BUFFER, "source_buffer_r8"),
+        state_allocate(StateResource.BUFFER, "dst_r8"),
     ),
     semantics=InstructionSemantics(
         description=(
@@ -279,6 +294,11 @@ HAL_BUFFER_UNMAP = hal_instruction(
             ),
         ),
         zero_padding("zero_padding_u8", 3, 1),
+    ),
+    state_effects=(
+        state_write(StateResource.BUFFER, "mapped_buffer_r8"),
+        state_synchronize(StateResource.BUFFER, "mapped_buffer_r8"),
+        state_release(StateResource.BUFFER, "mapped_buffer_r8"),
     ),
     semantics=InstructionSemantics(
         description=(

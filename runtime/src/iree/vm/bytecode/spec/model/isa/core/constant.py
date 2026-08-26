@@ -65,6 +65,7 @@ CONSTANT_ZERO = core_instruction(
     byte_length=4,
     family_id=FAMILY.entity_id,
     fields=(_destination(), _zero_u16()),
+    state_effects=(),
     semantics=InstructionSemantics(
         description="Writes zero to all 64 bits of dst_v8.",
         verification=(
@@ -102,6 +103,7 @@ CONSTANT_S16 = core_instruction(
             (RuleUse(ANY_BITS.entity_id),),
         ),
     ),
+    state_effects=(),
     semantics=InstructionSemantics(
         description=(
             "Sign-extends the encoded signed 16-bit immediate through all 64 "
@@ -145,6 +147,7 @@ CONSTANT_I32 = core_instruction(
             (RuleUse(ANY_BITS.entity_id),),
         ),
     ),
+    state_effects=(),
     semantics=InstructionSemantics(
         description=(
             "Writes the encoded 32-bit pattern into the low half of dst_v8 "
@@ -194,6 +197,7 @@ CONSTANT_I64 = core_instruction(
             (RuleUse(ANY_BITS.entity_id),),
         ),
     ),
+    state_effects=(),
     semantics=InstructionSemantics(
         description=(
             "Combines two naturally aligned little-endian 32-bit fields into "
@@ -250,6 +254,7 @@ def _pool_load(
                 (RuleUse(CONSTANT_POOL_ORDINAL.entity_id),),
             ),
         ),
+        state_effects=(),
         semantics=InstructionSemantics(
             description=result_effect,
             verification=(

@@ -19,11 +19,16 @@ from model.isa import (
     RefNullPolicy,
     RefOwnership,
     RuntimeRefPolicy,
+    StateResource,
     Suspension,
 )
 from model.isa.declarations import (
     hal_instruction,
     instruction_field,
+    state_allocate,
+    state_read,
+    state_synchronize,
+    state_write,
     value_register,
     zero_padding,
 )
@@ -141,6 +146,10 @@ HAL_SEMAPHORE_CREATE = hal_instruction(
             (RuleUse(ALLOWED_BITS.entity_id, (0x0000000E,)),),
         ),
     ),
+    state_effects=(
+        state_read(StateResource.HAL_DEVICE, "device_r8"),
+        state_allocate(StateResource.HAL_SEMAPHORE, "dst_r8"),
+    ),
     semantics=InstructionSemantics(
         description=(
             "Validates one explicit device and architectural initial payload, "
@@ -212,6 +221,7 @@ HAL_SEMAPHORE_QUERY = hal_instruction(
         ),
         hal_ref("semaphore_r8", 3, "hal.semaphore"),
     ),
+    state_effects=(state_read(StateResource.HAL_SEMAPHORE, "semaphore_r8"),),
     semantics=InstructionSemantics(
         description="Reads one timeline semaphore without blocking.",
         verification=("dst_v8 and semaphore_r8 must be valid register ordinals.",),
@@ -261,6 +271,11 @@ HAL_SEMAPHORE_SIGNAL = hal_instruction(
             "Architectural semaphore signal payload.",
         ),
         zero_padding("zero_padding_u8", 5, 3),
+    ),
+    state_effects=(
+        state_synchronize(StateResource.HAL_DEVICE_GROUP, "group_r8"),
+        state_write(StateResource.HAL_SEMAPHORE, "semaphore_r8"),
+        state_synchronize(StateResource.HAL_SEMAPHORE, "semaphore_r8"),
     ),
     semantics=InstructionSemantics(
         description=(
@@ -405,6 +420,12 @@ HAL_SEMAPHORE_AWAIT = hal_instruction(
         ),
     ),
     suspension=Suspension.CONDITIONAL,
+    state_effects=(
+        state_read(StateResource.FRAME_LOCALS, "semaphore_base_u16"),
+        state_read(StateResource.FRAME_LOCALS, "payload_base_u16"),
+        state_read(StateResource.HAL_SEMAPHORE, "semaphore_base_u16"),
+        state_synchronize(StateResource.HAL_SEMAPHORE, "semaphore_base_u16"),
+    ),
     semantics=InstructionSemantics(
         description=(
             "Validates and polls one struct-of-arrays timepoint set, completing "

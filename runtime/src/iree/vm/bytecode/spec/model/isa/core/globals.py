@@ -17,12 +17,16 @@ from model.isa import (
     RefNullPolicy,
     RefOwnership,
     RuntimeRefPolicy,
+    StateEffect,
+    StateResource,
 )
 from model.isa.declarations import (
     core_instruction,
     function_register,
     instruction_field,
     ref_register,
+    state_read,
+    state_write,
     value_register,
 )
 from model.isa.validation import GLOBAL_ORDINAL
@@ -100,6 +104,7 @@ def _value_global(
     register_name: str,
     register_role: InstructionFieldRole,
     global_contract: str,
+    state_effects: tuple[StateEffect, ...],
     semantics: InstructionSemantics,
 ) -> Instruction:
     return core_instruction(
@@ -119,6 +124,7 @@ def _value_global(
             ),
             _global(global_contract),
         ),
+        state_effects=state_effects,
         semantics=semantics,
     )
 
@@ -131,6 +137,7 @@ GLOBAL_VALUE_IMMUTABLE_LOAD = _value_global(
     register_name="dst_v8",
     register_role=InstructionFieldRole.RESULT,
     global_contract="value.immutable",
+    state_effects=(state_read(StateResource.PROCESS_GLOBALS, "global_u16"),),
     semantics=_semantics(
         "Copies all 64 bits from a set-once value global into dst_v8.",
         (
@@ -170,6 +177,7 @@ GLOBAL_VALUE_IMMUTABLE_STORE = _value_global(
     register_name="src_v8",
     register_role=InstructionFieldRole.OPERAND,
     global_contract="value.immutable",
+    state_effects=(state_write(StateResource.PROCESS_GLOBALS, "global_u16"),),
     semantics=_semantics(
         "Copies all 64 bits of src_v8 into an open set-once value global.",
         (
@@ -213,6 +221,7 @@ GLOBAL_VALUE_MUTABLE_LOAD = _value_global(
     register_name="dst_v8",
     register_role=InstructionFieldRole.RESULT,
     global_contract="value.mutable",
+    state_effects=(state_read(StateResource.PROCESS_GLOBALS, "global_u16"),),
     semantics=_semantics(
         "Copies all 64 bits from a mutable value global into dst_v8.",
         (
@@ -236,6 +245,7 @@ GLOBAL_VALUE_MUTABLE_STORE = _value_global(
     register_name="src_v8",
     register_role=InstructionFieldRole.OPERAND,
     global_contract="value.mutable",
+    state_effects=(state_write(StateResource.PROCESS_GLOBALS, "global_u16"),),
     semantics=_semantics(
         "Copies all 64 bits of src_v8 into a mutable value global.",
         (
@@ -265,6 +275,7 @@ def _ref_global(
     register_role: InstructionFieldRole,
     global_contract: str,
     ownership_policy: RefOwnership,
+    state_effects: tuple[StateEffect, ...],
     semantics: InstructionSemantics,
 ) -> Instruction:
     return core_instruction(
@@ -289,6 +300,7 @@ def _ref_global(
             ),
             _global(global_contract),
         ),
+        state_effects=state_effects,
         semantics=semantics,
     )
 
@@ -302,6 +314,7 @@ GLOBAL_REF_IMMUTABLE_LOAD_BORROW = _ref_global(
     register_role=InstructionFieldRole.RESULT,
     global_contract="ref.immutable",
     ownership_policy=RefOwnership.BORROW,
+    state_effects=(state_read(StateResource.PROCESS_GLOBALS, "global_u16"),),
     semantics=_semantics(
         (
             "Publishes an internal borrow from a set-once ref-global owner into "
@@ -353,6 +366,7 @@ GLOBAL_REF_IMMUTABLE_STORE_MOVE = _ref_global(
     register_role=InstructionFieldRole.OPERAND,
     global_contract="ref.immutable",
     ownership_policy=RefOwnership.PUBLISH_MOVE,
+    state_effects=(state_write(StateResource.PROCESS_GLOBALS, "global_u16"),),
     semantics=_semantics(
         (
             "Promotes a borrow when necessary, moves the owner or accepted null "
@@ -410,6 +424,7 @@ GLOBAL_REF_MUTABLE_LOAD_RETAIN = _ref_global(
     register_role=InstructionFieldRole.RESULT,
     global_contract="ref.mutable",
     ownership_policy=RefOwnership.RETAIN,
+    state_effects=(state_read(StateResource.PROCESS_GLOBALS, "global_u16"),),
     semantics=_semantics(
         "Creates an owned snapshot of a mutable ref global in dst_r8.",
         (
@@ -455,6 +470,7 @@ GLOBAL_REF_MUTABLE_STORE_MOVE = _ref_global(
     register_role=InstructionFieldRole.OPERAND,
     global_contract="ref.mutable",
     ownership_policy=RefOwnership.PUBLISH_MOVE,
+    state_effects=(state_write(StateResource.PROCESS_GLOBALS, "global_u16"),),
     semantics=_semantics(
         (
             "Promotes a borrowed source when necessary, moves the resulting "
@@ -504,6 +520,7 @@ def _function_global(
     register_name: str,
     register_role: InstructionFieldRole,
     global_contract: str,
+    state_effects: tuple[StateEffect, ...],
     semantics: InstructionSemantics,
 ) -> Instruction:
     return core_instruction(
@@ -523,6 +540,7 @@ def _function_global(
             ),
             _global(global_contract),
         ),
+        state_effects=state_effects,
         semantics=semantics,
     )
 
@@ -535,6 +553,7 @@ GLOBAL_FUNC_IMMUTABLE_LOAD = _function_global(
     register_name="dst_f8",
     register_role=InstructionFieldRole.RESULT,
     global_contract="func.immutable",
+    state_effects=(state_read(StateResource.PROCESS_GLOBALS, "global_u16"),),
     semantics=_semantics(
         "Copies one complete set-once function global into dst_f8.",
         (
@@ -572,6 +591,7 @@ GLOBAL_FUNC_IMMUTABLE_STORE = _function_global(
     register_name="src_f8",
     register_role=InstructionFieldRole.OPERAND,
     global_contract="func.immutable",
+    state_effects=(state_write(StateResource.PROCESS_GLOBALS, "global_u16"),),
     semantics=_semantics(
         "Validates and copies src_f8 into an open set-once function global.",
         (
@@ -620,6 +640,7 @@ GLOBAL_FUNC_MUTABLE_LOAD = _function_global(
     register_name="dst_f8",
     register_role=InstructionFieldRole.RESULT,
     global_contract="func.mutable",
+    state_effects=(state_read(StateResource.PROCESS_GLOBALS, "global_u16"),),
     semantics=_semantics(
         "Copies one complete mutable function global into dst_f8.",
         (
@@ -657,6 +678,7 @@ GLOBAL_FUNC_MUTABLE_STORE = _function_global(
     register_name="src_f8",
     register_role=InstructionFieldRole.OPERAND,
     global_contract="func.mutable",
+    state_effects=(state_write(StateResource.PROCESS_GLOBALS, "global_u16"),),
     semantics=_semantics(
         "Validates and copies src_f8 into a mutable function global.",
         (

@@ -16,11 +16,14 @@ from model.isa import (
     RefNullPolicy,
     RefOwnership,
     RuntimeRefPolicy,
+    StateResource,
 )
 from model.isa.declarations import (
     hal_instruction,
     instruction_field,
     ref_register,
+    state_allocate,
+    state_read,
     value_register,
     zero_padding,
 )
@@ -106,6 +109,7 @@ HAL_DEVICE_GROUP_COUNT = hal_instruction(
         ),
         _hal_ref("group_r8", 3, "hal.device_group"),
     ),
+    state_effects=(),
     semantics=InstructionSemantics(
         description="Widens one immutable host device-group count to unsigned u64.",
         verification=(
@@ -155,6 +159,7 @@ HAL_DEVICE_GROUP_GET = hal_instruction(
         ),
         zero_padding("zero_padding_u8", 5, 3),
     ),
+    state_effects=(),
     semantics=InstructionSemantics(
         description=(
             "Checked-narrows the complete index to host size, obtains the "
@@ -271,6 +276,12 @@ HAL_EXECUTABLE_LOAD = hal_instruction(
             "Number of selected u32 name indices.",
             (RuleUse(LOCAL_BYTES_REPEATED_COUNT.entity_id),),
         ),
+    ),
+    state_effects=(
+        state_read(StateResource.HAL_DEVICE, "device_r8"),
+        state_read(StateResource.BUFFER, "payload_vm_buffer_r8_nullable"),
+        state_read(StateResource.FRAME_LOCALS, "selected_ordinal_base_u16"),
+        state_allocate(StateResource.HAL_EXECUTABLE, "dst_r8"),
     ),
     semantics=InstructionSemantics(
         description=(

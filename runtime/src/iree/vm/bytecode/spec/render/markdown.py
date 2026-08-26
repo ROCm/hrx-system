@@ -13,7 +13,7 @@ import posixpath
 from collections.abc import Callable, Iterable
 from typing import cast
 
-from model.isa import Instruction, InstructionFamily
+from model.isa import Instruction, InstructionFamily, StateEffect
 from model.module import (
     EnvelopeRecord,
     ModuleFormat,
@@ -458,6 +458,38 @@ def _render_range_groups(lines: list[str], instruction: Instruction) -> None:
     lines.append("")
 
 
+def _render_state_effects(
+    lines: list[str],
+    instruction: Instruction,
+    detail_heading: str,
+) -> None:
+    lines.extend((f"{detail_heading} State Effects", ""))
+    if not instruction.state_effects:
+        lines.extend(("No non-register architectural state effects.", ""))
+        return
+    lines.extend(
+        (
+            "| Access | Resource | Identifying fields |",
+            "| --- | --- | --- |",
+        )
+    )
+    for state_effect in instruction.state_effects:
+        fields = (
+            ", ".join(f"`{field_name}`" for field_name in state_effect.resource_fields)
+            if state_effect.resource_fields
+            else "implicit or domain-wide"
+        )
+        lines.append(
+            f"| `{state_effect.access.value}` | `{state_effect.resource.value}` | "
+            f"{fields} |"
+        )
+    lines.append("")
+
+
+def _state_effect_summary(state_effect: StateEffect) -> str:
+    return f"`{state_effect.access.value} {state_effect.resource.value}`"
+
+
 def _render_instruction(
     lines: list[str],
     instruction: Instruction,
@@ -533,6 +565,7 @@ def _render_instruction(
             lines.append(f"- {_rule_use(constraint, entity_link)}")
         lines.append("")
 
+    _render_state_effects(lines, instruction, detail_heading)
     lines.extend((f"{detail_heading} Verification", ""))
     _list(lines, instruction.semantics.verification)
     lines.extend((f"{detail_heading} Dynamic Preconditions", ""))
@@ -621,16 +654,27 @@ def _render_instruction_summary(
 ) -> None:
     lines.extend(
         (
-            "| Opcode | Instruction | Bytes | Control | Suspension | Meaning |",
-            "| ---: | --- | ---: | --- | --- | --- |",
+            "| Opcode | Instruction | Bytes | Control | Suspension | State effects | Meaning |",
+            "| ---: | --- | ---: | --- | --- | --- | --- |",
         )
     )
     for instruction in sorted(instructions, key=lambda value: value.opcode):
+        state_effects = (
+            "<br>".join(
+                dict.fromkeys(
+                    _state_effect_summary(state_effect)
+                    for state_effect in instruction.state_effects
+                )
+            )
+            if instruction.state_effects
+            else "—"
+        )
         lines.append(
             f"| `0x{instruction.opcode:02X}` | "
             f"{entity_link(instruction.entity_id)} | {instruction.byte_length} | "
             f"`{instruction.control_flow.value}` | "
-            f"`{instruction.suspension.value}` | {_cell(instruction.summary)} |"
+            f"`{instruction.suspension.value}` | {state_effects} | "
+            f"{_cell(instruction.summary)} |"
         )
     lines.append("")
 

@@ -32,7 +32,13 @@ from model import (  # noqa: E402
     NumericTable,
     NumericValue,
 )
-from model.isa import Instruction, InstructionFamily  # noqa: E402
+from model.isa import (  # noqa: E402
+    Instruction,
+    InstructionFamily,
+    StateAccess,
+    StateEffect,
+    StateResource,
+)
 from model.isa.specification import ISA_SPECIFICATION  # noqa: E402
 from model.module import (  # noqa: E402
     Section,
@@ -209,6 +215,83 @@ class ProjectionTest(unittest.TestCase):
             "IREE_VM_ISA_ARCHITECTURAL_EXTENSION_PAGE_MAX = 0xFD,",
             core_opcodes,
         )
+
+    def test_instruction_state_effects_are_projected_and_rendered(self) -> None:
+        entities = ISA_SPECIFICATION.entity_map()
+
+        self.assertEqual(entities["core.instruction.integer.add.i32"].state_effects, ())
+        self.assertEqual(
+            entities["core.instruction.buffer.length"].state_effects,
+            (),
+        )
+        self.assertEqual(
+            entities["core.instruction.control.call"].state_effects,
+            (StateEffect(StateAccess.UNKNOWN, StateResource.ANY),),
+        )
+        self.assertEqual(
+            entities["core.instruction.global.value.mutable.store"].state_effects,
+            (
+                StateEffect(
+                    StateAccess.WRITE,
+                    StateResource.PROCESS_GLOBALS,
+                    ("global_u16",),
+                ),
+            ),
+        )
+        self.assertEqual(
+            entities["core.instruction.buffer.copy"].state_effects,
+            (
+                StateEffect(
+                    StateAccess.READ,
+                    StateResource.BUFFER,
+                    ("source_r8",),
+                ),
+                StateEffect(
+                    StateAccess.WRITE,
+                    StateResource.BUFFER,
+                    ("target_r8",),
+                ),
+            ),
+        )
+
+        await_effects = entities["hal.instruction.semaphore.await"].state_effects
+        self.assertNotIn(
+            StateResource.ANY, {effect.resource for effect in await_effects}
+        )
+        queue_effects = entities["hal.instruction.queue.update"].state_effects
+        self.assertIn(
+            StateEffect(
+                StateAccess.WRITE,
+                StateResource.HAL_QUEUE,
+                ("device_r8", "affinity_v8"),
+            ),
+            queue_effects,
+        )
+        self.assertIn(
+            StateEffect(
+                StateAccess.SYNCHRONIZE,
+                StateResource.HAL_SEMAPHORE,
+                ("wait_semaphore_base_u16",),
+            ),
+            queue_effects,
+        )
+        execute_effects = entities["hal.instruction.queue.execute"].state_effects
+        self.assertIn(
+            StateEffect(StateAccess.WRITE, StateResource.BUFFER),
+            execute_effects,
+        )
+        self.assertIn(
+            StateEffect(StateAccess.SYNCHRONIZE, StateResource.HAL_CHANNEL),
+            execute_effects,
+        )
+
+        documentation = generated_documentation_outputs()
+        buffer_document = documentation["isa/core/buffer.md"]
+        self.assertIn("#### State Effects", buffer_document)
+        self.assertIn("| `read` | `buffer` | `source_r8` |", buffer_document)
+        self.assertIn("| `write` | `buffer` | `target_r8` |", buffer_document)
+        integer_document = documentation["isa/core/integer.md"]
+        self.assertIn("No non-register architectural state effects.", integer_document)
 
     def test_generated_file_set_is_deterministic_and_sharded(self) -> None:
         wire_outputs = generated_wire_outputs()
@@ -465,6 +548,28 @@ class ProjectionTest(unittest.TestCase):
             for entity in projection["entities"]:
                 self.assertIn("since", entity)
                 self.assertIn("minimum_consumer_version", entity)
+        buffer_copy = next(
+            entity
+            for entity in isa_projection["entities"]
+            if entity.get("mnemonic") == "buffer.copy"
+        )
+        self.assertEqual(
+            buffer_copy["state_effects"],
+            [
+                {
+                    "kind": "StateEffect",
+                    "access": "read",
+                    "resource": "buffer",
+                    "resource_fields": ["source_r8"],
+                },
+                {
+                    "kind": "StateEffect",
+                    "access": "write",
+                    "resource": "buffer",
+                    "resource_fields": ["target_r8"],
+                },
+            ],
+        )
         self.assertFalse(
             any(
                 path.endswith(".json")

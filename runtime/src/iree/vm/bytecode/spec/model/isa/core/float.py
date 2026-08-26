@@ -158,6 +158,7 @@ def _binary(
             _value("lhs_v8", 2, InstructionFieldRole.OPERAND),
             _value("rhs_v8", 3, InstructionFieldRole.OPERAND),
         ),
+        state_effects=(),
         semantics=_semantics(
             description=description,
             verification=(
@@ -291,6 +292,7 @@ def _sign_unary(
             _value("src_v8", 2, InstructionFieldRole.OPERAND),
             zero_padding("zero_padding_u8", 3, 1),
         ),
+        state_effects=(),
         semantics=_semantics(
             description=description,
             verification=(
@@ -366,6 +368,7 @@ def _binary_selector(
             _selector(field_name, 4, table_name),
             zero_padding("zero_padding_u8", 5, 3),
         ),
+        state_effects=(),
         semantics=_semantics(
             description=description,
             verification=(
@@ -467,6 +470,7 @@ def _classify(*, opcode: int, width: int) -> Instruction:
             _value("src_v8", 2, InstructionFieldRole.OPERAND),
             _selector("selector_u8", 3, "float.classify"),
         ),
+        state_effects=(),
         semantics=_semantics(
             description=(
                 "Tests raw exponent/significand bits for isnan, isinf, or "
@@ -514,6 +518,7 @@ def _clamp(*, opcode: int, width: int) -> Instruction:
             _selector("mode_u8", 5, "float.clamp"),
             _u16_zero(6),
         ),
+        state_effects=(),
         semantics=_semantics(
             description=(
                 "Ordered mode applies two ordered comparisons/selects and thus "
@@ -565,6 +570,7 @@ def _math_unary(*, opcode: int, width: int) -> Instruction:
             _value("src_v8", 2, InstructionFieldRole.OPERAND),
             _selector("selector_u8", 3, "float.math.unary"),
         ),
+        state_effects=(),
         semantics=_semantics(
             description=(
                 "Evaluates the selector's exact-width, width-matched host-math, "
@@ -640,6 +646,7 @@ def _math_ternary(*, opcode: int, width: int) -> Instruction:
             _selector("selector_u8", 5, "float.math.ternary"),
             _u16_zero(6),
         ),
+        state_effects=(),
         semantics=_semantics(
             description=(
                 "Computes infinitely precise a*b+c and rounds once to selected "

@@ -58,6 +58,7 @@ VALUE_COPY = core_instruction(
         ),
         zero_padding("zero_padding_u8", 3, 1),
     ),
+    state_effects=(),
     semantics=InstructionSemantics(
         description=(
             "Copies all 64 bits from src_v8 to dst_v8 without assigning a "
@@ -119,6 +120,7 @@ VALUE_SELECT = core_instruction(
         ),
         zero_padding("zero_padding_u8", 5, 3),
     ),
+    state_effects=(),
     semantics=InstructionSemantics(
         description=(
             "Copies all 64 bits from true_v8 when the complete 64-bit value "

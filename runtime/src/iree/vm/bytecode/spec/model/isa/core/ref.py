@@ -16,11 +16,15 @@ from model.isa import (
     RefNullPolicy,
     RefOwnership,
     RuntimeRefPolicy,
+    StateEffect,
+    StateResource,
 )
 from model.isa.declarations import (
     core_instruction,
     instruction_field,
     ref_register,
+    state_read,
+    state_write,
     value_register,
     zero_padding,
 )
@@ -134,6 +138,7 @@ REF_NULL = core_instruction(
         ),
         _zero_u16(),
     ),
+    state_effects=(),
     semantics=_semantics(
         "Replaces dst_r8 with canonical null.",
         (
@@ -174,6 +179,7 @@ REF_COMPARE_NULL = core_instruction(
         ),
         zero_padding("zero_padding_u8", 3, 1),
     ),
+    state_effects=(),
     semantics=_semantics(
         "Tests src_r8 for canonical null without inspecting its object.",
         (
@@ -220,6 +226,7 @@ REF_COMPARE_EQ = core_instruction(
             "Right ref-register ordinal.",
         ),
     ),
+    state_effects=(),
     semantics=_semantics(
         (
             "Tests canonical null or exact non-null descriptor-and-object "
@@ -276,6 +283,7 @@ REF_RETAIN = core_instruction(
         ),
         zero_padding("zero_padding_u8", 3, 1),
     ),
+    state_effects=(),
     semantics=_semantics(
         (
             "Creates an owned copy of src_r8 and replaces dst_r8 without "
@@ -335,6 +343,7 @@ REF_MOVE = core_instruction(
             (FieldReference("dst_r8"), FieldReference("src_r8")),
         ),
     ),
+    state_effects=(),
     semantics=_semantics(
         (
             "Transfers the complete null, borrowed, or owned state from src_r8 "
@@ -381,6 +390,7 @@ REF_DISCARD = core_instruction(
         ),
         _zero_u16(),
     ),
+    state_effects=(),
     semantics=_semantics(
         "Replaces src_r8 with canonical null.",
         (
@@ -411,6 +421,7 @@ def _stack_transfer(
     description: str,
     success: tuple[str, ...],
     ownership: tuple[str, ...],
+    state_effects: tuple[StateEffect, ...],
     assembly: str,
     pseudocode: str,
 ) -> Instruction:
@@ -432,6 +443,7 @@ def _stack_transfer(
             ),
             _slot(),
         ),
+        state_effects=state_effects,
         semantics=_semantics(
             description,
             (
@@ -467,6 +479,7 @@ REF_STACK_LOAD_RETAIN = _stack_transfer(
         "The source is retained before replacing and possibly releasing an old "
         "destination owner.",
     ),
+    state_effects=(state_read(StateResource.FRAME_LOCALS, "slot_u16"),),
     assembly="%r<dst> = ref.stack.load.retain #r<slot>",
     pseudocode=(
         "source = local_refs[slot_u16];\n"
@@ -494,6 +507,10 @@ REF_STACK_LOAD_MOVE = _stack_transfer(
     ownership=(
         "A borrowed state remains borrowed; an owned state transfers exactly "
         "one release obligation; a previous destination owner is released.",
+    ),
+    state_effects=(
+        state_read(StateResource.FRAME_LOCALS, "slot_u16"),
+        state_write(StateResource.FRAME_LOCALS, "slot_u16"),
     ),
     assembly="%r<dst> = ref.stack.load.move #r<slot>",
     pseudocode=(
@@ -524,6 +541,7 @@ REF_STACK_STORE_RETAIN = _stack_transfer(
         "The source is retained before replacing and possibly releasing an old "
         "slot owner.",
     ),
+    state_effects=(state_write(StateResource.FRAME_LOCALS, "slot_u16"),),
     assembly="ref.stack.store.retain %r<src>, #r<slot>",
     pseudocode=(
         "source = refs[src_r8];\n"
@@ -553,6 +571,7 @@ REF_STACK_STORE_MOVE = _stack_transfer(
         "A borrowed state remains borrowed; an owned state transfers exactly "
         "one release obligation; a previous slot owner is released.",
     ),
+    state_effects=(state_write(StateResource.FRAME_LOCALS, "slot_u16"),),
     assembly="ref.stack.store.move %r<src>, #r<slot>",
     pseudocode=(
         "source = refs[src_r8];\n"
@@ -571,6 +590,7 @@ REF_STACK_DISCARD = core_instruction(
     byte_length=4,
     family_id=FAMILY.entity_id,
     fields=(zero_padding("zero_padding_u8", 1, 1), _slot()),
+    state_effects=(state_write(StateResource.FRAME_LOCALS, "slot_u16"),),
     semantics=_semantics(
         "Replaces local ref slot_u16 with canonical null.",
         (

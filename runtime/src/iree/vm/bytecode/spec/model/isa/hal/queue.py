@@ -19,10 +19,17 @@ from model.isa import (
     RefNullPolicy,
     RefOwnership,
     RuntimeRefPolicy,
+    StateEffect,
+    StateResource,
 )
 from model.isa.declarations import (
     hal_instruction,
     instruction_field,
+    state_allocate,
+    state_read,
+    state_release,
+    state_synchronize,
+    state_write,
     value_register,
     zero_padding,
 )
@@ -290,6 +297,35 @@ def _common_preconditions() -> str:
     )
 
 
+def _queue_state_effects(
+    *operation_effects: StateEffect,
+) -> tuple[StateEffect, ...]:
+    return (
+        state_read(
+            StateResource.FRAME_LOCALS,
+            "wait_semaphore_base_u16",
+            "wait_payload_base_u16",
+            "signal_semaphore_base_u16",
+            "signal_payload_base_u16",
+        ),
+        state_write(StateResource.HAL_QUEUE, "device_r8", "affinity_v8"),
+        state_read(StateResource.HAL_SEMAPHORE, "wait_semaphore_base_u16"),
+        state_synchronize(
+            StateResource.HAL_SEMAPHORE,
+            "wait_semaphore_base_u16",
+        ),
+        state_write(
+            StateResource.HAL_SEMAPHORE,
+            "signal_semaphore_base_u16",
+        ),
+        state_synchronize(
+            StateResource.HAL_SEMAPHORE,
+            "signal_semaphore_base_u16",
+        ),
+        *operation_effects,
+    )
+
+
 HAL_QUEUE_ALLOCA = hal_instruction(
     entity_id="hal.instruction.queue.alloca",
     since=HAL_0,
@@ -322,6 +358,10 @@ HAL_QUEUE_ALLOCA = hal_instruction(
         _flags(24, 0x00000003),
     ),
     range_groups=(QUEUE_WAIT_RANGE, QUEUE_SIGNAL_RANGE),
+    state_effects=_queue_state_effects(
+        state_write(StateResource.HAL_POOL, "pool_r8_nullable"),
+        state_allocate(StateResource.BUFFER, "dst_r8"),
+    ),
     semantics=InstructionSemantics(
         description=(
             "Submits one queue-ordered transient allocation whose storage becomes "
@@ -404,6 +444,9 @@ HAL_QUEUE_DEALLOCA = hal_instruction(
         _flags(20, 0x00000001),
     ),
     range_groups=(QUEUE_WAIT_RANGE, QUEUE_SIGNAL_RANGE),
+    state_effects=_queue_state_effects(
+        state_release(StateResource.BUFFER, "buffer_r8"),
+    ),
     semantics=InstructionSemantics(
         description=(
             "Makes transient bytes reusable after every wait and publishes "
@@ -480,6 +523,9 @@ HAL_QUEUE_FILL = hal_instruction(
         _zero_u32(24),
     ),
     range_groups=(QUEUE_WAIT_RANGE, QUEUE_SIGNAL_RANGE),
+    state_effects=_queue_state_effects(
+        state_write(StateResource.BUFFER, "target_buffer_r8"),
+    ),
     semantics=InstructionSemantics(
         description=(
             "Queues a direct HAL-buffer fill using explicitly extracted little-"
@@ -562,6 +608,7 @@ def _transfer_instruction(
     contract: str,
     ownership: str,
     extra_failures: tuple[FailureCase, ...],
+    state_effects: tuple[StateEffect, ...],
     pseudocode: str,
 ):
     return hal_instruction(
@@ -583,6 +630,7 @@ def _transfer_instruction(
             _zero_u32(24),
         ),
         range_groups=(QUEUE_WAIT_RANGE, QUEUE_SIGNAL_RANGE),
+        state_effects=_queue_state_effects(*state_effects),
         semantics=InstructionSemantics(
             description=summary,
             verification=(
@@ -660,6 +708,10 @@ HAL_QUEUE_UPDATE = _transfer_instruction(
             "No HAL call occurs and every VM operand remains unchanged.",
         ),
     ),
+    state_effects=(
+        state_read(StateResource.BUFFER, "source_vm_buffer_r8"),
+        state_write(StateResource.BUFFER, "target_buffer_r8"),
+    ),
     pseudocode=(
         "source = require_hal_ref(refs[source_vm_buffer_r8], vm_buffer_type);\n"
         "source_offset = checked_host_size(values[source_offset_v8]);\n"
@@ -704,6 +756,10 @@ HAL_QUEUE_COPY = _transfer_instruction(
             "No HAL call occurs and every VM operand remains unchanged.",
         ),
     ),
+    state_effects=(
+        state_read(StateResource.BUFFER, "source_buffer_r8"),
+        state_write(StateResource.BUFFER, "target_buffer_r8"),
+    ),
     pseudocode=(
         "source = require_hal_ref(refs[source_buffer_r8], hal_buffer_type);\n"
         "target = require_hal_ref(refs[target_buffer_r8], hal_buffer_type);\n"
@@ -741,6 +797,10 @@ HAL_QUEUE_READ = _transfer_instruction(
         "longer use them; VM refs and local rows remain unchanged."
     ),
     extra_failures=(),
+    state_effects=(
+        state_read(StateResource.IO_FILE, "source_file_r8"),
+        state_write(StateResource.BUFFER, "target_buffer_r8"),
+    ),
     pseudocode=(
         "source = require_hal_ref(refs[source_file_r8], hal_file_type);\n"
         "target = require_hal_ref(refs[target_buffer_r8], hal_buffer_type);\n"
@@ -777,6 +837,10 @@ HAL_QUEUE_WRITE = _transfer_instruction(
         "longer use them; VM refs and local rows remain unchanged."
     ),
     extra_failures=(),
+    state_effects=(
+        state_read(StateResource.BUFFER, "source_buffer_r8"),
+        state_write(StateResource.IO_FILE, "target_file_r8"),
+    ),
     pseudocode=(
         "source = require_hal_ref(refs[source_buffer_r8], hal_buffer_type);\n"
         "target = require_hal_ref(refs[target_file_r8], hal_file_type);\n"
@@ -946,6 +1010,18 @@ HAL_QUEUE_DISPATCH = hal_instruction(
         QUEUE_SIGNAL_RANGE,
         QUEUE_DIRECT_BINDING_RANGE,
     ),
+    state_effects=_queue_state_effects(
+        state_read(
+            StateResource.FRAME_LOCALS,
+            "launch_base_u16",
+            "constant_base_u16",
+            "binding_buffer_base_u16",
+            "binding_offset_base_u16",
+            "binding_length_base_u16",
+        ),
+        state_read(StateResource.BUFFER, "binding_buffer_base_u16"),
+        state_write(StateResource.BUFFER, "binding_buffer_base_u16"),
+    ),
     semantics=InstructionSemantics(
         description=(
             "Reads exact static workgroup counts, optional workgroup sizes, dynamic "
@@ -1035,6 +1111,19 @@ HAL_QUEUE_DISPATCH_INDIRECT_COUNT = hal_instruction(
         QUEUE_SIGNAL_RANGE,
         QUEUE_DIRECT_BINDING_RANGE,
     ),
+    state_effects=_queue_state_effects(
+        state_read(
+            StateResource.FRAME_LOCALS,
+            "launch_base_u16",
+            "constant_base_u16",
+            "binding_buffer_base_u16",
+            "binding_offset_base_u16",
+            "binding_length_base_u16",
+        ),
+        state_read(StateResource.BUFFER, "workgroup_count_buffer_r8"),
+        state_read(StateResource.BUFFER, "binding_buffer_base_u16"),
+        state_write(StateResource.BUFFER, "binding_buffer_base_u16"),
+    ),
     semantics=InstructionSemantics(
         description=(
             "Reads optional workgroup sizes and dynamic local memory from local "
@@ -1112,6 +1201,21 @@ HAL_QUEUE_EXECUTE = hal_instruction(
         QUEUE_SIGNAL_RANGE,
         QUEUE_EXECUTE_BINDING_RANGE,
     ),
+    state_effects=_queue_state_effects(
+        state_read(StateResource.HAL_COMMAND_BUFFER, "command_buffer_r8"),
+        state_read(StateResource.BUFFER),
+        state_write(StateResource.BUFFER),
+        state_synchronize(StateResource.BUFFER),
+        state_synchronize(StateResource.HAL_CHANNEL),
+        state_read(
+            StateResource.FRAME_LOCALS,
+            "binding_buffer_base_u16",
+            "binding_offset_base_u16",
+            "binding_length_base_u16",
+        ),
+        state_read(StateResource.BUFFER, "binding_buffer_base_u16"),
+        state_write(StateResource.BUFFER, "binding_buffer_base_u16"),
+    ),
     semantics=InstructionSemantics(
         description=(
             "Submits one non-null finalized command buffer with a nullable direct "
@@ -1188,6 +1292,7 @@ HAL_QUEUE_BARRIER = hal_instruction(
     family_id=FAMILY.entity_id,
     fields=(*_queue_common_fields(), _zero_u32(16)),
     range_groups=(QUEUE_WAIT_RANGE, QUEUE_SIGNAL_RANGE),
+    state_effects=_queue_state_effects(),
     semantics=InstructionSemantics(
         description=(
             "Submits one explicit semaphore-only fan-in/fan-out operation, even "
@@ -1238,6 +1343,7 @@ HAL_QUEUE_FLUSH = hal_instruction(
         hal_ref("device_r8", 2, "hal.device"),
         _value("affinity_v8", 3, "Complete u64 queue-affinity bitset."),
     ),
+    state_effects=(state_write(StateResource.HAL_QUEUE, "device_r8", "affinity_v8"),),
     semantics=InstructionSemantics(
         description=(
             "Asks one explicit device/affinity selection to submit locally pending "
