@@ -716,11 +716,23 @@ void iree_hal_amdgpu_host_queue_deinitialize_tsan_state(
 void iree_hal_amdgpu_host_queue_deinitialize(
     iree_hal_amdgpu_host_queue_t* queue);
 
-// Records an unrecoverable asynchronous queue failure and wakes the completion
-// service so all submitted and deferred operations fail promptly. Consumes
-// |status| and preserves only the first failure.
-void iree_hal_amdgpu_host_queue_fail(iree_hal_amdgpu_host_queue_t* queue,
-                                     iree_status_t status);
+// Records a permanent terminal failure on the queue from an unrecoverable
+// asynchronous error and wakes the completion service so all submitted and
+// deferred operations fail promptly. Consumes |status|; the first failure wins
+// and later ones are freed.
+//
+// The completion thread then runs the queue's terminal transition and exits,
+// after which the queue rejects all further submissions and never accepts work
+// again. The only remaining valid operation on the queue is deinitialization.
+//
+// Callable from any thread, including an HSA runtime callback thread, as long
+// as the caller holds a guarantee the queue is still initialized: the whole
+// call is a first-error-wins compare-exchange on the failure slot, a free of
+// the status that loses, and a store to the queue's stop signal when the queue
+// has one. That store is the only HSA entry point it reaches, and the signal
+// behind it is what the guarantee has to cover.
+void iree_hal_amdgpu_host_queue_record_failure(
+    iree_hal_amdgpu_host_queue_t* queue, iree_status_t status);
 
 // Populates |out_scope| with immutable queue identity and AQL ring facts.
 void iree_hal_amdgpu_host_queue_query_scope(

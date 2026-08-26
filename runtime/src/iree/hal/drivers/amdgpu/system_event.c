@@ -43,8 +43,8 @@ static void iree_hal_amdgpu_system_event_initialize(void) {
   iree_mutex_initialize(&iree_hal_amdgpu_system_event_registry.mutex);
 }
 
-static bool iree_hal_amdgpu_system_event_agent(
-    const hsa_amd_event_t* event, hsa_agent_t* out_agent) {
+static bool iree_hal_amdgpu_system_event_agent(const hsa_amd_event_t* event,
+                                               hsa_agent_t* out_agent) {
   *out_agent = (hsa_agent_t){0};
   switch (event->event_type) {
     case HSA_AMD_GPU_MEMORY_FAULT_EVENT:
@@ -134,7 +134,7 @@ static hsa_status_t iree_hal_amdgpu_system_event_callback(
 
       logical_device_faulted = true;
       for (iree_host_size_t j = 0; j < physical_device->host_queue_count; ++j) {
-        iree_hal_amdgpu_host_queue_fail(
+        iree_hal_amdgpu_host_queue_record_failure(
             &physical_device->host_queues[j],
             iree_hal_amdgpu_system_event_make_status(event));
       }

@@ -507,8 +507,8 @@ static void iree_hal_amdgpu_host_queue_request_completion_thread_stop(
   }
 }
 
-void iree_hal_amdgpu_host_queue_fail(iree_hal_amdgpu_host_queue_t* queue,
-                                     iree_status_t status) {
+void iree_hal_amdgpu_host_queue_record_failure(
+    iree_hal_amdgpu_host_queue_t* queue, iree_status_t status) {
   IREE_ASSERT_ARGUMENT(queue);
   if (iree_hal_amdgpu_host_queue_store_error(queue, status)) {
     iree_hal_amdgpu_host_queue_request_completion_thread_stop(queue);
@@ -569,8 +569,8 @@ iree_status_t iree_hal_amdgpu_host_queue_wait_for_setup_epoch(
           "hsa_amd_signal_wait_any returned invalid signal index %u while "
           "waiting for AMDGPU host queue epoch %" PRIu64,
           signal_index, epoch);
-      iree_hal_amdgpu_host_queue_store_error(queue, iree_status_clone(error));
-      iree_hal_amdgpu_host_queue_request_completion_thread_stop(queue);
+      iree_hal_amdgpu_host_queue_record_failure(queue,
+                                                iree_status_clone(error));
       return error;
     } else if (signal_index == IREE_HAL_AMDGPU_EPOCH_WAIT_STOP_SIGNAL) {
       iree_status_t error =
@@ -651,8 +651,7 @@ static void iree_hal_amdgpu_host_queue_wait_idle_before_teardown(
           "hsa_amd_signal_wait_any returned invalid signal index %u during "
           "AMDGPU host queue teardown",
           signal_index);
-      iree_hal_amdgpu_host_queue_store_error(queue, error);
-      iree_hal_amdgpu_host_queue_request_completion_thread_stop(queue);
+      iree_hal_amdgpu_host_queue_record_failure(queue, error);
     }
   } else {
     (void)iree_hsa_signal_wait_scacquire(
@@ -737,7 +736,7 @@ static int iree_hal_amdgpu_host_queue_completion_thread_main(void* entry_arg) {
             IREE_STATUS_INTERNAL,
             "hsa_amd_signal_wait_any returned invalid signal index %u",
             signal_index);
-        iree_hal_amdgpu_host_queue_store_error(queue, error);
+        iree_hal_amdgpu_host_queue_record_failure(queue, error);
         iree_hal_amdgpu_host_queue_drain_completions(queue);
         keep_running = false;
       }
@@ -771,7 +770,7 @@ static void iree_hal_amdgpu_host_queue_error_callback(hsa_status_t status,
   // First-error-wins: store the error with release semantics so the status
   // payload (heap-allocated string, backtrace) is visible to any thread that
   // loads with acquire. If another error already won the race, free ours.
-  iree_hal_amdgpu_host_queue_fail(queue, error);
+  iree_hal_amdgpu_host_queue_record_failure(queue, error);
 }
 
 iree_status_t iree_hal_amdgpu_host_queue_initialize(
