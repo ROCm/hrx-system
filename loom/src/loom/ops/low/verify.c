@@ -843,6 +843,64 @@ static iree_status_t loom_low_emit_register_value_relation_error(
                        IREE_ARRAYSIZE(params));
 }
 
+// Returns true when a one-unit slice is the exact scalar projection of a
+// rank-1 vector represented with one register unit per element.
+static bool loom_low_slice_has_exact_vector_value_relation(
+    loom_type_t source_type, loom_type_t result_type) {
+  if (!loom_type_register_has_value_type(source_type) ||
+      !loom_type_register_has_value_type(result_type) ||
+      loom_low_register_type_unit_count(result_type) != 1) {
+    return false;
+  }
+  const loom_type_t* source_value_type =
+      loom_type_register_value_type(source_type);
+  const loom_type_t* result_value_type =
+      loom_type_register_value_type(result_type);
+  if (!loom_type_is_vector(*source_value_type) ||
+      loom_type_rank(*source_value_type) != 1 ||
+      !loom_type_is_all_static(*source_value_type) ||
+      !loom_type_is_scalar(*result_value_type) ||
+      !loom_type_element_type_equals(*source_value_type, *result_value_type)) {
+    return false;
+  }
+  return (uint64_t)loom_type_dim_static_size_at(*source_value_type, 0) ==
+         loom_low_register_type_unit_count(source_type);
+}
+
+// Returns true when scalar sources exactly construct a rank-1 vector
+// represented with one register unit per element.
+static bool loom_low_concat_has_exact_vector_value_relation(
+    const loom_module_t* module, loom_value_slice_t sources,
+    loom_type_t result_type) {
+  if (!loom_type_register_has_value_type(result_type)) return false;
+  const loom_type_t* result_value_type =
+      loom_type_register_value_type(result_type);
+  if (!loom_type_is_vector(*result_value_type) ||
+      loom_type_rank(*result_value_type) != 1 ||
+      !loom_type_is_all_static(*result_value_type) ||
+      (uint64_t)loom_type_dim_static_size_at(*result_value_type, 0) !=
+          sources.count ||
+      sources.count != loom_low_register_type_unit_count(result_type)) {
+    return false;
+  }
+  for (iree_host_size_t i = 0; i < sources.count; ++i) {
+    const loom_type_t source_type =
+        loom_module_value_type(module, sources.values[i]);
+    if (!loom_type_register_has_value_type(source_type) ||
+        loom_low_register_type_unit_count(source_type) != 1) {
+      return false;
+    }
+    const loom_type_t* source_value_type =
+        loom_type_register_value_type(source_type);
+    if (!loom_type_is_scalar(*source_value_type) ||
+        !loom_type_element_type_equals(*source_value_type,
+                                       *result_value_type)) {
+      return false;
+    }
+  }
+  return true;
+}
+
 static iree_status_t loom_low_verify_transfer_register_value_relation(
     const loom_module_t* module, const loom_op_t* op, loom_value_id_t source_id,
     loom_value_id_t result_id, iree_diagnostic_emitter_t emitter) {
@@ -893,7 +951,9 @@ static iree_status_t loom_low_verify_slice_register_range(
   if (!loom_low_register_type_same_class(source_type, result_type) ||
       (!loom_type_register_has_value_type(source_type) &&
        !loom_type_register_has_value_type(result_type)) ||
-      (offset == 0 && loom_type_equal(source_type, result_type))) {
+      (offset == 0 && loom_type_equal(source_type, result_type)) ||
+      loom_low_slice_has_exact_vector_value_relation(source_type,
+                                                     result_type)) {
     return iree_ok_status();
   }
   return loom_low_emit_register_value_relation_error(
@@ -935,6 +995,10 @@ static iree_status_t loom_low_verify_concat_register_value_relation(
       loom_module_value_type(module, sources.values[diagnostic_source_index]);
   if (sources.count == 1 &&
       loom_type_equal(diagnostic_source_type, result_type)) {
+    return iree_ok_status();
+  }
+  if (loom_low_concat_has_exact_vector_value_relation(module, sources,
+                                                      result_type)) {
     return iree_ok_status();
   }
   return loom_low_emit_register_value_relation_error(

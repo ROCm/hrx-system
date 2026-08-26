@@ -148,9 +148,9 @@ low.func.def target<test.low.core>(@test_target) @typed_copy_rejects_semantic_re
 // ====
 
 test.target<low_core> @test_target
-low.func.def target<test.low.core>(@test_target) @typed_slice_requires_a_semantic_relation(%value: reg<test.i32 x2 : vector<2xi32>>) {
-  // ERROR@+1: TYPE/017 {op_name="low.slice", source_type="reg<test.i32 x2 : vector<2xi32>>", result_type="reg<test.i32 : i32>"}
-  %lane = low.slice %value[0] : reg<test.i32 x2 : vector<2xi32>> -> reg<test.i32 : i32>
+low.func.def target<test.low.core>(@test_target) @typed_slice_requires_a_semantic_relation(%value: reg<test.i32 x2 : vector<2xf32>>) {
+  // ERROR@+1: TYPE/017 {op_name="low.slice", source_type="reg<test.i32 x2 : vector<2xf32>>", result_type="reg<test.i32 : i32>"}
+  %lane = low.slice %value[0] : reg<test.i32 x2 : vector<2xf32>> -> reg<test.i32 : i32>
   low.return
 }
 
@@ -158,9 +158,27 @@ low.func.def target<test.low.core>(@test_target) @typed_slice_requires_a_semanti
 
 test.target<low_core> @test_target
 low.func.def target<test.low.core>(@test_target) @typed_concat_requires_a_semantic_relation(%lo: reg<test.i32 : i32>, %hi: reg<test.i32 : i32>) {
-  // ERROR@+1: TYPE/017 {op_name="low.concat", source_type="reg<test.i32 : i32>", result_type="reg<test.i32 x2 : vector<2xi32>>"}
-  %pair = low.concat(%lo, %hi) : (reg<test.i32 : i32>, reg<test.i32 : i32>) -> reg<test.i32 x2 : vector<2xi32>>
+  // ERROR@+1: TYPE/017 {op_name="low.concat", source_type="reg<test.i32 : i32>", result_type="reg<test.i32 x2 : vector<2xf32>>"}
+  %pair = low.concat(%lo, %hi) : (reg<test.i32 : i32>, reg<test.i32 : i32>) -> reg<test.i32 x2 : vector<2xf32>>
   low.return
+}
+
+// ====
+
+test.target<low_core> @test_target
+low.func.def target<test.low.core>(@test_target) @typed_scalar_vector_structural_relations(%lo: reg<test.i32 : i32>, %hi: reg<test.i32 : i32>) -> (reg<test.i32 : i32>) {
+  %pair = low.concat(%lo, %hi) : (reg<test.i32 : i32>, reg<test.i32 : i32>) -> reg<test.i32 x2 : vector<2xi32>>
+  %lane = low.slice %pair[1] : reg<test.i32 x2 : vector<2xi32>> -> reg<test.i32 : i32>
+  low.return %lane : reg<test.i32 : i32>
+}
+
+// ====
+
+test.target<low_core> @test_target
+low.func.def target<test.low.core>(@test_target) @typed_scalar_singleton_vector_structural_relations(%value: reg<test.i32 : i32>) -> (reg<test.i32 : i32>) {
+  %singleton = low.concat(%value) : (reg<test.i32 : i32>) -> reg<test.i32 : vector<1xi32>>
+  %scalar = low.slice %singleton[0] : reg<test.i32 : vector<1xi32>> -> reg<test.i32 : i32>
+  low.return %scalar : reg<test.i32 : i32>
 }
 
 // ====
