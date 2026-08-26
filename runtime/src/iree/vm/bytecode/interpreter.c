@@ -11,6 +11,7 @@
 #include "iree/vm/bytecode/interpreter_atomic.h"
 #include "iree/vm/bytecode/interpreter_buffer.h"
 #include "iree/vm/bytecode/interpreter_call.h"
+#include "iree/vm/bytecode/interpreter_conversion.h"
 #include "iree/vm/bytecode/interpreter_float.h"
 #include "iree/vm/bytecode/interpreter_float_math.h"
 #include "iree/vm/bytecode/interpreter_frame.h"
@@ -1607,15 +1608,7 @@ static iree_status_t iree_vm_bytecode_execute(
     do {
       const iree_vm_isa_conversion_integer_record_t* record =
           (const iree_vm_isa_conversion_integer_record_t*)record_data;
-      const uint32_t source = (uint32_t)values[record->src_v8];
-      if (record->selector_u8 == IREE_VM_ISA_INTEGER_CONVERT_S32_TO_I64) {
-        values[record->dst_v8] =
-            source & 0x80000000u
-                ? (uint64_t)source | UINT64_C(0xFFFFFFFF00000000)
-                : source;
-      } else {
-        values[record->dst_v8] = source;
-      }
+      iree_vm_bytecode_execute_conversion_integer(record, values);
       record_data += sizeof(*record);
     } while (IREE_VM_BYTECODE_DISPATCH_IS_SAME(CONVERSION_INTEGER));
     IREE_VM_BYTECODE_DISPATCH_CONTINUE();
@@ -1624,22 +1617,49 @@ static iree_status_t iree_vm_bytecode_execute(
                                  conversion_float_extend) {
     const iree_vm_isa_conversion_float_extend_record_t* record =
         (const iree_vm_isa_conversion_float_extend_record_t*)record_data;
-    values[record->dst_v8] =
-        iree_vm_bytecode_bf16_to_f32_bits((uint16_t)values[record->src_v8]);
+    iree_vm_bytecode_execute_conversion_float_extend(record, values);
     IREE_VM_BYTECODE_DISPATCH_NEXT(
         iree_vm_isa_conversion_float_extend_record_t);
+  }
+  IREE_VM_BYTECODE_DISPATCH_CASE(CONVERSION_FLOAT_TRUNCATE,
+                                 conversion_float_truncate) {
+    const iree_vm_isa_conversion_float_truncate_record_t* record =
+        (const iree_vm_isa_conversion_float_truncate_record_t*)record_data;
+    iree_vm_bytecode_execute_conversion_float_truncate(record, values);
+    IREE_VM_BYTECODE_DISPATCH_NEXT(
+        iree_vm_isa_conversion_float_truncate_record_t);
+  }
+  IREE_VM_BYTECODE_DISPATCH_CASE(CONVERSION_FLOAT_WIDTH,
+                                 conversion_float_width) {
+    const iree_vm_isa_conversion_float_width_record_t* record =
+        (const iree_vm_isa_conversion_float_width_record_t*)record_data;
+    iree_vm_bytecode_execute_conversion_float_width(record, values);
+    IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_isa_conversion_float_width_record_t);
+  }
+  IREE_VM_BYTECODE_DISPATCH_CASE(CONVERSION_INTEGER_TO_FLOAT,
+                                 conversion_integer_to_float) {
+    const iree_vm_isa_conversion_integer_to_float_record_t* record =
+        (const iree_vm_isa_conversion_integer_to_float_record_t*)record_data;
+    iree_vm_bytecode_execute_conversion_integer_to_float(record, values);
+    IREE_VM_BYTECODE_DISPATCH_NEXT(
+        iree_vm_isa_conversion_integer_to_float_record_t);
   }
   IREE_VM_BYTECODE_DISPATCH_CASE(CONVERSION_FLOAT_TO_INTEGER,
                                  conversion_float_to_integer) {
     const iree_vm_isa_conversion_float_to_integer_record_t* record =
         (const iree_vm_isa_conversion_float_to_integer_record_t*)record_data;
-    uint32_t result = 0;
-    status =
-        iree_vm_bytecode_f32_to_u32((uint32_t)values[record->src_v8], &result);
-    if (!iree_status_is_ok(status)) {
+    const iree_vm_bytecode_conversion_failure_t failure =
+        iree_vm_bytecode_execute_conversion_float_to_integer(record, values);
+    if (failure != IREE_VM_BYTECODE_CONVERSION_FAILURE_NONE) {
+      status = failure == IREE_VM_BYTECODE_CONVERSION_FAILURE_NAN
+                   ? iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                      "cannot convert a floating NaN to an "
+                                      "integer")
+                   : iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                                      "floating value is outside the selected "
+                                      "integer interval");
       IREE_VM_BYTECODE_DISPATCH_TERMINATE();
     }
-    values[record->dst_v8] = result;
     IREE_VM_BYTECODE_DISPATCH_NEXT(
         iree_vm_isa_conversion_float_to_integer_record_t);
   }

@@ -27,6 +27,19 @@ iree_py_library(
 
 iree_py_library(
   NAME
+    generate_conversion_test_vectors
+  MAIN
+    "conversion_test_vectors.py"
+  SRCS
+    "conversion_test_vectors.py"
+  IMPORTS
+    "."
+  DEPS
+    iree::vm::bytecode::spec::model::isa::definitions
+)
+
+iree_py_library(
+  NAME
     generate
   MAIN
     "generate_main.py"

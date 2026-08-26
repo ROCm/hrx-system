@@ -34,6 +34,16 @@ iree_generated_files(
     tool = "//runtime/src/iree/vm/bytecode/spec:generate",
 )
 
+iree_generated_files(
+    name = "conversion_test_vectors_gen",
+    outs = ["conversion_test_vectors.inl"],
+    output_args = {
+        "conversion_test_vectors.inl": "--output-file={path}",
+    },
+    tags = ["skip-bazel_to_cmake"],
+    tool = "//runtime/src/iree/vm/bytecode/spec:generate_conversion_test_vectors",
+)
+
 iree_cmake_extra_content(
     content = """
 iree_py_generated_files(
@@ -48,6 +58,20 @@ iree_py_generated_files(
     --output-file=isa_tables.c.inc
     --output-file=module_tables.c.inc
   ARGS --output-kind=tables
+)
+""",
+    inline = True,
+)
+
+iree_cmake_extra_content(
+    content = """
+iree_py_generated_files(
+  NAME conversion_test_vectors_gen
+  GENERATOR iree::vm::bytecode::spec::generate_conversion_test_vectors
+  OUTPUTS
+    conversion_test_vectors.inl
+  OUTPUT_FLAGS
+    --output-file
 )
 """,
     inline = True,
@@ -88,6 +112,8 @@ iree_runtime_cc_library(
         "interpreter_buffer.h",
         "interpreter_call.c",
         "interpreter_call.h",
+        "interpreter_conversion.c",
+        "interpreter_conversion.h",
         "interpreter_float.h",
         "interpreter_float_math.c",
         "interpreter_float_math.h",
@@ -170,6 +196,23 @@ iree_runtime_cc_test(
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
         "//runtime/src/iree/vm",
+        "//runtime/src/iree/vm/bytecode/wire",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "interpreter_conversion_test",
+    srcs = [
+        "conversion_test_vectors.inl",
+        "interpreter_conversion.h",
+        "interpreter_conversion_test.cc",
+    ],
+    deps = [
+        ":bytecode",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
         "//runtime/src/iree/vm/bytecode/wire",
     ],
 )

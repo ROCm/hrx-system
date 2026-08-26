@@ -21,6 +21,7 @@
 #include "iree/vm/bytecode/wire/core/abi.h"
 #include "iree/vm/bytecode/wire/core/constant.h"
 #include "iree/vm/bytecode/wire/core/control.h"
+#include "iree/vm/bytecode/wire/core/conversion.h"
 #include "iree/vm/bytecode/wire/core/float.h"
 #include "iree/vm/bytecode/wire/core/function.h"
 #include "iree/vm/bytecode/wire/core/global.h"
@@ -2144,6 +2145,63 @@ TEST(VMBytecodeModuleTest, RejectsMalformedFunctionStateInstructions) {
           globals + 1);
   descriptors[0].flags_u16 = 2;
   expect_rejected(image);
+
+  iree_vm_environment_free(environment);
+}
+
+TEST(VMBytecodeModuleTest, RejectsMalformedConversionInstructions) {
+  iree_vm_environment_t* environment = nullptr;
+  IREE_ASSERT_OK(
+      iree_vm_environment_allocate(iree_allocator_system(), &environment));
+  const auto expect_rejected = [&](const auto& record) {
+    std::vector<uint8_t> image = BuildOwnershipModuleImage();
+    const MutableFunctionImage function = FindFunctionImage(&image, 1);
+    ASSERT_NE(function.row, nullptr);
+    constexpr uint32_t kInstructionOffset = 8;
+    ASSERT_LE(kInstructionOffset + sizeof(record),
+              function.row->bytecode_length_u32 -
+                  sizeof(iree_vm_isa_control_return_record_t));
+    std::memcpy(function.bytecode + kInstructionOffset, &record,
+                sizeof(record));
+
+    iree_vm_module_t* module = nullptr;
+    IREE_EXPECT_STATUS_IS(
+        IREE_STATUS_INVALID_ARGUMENT,
+        iree_vm_bytecode_module_create(
+            environment, IREE_SV("malformed_conversion"),
+            {iree_make_const_byte_span(image.data(), image.size()),
+             iree_allocator_null()},
+            iree_allocator_system(), &module));
+    EXPECT_EQ(module, nullptr);
+    iree_vm_module_release(module);
+  };
+
+  iree_vm_isa_conversion_integer_record_t integer = {
+      IREE_VM_ISA_CORE_OPCODE_CONVERSION_INTEGER, 0, 1,
+      IREE_VM_ISA_INTEGER_CONVERT_I64_TO_I32 + 1};
+  expect_rejected(integer);
+  integer.selector_u8 = IREE_VM_ISA_INTEGER_CONVERT_S8_TO_I32;
+  integer.dst_v8 = 2;
+  expect_rejected(integer);
+  integer.dst_v8 = 0;
+  integer.src_v8 = 2;
+  expect_rejected(integer);
+
+  expect_rejected(iree_vm_isa_conversion_float_extend_record_t{
+      IREE_VM_ISA_CORE_OPCODE_CONVERSION_FLOAT_EXTEND, 0, 1,
+      IREE_VM_ISA_FLOAT_EXTEND_BF16_TO_F32 + 1});
+  expect_rejected(iree_vm_isa_conversion_float_truncate_record_t{
+      IREE_VM_ISA_CORE_OPCODE_CONVERSION_FLOAT_TRUNCATE, 0, 1,
+      IREE_VM_ISA_FLOAT_TRUNCATE_F64_TO_BF16 + 1});
+  expect_rejected(iree_vm_isa_conversion_float_width_record_t{
+      IREE_VM_ISA_CORE_OPCODE_CONVERSION_FLOAT_WIDTH, 0, 1,
+      IREE_VM_ISA_FLOAT_WIDTH_F64_TO_F32 + 1});
+  expect_rejected(iree_vm_isa_conversion_integer_to_float_record_t{
+      IREE_VM_ISA_CORE_OPCODE_CONVERSION_INTEGER_TO_FLOAT, 0, 1,
+      IREE_VM_ISA_INTEGER_TO_FLOAT_U64_TO_BF16 + 1});
+  expect_rejected(iree_vm_isa_conversion_float_to_integer_record_t{
+      IREE_VM_ISA_CORE_OPCODE_CONVERSION_FLOAT_TO_INTEGER, 0, 1,
+      IREE_VM_ISA_FLOAT_TO_INTEGER_F64_TO_U64 + 1});
 
   iree_vm_environment_free(environment);
 }

@@ -23,6 +23,15 @@ iree_py_generated_files(
   ARGS --output-kind=tables
 )
 
+iree_py_generated_files(
+  NAME conversion_test_vectors_gen
+  GENERATOR iree::vm::bytecode::spec::generate_conversion_test_vectors
+  OUTPUTS
+    conversion_test_vectors.inl
+  OUTPUT_FLAGS
+    --output-file
+)
+
 iree_cc_library(
   NAME
     module
@@ -61,6 +70,8 @@ iree_cc_library(
     "interpreter_buffer.h"
     "interpreter_call.c"
     "interpreter_call.h"
+    "interpreter_conversion.c"
+    "interpreter_conversion.h"
     "interpreter_float.h"
     "interpreter_float_math.c"
     "interpreter_float_math.h"
@@ -140,6 +151,22 @@ iree_cc_test(
     iree::testing::gtest
     iree::testing::gtest_main
     iree::vm
+    iree::vm::bytecode::wire
+)
+
+iree_cc_test(
+  NAME
+    interpreter_conversion_test
+  SRCS
+    "conversion_test_vectors.inl"
+    "interpreter_conversion.h"
+    "interpreter_conversion_test.cc"
+  DEPS
+    ::bytecode
+    iree::base
+    iree::base::internal
+    iree::testing::gtest
+    iree::testing::gtest_main
     iree::vm::bytecode::wire
 )
 

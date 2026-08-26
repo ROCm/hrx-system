@@ -1038,6 +1038,9 @@ def _validate_verification_form(
     elif verification_form in (
         "CONVERSION_INTEGER",
         "CONVERSION_FLOAT_EXTEND",
+        "CONVERSION_FLOAT_TRUNCATE",
+        "CONVERSION_FLOAT_WIDTH",
+        "CONVERSION_INTEGER_TO_FLOAT",
         "CONVERSION_FLOAT_TO_INTEGER",
     ):
         if instruction.byte_length != 4:
@@ -1049,6 +1052,9 @@ def _validate_verification_form(
         selector_table_id = {
             "CONVERSION_INTEGER": "core.selector.integer.convert",
             "CONVERSION_FLOAT_EXTEND": "core.selector.float.extend",
+            "CONVERSION_FLOAT_TRUNCATE": "core.selector.float.truncate",
+            "CONVERSION_FLOAT_WIDTH": "core.selector.float.width",
+            "CONVERSION_INTEGER_TO_FLOAT": "core.selector.integer.to.float",
             "CONVERSION_FLOAT_TO_INTEGER": "core.selector.float.to.integer",
         }[verification_form]
         require_field(

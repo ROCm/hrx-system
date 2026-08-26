@@ -105,6 +105,9 @@ typedef enum iree_vm_bytecode_verification_form_e {
   IREE_VM_BYTECODE_VERIFICATION_FORM_BUFFER_RODATA_LOAD,
   IREE_VM_BYTECODE_VERIFICATION_FORM_CONVERSION_INTEGER,
   IREE_VM_BYTECODE_VERIFICATION_FORM_CONVERSION_FLOAT_EXTEND,
+  IREE_VM_BYTECODE_VERIFICATION_FORM_CONVERSION_FLOAT_TRUNCATE,
+  IREE_VM_BYTECODE_VERIFICATION_FORM_CONVERSION_FLOAT_WIDTH,
+  IREE_VM_BYTECODE_VERIFICATION_FORM_CONVERSION_INTEGER_TO_FLOAT,
   IREE_VM_BYTECODE_VERIFICATION_FORM_CONVERSION_FLOAT_TO_INTEGER,
   IREE_VM_BYTECODE_VERIFICATION_FORM_STACK_LOAD,
   IREE_VM_BYTECODE_VERIFICATION_FORM_STACK_STORE,
@@ -1470,47 +1473,44 @@ static iree_status_t iree_vm_bytecode_function_verify(
             iree_make_const_byte_span(record_data, record_length)));
         break;
       }
-      case IREE_VM_BYTECODE_VERIFICATION_FORM_CONVERSION_INTEGER: {
+      case IREE_VM_BYTECODE_VERIFICATION_FORM_CONVERSION_INTEGER:
+      case IREE_VM_BYTECODE_VERIFICATION_FORM_CONVERSION_FLOAT_EXTEND:
+      case IREE_VM_BYTECODE_VERIFICATION_FORM_CONVERSION_FLOAT_TRUNCATE:
+      case IREE_VM_BYTECODE_VERIFICATION_FORM_CONVERSION_FLOAT_WIDTH:
+      case IREE_VM_BYTECODE_VERIFICATION_FORM_CONVERSION_INTEGER_TO_FLOAT:
+      case IREE_VM_BYTECODE_VERIFICATION_FORM_CONVERSION_FLOAT_TO_INTEGER: {
+        // All conversion records deliberately share {opcode, dst, src,
+        // selector} so common structural checks stay on one verifier path.
         const iree_vm_isa_conversion_integer_record_t* record =
             (const iree_vm_isa_conversion_integer_record_t*)record_data;
         IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_value_register(
             record->dst_v8, function->value_register_count_u16));
         IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_value_register(
             record->src_v8, function->value_register_count_u16));
-        if (record->selector_u8 != IREE_VM_ISA_INTEGER_CONVERT_S32_TO_I64 &&
-            record->selector_u8 != IREE_VM_ISA_INTEGER_CONVERT_U32_TO_I64) {
-          return iree_make_status(
-              IREE_STATUS_UNIMPLEMENTED,
-              "integer conversion selector is outside the B0 closure");
+        uint8_t maximum_selector = 0;
+        switch (execution_info.verification_form) {
+          case IREE_VM_BYTECODE_VERIFICATION_FORM_CONVERSION_INTEGER:
+            maximum_selector = IREE_VM_ISA_INTEGER_CONVERT_I64_TO_I32;
+            break;
+          case IREE_VM_BYTECODE_VERIFICATION_FORM_CONVERSION_FLOAT_EXTEND:
+            maximum_selector = IREE_VM_ISA_FLOAT_EXTEND_BF16_TO_F32;
+            break;
+          case IREE_VM_BYTECODE_VERIFICATION_FORM_CONVERSION_FLOAT_TRUNCATE:
+            maximum_selector = IREE_VM_ISA_FLOAT_TRUNCATE_F64_TO_BF16;
+            break;
+          case IREE_VM_BYTECODE_VERIFICATION_FORM_CONVERSION_FLOAT_WIDTH:
+            maximum_selector = IREE_VM_ISA_FLOAT_WIDTH_F64_TO_F32;
+            break;
+          case IREE_VM_BYTECODE_VERIFICATION_FORM_CONVERSION_INTEGER_TO_FLOAT:
+            maximum_selector = IREE_VM_ISA_INTEGER_TO_FLOAT_U64_TO_BF16;
+            break;
+          default:
+            maximum_selector = IREE_VM_ISA_FLOAT_TO_INTEGER_F64_TO_U64;
+            break;
         }
-        break;
-      }
-      case IREE_VM_BYTECODE_VERIFICATION_FORM_CONVERSION_FLOAT_EXTEND: {
-        const iree_vm_isa_conversion_float_extend_record_t* record =
-            (const iree_vm_isa_conversion_float_extend_record_t*)record_data;
-        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_value_register(
-            record->dst_v8, function->value_register_count_u16));
-        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_value_register(
-            record->src_v8, function->value_register_count_u16));
-        if (record->selector_u8 != IREE_VM_ISA_FLOAT_EXTEND_BF16_TO_F32) {
-          return iree_make_status(
-              IREE_STATUS_UNIMPLEMENTED,
-              "float extension selector is outside the B0 closure");
-        }
-        break;
-      }
-      case IREE_VM_BYTECODE_VERIFICATION_FORM_CONVERSION_FLOAT_TO_INTEGER: {
-        const iree_vm_isa_conversion_float_to_integer_record_t* record =
-            (const iree_vm_isa_conversion_float_to_integer_record_t*)
-                record_data;
-        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_value_register(
-            record->dst_v8, function->value_register_count_u16));
-        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_value_register(
-            record->src_v8, function->value_register_count_u16));
-        if (record->selector_u8 != IREE_VM_ISA_FLOAT_TO_INTEGER_F32_TO_U32) {
-          return iree_make_status(
-              IREE_STATUS_UNIMPLEMENTED,
-              "float-to-integer selector is outside the B0 closure");
+        if (record->selector_u8 > maximum_selector) {
+          return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                  "conversion selector is invalid");
         }
         break;
       }

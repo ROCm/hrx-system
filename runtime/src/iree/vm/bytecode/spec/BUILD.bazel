@@ -28,6 +28,16 @@ iree_py_library(
 )
 
 iree_py_binary(
+    name = "generate_conversion_test_vectors",
+    srcs = ["conversion_test_vectors.py"],
+    imports = ["."],
+    main = "conversion_test_vectors.py",
+    deps = [
+        "//runtime/src/iree/vm/bytecode/spec/model/isa:definitions",
+    ],
+)
+
+iree_py_binary(
     name = "generate",
     srcs = ["generate_main.py"],
     main = "generate_main.py",
