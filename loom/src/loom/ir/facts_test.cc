@@ -1173,6 +1173,44 @@ TEST(RemuiTransfer, DynamicDivisorClampedByDividend) {
 }
 
 //===----------------------------------------------------------------------===//
+// Transfer functions: remsi
+//===----------------------------------------------------------------------===//
+
+TEST(RemsiTransfer, ExactMinimumOverflowPair) {
+  loom_value_facts_t dividend = loom_value_facts_exact_i64(INT64_MIN);
+  loom_value_facts_t divisor = loom_value_facts_exact_i64(-1);
+  loom_value_facts_t out;
+  loom_value_facts_remsi(&dividend, &divisor, &out);
+  EXPECT_TRUE(loom_value_facts_is_exact(out));
+  EXPECT_EQ(out.range_lo, 0);
+}
+
+TEST(RemsiTransfer, ExactRemainderPreservesDividendSign) {
+  loom_value_facts_t out;
+
+  loom_value_facts_t negative_dividend = loom_value_facts_exact_i64(-17);
+  loom_value_facts_t positive_divisor = loom_value_facts_exact_i64(5);
+  loom_value_facts_remsi(&negative_dividend, &positive_divisor, &out);
+  EXPECT_TRUE(loom_value_facts_is_exact(out));
+  EXPECT_EQ(out.range_lo, -2);
+
+  loom_value_facts_t positive_dividend = loom_value_facts_exact_i64(17);
+  loom_value_facts_t negative_divisor = loom_value_facts_exact_i64(-5);
+  loom_value_facts_remsi(&positive_dividend, &negative_divisor, &out);
+  EXPECT_TRUE(loom_value_facts_is_exact(out));
+  EXPECT_EQ(out.range_lo, 2);
+}
+
+TEST(RemsiTransfer, MinimumDivisorHasRepresentableRemainderBounds) {
+  loom_value_facts_t dividend = loom_value_facts_unknown();
+  loom_value_facts_t divisor = loom_value_facts_exact_i64(INT64_MIN);
+  loom_value_facts_t out;
+  loom_value_facts_remsi(&dividend, &divisor, &out);
+  EXPECT_EQ(out.range_lo, -INT64_MAX);
+  EXPECT_EQ(out.range_hi, INT64_MAX);
+}
+
+//===----------------------------------------------------------------------===//
 // Transfer functions: shifts
 //===----------------------------------------------------------------------===//
 
@@ -1258,6 +1296,26 @@ TEST(ShrsiTransfer, SignBitShift) {
   loom_value_facts_shrsi(&unknown, &shift, &out);
   EXPECT_EQ(out.range_lo, -1);
   EXPECT_EQ(out.range_hi, 0);
+}
+
+TEST(ShrsiTransfer, NegativeValuesUseArithmeticSemantics) {
+  loom_value_facts_t shift = loom_value_facts_exact_i64(1);
+  loom_value_facts_t out;
+
+  loom_value_facts_t exact = loom_value_facts_exact_i64(-5);
+  loom_value_facts_shrsi(&exact, &shift, &out);
+  EXPECT_TRUE(loom_value_facts_is_exact(out));
+  EXPECT_EQ(out.range_lo, -3);
+
+  loom_value_facts_t minimum = loom_value_facts_exact_i64(INT64_MIN);
+  loom_value_facts_shrsi(&minimum, &shift, &out);
+  EXPECT_TRUE(loom_value_facts_is_exact(out));
+  EXPECT_EQ(out.range_lo, INT64_MIN / 2);
+
+  loom_value_facts_t range = loom_value_facts_make(-9, -5, 1);
+  loom_value_facts_shrsi(&range, &shift, &out);
+  EXPECT_EQ(out.range_lo, -5);
+  EXPECT_EQ(out.range_hi, -3);
 }
 
 //===----------------------------------------------------------------------===//
