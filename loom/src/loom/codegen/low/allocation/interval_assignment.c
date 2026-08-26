@@ -781,8 +781,12 @@ loom_low_allocation_interval_assignment_assign_fixed_interval(
           LOOM_LOW_ALLOCATION_STORAGE_RELEASE_FORBIDDEN)) {
     return iree_make_status(
         IREE_STATUS_FAILED_PRECONDITION,
-        "low fixed value cannot occupy its required location without "
-        "overlapping another live interval or reserved range");
+        "low fixed value %u cannot occupy register class %u location %u:%u "
+        "without overlapping another live interval or reserved range",
+        (unsigned)interval->value_id,
+        (unsigned)fixed_value->descriptor_reg_class_id,
+        (unsigned)fixed_value->location_base,
+        (unsigned)fixed_value->location_count);
   }
 
   const loom_low_allocation_assignment_t assignment = {

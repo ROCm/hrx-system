@@ -113,7 +113,8 @@ TEST_F(LowAllocationTargetConstraintsTest, AppliesBudgetToUnboundedClass) {
   EXPECT_EQ(capacity.max_units, 7u);
 }
 
-TEST_F(LowAllocationTargetConstraintsTest, ReferenceClassCannotSpill) {
+TEST_F(LowAllocationTargetConstraintsTest,
+       ReferenceClassSpillsWhenTargetSupportsIt) {
   const uint16_t reg_class_id = RegisterClassId(IREE_SV("test.i32"));
   loom_low_descriptor_set_t descriptor_set = *target_.descriptor_set;
   std::vector<loom_low_reg_class_t> reg_classes(
@@ -133,7 +134,7 @@ TEST_F(LowAllocationTargetConstraintsTest, ReferenceClassCannotSpill) {
   loom_low_allocation_class_capacity_t capacity = {};
   IREE_ASSERT_OK(loom_low_allocation_target_constraints_reg_class_capacity(
       &constraints, reg_class_id, &capacity));
-  EXPECT_FALSE(capacity.is_spillable);
+  EXPECT_TRUE(capacity.is_spillable);
 }
 
 TEST_F(LowAllocationTargetConstraintsTest,
