@@ -298,8 +298,8 @@ command.program.def public @parameterized() launch(%parameters: buffer, %target:
 
 TEST_F(CmdProgramPlanTest, OwnsBodylessEntryRequirementsAndArtifact) {
   ModulePtr source_module = ParseAndVerify(R"(
-kernel.entry.decl @configured_a(%scale: i8, %output: buffer) where [workgroup_size(64, 1, 1)]
-kernel.entry.decl @configured_b(%output: buffer) where [workgroup_size(256, 1, 1)]
+kernel.entry.decl @configured_a(%scale: i8, %output: buffer)
+kernel.entry.decl @configured_b(%output: buffer)
 
 command.program.def public @bodyless() launch(%output: buffer) {
   %count_x = index.constant 7 : index
@@ -396,9 +396,9 @@ kernel.def @logical_count(%count: index) {
   kernel.return
 }
 
-kernel.entry.decl @stable_entry() where [workgroup_size(64, 1, 1)]
-kernel.entry.decl @produce_counts(%counts: view<3xi32>) where [workgroup_size(64, 1, 1)]
-kernel.entry.decl @dynamic_entry() where [workgroup_size(64, 1, 1)]
+kernel.entry.decl @stable_entry()
+kernel.entry.decl @produce_counts(%counts: view<3xi32>)
+kernel.entry.decl @dynamic_entry()
 
 command.program.def public @stable_root(%count: index) launch(%count_storage: buffer) where [range(%count, 1, 1024)] {
   %c0 = index.constant 0 : offset

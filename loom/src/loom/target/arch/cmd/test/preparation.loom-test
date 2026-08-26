@@ -525,8 +525,8 @@ low.func.def public retain target<cmd.core> abi(command_program) abi_layout({ent
 
 // RUN: emit command-program @bodyless_dispatch
 
-kernel.entry.decl @configured_a(%scale: i8, %fp8e4: f8E4M3, %fp8e5: f8E5M2, %gain: f16, %offset: bf16, %bias: f32, %threshold: f64, %slice: view<4xi32>, %output: buffer) where [workgroup_size(64, 1, 1)]
-kernel.entry.decl @configured_b(%output: buffer) where [workgroup_size(256, 1, 1)]
+kernel.entry.decl @configured_a(%scale: i8, %fp8e4: f8E4M3, %fp8e5: f8E5M2, %gain: f16, %offset: bf16, %bias: f32, %threshold: f64, %slice: view<4xi32>, %output: buffer)
+kernel.entry.decl @configured_b(%output: buffer)
 
 command.program.def public @bodyless_dispatch() launch(%output: buffer) {
   %count_x = index.constant 7 : index
@@ -585,7 +585,7 @@ kernel.def @local_entry() {
   kernel.return
 }
 
-kernel.entry.decl @provided_entry(%output: buffer) where [workgroup_size(64, 1, 1)]
+kernel.entry.decl @provided_entry(%output: buffer)
 
 command.program.def public @mixed_dispatch() launch(%output: buffer) {
   %c2 = index.constant 2 : index
@@ -614,7 +614,7 @@ low.func.def public retain target<cmd.core> abi(command_program) abi_layout({ent
 
 // RUN: emit command-program @transient_direct_dispatch
 
-kernel.entry.decl @consume_transient(%scratch: buffer) where [workgroup_size(64, 1, 1)]
+kernel.entry.decl @consume_transient(%scratch: buffer)
 
 command.program.def public @transient_direct_dispatch() launch() {
   %count = index.constant 1 : index
@@ -640,7 +640,7 @@ low.func.def public retain target<cmd.core> abi(command_program) abi_layout({ent
 
 // RUN: emit command-program @stable_indirect_dispatch
 
-kernel.entry.decl @stable_count_entry(%output: buffer) where [workgroup_size(64, 1, 1)]
+kernel.entry.decl @stable_count_entry(%output: buffer)
 
 command.program.def public @stable_indirect_dispatch() launch(%count_storage: buffer, %output: buffer) {
   %c0 = index.constant 0 : offset
@@ -667,8 +667,8 @@ low.func.def public retain target<cmd.core> abi(command_program) abi_layout({ent
 
 // RUN: emit command-program @dynamic_indirect_dispatch
 
-kernel.entry.decl @produce_counts(%counts: view<3xi32>) where [workgroup_size(64, 1, 1)]
-kernel.entry.decl @consume_counts(%output: buffer, %scratch: view<4xi32>) where [workgroup_size(64, 1, 1)]
+kernel.entry.decl @produce_counts(%counts: view<3xi32>)
+kernel.entry.decl @consume_counts(%output: buffer, %scratch: view<4xi32>)
 
 command.program.def public @dynamic_indirect_dispatch() launch(%output: buffer) {
   %c0 = index.constant 0 : offset
@@ -707,7 +707,7 @@ low.func.def public retain target<cmd.core> abi(command_program) abi_layout({ent
 
 // RUN: emit command-program @fixed_indirect_dispatch
 
-kernel.entry.decl @fixed_count_entry() where [workgroup_size(64, 1, 1)]
+kernel.entry.decl @fixed_count_entry()
 
 command.program.def public @fixed_indirect_dispatch() launch(%parameters: buffer) {
   %counts = command.parameter %parameters, "dispatch.counts" : view<3xi32>
@@ -739,7 +739,7 @@ kernel.def @logical_count(%count: index) {
   kernel.return
 }
 
-kernel.entry.decl @stable_mixed_entry(%output: buffer) where [workgroup_size(64, 1, 1)]
+kernel.entry.decl @stable_mixed_entry(%output: buffer)
 
 command.program.def public @mixed_host_and_stable_counts(%count: index) launch(%count_storage: buffer, %output: buffer) where [range(%count, 1, 1024)] {
   %c0 = index.constant 0 : offset

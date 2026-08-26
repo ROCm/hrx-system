@@ -638,6 +638,23 @@ ERR_LOWERING_054 = ErrorDef(
     ),
 )
 
+# ERR_LOWERING_055: Command dispatch workgroup-size override is unsupported.
+ERR_LOWERING_055 = ErrorDef(
+    domain=ErrorDomain.LOWERING,
+    code=55,
+    severity=Severity.ERROR,
+    summary="Command dispatch workgroup-size override is unsupported.",
+    message=(
+        "portable command-program lowering cannot carry the dispatch-time "
+        "workgroup size for @{kernel_name}"
+    ),
+    params=(ErrorParam("kernel_name", ParamKind.STRING),),
+    fix_hint=(
+        "Use the executable entry default or a command target that supports "
+        "dispatch-time workgroup sizes"
+    ),
+)
+
 ALL_LOWERING_ERRORS: tuple[ErrorDef, ...] = (
     ERR_LOWERING_022,
     ERR_LOWERING_023,
@@ -670,4 +687,5 @@ ALL_LOWERING_ERRORS: tuple[ErrorDef, ...] = (
     ERR_LOWERING_052,
     ERR_LOWERING_053,
     ERR_LOWERING_054,
+    ERR_LOWERING_055,
 )

@@ -27,7 +27,7 @@ command.program.def public @external_entry(%workgroup_count_x: index) launch() {
 
 // RUN: emit command-program @dynamic_dispatch
 
-kernel.entry.decl @configured() where [workgroup_size(64, 1, 1)]
+kernel.entry.decl @configured()
 
 command.program.def public @dynamic_dispatch(%workgroup_count_x: index) launch() {
   // ERROR@+1: LOWERING/051 {kernel_name="configured", dimension="0", requirement="an exact unsigned 32-bit value"}
@@ -39,7 +39,7 @@ command.program.def public @dynamic_dispatch(%workgroup_count_x: index) launch()
 
 // RUN: emit command-program @invalid_dispatch
 
-kernel.entry.decl @range_checked() where [workgroup_size(64, 1, 1)]
+kernel.entry.decl @range_checked()
 
 command.program.def public @invalid_dispatch() launch() {
   %negative = index.constant -1 : index
@@ -50,9 +50,22 @@ command.program.def public @invalid_dispatch() launch() {
 
 // ====
 
+// RUN: emit command-program @workgroup_size_override
+
+kernel.entry.decl @overridden_entry()
+
+command.program.def public @workgroup_size_override(%size_x: index, %size_y: index, %size_z: index) launch() {
+  %c1 = index.constant 1 : index
+  // ERROR@+1: LOWERING/055 {kernel_name="overridden_entry"}
+  kernel.dispatch @overridden_entry[%c1]() workgroup_size(%size_x, %size_y, %size_z) : [index]()
+  command.return
+}
+
+// ====
+
 // RUN: emit command-program @dynamic_argument
 
-kernel.entry.decl @scalar_entry(%scale: i32) where [workgroup_size(64, 1, 1)]
+kernel.entry.decl @scalar_entry(%scale: i32)
 
 command.program.def public @dynamic_argument(%scale: i32) launch() {
   %c1 = index.constant 1 : index
@@ -65,8 +78,8 @@ command.program.def public @dynamic_argument(%scale: i32) launch() {
 
 // RUN: emit command-program @unordered_indirect_dispatch
 
-kernel.entry.decl @write_counts(%counts: view<3xi32>) where [workgroup_size(64, 1, 1)]
-kernel.entry.decl @use_counts() where [workgroup_size(64, 1, 1)]
+kernel.entry.decl @write_counts(%counts: view<3xi32>)
+kernel.entry.decl @use_counts()
 
 command.program.def public @unordered_indirect_dispatch() launch() {
   %c0 = index.constant 0 : offset
@@ -86,7 +99,7 @@ command.program.def public @unordered_indirect_dispatch() launch() {
 
 // RUN: emit command-program @unplaced_indirect_dispatch
 
-kernel.entry.decl @unplaced_counts() where [workgroup_size(64, 1, 1)]
+kernel.entry.decl @unplaced_counts()
 
 command.program.def public @unplaced_indirect_dispatch(%byte_offset: offset) launch(%count_storage: buffer) {
   %counts = buffer.view %count_storage[%byte_offset] : buffer -> view<3xi32>

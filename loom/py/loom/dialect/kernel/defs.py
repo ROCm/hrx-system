@@ -273,34 +273,6 @@ _ENTRY_LAUNCH_FORMAT: list[FormatElement] = [
     ),
 ]
 
-_ENTRY_EXECUTION_CONSTRAINTS_FORMAT: list[FormatElement] = [
-    kw("where"),
-    LBRACKET,
-    Clause(
-        "workgroup_size",
-        Attr("workgroup_size_x"),
-        COMMA,
-        Attr("workgroup_size_y"),
-        COMMA,
-        Attr("workgroup_size_z"),
-    ),
-    OptionalGroup(
-        [
-            COMMA,
-            Clause(
-                "cluster_size",
-                Attr("workgroup_cluster_size_x"),
-                COMMA,
-                Attr("workgroup_cluster_size_y"),
-                COMMA,
-                Attr("workgroup_cluster_size_z"),
-            ),
-        ],
-        anchor="workgroup_cluster_size_x",
-    ),
-    RBRACKET,
-]
-
 _ENTRY_ATTRS = [
     AttrDef("callee", "symbol"),
     AttrDef(
@@ -1903,9 +1875,7 @@ kernel_entry_decl = Op(
     group=kernel_ops,
     phase=OpPhase.EXECUTABLE,
     doc=(
-        "Bodyless declaration of an executable kernel entry. The declaration "
-        "owns the exact target execution geometry and device ABI but has no "
-        "workload-to-workgroup configuration contract or implementation body."
+        "Bodyless declaration of an executable kernel entry. The declaration owns the device ABI but has no workload-to-workgroup configuration contract, execution geometry, or implementation body."
     ),
     traits=[SYMBOL_DEFINE],
     operands=[
@@ -1919,12 +1889,6 @@ kernel_entry_decl = Op(
             optional=True,
             symbol_ref=SymbolReference("target", ["target"]),
         ),
-        AttrDef("workgroup_size_x", ATTR_TYPE_I64),
-        AttrDef("workgroup_size_y", ATTR_TYPE_I64),
-        AttrDef("workgroup_size_z", ATTR_TYPE_I64),
-        AttrDef("workgroup_cluster_size_x", ATTR_TYPE_I64, optional=True),
-        AttrDef("workgroup_cluster_size_y", ATTR_TYPE_I64, optional=True),
-        AttrDef("workgroup_cluster_size_z", ATTR_TYPE_I64, optional=True),
         AttrDef("retain", "enum", enum_def=Retain, optional=True),
     ],
     symbol_def=SymbolDefinition(
@@ -1943,17 +1907,15 @@ kernel_entry_decl = Op(
             args="args",
         )
     ],
-    verify="loom_kernel_entry_decl_verify",
     format=[
         *_ENTRY_RETAIN_FORMAT,
         *_ENTRY_TARGET_FORMAT,
         SymbolRef("callee"),
         Scope([FuncArgs("args")]),
-        *_ENTRY_EXECUTION_CONSTRAINTS_FORMAT,
     ],
     examples=[
-        "kernel.entry.decl @fill(%count: index, %output: buffer) where [workgroup_size(256, 1, 1)]",
-        "kernel.entry.decl target(@gfx1250) @clustered(%output: buffer) where [workgroup_size(256, 1, 1), cluster_size(2, 1, 1)]",
+        "kernel.entry.decl @fill(%count: index, %output: buffer)",
+        "kernel.entry.decl target(@gfx1250) @clustered(%output: buffer)",
     ],
 )
 
@@ -2013,10 +1975,17 @@ kernel_dispatch = Op(
     "kernel.dispatch",
     group=kernel_ops,
     phase=OpPhase.EXECUTABLE,
-    doc=("Dispatch a configured kernel entry with exact workgroup counts and device-ABI operands. Counts are one to three index values or one dense view<3xi32> for indirect dispatch."),
+    doc=(
+        "Dispatch an executable kernel entry with exact workgroup counts and "
+        "device-ABI operands. Counts are one to three index values or one "
+        "dense view<3xi32> for indirect dispatch. An optional XYZ workgroup "
+        "size overrides the executable entry default for targets supporting "
+        "dispatch-time workgroup sizes."
+    ),
     operands=[
         Operand("workgroup_counts", ANY, variadic=True),
         Operand("arguments", ANY, variadic=True),
+        Operand("workgroup_size", INDEX, variadic=True),
     ],
     attrs=[
         AttrDef(
@@ -2045,6 +2014,10 @@ kernel_dispatch = Op(
         LPAREN,
         Refs("arguments"),
         RPAREN,
+        OptionalGroup(
+            [Clause("workgroup_size", Refs("workgroup_size"))],
+            anchor="workgroup_size",
+        ),
         COLON,
         LBRACKET,
         TypesOf("workgroup_counts"),
@@ -2058,6 +2031,7 @@ kernel_dispatch = Op(
         "kernel.dispatch @fill[%count](%count, %output) : [index](index, buffer)",
         "kernel.dispatch @fill[%x, %y, %z](%count, %output) : [index, index, index](index, buffer)",
         "kernel.dispatch @fill[%counts](%count, %output) : [view<3xi32>](index, buffer)",
+        "kernel.dispatch @fill[%count](%count, %output) workgroup_size(%x, %y, %z) : [index](index, buffer)",
     ],
 )
 

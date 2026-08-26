@@ -120,16 +120,16 @@ func.def @launch_requires_kernel_symbol() {
 
 // ====
 
-kernel.entry.decl @configured_entry(%count: index, %output: buffer) where [workgroup_size(256, 1, 1)]
+kernel.entry.decl @configured_entry(%count: index, %output: buffer)
 
-func.def @valid_direct_dispatch(%x: index, %y: index, %count: index, %output: tensor<4xi32>) {
-  kernel.dispatch @configured_entry[%x, %y](%count, %output) : [index, index](index, tensor<4xi32>)
+func.def @valid_direct_dispatch(%x: index, %y: index, %count: index, %output: tensor<4xi32>, %size_x: index, %size_y: index, %size_z: index) {
+  kernel.dispatch @configured_entry[%x, %y](%count, %output) workgroup_size(%size_x, %size_y, %size_z) : [index, index](index, tensor<4xi32>)
   func.return
 }
 
 // ====
 
-kernel.entry.decl @indirect_entry(%output: buffer) where [workgroup_size(256, 1, 1)]
+kernel.entry.decl @indirect_entry(%output: buffer)
 
 func.def @valid_indirect_dispatch(%counts: view<3xi32>, %output: buffer) {
   kernel.dispatch @indirect_entry[%counts](%output) : [view<3xi32>](buffer)
@@ -138,22 +138,17 @@ func.def @valid_indirect_dispatch(%counts: view<3xi32>, %output: buffer) {
 
 // ====
 
-// ERROR@+1: STRUCTURE/014 "workgroup_size_x" "0" "positive u32"
-kernel.entry.decl @zero_workgroup_size() where [workgroup_size(0, 1, 1)]
+kernel.entry.decl @dispatch_size_contract()
+
+func.def @partial_dispatch_size(%count: index, %size_x: index, %size_y: index) {
+  // ERROR@+1: STRUCTURE/014 "workgroup size operand count" "2" "zero or three"
+  kernel.dispatch @dispatch_size_contract[%count]() workgroup_size(%size_x, %size_y) : [index]()
+  func.return
+}
 
 // ====
 
-// ERROR@+1: STRUCTURE/014 "workgroup_cluster_size_x" "1" "omitted when the complete cluster shape is 1x1x1"
-kernel.entry.decl @trivial_cluster_size() where [workgroup_size(64, 1, 1), cluster_size(1, 1, 1)]
-
-// ====
-
-// ERROR@+1: STRUCTURE/014 "workgroup_cluster_size_z" "2" "a value whose product with x and y fits u32"
-kernel.entry.decl @oversized_cluster() where [workgroup_size(64, 1, 1), cluster_size(4294967295, 4294967295, 2)]
-
-// ====
-
-kernel.entry.decl @dispatch_count_contract() where [workgroup_size(64, 1, 1)]
+kernel.entry.decl @dispatch_count_contract()
 
 func.def @missing_dispatch_count() {
   // ERROR@+1: STRUCTURE/014 "workgroup count operand count" "0" "one to three"
@@ -163,7 +158,7 @@ func.def @missing_dispatch_count() {
 
 // ====
 
-kernel.entry.decl @dispatch_count_type_contract() where [workgroup_size(64, 1, 1)]
+kernel.entry.decl @dispatch_count_type_contract()
 
 func.def @wrong_dispatch_count_type(%count: i32) {
   // ERROR@+1: TYPE/003 "workgroup_counts" "i32" "index or dense view<3xi32>"
@@ -173,7 +168,7 @@ func.def @wrong_dispatch_count_type(%count: i32) {
 
 // ====
 
-kernel.entry.decl @dispatch_argument_contract(%argument: i32) where [workgroup_size(64, 1, 1)]
+kernel.entry.decl @dispatch_argument_contract(%argument: i32)
 
 func.def @wrong_dispatch_argument_type(%count: index, %argument: f32) {
   // ERROR@+1: TYPE/001 "argument 0" "kernel entry ABI argument 0"

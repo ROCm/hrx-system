@@ -411,6 +411,24 @@ static iree_status_t loom_cmd_launch_graph_emit_direct_count_error(
   return iree_diagnostic_emit(build->diagnostic_emitter, &emission);
 }
 
+static iree_status_t loom_cmd_launch_graph_emit_workgroup_size_override_error(
+    loom_cmd_launch_graph_build_t* build,
+    const loom_cmd_schedule_command_t* command) {
+  const loom_diagnostic_param_t params[] = {
+      loom_param_string(loom_cmd_launch_graph_symbol_name(build->source_module,
+                                                          command->callee)),
+  };
+  const loom_diagnostic_emission_t emission = {
+      .module = build->source_module,
+      .op = command->source_op,
+      .error = LOOM_ERR_LOWERING_055,
+      .params = params,
+      .param_count = IREE_ARRAYSIZE(params),
+  };
+  build->valid = false;
+  return iree_diagnostic_emit(build->diagnostic_emitter, &emission);
+}
+
 static iree_status_t loom_cmd_launch_graph_record_direct_dispatch(
     loom_cmd_launch_graph_build_t* build,
     const loom_cmd_schedule_command_t* command,
@@ -674,6 +692,13 @@ static iree_status_t loom_cmd_launch_graph_build_body(
           &build->schedule->commands[command_index];
       loom_cmd_launch_count_t* launch = &build->launches[command_index];
       launch->source_op = command->source_op;
+      if (loom_kernel_dispatch_isa(command->source_op) &&
+          loom_kernel_dispatch_workgroup_size(command->source_op).count != 0) {
+        IREE_RETURN_IF_ERROR(
+            loom_cmd_launch_graph_emit_workgroup_size_override_error(build,
+                                                                     command));
+        return iree_ok_status();
+      }
       switch (command->kind) {
         case LOOM_CMD_SCHEDULE_COMMAND_KIND_KERNEL_LAUNCH: {
           IREE_RETURN_IF_ERROR(loom_cmd_launch_graph_clone_config(

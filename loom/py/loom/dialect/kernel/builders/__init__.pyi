@@ -533,12 +533,6 @@ class KernelBuilder(DialectBuilder):
         target: str | None = ...,
         callee: str,
         args: list[ValueRef] = ...,
-        workgroup_size_x: int,
-        workgroup_size_y: int,
-        workgroup_size_z: int,
-        workgroup_cluster_size_x: int | None = ...,
-        workgroup_cluster_size_y: int | None = ...,
-        workgroup_cluster_size_z: int | None = ...,
         location_id: int | None = ...,
     ) -> None: ...
     def launch(
@@ -555,6 +549,7 @@ class KernelBuilder(DialectBuilder):
         callee: str,
         workgroup_counts: list[ValueRef] = ...,
         arguments: list[ValueRef] = ...,
+        workgroup_size: list[ValueRef] = ...,
         location_id: int | None = ...,
     ) -> None: ...
     def yield_(

@@ -42,7 +42,7 @@ typedef struct loom_cmd_schedule_value_slice_t {
 typedef struct loom_cmd_schedule_command_t {
   // Source issue operation.
   const loom_op_t* source_op;
-  // Referenced logical kernel or configured entry symbol.
+  // Referenced logical kernel or executable entry symbol.
   loom_symbol_ref_t callee;
   // Device-ABI argument values in authored order.
   loom_cmd_schedule_value_slice_t arguments;
