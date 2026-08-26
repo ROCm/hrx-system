@@ -31,22 +31,19 @@ enum iree_vm_invocation_operation_e {
 typedef struct iree_vm_root_call_t {
   // Transient callable view resolved once for the active root operation.
   iree_vm_program_callable_t callable;
-  // Canonical physical root call banks.
-  iree_vm_call_packet_t packet;
-  // First root staging byte rewound at terminal cleanup.
-  uint8_t* allocation_begin;
+  // Complete packed root target bits.
+  uint64_t target_bits;
 } iree_vm_root_call_t;
 
-typedef struct iree_vm_call_request_t {
-  // Resolved child module.
-  const iree_vm_linked_module_t* linked_module;
-  // Stable physical banks copied from the requesting callback.
-  iree_vm_call_packet_t packet;
-  // Module-local child function ordinal.
-  uint16_t function_ordinal;
-  // True when the child is permitted to yield.
-  bool may_yield;
-} iree_vm_call_request_t;
+// Validated facts carried from root preflight into its no-fail commit.
+typedef struct iree_vm_root_preflight_t {
+  // Exact root-bank bytes reserved before the first provider frame.
+  iree_host_size_t root_storage_size;
+  // True when staged arguments will contain a nonnull external borrowed ref.
+  bool has_external_borrowed_arguments;
+} iree_vm_root_preflight_t;
+
+typedef struct iree_vm_callback_context_t iree_vm_callback_context_t;
 
 struct iree_vm_frame_t {
   // Stack cursor restored when this frame is removed.
@@ -70,43 +67,42 @@ struct iree_vm_invocation_t {
   uint8_t* storage_begin;
   // One-past-last byte in the complete storage span.
   uint8_t* storage_end;
-  // First byte available after the private invocation header.
-  uint8_t* stack_base;
   // Current composite frame-stack allocation cursor.
   uint8_t* stack_cursor;
   // Current top module-owned frame.
   iree_vm_frame_t* top_frame;
   // Process borrowed by calls or owned while construction is unpublished.
   iree_vm_process_t* process;
-  // Linked module whose callback is currently executing.
-  const iree_vm_linked_module_t* executing_linked_module;
-  // Complete root call transaction.
+  // Native-stack callback context, or null outside a module callback.
+  const iree_vm_callback_context_t* callback_context;
+  // Active root call description.
   iree_vm_root_call_t root_call;
-  // Original allocation base for allocated invocations, otherwise null.
-  void* allocation_base;
-  // Allocator owning |allocation_base| when nonnull.
-  iree_allocator_t host_allocator;
   // Wake callback stable for the complete active operation.
   iree_vm_invocation_wake_callback_t wake_callback;
-  // Root target word.
-  uint64_t root_target_bits;
   // IDLE sentinel, active NONE, or the first cancellation reason.
   iree_atomic_int32_t cancel_reason;
-  // Module-local function whose callback is currently executing.
-  uint16_t executing_function_ordinal;
-  // True when the currently executing function is permitted to yield.
-  bool executing_may_yield;
   // Current exclusive-driver state.
   iree_vm_invocation_state_t state;
   // Current root operation kind.
   iree_vm_invocation_operation_t operation;
   // True when root staging contains a nonnull external borrowed ref.
   bool has_external_borrowed_arguments;
-  // True when |call_request| contains a callback-requested child call.
-  bool has_call_request;
-  // Cold child-call payload accessed only when |has_call_request| is true.
-  iree_vm_call_request_t call_request;
+  // True when storage was returned by |iree_vm_invocation_allocate|.
+  bool is_allocated;
 };
+
+static_assert(sizeof(void*) != 8 || sizeof(iree_vm_root_call_t) == 40,
+              "64-bit root call descriptions must remain 40 bytes");
+static_assert(sizeof(void*) != 8 || sizeof(iree_vm_frame_t) == 48,
+              "64-bit generic frames must remain 48 bytes");
+static_assert(sizeof(void*) != 8 || sizeof(iree_vm_invocation_t) == 112,
+              "64-bit invocation headers must remain 112 bytes");
+
+// Returns the max-aligned base of invocation-owned root call banks.
+static inline uint8_t* iree_vm_invocation_stack_base(
+    iree_vm_invocation_t* invocation) {
+  return (uint8_t*)invocation + iree_sizeof_struct(*invocation);
+}
 
 // Aligns one invocation-storage address without truncation.
 static inline bool iree_vm_invocation_align_address(uintptr_t address,
@@ -154,13 +150,24 @@ static inline void iree_vm_invocation_stack_rewind(
 // Returns true when |invocation| can accept a new operation.
 bool iree_vm_invocation_is_idle(const iree_vm_invocation_t* invocation);
 
-// Stages and consumes one spatially validated root call before provider entry.
-iree_status_t iree_vm_invocation_prepare_root(
+// Validates one root call before any process allocation or provider entry.
+// Semantic failure consumes |arguments|; success leaves them unchanged.
+iree_status_t iree_vm_invocation_preflight_root(
+    iree_vm_invocation_t* invocation, const iree_vm_program_t* program,
+    uint64_t target_bits, const iree_vm_program_callable_t* callable,
+    iree_vm_variant_span_t arguments, iree_vm_variant_span_t results,
+    iree_vm_root_preflight_t* out_preflight);
+
+// Stages and consumes a successfully preflighted root call and returns its
+// derived physical packet. The packet may be discarded across suspension and
+// reconstructed from the active root description.
+iree_vm_call_packet_t iree_vm_invocation_commit_root(
     iree_vm_invocation_t* invocation, iree_vm_invocation_operation_t operation,
     iree_vm_process_t* process, uint64_t target_bits,
     const iree_vm_program_callable_t* callable,
-    iree_vm_variant_span_t arguments, iree_vm_variant_span_t results,
-    iree_vm_invocation_wake_callback_t wake_callback);
+    iree_vm_variant_span_t arguments,
+    iree_vm_invocation_wake_callback_t wake_callback,
+    iree_vm_root_preflight_t preflight);
 
 // Validates one drive boundary without mutating invocation or caller storage.
 iree_status_t iree_vm_invocation_validate_boundary(
@@ -169,7 +176,8 @@ iree_status_t iree_vm_invocation_validate_boundary(
 
 // Drives the validated root target from an already prepared operation.
 iree_status_t iree_vm_invocation_drive_start(
-    iree_vm_invocation_t* invocation, iree_vm_execution_outcome_t* out_outcome);
+    iree_vm_invocation_t* invocation, const iree_vm_call_packet_t* root_packet,
+    iree_vm_execution_outcome_t* out_outcome);
 
 // Drives suspended frames until the root completes or suspends again.
 iree_status_t iree_vm_invocation_drive_resume(
@@ -185,10 +193,6 @@ iree_status_t iree_vm_invocation_request_call(
     bool may_yield, const iree_vm_call_packet_t* call,
     iree_vm_execution_outcome_t* out_outcome);
 
-// Validates every root result without touching caller storage.
-iree_status_t iree_vm_invocation_validate_root_results(
-    const iree_vm_invocation_t* invocation);
-
 // Atomically closes an uncancelled operation. Failure reports the winning
 // cancellation reason without changing invocation-owned storage.
 bool iree_vm_invocation_try_claim_completion(
@@ -198,26 +202,7 @@ bool iree_vm_invocation_try_claim_completion(
 // Releases root ownership and marks an atomically closed operation idle after
 // every frame has been removed. Other private fields are dead while idle and
 // are overwritten before the next provider entry.
-static inline void iree_vm_invocation_finish(iree_vm_invocation_t* invocation) {
-  const uint16_t argument_ref_count =
-      invocation->root_call.callable.argument_counts.ref_count;
-  for (uint16_t i = 0; i < argument_ref_count; ++i) {
-    iree_vm_ref_t* ref =
-        i < 16 ? &invocation->root_call.packet.ref_arguments.direct[i]
-               : &invocation->root_call.packet.ref_arguments.overflow[i - 16];
-    iree_vm_ref_reset(ref);
-  }
-  const uint16_t result_ref_count =
-      invocation->root_call.callable.result_counts.ref_count;
-  for (uint16_t i = 0; i < result_ref_count; ++i) {
-    iree_vm_ref_t* ref =
-        i < 16 ? &invocation->root_call.packet.ref_results.direct[i]
-               : &invocation->root_call.packet.ref_results.overflow[i - 16];
-    iree_vm_ref_reset(ref);
-  }
-  invocation->state = IREE_VM_INVOCATION_STATE_IDLE;
-  invocation->operation = IREE_VM_INVOCATION_OPERATION_NONE;
-}
+void iree_vm_invocation_finish(iree_vm_invocation_t* invocation);
 
 // Atomically closes, unwinds, and resets one failed operation.
 void iree_vm_invocation_abort(iree_vm_invocation_t* invocation);

@@ -15,6 +15,39 @@
 static const iree_fpu_state_flags_t iree_vm_invocation_fpu_state_flags =
     IREE_FPU_STATE_FLAG_MASK_EXCEPTIONS | IREE_FPU_STATE_FLAG_ROUND_TO_NEAREST;
 
+// Allocation-only owner prefix preceding max-aligned invocation storage.
+typedef struct iree_alignas(iree_max_align_t) iree_vm_invocation_allocation_t {
+  // Allocator owning the complete prefix and invocation allocation.
+  iree_allocator_t host_allocator;
+} iree_vm_invocation_allocation_t;
+
+static_assert(sizeof(iree_vm_invocation_allocation_t) % iree_max_align_t == 0,
+              "invocation allocation prefix must preserve max alignment");
+
+// Driver-local child call requested by one module callback.
+typedef struct iree_vm_call_request_t {
+  // Resolved child module, or null when no request is pending.
+  const iree_vm_linked_module_t* linked_module;
+  // Stable physical banks copied from the requesting callback.
+  iree_vm_call_packet_t packet;
+  // Module-local child function ordinal.
+  uint16_t function_ordinal;
+  // True when the child is permitted to yield.
+  bool may_yield;
+} iree_vm_call_request_t;
+
+// Native-stack context valid only while one module callback is executing.
+struct iree_vm_callback_context_t {
+  // Linked module currently executing.
+  const iree_vm_linked_module_t* linked_module;
+  // Driver-local child request populated by callback call helpers.
+  iree_vm_call_request_t* call_request;
+  // Module-local function currently executing.
+  uint16_t function_ordinal;
+  // True when the current function is permitted to yield.
+  bool may_yield;
+};
+
 //===----------------------------------------------------------------------===//
 // Invocation Storage
 //===----------------------------------------------------------------------===//
@@ -53,9 +86,7 @@ IREE_API_EXPORT iree_status_t iree_vm_invocation_initialize(
   memset(invocation, 0, sizeof(*invocation));
   invocation->storage_begin = storage.data;
   invocation->storage_end = storage.data + storage.data_length;
-  invocation->stack_base =
-      (uint8_t*)invocation + iree_sizeof_struct(*invocation);
-  invocation->stack_cursor = invocation->stack_base;
+  invocation->stack_cursor = iree_vm_invocation_stack_base(invocation);
   iree_atomic_store(&invocation->cancel_reason,
                     IREE_VM_INVOCATION_CANCEL_REASON_IDLE,
                     iree_memory_order_relaxed);
@@ -67,8 +98,8 @@ IREE_API_EXPORT void iree_vm_invocation_deinitialize(
     iree_vm_invocation_t* invocation) {
   if (!invocation) return;
   IREE_ASSERT(iree_vm_invocation_is_idle(invocation));
-  IREE_ASSERT(!invocation->allocation_base);
-  if (!iree_vm_invocation_is_idle(invocation) || invocation->allocation_base) {
+  IREE_ASSERT(!invocation->is_allocated);
+  if (!iree_vm_invocation_is_idle(invocation) || invocation->is_allocated) {
     return;
   }
   memset(invocation, 0, sizeof(*invocation));
@@ -82,15 +113,16 @@ IREE_API_EXPORT iree_status_t iree_vm_invocation_allocate(
                             "out_invocation is required");
   }
   *out_invocation = NULL;
-  void* allocation = NULL;
-  IREE_RETURN_IF_ERROR(
-      iree_allocator_malloc(host_allocator, storage_size, &allocation));
+  iree_vm_invocation_allocation_t* allocation = NULL;
+  IREE_RETURN_IF_ERROR(iree_allocator_malloc_with_trailing(
+      host_allocator, sizeof(*allocation), storage_size, (void**)&allocation));
+  uint8_t* storage = (uint8_t*)allocation + sizeof(*allocation);
   iree_vm_invocation_t* invocation = NULL;
   iree_status_t status = iree_vm_invocation_initialize(
-      iree_make_byte_span(allocation, storage_size), &invocation);
+      iree_make_byte_span(storage, storage_size), &invocation);
   if (iree_status_is_ok(status)) {
-    invocation->allocation_base = allocation;
-    invocation->host_allocator = host_allocator;
+    allocation->host_allocator = host_allocator;
+    invocation->is_allocated = true;
     *out_invocation = invocation;
   } else {
     iree_allocator_free(host_allocator, allocation);
@@ -101,14 +133,16 @@ IREE_API_EXPORT iree_status_t iree_vm_invocation_allocate(
 IREE_API_EXPORT void iree_vm_invocation_free(iree_vm_invocation_t* invocation) {
   if (!invocation) return;
   IREE_ASSERT(iree_vm_invocation_is_idle(invocation));
-  IREE_ASSERT(invocation->allocation_base);
-  if (!iree_vm_invocation_is_idle(invocation) || !invocation->allocation_base) {
+  IREE_ASSERT(invocation->is_allocated);
+  if (!iree_vm_invocation_is_idle(invocation) || !invocation->is_allocated) {
     return;
   }
-  void* allocation_base = invocation->allocation_base;
-  const iree_allocator_t host_allocator = invocation->host_allocator;
+  iree_vm_invocation_allocation_t* allocation =
+      (iree_vm_invocation_allocation_t*)(invocation->storage_begin -
+                                         sizeof(*allocation));
+  const iree_allocator_t host_allocator = allocation->host_allocator;
   memset(invocation, 0, sizeof(*invocation));
-  iree_allocator_free(host_allocator, allocation_base);
+  iree_allocator_free(host_allocator, allocation);
 }
 
 //===----------------------------------------------------------------------===//
@@ -140,11 +174,13 @@ IREE_API_EXPORT iree_status_t iree_vm_invocation_push_frame(
                             "invalid invocation frame request");
   }
   iree_vm_invocation_t* invocation = start_params->execution.invocation;
+  const iree_vm_callback_context_t* callback_context =
+      invocation->callback_context;
   if (invocation->state != IREE_VM_INVOCATION_STATE_RUNNING ||
-      invocation->executing_linked_module !=
+      !callback_context ||
+      callback_context->linked_module !=
           start_params->execution.linked_module ||
-      invocation->executing_function_ordinal !=
-          start_params->function_ordinal) {
+      callback_context->function_ordinal != start_params->function_ordinal) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "frame request is outside its module callback");
   }
@@ -177,7 +213,7 @@ IREE_API_EXPORT iree_status_t iree_vm_invocation_push_frame(
   frame->linked_module = start_params->execution.linked_module;
   frame->cleanup = cleanup;
   frame->function_ordinal = start_params->function_ordinal;
-  frame->may_yield = invocation->executing_may_yield;
+  frame->may_yield = callback_context->may_yield;
   invocation->stack_cursor = (uint8_t*)payload_address + layout.storage_size;
   invocation->top_frame = frame;
   *out_frame = frame;
@@ -287,7 +323,7 @@ iree_status_t iree_vm_invocation_validate_boundary(
 }
 
 static iree_status_t iree_vm_invocation_validate_arguments(
-    const iree_vm_process_t* process, uint64_t target_bits,
+    const iree_vm_program_t* program, uint64_t target_bits,
     const iree_vm_linked_module_t* signature_module,
     iree_vm_module_signature_type_span_t types,
     iree_vm_program_bank_counts_t argument_counts,
@@ -364,9 +400,8 @@ static iree_status_t iree_vm_invocation_validate_arguments(
       function_ref.program_bits = argument.payload;
       function_ref.target_bits =
           argument.metadata & ~(uint64_t)IREE_VM_VARIANT_TAG_MASK;
-      if (!iree_vm_program_function_ref_matches(process->program, function_ref,
-                                                signature_module,
-                                                type.type_ordinal)) {
+      if (!iree_vm_program_function_ref_matches(
+              program, function_ref, signature_module, type.type_ordinal)) {
         return iree_make_status(
             IREE_STATUS_INVALID_ARGUMENT,
             "invocation function argument contract mismatch");
@@ -388,69 +423,46 @@ static void iree_vm_invocation_consume_arguments(
   if (arguments.data) iree_vm_variant_span_reset(arguments);
 }
 
-static iree_status_t iree_vm_invocation_layout_root_call(
-    iree_vm_invocation_t* invocation,
+static iree_host_size_t iree_vm_invocation_root_storage_size(
     iree_vm_program_bank_counts_t argument_counts,
-    iree_vm_program_bank_counts_t result_counts,
-    iree_vm_call_packet_t* out_packet, uint8_t** out_stack_cursor) {
+    iree_vm_program_bank_counts_t result_counts) {
   // Module validation caps each signature side at UINT16_MAX logical values.
-  // All bank elements have power-of-two native alignment, the stack base is
-  // max-aligned, and every bank byte length preserves that alignment. The
-  // resulting two-side layout therefore fits host size without checked
-  // arithmetic or per-bank padding on every invocation.
+  // The complete bank layout therefore fits host size without checked
+  // arithmetic on every invocation.
   iree_host_size_t total_size = 0;
-  const iree_host_size_t value_arguments_offset = total_size;
   total_size += argument_counts.value_count * sizeof(uint64_t);
-  const iree_host_size_t ref_arguments_offset = total_size;
   total_size += argument_counts.ref_count * sizeof(iree_vm_ref_t);
-  const iree_host_size_t function_arguments_offset = total_size;
   total_size += argument_counts.function_count * sizeof(iree_vm_function_ref_t);
-  const iree_host_size_t value_results_offset = total_size;
   total_size += result_counts.value_count * sizeof(uint64_t);
-  const iree_host_size_t ref_results_offset = total_size;
   total_size += result_counts.ref_count * sizeof(iree_vm_ref_t);
-  const iree_host_size_t function_results_offset = total_size;
   total_size += result_counts.function_count * sizeof(iree_vm_function_ref_t);
-  if (total_size >
-      (iree_host_size_t)(invocation->storage_end - invocation->stack_base)) {
-    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                            "root call staging exceeds invocation capacity");
-  }
+  return total_size;
+}
 
-  uint8_t* storage = invocation->stack_base;
+static iree_vm_call_packet_t iree_vm_invocation_make_root_packet(
+    uint8_t* storage, iree_vm_program_bank_counts_t argument_counts,
+    iree_vm_program_bank_counts_t result_counts) {
+  iree_host_size_t offset = 0;
   uint64_t* value_arguments =
-      argument_counts.value_count
-          ? (uint64_t*)(storage + value_arguments_offset)
-          : NULL;
+      argument_counts.value_count ? (uint64_t*)(storage + offset) : NULL;
+  offset += argument_counts.value_count * sizeof(*value_arguments);
   iree_vm_ref_t* ref_arguments =
-      argument_counts.ref_count
-          ? (iree_vm_ref_t*)(storage + ref_arguments_offset)
-          : NULL;
+      argument_counts.ref_count ? (iree_vm_ref_t*)(storage + offset) : NULL;
+  offset += argument_counts.ref_count * sizeof(*ref_arguments);
   iree_vm_function_ref_t* function_arguments =
       argument_counts.function_count
-          ? (iree_vm_function_ref_t*)(storage + function_arguments_offset)
+          ? (iree_vm_function_ref_t*)(storage + offset)
           : NULL;
-  uint64_t* value_results = result_counts.value_count
-                                ? (uint64_t*)(storage + value_results_offset)
-                                : NULL;
+  offset += argument_counts.function_count * sizeof(*function_arguments);
+  uint64_t* value_results =
+      result_counts.value_count ? (uint64_t*)(storage + offset) : NULL;
+  offset += result_counts.value_count * sizeof(*value_results);
   iree_vm_ref_t* ref_results =
-      result_counts.ref_count ? (iree_vm_ref_t*)(storage + ref_results_offset)
-                              : NULL;
+      result_counts.ref_count ? (iree_vm_ref_t*)(storage + offset) : NULL;
+  offset += result_counts.ref_count * sizeof(*ref_results);
   iree_vm_function_ref_t* function_results =
-      result_counts.function_count
-          ? (iree_vm_function_ref_t*)(storage + function_results_offset)
-          : NULL;
-  if (ref_arguments) {
-    memset(ref_arguments, 0,
-           argument_counts.ref_count * sizeof(*ref_arguments));
-  }
-  if (ref_results) {
-    memset(ref_results, 0, result_counts.ref_count * sizeof(*ref_results));
-  }
-  if (function_results) {
-    memset(function_results, 0,
-           result_counts.function_count * sizeof(*function_results));
-  }
+      result_counts.function_count ? (iree_vm_function_ref_t*)(storage + offset)
+                                   : NULL;
   const iree_vm_call_packet_t packet = {
       .value_arguments = {value_arguments, argument_counts.value_count > 16
                                                ? value_arguments + 16
@@ -471,9 +483,35 @@ static iree_status_t iree_vm_invocation_layout_root_call(
                                                  ? function_results + 16
                                                  : NULL},
   };
-  *out_packet = packet;
-  *out_stack_cursor = storage + total_size;
-  return iree_ok_status();
+  return packet;
+}
+
+static iree_vm_call_packet_t iree_vm_invocation_root_packet(
+    iree_vm_invocation_t* invocation) {
+  return iree_vm_invocation_make_root_packet(
+      iree_vm_invocation_stack_base(invocation),
+      invocation->root_call.callable.argument_counts,
+      invocation->root_call.callable.result_counts);
+}
+
+static void iree_vm_invocation_initialize_root_banks(
+    const iree_vm_program_callable_t* callable,
+    const iree_vm_call_packet_t* packet) {
+  if (callable->argument_counts.ref_count) {
+    memset(packet->ref_arguments.direct, 0,
+           callable->argument_counts.ref_count *
+               sizeof(*packet->ref_arguments.direct));
+  }
+  if (callable->result_counts.ref_count) {
+    memset(packet->ref_results.direct, 0,
+           callable->result_counts.ref_count *
+               sizeof(*packet->ref_results.direct));
+  }
+  if (callable->result_counts.function_count) {
+    memset(packet->function_results.direct, 0,
+           callable->result_counts.function_count *
+               sizeof(*packet->function_results.direct));
+  }
 }
 
 static iree_vm_ref_t* iree_vm_call_ref_argument_slot(
@@ -556,18 +594,18 @@ static void iree_vm_invocation_stage_arguments(
   }
 }
 
-static void iree_vm_invocation_commit_root(
+static void iree_vm_invocation_commit_root_state(
     iree_vm_invocation_t* invocation, iree_vm_invocation_operation_t operation,
     iree_vm_process_t* process, uint64_t target_bits,
-    const iree_vm_program_callable_t* callable, iree_vm_call_packet_t packet,
-    uint8_t* stack_cursor, iree_vm_invocation_wake_callback_t wake_callback,
+    const iree_vm_program_callable_t* callable, uint8_t* stack_cursor,
+    iree_vm_invocation_wake_callback_t wake_callback,
     bool has_external_borrowed_arguments) {
   invocation->process = process;
-  invocation->root_target_bits = target_bits;
   invocation->root_call.callable = *callable;
-  invocation->root_call.packet = packet;
-  invocation->root_call.allocation_begin = invocation->stack_base;
+  invocation->root_call.target_bits = target_bits;
   invocation->stack_cursor = stack_cursor;
+  invocation->top_frame = NULL;
+  invocation->callback_context = NULL;
   invocation->wake_callback = wake_callback;
   invocation->operation = operation;
   invocation->has_external_borrowed_arguments = has_external_borrowed_arguments;
@@ -576,12 +614,80 @@ static void iree_vm_invocation_commit_root(
                     iree_memory_order_release);
 }
 
+iree_status_t iree_vm_invocation_preflight_root(
+    iree_vm_invocation_t* invocation, const iree_vm_program_t* program,
+    uint64_t target_bits, const iree_vm_program_callable_t* callable,
+    iree_vm_variant_span_t arguments, iree_vm_variant_span_t results,
+    iree_vm_root_preflight_t* out_preflight) {
+  if (!iree_vm_invocation_is_idle(invocation) || !program || target_bits == 0 ||
+      !callable || !out_preflight) {
+    iree_vm_invocation_consume_arguments(arguments);
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "invalid invocation root boundary");
+  }
+  const iree_vm_module_signature_t signature =
+      iree_vm_program_callable_signature(callable);
+  if (results.count != signature.results.count) {
+    iree_vm_invocation_consume_arguments(arguments);
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "invocation result count mismatch");
+  }
+
+  bool has_external_borrowed_arguments = false;
+  iree_status_t status = iree_vm_invocation_validate_arguments(
+      program, target_bits,
+      iree_vm_program_callable_signature_module(program, callable),
+      signature.arguments, callable->argument_counts, arguments,
+      &has_external_borrowed_arguments);
+  const iree_host_size_t root_storage_size =
+      iree_vm_invocation_root_storage_size(callable->argument_counts,
+                                           callable->result_counts);
+  if (iree_status_is_ok(status) &&
+      root_storage_size >
+          (iree_host_size_t)(invocation->storage_end -
+                             iree_vm_invocation_stack_base(invocation))) {
+    status = iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                              "root call staging exceeds invocation capacity");
+  }
+  if (!iree_status_is_ok(status)) {
+    iree_vm_invocation_consume_arguments(arguments);
+    return status;
+  }
+  *out_preflight = (iree_vm_root_preflight_t){
+      .root_storage_size = root_storage_size,
+      .has_external_borrowed_arguments = has_external_borrowed_arguments,
+  };
+  return iree_ok_status();
+}
+
+iree_vm_call_packet_t iree_vm_invocation_commit_root(
+    iree_vm_invocation_t* invocation, iree_vm_invocation_operation_t operation,
+    iree_vm_process_t* process, uint64_t target_bits,
+    const iree_vm_program_callable_t* callable,
+    iree_vm_variant_span_t arguments,
+    iree_vm_invocation_wake_callback_t wake_callback,
+    iree_vm_root_preflight_t preflight) {
+  iree_vm_call_packet_t packet = iree_vm_invocation_make_root_packet(
+      iree_vm_invocation_stack_base(invocation), callable->argument_counts,
+      callable->result_counts);
+  iree_vm_invocation_initialize_root_banks(callable, &packet);
+  iree_vm_invocation_stage_arguments(
+      iree_vm_program_callable_signature(callable).arguments,
+      callable->argument_counts, arguments, &packet);
+  iree_vm_invocation_commit_root_state(
+      invocation, operation, process, target_bits, callable,
+      iree_vm_invocation_stack_base(invocation) + preflight.root_storage_size,
+      wake_callback, preflight.has_external_borrowed_arguments);
+  return packet;
+}
+
 static iree_status_t iree_vm_invocation_prepare_scalar_root(
     iree_vm_invocation_t* invocation, iree_vm_invocation_operation_t operation,
     iree_vm_process_t* process, uint64_t target_bits,
     const iree_vm_program_callable_t* callable,
     iree_vm_module_signature_t signature, iree_vm_variant_span_t arguments,
-    iree_vm_invocation_wake_callback_t wake_callback) {
+    iree_vm_invocation_wake_callback_t wake_callback,
+    iree_vm_call_packet_t* out_packet) {
   if (IREE_UNLIKELY(arguments.count != signature.arguments.count)) {
     iree_vm_invocation_consume_arguments(arguments);
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -607,77 +713,43 @@ static iree_status_t iree_vm_invocation_prepare_scalar_root(
   const iree_host_size_t result_count = signature.results.count;
   const iree_host_size_t total_size =
       (argument_count + result_count) * sizeof(uint64_t);
-  if (IREE_UNLIKELY(total_size > (iree_host_size_t)(invocation->storage_end -
-                                                    invocation->stack_base))) {
+  uint8_t* stack_base = iree_vm_invocation_stack_base(invocation);
+  if (IREE_UNLIKELY(total_size >
+                    (iree_host_size_t)(invocation->storage_end - stack_base))) {
     iree_vm_invocation_consume_arguments(arguments);
     return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
                             "root call staging exceeds invocation capacity");
   }
 
-  uint64_t* value_arguments = (uint64_t*)invocation->stack_base;
+  uint64_t* value_arguments = (uint64_t*)stack_base;
   uint64_t* value_results = value_arguments + argument_count;
-  iree_vm_call_packet_t packet = {0};
-  packet.value_arguments.direct = value_arguments;
-  packet.value_arguments.overflow =
-      argument_count > 16 ? value_arguments + 16 : NULL;
-  packet.value_results.direct = value_results;
-  packet.value_results.overflow = result_count > 16 ? value_results + 16 : NULL;
+  *out_packet = (iree_vm_call_packet_t){
+      .value_arguments = {value_arguments,
+                          argument_count > 16 ? value_arguments + 16 : NULL},
+      .value_results = {value_results,
+                        result_count > 16 ? value_results + 16 : NULL},
+  };
   for (iree_host_size_t i = 0; i < argument_count; ++i) {
     value_arguments[i] = arguments.data[i].payload;
     arguments.data[i] = iree_vm_variant_empty();
   }
-  iree_vm_invocation_commit_root(
-      invocation, operation, process, target_bits, callable, packet,
-      invocation->stack_base + total_size, wake_callback,
+  iree_vm_invocation_commit_root_state(
+      invocation, operation, process, target_bits, callable,
+      stack_base + total_size, wake_callback,
       /*has_external_borrowed_arguments=*/false);
   return iree_ok_status();
 }
 
-static IREE_ATTRIBUTE_NOINLINE iree_status_t
-iree_vm_invocation_prepare_mixed_root(
-    iree_vm_invocation_t* invocation, iree_vm_invocation_operation_t operation,
-    iree_vm_process_t* process, uint64_t target_bits,
-    const iree_vm_program_callable_t* callable,
-    iree_vm_module_signature_t signature, iree_vm_variant_span_t arguments,
-    iree_vm_invocation_wake_callback_t wake_callback) {
-  bool has_external_borrowed_arguments = false;
-  iree_status_t status = iree_vm_invocation_validate_arguments(
-      process, target_bits,
-      iree_vm_program_callable_signature_module(process->program, callable),
-      signature.arguments, callable->argument_counts, arguments,
-      &has_external_borrowed_arguments);
-  if (!iree_status_is_ok(status)) {
-    iree_vm_invocation_consume_arguments(arguments);
-    return status;
-  }
-
-  iree_vm_call_packet_t packet = {0};
-  uint8_t* stack_cursor = NULL;
-  status = iree_vm_invocation_layout_root_call(
-      invocation, callable->argument_counts, callable->result_counts, &packet,
-      &stack_cursor);
-  if (!iree_status_is_ok(status)) {
-    iree_vm_invocation_consume_arguments(arguments);
-    return status;
-  }
-
-  iree_vm_invocation_stage_arguments(
-      signature.arguments, callable->argument_counts, arguments, &packet);
-  iree_vm_invocation_commit_root(invocation, operation, process, target_bits,
-                                 callable, packet, stack_cursor, wake_callback,
-                                 has_external_borrowed_arguments);
-  return iree_ok_status();
-}
-
-iree_status_t iree_vm_invocation_prepare_root(
+static iree_status_t iree_vm_invocation_prepare_root(
     iree_vm_invocation_t* invocation, iree_vm_invocation_operation_t operation,
     iree_vm_process_t* process, uint64_t target_bits,
     const iree_vm_program_callable_t* callable,
     iree_vm_variant_span_t arguments, iree_vm_variant_span_t results,
-    iree_vm_invocation_wake_callback_t wake_callback) {
+    iree_vm_invocation_wake_callback_t wake_callback,
+    iree_vm_call_packet_t* out_packet) {
   if (!iree_vm_invocation_is_idle(invocation) || !process ||
       operation == IREE_VM_INVOCATION_OPERATION_NONE || target_bits == 0 ||
-      !callable) {
+      !callable || !out_packet) {
     iree_vm_invocation_consume_arguments(arguments);
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "invalid invocation root boundary");
@@ -692,11 +764,17 @@ iree_status_t iree_vm_invocation_prepare_root(
   if (iree_vm_program_callable_is_scalar_only(callable)) {
     return iree_vm_invocation_prepare_scalar_root(
         invocation, operation, process, target_bits, callable, signature,
-        arguments, wake_callback);
+        arguments, wake_callback, out_packet);
   }
-  return iree_vm_invocation_prepare_mixed_root(invocation, operation, process,
-                                               target_bits, callable, signature,
-                                               arguments, wake_callback);
+
+  iree_vm_root_preflight_t preflight = {0};
+  IREE_RETURN_IF_ERROR(iree_vm_invocation_preflight_root(
+      invocation, process->program, target_bits, callable, arguments, results,
+      &preflight));
+  *out_packet = iree_vm_invocation_commit_root(invocation, operation, process,
+                                               target_bits, callable, arguments,
+                                               wake_callback, preflight);
+  return iree_ok_status();
 }
 
 //===----------------------------------------------------------------------===//
@@ -736,8 +814,11 @@ static bool iree_vm_invocation_execution_is_current(
     return false;
   }
   const iree_vm_invocation_t* invocation = execution->invocation;
+  const iree_vm_callback_context_t* callback_context =
+      invocation->callback_context;
   if (invocation->state != IREE_VM_INVOCATION_STATE_RUNNING ||
-      invocation->executing_linked_module != execution->linked_module) {
+      !callback_context ||
+      callback_context->linked_module != execution->linked_module) {
     return false;
   }
   const iree_byte_span_t process_storage = iree_vm_process_module_state(
@@ -752,26 +833,28 @@ iree_status_t iree_vm_invocation_request_call(
     iree_vm_execution_outcome_t* out_outcome) {
   if (!invocation || !linked_module || !call || !out_outcome ||
       invocation->state != IREE_VM_INVOCATION_STATE_RUNNING ||
-      !invocation->executing_linked_module) {
+      !invocation->callback_context) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "invalid child call request");
   }
-  if (invocation->has_call_request) {
+  const iree_vm_callback_context_t* callback_context =
+      invocation->callback_context;
+  iree_vm_call_request_t* call_request = callback_context->call_request;
+  if (call_request->linked_module) {
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                             "module callback already requested a child call");
   }
-  if (may_yield && !invocation->executing_may_yield) {
+  if (may_yield && !callback_context->may_yield) {
     return iree_make_status(
         IREE_STATUS_FAILED_PRECONDITION,
         "non-yielding module callback requested a yielding child");
   }
-  invocation->call_request = (iree_vm_call_request_t){
+  *call_request = (iree_vm_call_request_t){
       .linked_module = linked_module,
       .packet = *call,
       .function_ordinal = function_ordinal,
       .may_yield = may_yield,
   };
-  invocation->has_call_request = true;
   *out_outcome = IREE_VM_EXECUTION_OUTCOME_SUSPENDED;
   return iree_ok_status();
 }
@@ -780,7 +863,7 @@ static IREE_ATTRIBUTE_NOINLINE iree_status_t
 iree_vm_invocation_validate_dispatch_outcome_slow(
     const iree_vm_invocation_t* invocation, uint8_t* checkpoint_cursor,
     const iree_vm_frame_t* checkpoint_frame, bool may_yield,
-    iree_vm_execution_outcome_t outcome) {
+    bool has_call_request, iree_vm_execution_outcome_t outcome) {
   const bool is_at_checkpoint = invocation->stack_cursor == checkpoint_cursor &&
                                 invocation->top_frame == checkpoint_frame;
   const bool has_continuation = invocation->stack_cursor > checkpoint_cursor &&
@@ -790,7 +873,7 @@ iree_vm_invocation_validate_dispatch_outcome_slow(
                             "module callback corrupted its frame boundary");
   }
   if (outcome == IREE_VM_EXECUTION_OUTCOME_COMPLETED) {
-    if (invocation->has_call_request) {
+    if (has_call_request) {
       return iree_make_status(
           IREE_STATUS_INTERNAL,
           "completed module callback left a child call request");
@@ -806,7 +889,7 @@ iree_vm_invocation_validate_dispatch_outcome_slow(
     return iree_make_status(IREE_STATUS_INTERNAL,
                             "module callback returned an invalid outcome");
   }
-  if (invocation->has_call_request) {
+  if (has_call_request) {
     return iree_ok_status();
   }
   if (!has_continuation) {
@@ -826,9 +909,11 @@ static iree_status_t iree_vm_invocation_dispatch_start(
     iree_vm_invocation_t* invocation,
     const iree_vm_linked_module_t* linked_module, uint16_t function_ordinal,
     bool may_yield, const iree_vm_call_packet_t* call,
+    iree_vm_call_request_t* call_request,
     iree_vm_execution_outcome_t* out_outcome) {
   uint8_t* checkpoint_cursor = invocation->stack_cursor;
   iree_vm_frame_t* checkpoint_frame = invocation->top_frame;
+  call_request->linked_module = NULL;
   const iree_byte_span_t process_storage =
       iree_vm_process_module_state(invocation->process, linked_module);
   const iree_vm_module_function_start_params_t params = {
@@ -841,25 +926,30 @@ static iree_status_t iree_vm_invocation_dispatch_start(
       .function_ordinal = function_ordinal,
       .call = *call,
   };
-  invocation->executing_linked_module = linked_module;
-  invocation->executing_function_ordinal = function_ordinal;
-  invocation->executing_may_yield = may_yield;
+  const iree_vm_callback_context_t callback_context = {
+      .linked_module = linked_module,
+      .call_request = call_request,
+      .function_ordinal = function_ordinal,
+      .may_yield = may_yield,
+  };
+  invocation->callback_context = &callback_context;
   iree_vm_execution_outcome_t module_outcome = UINT32_MAX;
   iree_status_t status = linked_module->module->vtable->function_start(
       linked_module->module, &params, &module_outcome);
-  invocation->executing_linked_module = NULL;
+  invocation->callback_context = NULL;
 
+  const bool has_call_request = call_request->linked_module != NULL;
   if (iree_status_is_ok(status) &&
       IREE_UNLIKELY(module_outcome != IREE_VM_EXECUTION_OUTCOME_COMPLETED ||
                     invocation->stack_cursor != checkpoint_cursor ||
                     invocation->top_frame != checkpoint_frame ||
-                    invocation->has_call_request)) {
+                    has_call_request)) {
     status = iree_vm_invocation_validate_dispatch_outcome_slow(
         invocation, checkpoint_cursor, checkpoint_frame, may_yield,
-        module_outcome);
+        has_call_request, module_outcome);
   }
   if (!iree_status_is_ok(status)) {
-    invocation->has_call_request = false;
+    call_request->linked_module = NULL;
     iree_vm_invocation_unwind_to(invocation, checkpoint_cursor);
     return status;
   }
@@ -869,11 +959,13 @@ static iree_status_t iree_vm_invocation_dispatch_start(
 
 static iree_status_t iree_vm_invocation_dispatch_resume(
     iree_vm_invocation_t* invocation, iree_vm_frame_t* frame,
+    iree_vm_call_request_t* call_request,
     iree_vm_execution_outcome_t* out_outcome) {
   uint8_t* checkpoint_cursor = frame->allocation_begin;
   iree_vm_frame_t* checkpoint_frame = frame->parent;
   const iree_vm_linked_module_t* linked_module = frame->linked_module;
   const bool may_yield = frame->may_yield;
+  call_request->linked_module = NULL;
   const iree_byte_span_t process_storage =
       iree_vm_process_module_state(invocation->process, linked_module);
   const iree_vm_module_function_resume_params_t params = {
@@ -885,25 +977,30 @@ static iree_status_t iree_vm_invocation_dispatch_resume(
           },
       .frame = frame,
   };
-  invocation->executing_linked_module = linked_module;
-  invocation->executing_function_ordinal = frame->function_ordinal;
-  invocation->executing_may_yield = may_yield;
+  const iree_vm_callback_context_t callback_context = {
+      .linked_module = linked_module,
+      .call_request = call_request,
+      .function_ordinal = frame->function_ordinal,
+      .may_yield = may_yield,
+  };
+  invocation->callback_context = &callback_context;
   iree_vm_execution_outcome_t module_outcome = UINT32_MAX;
   iree_status_t status = linked_module->module->vtable->function_resume(
       linked_module->module, &params, &module_outcome);
-  invocation->executing_linked_module = NULL;
+  invocation->callback_context = NULL;
 
+  const bool has_call_request = call_request->linked_module != NULL;
   if (iree_status_is_ok(status) &&
       IREE_UNLIKELY(module_outcome != IREE_VM_EXECUTION_OUTCOME_COMPLETED ||
                     invocation->stack_cursor != checkpoint_cursor ||
                     invocation->top_frame != checkpoint_frame ||
-                    invocation->has_call_request)) {
+                    has_call_request)) {
     status = iree_vm_invocation_validate_dispatch_outcome_slow(
         invocation, checkpoint_cursor, checkpoint_frame, may_yield,
-        module_outcome);
+        has_call_request, module_outcome);
   }
   if (!iree_status_is_ok(status)) {
-    invocation->has_call_request = false;
+    call_request->linked_module = NULL;
     iree_vm_invocation_unwind_to(invocation, checkpoint_cursor);
     return status;
   }
@@ -927,32 +1024,29 @@ iree_vm_invocation_publish_suspension(
 
 static IREE_ATTRIBUTE_NOINLINE iree_status_t
 iree_vm_invocation_drive_continuations(
-    iree_vm_invocation_t* invocation,
+    iree_vm_invocation_t* invocation, iree_vm_call_request_t* call_request,
     iree_vm_execution_outcome_t* out_outcome) {
   while (true) {
     iree_vm_execution_outcome_t outcome = UINT32_MAX;
     iree_status_t status = iree_ok_status();
-    if (invocation->has_call_request) {
+    if (call_request->linked_module) {
       const iree_vm_linked_module_t* linked_module =
-          invocation->call_request.linked_module;
-      const uint16_t function_ordinal =
-          invocation->call_request.function_ordinal;
-      const bool may_yield = invocation->call_request.may_yield;
-      const iree_vm_call_packet_t* packet = &invocation->call_request.packet;
-      invocation->has_call_request = false;
-      status = iree_vm_invocation_dispatch_start(invocation, linked_module,
-                                                 function_ordinal, may_yield,
-                                                 packet, &outcome);
+          call_request->linked_module;
+      const uint16_t function_ordinal = call_request->function_ordinal;
+      const bool may_yield = call_request->may_yield;
+      status = iree_vm_invocation_dispatch_start(
+          invocation, linked_module, function_ordinal, may_yield,
+          &call_request->packet, call_request, &outcome);
     } else if (invocation->top_frame) {
       status = iree_vm_invocation_dispatch_resume(
-          invocation, invocation->top_frame, &outcome);
+          invocation, invocation->top_frame, call_request, &outcome);
     } else {
       *out_outcome = IREE_VM_EXECUTION_OUTCOME_COMPLETED;
       return iree_ok_status();
     }
     if (!iree_status_is_ok(status)) return status;
     if (outcome == IREE_VM_EXECUTION_OUTCOME_COMPLETED ||
-        invocation->has_call_request) {
+        call_request->linked_module) {
       continue;
     }
     return iree_vm_invocation_publish_suspension(invocation, out_outcome);
@@ -960,26 +1054,28 @@ iree_vm_invocation_drive_continuations(
 }
 
 iree_status_t iree_vm_invocation_drive_start(
-    iree_vm_invocation_t* invocation,
+    iree_vm_invocation_t* invocation, const iree_vm_call_packet_t* root_packet,
     iree_vm_execution_outcome_t* out_outcome) {
   const uint16_t module_ordinal =
-      iree_vm_program_target_module_ordinal(invocation->root_target_bits);
-  const uint16_t function_ordinal =
-      iree_vm_program_target_function_ordinal(invocation->root_target_bits);
+      iree_vm_program_target_module_ordinal(invocation->root_call.target_bits);
+  const uint16_t function_ordinal = iree_vm_program_target_function_ordinal(
+      invocation->root_call.target_bits);
   const iree_vm_linked_module_t* linked_module =
       &invocation->process->program->linked_modules[module_ordinal];
   const iree_fpu_state_t fpu_state =
       iree_fpu_state_push(iree_vm_invocation_fpu_state_flags);
+  iree_vm_call_request_t call_request;
   iree_vm_execution_outcome_t outcome = UINT32_MAX;
   iree_status_t status = iree_vm_invocation_dispatch_start(
       invocation, linked_module, function_ordinal,
-      iree_vm_program_target_may_yield(invocation->root_target_bits),
-      &invocation->root_call.packet, &outcome);
+      iree_vm_program_target_may_yield(invocation->root_call.target_bits),
+      root_packet, &call_request, &outcome);
   if (iree_status_is_ok(status)) {
     if (outcome == IREE_VM_EXECUTION_OUTCOME_COMPLETED) {
       *out_outcome = outcome;
-    } else if (invocation->has_call_request) {
-      status = iree_vm_invocation_drive_continuations(invocation, out_outcome);
+    } else if (call_request.linked_module) {
+      status = iree_vm_invocation_drive_continuations(invocation, &call_request,
+                                                      out_outcome);
     } else {
       status = iree_vm_invocation_publish_suspension(invocation, out_outcome);
     }
@@ -998,14 +1094,16 @@ iree_status_t iree_vm_invocation_drive_resume(
   }
   const iree_fpu_state_t fpu_state =
       iree_fpu_state_push(iree_vm_invocation_fpu_state_flags);
+  iree_vm_call_request_t call_request;
   iree_vm_execution_outcome_t outcome = UINT32_MAX;
   iree_status_t status = iree_vm_invocation_dispatch_resume(
-      invocation, invocation->top_frame, &outcome);
+      invocation, invocation->top_frame, &call_request, &outcome);
   if (iree_status_is_ok(status)) {
-    if (invocation->has_call_request ||
+    if (call_request.linked_module ||
         (outcome == IREE_VM_EXECUTION_OUTCOME_COMPLETED &&
          invocation->top_frame)) {
-      status = iree_vm_invocation_drive_continuations(invocation, out_outcome);
+      status = iree_vm_invocation_drive_continuations(invocation, &call_request,
+                                                      out_outcome);
     } else if (outcome == IREE_VM_EXECUTION_OUTCOME_COMPLETED) {
       *out_outcome = outcome;
     } else {
@@ -1185,8 +1283,8 @@ IREE_API_EXPORT iree_status_t iree_vm_function_ref_from_import(
 // Root Result Transaction And Cancellation
 //===----------------------------------------------------------------------===//
 
-iree_status_t iree_vm_invocation_validate_root_results(
-    const iree_vm_invocation_t* invocation) {
+static iree_status_t iree_vm_invocation_validate_root_results(
+    iree_vm_invocation_t* invocation, const iree_vm_call_packet_t* packet) {
   if (invocation->root_call.callable.result_counts.ref_count == 0 &&
       invocation->root_call.callable.result_counts.function_count == 0) {
     return iree_ok_status();
@@ -1203,8 +1301,8 @@ iree_status_t iree_vm_invocation_validate_root_results(
   for (iree_host_size_t i = 0; i < signature.results.count; ++i) {
     const iree_vm_module_signature_type_t type = signature.results.data[i];
     if (type.kind == IREE_VM_MODULE_SIGNATURE_TYPE_KIND_REF) {
-      const iree_vm_ref_t ref = *iree_vm_call_ref_result_slot(
-          &invocation->root_call.packet, ref_ordinal++);
+      const iree_vm_ref_t ref =
+          *iree_vm_call_ref_result_slot(packet, ref_ordinal++);
       const iree_vm_ref_type_t expected_type =
           signature_module->module->descriptor->ref_types
               .data[type.type_ordinal];
@@ -1217,8 +1315,7 @@ iree_status_t iree_vm_invocation_validate_root_results(
       }
     } else if (type.kind == IREE_VM_MODULE_SIGNATURE_TYPE_KIND_FUNCTION) {
       const iree_vm_function_ref_t function_ref =
-          *iree_vm_call_function_result_slot(&invocation->root_call.packet,
-                                             function_ordinal++);
+          *iree_vm_call_function_result_slot(packet, function_ordinal++);
       if (!iree_vm_program_function_ref_matches(
               program, function_ref, signature_module, type.type_ordinal)) {
         return iree_make_status(
@@ -1275,13 +1372,13 @@ iree_vm_invocation_publish_uniform_scalar_results(
 }
 
 static IREE_ATTRIBUTE_NOINLINE void iree_vm_invocation_publish_root_results(
-    iree_vm_invocation_t* invocation, iree_vm_variant_span_t results) {
+    iree_vm_invocation_t* invocation, const iree_vm_call_packet_t* packet,
+    iree_vm_variant_span_t results) {
   const iree_vm_module_signature_t signature =
       iree_vm_program_callable_signature(&invocation->root_call.callable);
   if (invocation->root_call.callable.result_counts.value_count ==
       signature.results.count) {
-    const uint64_t* value_results =
-        invocation->root_call.packet.value_results.direct;
+    const uint64_t* value_results = packet->value_results.direct;
     for (iree_host_size_t i = 0; i < signature.results.count; ++i) {
       const iree_vm_scalar_type_t scalar_type =
           (iree_vm_scalar_type_t)signature.results.data[i].kind;
@@ -1304,27 +1401,44 @@ static IREE_ATTRIBUTE_NOINLINE void iree_vm_invocation_publish_root_results(
     if (type.kind > IREE_VM_SCALAR_TYPE_INVALID &&
         type.kind <= IREE_VM_SCALAR_TYPE_F64) {
       results.data[i] = iree_vm_invocation_scalar_result(
-          type.kind, iree_vm_call_value_result_load(
-                         &invocation->root_call.packet, value_ordinal++));
+          type.kind, iree_vm_call_value_result_load(packet, value_ordinal++));
     } else if (type.kind == IREE_VM_MODULE_SIGNATURE_TYPE_KIND_REF) {
-      iree_vm_ref_t* ref = iree_vm_call_ref_result_slot(
-          &invocation->root_call.packet, ref_ordinal++);
+      iree_vm_ref_t* ref = iree_vm_call_ref_result_slot(packet, ref_ordinal++);
       results.data[i] = iree_vm_variant_from_ref_move(ref);
     } else {
-      results.data[i] =
-          iree_vm_variant_from_function_ref(*iree_vm_call_function_result_slot(
-              &invocation->root_call.packet, function_ordinal++));
+      results.data[i] = iree_vm_variant_from_function_ref(
+          *iree_vm_call_function_result_slot(packet, function_ordinal++));
     }
   }
+}
+
+void iree_vm_invocation_finish(iree_vm_invocation_t* invocation) {
+  const iree_vm_call_packet_t packet =
+      iree_vm_invocation_root_packet(invocation);
+  const uint16_t argument_ref_count =
+      invocation->root_call.callable.argument_counts.ref_count;
+  for (uint16_t i = 0; i < argument_ref_count; ++i) {
+    iree_vm_ref_reset(iree_vm_call_ref_argument_slot(&packet, i));
+  }
+  const uint16_t result_ref_count =
+      invocation->root_call.callable.result_counts.ref_count;
+  for (uint16_t i = 0; i < result_ref_count; ++i) {
+    iree_vm_ref_reset(iree_vm_call_ref_result_slot(&packet, i));
+  }
+  invocation->callback_context = NULL;
+  invocation->top_frame = NULL;
+  invocation->stack_cursor = iree_vm_invocation_stack_base(invocation);
+  invocation->state = IREE_VM_INVOCATION_STATE_IDLE;
+  invocation->operation = IREE_VM_INVOCATION_OPERATION_NONE;
 }
 
 void iree_vm_invocation_abort(iree_vm_invocation_t* invocation) {
   iree_atomic_store(&invocation->cancel_reason,
                     IREE_VM_INVOCATION_CANCEL_REASON_IDLE,
                     iree_memory_order_release);
-  invocation->has_call_request = false;
+  invocation->callback_context = NULL;
   iree_vm_invocation_unwind_to(invocation,
-                               invocation->root_call.allocation_begin);
+                               iree_vm_invocation_stack_base(invocation));
   iree_vm_invocation_finish(invocation);
 }
 
@@ -1398,35 +1512,41 @@ static iree_status_t iree_vm_invocation_resolve_root_function(
   return iree_ok_status();
 }
 
+static void iree_vm_invocation_finish_scalar(iree_vm_invocation_t* invocation) {
+  invocation->callback_context = NULL;
+  invocation->top_frame = NULL;
+  invocation->stack_cursor = iree_vm_invocation_stack_base(invocation);
+  invocation->state = IREE_VM_INVOCATION_STATE_IDLE;
+  invocation->operation = IREE_VM_INVOCATION_OPERATION_NONE;
+}
+
 static iree_status_t iree_vm_invocation_complete_scalar_call(
-    iree_vm_invocation_t* invocation, iree_vm_variant_span_t results,
-    iree_vm_execution_outcome_t* out_outcome) {
+    iree_vm_invocation_t* invocation, const iree_vm_call_packet_t* root_packet,
+    iree_vm_variant_span_t results, iree_vm_execution_outcome_t* out_outcome) {
   iree_vm_cancel_reason_t cancel_reason = IREE_VM_CANCEL_REASON_NONE;
   if (!iree_vm_invocation_try_claim_completion(invocation, &cancel_reason)) {
-    invocation->state = IREE_VM_INVOCATION_STATE_IDLE;
-    invocation->operation = IREE_VM_INVOCATION_OPERATION_NONE;
+    iree_vm_invocation_finish_scalar(invocation);
     return iree_vm_invocation_cancel_status(cancel_reason);
   }
 
   const iree_vm_program_callable_t* callable = &invocation->root_call.callable;
   if (callable->uniform_result_scalar_type != IREE_VM_SCALAR_TYPE_INVALID) {
     iree_vm_invocation_publish_uniform_scalar_results(
-        invocation->root_call.packet.value_results.direct,
-        callable->result_counts.value_count,
+        root_packet->value_results.direct, callable->result_counts.value_count,
         callable->uniform_result_scalar_type, results.data);
   } else {
-    iree_vm_invocation_publish_root_results(invocation, results);
+    iree_vm_invocation_publish_root_results(invocation, root_packet, results);
   }
-  invocation->state = IREE_VM_INVOCATION_STATE_IDLE;
-  invocation->operation = IREE_VM_INVOCATION_OPERATION_NONE;
+  iree_vm_invocation_finish_scalar(invocation);
   *out_outcome = IREE_VM_EXECUTION_OUTCOME_COMPLETED;
   return iree_ok_status();
 }
 
 static iree_status_t iree_vm_invocation_complete_call(
-    iree_vm_invocation_t* invocation, iree_vm_variant_span_t results,
-    iree_vm_execution_outcome_t* out_outcome) {
-  iree_status_t status = iree_vm_invocation_validate_root_results(invocation);
+    iree_vm_invocation_t* invocation, const iree_vm_call_packet_t* root_packet,
+    iree_vm_variant_span_t results, iree_vm_execution_outcome_t* out_outcome) {
+  iree_status_t status =
+      iree_vm_invocation_validate_root_results(invocation, root_packet);
   iree_vm_cancel_reason_t cancel_reason = IREE_VM_CANCEL_REASON_NONE;
   if (iree_status_is_ok(status) &&
       !iree_vm_invocation_try_claim_completion(invocation, &cancel_reason)) {
@@ -1437,11 +1557,11 @@ static iree_status_t iree_vm_invocation_complete_call(
         &invocation->root_call.callable;
     if (callable->uniform_result_scalar_type != IREE_VM_SCALAR_TYPE_INVALID) {
       iree_vm_invocation_publish_uniform_scalar_results(
-          invocation->root_call.packet.value_results.direct,
+          root_packet->value_results.direct,
           callable->result_counts.value_count,
           callable->uniform_result_scalar_type, results.data);
     } else {
-      iree_vm_invocation_publish_root_results(invocation, results);
+      iree_vm_invocation_publish_root_results(invocation, root_packet, results);
     }
     iree_vm_invocation_finish(invocation);
     *out_outcome = IREE_VM_EXECUTION_OUTCOME_COMPLETED;
@@ -1467,13 +1587,15 @@ IREE_API_EXPORT iree_status_t iree_vm_invocation_start(
     iree_vm_invocation_consume_arguments(arguments);
     return status;
   }
+  iree_vm_call_packet_t root_packet;
   status = iree_vm_invocation_prepare_root(
       invocation, IREE_VM_INVOCATION_OPERATION_CALL, process,
-      function.target_bits, &callable, arguments, results, wake_callback);
+      function.target_bits, &callable, arguments, results, wake_callback,
+      &root_packet);
   if (!iree_status_is_ok(status)) return status;
 
   iree_vm_execution_outcome_t outcome = UINT32_MAX;
-  status = iree_vm_invocation_drive_start(invocation, &outcome);
+  status = iree_vm_invocation_drive_start(invocation, &root_packet, &outcome);
   if (!iree_status_is_ok(status)) {
     iree_vm_invocation_abort(invocation);
     return status;
@@ -1483,10 +1605,11 @@ IREE_API_EXPORT iree_status_t iree_vm_invocation_start(
     return iree_ok_status();
   }
   if (iree_vm_program_callable_is_scalar_only(&callable)) {
-    return iree_vm_invocation_complete_scalar_call(invocation, results,
-                                                   out_outcome);
+    return iree_vm_invocation_complete_scalar_call(invocation, &root_packet,
+                                                   results, out_outcome);
   }
-  return iree_vm_invocation_complete_call(invocation, results, out_outcome);
+  return iree_vm_invocation_complete_call(invocation, &root_packet, results,
+                                          out_outcome);
 }
 
 IREE_API_EXPORT iree_status_t iree_vm_invocation_resume(
@@ -1517,5 +1640,13 @@ IREE_API_EXPORT iree_status_t iree_vm_invocation_resume(
     *out_outcome = outcome;
     return iree_ok_status();
   }
-  return iree_vm_invocation_complete_call(invocation, results, out_outcome);
+  const iree_vm_call_packet_t root_packet =
+      iree_vm_invocation_root_packet(invocation);
+  if (iree_vm_program_callable_is_scalar_only(
+          &invocation->root_call.callable)) {
+    return iree_vm_invocation_complete_scalar_call(invocation, &root_packet,
+                                                   results, out_outcome);
+  }
+  return iree_vm_invocation_complete_call(invocation, &root_packet, results,
+                                          out_outcome);
 }

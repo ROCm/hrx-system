@@ -23,6 +23,34 @@ namespace {
 
 constexpr iree_host_size_t kInvocationStorageSize = 16 * 1024;
 
+struct CountingAllocator {
+  // Allocator receiving every command.
+  iree_allocator_t delegate = iree_allocator_system();
+  // Number of allocation or reallocation commands.
+  iree_host_size_t allocation_count = 0;
+  // Number of free commands.
+  iree_host_size_t free_count = 0;
+};
+
+iree_status_t CountingAllocatorControl(void* self,
+                                       iree_allocator_command_t command,
+                                       const void* params, void** inout_ptr) {
+  auto* allocator = static_cast<CountingAllocator*>(self);
+  if (command == IREE_ALLOCATOR_COMMAND_MALLOC ||
+      command == IREE_ALLOCATOR_COMMAND_CALLOC ||
+      command == IREE_ALLOCATOR_COMMAND_REALLOC) {
+    ++allocator->allocation_count;
+  } else if (command == IREE_ALLOCATOR_COMMAND_FREE) {
+    ++allocator->free_count;
+  }
+  return allocator->delegate.ctl(allocator->delegate.self, command, params,
+                                 inout_ptr);
+}
+
+iree_allocator_t MakeCountingAllocator(CountingAllocator* allocator) {
+  return iree_allocator_t{allocator, CountingAllocatorControl};
+}
+
 struct ExecutionHarness {
   // Application module observations.
   iree_vm_execution_test_counters_t application_counters = {};
@@ -166,10 +194,14 @@ TEST(VMExecutionTest, ReusesPlacementAndAllocatedInvocationStorage) {
   iree_vm_invocation_deinitialize(invocation);
 
   invocation = nullptr;
+  CountingAllocator allocator;
   IREE_ASSERT_OK(iree_vm_invocation_allocate(
-      kInvocationStorageSize, iree_allocator_system(), &invocation));
+      kInvocationStorageSize, MakeCountingAllocator(&allocator), &invocation));
   ASSERT_NE(invocation, nullptr);
+  EXPECT_EQ(allocator.allocation_count, 1u);
+  EXPECT_EQ(allocator.free_count, 0u);
   iree_vm_invocation_free(invocation);
+  EXPECT_EQ(allocator.free_count, 1u);
 
   alignas(max_align_t) std::array<uint8_t, 1> too_small;
   std::memset(too_small.data(), 0xA5, too_small.size());
@@ -303,6 +335,51 @@ TEST(VMExecutionTest, SemanticRootRejectionConsumesArgumentsBeforeEntry) {
   int32_t value = 0;
   IREE_ASSERT_OK(harness.InvokeBinary(IREE_SV("add"), 2, 3, &value));
   EXPECT_EQ(value, 5);
+}
+
+TEST(VMExecutionTest, RejectsInvalidInitializerBeforeProcessAllocation) {
+  ExecutionHarness harness;
+  harness.Initialize();
+  CountingAllocator allocator;
+  iree_vm_process_create_outcome_t outcome = {
+      UINT32_MAX,
+      reinterpret_cast<iree_vm_process_t*>(1),
+  };
+
+  iree_vm_variant_t wrong_type_arguments[] = {
+      iree_vm_variant_from_i64(42),
+  };
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      iree_vm_process_create_start(
+          harness.program, harness.invocation,
+          iree_vm_variant_span_from_array(wrong_type_arguments), {},
+          MakeCountingAllocator(&allocator), &outcome));
+  EXPECT_TRUE(iree_vm_variant_is_empty(wrong_type_arguments[0]));
+  EXPECT_EQ(outcome.execution_outcome, UINT32_MAX);
+  EXPECT_EQ(outcome.process, reinterpret_cast<iree_vm_process_t*>(1));
+
+  iree_vm_variant_t wrong_count_arguments[] = {
+      iree_vm_variant_from_i32(42),
+      iree_vm_variant_from_i32(43),
+  };
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      iree_vm_process_create_start(
+          harness.program, harness.invocation,
+          iree_vm_variant_span_from_array(wrong_count_arguments), {},
+          MakeCountingAllocator(&allocator), &outcome));
+  EXPECT_TRUE(iree_vm_variant_is_empty(wrong_count_arguments[0]));
+  EXPECT_TRUE(iree_vm_variant_is_empty(wrong_count_arguments[1]));
+  EXPECT_EQ(outcome.execution_outcome, UINT32_MAX);
+  EXPECT_EQ(outcome.process, reinterpret_cast<iree_vm_process_t*>(1));
+
+  EXPECT_EQ(allocator.allocation_count, 0u);
+  EXPECT_EQ(allocator.free_count, 0u);
+  EXPECT_EQ(harness.application_counters.attach_count, 0);
+  EXPECT_EQ(harness.math_counters.attach_count, 0);
+  EXPECT_EQ(harness.application_counters.function_start_count, 0);
+  EXPECT_EQ(harness.math_counters.function_start_count, 0);
 }
 
 TEST(VMExecutionTest, ConstructsAndPublishesAProcessAsynchronously) {

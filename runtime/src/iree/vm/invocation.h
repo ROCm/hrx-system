@@ -34,7 +34,8 @@ IREE_API_EXPORT iree_status_t iree_vm_invocation_initialize(
 IREE_API_EXPORT void iree_vm_invocation_deinitialize(
     iree_vm_invocation_t* invocation);
 
-// Coallocates one invocation with exact fixed |storage_size| bytes.
+// Allocates one private owner prefix followed by an exact fixed
+// |storage_size|-byte invocation span.
 // |out_invocation| is required and is set to null first.
 IREE_API_EXPORT iree_status_t iree_vm_invocation_allocate(
     iree_host_size_t storage_size, iree_allocator_t host_allocator,

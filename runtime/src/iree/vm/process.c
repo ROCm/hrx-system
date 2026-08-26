@@ -266,6 +266,25 @@ IREE_API_EXPORT iree_status_t iree_vm_process_create_start(
         "a program without initialize accepts no process arguments");
   }
 
+  iree_vm_program_callable_t initializer_callable = {0};
+  iree_vm_root_preflight_t preflight = {0};
+  iree_vm_call_packet_t root_packet;
+  if (program->initializer.target_bits) {
+    initializer_callable = (iree_vm_program_callable_t){
+        .argument_types = program->initializer.arguments.data,
+        .result_types = NULL,
+        .argument_counts = program->initializer.argument_counts,
+        .result_counts = {0},
+        .signature_module_ordinal = iree_vm_program_target_module_ordinal(
+            program->initializer.target_bits),
+        .uniform_result_scalar_type = IREE_VM_SCALAR_TYPE_INVALID,
+    };
+    IREE_RETURN_IF_ERROR(iree_vm_invocation_preflight_root(
+        invocation, program, program->initializer.target_bits,
+        &initializer_callable, arguments, iree_vm_variant_span_empty(),
+        &preflight));
+  }
+
   iree_vm_process_t* process = NULL;
   iree_status_t status =
       iree_vm_process_allocate_unpublished(program, host_allocator, &process);
@@ -275,23 +294,10 @@ IREE_API_EXPORT iree_status_t iree_vm_process_create_start(
   }
 
   if (program->initializer.target_bits) {
-    const iree_vm_program_callable_t initializer_callable = {
-        .argument_types = program->initializer.arguments.data,
-        .result_types = NULL,
-        .argument_counts = program->initializer.argument_counts,
-        .result_counts = {0},
-        .signature_module_ordinal = iree_vm_program_target_module_ordinal(
-            program->initializer.target_bits),
-        .uniform_result_scalar_type = IREE_VM_SCALAR_TYPE_INVALID,
-    };
-    status = iree_vm_invocation_prepare_root(
+    root_packet = iree_vm_invocation_commit_root(
         invocation, IREE_VM_INVOCATION_OPERATION_PROCESS_CREATE, process,
         program->initializer.target_bits, &initializer_callable, arguments,
-        iree_vm_variant_span_empty(), wake_callback);
-    if (!iree_status_is_ok(status)) {
-      iree_vm_process_free_unpublished(process, 0);
-      return status;
-    }
+        wake_callback, preflight);
   } else {
     iree_vm_process_consume_arguments(arguments);
   }
@@ -310,7 +316,8 @@ IREE_API_EXPORT iree_status_t iree_vm_process_create_start(
   }
 
   iree_vm_execution_outcome_t execution_outcome = UINT32_MAX;
-  status = iree_vm_invocation_drive_start(invocation, &execution_outcome);
+  status = iree_vm_invocation_drive_start(invocation, &root_packet,
+                                          &execution_outcome);
   if (!iree_status_is_ok(status)) {
     iree_vm_invocation_abort(invocation);
     iree_vm_process_free_unpublished(process, program->linked_module_count);
