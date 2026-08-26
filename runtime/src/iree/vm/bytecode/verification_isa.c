@@ -4,6 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+#include "iree/base/alignment.h"
 #include "iree/vm/bytecode/verification.h"
 #include "iree/vm/bytecode/wire/core/abi.h"
 #include "iree/vm/bytecode/wire/core/buffer.h"
@@ -24,6 +25,11 @@ typedef enum iree_vm_bytecode_verification_form_e {
   IREE_VM_BYTECODE_VERIFICATION_FORM_NONE = 0,
   IREE_VM_BYTECODE_VERIFICATION_FORM_CONTROL_BLOCK,
   IREE_VM_BYTECODE_VERIFICATION_FORM_CONTROL_RETURN,
+  IREE_VM_BYTECODE_VERIFICATION_FORM_CONTROL_BRANCH_S16,
+  IREE_VM_BYTECODE_VERIFICATION_FORM_CONTROL_BRANCH_S32,
+  IREE_VM_BYTECODE_VERIFICATION_FORM_CONTROL_BRANCH_CONDITIONAL_S16,
+  IREE_VM_BYTECODE_VERIFICATION_FORM_CONTROL_BRANCH_CONDITIONAL_S32,
+  IREE_VM_BYTECODE_VERIFICATION_FORM_CONTROL_SWITCH,
   IREE_VM_BYTECODE_VERIFICATION_FORM_VALUE_ABI_ARGUMENT_LOAD,
   IREE_VM_BYTECODE_VERIFICATION_FORM_VALUE_ABI_RESULT_STORE,
   IREE_VM_BYTECODE_VERIFICATION_FORM_REF_ABI_ARGUMENT_LOAD,
@@ -322,9 +328,114 @@ static iree_status_t iree_vm_bytecode_verify_function_address_record(
   }
 }
 
-iree_status_t iree_vm_bytecode_function_verify(
+typedef struct iree_vm_bytecode_function_verification_scratch_t {
+  // Caller-owned decoded control.block offsets in ascending byte order.
+  uint32_t* block_offsets;
+  // Number of entries available in |block_offsets|.
+  uint32_t block_capacity;
+} iree_vm_bytecode_function_verification_scratch_t;
+
+static iree_status_t iree_vm_bytecode_verify_control_target(
+    uint32_t record_offset, uint8_t record_length, int64_t target_word_delta,
+    uint32_t function_length, uint32_t* out_target_offset) {
+  const int64_t target_offset =
+      (int64_t)record_offset + record_length + target_word_delta * 4;
+  if (target_offset < 0 || target_offset >= function_length ||
+      (target_offset & 3) != 0) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "direct control target is out of range");
+  }
+  *out_target_offset = (uint32_t)target_offset;
+  return iree_ok_status();
+}
+
+static bool iree_vm_bytecode_function_has_block_at(
+    const uint32_t* block_offsets, uint32_t block_count,
+    uint32_t target_offset) {
+  uint32_t lower = 0;
+  uint32_t upper = block_count;
+  while (lower < upper) {
+    const uint32_t middle = lower + (upper - lower) / 2;
+    const uint32_t block_offset = block_offsets[middle];
+    if (target_offset < block_offset) {
+      upper = middle;
+    } else if (target_offset > block_offset) {
+      lower = middle + 1;
+    } else {
+      return true;
+    }
+  }
+  return false;
+}
+
+static iree_status_t iree_vm_bytecode_verify_direct_targets(
     const iree_vm_bytecode_module_layout_t* layout,
-    const iree_vm_bytecode_v0_function_row_t* function, uint32_t ordinal) {
+    const iree_vm_bytecode_v0_function_row_t* function,
+    const uint32_t* block_offsets) {
+  const uint8_t* bytecode =
+      layout->functions.bytecode_data + function->bytecode_offset_u32;
+  uint32_t byte_offset = 0;
+  while (byte_offset < function->bytecode_length_u32) {
+    const uint8_t* record_data = bytecode + byte_offset;
+    const iree_vm_bytecode_execution_info_t execution_info =
+        iree_vm_bytecode_execution_info[record_data[0]];
+    int64_t target_word_delta = 0;
+    bool has_target = true;
+    switch ((iree_vm_bytecode_verification_form_t)
+                execution_info.verification_form) {
+      case IREE_VM_BYTECODE_VERIFICATION_FORM_CONTROL_BRANCH_S16:
+      case IREE_VM_BYTECODE_VERIFICATION_FORM_CONTROL_BRANCH_CONDITIONAL_S16:
+        target_word_delta =
+            (int16_t)iree_unaligned_load_le_u16(record_data + 2);
+        break;
+      case IREE_VM_BYTECODE_VERIFICATION_FORM_CONTROL_BRANCH_S32:
+      case IREE_VM_BYTECODE_VERIFICATION_FORM_CONTROL_BRANCH_CONDITIONAL_S32:
+        target_word_delta =
+            (int32_t)iree_unaligned_load_le_u32(record_data + 4);
+        break;
+      default:
+        has_target = false;
+        break;
+    }
+    if (has_target) {
+      uint32_t target_offset = 0;
+      IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_control_target(
+          byte_offset, execution_info.record_length, target_word_delta,
+          function->bytecode_length_u32, &target_offset));
+      if (!iree_vm_bytecode_function_has_block_at(
+              block_offsets, function->block_count_u32, target_offset)) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "direct control target does not name a decoded control.block");
+      }
+    }
+    byte_offset += execution_info.record_length;
+  }
+
+  const iree_vm_bytecode_v0_switch_target_entry_t* switch_targets =
+      layout->functions.switch_targets + function->switch_target_base_u32;
+  for (uint32_t i = 0; i < function->switch_target_entry_count_u32; ++i) {
+    const uint32_t target_word_offset = switch_targets[i];
+    if (target_word_offset > UINT32_MAX / 4u) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "switch target is out of range");
+    }
+    const uint32_t target_offset = target_word_offset * 4u;
+    if (target_offset >= function->bytecode_length_u32 ||
+        !iree_vm_bytecode_function_has_block_at(
+            block_offsets, function->block_count_u32, target_offset)) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "switch target does not name a decoded control.block");
+    }
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t iree_vm_bytecode_function_verify(
+    const iree_vm_bytecode_module_layout_t* layout,
+    const iree_vm_bytecode_v0_function_row_t* function, uint32_t ordinal,
+    iree_vm_bytecode_function_verification_scratch_t scratch) {
   const iree_vm_bytecode_v0_signature_row_t* signature =
       &layout->signatures.rows[function->signature_ordinal_u16];
   const uint8_t* bytecode =
@@ -335,16 +446,19 @@ iree_status_t iree_vm_bytecode_function_verify(
         "function %" PRIu32 " does not begin with control.block", ordinal);
   }
 
-  uint8_t final_opcode = 0;
+  iree_vm_bytecode_verification_form_t final_form =
+      IREE_VM_BYTECODE_VERIFICATION_FORM_NONE;
+  uint32_t block_count = 0;
   uint32_t byte_offset = 0;
   while (byte_offset < function->bytecode_length_u32) {
     const uint8_t* record_data = bytecode + byte_offset;
     const uint8_t opcode = record_data[0];
-    final_opcode = opcode;
     const uint32_t remaining_length =
         function->bytecode_length_u32 - byte_offset;
     const iree_vm_bytecode_execution_info_t execution_info =
         iree_vm_bytecode_execution_info[opcode];
+    final_form =
+        (iree_vm_bytecode_verification_form_t)execution_info.verification_form;
     if (execution_info.verification_form ==
         IREE_VM_BYTECODE_VERIFICATION_FORM_NONE) {
       return iree_make_status(
@@ -359,26 +473,95 @@ iree_status_t iree_vm_bytecode_function_verify(
       case IREE_VM_BYTECODE_VERIFICATION_FORM_CONTROL_BLOCK: {
         const iree_vm_isa_control_block_record_t* record =
             (const iree_vm_isa_control_block_record_t*)record_data;
-        if (byte_offset != 0 || record->zero_padding_u8[0] != 0 ||
+        if (record->zero_padding_u8[0] != 0 ||
             record->zero_padding_u8[1] != 0 ||
             record->zero_padding_u8[2] != 0) {
           return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                                  "control.block must be the first record with "
-                                  "canonical padding");
+                                  "control.block padding is nonzero");
         }
+        if (block_count >= function->block_count_u32 ||
+            block_count >= scratch.block_capacity) {
+          return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                  "decoded control.block count exceeds its "
+                                  "function declaration");
+        }
+        scratch.block_offsets[block_count++] = byte_offset;
         break;
       }
       case IREE_VM_BYTECODE_VERIFICATION_FORM_CONTROL_RETURN: {
         const iree_vm_isa_control_return_record_t* record =
             (const iree_vm_isa_control_return_record_t*)record_data;
-        if (record_length != remaining_length ||
-            record->zero_padding_u8[0] != 0 ||
+        if (record->zero_padding_u8[0] != 0 ||
             record->zero_padding_u8[1] != 0 ||
             record->zero_padding_u8[2] != 0) {
+          return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                  "control.return padding is nonzero");
+        }
+        break;
+      }
+      case IREE_VM_BYTECODE_VERIFICATION_FORM_CONTROL_BRANCH_S16: {
+        const iree_vm_isa_control_branch_s16_record_t* record =
+            (const iree_vm_isa_control_branch_s16_record_t*)record_data;
+        if (record->zero_padding_u8 != 0) {
+          return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                  "control.branch.s16 padding is nonzero");
+        }
+        break;
+      }
+      case IREE_VM_BYTECODE_VERIFICATION_FORM_CONTROL_BRANCH_S32: {
+        const iree_vm_isa_control_branch_s32_record_t* record =
+            (const iree_vm_isa_control_branch_s32_record_t*)record_data;
+        if (record->zero_padding_u8[0] != 0 ||
+            record->zero_padding_u8[1] != 0 ||
+            record->zero_padding_u8[2] != 0) {
+          return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                  "control.branch.s32 padding is nonzero");
+        }
+        break;
+      }
+      case IREE_VM_BYTECODE_VERIFICATION_FORM_CONTROL_BRANCH_CONDITIONAL_S16: {
+        const iree_vm_isa_control_branch_if_s16_record_t* record =
+            (const iree_vm_isa_control_branch_if_s16_record_t*)record_data;
+        if (record_length == remaining_length) {
           return iree_make_status(
               IREE_STATUS_INVALID_ARGUMENT,
-              "control.return must be the final record with "
-              "canonical padding");
+              "conditional branch requires a sequential record");
+        }
+        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_value_register(
+            record->condition_v8, function->value_register_count_u16));
+        break;
+      }
+      case IREE_VM_BYTECODE_VERIFICATION_FORM_CONTROL_BRANCH_CONDITIONAL_S32: {
+        const iree_vm_isa_control_branch_if_s32_record_t* record =
+            (const iree_vm_isa_control_branch_if_s32_record_t*)record_data;
+        if (record_length == remaining_length) {
+          return iree_make_status(
+              IREE_STATUS_INVALID_ARGUMENT,
+              "conditional branch requires a sequential record");
+        }
+        if (record->zero_padding_u16 != 0) {
+          return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                  "conditional branch padding is nonzero");
+        }
+        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_value_register(
+            record->condition_v8, function->value_register_count_u16));
+        break;
+      }
+      case IREE_VM_BYTECODE_VERIFICATION_FORM_CONTROL_SWITCH: {
+        const iree_vm_isa_control_switch_record_t* record =
+            (const iree_vm_isa_control_switch_record_t*)record_data;
+        if (record_length == remaining_length) {
+          return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                  "control.switch requires a default record");
+        }
+        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_value_register(
+            record->selector_v8, function->value_register_count_u16));
+        if (record->target_base_u32 > function->switch_target_entry_count_u32 ||
+            record->target_count_u16 > function->switch_target_entry_count_u32 -
+                                           record->target_base_u32) {
+          return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                  "control.switch target slice is out of "
+                                  "range");
         }
         break;
       }
@@ -1262,28 +1445,41 @@ iree_status_t iree_vm_bytecode_function_verify(
     byte_offset += (uint32_t)record_length;
   }
 
-  if (final_opcode != IREE_VM_ISA_CORE_OPCODE_CONTROL_RETURN) {
+  if (block_count != function->block_count_u32) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "function %" PRIu32
+                            " decoded control.block count does not match its "
+                            "declaration",
+                            ordinal);
+  }
+  if (final_form != IREE_VM_BYTECODE_VERIFICATION_FORM_CONTROL_RETURN &&
+      final_form != IREE_VM_BYTECODE_VERIFICATION_FORM_CONTROL_BRANCH_S16 &&
+      final_form != IREE_VM_BYTECODE_VERIFICATION_FORM_CONTROL_BRANCH_S32) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
         "function %" PRIu32 " falls through past its final record", ordinal);
   }
-  return iree_ok_status();
+  return iree_vm_bytecode_verify_direct_targets(layout, function,
+                                                scratch.block_offsets);
 }
 
 iree_status_t iree_vm_bytecode_module_verify_executable(
-    const iree_vm_bytecode_module_plan_t* plan) {
+    const iree_vm_bytecode_module_plan_t* plan,
+    iree_allocator_t scratch_allocator) {
   if (plan->layout.requirements.count != 0) {
     return iree_make_status(IREE_STATUS_INCOMPATIBLE,
                             "extension page 0x%02" PRIx16
                             " is unavailable in this runtime",
                             plan->layout.requirements.rows[0].page_id_u16);
   }
+  uint32_t maximum_block_count = 0;
   for (uint32_t i = 0; i < plan->layout.functions.count; ++i) {
     const iree_vm_bytecode_v0_function_row_t* function =
         &plan->layout.functions.rows[i];
-    if (function->switch_target_entry_count_u32 != 0) {
-      return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
-                              "direct control targets are not executable");
+    if ((uint64_t)function->bytecode_length_u32 > (uint64_t)PTRDIFF_MAX) {
+      return iree_make_status(
+          IREE_STATUS_UNIMPLEMENTED,
+          "function bytecode exceeds the host pointer-difference range");
     }
     if (function->local_ref_count_u32 > (uint32_t)UINT16_MAX + 1u) {
       return iree_make_status(
@@ -1295,8 +1491,31 @@ iree_status_t iree_vm_bytecode_module_verify_executable(
           IREE_STATUS_UNIMPLEMENTED,
           "bytecode functions support only direct local function slots");
     }
-    IREE_RETURN_IF_ERROR(
-        iree_vm_bytecode_function_verify(&plan->layout, function, i));
+    maximum_block_count =
+        iree_max(maximum_block_count, function->block_count_u32);
   }
-  return iree_ok_status();
+
+  enum { IREE_VM_BYTECODE_INLINE_BLOCK_CAPACITY = 32 };
+  uint32_t inline_block_offsets[IREE_VM_BYTECODE_INLINE_BLOCK_CAPACITY];
+  uint32_t* allocated_block_offsets = NULL;
+  iree_status_t status = iree_ok_status();
+  if (maximum_block_count > IREE_VM_BYTECODE_INLINE_BLOCK_CAPACITY) {
+    status = iree_allocator_malloc_array_uninitialized(
+        scratch_allocator, maximum_block_count,
+        sizeof(*allocated_block_offsets), (void**)&allocated_block_offsets);
+  }
+  uint32_t* block_offsets = allocated_block_offsets != NULL
+                                ? allocated_block_offsets
+                                : inline_block_offsets;
+  const iree_vm_bytecode_function_verification_scratch_t scratch = {
+      .block_offsets = block_offsets,
+      .block_capacity = maximum_block_count,
+  };
+  for (uint32_t i = 0;
+       i < plan->layout.functions.count && iree_status_is_ok(status); ++i) {
+    status = iree_vm_bytecode_function_verify(
+        &plan->layout, &plan->layout.functions.rows[i], i, scratch);
+  }
+  iree_allocator_free(scratch_allocator, allocated_block_offsets);
+  return status;
 }

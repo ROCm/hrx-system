@@ -254,7 +254,8 @@ IREE_API_EXPORT iree_status_t iree_vm_bytecode_module_create(
   iree_vm_bytecode_module_plan_t plan = {0};
   IREE_RETURN_IF_ERROR(
       iree_vm_bytecode_module_verify_structure(storage.contents, &plan));
-  IREE_RETURN_IF_ERROR(iree_vm_bytecode_module_verify_executable(&plan));
+  IREE_RETURN_IF_ERROR(
+      iree_vm_bytecode_module_verify_executable(&plan, host_allocator));
 
   iree_host_size_t total_size = 0;
   iree_host_size_t name_offset = 0;

@@ -19,6 +19,9 @@ from model.isa.validation import (
     ANY_BITS,
     CONSTANT_POOL_ORDINAL,
     CONSTRAINT_MEMBER,
+    CONTROL_SWITCH_TARGETS,
+    CONTROL_TARGET_RELATIVE_S16,
+    CONTROL_TARGET_RELATIVE_S32,
     FIELDS_DISTINCT,
     FUNCTION_ADDRESS,
     FUNCTION_LOCAL_ORDINAL,
@@ -185,6 +188,82 @@ def _validate_verification_form(
         if instruction.byte_length != 4:
             raise ValueError(f"{instruction.mnemonic}: control record is not 4 bytes")
         require_zero(1, 1, array_length=3)
+    elif verification_form == "CONTROL_BRANCH_S16":
+        if instruction.byte_length != 4:
+            raise ValueError(f"{instruction.mnemonic}: short branch is not 4 bytes")
+        require_zero(1, 1)
+        require_field(
+            2,
+            2,
+            CONTROL_TARGET_RELATIVE_S16.entity_id,
+            (InstructionFieldRole.IMMEDIATE,),
+        )
+    elif verification_form == "CONTROL_BRANCH_S32":
+        if instruction.byte_length != 8:
+            raise ValueError(f"{instruction.mnemonic}: wide branch is not 8 bytes")
+        require_zero(1, 1, array_length=3)
+        require_field(
+            4,
+            4,
+            CONTROL_TARGET_RELATIVE_S32.entity_id,
+            (InstructionFieldRole.IMMEDIATE,),
+        )
+    elif verification_form == "CONTROL_BRANCH_CONDITIONAL_S16":
+        if instruction.byte_length != 4:
+            raise ValueError(
+                f"{instruction.mnemonic}: short conditional branch is not 4 bytes"
+            )
+        require_value(1)
+        require_field(
+            2,
+            2,
+            CONTROL_TARGET_RELATIVE_S16.entity_id,
+            (InstructionFieldRole.IMMEDIATE,),
+        )
+    elif verification_form == "CONTROL_BRANCH_CONDITIONAL_S32":
+        if instruction.byte_length != 8:
+            raise ValueError(
+                f"{instruction.mnemonic}: wide conditional branch is not 8 bytes"
+            )
+        require_value(1)
+        require_zero(2, 2)
+        require_field(
+            4,
+            4,
+            CONTROL_TARGET_RELATIVE_S32.entity_id,
+            (InstructionFieldRole.IMMEDIATE,),
+        )
+    elif verification_form == "CONTROL_SWITCH":
+        if instruction.byte_length != 8:
+            raise ValueError(f"{instruction.mnemonic}: switch is not 8 bytes")
+        require_value(1)
+        require_field(
+            2,
+            2,
+            CONSTRAINT_MEMBER.entity_id,
+            (InstructionFieldRole.CONSTRAINT_MEMBER,),
+            rule_arguments=("control.switch.targets",),
+        )
+        require_field(
+            4,
+            4,
+            CONSTRAINT_MEMBER.entity_id,
+            (InstructionFieldRole.CONSTRAINT_MEMBER,),
+            rule_arguments=("control.switch.targets",),
+        )
+        expected_arguments = (
+            FieldReference("target_count_u16"),
+            FieldReference("target_base_u32"),
+        )
+        if (
+            len(instruction.constraints) != 1
+            or instruction.constraints[0].rule_id != CONTROL_SWITCH_TARGETS.entity_id
+            or tuple(instruction.constraints[0].arguments) != expected_arguments
+        ):
+            raise ValueError(
+                f"{instruction.mnemonic}: switch-target constraint does not "
+                "match its runtime verification form"
+            )
     elif verification_form in (
         "VALUE_ABI_ARGUMENT_LOAD",
         "VALUE_ABI_RESULT_STORE",

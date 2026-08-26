@@ -69,7 +69,7 @@ class ProjectionTest(unittest.TestCase):
         )
         self.assertEqual(
             sum(isinstance(entity, ValidationObligation) for entity in module_entities),
-            55,
+            56,
         )
         self.assertEqual(
             sum(isinstance(entity, NumericValue) for entity in module_entities),

@@ -276,10 +276,12 @@ SECTIONS = (
             "ranges in function ordinal order. switch_target_base and "
             "bytecode_offset are exact checked running prefixes and the final "
             "bytecode end consumes the section. bytecode_length is a nonzero "
-            "multiple of four. Each register count is in [0, 256] and covers "
-            "the larger direct argument/result prefix for its signature bank, "
-            "capped at 16. Declared byte/ref/function local extents include the "
-            "canonical outgoing call packet and must fit every decoded call. "
+            "multiple of four. block_count is in [1, 65536] and exactly equals "
+            "the number of decoded control.block records in the function. Each "
+            "register count is in [0, 256] and covers the larger direct "
+            "argument/result prefix for its signature bank, capped at 16. "
+            "Declared byte/ref/function local extents include the canonical "
+            "outgoing call packet and must fit every decoded call. "
             "Every switch-table entry is a u32 four-byte-word offset to an exact "
             "decoded control.block in its owning function, including unused "
             "entries. Switch subranges may overlap and unused valid entries are "
@@ -1257,6 +1259,21 @@ VALIDATION_OBLIGATIONS = (
             ),
         ),
         normative_text="Decode and structurally validate every instruction record with exact byte coverage.",
+        section_id=SECTIONS_BY_KEY["functions"].entity_id,
+    ),
+    ValidationObligation(
+        entity_id="core.validation.module.functions.block_count",
+        since=CORE_0,
+        summary="Require the declared block count to equal the number of decoded control.block records.",
+        scope=ValidationScope.SECTION,
+        kind="validate_block_count",
+        inputs=(
+            RecordFieldReference(
+                RECORDS_BY_KEY["function_row"].entity_id,
+                "block_count_u32",
+            ),
+        ),
+        normative_text="Require the declared block count to equal the number of decoded control.block records.",
         section_id=SECTIONS_BY_KEY["functions"].entity_id,
     ),
     ValidationObligation(

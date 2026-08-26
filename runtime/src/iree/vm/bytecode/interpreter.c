@@ -121,6 +121,14 @@ static inline void iree_vm_bytecode_ref_move(iree_vm_ref_t* target,
   iree_vm_bytecode_ref_replace(target, moved_ref);
 }
 
+// Resolves one verified signed word displacement from the record end.
+static inline const uint8_t* iree_vm_bytecode_direct_target(
+    const uint8_t* record_data, iree_host_size_t record_length,
+    int32_t target_word_delta) {
+  return record_data + record_length +
+         (ptrdiff_t)((int64_t)target_word_delta * 4);
+}
+
 // Returns whether |ref| satisfies one resolved ref-global descriptor.
 static inline bool iree_vm_bytecode_ref_matches_global(
     iree_vm_ref_t ref, iree_vm_ref_type_t expected_type,
@@ -469,9 +477,13 @@ iree_status_t iree_vm_bytecode_function_start(
   }
   const iree_vm_bytecode_v0_constant_cell_t* constant_cells =
       module->layout.constants.cells;
-  const uint8_t* bytecode = module->layout.functions.bytecode_data +
-                            function->bytecode_offset_u32 +
-                            sizeof(iree_vm_isa_control_block_record_t);
+  const uint8_t* function_bytecode =
+      module->layout.functions.bytecode_data + function->bytecode_offset_u32;
+  const iree_vm_bytecode_v0_switch_target_entry_t* switch_targets =
+      module->layout.functions.switch_targets +
+      function->switch_target_base_u32;
+  const uint8_t* bytecode =
+      function_bytecode + sizeof(iree_vm_isa_control_block_record_t);
   iree_status_t status = iree_ok_status();
 
   IREE_VM_BYTECODE_DISPATCH_BEGIN();
@@ -486,6 +498,77 @@ iree_status_t iree_vm_bytecode_function_start(
       *out_outcome = IREE_VM_EXECUTION_OUTCOME_COMPLETED;
     }
     IREE_VM_BYTECODE_DISPATCH_TERMINATE();
+  }
+  IREE_VM_BYTECODE_DISPATCH_CASE(CONTROL_BRANCH_S16, control_branch_s16) {
+    const iree_vm_isa_control_branch_s16_record_t* record =
+        (const iree_vm_isa_control_branch_s16_record_t*)record_data;
+    record_data = iree_vm_bytecode_direct_target(record_data, sizeof(*record),
+                                                 record->target_rel16);
+    IREE_VM_BYTECODE_DISPATCH_CONTINUE();
+  }
+  IREE_VM_BYTECODE_DISPATCH_CASE(CONTROL_BRANCH_S32, control_branch_s32) {
+    const iree_vm_isa_control_branch_s32_record_t* record =
+        (const iree_vm_isa_control_branch_s32_record_t*)record_data;
+    record_data = iree_vm_bytecode_direct_target(record_data, sizeof(*record),
+                                                 record->target_rel32);
+    IREE_VM_BYTECODE_DISPATCH_CONTINUE();
+  }
+  IREE_VM_BYTECODE_DISPATCH_CASE(CONTROL_BRANCH_IF_S16, control_branch_if_s16) {
+    const iree_vm_isa_control_branch_if_s16_record_t* record =
+        (const iree_vm_isa_control_branch_if_s16_record_t*)record_data;
+    if (values[record->condition_v8] != 0) {
+      record_data = iree_vm_bytecode_direct_target(record_data, sizeof(*record),
+                                                   record->target_rel16);
+      IREE_VM_BYTECODE_DISPATCH_CONTINUE();
+    }
+    IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_isa_control_branch_if_s16_record_t);
+  }
+  IREE_VM_BYTECODE_DISPATCH_CASE(CONTROL_BRANCH_IF_S32, control_branch_if_s32) {
+    const iree_vm_isa_control_branch_if_s32_record_t* record =
+        (const iree_vm_isa_control_branch_if_s32_record_t*)record_data;
+    if (values[record->condition_v8] != 0) {
+      record_data = iree_vm_bytecode_direct_target(record_data, sizeof(*record),
+                                                   record->target_rel32);
+      IREE_VM_BYTECODE_DISPATCH_CONTINUE();
+    }
+    IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_isa_control_branch_if_s32_record_t);
+  }
+  IREE_VM_BYTECODE_DISPATCH_CASE(CONTROL_BRANCH_UNLESS_S16,
+                                 control_branch_unless_s16) {
+    const iree_vm_isa_control_branch_unless_s16_record_t* record =
+        (const iree_vm_isa_control_branch_unless_s16_record_t*)record_data;
+    if (values[record->condition_v8] == 0) {
+      record_data = iree_vm_bytecode_direct_target(record_data, sizeof(*record),
+                                                   record->target_rel16);
+      IREE_VM_BYTECODE_DISPATCH_CONTINUE();
+    }
+    IREE_VM_BYTECODE_DISPATCH_NEXT(
+        iree_vm_isa_control_branch_unless_s16_record_t);
+  }
+  IREE_VM_BYTECODE_DISPATCH_CASE(CONTROL_BRANCH_UNLESS_S32,
+                                 control_branch_unless_s32) {
+    const iree_vm_isa_control_branch_unless_s32_record_t* record =
+        (const iree_vm_isa_control_branch_unless_s32_record_t*)record_data;
+    if (values[record->condition_v8] == 0) {
+      record_data = iree_vm_bytecode_direct_target(record_data, sizeof(*record),
+                                                   record->target_rel32);
+      IREE_VM_BYTECODE_DISPATCH_CONTINUE();
+    }
+    IREE_VM_BYTECODE_DISPATCH_NEXT(
+        iree_vm_isa_control_branch_unless_s32_record_t);
+  }
+  IREE_VM_BYTECODE_DISPATCH_CASE(CONTROL_SWITCH, control_switch) {
+    const iree_vm_isa_control_switch_record_t* record =
+        (const iree_vm_isa_control_switch_record_t*)record_data;
+    const uint64_t selector = values[record->selector_v8];
+    if (selector < record->target_count_u16) {
+      const uint32_t target_word_offset =
+          switch_targets[record->target_base_u32 + (uint32_t)selector];
+      record_data =
+          function_bytecode + (iree_host_size_t)target_word_offset * 4;
+      IREE_VM_BYTECODE_DISPATCH_CONTINUE();
+    }
+    IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_isa_control_switch_record_t);
   }
   IREE_VM_BYTECODE_DISPATCH_CASE(VALUE_ABI_ARGUMENT_LOAD,
                                  value_abi_argument_load) {

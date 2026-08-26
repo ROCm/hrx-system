@@ -189,9 +189,9 @@ std::vector<uint8_t> BuildOwnershipFunctions() {
   ByteBuffer section;
   section.Append(iree_vm_bytecode_v0_functions_header_t{2});
   section.Append(iree_vm_bytecode_v0_function_row_t{
-      0, 0, 0, 16, 0, 0, 0, 1, 0, 0, 0, 0, {0, 0, 0}});
+      0, 0, 0, 16, 0, 0, 0, 1, 0, 0, 0, 0, 1, {0, 0}});
   section.Append(iree_vm_bytecode_v0_function_row_t{
-      1, 0, 16, 20, 0, 0, 0, 2, 1, 0, 0, 0, {0, 0, 0}});
+      1, 0, 16, 20, 0, 0, 0, 2, 1, 0, 0, 0, 1, {0, 0}});
   section.AppendBytes(bytecode_data.data(), bytecode_data.size());
   return section.Take();
 }
@@ -270,9 +270,9 @@ std::vector<uint8_t> BuildFunctionFunctions() {
   ByteBuffer section;
   section.Append(iree_vm_bytecode_v0_functions_header_t{2});
   section.Append(iree_vm_bytecode_v0_function_row_t{
-      0, 0, 0, 48, 0, 0, 0, 2, 0, 5, 0, 1, {0, 0, 0}});
+      0, 0, 0, 48, 0, 0, 0, 2, 0, 5, 0, 1, 1, {0, 0}});
   section.Append(iree_vm_bytecode_v0_function_row_t{
-      0, 0, 48, 8, 0, 0, 0, 0, 0, 0, 0, 0, {0, 0, 0}});
+      0, 0, 48, 8, 0, 0, 0, 0, 0, 0, 0, 0, 1, {0, 0}});
   section.AppendBytes(bytecode_data.data(), bytecode_data.size());
   return section.Take();
 }
@@ -387,19 +387,19 @@ std::vector<uint8_t> BuildFunctionStateFunctions() {
   ByteBuffer section;
   section.Append(iree_vm_bytecode_v0_functions_header_t{7});
   section.Append(iree_vm_bytecode_v0_function_row_t{
-      0, 0, 0, 8, 0, 0, 0, 1, 0, 0, 0, 0, {0, 0, 0}});
+      0, 0, 0, 8, 0, 0, 0, 1, 0, 0, 0, 0, 1, {0, 0}});
   section.Append(iree_vm_bytecode_v0_function_row_t{
-      1, 0, 8, 16, 0, 0, 0, 0, 0, 2, 0, 0, {0, 0, 0}});
+      1, 0, 8, 16, 0, 0, 0, 0, 0, 2, 0, 0, 1, {0, 0}});
   section.Append(iree_vm_bytecode_v0_function_row_t{
-      2, 0, 24, 16, 0, 0, 0, 0, 0, 2, 0, 0, {0, 0, 0}});
+      2, 0, 24, 16, 0, 0, 0, 0, 0, 2, 0, 0, 1, {0, 0}});
   section.Append(iree_vm_bytecode_v0_function_row_t{
-      3, 0, 40, 12, 0, 0, 0, 0, 0, 1, 0, 0, {0, 0, 0}});
+      3, 0, 40, 12, 0, 0, 0, 0, 0, 1, 0, 0, 1, {0, 0}});
   section.Append(iree_vm_bytecode_v0_function_row_t{
-      4, 0, 52, 24, 0, 0, 0, 0, 0, 18, 0, 0, {0, 0, 0}});
+      4, 0, 52, 24, 0, 0, 0, 0, 0, 18, 0, 0, 1, {0, 0}});
   section.Append(iree_vm_bytecode_v0_function_row_t{
-      5, 0, 76, 16, 0, 0, 0, 0, 0, 1, 0, 0, {0, 0, 0}});
+      5, 0, 76, 16, 0, 0, 0, 0, 0, 1, 0, 0, 1, {0, 0}});
   section.Append(iree_vm_bytecode_v0_function_row_t{
-      6, 0, 92, 20, 0, 0, 0, 0, 0, 1, 0, 0, {0, 0, 0}});
+      6, 0, 92, 20, 0, 0, 0, 0, 0, 1, 0, 0, 1, {0, 0}});
   section.AppendBytes(bytecode_data.data(), bytecode_data.size());
   return section.Take();
 }
@@ -522,9 +522,9 @@ std::vector<uint8_t> BuildRefFunctions() {
   ByteBuffer section;
   section.Append(iree_vm_bytecode_v0_functions_header_t{2});
   section.Append(iree_vm_bytecode_v0_function_row_t{
-      0, 0, 0, 76, 0, 0, 0, 3, 3, 0, 2, 0, {0, 0, 0}});
+      0, 0, 0, 76, 0, 0, 0, 3, 3, 0, 2, 0, 1, {0, 0}});
   section.Append(iree_vm_bytecode_v0_function_row_t{
-      1, 0, 76, 28, 0, 0, 0, 2, 2, 0, 1, 0, {0, 0, 0}});
+      1, 0, 76, 28, 0, 0, 0, 2, 2, 0, 1, 0, 1, {0, 0}});
   section.AppendBytes(bytecode_data.data(), bytecode_data.size());
   return section.Take();
 }
@@ -639,13 +639,13 @@ std::vector<uint8_t> BuildRefStateFunctions() {
   ByteBuffer section;
   section.Append(iree_vm_bytecode_v0_functions_header_t{4});
   section.Append(iree_vm_bytecode_v0_function_row_t{
-      0, 0, 0, 16, 0, 0, 0, 0, 2, 0, 0, 0, {0, 0, 0}});
+      0, 0, 0, 16, 0, 0, 0, 0, 2, 0, 0, 0, 1, {0, 0}});
   section.Append(iree_vm_bytecode_v0_function_row_t{
-      1, 0, 16, 16, 0, 0, 0, 0, 2, 0, 0, 0, {0, 0, 0}});
+      1, 0, 16, 16, 0, 0, 0, 0, 2, 0, 0, 0, 1, {0, 0}});
   section.Append(iree_vm_bytecode_v0_function_row_t{
-      2, 0, 32, 20, 0, 0, 0, 0, 18, 0, 0, 0, {0, 0, 0}});
+      2, 0, 32, 20, 0, 0, 0, 0, 18, 0, 0, 0, 1, {0, 0}});
   section.Append(iree_vm_bytecode_v0_function_row_t{
-      3, 0, 52, 12, 0, 0, 0, 0, 1, 0, 0, 0, {0, 0, 0}});
+      3, 0, 52, 12, 0, 0, 0, 0, 1, 0, 0, 0, 1, {0, 0}});
   section.AppendBytes(bytecode_data.data(), bytecode_data.size());
   return section.Take();
 }
@@ -793,11 +793,11 @@ std::vector<uint8_t> BuildLaunchConfigFunctions() {
   ByteBuffer section;
   section.Append(iree_vm_bytecode_v0_functions_header_t{3});
   section.Append(iree_vm_bytecode_v0_function_row_t{
-      0, 0, 0, 68, 0, 0, 0, 11, 0, 0, 0, 0, {0, 0, 0}});
+      0, 0, 0, 68, 0, 0, 0, 11, 0, 0, 0, 0, 1, {0, 0}});
   section.Append(iree_vm_bytecode_v0_function_row_t{
-      1, 0, 68, 8, 0, 0, 0, 0, 0, 0, 0, 0, {0, 0, 0}});
+      1, 0, 68, 8, 0, 0, 0, 0, 0, 0, 0, 0, 1, {0, 0}});
   section.Append(iree_vm_bytecode_v0_function_row_t{
-      0, 0, 76, 8, 0, 0, 0, 11, 0, 0, 0, 0, {0, 0, 0}});
+      0, 0, 76, 8, 0, 0, 0, 11, 0, 0, 0, 0, 1, {0, 0}});
   section.AppendBytes(bytecode_data.data(), bytecode_data.size());
   return section.Take();
 }
@@ -868,9 +868,9 @@ std::vector<uint8_t> BuildValueOverflowFunctions() {
   ByteBuffer section;
   section.Append(iree_vm_bytecode_v0_functions_header_t{2});
   section.Append(iree_vm_bytecode_v0_function_row_t{
-      0, 0, 0, 24, 0, 0, 0, 18, 0, 0, 0, 0, {0, 0, 0}});
+      0, 0, 0, 24, 0, 0, 0, 18, 0, 0, 0, 0, 1, {0, 0}});
   section.Append(iree_vm_bytecode_v0_function_row_t{
-      0, 0, 24, 28, 0, 0, 0, 18, 0, 0, 0, 0, {0, 0, 0}});
+      0, 0, 24, 28, 0, 0, 0, 18, 0, 0, 0, 0, 1, {0, 0}});
   section.AppendBytes(bytecode_data.data(), bytecode_data.size());
   return section.Take();
 }
@@ -956,9 +956,9 @@ std::vector<uint8_t> BuildScalarStateFunctions() {
   ByteBuffer section;
   section.Append(iree_vm_bytecode_v0_functions_header_t{2});
   section.Append(iree_vm_bytecode_v0_function_row_t{
-      0, 0, 0, 24, 0, 0, 0, 2, 0, 0, 0, 0, {0, 0, 0}});
+      0, 0, 0, 24, 0, 0, 0, 2, 0, 0, 0, 0, 1, {0, 0}});
   section.Append(iree_vm_bytecode_v0_function_row_t{
-      1, 0, 24, 68, 0, 0, 0, 6, 0, 0, 0, 0, {0, 0, 0}});
+      1, 0, 24, 68, 0, 0, 0, 6, 0, 0, 0, 0, 1, {0, 0}});
   section.AppendBytes(bytecode_data.data(), bytecode_data.size());
   return section.Take();
 }
@@ -1042,7 +1042,7 @@ std::vector<uint8_t> BuildHALInspectionFunctions() {
   ByteBuffer section;
   section.Append(iree_vm_bytecode_v0_functions_header_t{1});
   section.Append(iree_vm_bytecode_v0_function_row_t{
-      0, 0, 0, 12, 0, 0, 0, 1, 1, 0, 0, 0, {0, 0, 0}});
+      0, 0, 0, 12, 0, 0, 0, 1, 1, 0, 0, 0, 1, {0, 0}});
   section.AppendBytes(bytecode_data.data(), bytecode_data.size());
   return section.Take();
 }
@@ -1085,7 +1085,7 @@ std::vector<uint8_t> BuildSwitchInspectionFunctions() {
   ByteBuffer section;
   section.Append(iree_vm_bytecode_v0_functions_header_t{1});
   section.Append(iree_vm_bytecode_v0_function_row_t{
-      0, 0, 0, 20, 0, 1, 0, 1, 0, 0, 0, 0, {0, 0, 0}});
+      0, 0, 0, 20, 0, 1, 0, 1, 0, 0, 0, 0, 2, {0, 0}});
   section.Append(static_cast<iree_vm_bytecode_v0_switch_target_entry_t>(3));
   section.AppendBytes(bytecode_data.data(), bytecode_data.size());
   return section.Take();

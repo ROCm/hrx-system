@@ -384,6 +384,159 @@ TEST(VMBytecodeModuleTest, InspectionAndExecutionShareStructuralDiagnostics) {
   iree_vm_environment_free(environment);
 }
 
+TEST(VMBytecodeModuleTest, RejectsMalformedDirectControlFlow) {
+  iree_vm_environment_t* environment = nullptr;
+  IREE_ASSERT_OK(
+      iree_vm_environment_allocate(iree_allocator_system(), &environment));
+  const auto expect_rejected = [&](const auto& mutate) {
+    std::vector<uint8_t> image = BuildSwitchInspectionModuleImage();
+    MutableFunctionImage function = FindFunctionImage(&image, 0);
+    ASSERT_NE(function.row, nullptr);
+    ASSERT_NE(function.bytecode, nullptr);
+    mutate(function);
+    iree_vm_module_t* module =
+        reinterpret_cast<iree_vm_module_t*>(uintptr_t{1});
+    IREE_EXPECT_STATUS_IS(
+        IREE_STATUS_INVALID_ARGUMENT,
+        iree_vm_bytecode_module_create(
+            environment, IREE_SV("malformed_control"),
+            {iree_make_const_byte_span(image.data(), image.size()),
+             iree_allocator_null()},
+            iree_allocator_system(), &module));
+    EXPECT_EQ(module, nullptr);
+  };
+
+  constexpr uint32_t kSwitchOffset = sizeof(iree_vm_isa_control_block_record_t);
+  constexpr uint32_t kSecondBlockOffset =
+      kSwitchOffset + sizeof(iree_vm_isa_control_switch_record_t);
+  constexpr uint32_t kReturnOffset =
+      kSecondBlockOffset + sizeof(iree_vm_isa_control_block_record_t);
+
+  // The declared count must exactly match decoded control.block records.
+  expect_rejected(
+      [](MutableFunctionImage function) { function.row->block_count_u32 = 3; });
+
+  // Function-owned switch targets must name decoded block boundaries.
+  expect_rejected([](MutableFunctionImage function) {
+    auto* switch_targets =
+        reinterpret_cast<iree_vm_bytecode_v0_switch_target_entry_t*>(
+            function.row + 1);
+    switch_targets[0] = 2;
+  });
+
+  // A direct target cannot masquerade as a block by landing on an opcode-like
+  // byte in the middle of a decoded record.
+  expect_rejected([&](MutableFunctionImage function) {
+    function.row->block_count_u32 = 1;
+    auto* switch_targets =
+        reinterpret_cast<iree_vm_bytecode_v0_switch_target_entry_t*>(
+            function.row + 1);
+    switch_targets[0] = 0;
+    const iree_vm_isa_constant_i32_record_t constant = {
+        IREE_VM_ISA_CORE_OPCODE_CONSTANT_I32, 0, 0,
+        IREE_VM_ISA_CORE_OPCODE_CONTROL_BLOCK};
+    std::memcpy(function.bytecode + kSwitchOffset, &constant, sizeof(constant));
+    const iree_vm_isa_control_branch_s16_record_t branch = {
+        IREE_VM_ISA_CORE_OPCODE_CONTROL_BRANCH_S16, 0, -2};
+    std::memcpy(function.bytecode + kSecondBlockOffset, &branch,
+                sizeof(branch));
+  });
+
+  expect_rejected([&](MutableFunctionImage function) {
+    function.row->block_count_u32 = 1;
+    auto* switch_targets =
+        reinterpret_cast<iree_vm_bytecode_v0_switch_target_entry_t*>(
+            function.row + 1);
+    switch_targets[0] = 0;
+    const iree_vm_isa_control_branch_s16_record_t branch = {
+        IREE_VM_ISA_CORE_OPCODE_CONTROL_BRANCH_S16, 0, INT16_MAX};
+    std::memcpy(function.bytecode + kSecondBlockOffset, &branch,
+                sizeof(branch));
+  });
+
+  expect_rejected([&](MutableFunctionImage function) {
+    function.row->block_count_u32 = 1;
+    auto* switch_targets =
+        reinterpret_cast<iree_vm_bytecode_v0_switch_target_entry_t*>(
+            function.row + 1);
+    switch_targets[0] = 0;
+    const iree_vm_isa_control_branch_s16_record_t branch = {
+        IREE_VM_ISA_CORE_OPCODE_CONTROL_BRANCH_S16, 1, -4};
+    std::memcpy(function.bytecode + kSecondBlockOffset, &branch,
+                sizeof(branch));
+  });
+
+  expect_rejected([&](MutableFunctionImage function) {
+    function.row->block_count_u32 = 1;
+    auto* switch_targets =
+        reinterpret_cast<iree_vm_bytecode_v0_switch_target_entry_t*>(
+            function.row + 1);
+    switch_targets[0] = 0;
+    const iree_vm_isa_control_branch_s32_record_t branch = {
+        IREE_VM_ISA_CORE_OPCODE_CONTROL_BRANCH_S32, {1, 0, 0}, -5};
+    std::memcpy(function.bytecode + kSecondBlockOffset, &branch,
+                sizeof(branch));
+  });
+
+  expect_rejected([&](MutableFunctionImage function) {
+    function.row->block_count_u32 = 1;
+    auto* switch_targets =
+        reinterpret_cast<iree_vm_bytecode_v0_switch_target_entry_t*>(
+            function.row + 1);
+    switch_targets[0] = 0;
+    const iree_vm_isa_control_branch_if_s16_record_t branch = {
+        IREE_VM_ISA_CORE_OPCODE_CONTROL_BRANCH_IF_S16, 1, -4};
+    std::memcpy(function.bytecode + kSecondBlockOffset, &branch,
+                sizeof(branch));
+  });
+
+  // Conditional control records require a sequential default record.
+  expect_rejected([&](MutableFunctionImage function) {
+    const iree_vm_isa_control_branch_if_s16_record_t branch = {
+        IREE_VM_ISA_CORE_OPCODE_CONTROL_BRANCH_IF_S16, 0, -5};
+    std::memcpy(function.bytecode + kReturnOffset, &branch, sizeof(branch));
+  });
+
+  expect_rejected([&](MutableFunctionImage function) {
+    function.row->block_count_u32 = 1;
+    auto* switch_targets =
+        reinterpret_cast<iree_vm_bytecode_v0_switch_target_entry_t*>(
+            function.row + 1);
+    switch_targets[0] = 0;
+    const iree_vm_isa_constant_i32_record_t constant = {
+        IREE_VM_ISA_CORE_OPCODE_CONSTANT_I32, 0, 0, 0};
+    std::memcpy(function.bytecode + kSwitchOffset, &constant, sizeof(constant));
+    const iree_vm_isa_control_switch_record_t switch_record = {
+        IREE_VM_ISA_CORE_OPCODE_CONTROL_SWITCH, 0, 1, 0};
+    std::memcpy(function.bytecode + kSecondBlockOffset, &switch_record,
+                sizeof(switch_record));
+  });
+
+  // The instruction-local switch slice must fit its function-owned table.
+  expect_rejected([&](MutableFunctionImage function) {
+    auto* switch_record =
+        reinterpret_cast<iree_vm_isa_control_switch_record_t*>(
+            function.bytecode + kSwitchOffset);
+    switch_record->target_count_u16 = 2;
+  });
+  expect_rejected([&](MutableFunctionImage function) {
+    auto* switch_record =
+        reinterpret_cast<iree_vm_isa_control_switch_record_t*>(
+            function.bytecode + kSwitchOffset);
+    switch_record->target_base_u32 = 2;
+  });
+
+  // The selector must name a declared value register.
+  expect_rejected([&](MutableFunctionImage function) {
+    auto* switch_record =
+        reinterpret_cast<iree_vm_isa_control_switch_record_t*>(
+            function.bytecode + kSwitchOffset);
+    switch_record->selector_v8 = 1;
+  });
+
+  iree_vm_environment_free(environment);
+}
+
 TEST(VMBytecodeModuleTest, ExecutesScalarStateInstructions) {
   std::vector<uint8_t> image = BuildScalarStateModuleImage();
   iree_vm_environment_t* environment = nullptr;
@@ -826,8 +979,6 @@ TEST(VMBytecodeModuleTest, RejectsMalformedScalarStateInstructions) {
       {1, 62, 2},
       {1, 36, IREE_VM_ISA_CORE_OPCODE_GLOBAL_VALUE_IMMUTABLE_LOAD},
       {1, 56, IREE_VM_ISA_CORE_OPCODE_GLOBAL_VALUE_IMMUTABLE_STORE},
-      // A canonical return is legal only as the final instruction.
-      {1, 4, IREE_VM_ISA_CORE_OPCODE_CONTROL_RETURN},
       // A valid non-return final record is diagnosed as fallthrough.
       {1, 64, IREE_VM_ISA_CORE_OPCODE_CONSTANT_S16},
   };

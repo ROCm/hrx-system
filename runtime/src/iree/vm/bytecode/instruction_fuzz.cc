@@ -64,6 +64,7 @@ enum class FixtureKind {
   kScalarState,
   kOwnership,
   kValueOverflow,
+  kControl,
 };
 
 void RequireOk(iree_status_t status) {
@@ -102,6 +103,14 @@ uint8_t SelectOpcode(uint8_t selector) {
 
 FixtureKind SelectFixture(uint8_t opcode) {
   switch (opcode) {
+    case IREE_VM_ISA_CORE_OPCODE_CONTROL_BRANCH_S16:
+    case IREE_VM_ISA_CORE_OPCODE_CONTROL_BRANCH_S32:
+    case IREE_VM_ISA_CORE_OPCODE_CONTROL_BRANCH_IF_S16:
+    case IREE_VM_ISA_CORE_OPCODE_CONTROL_BRANCH_IF_S32:
+    case IREE_VM_ISA_CORE_OPCODE_CONTROL_BRANCH_UNLESS_S16:
+    case IREE_VM_ISA_CORE_OPCODE_CONTROL_BRANCH_UNLESS_S32:
+    case IREE_VM_ISA_CORE_OPCODE_CONTROL_SWITCH:
+      return FixtureKind::kControl;
     case IREE_VM_ISA_CORE_OPCODE_VALUE_ABI_ARGUMENT_LOAD:
     case IREE_VM_ISA_CORE_OPCODE_VALUE_ABI_RESULT_STORE:
       return FixtureKind::kValueOverflow;
@@ -126,8 +135,14 @@ FixtureKind SelectFixture(uint8_t opcode) {
 }
 
 iree_string_view_t FixtureExportName(FixtureKind fixture_kind) {
-  return fixture_kind == FixtureKind::kValueOverflow ? IREE_SV("identity")
-                                                     : IREE_SV("run");
+  switch (fixture_kind) {
+    case FixtureKind::kValueOverflow:
+      return IREE_SV("identity");
+    case FixtureKind::kControl:
+      return IREE_SV("select");
+    default:
+      return IREE_SV("run");
+  }
 }
 
 template <typename T>
@@ -225,9 +240,48 @@ void FillValueOverflowFunction(const uint8_t* record, uint8_t record_length,
               record, record_length);
 }
 
+void FillControlFunction(const uint8_t* record, uint8_t record_length,
+                         std::vector<uint8_t>* image) {
+  using iree::vm::bytecode::testing::FindFunctionImage;
+  using iree::vm::bytecode::testing::MutableFunctionImage;
+  const MutableFunctionImage function = FindFunctionImage(image, 0);
+  if (function.row == nullptr || function.row->bytecode_length_u32 != 20 ||
+      function.row->block_count_u32 != 2 ||
+      function.row->switch_target_entry_count_u32 != 1 ||
+      function.row->value_register_count_u16 != 1 || record_length > 8) {
+    std::abort();
+  }
+
+  uint8_t* cursor = function.bytecode;
+  AppendRecord(
+      iree_vm_isa_control_block_record_t{IREE_VM_ISA_CORE_OPCODE_CONTROL_BLOCK,
+                                         {0, 0, 0}},
+      &cursor);
+  std::memcpy(cursor, record, record_length);
+  cursor += record_length;
+  if (record_length == 4) {
+    AppendRecord(
+        iree_vm_isa_constant_zero_record_t{
+            IREE_VM_ISA_CORE_OPCODE_CONSTANT_ZERO, 0, 0},
+        &cursor);
+  }
+  AppendRecord(
+      iree_vm_isa_control_block_record_t{IREE_VM_ISA_CORE_OPCODE_CONTROL_BLOCK,
+                                         {0, 0, 0}},
+      &cursor);
+  AppendRecord(
+      iree_vm_isa_control_return_record_t{
+          IREE_VM_ISA_CORE_OPCODE_CONTROL_RETURN, {0, 0, 0}},
+      &cursor);
+  if (cursor != function.bytecode + function.row->bytecode_length_u32) {
+    std::abort();
+  }
+}
+
 std::vector<uint8_t> BuildRecordImage(const uint8_t* data, size_t size,
                                       FixtureKind* out_fixture_kind,
-                                      uint8_t* out_opcode) {
+                                      uint8_t* out_opcode,
+                                      bool* out_safe_to_invoke) {
   const uint8_t opcode = SelectOpcode(size > 0 ? data[0] : 0);
   const uint8_t record_length = kRecordLengths[opcode];
   std::array<uint8_t, kMaximumRecordLength> record = {};
@@ -251,9 +305,23 @@ std::vector<uint8_t> BuildRecordImage(const uint8_t* data, size_t size,
       image = iree::vm::bytecode::testing::BuildValueOverflowModuleImage();
       FillValueOverflowFunction(record.data(), record_length, &image);
       break;
+    case FixtureKind::kControl:
+      image = iree::vm::bytecode::testing::BuildSwitchInspectionModuleImage();
+      FillControlFunction(record.data(), record_length, &image);
+      break;
   }
   *out_fixture_kind = fixture_kind;
   *out_opcode = opcode;
+  *out_safe_to_invoke = true;
+  if (opcode == IREE_VM_ISA_CORE_OPCODE_CONTROL_BRANCH_S16) {
+    const int16_t target_delta =
+        (int16_t)iree_unaligned_load_le_u16(record.data() + 2);
+    *out_safe_to_invoke = 4 + record_length + (int64_t)target_delta * 4 != 0;
+  } else if (opcode == IREE_VM_ISA_CORE_OPCODE_CONTROL_BRANCH_S32) {
+    const int32_t target_delta =
+        (int32_t)iree_unaligned_load_le_u32(record.data() + 4);
+    *out_safe_to_invoke = 4 + record_length + (int64_t)target_delta * 4 != 0;
+  }
   return image;
 }
 
@@ -303,7 +371,11 @@ void ExerciseInspection(const std::vector<uint8_t>& image,
   RequireOk(iree_vm_bytecode_module_create_for_inspection(
       IREE_SV("instruction_fuzz"), {image_span, iree_allocator_null()},
       iree_allocator_system(), &module));
-  if (iree_vm_module_export_count(module) != 2) std::abort();
+  const iree_host_size_t expected_export_count =
+      fixture_kind == FixtureKind::kControl ? 1 : 2;
+  if (iree_vm_module_export_count(module) != expected_export_count) {
+    std::abort();
+  }
   iree_vm_export_t run_export = {};
   const iree_string_view_t export_name = FixtureExportName(fixture_kind);
   RequireOk(iree_vm_module_lookup_export(module, export_name, &run_export));
@@ -326,11 +398,17 @@ void InvokeRecord(iree_vm_invocation_t* invocation, iree_vm_function_t function,
   if (IsSuccessfulOrExpectedFailure(
           status, {IREE_STATUS_INVALID_ARGUMENT, IREE_STATUS_OUT_OF_RANGE,
                    IREE_STATUS_FAILED_PRECONDITION})) {
-    iree_vm_variant_span_reset(
-        iree_vm_variant_span_from_ptr(results->data(), results->size()));
-  } else if (std::memcmp(results->data(), untouched_results.data(),
-                         sizeof(*results)) != 0) {
-    std::abort();
+    if constexpr (ResultCount > 0) {
+      iree_vm_variant_span_reset(
+          iree_vm_variant_span_from_ptr(results->data(), results->size()));
+    }
+  } else {
+    if constexpr (ResultCount > 0) {
+      if (std::memcmp(results->data(), untouched_results.data(),
+                      sizeof(*results)) != 0) {
+        std::abort();
+      }
+    }
   }
 }
 
@@ -341,7 +419,8 @@ bool AllowsUnimplementedSelector(uint8_t opcode) {
 }
 
 void ExerciseExecutable(const std::vector<uint8_t>& image,
-                        FixtureKind fixture_kind, uint8_t opcode) {
+                        FixtureKind fixture_kind, uint8_t opcode,
+                        bool safe_to_invoke) {
   iree_vm_environment_t* environment = nullptr;
   RequireOk(
       iree_vm_environment_allocate(iree_allocator_system(), &environment));
@@ -386,28 +465,40 @@ void ExerciseExecutable(const std::vector<uint8_t>& image,
   iree_vm_function_t run = iree_vm_function_null();
   RequireOk(iree_vm_function_from_export(process, run_export, &run));
 
-  switch (fixture_kind) {
-    case FixtureKind::kScalarState: {
-      std::array<iree_vm_variant_t, 0> arguments = {};
-      std::array<iree_vm_variant_t, 5> results = {};
-      InvokeRecord(invocation, run, &arguments, &results);
-      break;
-    }
-    case FixtureKind::kOwnership: {
-      std::array<iree_vm_variant_t, 1> arguments = {
-          iree_vm_variant_from_i32(35)};
-      std::array<iree_vm_variant_t, 2> results = {};
-      InvokeRecord(invocation, run, &arguments, &results);
-      break;
-    }
-    case FixtureKind::kValueOverflow: {
-      std::array<iree_vm_variant_t, 18> arguments = {};
-      for (iree_host_size_t i = 0; i < arguments.size(); ++i) {
-        arguments[i] = iree_vm_variant_from_i64(static_cast<int64_t>(i));
+  if (safe_to_invoke) {
+    switch (fixture_kind) {
+      case FixtureKind::kScalarState: {
+        std::array<iree_vm_variant_t, 0> arguments = {};
+        std::array<iree_vm_variant_t, 5> results = {};
+        InvokeRecord(invocation, run, &arguments, &results);
+        break;
       }
-      std::array<iree_vm_variant_t, 18> results = {};
-      InvokeRecord(invocation, run, &arguments, &results);
-      break;
+      case FixtureKind::kOwnership: {
+        std::array<iree_vm_variant_t, 1> arguments = {
+            iree_vm_variant_from_i32(35)};
+        std::array<iree_vm_variant_t, 2> results = {};
+        InvokeRecord(invocation, run, &arguments, &results);
+        break;
+      }
+      case FixtureKind::kValueOverflow: {
+        std::array<iree_vm_variant_t, 18> arguments = {};
+        for (iree_host_size_t i = 0; i < arguments.size(); ++i) {
+          arguments[i] = iree_vm_variant_from_i64(static_cast<int64_t>(i));
+        }
+        std::array<iree_vm_variant_t, 18> results = {};
+        InvokeRecord(invocation, run, &arguments, &results);
+        break;
+      }
+      case FixtureKind::kControl: {
+        const bool is_unless =
+            opcode == IREE_VM_ISA_CORE_OPCODE_CONTROL_BRANCH_UNLESS_S16 ||
+            opcode == IREE_VM_ISA_CORE_OPCODE_CONTROL_BRANCH_UNLESS_S32;
+        std::array<iree_vm_variant_t, 1> arguments = {
+            iree_vm_variant_from_i32(is_unless ? 1 : 0)};
+        std::array<iree_vm_variant_t, 0> results = {};
+        InvokeRecord(invocation, run, &arguments, &results);
+        break;
+      }
     }
   }
 
@@ -422,9 +513,10 @@ void ExerciseExecutable(const std::vector<uint8_t>& image,
 extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
   FixtureKind fixture_kind = FixtureKind::kScalarState;
   uint8_t opcode = 0;
+  bool safe_to_invoke = true;
   const std::vector<uint8_t> image =
-      BuildRecordImage(data, size, &fixture_kind, &opcode);
+      BuildRecordImage(data, size, &fixture_kind, &opcode, &safe_to_invoke);
   ExerciseInspection(image, fixture_kind);
-  ExerciseExecutable(image, fixture_kind, opcode);
+  ExerciseExecutable(image, fixture_kind, opcode, safe_to_invoke);
   return 0;
 }

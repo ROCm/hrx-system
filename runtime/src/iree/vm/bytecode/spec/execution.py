@@ -35,6 +35,17 @@ class ExecutableInstruction:
 EXECUTABLE_INSTRUCTIONS = (
     ExecutableInstruction("control.block", "CONTROL_BLOCK"),
     ExecutableInstruction("control.return", "CONTROL_RETURN"),
+    ExecutableInstruction("control.branch.s16", "CONTROL_BRANCH_S16"),
+    ExecutableInstruction("control.branch.s32", "CONTROL_BRANCH_S32"),
+    ExecutableInstruction("control.branch.if.s16", "CONTROL_BRANCH_CONDITIONAL_S16"),
+    ExecutableInstruction("control.branch.if.s32", "CONTROL_BRANCH_CONDITIONAL_S32"),
+    ExecutableInstruction(
+        "control.branch.unless.s16", "CONTROL_BRANCH_CONDITIONAL_S16"
+    ),
+    ExecutableInstruction(
+        "control.branch.unless.s32", "CONTROL_BRANCH_CONDITIONAL_S32"
+    ),
+    ExecutableInstruction("control.switch", "CONTROL_SWITCH"),
     ExecutableInstruction("value.abi.argument.load", "VALUE_ABI_ARGUMENT_LOAD"),
     ExecutableInstruction("value.abi.result.store", "VALUE_ABI_RESULT_STORE"),
     ExecutableInstruction("ref.abi.argument.load.borrow", "REF_ABI_ARGUMENT_LOAD"),
