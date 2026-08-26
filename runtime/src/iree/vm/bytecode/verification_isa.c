@@ -14,6 +14,7 @@
 #include "iree/vm/bytecode/wire/core/global.h"
 #include "iree/vm/bytecode/wire/core/integer.h"
 #include "iree/vm/bytecode/wire/core/opcodes.h"
+#include "iree/vm/bytecode/wire/core/ref.h"
 #include "iree/vm/bytecode/wire/core/selectors.h"
 #include "iree/vm/bytecode/wire/core/stack.h"
 #include "iree/vm/bytecode/wire/core/value.h"
@@ -48,6 +49,13 @@ typedef enum iree_vm_bytecode_verification_form_e {
   IREE_VM_BYTECODE_VERIFICATION_FORM_FLOAT_MATH_UNARY,
   IREE_VM_BYTECODE_VERIFICATION_FORM_FLOAT_MATH_BINARY,
   IREE_VM_BYTECODE_VERIFICATION_FORM_FLOAT_MATH_TERNARY,
+  IREE_VM_BYTECODE_VERIFICATION_FORM_REF_CLEAR,
+  IREE_VM_BYTECODE_VERIFICATION_FORM_REF_COMPARE_NULL,
+  IREE_VM_BYTECODE_VERIFICATION_FORM_REF_COMPARE_EQ,
+  IREE_VM_BYTECODE_VERIFICATION_FORM_REF_RETAIN,
+  IREE_VM_BYTECODE_VERIFICATION_FORM_REF_MOVE,
+  IREE_VM_BYTECODE_VERIFICATION_FORM_REF_STACK_TRANSFER,
+  IREE_VM_BYTECODE_VERIFICATION_FORM_REF_STACK_DISCARD,
   IREE_VM_BYTECODE_VERIFICATION_FORM_BUFFER_RODATA_LOAD,
   IREE_VM_BYTECODE_VERIFICATION_FORM_CONVERSION_INTEGER,
   IREE_VM_BYTECODE_VERIFICATION_FORM_CONVERSION_FLOAT_EXTEND,
@@ -102,6 +110,15 @@ static iree_status_t iree_vm_bytecode_verify_ref_register(
   if (ordinal >= register_count) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "ref register ordinal is out of range");
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t iree_vm_bytecode_verify_ref_slot(uint16_t ordinal,
+                                                      uint32_t slot_count) {
+  if (ordinal >= slot_count) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "local ref slot ordinal is out of range");
   }
   return iree_ok_status();
 }
@@ -582,6 +599,81 @@ iree_status_t iree_vm_bytecode_function_verify(
             record->c_v8, function->value_register_count_u16));
         break;
       }
+      case IREE_VM_BYTECODE_VERIFICATION_FORM_REF_CLEAR: {
+        const iree_vm_isa_ref_null_record_t* record =
+            (const iree_vm_isa_ref_null_record_t*)record_data;
+        if (record->zero_padding_u16 != 0) {
+          return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                  "ref clear padding is nonzero");
+        }
+        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_ref_register(
+            record->dst_r8, function->ref_register_count_u16));
+        break;
+      }
+      case IREE_VM_BYTECODE_VERIFICATION_FORM_REF_COMPARE_NULL: {
+        const iree_vm_isa_ref_compare_null_record_t* record =
+            (const iree_vm_isa_ref_compare_null_record_t*)record_data;
+        if (record->zero_padding_u8 != 0) {
+          return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                  "ref.compare.null padding is nonzero");
+        }
+        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_value_register(
+            record->dst_v8, function->value_register_count_u16));
+        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_ref_register(
+            record->src_r8, function->ref_register_count_u16));
+        break;
+      }
+      case IREE_VM_BYTECODE_VERIFICATION_FORM_REF_COMPARE_EQ: {
+        const iree_vm_isa_ref_compare_eq_record_t* record =
+            (const iree_vm_isa_ref_compare_eq_record_t*)record_data;
+        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_value_register(
+            record->dst_v8, function->value_register_count_u16));
+        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_ref_register(
+            record->lhs_r8, function->ref_register_count_u16));
+        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_ref_register(
+            record->rhs_r8, function->ref_register_count_u16));
+        break;
+      }
+      case IREE_VM_BYTECODE_VERIFICATION_FORM_REF_RETAIN:
+      case IREE_VM_BYTECODE_VERIFICATION_FORM_REF_MOVE: {
+        const iree_vm_isa_ref_retain_record_t* record =
+            (const iree_vm_isa_ref_retain_record_t*)record_data;
+        if (record->zero_padding_u8 != 0) {
+          return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                  "ref transfer padding is nonzero");
+        }
+        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_ref_register(
+            record->dst_r8, function->ref_register_count_u16));
+        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_ref_register(
+            record->src_r8, function->ref_register_count_u16));
+        if (execution_info.verification_form ==
+                IREE_VM_BYTECODE_VERIFICATION_FORM_REF_MOVE &&
+            record->dst_r8 == record->src_r8) {
+          return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                  "ref.move registers must be distinct");
+        }
+        break;
+      }
+      case IREE_VM_BYTECODE_VERIFICATION_FORM_REF_STACK_TRANSFER: {
+        const iree_vm_isa_ref_stack_load_retain_record_t* record =
+            (const iree_vm_isa_ref_stack_load_retain_record_t*)record_data;
+        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_ref_register(
+            record->dst_r8, function->ref_register_count_u16));
+        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_ref_slot(
+            record->slot_u16, function->local_ref_count_u32));
+        break;
+      }
+      case IREE_VM_BYTECODE_VERIFICATION_FORM_REF_STACK_DISCARD: {
+        const iree_vm_isa_ref_stack_discard_record_t* record =
+            (const iree_vm_isa_ref_stack_discard_record_t*)record_data;
+        if (record->zero_padding_u8 != 0) {
+          return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                  "ref.stack.discard padding is nonzero");
+        }
+        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_ref_slot(
+            record->slot_u16, function->local_ref_count_u32));
+        break;
+      }
       case IREE_VM_BYTECODE_VERIFICATION_FORM_BUFFER_RODATA_LOAD: {
         const iree_vm_isa_buffer_rodata_load_record_t* record =
             (const iree_vm_isa_buffer_rodata_load_record_t*)record_data;
@@ -843,11 +935,15 @@ iree_status_t iree_vm_bytecode_module_verify_executable(
           "function banks");
     }
     if (function->switch_target_entry_count_u32 != 0 ||
-        function->local_ref_count_u32 != 0 ||
         function->local_function_count_u32 != 0) {
       return iree_make_status(
           IREE_STATUS_UNIMPLEMENTED,
-          "B0 bytecode functions do not support targets or local packets");
+          "B0 bytecode functions do not support targets or local functions");
+    }
+    if (function->local_ref_count_u32 > (uint32_t)UINT16_MAX + 1u) {
+      return iree_make_status(
+          IREE_STATUS_UNIMPLEMENTED,
+          "B0 bytecode functions support only direct local ref slots");
     }
     IREE_RETURN_IF_ERROR(
         iree_vm_bytecode_function_verify(&plan->layout, function, i));

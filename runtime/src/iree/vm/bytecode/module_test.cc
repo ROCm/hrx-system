@@ -25,6 +25,7 @@
 #include "iree/vm/bytecode/wire/core/global.h"
 #include "iree/vm/bytecode/wire/core/integer.h"
 #include "iree/vm/bytecode/wire/core/opcodes.h"
+#include "iree/vm/bytecode/wire/core/ref.h"
 #include "iree/vm/bytecode/wire/core/selectors.h"
 #include "iree/vm/bytecode/wire/core/stack.h"
 #include "iree/vm/bytecode/wire/module_format.h"
@@ -66,6 +67,11 @@ iree_status_t CountingAllocatorControl(void* self,
 
 iree_allocator_t MakeCountingAllocator(CountingAllocator* allocator) {
   return iree_allocator_t{allocator, CountingAllocatorControl};
+}
+
+void CountBufferRelease(void* user_data, iree_byte_span_t storage) {
+  (void)storage;
+  ++*static_cast<int*>(user_data);
 }
 
 std::string_view ToStringView(iree_string_view_t value) {
@@ -386,6 +392,125 @@ TEST(VMBytecodeModuleTest, ExecutesScalarStateInstructions) {
     EXPECT_EQ(value, expected[i]);
   }
   iree_vm_variant_span_reset(iree_vm_variant_span_from_array(results));
+
+  iree_vm_invocation_free(invocation);
+  iree_vm_process_release(process);
+  iree_vm_program_release(program);
+  iree_vm_module_release(module);
+}
+
+TEST(VMBytecodeModuleTest, ExecutesTypedRefOwnershipExactly) {
+  std::vector<uint8_t> image = BuildRefModuleImage();
+  iree_vm_environment_t* environment = nullptr;
+  IREE_ASSERT_OK(
+      iree_vm_environment_allocate(iree_allocator_system(), &environment));
+  iree_vm_module_t* module = nullptr;
+  IREE_ASSERT_OK(iree_vm_bytecode_module_create(
+      environment, IREE_SV("refs"),
+      {iree_make_const_byte_span(image.data(), image.size()),
+       iree_allocator_null()},
+      iree_allocator_system(), &module));
+  iree_vm_environment_free(environment);
+
+  iree_vm_ref_type_t buffer_type = nullptr;
+  IREE_ASSERT_OK(iree_vm_module_ref_type_by_ordinal(module, 0, &buffer_type));
+  const iree_vm_ref_types_t vm_types = {buffer_type};
+  iree_vm_program_t* program = nullptr;
+  IREE_ASSERT_OK(iree_vm_program_create({module, iree_vm_module_span_empty()},
+                                        iree_allocator_system(), &program));
+  iree_vm_invocation_t* invocation = nullptr;
+  IREE_ASSERT_OK(iree_vm_invocation_allocate(
+      kInvocationStorageSize, iree_allocator_system(), &invocation));
+  iree_vm_process_t* process = nullptr;
+  IREE_ASSERT_OK(iree_vm_process_create(program, invocation,
+                                        iree_vm_variant_span_empty(),
+                                        iree_allocator_system(), &process));
+  iree_vm_function_t exercise = iree_vm_function_null();
+  IREE_ASSERT_OK(iree_vm_process_lookup_function(
+      process, IREE_SV("refs"), IREE_SV("exercise"), &exercise));
+  iree_vm_function_t fail = iree_vm_function_null();
+  IREE_ASSERT_OK(iree_vm_process_lookup_function(process, IREE_SV("refs"),
+                                                 IREE_SV("fail"), &fail));
+
+  auto expect_comparisons = [](iree_vm_variant_t* results, int32_t is_null,
+                               int32_t equals_null) {
+    int32_t actual = 0;
+    IREE_ASSERT_OK(iree_vm_i32_from_variant(results[0], &actual));
+    EXPECT_EQ(actual, is_null);
+    IREE_ASSERT_OK(iree_vm_i32_from_variant(results[1], &actual));
+    EXPECT_EQ(actual, equals_null);
+    IREE_ASSERT_OK(iree_vm_i32_from_variant(results[2], &actual));
+    EXPECT_EQ(actual, 1);
+  };
+
+  iree_vm_variant_t null_arguments[] = {iree_vm_variant_null()};
+  iree_vm_variant_t null_results[4] = {};
+  IREE_ASSERT_OK(iree_vm_invoke(invocation, exercise,
+                                iree_vm_variant_span_from_array(null_arguments),
+                                iree_vm_variant_span_from_array(null_results)));
+  EXPECT_TRUE(iree_vm_variant_is_empty(null_arguments[0]));
+  expect_comparisons(null_results, 1, 1);
+  EXPECT_TRUE(iree_vm_variant_is_null(null_results[3]));
+  iree_vm_variant_span_reset(iree_vm_variant_span_from_array(null_results));
+
+  uint8_t storage = 0;
+  int borrowed_release_count = 0;
+  iree_vm_buffer_t* borrowed_buffer = nullptr;
+  IREE_ASSERT_OK(iree_vm_buffer_wrap(
+      IREE_VM_BUFFER_ACCESS_FLAG_READ, iree_make_byte_span(&storage, 1),
+      {CountBufferRelease, &borrowed_release_count}, iree_allocator_system(),
+      &borrowed_buffer));
+  iree_vm_variant_t borrowed_arguments[] = {
+      iree_vm_buffer_variant_from_ptr_borrowed(&vm_types, borrowed_buffer),
+  };
+  iree_vm_variant_t borrowed_results[4] = {};
+  IREE_ASSERT_OK(iree_vm_invoke(
+      invocation, exercise, iree_vm_variant_span_from_array(borrowed_arguments),
+      iree_vm_variant_span_from_array(borrowed_results)));
+  EXPECT_TRUE(iree_vm_variant_is_empty(borrowed_arguments[0]));
+  expect_comparisons(borrowed_results, 0, 0);
+  EXPECT_TRUE(iree_vm_variant_ref_isa(borrowed_results[3], buffer_type));
+  iree_vm_variant_span_reset(iree_vm_variant_span_from_array(borrowed_results));
+  EXPECT_EQ(borrowed_release_count, 0);
+  iree_vm_buffer_release(borrowed_buffer);
+  EXPECT_EQ(borrowed_release_count, 1);
+
+  int moved_release_count = 0;
+  iree_vm_buffer_t* moved_buffer = nullptr;
+  IREE_ASSERT_OK(iree_vm_buffer_wrap(IREE_VM_BUFFER_ACCESS_FLAG_READ,
+                                     iree_make_byte_span(&storage, 1),
+                                     {CountBufferRelease, &moved_release_count},
+                                     iree_allocator_system(), &moved_buffer));
+  iree_vm_variant_t moved_arguments[] = {
+      iree_vm_buffer_variant_from_ptr_move(&vm_types, &moved_buffer),
+  };
+  EXPECT_EQ(moved_buffer, nullptr);
+  iree_vm_variant_t moved_results[4] = {};
+  IREE_ASSERT_OK(iree_vm_invoke(
+      invocation, exercise, iree_vm_variant_span_from_array(moved_arguments),
+      iree_vm_variant_span_from_array(moved_results)));
+  EXPECT_TRUE(iree_vm_variant_is_empty(moved_arguments[0]));
+  expect_comparisons(moved_results, 0, 0);
+  EXPECT_EQ(moved_release_count, 0);
+  iree_vm_variant_span_reset(iree_vm_variant_span_from_array(moved_results));
+  EXPECT_EQ(moved_release_count, 1);
+
+  int failure_release_count = 0;
+  iree_vm_buffer_t* failure_buffer = nullptr;
+  IREE_ASSERT_OK(iree_vm_buffer_wrap(
+      IREE_VM_BUFFER_ACCESS_FLAG_READ, iree_make_byte_span(&storage, 1),
+      {CountBufferRelease, &failure_release_count}, iree_allocator_system(),
+      &failure_buffer));
+  iree_vm_variant_t failure_arguments[] = {
+      iree_vm_buffer_variant_from_ptr_move(&vm_types, &failure_buffer),
+  };
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      iree_vm_invoke(invocation, fail,
+                     iree_vm_variant_span_from_array(failure_arguments),
+                     iree_vm_variant_span_empty()));
+  EXPECT_TRUE(iree_vm_variant_is_empty(failure_arguments[0]));
+  EXPECT_EQ(failure_release_count, 1);
 
   iree_vm_invocation_free(invocation);
   iree_vm_process_release(process);
@@ -875,6 +1000,74 @@ TEST(VMBytecodeModuleTest, RejectsMalformedStackInstructions) {
   expect_rejected(pack_i64);
   pack_i64.target_u16 = 8;
   expect_rejected(pack_i64);
+
+  iree_vm_environment_free(environment);
+}
+
+TEST(VMBytecodeModuleTest, RejectsMalformedRefInstructions) {
+  iree_vm_environment_t* environment = nullptr;
+  IREE_ASSERT_OK(
+      iree_vm_environment_allocate(iree_allocator_system(), &environment));
+  const auto expect_rejected = [&](const auto& record) {
+    static_assert(sizeof(record) == 4, "ref records must remain four bytes");
+    std::vector<uint8_t> image = BuildOwnershipModuleImage();
+    const MutableFunctionImage function = FindFunctionImage(&image, 1);
+    ASSERT_NE(function.row, nullptr);
+    function.row->ref_register_count_u16 = 3;
+    function.row->local_ref_count_u32 = 2;
+    constexpr uint32_t kInstructionOffset = 8;
+    std::memcpy(function.bytecode + kInstructionOffset, &record,
+                sizeof(record));
+
+    iree_vm_module_t* module = nullptr;
+    IREE_EXPECT_STATUS_IS(
+        IREE_STATUS_INVALID_ARGUMENT,
+        iree_vm_bytecode_module_create(
+            environment, IREE_SV("malformed_ref"),
+            {iree_make_const_byte_span(image.data(), image.size()),
+             iree_allocator_null()},
+            iree_allocator_system(), &module));
+    EXPECT_EQ(module, nullptr);
+    iree_vm_module_release(module);
+  };
+
+  expect_rejected(
+      iree_vm_isa_ref_null_record_t{IREE_VM_ISA_CORE_OPCODE_REF_NULL, 3, 0});
+  expect_rejected(iree_vm_isa_ref_compare_null_record_t{
+      IREE_VM_ISA_CORE_OPCODE_REF_COMPARE_NULL, 0, 0, 1});
+  expect_rejected(iree_vm_isa_ref_compare_eq_record_t{
+      IREE_VM_ISA_CORE_OPCODE_REF_COMPARE_EQ, 0, 0, 3});
+  expect_rejected(iree_vm_isa_ref_retain_record_t{
+      IREE_VM_ISA_CORE_OPCODE_REF_RETAIN, 0, 3, 0});
+  expect_rejected(
+      iree_vm_isa_ref_move_record_t{IREE_VM_ISA_CORE_OPCODE_REF_MOVE, 1, 1, 0});
+  expect_rejected(iree_vm_isa_ref_discard_record_t{
+      IREE_VM_ISA_CORE_OPCODE_REF_DISCARD, 0, 1});
+  expect_rejected(iree_vm_isa_ref_stack_load_retain_record_t{
+      IREE_VM_ISA_CORE_OPCODE_REF_STACK_LOAD_RETAIN, 0, 2});
+  expect_rejected(iree_vm_isa_ref_stack_load_move_record_t{
+      IREE_VM_ISA_CORE_OPCODE_REF_STACK_LOAD_MOVE, 3, 0});
+  expect_rejected(iree_vm_isa_ref_stack_store_retain_record_t{
+      IREE_VM_ISA_CORE_OPCODE_REF_STACK_STORE_RETAIN, 0, 2});
+  expect_rejected(iree_vm_isa_ref_stack_store_move_record_t{
+      IREE_VM_ISA_CORE_OPCODE_REF_STACK_STORE_MOVE, 3, 0});
+  expect_rejected(iree_vm_isa_ref_stack_discard_record_t{
+      IREE_VM_ISA_CORE_OPCODE_REF_STACK_DISCARD, 1, 0});
+
+  std::vector<uint8_t> image = BuildOwnershipModuleImage();
+  const MutableFunctionImage function = FindFunctionImage(&image, 1);
+  ASSERT_NE(function.row, nullptr);
+  function.row->local_ref_count_u32 = (uint32_t)UINT16_MAX + 2u;
+  iree_vm_module_t* module = nullptr;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_UNIMPLEMENTED,
+      iree_vm_bytecode_module_create(
+          environment, IREE_SV("ref_slot_overflow"),
+          {iree_make_const_byte_span(image.data(), image.size()),
+           iree_allocator_null()},
+          iree_allocator_system(), &module));
+  EXPECT_EQ(module, nullptr);
+  iree_vm_module_release(module);
 
   iree_vm_environment_free(environment);
 }

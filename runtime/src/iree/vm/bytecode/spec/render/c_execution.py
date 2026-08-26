@@ -18,6 +18,7 @@ from model.isa.validation import (
     ALLOWED_VALUES,
     ANY_BITS,
     CONSTANT_POOL_ORDINAL,
+    FIELDS_DISTINCT,
     GLOBAL_ORDINAL,
     LOCAL_BYTES_FIXED_BASE,
     LOCAL_BYTES_RANGE_BASE,
@@ -25,6 +26,7 @@ from model.isa.validation import (
     LOCAL_BYTES_RANGE_MEMORY_FORMAT,
     LOCAL_BYTES_REPEATED_BASE,
     LOCAL_BYTES_REPEATED_COUNT,
+    REF_SLOT,
     REGISTER_REF,
     REGISTER_VALUE,
     RODATA_ORDINAL,
@@ -33,7 +35,7 @@ from model.isa.validation import (
     VALUE_REGISTER_RANGE_FROM_MEMORY_FORMAT,
     ZERO,
 )
-from model.schema import EntityReference, FieldReference, ScalarEncoding
+from model.schema import EntityReference, FieldReference, RuleUse, ScalarEncoding
 from model.specification import Projection
 
 
@@ -119,6 +121,22 @@ def _validate_verification_form(
             1,
             REGISTER_VALUE.entity_id,
             result_or_operand,
+        )
+
+    def require_ref(offset: int) -> None:
+        require_field(
+            offset,
+            1,
+            REGISTER_REF.entity_id,
+            result_or_operand,
+        )
+
+    def require_ref_slot(offset: int) -> None:
+        require_field(
+            offset,
+            2,
+            REF_SLOT.entity_id,
+            (InstructionFieldRole.IMMEDIATE,),
         )
 
     def require_zero(offset: int, byte_length: int, *, array_length: int = 1) -> None:
@@ -351,6 +369,59 @@ def _validate_verification_form(
             (InstructionFieldRole.IMMEDIATE,),
             rule_arguments=(0, maximum_log2),
         )
+    elif verification_form == "REF_CLEAR":
+        if instruction.byte_length != 4:
+            raise ValueError(f"{instruction.mnemonic}: ref clear record is not 4 bytes")
+        require_ref(1)
+        require_zero(2, 2)
+    elif verification_form == "REF_COMPARE_NULL":
+        if instruction.byte_length != 4:
+            raise ValueError(
+                f"{instruction.mnemonic}: ref null comparison is not 4 bytes"
+            )
+        require_value(1)
+        require_ref(2)
+        require_zero(3, 1)
+    elif verification_form == "REF_COMPARE_EQ":
+        if instruction.byte_length != 4:
+            raise ValueError(
+                f"{instruction.mnemonic}: ref equality comparison is not 4 bytes"
+            )
+        require_value(1)
+        require_ref(2)
+        require_ref(3)
+    elif verification_form in ("REF_RETAIN", "REF_MOVE"):
+        if instruction.byte_length != 4:
+            raise ValueError(
+                f"{instruction.mnemonic}: ref transfer record is not 4 bytes"
+            )
+        require_ref(1)
+        require_ref(2)
+        require_zero(3, 1)
+        if verification_form == "REF_MOVE":
+            expected_constraint = RuleUse(
+                FIELDS_DISTINCT.entity_id,
+                (FieldReference("dst_r8"), FieldReference("src_r8")),
+            )
+            if instruction.constraints != (expected_constraint,):
+                raise ValueError(
+                    f"{instruction.mnemonic}: move constraint does not match its "
+                    "runtime verification form"
+                )
+    elif verification_form == "REF_STACK_TRANSFER":
+        if instruction.byte_length != 4:
+            raise ValueError(
+                f"{instruction.mnemonic}: ref stack transfer is not 4 bytes"
+            )
+        require_ref(1)
+        require_ref_slot(2)
+    elif verification_form == "REF_STACK_DISCARD":
+        if instruction.byte_length != 4:
+            raise ValueError(
+                f"{instruction.mnemonic}: ref stack discard is not 4 bytes"
+            )
+        require_zero(1, 1)
+        require_ref_slot(2)
     elif verification_form == "BUFFER_RODATA_LOAD":
         if instruction.byte_length != 4:
             raise ValueError(f"{instruction.mnemonic}: rodata load is not 4 bytes")

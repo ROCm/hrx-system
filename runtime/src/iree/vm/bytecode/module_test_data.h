@@ -32,6 +32,9 @@ MutableFunctionImage FindFunctionImage(std::vector<uint8_t>* image,
 // Builds the exact B0 ownership and reflection fixture.
 std::vector<uint8_t> BuildOwnershipModuleImage();
 
+// Builds one typed-ref fixture covering register and local-slot ownership.
+std::vector<uint8_t> BuildRefModuleImage();
+
 // Builds the exact 17-record launch-configuration fixture plus empty and
 // full-signature no-op decomposition functions.
 std::vector<uint8_t> BuildLaunchConfigModuleImage();

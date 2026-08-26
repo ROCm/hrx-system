@@ -23,6 +23,7 @@
 #include "iree/vm/bytecode/wire/core/global.h"
 #include "iree/vm/bytecode/wire/core/integer.h"
 #include "iree/vm/bytecode/wire/core/opcodes.h"
+#include "iree/vm/bytecode/wire/core/ref.h"
 #include "iree/vm/bytecode/wire/core/stack.h"
 #include "iree/vm/bytecode/wire/core/value.h"
 #include "iree/vm/invocation_storage.h"
@@ -94,9 +95,33 @@
     }
 #endif  // computed goto dispatch
 
+// Replaces |target| with an already-safe complete ref state. Installing the
+// new state before releasing the old owner keeps self-replacement safe.
+static inline void iree_vm_bytecode_ref_replace(iree_vm_ref_t* target,
+                                                iree_vm_ref_t new_ref) {
+  iree_vm_ref_t old_ref = *target;
+  *target = new_ref;
+  iree_vm_ref_reset(&old_ref);
+}
+
+// Retains |source| before replacing |target| so the two may alias.
+static inline void iree_vm_bytecode_ref_retain(iree_vm_ref_t* target,
+                                               iree_vm_ref_t source) {
+  iree_vm_bytecode_ref_replace(target, iree_vm_ref_retain(source));
+}
+
+// Transfers one internal null, borrowed, or owned state exactly. Unlike the
+// public escaping move, an internal borrowed state remains borrowed.
+static inline void iree_vm_bytecode_ref_move(iree_vm_ref_t* target,
+                                             iree_vm_ref_t* source) {
+  iree_vm_ref_t moved_ref = *source;
+  *source = iree_vm_ref_null();
+  iree_vm_bytecode_ref_replace(target, moved_ref);
+}
+
 static void iree_vm_bytecode_frame_reset(iree_vm_ref_t* refs,
-                                         uint16_t ref_register_count) {
-  for (uint16_t i = 0; i < ref_register_count; ++i) {
+                                         uint32_t ref_count) {
+  for (uint32_t i = 0; i < ref_count; ++i) {
     iree_vm_ref_reset(&refs[i]);
   }
 }
@@ -287,11 +312,13 @@ iree_status_t iree_vm_bytecode_function_start(
   uint8_t* frame_checkpoint = invocation->stack_cursor;
   uint64_t* values = NULL;
   iree_vm_ref_t* refs = NULL;
+  iree_vm_ref_t* local_refs = NULL;
   uint8_t* local_bytes = NULL;
   // Verification requires the register bank to cover every result, so the
   // final comparison is equality for every published image.
   if (function->local_byte_length_u16 == 0 &&
       function->ref_register_count_u16 == 0 &&
+      function->local_ref_count_u32 == 0 &&
       function->value_register_count_u16 <= 16 &&
       function->value_register_count_u16 <= signature->result_value_count_u16) {
     // Result banks are invocation-owned staging until the root succeeds. A
@@ -299,9 +326,11 @@ iree_status_t iree_vm_bytecode_function_start(
     // prefix can execute in place without reserving or copying a frame.
     values = params->call.value_results.direct;
   } else {
+    const uint32_t ref_count =
+        function->ref_register_count_u16 + function->local_ref_count_u32;
     const iree_host_size_t frame_storage_size =
         function->value_register_count_u16 * sizeof(uint64_t) +
-        function->ref_register_count_u16 * sizeof(iree_vm_ref_t) +
+        (iree_host_size_t)ref_count * sizeof(iree_vm_ref_t) +
         function->local_byte_length_u16;
     uint8_t* frame_storage = NULL;
     IREE_RETURN_IF_ERROR(iree_vm_invocation_stack_reserve(
@@ -311,13 +340,13 @@ iree_status_t iree_vm_bytecode_function_start(
     values = (uint64_t*)frame_storage;
     uint8_t* ref_storage =
         frame_storage + function->value_register_count_u16 * sizeof(uint64_t);
-    if (function->ref_register_count_u16) {
-      refs = (iree_vm_ref_t*)ref_storage;
-    }
-    local_bytes =
-        ref_storage + function->ref_register_count_u16 * sizeof(iree_vm_ref_t);
+    refs = (iree_vm_ref_t*)ref_storage;
+    local_refs = refs + function->ref_register_count_u16;
+    local_bytes = (uint8_t*)(local_refs + function->local_ref_count_u32);
   }
-  for (uint16_t i = 0; i < function->ref_register_count_u16; ++i) {
+  const uint32_t ref_count =
+      function->ref_register_count_u16 + function->local_ref_count_u32;
+  for (uint32_t i = 0; i < ref_count; ++i) {
     refs[i] = iree_vm_ref_null();
   }
   const uint16_t direct_value_count = signature->argument_value_count_u16 < 16
@@ -921,13 +950,88 @@ iree_status_t iree_vm_bytecode_function_start(
         values[record->c_v8]);
     IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_isa_float_math_ternary_f64_record_t);
   }
+  IREE_VM_BYTECODE_DISPATCH_CASE(REF_NULL, ref_null) {
+    const iree_vm_isa_ref_null_record_t* record =
+        (const iree_vm_isa_ref_null_record_t*)record_data;
+    iree_vm_ref_reset(&refs[record->dst_r8]);
+    IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_isa_ref_null_record_t);
+  }
+  IREE_VM_BYTECODE_DISPATCH_CASE(REF_COMPARE_NULL, ref_compare_null) {
+    const iree_vm_isa_ref_compare_null_record_t* record =
+        (const iree_vm_isa_ref_compare_null_record_t*)record_data;
+    values[record->dst_v8] = iree_vm_ref_is_null(refs[record->src_r8]);
+    IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_isa_ref_compare_null_record_t);
+  }
+  IREE_VM_BYTECODE_DISPATCH_CASE(REF_COMPARE_EQ, ref_compare_eq) {
+    const iree_vm_isa_ref_compare_eq_record_t* record =
+        (const iree_vm_isa_ref_compare_eq_record_t*)record_data;
+    const iree_vm_ref_t lhs = refs[record->lhs_r8];
+    const iree_vm_ref_t rhs = refs[record->rhs_r8];
+    values[record->dst_v8] =
+        lhs.object == rhs.object &&
+        (!lhs.object || iree_vm_ref_type(lhs) == iree_vm_ref_type(rhs));
+    IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_isa_ref_compare_eq_record_t);
+  }
+  IREE_VM_BYTECODE_DISPATCH_CASE(REF_RETAIN, ref_retain) {
+    const iree_vm_isa_ref_retain_record_t* record =
+        (const iree_vm_isa_ref_retain_record_t*)record_data;
+    iree_vm_bytecode_ref_retain(&refs[record->dst_r8], refs[record->src_r8]);
+    IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_isa_ref_retain_record_t);
+  }
+  IREE_VM_BYTECODE_DISPATCH_CASE(REF_MOVE, ref_move) {
+    const iree_vm_isa_ref_move_record_t* record =
+        (const iree_vm_isa_ref_move_record_t*)record_data;
+    iree_vm_bytecode_ref_move(&refs[record->dst_r8], &refs[record->src_r8]);
+    IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_isa_ref_move_record_t);
+  }
+  IREE_VM_BYTECODE_DISPATCH_CASE(REF_DISCARD, ref_discard) {
+    const iree_vm_isa_ref_discard_record_t* record =
+        (const iree_vm_isa_ref_discard_record_t*)record_data;
+    iree_vm_ref_reset(&refs[record->src_r8]);
+    IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_isa_ref_discard_record_t);
+  }
+  IREE_VM_BYTECODE_DISPATCH_CASE(REF_STACK_LOAD_RETAIN, ref_stack_load_retain) {
+    const iree_vm_isa_ref_stack_load_retain_record_t* record =
+        (const iree_vm_isa_ref_stack_load_retain_record_t*)record_data;
+    iree_vm_bytecode_ref_retain(&refs[record->dst_r8],
+                                local_refs[record->slot_u16]);
+    IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_isa_ref_stack_load_retain_record_t);
+  }
+  IREE_VM_BYTECODE_DISPATCH_CASE(REF_STACK_LOAD_MOVE, ref_stack_load_move) {
+    const iree_vm_isa_ref_stack_load_move_record_t* record =
+        (const iree_vm_isa_ref_stack_load_move_record_t*)record_data;
+    iree_vm_bytecode_ref_move(&refs[record->dst_r8],
+                              &local_refs[record->slot_u16]);
+    IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_isa_ref_stack_load_move_record_t);
+  }
+  IREE_VM_BYTECODE_DISPATCH_CASE(REF_STACK_STORE_RETAIN,
+                                 ref_stack_store_retain) {
+    const iree_vm_isa_ref_stack_store_retain_record_t* record =
+        (const iree_vm_isa_ref_stack_store_retain_record_t*)record_data;
+    iree_vm_bytecode_ref_retain(&local_refs[record->slot_u16],
+                                refs[record->src_r8]);
+    IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_isa_ref_stack_store_retain_record_t);
+  }
+  IREE_VM_BYTECODE_DISPATCH_CASE(REF_STACK_STORE_MOVE, ref_stack_store_move) {
+    const iree_vm_isa_ref_stack_store_move_record_t* record =
+        (const iree_vm_isa_ref_stack_store_move_record_t*)record_data;
+    iree_vm_bytecode_ref_move(&local_refs[record->slot_u16],
+                              &refs[record->src_r8]);
+    IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_isa_ref_stack_store_move_record_t);
+  }
+  IREE_VM_BYTECODE_DISPATCH_CASE(REF_STACK_DISCARD, ref_stack_discard) {
+    const iree_vm_isa_ref_stack_discard_record_t* record =
+        (const iree_vm_isa_ref_stack_discard_record_t*)record_data;
+    iree_vm_ref_reset(&local_refs[record->slot_u16]);
+    IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_isa_ref_stack_discard_record_t);
+  }
   IREE_VM_BYTECODE_DISPATCH_CASE(BUFFER_RODATA_LOAD, buffer_rodata_load) {
     const iree_vm_isa_buffer_rodata_load_record_t* record =
         (const iree_vm_isa_buffer_rodata_load_record_t*)record_data;
-    iree_vm_ref_t old_ref = refs[record->dst_r8];
-    refs[record->dst_r8] = iree_vm_ref_from_ptr_borrowed(
-        &module->rodata_roots[record->rodata_u16], module->buffer_type);
-    iree_vm_ref_reset(&old_ref);
+    iree_vm_bytecode_ref_replace(
+        &refs[record->dst_r8],
+        iree_vm_ref_from_ptr_borrowed(&module->rodata_roots[record->rodata_u16],
+                                      module->buffer_type));
     IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_isa_buffer_rodata_load_record_t);
   }
   IREE_VM_BYTECODE_DISPATCH_CASE(CONVERSION_INTEGER, conversion_integer) {
@@ -1127,7 +1231,7 @@ iree_status_t iree_vm_bytecode_function_start(
   }
   IREE_VM_BYTECODE_DISPATCH_END();
 
-  iree_vm_bytecode_frame_reset(refs, function->ref_register_count_u16);
+  iree_vm_bytecode_frame_reset(refs, ref_count);
   iree_vm_invocation_stack_rewind(invocation, frame_checkpoint);
   return status;
 }

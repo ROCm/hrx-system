@@ -107,6 +107,17 @@ FixtureKind SelectFixture(uint8_t opcode) {
       return FixtureKind::kValueOverflow;
     case IREE_VM_ISA_CORE_OPCODE_GLOBAL_VALUE_IMMUTABLE_LOAD:
     case IREE_VM_ISA_CORE_OPCODE_GLOBAL_VALUE_IMMUTABLE_STORE:
+    case IREE_VM_ISA_CORE_OPCODE_REF_NULL:
+    case IREE_VM_ISA_CORE_OPCODE_REF_COMPARE_NULL:
+    case IREE_VM_ISA_CORE_OPCODE_REF_COMPARE_EQ:
+    case IREE_VM_ISA_CORE_OPCODE_REF_RETAIN:
+    case IREE_VM_ISA_CORE_OPCODE_REF_MOVE:
+    case IREE_VM_ISA_CORE_OPCODE_REF_DISCARD:
+    case IREE_VM_ISA_CORE_OPCODE_REF_STACK_LOAD_RETAIN:
+    case IREE_VM_ISA_CORE_OPCODE_REF_STACK_LOAD_MOVE:
+    case IREE_VM_ISA_CORE_OPCODE_REF_STACK_STORE_RETAIN:
+    case IREE_VM_ISA_CORE_OPCODE_REF_STACK_STORE_MOVE:
+    case IREE_VM_ISA_CORE_OPCODE_REF_STACK_DISCARD:
     case IREE_VM_ISA_CORE_OPCODE_BUFFER_RODATA_LOAD:
       return FixtureKind::kOwnership;
     default:
@@ -174,6 +185,8 @@ void FillOwnershipFunction(const uint8_t* record, uint8_t record_length,
       record_length != 4) {
     std::abort();
   }
+  function.row->ref_register_count_u16 = 256;
+  function.row->local_ref_count_u32 = 256;
 
   uint8_t* cursor = function.bytecode;
   AppendRecord(
