@@ -43,6 +43,25 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "resolve_launches",
+    srcs = ["resolve_launches.c"],
+    hdrs = ["resolve_launches.h"],
+    deps = [
+        "//loom/src/loom/analysis:symbol_references",
+        "//loom/src/loom/error:emitter",
+        "//loom/src/loom/error:error_defs",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops/func",
+        "//loom/src/loom/ops/kernel",
+        "//loom/src/loom/rewrite:remap",
+        "//loom/src/loom/rewrite:rewriter",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
     name = "promote_private_fragments",
     srcs = ["promote_private_fragments.c"],
     hdrs = ["promote_private_fragments.h"],

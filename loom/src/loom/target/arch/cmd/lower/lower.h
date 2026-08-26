@@ -12,7 +12,8 @@
 #include "iree/base/api.h"
 #include "loom/ir/ir.h"
 #include "loom/target/arch/cmd/abi_layout.h"
-#include "loom/target/arch/cmd/lower/launch_graph.h"
+#include "loom/target/arch/cmd/lower/dispatch_counts.h"
+#include "loom/target/arch/cmd/lower/schedule.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -42,7 +43,7 @@ typedef struct loom_cmd_lower_dispatch_argument_t {
   uint64_t scalar_bits;
 } loom_cmd_lower_dispatch_argument_t;
 
-// Resolved executable placement for one aggregate dispatch row.
+// Resolved executable placement for one prepared dispatch row.
 typedef struct loom_cmd_lower_dispatch_t {
   // Dense executable-table index selected for the dispatch.
   uint32_t executable_index;
@@ -56,20 +57,12 @@ typedef struct loom_cmd_lower_dispatch_t {
   uint32_t operand_value_count;
 } loom_cmd_lower_dispatch_t;
 
-// Issue-time binding placement of the aggregate host launch-count table.
-typedef struct loom_cmd_lower_launch_count_binding_t {
-  // Dense index in the rebindable binding table.
-  uint32_t resource_index;
-  // Root-relative byte offset of the first xyz tuple.
-  uint64_t byte_offset;
-} loom_cmd_lower_launch_count_binding_t;
-
 // Compiler-owned facts consumed by closed command-program conversion.
 //
-// Rows are already resolved by source specialization, dependency-unit
-// extraction, binding placement, aggregate launch analysis, and wave planning.
-// Conversion preserves these facts; it does not rediscover kernel identity,
-// launch arithmetic, or command ordering from the source module.
+// Rows are already resolved by source specialization, binding placement,
+// physical count placement, and wave planning. Conversion preserves these
+// facts; it does not rediscover entry identity, count arithmetic, or command
+// ordering from the source module.
 typedef struct loom_cmd_lower_plan_t {
   // Source launch-binding rows in command-program signature order.
   const loom_cmd_buffer_binding_t* bindings;
@@ -81,11 +74,11 @@ typedef struct loom_cmd_lower_plan_t {
   iree_host_size_t buffer_range_count;
   // External resource-table shape emitted on the lowered function.
   loom_cmd_abi_layout_t abi_layout;
-  // Aggregate launch graph defining direct, host, and source count placement.
-  const loom_cmd_launch_graph_t* launch_graph;
-  // Host launch-count table placement, ignored when the graph has no tuples.
-  loom_cmd_lower_launch_count_binding_t launch_count_binding;
-  // Executable placements in aggregate launch-graph traversal order.
+  // Prepared command and wave order borrowed from source scheduling.
+  const loom_cmd_schedule_plan_t* schedule;
+  // Physical workgroup-count placement in schedule command order.
+  const loom_cmd_dispatch_count_t* dispatch_counts;
+  // Executable placements in schedule command order.
   const loom_cmd_lower_dispatch_t* dispatches;
 } loom_cmd_lower_plan_t;
 
@@ -94,11 +87,10 @@ typedef struct loom_cmd_lower_plan_t {
 // representation contract.
 //
 // The portable issue-time ABI accepts buffer roots and explicitly resolved
-// view ranges plus workgroup counts classified by |plan->launch_graph|. Exact
-// tuples become direct dispatches. Host tuples become static-indirect
-// dispatches referencing one rebindable output table. Stable source views
-// remain static indirect, while transient source views become dynamic indirect
-// after a preceding execution barrier. Buffer and view arguments become
+// view ranges plus workgroup counts classified by |plan->dispatch_counts|.
+// Exact tuples become direct dispatches. Stable source views remain static
+// indirect, while transient source views become dynamic indirect after a
+// preceding execution barrier. Buffer and view arguments become
 // resolved ranges; exact scalar arguments preserve their tagless ABI bits.
 // Unsupported kernel-argument forms fail without changing the source program.
 // On success the replacement keeps the source symbol identity and is returned

@@ -19,12 +19,10 @@ extern "C" {
 
 // Semantic issue-command kind classified during schedule traversal.
 typedef enum loom_cmd_schedule_command_kind_e {
-  // Logical workload launch requiring configuration and a kernel body.
-  LOOM_CMD_SCHEDULE_COMMAND_KIND_KERNEL_LAUNCH = 0,
   // Configured entry dispatch with one to three direct count values.
-  LOOM_CMD_SCHEDULE_COMMAND_KIND_KERNEL_DISPATCH_DIRECT = 1,
+  LOOM_CMD_SCHEDULE_COMMAND_KIND_KERNEL_DISPATCH_DIRECT = 0,
   // Configured entry dispatch reading one indirect count view.
-  LOOM_CMD_SCHEDULE_COMMAND_KIND_KERNEL_DISPATCH_INDIRECT = 2,
+  LOOM_CMD_SCHEDULE_COMMAND_KIND_KERNEL_DISPATCH_INDIRECT = 1,
 } loom_cmd_schedule_command_kind_t;
 
 // Borrowed source SSA values retained by one prepared issue row.
@@ -48,13 +46,8 @@ typedef struct loom_cmd_schedule_command_t {
   loom_cmd_schedule_value_slice_t arguments;
   // Classified source issue semantics.
   loom_cmd_schedule_command_kind_t kind;
-  // Kind-specific values used to derive physical workgroup counts.
-  union {
-    // Logical workload values for KERNEL_LAUNCH.
-    loom_cmd_schedule_value_slice_t workloads;
-    // Physical count values for either KERNEL_DISPATCH kind.
-    loom_cmd_schedule_value_slice_t workgroup_counts;
-  } count_inputs;
+  // Physical count values interpreted according to |kind|.
+  loom_cmd_schedule_value_slice_t workgroup_counts;
 } loom_cmd_schedule_command_t;
 
 // One contiguous wave in a portable command schedule.
@@ -84,8 +77,6 @@ typedef struct loom_cmd_schedule_plan_t {
   const loom_cmd_schedule_command_t* commands;
   // Total number of source commands.
   iree_host_size_t command_count;
-  // Number of logical kernel launch commands.
-  iree_host_size_t kernel_launch_count;
   // Total number of device-ABI argument values across all commands.
   iree_host_size_t argument_value_count;
   // Ordered wave table.
@@ -104,13 +95,15 @@ typedef struct loom_cmd_schedule_plan_t {
 // ordered. Siblings in concurrent launch-schedule regions begin in the same
 // wave; nested serial spans are aligned by wave index, which may conservatively
 // add cross-sibling dependencies. The kernel.launch and command schedule ops
-// are equivalent structured scheduling forms. Allocation definitions retain
+// are equivalent structured scheduling forms. The body must already contain
+// configured kernel.dispatch operations; logical launches are resolved before
+// scheduling. Allocation definitions retain
 // their first possible wave so storage planning can preserve state from
 // definition through last use. Pure leaf dataflow is ignored because it emits
-// no command; the launch plan owns any values it contributes to dispatch
-// metadata. Other residual source operations must have been specialized away
-// and are rejected. Issue rows classify launch and direct/indirect dispatch
-// forms once so later command planning never needs to rediscover them.
+// no command; later placement consumes its prepared SSA facts directly. Other
+// residual source operations must have been specialized away and are rejected.
+// Issue rows classify direct/indirect dispatch forms once so later command
+// planning never needs to rediscover them.
 iree_status_t loom_cmd_schedule_plan_build(const loom_module_t* module,
                                            loom_region_t* program_body,
                                            iree_arena_allocator_t* arena,

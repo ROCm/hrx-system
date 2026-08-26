@@ -37,6 +37,23 @@ command.program.def public @dynamic_dispatch(%workgroup_count_x: index) launch()
 
 // ====
 
+// RUN: emit command-program @dynamic_launch
+
+kernel.def @configured_from_workload(%workgroup_count_x: index) {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%workgroup_count_x, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch() {
+  kernel.return
+}
+
+command.program.def public @dynamic_launch(%workgroup_count_x: index) launch() {
+  // ERROR@+1: LOWERING/051 {kernel_name="configured_from_workload", dimension="0", requirement="an exact unsigned 32-bit value"}
+  kernel.launch @configured_from_workload[%workgroup_count_x]() : [index]()
+  command.return
+}
+
+// ====
+
 // RUN: emit command-program @invalid_dispatch
 
 kernel.entry.decl @range_checked()

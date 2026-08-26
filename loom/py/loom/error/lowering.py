@@ -541,19 +541,19 @@ ERR_LOWERING_049 = ErrorDef(
     ),
 )
 
-# ERR_LOWERING_050: Command program launch has no kernel definition.
+# ERR_LOWERING_050: Command program launch has no launch configuration.
 ERR_LOWERING_050 = ErrorDef(
     domain=ErrorDomain.LOWERING,
     code=50,
     severity=Severity.ERROR,
-    summary="Command program launch has no kernel definition.",
+    summary="Command program launch has no launch configuration.",
     message=(
-        "command-program preparation cannot lower the unresolved kernel "
-        "declaration @{kernel_name}"
+        "command-program preparation cannot configure the kernel declaration "
+        "@{kernel_name}"
     ),
     params=(ErrorParam("kernel_name", ParamKind.STRING),),
     fix_hint=(
-        "Link a kernel.def implementation for this declaration before "
+        "Link the kernel configuration facet for this declaration before "
         "preparing the command program"
     ),
 )

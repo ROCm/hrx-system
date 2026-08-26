@@ -70,7 +70,6 @@ loom_check_test_suite(
   SRCS
     "test/bytecode.loom-test"
     "test/diagnostics.loom-test"
-    "test/kernel_units.loom-test"
     "test/low.loom-test"
     "test/preparation.loom-test"
     "test/roundtrip.loom-test"
