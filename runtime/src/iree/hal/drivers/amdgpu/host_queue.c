@@ -475,15 +475,22 @@ iree_host_size_t iree_hal_amdgpu_host_queue_drain_completions_for_waiter(
   return count;
 }
 
+// Returns the queue's recorded failure without transferring ownership. The
+// queue owns the status until it is taken by deinitialization.
+static iree_status_t iree_hal_amdgpu_host_queue_error_status(
+    iree_hal_amdgpu_host_queue_t* queue) {
+  return (iree_status_t)iree_atomic_load(&queue->error_status,
+                                         iree_memory_order_acquire);
+}
+
 static bool iree_hal_amdgpu_host_queue_has_error(
     iree_hal_amdgpu_host_queue_t* queue) {
-  return iree_atomic_load(&queue->error_status, iree_memory_order_acquire) != 0;
+  return !iree_status_is_ok(iree_hal_amdgpu_host_queue_error_status(queue));
 }
 
 static iree_status_t iree_hal_amdgpu_host_queue_clone_error_status(
     iree_hal_amdgpu_host_queue_t* queue) {
-  iree_status_t error = (iree_status_t)iree_atomic_load(
-      &queue->error_status, iree_memory_order_acquire);
+  iree_status_t error = iree_hal_amdgpu_host_queue_error_status(queue);
   return iree_status_is_ok(error) ? iree_ok_status() : iree_status_clone(error);
 }
 
@@ -762,8 +769,7 @@ static int iree_hal_amdgpu_host_queue_completion_thread_main(void* entry_arg) {
           // normal failure path instead of being destroyed under the callback.
           iree_hal_amdgpu_host_queue_run_post_drain_actions(queue);
           iree_hal_amdgpu_host_queue_cancel_pending(
-              queue, IREE_STATUS_ABORTED,
-              "AMDGPU queue stopped after an unrecoverable device error");
+              queue, iree_hal_amdgpu_host_queue_error_status(queue));
         }
         keep_running = false;
       }
@@ -1041,10 +1047,14 @@ void iree_hal_amdgpu_host_queue_deinitialize(
   iree_hal_amdgpu_host_queue_run_post_drain_actions(queue);
 
   // Cancel all pending (deferred) operations. Their signal semaphores are
-  // failed with CANCELLED so downstream waiters don't hang.
+  // failed so downstream waiters don't hang. A queue that failed has already
+  // cancelled these on its completion thread with the recorded failure, so
+  // anything still linked here was deferred during a clean teardown.
   if (queue->pending_head) {
-    iree_hal_amdgpu_host_queue_cancel_pending(queue, IREE_STATUS_CANCELLED,
-                                              "queue shutting down");
+    iree_status_t cancellation_status =
+        iree_make_status(IREE_STATUS_CANCELLED, "queue shutting down");
+    iree_hal_amdgpu_host_queue_cancel_pending(queue, cancellation_status);
+    iree_status_free(cancellation_status);
   }
 
   // Process any remaining notification entries before destroying resources.

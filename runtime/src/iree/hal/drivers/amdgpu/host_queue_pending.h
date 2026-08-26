@@ -22,15 +22,16 @@ iree_status_t iree_hal_amdgpu_pending_op_start(iree_hal_amdgpu_pending_op_t* op,
 void iree_hal_amdgpu_pending_op_enqueue_alloca_memory_wait(
     iree_hal_amdgpu_pending_op_t* op);
 
-// Cancels all queue pending operations during shutdown or fatal queue failure.
-// Each operation is failed with a status built from |status_code| and
-// |status_message| unless it already captured a more specific wait-side error.
+// Cancels all queue pending operations during shutdown or fatal queue failure,
+// failing each with a clone of |failure_status|. An operation that already
+// captured a wait-side error keeps that more specific cause.
+//
+// |failure_status| remains owned by the caller.
 //
 // Does not close submission admission. The caller must have closed it and must
 // ensure no concurrent submissions.
 void iree_hal_amdgpu_host_queue_cancel_pending(
-    iree_hal_amdgpu_host_queue_t* queue, iree_status_code_t status_code,
-    const char* status_message);
+    iree_hal_amdgpu_host_queue_t* queue, const iree_status_t failure_status);
 
 // Captures a queue_alloca operation for later issue. Caller must hold
 // queue->locks.submission_mutex.
