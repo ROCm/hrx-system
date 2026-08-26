@@ -500,6 +500,65 @@ static bool loom_contract_vector_mma_fail(
   return false;
 }
 
+static bool loom_contract_vector_operand_exact_payload_bit_width(
+    loom_contract_operand_t operand, uint16_t* out_bit_width) {
+  *out_bit_width = 0;
+  const uint16_t element_bit_width =
+      loom_contract_numeric_bit_width(operand.numeric_type);
+  if (operand.payload_element_count == 0 ||
+      operand.payload_register_count == 0 || element_bit_width == 0) {
+    return false;
+  }
+  const uint32_t element_payload_bit_width =
+      (uint32_t)operand.payload_element_count * element_bit_width;
+  const uint32_t register_payload_bit_width =
+      (uint32_t)operand.payload_register_count * 32u;
+  if (element_payload_bit_width != register_payload_bit_width ||
+      register_payload_bit_width > UINT16_MAX) {
+    return false;
+  }
+  *out_bit_width = (uint16_t)register_payload_bit_width;
+  return true;
+}
+
+static bool loom_contract_vector_project_packed_mma_fragment(
+    loom_contract_request_t* request) {
+  uint16_t lhs_bit_width = 0;
+  uint16_t rhs_bit_width = 0;
+  uint16_t accumulator_bit_width = 0;
+  uint16_t result_bit_width = 0;
+  if (!loom_contract_vector_operand_exact_payload_bit_width(request->lhs,
+                                                            &lhs_bit_width) ||
+      !loom_contract_vector_operand_exact_payload_bit_width(request->rhs,
+                                                            &rhs_bit_width) ||
+      !loom_contract_vector_operand_exact_payload_bit_width(
+          request->accumulator, &accumulator_bit_width) ||
+      !loom_contract_vector_operand_exact_payload_bit_width(
+          request->result, &result_bit_width) ||
+      lhs_bit_width != rhs_bit_width ||
+      lhs_bit_width != accumulator_bit_width ||
+      lhs_bit_width != result_bit_width ||
+      request->lhs.payload_element_count !=
+          request->rhs.payload_element_count ||
+      request->accumulator.payload_element_count !=
+          request->result.payload_element_count ||
+      request->lhs.payload_element_count %
+              request->result.payload_element_count !=
+          0) {
+    return false;
+  }
+
+  request->fragment = (loom_contract_fragment_t){
+      .atom_bits = LOOM_CONTRACT_FRAGMENT_VECTOR_LANE,
+      .vector_bit_width = lhs_bit_width,
+      .source_lane_count = request->lhs.payload_element_count,
+      .result_lane_count = request->result.payload_element_count,
+  };
+  request->k_group_size = request->lhs.payload_element_count /
+                          request->result.payload_element_count;
+  return request->k_group_size != 0;
+}
+
 //===----------------------------------------------------------------------===//
 // Dot op adapters
 //===----------------------------------------------------------------------===//
@@ -828,8 +887,21 @@ bool loom_contract_request_from_vector_mma_op(
       .k = k.value_ref,
       .block_count = blocks.value_ref,
   };
-  out_request->k_group_size = options->k_group_size;
-  out_request->fragment = options->fragment;
+  switch (options->fragment_projection) {
+    case LOOM_CONTRACT_VECTOR_MMA_FRAGMENT_PROJECTION_EXPLICIT:
+      out_request->k_group_size = options->k_group_size;
+      out_request->fragment = options->fragment;
+      break;
+    case LOOM_CONTRACT_VECTOR_MMA_FRAGMENT_PROJECTION_PACKED_VECTOR:
+      if (!loom_contract_vector_project_packed_mma_fragment(out_request)) {
+        return loom_contract_vector_mma_fail(LOOM_CONTRACT_REJECTION_FRAGMENT,
+                                             out_diagnostic);
+      }
+      break;
+    default:
+      IREE_ASSERT_UNREACHABLE("unknown vector.mma fragment projection");
+      IREE_BUILTIN_UNREACHABLE();
+  }
   out_request->capability_class = options->capability_class;
   out_request->policy = options->policy;
   out_request->arithmetic = loom_contract_vector_mma_arithmetic(out_request);

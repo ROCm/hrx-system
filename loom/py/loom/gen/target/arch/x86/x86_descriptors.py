@@ -33,6 +33,7 @@ from loom.gen.target.low.low_descriptors import (  # noqa: E402
 from loom.target.arch.x86.target_info import (  # noqa: E402
     X86DescriptorSetInfo,
     x86_descriptor_set_info_by_generator_target,
+    x86_descriptor_set_ordinal,
     x86_descriptor_set_storage_info_by_generator_target,
     x86_descriptor_set_view_infos_by_storage_generator_target,
 )
@@ -61,7 +62,10 @@ def _parse_view_headers(values: Sequence[str]) -> dict[str, Path]:
 
 
 def _descriptor_set_for_info(info: X86DescriptorSetInfo) -> DescriptorSet:
-    return resolve_descriptor_set(info.key)
+    return replace(
+        resolve_descriptor_set(info.key),
+        descriptor_set_ordinal=x86_descriptor_set_ordinal(info.key),
+    )
 
 
 def _view_infos_for_storage_target(

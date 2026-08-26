@@ -27,6 +27,7 @@ from loom.target.arch.x86.packed_dot_data import (
 )
 from loom.target.contracts import (
     ContractFragment,
+    DescriptorMatrixRule,
     DescriptorRule,
     DotDescriptorCase,
     GuardDiagnostic,
@@ -184,5 +185,8 @@ X86_PACKED_DOT_CONTRACT_FRAGMENT = ContractFragment(
     name="x86.packed_dot",
     descriptor_set=X86_PACKED_DOT_DESCRIPTOR_SET,
     public_header="loom/target/arch/x86/contracts/packed_dot.h",
-    cases=_packed_dot_rules(),
+    cases=(
+        *_packed_dot_rules(),
+        DescriptorMatrixRule(source_op=vector.vector_mma, source="vector_mma"),
+    ),
 )

@@ -1163,49 +1163,10 @@ static iree_status_t loom_low_lower_emit_contract_query_rejection(
   return loom_low_lower_emit_no_target_contract(context, source_op);
 }
 
-static iree_status_t loom_low_lower_descriptor_matrix_request_from_source(
-    loom_low_lower_context_t* context, const loom_op_t* source_op,
-    const loom_target_contract_descriptor_matrix_rule_t* matrix_rule,
-    loom_contract_request_t* out_request) {
-  *out_request = (loom_contract_request_t){0};
-  if (context->policy->descriptor_matrix.options == NULL) {
-    IREE_ASSERT_UNREACHABLE("descriptor-matrix policy has no source adapter");
-    IREE_BUILTIN_UNREACHABLE();
-  }
-
-  switch (matrix_rule->source) {
-    case LOOM_TARGET_CONTRACT_DESCRIPTOR_MATRIX_SOURCE_VECTOR_MMA: {
-      if (!loom_vector_mma_isa(source_op)) {
-        IREE_ASSERT_UNREACHABLE("descriptor-matrix selected non-vector.mma op");
-        IREE_BUILTIN_UNREACHABLE();
-      }
-      loom_target_contract_query_environment_t environment = {0};
-      IREE_RETURN_IF_ERROR(loom_low_lower_query_environment_from_context(
-          context, context->descriptor_set, &environment));
-      loom_contract_vector_mma_options_t options = {0};
-      IREE_RETURN_IF_ERROR(context->policy->descriptor_matrix.options(
-          context->policy->descriptor_matrix.user_data, &environment,
-          matrix_rule, &options));
-      loom_contract_diagnostic_t diagnostic = {0};
-      if (!loom_contract_request_from_vector_mma_op(
-              context->module, context->lowering.fact_table, source_op,
-              &options, out_request, &diagnostic)) {
-        IREE_ASSERT_UNREACHABLE(
-            "descriptor-matrix selected vector.mma request is inconsistent");
-        IREE_BUILTIN_UNREACHABLE();
-      }
-      return iree_ok_status();
-    }
-    case LOOM_TARGET_CONTRACT_DESCRIPTOR_MATRIX_SOURCE_NONE:
-    default:
-      IREE_ASSERT_UNREACHABLE("unknown descriptor-matrix source");
-      IREE_BUILTIN_UNREACHABLE();
-  }
-}
-
 static iree_status_t loom_low_lower_record_descriptor_matrix_plan(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     const loom_target_contract_descriptor_matrix_rule_t* matrix_rule,
+    const loom_contract_request_t* contract_request,
     const loom_target_contract_query_result_t* query_result) {
   loom_low_lower_descriptor_matrix_plan_t* plan_data = NULL;
   IREE_RETURN_IF_ERROR(loom_low_lower_allocate_plan_data(
@@ -1216,8 +1177,7 @@ static iree_status_t loom_low_lower_record_descriptor_matrix_plan(
     IREE_BUILTIN_UNREACHABLE();
   }
   plan_data->descriptor.descriptor = query_result->selected_descriptor;
-  IREE_RETURN_IF_ERROR(loom_low_lower_descriptor_matrix_request_from_source(
-      context, source_op, matrix_rule, &plan_data->contract_request));
+  plan_data->contract_request = *contract_request;
   plan_data->attrs = loom_named_attr_slice_empty();
   if (plan_data->descriptor.descriptor->immediate_count != 0) {
     if (context->policy->descriptor_matrix.attrs == NULL) {
@@ -1274,16 +1234,17 @@ static iree_status_t loom_low_lower_plan_op_from_contract_index(
           &binding->fragment->descriptor_matrices[contract_case->row_index];
       loom_target_contract_query_result_t query_result =
           loom_target_contract_query_result_empty();
+      loom_contract_request_t contract_request = {0};
       loom_target_contract_query_environment_t environment = {0};
       IREE_RETURN_IF_ERROR(loom_low_lower_query_environment_from_context(
           context, context->descriptor_set, &environment));
       IREE_RETURN_IF_ERROR(loom_low_lower_query_descriptor_matrix_contract(
           &environment, &context->policy->descriptor_matrix, matrix_rule,
-          source_op, &query_result));
+          source_op, &contract_request, &query_result));
       if (query_result.outcome == LOOM_TARGET_CONTRACT_QUERY_LEGAL) {
         query_result.rule_index = contract_case->row_index;
         IREE_RETURN_IF_ERROR(loom_low_lower_record_descriptor_matrix_plan(
-            context, source_op, matrix_rule, &query_result));
+            context, source_op, matrix_rule, &contract_request, &query_result));
         *out_selected = true;
         return iree_ok_status();
       }

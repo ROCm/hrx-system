@@ -68,7 +68,9 @@ iree_py_library(
   DEPS
     loom::py::loom::gen::bootstrap
     loom::py::loom::gen::support::support
+    loom::py::loom::target::descriptor_sets
     loom::py::loom::target::low_descriptors
+    loom::py::loom::target::arch::x86::descriptors
     loom::py::loom::target::arch::x86::target_info
 )
 

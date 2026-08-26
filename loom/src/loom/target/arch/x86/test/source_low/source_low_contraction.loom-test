@@ -1,0 +1,151 @@
+// RUN: emit source-low output=low
+
+x86.target<avx512_packed_dot> @target
+
+func.def target(@target) @bf16_blocked_mma_xmm(
+    %lhs_data: vector<8xbf16>,
+    %rhs_data: vector<8xbf16>,
+    %init_data: vector<4xf32>) -> (vector<4xf32>) {
+  %blocks = index.constant 4 : index
+  %m = index.constant 1 : index
+  %n = index.constant 1 : index
+  %k = index.constant 2 : index
+  %lhs = vector.fragment<lhs> %lhs_data shape [blocks(%blocks), %m, %k] : vector<8xbf16>
+  %rhs = vector.fragment<rhs> %rhs_data shape [blocks(%blocks), %k, %n] : vector<8xbf16>
+  %init = vector.fragment<init> %init_data shape [blocks(%blocks), %m, %n] : vector<4xf32>
+  %result = vector.mma %lhs, %rhs, %init : vector<8xbf16>, vector<8xbf16>, vector<4xf32>
+  func.return %result : vector<4xf32>
+}
+
+// ----
+low.func.def target<x86.avx512_packed_dot.core>(@target) abi(object_function) @bf16_blocked_mma_xmm(%lhs: reg<x86.xmm>, %rhs: reg<x86.xmm>, %init: reg<x86.xmm>) -> (reg<x86.xmm>) asm {
+  %16 = copy %init : reg<x86.xmm> -> reg<x86.xmm>
+  %result = avx512_bf16.vdpbf16ps.xmm %16, %lhs, %rhs
+  return %result
+}
+
+// ====
+
+x86.target<avx512_packed_dot> @target
+
+func.def target(@target) @bf16_blocked_mma(
+    %lhs_data: vector<16xbf16>,
+    %rhs_data: vector<16xbf16>,
+    %init_data: vector<8xf32>) -> (vector<8xf32>) {
+  %blocks = index.constant 8 : index
+  %m = index.constant 1 : index
+  %n = index.constant 1 : index
+  %k = index.constant 2 : index
+  %lhs = vector.fragment<lhs> %lhs_data shape [blocks(%blocks), %m, %k] : vector<16xbf16>
+  %rhs = vector.fragment<rhs> %rhs_data shape [blocks(%blocks), %k, %n] : vector<16xbf16>
+  %init = vector.fragment<init> %init_data shape [blocks(%blocks), %m, %n] : vector<8xf32>
+  %result = vector.mma %lhs, %rhs, %init : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+  func.return %result : vector<8xf32>
+}
+
+// ----
+low.func.def target<x86.avx512_packed_dot.core>(@target) abi(object_function) @bf16_blocked_mma(%lhs: reg<x86.ymm>, %rhs: reg<x86.ymm>, %init: reg<x86.ymm>) -> (reg<x86.ymm>) asm {
+  %16 = copy %init : reg<x86.ymm> -> reg<x86.ymm>
+  %result = avx512_bf16.vdpbf16ps.ymm %16, %lhs, %rhs
+  return %result
+}
+
+// ====
+
+x86.target<avx512_packed_dot> @target
+
+func.def target(@target) @bf16_blocked_mma_zmm(
+    %lhs_data: vector<32xbf16>,
+    %rhs_data: vector<32xbf16>,
+    %init_data: vector<16xf32>) -> (vector<16xf32>) {
+  %blocks = index.constant 16 : index
+  %m = index.constant 1 : index
+  %n = index.constant 1 : index
+  %k = index.constant 2 : index
+  %lhs = vector.fragment<lhs> %lhs_data shape [blocks(%blocks), %m, %k] : vector<32xbf16>
+  %rhs = vector.fragment<rhs> %rhs_data shape [blocks(%blocks), %k, %n] : vector<32xbf16>
+  %init = vector.fragment<init> %init_data shape [blocks(%blocks), %m, %n] : vector<16xf32>
+  %result = vector.mma %lhs, %rhs, %init : vector<32xbf16>, vector<32xbf16>, vector<16xf32>
+  func.return %result : vector<16xf32>
+}
+
+// ----
+low.func.def target<x86.avx512_packed_dot.core>(@target) abi(object_function) @bf16_blocked_mma_zmm(%lhs: reg<x86.zmm>, %rhs: reg<x86.zmm>, %init: reg<x86.zmm>) -> (reg<x86.zmm>) asm {
+  %16 = copy %init : reg<x86.zmm> -> reg<x86.zmm>
+  %result = avx512_bf16.vdpbf16ps %16, %lhs, %rhs
+  return %result
+}
+
+// ====
+
+x86.target<avx512_packed_dot> @target
+
+func.def target(@target) @i8_blocked_mma(
+    %lhs_data: vector<32xi8>,
+    %rhs_data: vector<32xi8>,
+    %init_data: vector<8xi32>) -> (vector<8xi32>) {
+  %blocks = index.constant 8 : index
+  %m = index.constant 1 : index
+  %n = index.constant 1 : index
+  %k = index.constant 4 : index
+  %lhs = vector.fragment<lhs> %lhs_data shape [blocks(%blocks), %m, %k] : vector<32xi8>
+  %rhs = vector.fragment<rhs> %rhs_data shape [blocks(%blocks), %k, %n] : vector<32xi8>
+  %init = vector.fragment<init> %init_data shape [blocks(%blocks), %m, %n] : vector<8xi32>
+  %result = vector.mma %lhs, %rhs, %init : vector<32xi8>, vector<32xi8>, vector<8xi32>
+  func.return %result : vector<8xi32>
+}
+
+// ----
+low.func.def target<x86.avx512_packed_dot.core>(@target) abi(object_function) @i8_blocked_mma(%lhs: reg<x86.ymm>, %rhs: reg<x86.ymm>, %init: reg<x86.ymm>) -> (reg<x86.ymm>) asm {
+  %16 = copy %init : reg<x86.ymm> -> reg<x86.ymm>
+  %result = avx_vnni_int8.vpdpbssd.ymm %16, %lhs, %rhs
+  return %result
+}
+
+// ====
+
+x86.target<avx512_packed_dot> @target
+
+func.def target(@target) @encoded_u8s8_blocked_mma(
+    %lhs_data: vector<8xi32>,
+    %rhs_data: vector<8xi32>,
+    %init_data: vector<8xi32>) -> (vector<8xi32>) {
+  %blocks = index.constant 8 : index
+  %m = index.constant 1 : index
+  %n = index.constant 1 : index
+  %k = index.constant 4 : index
+  %lhs_schema = encoding.define #encoding.operand<element_format=u8, payload_elements=32, payload_registers=8> : encoding<schema>
+  %rhs_schema = encoding.define #encoding.operand<element_format=i8, payload_elements=32, payload_registers=8> : encoding<schema>
+  %lhs = vector.fragment<lhs> %lhs_data shape [blocks(%blocks), %m, %k] using {schema = %lhs_schema : encoding<schema>} : vector<8xi32>
+  %rhs = vector.fragment<rhs> %rhs_data shape [blocks(%blocks), %k, %n] using {schema = %rhs_schema : encoding<schema>} : vector<8xi32>
+  %init = vector.fragment<init> %init_data shape [blocks(%blocks), %m, %n] : vector<8xi32>
+  %result = vector.mma %lhs, %rhs, %init : vector<8xi32>, vector<8xi32>, vector<8xi32>
+  func.return %result : vector<8xi32>
+}
+
+// ----
+low.func.def target<x86.avx512_packed_dot.core>(@target) abi(object_function) @encoded_u8s8_blocked_mma(%lhs: reg<x86.ymm>, %rhs: reg<x86.ymm>, %init: reg<x86.ymm>) -> (reg<x86.ymm>) asm {
+  %18 = copy %init : reg<x86.ymm> -> reg<x86.ymm>
+  %result = avx512_vnni.vpdpbusd.ymm %18, %lhs, %rhs
+  return %result
+}
+
+// ====
+
+x86.target<avx512_packed_dot> @target
+
+func.def target(@target) @non_scalar_fragment_mma(
+    %lhs_data: vector<16xbf16>,
+    %rhs_data: vector<16xbf16>,
+    %init_data: vector<8xf32>) -> (vector<8xf32>) {
+  %blocks = index.constant 4 : index
+  %m = index.constant 2 : index
+  %n = index.constant 1 : index
+  %k = index.constant 2 : index
+  %lhs = vector.fragment<lhs> %lhs_data shape [blocks(%blocks), %m, %k] : vector<16xbf16>
+  %rhs = vector.fragment<rhs> %rhs_data shape [blocks(%blocks), %k, %n] : vector<16xbf16>
+  %init = vector.fragment<init> %init_data shape [blocks(%blocks), %m, %n] : vector<8xf32>
+  // ERROR@+1: TARGET/039 {source_contract="vector.mma", matrix_constraint="x86.packed_dot.scalar_dot_shape"}
+  %result = vector.mma %lhs, %rhs, %init : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+  func.return %result : vector<8xf32>
+}

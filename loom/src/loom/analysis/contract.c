@@ -138,6 +138,39 @@ loom_contract_operand_required_capability_flags(
 // Public API
 //===----------------------------------------------------------------------===//
 
+uint16_t loom_contract_numeric_bit_width(
+    loom_contract_numeric_type_t numeric_type) {
+  switch (numeric_type) {
+    case LOOM_CONTRACT_NUMERIC_I4:
+    case LOOM_CONTRACT_NUMERIC_U4:
+    case LOOM_CONTRACT_NUMERIC_FP4:
+      return 4;
+    case LOOM_CONTRACT_NUMERIC_FP6:
+    case LOOM_CONTRACT_NUMERIC_BF6:
+      return 6;
+    case LOOM_CONTRACT_NUMERIC_I8:
+    case LOOM_CONTRACT_NUMERIC_U8:
+    case LOOM_CONTRACT_NUMERIC_FP8:
+    case LOOM_CONTRACT_NUMERIC_BF8:
+      return 8;
+    case LOOM_CONTRACT_NUMERIC_I16:
+    case LOOM_CONTRACT_NUMERIC_U16:
+    case LOOM_CONTRACT_NUMERIC_F16:
+    case LOOM_CONTRACT_NUMERIC_BF16:
+      return 16;
+    case LOOM_CONTRACT_NUMERIC_I32:
+    case LOOM_CONTRACT_NUMERIC_U32:
+    case LOOM_CONTRACT_NUMERIC_F32:
+    case LOOM_CONTRACT_NUMERIC_TF32:
+      return 32;
+    case LOOM_CONTRACT_NUMERIC_F64:
+      return 64;
+    case LOOM_CONTRACT_NUMERIC_UNKNOWN:
+      return 0;
+  }
+  return 0;
+}
+
 loom_contract_capability_flags_t
 loom_contract_plain_fragment_available_capability_flags(
     loom_contract_operand_role_t role) {

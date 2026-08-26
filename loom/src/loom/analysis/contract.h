@@ -89,6 +89,10 @@ typedef enum loom_contract_numeric_type_e {
   LOOM_CONTRACT_NUMERIC_TF32 = 18,
 } loom_contract_numeric_type_t;
 
+// Returns the logical element bit width of |numeric_type|, or 0 for UNKNOWN.
+uint16_t loom_contract_numeric_bit_width(
+    loom_contract_numeric_type_t numeric_type);
+
 typedef enum loom_contract_scale_kind_e {
   // Unknown or uninitialized scale requirement.
   LOOM_CONTRACT_SCALE_UNKNOWN = 0,
