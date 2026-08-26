@@ -183,7 +183,10 @@ typedef struct iree_hal_amdgpu_host_queue_t {
   // an unrecoverable GPU fault (page fault, invalid packet, ECC error).
   // First-error-wins CAS from the HSA runtime thread; acquire-loaded by the
   // completion drain path to fail pending semaphores instead of signaling.
-  // Owned by the queue (freed in deinit).
+  //
+  // Owned by the queue. Deinitialization takes the status out of the slot in
+  // the same step that frees it, so a non-zero slot always names a live status
+  // and every reader may clone from it without further coordination.
   iree_atomic_intptr_t error_status;
 
   // Hardware AQL queue created via hsa_queue_create. Owned by this queue.

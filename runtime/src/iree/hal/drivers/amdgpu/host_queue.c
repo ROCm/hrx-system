@@ -1060,8 +1060,13 @@ void iree_hal_amdgpu_host_queue_deinitialize(
   // Process any remaining notification entries before destroying resources.
   // If the GPU faulted, fail all pending entries so waiters get the actual
   // error. Otherwise drain normally (entries completed but not yet processed).
-  iree_status_t error = (iree_status_t)iree_atomic_load(
-      &queue->error_status, iree_memory_order_acquire);
+  //
+  // Emptying the slot in the same step that takes ownership of the failure is
+  // what makes the free below safe: a non-zero slot names a live status, and
+  // every reader that dereferences it - including the post-drain pass this
+  // function runs after the free - only clones from it.
+  iree_status_t error = (iree_status_t)iree_atomic_exchange(
+      &queue->error_status, 0, iree_memory_order_acq_rel);
   iree_hal_amdgpu_reclaim_positions_t reclaim_positions = {0};
   if (!iree_status_is_ok(error)) {
     iree_hal_amdgpu_notification_ring_fail_all_reclaim_positions(
