@@ -14,10 +14,12 @@ iree_py_generated_files(
   GENERATOR iree::vm::bytecode::spec::generate
   OUTPUTS
     execution_tables.inl
+    module_validation_obligations.inl
     tooling/isa_tables.c.inc
     tooling/module_tables.c.inc
   OUTPUT_FLAGS
     --output-file=execution_tables.inl
+    --output-file=module_validation_obligations.inl
     --output-file=isa_tables.c.inc
     --output-file=module_tables.c.inc
   ARGS --output-kind=tables
@@ -236,6 +238,25 @@ iree_cc_test(
   DEPS
     ::bytecode
     ::inspection
+    iree::testing::gtest
+    iree::testing::gtest_main
+    iree::vm
+    iree::vm::bytecode::wire
+)
+
+iree_cc_test(
+  NAME
+    verification_test
+  SRCS
+    "module_test_data.cc"
+    "module_test_data.h"
+    "module_validation_obligations.inl"
+    "verification_test.cc"
+  DEPS
+    ::bytecode
+    ::inspection
+    ::module
+    iree::base
     iree::testing::gtest
     iree::testing::gtest_main
     iree::vm

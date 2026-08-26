@@ -31,6 +31,7 @@ from render import (
     render_module_assertions,
     render_module_header,
     render_module_markdown,
+    render_module_validation_obligations,
     render_specification_index_markdown,
     render_tooling_isa_tables,
     render_tooling_module_tables,
@@ -198,6 +199,11 @@ def generated_table_outputs() -> dict[str, str]:
         ),
         "module_tables.c.inc": render_tooling_module_tables(
             _latest_projection(MODULE_SPECIFICATION)
+        ),
+        "module_validation_obligations.inl": (
+            render_module_validation_obligations(
+                _latest_projection(MODULE_SPECIFICATION)
+            )
         ),
     }
 

@@ -222,7 +222,12 @@ class ProjectionTest(unittest.TestCase):
         self.assertEqual(len(documentation_outputs), 21)
         self.assertEqual(
             set(table_outputs),
-            {"execution_tables.inl", "isa_tables.c.inc", "module_tables.c.inc"},
+            {
+                "execution_tables.inl",
+                "isa_tables.c.inc",
+                "module_tables.c.inc",
+                "module_validation_obligations.inl",
+            },
         )
         self.assertEqual(
             {path for path in documentation_outputs if path.endswith("/index.md")},
@@ -264,6 +269,7 @@ class ProjectionTest(unittest.TestCase):
         execution_table = table_outputs["execution_tables.inl"]
         isa_table = table_outputs["isa_tables.c.inc"]
         module_table = table_outputs["module_tables.c.inc"]
+        validation_obligations = table_outputs["module_validation_obligations.inl"]
         self.assertNotIn("IREE_SVL", isa_table + module_table)
         self.assertIn("iree_vm_bytecode_tooling_isa_string_table", isa_table)
         self.assertIn("iree_vm_bytecode_tooling_opcode_maps[][256]", isa_table)
@@ -271,6 +277,12 @@ class ProjectionTest(unittest.TestCase):
         self.assertIn("iree_vm_bytecode_tooling_module_string_table", module_table)
         self.assertIn("iree_vm_bytecode_tooling_sections", module_table)
         self.assertNotIn("iree_vm_bytecode_tooling_opcode_maps", module_table)
+        self.assertEqual(
+            validation_obligations.count(
+                "IREE_VM_BYTECODE_MODULE_VALIDATION_OBLIGATION("
+            ),
+            56,
+        )
         self.assertEqual(
             execution_table.count("IREE_VM_BYTECODE_EXECUTION_INFO_ROW("), 256
         )

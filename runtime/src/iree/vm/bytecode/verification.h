@@ -9,6 +9,10 @@
 
 #include "iree/vm/bytecode/module_storage.h"
 
+#ifdef __cplusplus
+extern "C" {
+#endif  // __cplusplus
+
 // Verifies provider-independent image and declaration structure and derives the
 // exact mapped construction plan. Instruction execution semantics are not
 // proven by this pass.
@@ -26,5 +30,9 @@ iree_status_t iree_vm_bytecode_module_verify_executable(
 // This performs no allocation and does not modify |plan|.
 iree_status_t iree_vm_bytecode_module_verify_inspectable(
     const iree_vm_bytecode_module_plan_t* plan);
+
+#ifdef __cplusplus
+}  // extern "C"
+#endif  // __cplusplus
 
 #endif  // IREE_VM_BYTECODE_VERIFICATION_H_

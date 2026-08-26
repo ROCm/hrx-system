@@ -16,6 +16,7 @@ from .c_header import (
     render_module_header,
     shared_selector_table_ids,
 )
+from .c_module_validation import render_module_validation_obligations
 from .c_tooling import render_tooling_isa_tables, render_tooling_module_tables
 from .json_projection import render_projection_json
 from .manifest import render_completeness_manifest, render_release_manifest
@@ -42,6 +43,7 @@ __all__ = (
     "render_module_assertions",
     "render_module_header",
     "render_module_markdown",
+    "render_module_validation_obligations",
     "render_specification_index_markdown",
     "render_projection_json",
     "render_release_manifest",

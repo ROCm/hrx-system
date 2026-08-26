@@ -16,6 +16,7 @@ iree_py_library(
     "__init__.py"
     "c_execution.py"
     "c_header.py"
+    "c_module_validation.py"
     "c_tooling.py"
     "json_projection.py"
     "manifest.py"

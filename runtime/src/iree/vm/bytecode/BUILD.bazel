@@ -21,6 +21,7 @@ iree_generated_files(
     name = "tables_gen",
     outs = [
         "execution_tables.inl",
+        "module_validation_obligations.inl",
         "tooling/isa_tables.c.inc",
         "tooling/module_tables.c.inc",
     ],
@@ -29,6 +30,7 @@ iree_generated_files(
         "execution_tables.inl": "--output-file=execution_tables.inl={path}",
         "isa_tables.c.inc": "--output-file=isa_tables.c.inc={path}",
         "module_tables.c.inc": "--output-file=module_tables.c.inc={path}",
+        "module_validation_obligations.inl": "--output-file=module_validation_obligations.inl={path}",
     },
     tags = ["skip-bazel_to_cmake"],
     tool = "//runtime/src/iree/vm/bytecode/spec:generate",
@@ -51,10 +53,12 @@ iree_py_generated_files(
   GENERATOR iree::vm::bytecode::spec::generate
   OUTPUTS
     execution_tables.inl
+    module_validation_obligations.inl
     tooling/isa_tables.c.inc
     tooling/module_tables.c.inc
   OUTPUT_FLAGS
     --output-file=execution_tables.inl
+    --output-file=module_validation_obligations.inl
     --output-file=isa_tables.c.inc
     --output-file=module_tables.c.inc
   ARGS --output-kind=tables
@@ -287,6 +291,26 @@ iree_runtime_cc_test(
     deps = [
         ":bytecode",
         ":inspection",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+        "//runtime/src/iree/vm",
+        "//runtime/src/iree/vm/bytecode/wire",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "verification_test",
+    srcs = [
+        "module_test_data.cc",
+        "module_test_data.h",
+        "module_validation_obligations.inl",
+        "verification_test.cc",
+    ],
+    deps = [
+        ":bytecode",
+        ":inspection",
+        ":module",
+        "//runtime/src/iree/base",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
         "//runtime/src/iree/vm",
