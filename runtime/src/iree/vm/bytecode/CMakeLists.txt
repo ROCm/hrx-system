@@ -324,6 +324,22 @@ iree_cc_fuzz(
     iree::vm::bytecode::wire
 )
 
+iree_cc_fuzz(
+  NAME
+    module_factory_fuzz
+  SRCS
+    "module_factory_fuzz.cc"
+    "module_test_data.cc"
+    "module_test_data.h"
+  DEPS
+    ::bytecode
+    ::dump
+    ::inspection
+    iree::base
+    iree::vm
+    iree::vm::bytecode::wire
+)
+
 iree_cc_binary_benchmark(
   NAME
     module_benchmark

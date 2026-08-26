@@ -383,6 +383,23 @@ iree_runtime_cc_fuzz(
     ],
 )
 
+iree_runtime_cc_fuzz(
+    name = "module_factory_fuzz",
+    srcs = [
+        "module_factory_fuzz.cc",
+        "module_test_data.cc",
+        "module_test_data.h",
+    ],
+    deps = [
+        ":bytecode",
+        ":dump",
+        ":inspection",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/vm",
+        "//runtime/src/iree/vm/bytecode/wire",
+    ],
+)
+
 iree_runtime_cc_benchmark(
     name = "module_benchmark",
     srcs = [
