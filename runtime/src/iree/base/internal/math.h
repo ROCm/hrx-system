@@ -132,6 +132,30 @@ static inline bool iree_math_checked_lcm_i64(int64_t a, int64_t b,
 // Bitwise rotation (aka circular shifts)
 //==============================================================================
 
+// Unsigned rotate-left a 32-bit integer.
+// https://en.cppreference.com/w/cpp/numeric/rotl
+//
+// NOTE: this mirrors the compiler-recognized 64-bit form below; keep the two
+// forms in sync.
+static inline uint32_t iree_math_rotl_u32(const uint32_t n, uint32_t c) {
+  const uint32_t mask = 8 * sizeof(n) - 1;
+  c &= mask;
+  if (!c) return n;
+  return (n << c) | (n >> (32 - c));
+}
+
+// Unsigned rotate-right a 32-bit integer.
+// https://en.cppreference.com/w/cpp/numeric/rotr
+//
+// NOTE: this mirrors the compiler-recognized 64-bit form below; keep the two
+// forms in sync.
+static inline uint32_t iree_math_rotr_u32(const uint32_t n, uint32_t c) {
+  const uint32_t mask = 8 * sizeof(n) - 1;
+  c &= mask;
+  if (!c) return n;
+  return (n >> c) | (n << ((-c) & mask));
+}
+
 // Unsigned rotate-left a 64-bit integer.
 // https://en.cppreference.com/w/cpp/numeric/rotl
 //
