@@ -6,6 +6,7 @@
 
 load("//build_tools/bazel:cmake.bzl", "iree_cmake_extra_content")
 load("//build_tools/bazel:generate.bzl", "iree_generated_files")
+load("//build_tools/bazel:query.bzl", "iree_assert_no_dependency")
 load("//runtime/build_tools/bazel:cc.bzl", "iree_runtime_cc_library")
 load("//runtime/build_tools/bazel:cc_benchmark.bzl", "iree_runtime_cc_benchmark")
 load("//runtime/build_tools/bazel:cc_fuzz.bzl", "iree_runtime_cc_fuzz")
@@ -15,6 +16,24 @@ package(
     default_visibility = ["//visibility:private"],
     features = ["layering_check"],
     licenses = ["notice"],
+)
+
+#===------------------------------------------------------------------------===#
+# Layering checks
+#===------------------------------------------------------------------------===#
+
+# Inspection and dump must remain usable without linking the executable
+# bytecode module, verifier, or interpreter.
+iree_assert_no_dependency(
+    name = "inspection_no_bytecode_executor_dep",
+    dependency = "//runtime/src/iree/vm/bytecode:bytecode",
+    target = "//runtime/src/iree/vm/bytecode:inspection",
+)
+
+iree_assert_no_dependency(
+    name = "dump_no_bytecode_executor_dep",
+    dependency = "//runtime/src/iree/vm/bytecode:bytecode",
+    target = "//runtime/src/iree/vm/bytecode:dump",
 )
 
 iree_generated_files(

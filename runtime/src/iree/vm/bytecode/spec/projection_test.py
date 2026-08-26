@@ -270,6 +270,11 @@ class ProjectionTest(unittest.TestCase):
         isa_table = table_outputs["isa_tables.c.inc"]
         module_table = table_outputs["module_tables.c.inc"]
         validation_obligations = table_outputs["module_validation_obligations.inl"]
+        instructions = tuple(
+            entity
+            for entity in ISA_SPECIFICATION.entities
+            if isinstance(entity, Instruction)
+        )
         self.assertNotIn("IREE_SVL", isa_table + module_table)
         self.assertIn("iree_vm_bytecode_tooling_isa_string_table", isa_table)
         self.assertIn("iree_vm_bytecode_tooling_opcode_maps[][256]", isa_table)
@@ -277,6 +282,12 @@ class ProjectionTest(unittest.TestCase):
         self.assertIn("iree_vm_bytecode_tooling_module_string_table", module_table)
         self.assertIn("iree_vm_bytecode_tooling_sections", module_table)
         self.assertNotIn("iree_vm_bytecode_tooling_opcode_maps", module_table)
+        instruction_table = isa_table.split(
+            "iree_vm_bytecode_tooling_instructions[] = {", 1
+        )[1].split("\n};", 1)[0]
+        self.assertEqual(instruction_table.count("\n  {"), len(instructions))
+        for instruction in instructions:
+            self.assertIn(json.dumps(instruction.mnemonic), isa_table)
         self.assertEqual(
             validation_obligations.count(
                 "IREE_VM_BYTECODE_MODULE_VALIDATION_OBLIGATION("
