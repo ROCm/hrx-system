@@ -53,12 +53,14 @@ from loom.dsl import (
     ATTR_TYPE_SYMBOL,
     ATTR_TYPE_SYMBOL_ARRAY,
     ATTR_TYPE_SYMBOL_SET,
+    CONSTANT_LIKE,
     DECOMPOSABLE,
     ELEMENTWISE,
     HINT,
     INTEGER,
     MODULE_SCOPE,
     POOL,
+    PURE,
     SYMBOL_DEFINE,
     TERMINATOR,
     VECTOR,
@@ -128,6 +130,7 @@ from loom.dsl import (
     YieldCountMatchesResults,
     YieldTypesMatchResults,
 )
+from loom.gen.ops import c_traits
 from loom.gen.ops import model as c_table_model
 from loom.gen.ops.c_builders import generate_builders_c
 from loom.gen.ops.c_enums import TYPE_CONSTRAINT_MAP
@@ -174,6 +177,16 @@ def _compact_tensor_type_def(name: str) -> TypeDef:
             OptionalGroup([COMMA, EncodingOf("encoding")], anchor="encoding"),
         ],
     )
+
+
+def test_constant_like_ops_derive_safe_to_speculate() -> None:
+    constant = Op(
+        "test.constant",
+        results=[Result("result", INTEGER)],
+        traits=[PURE, CONSTANT_LIKE],
+    )
+
+    assert c_traits.trait_flags(constant) == ("LOOM_TRAIT_PURE | LOOM_TRAIT_CONSTANT_LIKE | LOOM_TRAIT_SAFE_TO_SPECULATE")
 
 
 def test_load_dialect_generation_calls_only_requested_loader() -> None:

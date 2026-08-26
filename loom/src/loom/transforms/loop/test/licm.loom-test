@@ -28,6 +28,31 @@ func.def @hoists_speculatable_invariant_chain(%n: index, %a: i32, %b: i32) {
 
 // ====
 
+// Constant-like ops are inherently safe to execute outside a potentially
+// zero-trip loop and move before it without a per-dialect speculation rule.
+func.def @hoists_constant_like_ops(%n: index) {
+  %loop_begin = index.constant 0 : index
+  %loop_step = index.constant 1 : index
+  scf.for %iv = [%loop_begin to %n step %loop_step] {
+    %tile_size = index.constant 16 : index
+    test.use %tile_size : index
+  }
+  func.return
+}
+
+// ----
+func.def @hoists_constant_like_ops(%n: index) {
+  %loop_begin = index.constant 0 : index
+  %loop_step = index.constant 1 : index
+  %tile_size = index.constant 16 : index
+  scf.for %iv = [%loop_begin to %n step %loop_step] {
+    test.use %tile_size : index
+  }
+  func.return
+}
+
+// ====
+
 // PURE does not imply that an op can execute on a path where the loop body did
 // not run. test.addi intentionally lacks SAFE_TO_SPECULATE and stays inside a
 // loop whose trip count may be zero.

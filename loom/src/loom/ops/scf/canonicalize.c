@@ -1208,8 +1208,7 @@ static bool loom_scf_if_op_can_selectify_speculate(const loom_module_t* module,
   if (loom_traits_may_read(traits) || loom_traits_may_write(traits)) {
     return false;
   }
-  return loom_traits_are_safe_to_speculate(traits) ||
-         iree_any_bit_set(traits, LOOM_TRAIT_CONSTANT_LIKE);
+  return loom_traits_are_safe_to_speculate(traits);
 }
 
 static bool loom_scf_if_block_can_selectify_speculate(

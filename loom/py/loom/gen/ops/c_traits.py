@@ -132,6 +132,13 @@ def trait_flags(op: Op) -> str:
     if "LOOM_TRAIT_DECOMPOSABLE" not in bits and is_derived_decomposable:
         bits.append("LOOM_TRAIT_DECOMPOSABLE")
 
+    # ConstantLike's DSL contract requires a pure, operand-free, region-free,
+    # single-result operation. Such a materialization cannot trap or observe
+    # runtime state, so every consumer should see the same speculation fact
+    # without each transform carrying a ConstantLike exception.
+    if _has_trait(op, "ConstantLike") and "LOOM_TRAIT_SAFE_TO_SPECULATE" not in bits:
+        bits.append("LOOM_TRAIT_SAFE_TO_SPECULATE")
+
     has_read = False
     has_write = False
     for effect in op.effects:
