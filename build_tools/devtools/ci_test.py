@@ -994,9 +994,7 @@ class CiTest(unittest.TestCase):
             with self.subTest(path=path):
                 block = self.workflow_job_block(path, job_name)
                 mkdir_command = 'mkdir -p "$HOME"'
-                git_config_command = (
-                    'git config --global --add safe.directory "$PWD"'
-                )
+                git_config_command = 'git config --global --add safe.directory "$PWD"'
                 self.assertIn(mkdir_command, block)
                 self.assertIn(git_config_command, block)
                 self.assertLess(
@@ -1343,15 +1341,16 @@ fi
                 self.assertIn('- "loom/**"', text)
                 self.assertNotIn('- "libhrx/**"', text)
 
-    def test_importer_workflow_is_path_scoped_and_uses_locked_cache_key(self):
+    def test_importer_workflow_covers_loom_changes_and_uses_locked_cache_key(self):
         text = Path(".github/workflows/ci_importers.yml").read_text()
 
         self.assertIn("name: CI Importers", text)
         self.assertIn('- "requirements-importers-*.lock.txt"', text)
         self.assertIn('- "requirements-importers-*.in"', text)
         self.assertIn('- "build_tools/devtools/**"', text)
-        self.assertIn('- "loom/config/**"', text)
-        self.assertIn('- "loom/py/loom/importers/**"', text)
+        self.assertIn('- "loom/**"', text)
+        self.assertNotIn('- "loom/config/**"', text)
+        self.assertNotIn('- "loom/py/loom/importers/**"', text)
         self.assertNotIn('- "runtime/**"', text)
         self.assertNotIn('- "libhrx/**"', text)
 

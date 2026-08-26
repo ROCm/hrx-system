@@ -20,8 +20,7 @@ on:
       - "requirements-importers-*.in"
       - "requirements-importers-*.lock.txt"
       - "build_tools/devtools/**"
-      - "loom/config/**"
-      - "loom/py/loom/importers/**"
+      - "loom/**"
   push:
     branches:
       - main
@@ -37,8 +36,7 @@ on:
       - "requirements-importers-*.in"
       - "requirements-importers-*.lock.txt"
       - "build_tools/devtools/**"
-      - "loom/config/**"
-      - "loom/py/loom/importers/**"
+      - "loom/**"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
