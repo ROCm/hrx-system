@@ -680,6 +680,52 @@ def _validate_verification_form(
             (InstructionFieldRole.IMMEDIATE,),
             rule_arguments=(0, maximum_log2),
         )
+    elif verification_form in (
+        "INTEGER_BITSTREAM_PACK",
+        "INTEGER_BITSTREAM_UNPACK",
+    ):
+        if instruction.byte_length != 8:
+            raise ValueError(
+                f"{instruction.mnemonic}: integer bitstream record is not 8 bytes"
+            )
+        require_value(1)
+        require_value(2)
+        require_field(
+            3,
+            1,
+            ALLOWED_RANGE.entity_id,
+            (InstructionFieldRole.IMMEDIATE,),
+            rule_arguments=(1, 64),
+        )
+        require_field(
+            4,
+            1,
+            ALLOWED_RANGE.entity_id,
+            (InstructionFieldRole.IMMEDIATE,),
+            rule_arguments=(1, 255),
+        )
+        require_field(
+            5,
+            1,
+            ALLOWED_RANGE.entity_id,
+            (InstructionFieldRole.IMMEDIATE,),
+            rule_arguments=(1, 255),
+        )
+        carrier_values = (8, 16, 32, 64)
+        require_field(
+            6,
+            1,
+            ALLOWED_VALUES.entity_id,
+            (InstructionFieldRole.IMMEDIATE,),
+            rule_arguments=(carrier_values,),
+        )
+        require_field(
+            7,
+            1,
+            ALLOWED_VALUES.entity_id,
+            (InstructionFieldRole.IMMEDIATE,),
+            rule_arguments=(carrier_values,),
+        )
     elif verification_form == "REF_CLEAR":
         if instruction.byte_length != 4:
             raise ValueError(f"{instruction.mnemonic}: ref clear record is not 4 bytes")

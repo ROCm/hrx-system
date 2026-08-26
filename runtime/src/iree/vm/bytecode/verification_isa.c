@@ -74,6 +74,8 @@ typedef enum iree_vm_bytecode_verification_form_e {
   IREE_VM_BYTECODE_VERIFICATION_FORM_INTEGER_LEA,
   IREE_VM_BYTECODE_VERIFICATION_FORM_INTEGER_CEILDIV_POW2_U32,
   IREE_VM_BYTECODE_VERIFICATION_FORM_INTEGER_CEILDIV_POW2_U64,
+  IREE_VM_BYTECODE_VERIFICATION_FORM_INTEGER_BITSTREAM_PACK,
+  IREE_VM_BYTECODE_VERIFICATION_FORM_INTEGER_BITSTREAM_UNPACK,
   IREE_VM_BYTECODE_VERIFICATION_FORM_FLOAT_MINMAX,
   IREE_VM_BYTECODE_VERIFICATION_FORM_FLOAT_COMPARE,
   IREE_VM_BYTECODE_VERIFICATION_FORM_FLOAT_CLASSIFY,
@@ -192,6 +194,48 @@ static iree_status_t iree_vm_bytecode_verify_value_register_range(
   if (base > register_count || count > register_count - base) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "value register range is out of bounds");
+  }
+  return iree_ok_status();
+}
+
+static bool iree_vm_bytecode_integer_carrier_width_is_valid(uint8_t width) {
+  return width == 8 || width == 16 || width == 32 || width == 64;
+}
+
+static iree_status_t iree_vm_bytecode_verify_integer_bitstream_record(
+    const iree_vm_isa_integer_bitstream_pack_record_t* record,
+    uint16_t value_register_count, bool is_pack) {
+  if (record->source_count_u8 == 0 || record->result_count_u8 == 0) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "integer bitstream register range is empty");
+  }
+  IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_value_register_range(
+      record->source_base_v8, record->source_count_u8, value_register_count));
+  IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_value_register_range(
+      record->result_base_v8, record->result_count_u8, value_register_count));
+  if (record->field_width_u8 == 0 || record->field_width_u8 > 64) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "integer bitstream field width is invalid");
+  }
+  if (!iree_vm_bytecode_integer_carrier_width_is_valid(
+          record->source_width_u8) ||
+      !iree_vm_bytecode_integer_carrier_width_is_valid(
+          record->result_width_u8)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "integer bitstream carrier width is invalid");
+  }
+  const uint32_t source_bit_count =
+      record->source_count_u8 *
+      (is_pack ? record->field_width_u8 : record->source_width_u8);
+  const uint32_t result_bit_count =
+      record->result_count_u8 *
+      (is_pack ? record->result_width_u8 : record->field_width_u8);
+  const uint8_t field_carrier_width =
+      is_pack ? record->source_width_u8 : record->result_width_u8;
+  if (record->field_width_u8 > field_carrier_width ||
+      source_bit_count != result_bit_count || source_bit_count > 64) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "integer bitstream shape is invalid");
   }
   return iree_ok_status();
 }
@@ -1384,6 +1428,16 @@ static iree_status_t iree_vm_bytecode_function_verify(
           return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                                   "integer.ceildiv.pow2.u64 log2 is invalid");
         }
+        break;
+      }
+      case IREE_VM_BYTECODE_VERIFICATION_FORM_INTEGER_BITSTREAM_PACK:
+      case IREE_VM_BYTECODE_VERIFICATION_FORM_INTEGER_BITSTREAM_UNPACK: {
+        const iree_vm_isa_integer_bitstream_pack_record_t* record =
+            (const iree_vm_isa_integer_bitstream_pack_record_t*)record_data;
+        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_integer_bitstream_record(
+            record, function->value_register_count_u16,
+            execution_info.verification_form ==
+                IREE_VM_BYTECODE_VERIFICATION_FORM_INTEGER_BITSTREAM_PACK));
         break;
       }
       case IREE_VM_BYTECODE_VERIFICATION_FORM_FLOAT_MINMAX: {

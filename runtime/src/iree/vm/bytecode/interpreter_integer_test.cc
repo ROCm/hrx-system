@@ -74,6 +74,22 @@ void ExpectDivisionAliasing(Execute execute, uint64_t lhs, uint64_t rhs,
   }
 }
 
+template <typename Record>
+Record MakeBitstreamRecord(uint8_t result_base, uint8_t source_base,
+                           uint8_t field_width, uint8_t source_count,
+                           uint8_t result_count, uint8_t source_width,
+                           uint8_t result_width) {
+  Record record = {};
+  record.result_base_v8 = result_base;
+  record.source_base_v8 = source_base;
+  record.field_width_u8 = field_width;
+  record.source_count_u8 = source_count;
+  record.result_count_u8 = result_count;
+  record.source_width_u8 = source_width;
+  record.result_width_u8 = result_width;
+  return record;
+}
+
 template <typename Record, typename Execute>
 void ExpectComparisonPredicates(Execute execute, uint64_t lhs, uint64_t rhs,
                                 const uint64_t (&expected)[10]) {
@@ -567,6 +583,164 @@ TEST(VMBytecodeInterpreterIntegerTest, ExecutesCeilDivPow2U64Record) {
     record.log2_u8 = test_case.log2;
     iree_vm_bytecode_execute_integer_ceildiv_pow2_u64(&record, values);
     EXPECT_EQ(values[0], test_case.expected);
+  }
+}
+
+TEST(VMBytecodeInterpreterIntegerTest, PacksEveryCarrierWidth) {
+  {
+    uint64_t values[] = {1, 2, 3, 0, UINT64_MAX};
+    const auto record =
+        MakeBitstreamRecord<iree_vm_isa_integer_bitstream_pack_record_t>(
+            4, 0, 2, 4, 1, 8, 8);
+    iree_vm_bytecode_execute_integer_bitstream_pack(&record, values);
+    EXPECT_EQ(values[4], UINT64_C(0x39));
+  }
+  {
+    uint64_t values[] = {0x1234, 0xAB12, UINT64_MAX};
+    const auto record =
+        MakeBitstreamRecord<iree_vm_isa_integer_bitstream_pack_record_t>(
+            2, 0, 8, 2, 1, 16, 16);
+    iree_vm_bytecode_execute_integer_bitstream_pack(&record, values);
+    EXPECT_EQ(values[2], UINT64_C(0x1234));
+  }
+  {
+    uint64_t values[] = {0x89ABCDEF, 0x01234567, UINT64_MAX};
+    const auto record =
+        MakeBitstreamRecord<iree_vm_isa_integer_bitstream_pack_record_t>(
+            2, 0, 16, 2, 1, 32, 32);
+    iree_vm_bytecode_execute_integer_bitstream_pack(&record, values);
+    EXPECT_EQ(values[2], UINT64_C(0x4567CDEF));
+  }
+  {
+    uint64_t values[] = {UINT64_C(0xFEDCBA9889ABCDEF),
+                         UINT64_C(0x7654321001234567), UINT64_MAX};
+    const auto record =
+        MakeBitstreamRecord<iree_vm_isa_integer_bitstream_pack_record_t>(
+            2, 0, 32, 2, 1, 64, 64);
+    iree_vm_bytecode_execute_integer_bitstream_pack(&record, values);
+    EXPECT_EQ(values[2], UINT64_C(0x0123456789ABCDEF));
+  }
+  {
+    uint64_t values[] = {UINT64_MAX, 0};
+    const auto record =
+        MakeBitstreamRecord<iree_vm_isa_integer_bitstream_pack_record_t>(
+            1, 0, 64, 1, 1, 64, 64);
+    iree_vm_bytecode_execute_integer_bitstream_pack(&record, values);
+    EXPECT_EQ(values[1], UINT64_MAX);
+  }
+}
+
+TEST(VMBytecodeInterpreterIntegerTest, UnpacksEveryCarrierWidth) {
+  {
+    uint64_t values[] = {UINT64_C(0x39), UINT64_MAX, UINT64_MAX, UINT64_MAX,
+                         UINT64_MAX};
+    const auto record =
+        MakeBitstreamRecord<iree_vm_isa_integer_bitstream_unpack_u_record_t>(
+            1, 0, 2, 1, 4, 8, 8);
+    iree_vm_bytecode_execute_integer_bitstream_unpack_u(&record, values);
+    EXPECT_EQ(values[1], 1u);
+    EXPECT_EQ(values[2], 2u);
+    EXPECT_EQ(values[3], 3u);
+    EXPECT_EQ(values[4], 0u);
+  }
+  {
+    uint64_t values[] = {UINT64_C(0xFF80), UINT64_MAX, UINT64_MAX};
+    const auto record =
+        MakeBitstreamRecord<iree_vm_isa_integer_bitstream_unpack_u_record_t>(
+            1, 0, 8, 1, 2, 16, 16);
+    iree_vm_bytecode_execute_integer_bitstream_unpack_u(&record, values);
+    EXPECT_EQ(values[1], UINT64_C(0x80));
+    EXPECT_EQ(values[2], UINT64_C(0xFF));
+  }
+  {
+    uint64_t values[] = {UINT64_C(0x89ABCDEF), UINT64_MAX, UINT64_MAX};
+    const auto record =
+        MakeBitstreamRecord<iree_vm_isa_integer_bitstream_unpack_u_record_t>(
+            1, 0, 16, 1, 2, 32, 32);
+    iree_vm_bytecode_execute_integer_bitstream_unpack_u(&record, values);
+    EXPECT_EQ(values[1], UINT64_C(0xCDEF));
+    EXPECT_EQ(values[2], UINT64_C(0x89AB));
+  }
+  {
+    uint64_t values[] = {UINT64_C(0x0123456789ABCDEF), UINT64_MAX, UINT64_MAX};
+    const auto record =
+        MakeBitstreamRecord<iree_vm_isa_integer_bitstream_unpack_u_record_t>(
+            1, 0, 32, 1, 2, 64, 64);
+    iree_vm_bytecode_execute_integer_bitstream_unpack_u(&record, values);
+    EXPECT_EQ(values[1], UINT64_C(0x89ABCDEF));
+    EXPECT_EQ(values[2], UINT64_C(0x01234567));
+  }
+}
+
+TEST(VMBytecodeInterpreterIntegerTest, SignExtendsBitstreamFields) {
+  uint64_t values[] = {UINT64_C(0xFF80), UINT64_MAX, UINT64_MAX};
+  const auto record =
+      MakeBitstreamRecord<iree_vm_isa_integer_bitstream_unpack_s_record_t>(
+          1, 0, 8, 1, 2, 16, 16);
+  iree_vm_bytecode_execute_integer_bitstream_unpack_s(&record, values);
+  EXPECT_EQ(values[1], UINT64_C(0xFF80));
+  EXPECT_EQ(values[2], UINT64_C(0xFFFF));
+
+  uint64_t bits[65] = {UINT64_MAX};
+  const auto bit_record =
+      MakeBitstreamRecord<iree_vm_isa_integer_bitstream_unpack_s_record_t>(
+          1, 0, 1, 1, 64, 64, 8);
+  iree_vm_bytecode_execute_integer_bitstream_unpack_s(&bit_record, bits);
+  for (iree_host_size_t i = 1; i < IREE_ARRAYSIZE(bits); ++i) {
+    EXPECT_EQ(bits[i], UINT64_C(0xFF));
+  }
+}
+
+TEST(VMBytecodeInterpreterIntegerTest, CapturesOverlappingBitstreamRanges) {
+  constexpr uint8_t kRegisterCount = 16;
+  for (uint8_t source_base = 0; source_base <= kRegisterCount - 8;
+       ++source_base) {
+    for (uint8_t result_base = 0; result_base <= kRegisterCount - 4;
+         ++result_base) {
+      SCOPED_TRACE(::testing::Message()
+                   << "pack source_base=" << static_cast<int>(source_base)
+                   << " result_base=" << static_cast<int>(result_base));
+      uint64_t values[kRegisterCount];
+      for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(values); ++i) {
+        values[i] = UINT64_MAX;
+      }
+      for (uint8_t i = 0; i < 8; ++i) {
+        values[source_base + i] = i + 1;
+      }
+      const auto record =
+          MakeBitstreamRecord<iree_vm_isa_integer_bitstream_pack_record_t>(
+              result_base, source_base, 4, 8, 4, 8, 8);
+      iree_vm_bytecode_execute_integer_bitstream_pack(&record, values);
+      EXPECT_EQ(values[result_base + 0], UINT64_C(0x21));
+      EXPECT_EQ(values[result_base + 1], UINT64_C(0x43));
+      EXPECT_EQ(values[result_base + 2], UINT64_C(0x65));
+      EXPECT_EQ(values[result_base + 3], UINT64_C(0x87));
+    }
+  }
+
+  for (uint8_t source_base = 0; source_base <= kRegisterCount - 4;
+       ++source_base) {
+    for (uint8_t result_base = 0; result_base <= kRegisterCount - 8;
+         ++result_base) {
+      SCOPED_TRACE(::testing::Message()
+                   << "unpack source_base=" << static_cast<int>(source_base)
+                   << " result_base=" << static_cast<int>(result_base));
+      uint64_t values[kRegisterCount];
+      for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(values); ++i) {
+        values[i] = UINT64_MAX;
+      }
+      values[source_base + 0] = UINT64_C(0x21);
+      values[source_base + 1] = UINT64_C(0x43);
+      values[source_base + 2] = UINT64_C(0x65);
+      values[source_base + 3] = UINT64_C(0x87);
+      const auto record =
+          MakeBitstreamRecord<iree_vm_isa_integer_bitstream_unpack_u_record_t>(
+              result_base, source_base, 4, 4, 8, 8, 8);
+      iree_vm_bytecode_execute_integer_bitstream_unpack_u(&record, values);
+      for (uint8_t i = 0; i < 8; ++i) {
+        EXPECT_EQ(values[result_base + i], i + 1);
+      }
+    }
   }
 }
 

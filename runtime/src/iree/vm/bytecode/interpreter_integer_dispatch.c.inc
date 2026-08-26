@@ -8,6 +8,8 @@
 // function. Keeping the labels in that function preserves direct-threaded
 // dispatch and makes the shared register banks explicit at each handler.
 
+// clang-format off
+
   IREE_VM_BYTECODE_DISPATCH_CASE(INTEGER_ADD_I32, integer_add_i32) {
     const iree_vm_isa_integer_add_i32_record_t* record =
         (const iree_vm_isa_integer_add_i32_record_t*)record_data;
@@ -460,3 +462,27 @@
     IREE_VM_BYTECODE_DISPATCH_NEXT(
         iree_vm_isa_integer_ceildiv_pow2_u64_record_t);
   }
+  IREE_VM_BYTECODE_DISPATCH_CASE(INTEGER_BITSTREAM_PACK, integer_bitstream_pack) {
+    const iree_vm_isa_integer_bitstream_pack_record_t* record =
+        (const iree_vm_isa_integer_bitstream_pack_record_t*)record_data;
+    iree_vm_bytecode_execute_integer_bitstream_pack(record, values);
+    IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_isa_integer_bitstream_pack_record_t);
+  }
+  IREE_VM_BYTECODE_DISPATCH_CASE(INTEGER_BITSTREAM_UNPACK_U,
+                                 integer_bitstream_unpack_u) {
+    const iree_vm_isa_integer_bitstream_unpack_u_record_t* record =
+        (const iree_vm_isa_integer_bitstream_unpack_u_record_t*)record_data;
+    iree_vm_bytecode_execute_integer_bitstream_unpack_u(record, values);
+    IREE_VM_BYTECODE_DISPATCH_NEXT(
+        iree_vm_isa_integer_bitstream_unpack_u_record_t);
+  }
+  IREE_VM_BYTECODE_DISPATCH_CASE(INTEGER_BITSTREAM_UNPACK_S,
+                                 integer_bitstream_unpack_s) {
+    const iree_vm_isa_integer_bitstream_unpack_s_record_t* record =
+        (const iree_vm_isa_integer_bitstream_unpack_s_record_t*)record_data;
+    iree_vm_bytecode_execute_integer_bitstream_unpack_s(record, values);
+    IREE_VM_BYTECODE_DISPATCH_NEXT(
+        iree_vm_isa_integer_bitstream_unpack_s_record_t);
+  }
+
+// clang-format on

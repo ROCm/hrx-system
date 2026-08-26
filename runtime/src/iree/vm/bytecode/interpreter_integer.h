@@ -390,4 +390,82 @@ iree_vm_bytecode_execute_integer_ceildiv_pow2_u64(
   values[record->dst_v8] = (source >> record->log2_u8) + ((source & mask) != 0);
 }
 
+static inline IREE_ATTRIBUTE_ALWAYS_INLINE uint64_t
+iree_vm_bytecode_integer_low_mask(uint8_t width) {
+  return width == 64 ? UINT64_MAX : (UINT64_C(1) << width) - UINT64_C(1);
+}
+
+typedef enum iree_vm_bytecode_integer_bitstream_mode_e {
+  IREE_VM_BYTECODE_INTEGER_BITSTREAM_MODE_PACK = 0,
+  IREE_VM_BYTECODE_INTEGER_BITSTREAM_MODE_UNPACK_U = 1,
+  IREE_VM_BYTECODE_INTEGER_BITSTREAM_MODE_UNPACK_S = 2,
+} iree_vm_bytecode_integer_bitstream_mode_t;
+
+static inline IREE_ATTRIBUTE_ALWAYS_INLINE void
+iree_vm_bytecode_execute_integer_bitstream(
+    uint8_t result_base, uint8_t source_base, uint8_t field_width,
+    uint8_t source_count, uint8_t result_count, uint8_t source_width,
+    uint8_t result_width, iree_vm_bytecode_integer_bitstream_mode_t mode,
+    uint64_t* values) {
+  const bool is_pack = mode == IREE_VM_BYTECODE_INTEGER_BITSTREAM_MODE_PACK;
+  const bool is_signed =
+      mode == IREE_VM_BYTECODE_INTEGER_BITSTREAM_MODE_UNPACK_S;
+  uint64_t stream = 0;
+  const uint8_t source_field_width = is_pack ? field_width : source_width;
+  const uint64_t source_mask =
+      iree_vm_bytecode_integer_low_mask(source_field_width);
+  for (uint8_t i = 0; i < source_count; ++i) {
+    stream |= (values[source_base + i] & source_mask)
+              << ((uint32_t)i * source_field_width);
+  }
+
+  const uint8_t result_field_width = is_pack ? result_width : field_width;
+  const uint64_t result_field_mask =
+      iree_vm_bytecode_integer_low_mask(result_field_width);
+  const uint64_t result_carrier_mask =
+      iree_vm_bytecode_integer_low_mask(result_width);
+  for (uint8_t i = 0; i < result_count; ++i) {
+    uint64_t field =
+        (stream >> ((uint32_t)i * result_field_width)) & result_field_mask;
+    if (!is_pack && is_signed && field_width < 64) {
+      const uint64_t sign_bit = UINT64_C(1) << (field_width - 1);
+      field = (field ^ sign_bit) - sign_bit;
+    }
+    values[result_base + i] = field & result_carrier_mask;
+  }
+}
+
+static inline IREE_ATTRIBUTE_ALWAYS_INLINE void
+iree_vm_bytecode_execute_integer_bitstream_pack(
+    const iree_vm_isa_integer_bitstream_pack_record_t* record,
+    uint64_t* values) {
+  iree_vm_bytecode_execute_integer_bitstream(
+      record->result_base_v8, record->source_base_v8, record->field_width_u8,
+      record->source_count_u8, record->result_count_u8, record->source_width_u8,
+      record->result_width_u8, IREE_VM_BYTECODE_INTEGER_BITSTREAM_MODE_PACK,
+      values);
+}
+
+static inline IREE_ATTRIBUTE_ALWAYS_INLINE void
+iree_vm_bytecode_execute_integer_bitstream_unpack_u(
+    const iree_vm_isa_integer_bitstream_unpack_u_record_t* record,
+    uint64_t* values) {
+  iree_vm_bytecode_execute_integer_bitstream(
+      record->result_base_v8, record->source_base_v8, record->field_width_u8,
+      record->source_count_u8, record->result_count_u8, record->source_width_u8,
+      record->result_width_u8, IREE_VM_BYTECODE_INTEGER_BITSTREAM_MODE_UNPACK_U,
+      values);
+}
+
+static inline IREE_ATTRIBUTE_ALWAYS_INLINE void
+iree_vm_bytecode_execute_integer_bitstream_unpack_s(
+    const iree_vm_isa_integer_bitstream_unpack_s_record_t* record,
+    uint64_t* values) {
+  iree_vm_bytecode_execute_integer_bitstream(
+      record->result_base_v8, record->source_base_v8, record->field_width_u8,
+      record->source_count_u8, record->result_count_u8, record->source_width_u8,
+      record->result_width_u8, IREE_VM_BYTECODE_INTEGER_BITSTREAM_MODE_UNPACK_S,
+      values);
+}
+
 #endif  // IREE_VM_BYTECODE_INTERPRETER_INTEGER_H_

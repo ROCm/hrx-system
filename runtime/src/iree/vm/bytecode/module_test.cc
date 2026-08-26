@@ -1475,6 +1475,94 @@ TEST(VMBytecodeModuleTest,
   iree_vm_environment_free(environment);
 }
 
+TEST(VMBytecodeModuleTest, RejectsMalformedIntegerBitstreamInstructions) {
+  iree_vm_environment_t* environment = nullptr;
+  IREE_ASSERT_OK(
+      iree_vm_environment_allocate(iree_allocator_system(), &environment));
+  const auto expect_rejected = [&](const auto& record) {
+    std::vector<uint8_t> image = BuildOwnershipModuleImage();
+    const MutableFunctionImage function = FindFunctionImage(&image, 1);
+    ASSERT_NE(function.row, nullptr);
+    constexpr uint32_t kInstructionOffset = 8;
+    ASSERT_LE(kInstructionOffset + sizeof(record),
+              function.row->bytecode_length_u32 -
+                  sizeof(iree_vm_isa_control_return_record_t));
+    std::memcpy(function.bytecode + kInstructionOffset, &record,
+                sizeof(record));
+
+    iree_vm_module_t* module = nullptr;
+    IREE_EXPECT_STATUS_IS(
+        IREE_STATUS_INVALID_ARGUMENT,
+        iree_vm_bytecode_module_create(
+            environment, IREE_SV("malformed_bitstream"),
+            {iree_make_const_byte_span(image.data(), image.size()),
+             iree_allocator_null()},
+            iree_allocator_system(), &module));
+    EXPECT_EQ(module, nullptr);
+    iree_vm_module_release(module);
+  };
+
+  iree_vm_isa_integer_bitstream_pack_record_t pack = {};
+  pack.opcode_u8 = IREE_VM_ISA_CORE_OPCODE_INTEGER_BITSTREAM_PACK;
+  pack.result_base_v8 = 1;
+  pack.source_base_v8 = 0;
+  pack.field_width_u8 = 8;
+  pack.source_count_u8 = 1;
+  pack.result_count_u8 = 1;
+  pack.source_width_u8 = 8;
+  pack.result_width_u8 = 8;
+
+  pack.source_count_u8 = 0;
+  expect_rejected(pack);
+  pack.source_count_u8 = 1;
+  pack.result_count_u8 = 0;
+  expect_rejected(pack);
+  pack.result_count_u8 = 1;
+  pack.source_base_v8 = 2;
+  expect_rejected(pack);
+  pack.source_base_v8 = 0;
+  pack.result_base_v8 = 2;
+  expect_rejected(pack);
+  pack.result_base_v8 = 1;
+  pack.field_width_u8 = 0;
+  expect_rejected(pack);
+  pack.field_width_u8 = 65;
+  expect_rejected(pack);
+  pack.field_width_u8 = 8;
+  pack.source_width_u8 = 24;
+  expect_rejected(pack);
+  pack.source_width_u8 = 8;
+  pack.result_width_u8 = 24;
+  expect_rejected(pack);
+  pack.result_width_u8 = 8;
+  pack.field_width_u8 = 4;
+  expect_rejected(pack);
+  pack.field_width_u8 = 9;
+  expect_rejected(pack);
+  pack.field_width_u8 = 64;
+  pack.source_count_u8 = 2;
+  pack.result_count_u8 = 2;
+  pack.source_width_u8 = 64;
+  pack.result_width_u8 = 64;
+  pack.result_base_v8 = 0;
+  expect_rejected(pack);
+
+  iree_vm_isa_integer_bitstream_unpack_u_record_t unpack = {};
+  unpack.opcode_u8 = IREE_VM_ISA_CORE_OPCODE_INTEGER_BITSTREAM_UNPACK_U;
+  unpack.result_base_v8 = 1;
+  unpack.source_base_v8 = 0;
+  unpack.field_width_u8 = 4;
+  unpack.source_count_u8 = 1;
+  unpack.result_count_u8 = 1;
+  unpack.source_width_u8 = 8;
+  unpack.result_width_u8 = 8;
+  expect_rejected(unpack);
+  unpack.field_width_u8 = 9;
+  expect_rejected(unpack);
+
+  iree_vm_environment_free(environment);
+}
+
 TEST(VMBytecodeModuleTest, RejectsMalformedStackInstructions) {
   iree_vm_environment_t* environment = nullptr;
   IREE_ASSERT_OK(
