@@ -15,6 +15,7 @@ iree_py_library(
     name = "render",
     srcs = [
         "__init__.py",
+        "c_execution.py",
         "c_header.py",
         "c_tooling.py",
         "json_projection.py",
@@ -24,6 +25,7 @@ iree_py_library(
     deps = [
         "//runtime/src/iree/vm/bytecode/spec/model",
         "//runtime/src/iree/vm/bytecode/spec/model/isa",
+        "//runtime/src/iree/vm/bytecode/spec/model/isa:definitions",
         "//runtime/src/iree/vm/bytecode/spec/model/module",
     ],
 )

@@ -6,6 +6,7 @@
 
 """Deterministic projections of the declarative VM bytecode specification."""
 
+from .c_execution import render_execution_tables
 from .c_header import (
     render_isa_assertions,
     render_isa_family_header,
@@ -28,6 +29,7 @@ from .markdown import (
 
 __all__ = (
     "render_completeness_manifest",
+    "render_execution_tables",
     "isa_family_path",
     "render_isa_assertions",
     "render_isa_family_header",

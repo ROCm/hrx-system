@@ -14,6 +14,7 @@ iree_py_library(
     render
   SRCS
     "__init__.py"
+    "c_execution.py"
     "c_header.py"
     "c_tooling.py"
     "json_projection.py"
@@ -22,6 +23,7 @@ iree_py_library(
   DEPS
     iree::vm::bytecode::spec::model::model
     iree::vm::bytecode::spec::model::isa::isa
+    iree::vm::bytecode::spec::model::isa::definitions
     iree::vm::bytecode::spec::model::module::module
 )
 

@@ -19,27 +19,9 @@
 #include "iree/vm/bytecode/wire/core/value.h"
 #include "iree/vm/invocation_storage.h"
 
-#define IREE_VM_BYTECODE_B0_OPCODE_LIST(OP)                      \
-  OP(CONTROL_BLOCK, control_block)                               \
-  OP(CONTROL_RETURN, control_return)                             \
-  OP(CONSTANT_ZERO, constant_zero)                               \
-  OP(CONSTANT_S16, constant_s16)                                 \
-  OP(CONSTANT_I32, constant_i32)                                 \
-  OP(CONSTANT_I64, constant_i64)                                 \
-  OP(CONSTANT_POOL_LOAD_I32, constant_pool_load_i32)             \
-  OP(CONSTANT_POOL_LOAD_I64, constant_pool_load_i64)             \
-  OP(VALUE_COPY, value_copy)                                     \
-  OP(VALUE_SELECT, value_select)                                 \
-  OP(GLOBAL_VALUE_IMMUTABLE_LOAD, global_value_immutable_load)   \
-  OP(GLOBAL_VALUE_IMMUTABLE_STORE, global_value_immutable_store) \
-  OP(GLOBAL_VALUE_MUTABLE_LOAD, global_value_mutable_load)       \
-  OP(GLOBAL_VALUE_MUTABLE_STORE, global_value_mutable_store)     \
-  OP(INTEGER_ADD_I32, integer_add_i32)                           \
-  OP(INTEGER_MUL_I64, integer_mul_i64)                           \
-  OP(BUFFER_RODATA_LOAD, buffer_rodata_load)                     \
-  OP(CONVERSION_INTEGER, conversion_integer)                     \
-  OP(CONVERSION_FLOAT_EXTEND, conversion_float_extend)           \
-  OP(CONVERSION_FLOAT_TO_INTEGER, conversion_float_to_integer)
+#define IREE_VM_BYTECODE_DEFINE_EXECUTABLE_OPCODE_LIST
+#include "iree/vm/bytecode/execution_tables.inl"
+#undef IREE_VM_BYTECODE_DEFINE_EXECUTABLE_OPCODE_LIST
 
 // Clang and GCC labels-as-values remove the shared loop branch and let each
 // opcode site predict its own successor. Other compilers retain the portable
@@ -48,11 +30,12 @@
     (defined(IREE_COMPILER_CLANG) || defined(IREE_COMPILER_GCC))
 #define IREE_VM_BYTECODE_DISPATCH_TABLE_ENTRY(opcode, label) \
   [IREE_VM_ISA_CORE_OPCODE_##opcode] = &&iree_vm_bytecode_dispatch_##label,
-#define IREE_VM_BYTECODE_DISPATCH_BEGIN()                                      \
-  static const void* const dispatch_table[256] = {                             \
-      IREE_VM_BYTECODE_B0_OPCODE_LIST(IREE_VM_BYTECODE_DISPATCH_TABLE_ENTRY)}; \
-  const uint8_t* record_data = bytecode;                                       \
-  do {                                                                         \
+#define IREE_VM_BYTECODE_DISPATCH_BEGIN()          \
+  static const void* const dispatch_table[256] = { \
+      IREE_VM_BYTECODE_EXECUTABLE_OPCODE_LIST(     \
+          IREE_VM_BYTECODE_DISPATCH_TABLE_ENTRY)}; \
+  const uint8_t* record_data = bytecode;           \
+  do {                                             \
   goto* dispatch_table[record_data[0]]
 #define IREE_VM_BYTECODE_DISPATCH_CASE(opcode, label) \
   iree_vm_bytecode_dispatch_##label:
@@ -408,15 +391,200 @@ iree_status_t iree_vm_bytecode_function_start(
   IREE_VM_BYTECODE_DISPATCH_CASE(INTEGER_ADD_I32, integer_add_i32) {
     const iree_vm_isa_integer_add_i32_record_t* record =
         (const iree_vm_isa_integer_add_i32_record_t*)record_data;
-    values[record->dst_v8] =
-        (uint32_t)values[record->lhs_v8] + (uint32_t)values[record->rhs_v8];
+    const uint32_t lhs = (uint32_t)values[record->lhs_v8];
+    const uint32_t rhs = (uint32_t)values[record->rhs_v8];
+    values[record->dst_v8] = lhs + rhs;
     IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_isa_integer_add_i32_record_t);
+  }
+  IREE_VM_BYTECODE_DISPATCH_CASE(INTEGER_ADD_I64, integer_add_i64) {
+    const iree_vm_isa_integer_add_i64_record_t* record =
+        (const iree_vm_isa_integer_add_i64_record_t*)record_data;
+    const uint64_t lhs = values[record->lhs_v8];
+    const uint64_t rhs = values[record->rhs_v8];
+    values[record->dst_v8] = lhs + rhs;
+    IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_isa_integer_add_i64_record_t);
+  }
+  IREE_VM_BYTECODE_DISPATCH_CASE(INTEGER_SUB_I32, integer_sub_i32) {
+    const iree_vm_isa_integer_sub_i32_record_t* record =
+        (const iree_vm_isa_integer_sub_i32_record_t*)record_data;
+    const uint32_t lhs = (uint32_t)values[record->lhs_v8];
+    const uint32_t rhs = (uint32_t)values[record->rhs_v8];
+    values[record->dst_v8] = lhs - rhs;
+    IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_isa_integer_sub_i32_record_t);
+  }
+  IREE_VM_BYTECODE_DISPATCH_CASE(INTEGER_SUB_I64, integer_sub_i64) {
+    const iree_vm_isa_integer_sub_i64_record_t* record =
+        (const iree_vm_isa_integer_sub_i64_record_t*)record_data;
+    const uint64_t lhs = values[record->lhs_v8];
+    const uint64_t rhs = values[record->rhs_v8];
+    values[record->dst_v8] = lhs - rhs;
+    IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_isa_integer_sub_i64_record_t);
+  }
+  IREE_VM_BYTECODE_DISPATCH_CASE(INTEGER_MUL_I32, integer_mul_i32) {
+    const iree_vm_isa_integer_mul_i32_record_t* record =
+        (const iree_vm_isa_integer_mul_i32_record_t*)record_data;
+    const uint32_t lhs = (uint32_t)values[record->lhs_v8];
+    const uint32_t rhs = (uint32_t)values[record->rhs_v8];
+    values[record->dst_v8] = lhs * rhs;
+    IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_isa_integer_mul_i32_record_t);
   }
   IREE_VM_BYTECODE_DISPATCH_CASE(INTEGER_MUL_I64, integer_mul_i64) {
     const iree_vm_isa_integer_mul_i64_record_t* record =
         (const iree_vm_isa_integer_mul_i64_record_t*)record_data;
-    values[record->dst_v8] = values[record->lhs_v8] * values[record->rhs_v8];
+    const uint64_t lhs = values[record->lhs_v8];
+    const uint64_t rhs = values[record->rhs_v8];
+    values[record->dst_v8] = lhs * rhs;
     IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_isa_integer_mul_i64_record_t);
+  }
+  IREE_VM_BYTECODE_DISPATCH_CASE(INTEGER_NEG_I32, integer_neg_i32) {
+    const iree_vm_isa_integer_neg_i32_record_t* record =
+        (const iree_vm_isa_integer_neg_i32_record_t*)record_data;
+    const uint32_t source = (uint32_t)values[record->src_v8];
+    values[record->dst_v8] = UINT32_C(0) - source;
+    IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_isa_integer_neg_i32_record_t);
+  }
+  IREE_VM_BYTECODE_DISPATCH_CASE(INTEGER_NEG_I64, integer_neg_i64) {
+    const iree_vm_isa_integer_neg_i64_record_t* record =
+        (const iree_vm_isa_integer_neg_i64_record_t*)record_data;
+    const uint64_t source = values[record->src_v8];
+    values[record->dst_v8] = UINT64_C(0) - source;
+    IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_isa_integer_neg_i64_record_t);
+  }
+  IREE_VM_BYTECODE_DISPATCH_CASE(INTEGER_ABS_S32, integer_abs_s32) {
+    const iree_vm_isa_integer_abs_s32_record_t* record =
+        (const iree_vm_isa_integer_abs_s32_record_t*)record_data;
+    const uint32_t source = (uint32_t)values[record->src_v8];
+    values[record->dst_v8] =
+        source & UINT32_C(0x80000000) ? UINT32_C(0) - source : source;
+    IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_isa_integer_abs_s32_record_t);
+  }
+  IREE_VM_BYTECODE_DISPATCH_CASE(INTEGER_ABS_S64, integer_abs_s64) {
+    const iree_vm_isa_integer_abs_s64_record_t* record =
+        (const iree_vm_isa_integer_abs_s64_record_t*)record_data;
+    const uint64_t source = values[record->src_v8];
+    values[record->dst_v8] =
+        source & UINT64_C(0x8000000000000000) ? UINT64_C(0) - source : source;
+    IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_isa_integer_abs_s64_record_t);
+  }
+  IREE_VM_BYTECODE_DISPATCH_CASE(INTEGER_MIN_S32, integer_min_s32) {
+    const iree_vm_isa_integer_min_s32_record_t* record =
+        (const iree_vm_isa_integer_min_s32_record_t*)record_data;
+    const uint32_t lhs = (uint32_t)values[record->lhs_v8];
+    const uint32_t rhs = (uint32_t)values[record->rhs_v8];
+    values[record->dst_v8] =
+        (lhs ^ UINT32_C(0x80000000)) < (rhs ^ UINT32_C(0x80000000)) ? lhs : rhs;
+    IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_isa_integer_min_s32_record_t);
+  }
+  IREE_VM_BYTECODE_DISPATCH_CASE(INTEGER_MIN_S64, integer_min_s64) {
+    const iree_vm_isa_integer_min_s64_record_t* record =
+        (const iree_vm_isa_integer_min_s64_record_t*)record_data;
+    const uint64_t lhs = values[record->lhs_v8];
+    const uint64_t rhs = values[record->rhs_v8];
+    values[record->dst_v8] = (lhs ^ UINT64_C(0x8000000000000000)) <
+                                     (rhs ^ UINT64_C(0x8000000000000000))
+                                 ? lhs
+                                 : rhs;
+    IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_isa_integer_min_s64_record_t);
+  }
+  IREE_VM_BYTECODE_DISPATCH_CASE(INTEGER_MIN_U32, integer_min_u32) {
+    const iree_vm_isa_integer_min_u32_record_t* record =
+        (const iree_vm_isa_integer_min_u32_record_t*)record_data;
+    const uint32_t lhs = (uint32_t)values[record->lhs_v8];
+    const uint32_t rhs = (uint32_t)values[record->rhs_v8];
+    values[record->dst_v8] = lhs < rhs ? lhs : rhs;
+    IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_isa_integer_min_u32_record_t);
+  }
+  IREE_VM_BYTECODE_DISPATCH_CASE(INTEGER_MIN_U64, integer_min_u64) {
+    const iree_vm_isa_integer_min_u64_record_t* record =
+        (const iree_vm_isa_integer_min_u64_record_t*)record_data;
+    const uint64_t lhs = values[record->lhs_v8];
+    const uint64_t rhs = values[record->rhs_v8];
+    values[record->dst_v8] = lhs < rhs ? lhs : rhs;
+    IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_isa_integer_min_u64_record_t);
+  }
+  IREE_VM_BYTECODE_DISPATCH_CASE(INTEGER_MAX_S32, integer_max_s32) {
+    const iree_vm_isa_integer_max_s32_record_t* record =
+        (const iree_vm_isa_integer_max_s32_record_t*)record_data;
+    const uint32_t lhs = (uint32_t)values[record->lhs_v8];
+    const uint32_t rhs = (uint32_t)values[record->rhs_v8];
+    values[record->dst_v8] =
+        (lhs ^ UINT32_C(0x80000000)) > (rhs ^ UINT32_C(0x80000000)) ? lhs : rhs;
+    IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_isa_integer_max_s32_record_t);
+  }
+  IREE_VM_BYTECODE_DISPATCH_CASE(INTEGER_MAX_S64, integer_max_s64) {
+    const iree_vm_isa_integer_max_s64_record_t* record =
+        (const iree_vm_isa_integer_max_s64_record_t*)record_data;
+    const uint64_t lhs = values[record->lhs_v8];
+    const uint64_t rhs = values[record->rhs_v8];
+    values[record->dst_v8] = (lhs ^ UINT64_C(0x8000000000000000)) >
+                                     (rhs ^ UINT64_C(0x8000000000000000))
+                                 ? lhs
+                                 : rhs;
+    IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_isa_integer_max_s64_record_t);
+  }
+  IREE_VM_BYTECODE_DISPATCH_CASE(INTEGER_MAX_U32, integer_max_u32) {
+    const iree_vm_isa_integer_max_u32_record_t* record =
+        (const iree_vm_isa_integer_max_u32_record_t*)record_data;
+    const uint32_t lhs = (uint32_t)values[record->lhs_v8];
+    const uint32_t rhs = (uint32_t)values[record->rhs_v8];
+    values[record->dst_v8] = lhs > rhs ? lhs : rhs;
+    IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_isa_integer_max_u32_record_t);
+  }
+  IREE_VM_BYTECODE_DISPATCH_CASE(INTEGER_MAX_U64, integer_max_u64) {
+    const iree_vm_isa_integer_max_u64_record_t* record =
+        (const iree_vm_isa_integer_max_u64_record_t*)record_data;
+    const uint64_t lhs = values[record->lhs_v8];
+    const uint64_t rhs = values[record->rhs_v8];
+    values[record->dst_v8] = lhs > rhs ? lhs : rhs;
+    IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_isa_integer_max_u64_record_t);
+  }
+  IREE_VM_BYTECODE_DISPATCH_CASE(INTEGER_AND_I32, integer_and_i32) {
+    const iree_vm_isa_integer_and_i32_record_t* record =
+        (const iree_vm_isa_integer_and_i32_record_t*)record_data;
+    const uint32_t lhs = (uint32_t)values[record->lhs_v8];
+    const uint32_t rhs = (uint32_t)values[record->rhs_v8];
+    values[record->dst_v8] = lhs & rhs;
+    IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_isa_integer_and_i32_record_t);
+  }
+  IREE_VM_BYTECODE_DISPATCH_CASE(INTEGER_AND_I64, integer_and_i64) {
+    const iree_vm_isa_integer_and_i64_record_t* record =
+        (const iree_vm_isa_integer_and_i64_record_t*)record_data;
+    const uint64_t lhs = values[record->lhs_v8];
+    const uint64_t rhs = values[record->rhs_v8];
+    values[record->dst_v8] = lhs & rhs;
+    IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_isa_integer_and_i64_record_t);
+  }
+  IREE_VM_BYTECODE_DISPATCH_CASE(INTEGER_OR_I32, integer_or_i32) {
+    const iree_vm_isa_integer_or_i32_record_t* record =
+        (const iree_vm_isa_integer_or_i32_record_t*)record_data;
+    const uint32_t lhs = (uint32_t)values[record->lhs_v8];
+    const uint32_t rhs = (uint32_t)values[record->rhs_v8];
+    values[record->dst_v8] = lhs | rhs;
+    IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_isa_integer_or_i32_record_t);
+  }
+  IREE_VM_BYTECODE_DISPATCH_CASE(INTEGER_OR_I64, integer_or_i64) {
+    const iree_vm_isa_integer_or_i64_record_t* record =
+        (const iree_vm_isa_integer_or_i64_record_t*)record_data;
+    const uint64_t lhs = values[record->lhs_v8];
+    const uint64_t rhs = values[record->rhs_v8];
+    values[record->dst_v8] = lhs | rhs;
+    IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_isa_integer_or_i64_record_t);
+  }
+  IREE_VM_BYTECODE_DISPATCH_CASE(INTEGER_XOR_I32, integer_xor_i32) {
+    const iree_vm_isa_integer_xor_i32_record_t* record =
+        (const iree_vm_isa_integer_xor_i32_record_t*)record_data;
+    const uint32_t lhs = (uint32_t)values[record->lhs_v8];
+    const uint32_t rhs = (uint32_t)values[record->rhs_v8];
+    values[record->dst_v8] = lhs ^ rhs;
+    IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_isa_integer_xor_i32_record_t);
+  }
+  IREE_VM_BYTECODE_DISPATCH_CASE(INTEGER_XOR_I64, integer_xor_i64) {
+    const iree_vm_isa_integer_xor_i64_record_t* record =
+        (const iree_vm_isa_integer_xor_i64_record_t*)record_data;
+    const uint64_t lhs = values[record->lhs_v8];
+    const uint64_t rhs = values[record->rhs_v8];
+    values[record->dst_v8] = lhs ^ rhs;
+    IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_isa_integer_xor_i64_record_t);
   }
   IREE_VM_BYTECODE_DISPATCH_CASE(BUFFER_RODATA_LOAD, buffer_rodata_load) {
     const iree_vm_isa_buffer_rodata_load_record_t* record =
@@ -482,4 +650,4 @@ iree_status_t iree_vm_bytecode_function_start(
 #undef IREE_VM_BYTECODE_DISPATCH_CONTINUE
 #undef IREE_VM_BYTECODE_DISPATCH_TERMINATE
 #undef IREE_VM_BYTECODE_DISPATCH_END
-#undef IREE_VM_BYTECODE_B0_OPCODE_LIST
+#undef IREE_VM_BYTECODE_EXECUTABLE_OPCODE_LIST

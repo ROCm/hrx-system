@@ -13,7 +13,10 @@ package(
 
 iree_py_library(
     name = "generator",
-    srcs = ["generate.py"],
+    srcs = [
+        "execution.py",
+        "generate.py",
+    ],
     imports = ["."],
     deps = [
         "//runtime/src/iree/vm/bytecode/spec/model",

@@ -10,15 +10,17 @@
 iree_add_all_subdirs()
 
 iree_py_generated_files(
-  NAME tooling_tables_gen
+  NAME tables_gen
   GENERATOR iree::vm::bytecode::spec::generate
   OUTPUTS
+    execution_tables.inl
     tooling/isa_tables.c.inc
     tooling/module_tables.c.inc
   OUTPUT_FLAGS
+    --output-file=execution_tables.inl
     --output-file=isa_tables.c.inc
     --output-file=module_tables.c.inc
-  ARGS --output-kind=tooling
+  ARGS --output-kind=tables
 )
 
 iree_cc_library(
@@ -49,6 +51,8 @@ iree_cc_library(
     bytecode
   HDRS
     "module.h"
+  TEXTUAL_HDRS
+    "execution_tables.inl"
   SRCS
     "interpreter.c"
     "interpreter.h"

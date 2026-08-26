@@ -115,7 +115,7 @@ TEST(VMBytecodeModuleTest, RejectsBeforeTakingImageStorageOwnership) {
   const size_t bytecode_offset =
       sizeof(iree_vm_bytecode_v0_functions_header_t) +
       2 * sizeof(iree_vm_bytecode_v0_function_row_t);
-  functions[bytecode_offset + 4] = IREE_VM_ISA_CORE_OPCODE_INTEGER_ADD_I64;
+  functions[bytecode_offset + 4] = IREE_VM_ISA_CORE_OPCODE_INTEGER_DIV_S32;
 
   CountingAllocator image_allocator = {iree_allocator_system(), 0, 0};
   void* owned_image = nullptr;
@@ -428,6 +428,68 @@ TEST(VMBytecodeModuleTest, ExecutesScalarStateInstructions) {
   iree_vm_module_release(module);
 }
 
+TEST(VMBytecodeModuleTest, PreservesIntegerSourcesAcrossDestinationAliasing) {
+  auto expect_result = [](uint8_t opcode, uint8_t dst, uint8_t lhs_or_src,
+                          uint8_t rhs_or_zero, int32_t argument,
+                          int32_t expected) {
+    std::vector<uint8_t> image = BuildOwnershipModuleImage();
+    const FunctionImageView function = FindFunctionImage(&image, 1);
+    ASSERT_NE(function.row, nullptr);
+    constexpr uint32_t kArithmeticInstructionOffset = 8;
+    function.bytecode[kArithmeticInstructionOffset + 0] = opcode;
+    function.bytecode[kArithmeticInstructionOffset + 1] = dst;
+    function.bytecode[kArithmeticInstructionOffset + 2] = lhs_or_src;
+    function.bytecode[kArithmeticInstructionOffset + 3] = rhs_or_zero;
+
+    iree_vm_environment_t* environment = nullptr;
+    IREE_ASSERT_OK(
+        iree_vm_environment_allocate(iree_allocator_system(), &environment));
+    iree_vm_module_t* module = nullptr;
+    IREE_ASSERT_OK(iree_vm_bytecode_module_create(
+        environment, IREE_SV("aliasing"),
+        {iree_make_const_byte_span(image.data(), image.size()),
+         iree_allocator_null()},
+        iree_allocator_system(), &module));
+    iree_vm_environment_free(environment);
+
+    iree_vm_program_t* program = nullptr;
+    IREE_ASSERT_OK(iree_vm_program_create({module, iree_vm_module_span_empty()},
+                                          iree_allocator_system(), &program));
+    iree_vm_invocation_t* invocation = nullptr;
+    IREE_ASSERT_OK(iree_vm_invocation_allocate(
+        kInvocationStorageSize, iree_allocator_system(), &invocation));
+    iree_vm_process_t* process = nullptr;
+    IREE_ASSERT_OK(iree_vm_process_create(program, invocation,
+                                          iree_vm_variant_span_empty(),
+                                          iree_allocator_system(), &process));
+    iree_vm_function_t run = iree_vm_function_null();
+    IREE_ASSERT_OK(iree_vm_process_lookup_function(process, IREE_SV("aliasing"),
+                                                   IREE_SV("run"), &run));
+
+    iree_vm_variant_t arguments[] = {iree_vm_variant_from_i32(argument)};
+    iree_vm_variant_t results[2] = {};
+    IREE_ASSERT_OK(iree_vm_invoke(invocation, run,
+                                  iree_vm_variant_span_from_array(arguments),
+                                  iree_vm_variant_span_from_array(results)));
+    int32_t actual = 0;
+    IREE_ASSERT_OK(iree_vm_i32_from_variant(results[0], &actual));
+    EXPECT_EQ(actual, expected);
+    iree_vm_variant_span_reset(iree_vm_variant_span_from_array(results));
+
+    iree_vm_invocation_free(invocation);
+    iree_vm_process_release(process);
+    iree_vm_program_release(program);
+    iree_vm_module_release(module);
+  };
+
+  // Binary destinations may alias either source register.
+  expect_result(IREE_VM_ISA_CORE_OPCODE_INTEGER_ADD_I32, 0, 0, 1, 35, 42);
+  expect_result(IREE_VM_ISA_CORE_OPCODE_INTEGER_SUB_I32, 0, 1, 0, 10, -3);
+  // Unary destinations may alias their source, including modular INT_MIN.
+  expect_result(IREE_VM_ISA_CORE_OPCODE_INTEGER_NEG_I32, 0, 0, 0, INT32_MIN,
+                INT32_MIN);
+}
+
 TEST(VMBytecodeModuleTest, RejectsMalformedScalarStateInstructions) {
   iree_vm_environment_t* environment = nullptr;
   IREE_ASSERT_OK(
@@ -495,6 +557,35 @@ TEST(VMBytecodeModuleTest, RejectsMalformedScalarStateInstructions) {
     ASSERT_NE(function.row, nullptr);
     ASSERT_LT(mutation.byte_offset, function.row->bytecode_length_u32);
     function.bytecode[mutation.byte_offset] = mutation.value;
+    expect_rejected(image);
+  }
+
+  struct ValueFormatMutation {
+    // Opcode selecting the shared value-record verification form.
+    uint8_t opcode;
+    // Byte offset within the four-byte instruction record to corrupt.
+    uint8_t field_offset;
+    // Replacement byte value.
+    uint8_t value;
+  };
+  const ValueFormatMutation value_format_mutations[] = {
+      // Binary records verify all three value-register ordinals.
+      {IREE_VM_ISA_CORE_OPCODE_INTEGER_ADD_I64, 1, 6},
+      {IREE_VM_ISA_CORE_OPCODE_INTEGER_ADD_I64, 2, 6},
+      {IREE_VM_ISA_CORE_OPCODE_INTEGER_ADD_I64, 3, 6},
+      // Unary records verify both registers and require canonical padding.
+      {IREE_VM_ISA_CORE_OPCODE_INTEGER_NEG_I64, 1, 6},
+      {IREE_VM_ISA_CORE_OPCODE_INTEGER_NEG_I64, 2, 6},
+      {IREE_VM_ISA_CORE_OPCODE_INTEGER_NEG_I64, 3, 1},
+  };
+  for (const ValueFormatMutation& mutation : value_format_mutations) {
+    std::vector<uint8_t> image = BuildScalarStateModuleImage();
+    const FunctionImageView function = FindFunctionImage(&image, 1);
+    ASSERT_NE(function.row, nullptr);
+    constexpr uint32_t kFirstBodyInstructionOffset = 4;
+    function.bytecode[kFirstBodyInstructionOffset] = mutation.opcode;
+    function.bytecode[kFirstBodyInstructionOffset + mutation.field_offset] =
+        mutation.value;
     expect_rejected(image);
   }
 

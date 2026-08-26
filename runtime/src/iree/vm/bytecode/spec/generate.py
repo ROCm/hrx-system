@@ -4,7 +4,7 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-"""Generates build-only wire, tooling, and documentation projections."""
+"""Generates build-only wire, table, and documentation projections."""
 
 from __future__ import annotations
 
@@ -14,12 +14,14 @@ import posixpath
 import re
 import sys
 
+from execution import EXECUTABLE_INSTRUCTIONS
 from model.isa import InstructionFamily
 from model.isa.specification import ISA_SPECIFICATION
 from model.module.v0 import MODULE_SPECIFICATION
 from model.specification import Projection, Specification
 from render import (
     isa_family_path,
+    render_execution_tables,
     render_isa_assertions,
     render_isa_family_header,
     render_isa_family_markdown,
@@ -184,10 +186,13 @@ def generated_documentation_outputs() -> dict[str, str]:
     return outputs
 
 
-def generated_tooling_outputs() -> dict[str, str]:
-    """Returns the complete deterministic build-only C tooling projection."""
+def generated_table_outputs() -> dict[str, str]:
+    """Returns all deterministic build-only C table projections."""
 
     return {
+        "execution_tables.inl": render_execution_tables(
+            _latest_projection(ISA_SPECIFICATION), EXECUTABLE_INSTRUCTIONS
+        ),
         "isa_tables.c.inc": render_tooling_isa_tables(
             _latest_projection(ISA_SPECIFICATION)
         ),
@@ -313,7 +318,7 @@ def main() -> int:
     )
     parser.add_argument(
         "--output-kind",
-        choices=("wire", "tooling", "documentation"),
+        choices=("wire", "tables", "documentation"),
         default="wire",
         help="Projection product to generate. Defaults to wire headers.",
     )
@@ -321,7 +326,7 @@ def main() -> int:
         "--output-directory",
         type=pathlib.Path,
         help=(
-            "Projection root for documentation output. Wire and tooling "
+            "Projection root for documentation output. Wire and table "
             "outputs are declared individually by the build system."
         ),
     )
@@ -331,23 +336,21 @@ def main() -> int:
         default=[],
         metavar="NAME=PATH",
         help=(
-            "Named build-tree output. Wire and tooling generation require one "
+            "Named build-tree output. Wire and table generation require one "
             "entry for every declared projection."
         ),
     )
     parser.add_argument("--check", action="store_true")
     arguments = parser.parse_args()
-    if arguments.output_kind in ("wire", "tooling"):
+    if arguments.output_kind in ("wire", "tables"):
         if arguments.output_directory is not None:
-            parser.error(
-                "--output-directory cannot be used for wire or tooling output"
-            )
+            parser.error("--output-directory cannot be used for wire or table output")
         if arguments.check:
             parser.error("--check cannot be used for named build outputs")
         outputs = (
             generated_wire_outputs()
             if arguments.output_kind == "wire"
-            else generated_tooling_outputs()
+            else generated_table_outputs()
         )
         output_files = _parse_named_output_files(
             parser, arguments.output_file, set(outputs)

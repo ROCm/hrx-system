@@ -17,13 +17,15 @@ package(
 )
 
 iree_generated_files(
-    name = "tooling_tables_gen",
+    name = "tables_gen",
     outs = [
+        "execution_tables.inl",
         "tooling/isa_tables.c.inc",
         "tooling/module_tables.c.inc",
     ],
-    args = ["--output-kind=tooling"],
+    args = ["--output-kind=tables"],
     output_args = {
+        "execution_tables.inl": "--output-file=execution_tables.inl={path}",
         "isa_tables.c.inc": "--output-file=isa_tables.c.inc={path}",
         "module_tables.c.inc": "--output-file=module_tables.c.inc={path}",
     },
@@ -34,15 +36,17 @@ iree_generated_files(
 iree_cmake_extra_content(
     content = """
 iree_py_generated_files(
-  NAME tooling_tables_gen
+  NAME tables_gen
   GENERATOR iree::vm::bytecode::spec::generate
   OUTPUTS
+    execution_tables.inl
     tooling/isa_tables.c.inc
     tooling/module_tables.c.inc
   OUTPUT_FLAGS
+    --output-file=execution_tables.inl
     --output-file=isa_tables.c.inc
     --output-file=module_tables.c.inc
-  ARGS --output-kind=tooling
+  ARGS --output-kind=tables
 )
 """,
     inline = True,
@@ -82,6 +86,7 @@ iree_runtime_cc_library(
         "verification_isa.c",
     ],
     hdrs = ["module.h"],
+    textual_hdrs = ["execution_tables.inl"],
     visibility = ["//visibility:public"],
     deps = [
         ":module",

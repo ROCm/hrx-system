@@ -23,7 +23,7 @@ sys.path.insert(0, str(PACKAGE_ROOT))
 
 from generate import (  # noqa: E402
     generated_documentation_outputs,
-    generated_tooling_outputs,
+    generated_table_outputs,
     generated_wire_outputs,
     write_or_check_documentation,
 )
@@ -197,15 +197,16 @@ class ProjectionTest(unittest.TestCase):
     def test_generated_file_set_is_deterministic_and_sharded(self) -> None:
         wire_outputs = generated_wire_outputs()
         documentation_outputs = generated_documentation_outputs()
-        tooling_outputs = generated_tooling_outputs()
+        table_outputs = generated_table_outputs()
 
         self.assertEqual(wire_outputs, generated_wire_outputs())
         self.assertEqual(documentation_outputs, generated_documentation_outputs())
-        self.assertEqual(tooling_outputs, generated_tooling_outputs())
+        self.assertEqual(table_outputs, generated_table_outputs())
         self.assertEqual(len(wire_outputs), 24)
         self.assertEqual(len(documentation_outputs), 21)
         self.assertEqual(
-            set(tooling_outputs), {"isa_tables.c.inc", "module_tables.c.inc"}
+            set(table_outputs),
+            {"execution_tables.inl", "isa_tables.c.inc", "module_tables.c.inc"},
         )
         self.assertEqual(
             {path for path in documentation_outputs if path.endswith("/index.md")},
@@ -235,17 +236,18 @@ class ProjectionTest(unittest.TestCase):
             documentation_outputs["isa/hal/index.md"],
         )
         for path, contents in (
-            wire_outputs | tooling_outputs | documentation_outputs
+            wire_outputs | table_outputs | documentation_outputs
         ).items():
             self.assertNotIn(".notes/", contents, path)
             self.assertNotIn("legacy schema", contents.lower(), path)
             self.assertIn("GENERATED FILE: DO NOT EDIT.", contents, path)
-            if path.endswith((".c", ".h")):
+            if path.endswith((".c", ".h", ".inc", ".inl")):
                 self.assertEqual(contents.count("// clang-format off"), 1, path)
                 self.assertEqual(contents.count("// clang-format on"), 1, path)
 
-        isa_table = tooling_outputs["isa_tables.c.inc"]
-        module_table = tooling_outputs["module_tables.c.inc"]
+        execution_table = table_outputs["execution_tables.inl"]
+        isa_table = table_outputs["isa_tables.c.inc"]
+        module_table = table_outputs["module_tables.c.inc"]
         self.assertNotIn("IREE_SVL", isa_table + module_table)
         self.assertIn("iree_vm_bytecode_tooling_isa_string_table", isa_table)
         self.assertIn("iree_vm_bytecode_tooling_opcode_maps[][256]", isa_table)
@@ -253,6 +255,10 @@ class ProjectionTest(unittest.TestCase):
         self.assertIn("iree_vm_bytecode_tooling_module_string_table", module_table)
         self.assertIn("iree_vm_bytecode_tooling_sections", module_table)
         self.assertNotIn("iree_vm_bytecode_tooling_opcode_maps", module_table)
+        self.assertEqual(
+            execution_table.count("IREE_VM_BYTECODE_EXECUTION_INFO_ROW("), 256
+        )
+        self.assertIn("OP(INTEGER_XOR_I64, integer_xor_i64)", execution_table)
 
     def test_every_entity_has_exactly_one_markdown_anchor(self) -> None:
         module_projection = latest_projection(MODULE_SPECIFICATION)

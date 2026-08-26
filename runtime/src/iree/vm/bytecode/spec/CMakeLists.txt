@@ -13,6 +13,7 @@ iree_py_library(
   NAME
     generator
   SRCS
+    "execution.py"
     "generate.py"
   IMPORTS
     "."
