@@ -796,6 +796,7 @@ loom_cc_test(
     loom::ops::config
     loom::ops::func
     loom::ops::global
+    loom::ops::kernel
     loom::ops::op_defs
     loom::ops::target
     loom::ops::template

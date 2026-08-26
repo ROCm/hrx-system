@@ -294,6 +294,9 @@ typedef struct loom_bytecode_module_metadata_t {
   // The module-root slice begins at zero; symbol slices are described by
   // symbol_references. Targets may repeat within a slice.
   uint32_t* dependency_symbol_indices;
+  // Arena-owned target interface constraints parallel to
+  // dependency_symbol_indices. Zero accepts any target interface.
+  loom_symbol_interface_flags_t* dependency_target_interfaces;
   // Arena-owned source root region indices plus one parallel to
   // dependency_symbol_indices. Zero identifies a source symbol contract or
   // module-root occurrence.

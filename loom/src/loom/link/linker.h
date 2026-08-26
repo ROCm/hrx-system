@@ -94,6 +94,30 @@ typedef struct loom_linker_source_symbol_list_t {
   const iree_host_size_t* ordinals;
 } loom_linker_source_symbol_list_t;
 
+// One omitted source symbol already projected into this linker's target.
+typedef struct loom_linker_source_symbol_binding_t {
+  // Module-local source symbol ordinal referenced by selected source IR.
+  uint32_t source_ordinal;
+  // Existing linker-target symbol replacing source_ordinal.
+  loom_symbol_ref_t target;
+} loom_linker_source_symbol_binding_t;
+
+// Exact source-to-target bindings accompanying one sparse selection.
+typedef struct loom_linker_source_symbol_binding_list_t {
+  // Number of entries in values.
+  iree_host_size_t count;
+  // Strictly increasing bindings owned by the caller for the add duration.
+  // Bound ordinals must be in range and absent from source_symbols; target
+  // refs must come from an earlier add to this linker.
+  const loom_linker_source_symbol_binding_t* values;
+} loom_linker_source_symbol_binding_list_t;
+
+// Returns an empty exact source-symbol binding list.
+static inline loom_linker_source_symbol_binding_list_t
+loom_linker_source_symbol_binding_list_empty(void) {
+  return (loom_linker_source_symbol_binding_list_t){0};
+}
+
 // Caller-provided output storage for projected target symbol references.
 typedef struct loom_linker_target_symbol_list_t {
   // Number of writable entries in values.
@@ -172,9 +196,12 @@ iree_status_t loom_linker_add_module(loom_linker_t* linker,
 // Adds an exact precomputed source symbol selection to |linker|.
 //
 // |source_symbols| must be strictly increasing. The caller owns dependency
-// closure: references from selected IR to omitted source symbols fail rather
-// than triggering reachability discovery. |provider_imports| names retained
-// availability rows in the same source ordinal domain. When
+// closure: references from selected IR to omitted source symbols fail unless
+// |source_bindings| explicitly maps them to symbols projected by a prior add.
+// Bindings do not clone, merge, or otherwise inspect the omitted source
+// definition; the caller owns compatibility with the projected target.
+// |provider_imports| names retained availability rows in the same source
+// ordinal domain. When
 // |source_outputs| is non-empty it must have one entry per selected source
 // symbol. Authored disposition preserves the source linkage surface;
 // dependency disposition internalizes it; root disposition preserves and
@@ -186,6 +213,7 @@ iree_status_t loom_linker_add_module(loom_linker_t* linker,
 iree_status_t loom_linker_add_module_symbols(
     loom_linker_t* linker, const loom_module_t* source_module,
     loom_linker_source_symbol_list_t source_symbols,
+    loom_linker_source_symbol_binding_list_t source_bindings,
     loom_linker_source_symbol_output_list_t source_outputs,
     loom_linker_source_provider_import_list_t provider_imports,
     loom_linker_target_symbol_list_t out_target_symbols);

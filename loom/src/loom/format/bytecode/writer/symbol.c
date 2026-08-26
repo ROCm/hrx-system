@@ -858,6 +858,8 @@ static iree_status_t loom_bytecode_write_dependency_row(
       IREE_RETURN_IF_ERROR(loom_bytecode_page_writer_write_uvarint(
           page_writer, loom_bytecode_wire_symbol_ordinal(
                            numbering, occurrence->target_symbol_id)));
+      IREE_RETURN_IF_ERROR(loom_bytecode_page_writer_write_uvarint(
+          page_writer, occurrence->target_interfaces));
     }
     occurrence_id = occurrence->next_outgoing_occurrence_id;
   }

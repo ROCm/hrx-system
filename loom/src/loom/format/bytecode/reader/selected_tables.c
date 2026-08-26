@@ -76,11 +76,20 @@ static iree_status_t loom_bytecode_selected_table_project_source(
     *out_target_source_id = (loom_source_id_t)target_id;
     return iree_ok_status();
   }
+  const iree_string_view_t source_name =
+      materializer->metadata->sources.values[source_ordinal];
   loom_source_id_t target_source_id = LOOM_SOURCE_ID_INVALID;
-  IREE_RETURN_IF_ERROR(loom_module_append_source(
-      materializer->output_module,
-      materializer->metadata->sources.values[source_ordinal],
-      &target_source_id));
+  for (iree_host_size_t i = 0; i < materializer->sources.inherited_count; ++i) {
+    if (iree_string_view_equal(materializer->output_module->sources.entries[i],
+                               source_name)) {
+      target_source_id = (loom_source_id_t)i;
+      break;
+    }
+  }
+  if (target_source_id == LOOM_SOURCE_ID_INVALID) {
+    IREE_RETURN_IF_ERROR(loom_module_append_source(
+        materializer->output_module, source_name, &target_source_id));
+  }
   IREE_RETURN_IF_ERROR(loom_bytecode_selected_projection_insert(
       &materializer->projection,
       LOOM_BYTECODE_SELECTED_PROJECTION_DOMAIN_SOURCE, source_ordinal,
@@ -105,6 +114,10 @@ void loom_bytecode_selected_table_materializer_initialize(
       .output_module = output_module,
       .symbol_resolver = symbol_resolver,
       .allocator = allocator,
+      .sources =
+          {
+              .inherited_count = output_module->sources.count,
+          },
   };
   loom_bytecode_selected_projection_initialize(allocator,
                                                &out_materializer->projection);

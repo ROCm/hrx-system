@@ -225,6 +225,47 @@ TEST_F(BytecodeSelectedTablesTest, MaterializesOnlyReachedMixedTableFacts) {
   loom_bytecode_selected_table_materializer_deinitialize(&materializer);
 }
 
+TEST_F(BytecodeSelectedTablesTest, ReusesInheritedSourceWhenComposingLocation) {
+  iree_string_view_t sources[] = {IREE_SV("model.loom")};
+  std::vector<uint8_t> bytecode;
+  loom_bytecode_table_entry_metadata_t locations[2] = {};
+  locations[0].entry_offset = bytecode.size();
+  bytecode.insert(bytecode.end(), {LOOM_LOCATION_NONE, 0x00});
+  locations[0].entry_length = bytecode.size() - locations[0].entry_offset;
+  locations[1].entry_offset = bytecode.size();
+  bytecode.insert(bytecode.end(), {
+                                      LOOM_LOCATION_FILE,
+                                      0x00,  // Flags.
+                                      0x00,  // Source ordinal.
+                                      0x01,
+                                      0x02,
+                                      0x03,
+                                      0x04,  // Coordinates.
+                                  });
+  locations[1].entry_length = bytecode.size() - locations[1].entry_offset;
+  loom_bytecode_module_metadata_t metadata = {};
+  metadata.sources = {IREE_ARRAYSIZE(sources), sources};
+  metadata.locations = {IREE_ARRAYSIZE(locations), locations};
+
+  loom_source_id_t inherited_source_id = LOOM_SOURCE_ID_INVALID;
+  IREE_ASSERT_OK(
+      loom_module_append_source(module_, sources[0], &inherited_source_id));
+  ASSERT_EQ(inherited_source_id, 0u);
+  loom_bytecode_selected_table_materializer_t materializer =
+      MakeMaterializer(bytecode, &metadata);
+
+  loom_location_id_t target_location_id = LOOM_LOCATION_UNKNOWN;
+  IREE_ASSERT_OK(loom_bytecode_selected_table_materialize_location(
+      &materializer, /*source_location_id=*/1, &target_location_id));
+  EXPECT_EQ(target_location_id, 1u);
+  ASSERT_EQ(module_->locations.count, 2u);
+  EXPECT_EQ(module_->locations.entries[1].file.source_id, inherited_source_id);
+  ASSERT_EQ(module_->sources.count, 1u);
+  EXPECT_TRUE(iree_string_view_equal(module_->sources.entries[0], sources[0]));
+
+  loom_bytecode_selected_table_materializer_deinitialize(&materializer);
+}
+
 TEST_F(BytecodeSelectedTablesTest, ResolvesExternalSymbolsByDenseSourceIndex) {
   iree_string_view_t strings[] = {
       IREE_SV("unused"),

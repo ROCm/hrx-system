@@ -104,7 +104,8 @@ static iree_status_t loom_symbol_reference_builder_append_occurrence(
     loom_symbol_reference_source_scope_t source_scope,
     loom_symbol_id_t target_symbol_id,
     loom_symbol_reference_occurrence_kind_t kind,
-    loom_symbol_reference_role_t role, uint16_t attr_index,
+    loom_symbol_reference_role_t role,
+    loom_symbol_interface_flags_t target_interfaces, uint8_t attr_index,
     const loom_op_t* user_op) {
   if (source_scope.symbol_id != LOOM_SYMBOL_ID_INVALID &&
       source_scope.symbol_id >= builder->module->symbols.count) {
@@ -138,6 +139,7 @@ static iree_status_t loom_symbol_reference_builder_append_occurrence(
   *occurrence = (loom_symbol_reference_occurrence_t){
       .source_symbol_id = source_scope.symbol_id,
       .target_symbol_id = target_symbol_id,
+      .target_interfaces = target_interfaces,
       .kind = kind,
       .role = role,
       .source_root_region_index_plus_one =
@@ -172,14 +174,15 @@ static iree_status_t loom_symbol_reference_add_ref(
     loom_symbol_reference_builder_t* builder,
     loom_symbol_reference_source_scope_t source_scope,
     loom_symbol_ref_t target_ref, loom_symbol_reference_occurrence_kind_t kind,
-    loom_symbol_reference_role_t role, uint16_t attr_index,
+    loom_symbol_reference_role_t role,
+    loom_symbol_interface_flags_t target_interfaces, uint8_t attr_index,
     const loom_op_t* user_op) {
   if (!loom_symbol_ref_is_valid(target_ref) || target_ref.module_id != 0) {
     return iree_ok_status();
   }
   return loom_symbol_reference_builder_append_occurrence(
-      builder, source_scope, target_ref.symbol_id, kind, role, attr_index,
-      user_op);
+      builder, source_scope, target_ref.symbol_id, kind, role,
+      target_interfaces, attr_index, user_op);
 }
 
 static iree_status_t loom_symbol_reference_append_template_demand(
@@ -339,21 +342,21 @@ static bool loom_symbol_reference_attr_may_contain_ref(loom_attribute_t attr) {
 static iree_status_t loom_symbol_reference_visit_type(
     loom_symbol_reference_builder_t* builder,
     loom_symbol_reference_source_scope_t source_scope, loom_type_t type,
-    loom_symbol_reference_occurrence_kind_t kind, uint16_t attr_index,
+    loom_symbol_reference_occurrence_kind_t kind, uint8_t attr_index,
     const loom_op_t* user_op);
 
 static iree_status_t loom_symbol_reference_visit_attr(
     loom_symbol_reference_builder_t* builder,
     loom_symbol_reference_source_scope_t source_scope, loom_attribute_t attr,
     const loom_attr_descriptor_t* descriptor,
-    loom_symbol_reference_occurrence_kind_t kind, uint16_t attr_index,
+    loom_symbol_reference_occurrence_kind_t kind, uint8_t attr_index,
     const loom_op_t* user_op, uint8_t dict_depth);
 
 static iree_status_t loom_symbol_reference_visit_encoding(
     loom_symbol_reference_builder_t* builder,
     loom_symbol_reference_source_scope_t source_scope,
     const loom_encoding_t* encoding,
-    loom_symbol_reference_occurrence_kind_t kind, uint16_t attr_index,
+    loom_symbol_reference_occurrence_kind_t kind, uint8_t attr_index,
     const loom_op_t* user_op) {
   if (!encoding || encoding->attribute_count == 0) return iree_ok_status();
   if (!encoding->attributes) {
@@ -372,7 +375,7 @@ static iree_status_t loom_symbol_reference_visit_encoding(
 static iree_status_t loom_symbol_reference_visit_static_encoding(
     loom_symbol_reference_builder_t* builder,
     loom_symbol_reference_source_scope_t source_scope, uint16_t encoding_id,
-    loom_symbol_reference_occurrence_kind_t kind, uint16_t attr_index,
+    loom_symbol_reference_occurrence_kind_t kind, uint8_t attr_index,
     const loom_op_t* user_op) {
   if (encoding_id == 0) return iree_ok_status();
   const loom_encoding_t* encoding =
@@ -392,7 +395,7 @@ static iree_status_t loom_symbol_reference_visit_type_sequence(
     loom_symbol_reference_builder_t* builder,
     loom_symbol_reference_source_scope_t source_scope, const loom_type_t* types,
     uint16_t type_count, loom_symbol_reference_occurrence_kind_t kind,
-    uint16_t attr_index, const loom_op_t* user_op) {
+    uint8_t attr_index, const loom_op_t* user_op) {
   if (!types) return iree_ok_status();
   for (uint16_t i = 0; i < type_count; ++i) {
     IREE_RETURN_IF_ERROR(loom_symbol_reference_visit_type(
@@ -404,7 +407,7 @@ static iree_status_t loom_symbol_reference_visit_type_sequence(
 static iree_status_t loom_symbol_reference_visit_type(
     loom_symbol_reference_builder_t* builder,
     loom_symbol_reference_source_scope_t source_scope, loom_type_t type,
-    loom_symbol_reference_occurrence_kind_t kind, uint16_t attr_index,
+    loom_symbol_reference_occurrence_kind_t kind, uint8_t attr_index,
     const loom_op_t* user_op) {
   loom_type_kind_t type_kind = loom_type_kind(type);
   if (!loom_type_kind_is_valid(type_kind)) return iree_ok_status();
@@ -457,33 +460,37 @@ static iree_status_t loom_symbol_reference_visit_attr(
     loom_symbol_reference_builder_t* builder,
     loom_symbol_reference_source_scope_t source_scope, loom_attribute_t attr,
     const loom_attr_descriptor_t* descriptor,
-    loom_symbol_reference_occurrence_kind_t kind, uint16_t attr_index,
+    loom_symbol_reference_occurrence_kind_t kind, uint8_t attr_index,
     const loom_op_t* user_op, uint8_t dict_depth) {
   switch ((loom_attr_kind_t)attr.kind) {
     case LOOM_ATTR_SYMBOL: {
       loom_symbol_reference_role_t role = LOOM_SYMBOL_REFERENCE_ROLE_DEPENDENCY;
+      loom_symbol_interface_flags_t target_interfaces = 0;
       if (descriptor && descriptor->attr_kind == LOOM_ATTR_SYMBOL &&
           descriptor->reference.symbol_ref) {
         role = descriptor->reference.symbol_ref->role;
+        target_interfaces = descriptor->reference.symbol_ref->interfaces;
       }
-      return loom_symbol_reference_add_ref(builder, source_scope,
-                                           loom_attr_as_symbol(attr), kind,
-                                           role, attr_index, user_op);
+      return loom_symbol_reference_add_ref(
+          builder, source_scope, loom_attr_as_symbol(attr), kind, role,
+          target_interfaces, attr_index, user_op);
     }
     case LOOM_ATTR_SYMBOL_ARRAY:
     case LOOM_ATTR_SYMBOL_SET: {
       loom_symbol_reference_role_t role = LOOM_SYMBOL_REFERENCE_ROLE_DEPENDENCY;
+      loom_symbol_interface_flags_t target_interfaces = 0;
       if (descriptor && descriptor->attr_kind == attr.kind &&
           descriptor->reference.symbol_ref) {
         role = descriptor->reference.symbol_ref->role;
+        target_interfaces = descriptor->reference.symbol_ref->interfaces;
       }
       loom_symbol_ref_array_t refs = attr.kind == LOOM_ATTR_SYMBOL_SET
                                          ? loom_attr_as_symbol_set(attr)
                                          : loom_attr_as_symbol_array(attr);
       for (uint16_t i = 0; i < refs.count; ++i) {
-        IREE_RETURN_IF_ERROR(
-            loom_symbol_reference_add_ref(builder, source_scope, refs.values[i],
-                                          kind, role, attr_index, user_op));
+        IREE_RETURN_IF_ERROR(loom_symbol_reference_add_ref(
+            builder, source_scope, refs.values[i], kind, role,
+            target_interfaces, attr_index, user_op));
       }
       return iree_ok_status();
     }

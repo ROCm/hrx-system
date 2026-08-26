@@ -42,7 +42,7 @@ typedef uint32_t loom_template_provider_reference_id_t;
   ((loom_template_provider_reference_id_t)UINT32_MAX)
 
 // Sentinel for occurrences not attached to a concrete op attribute.
-#define LOOM_SYMBOL_REFERENCE_ATTR_INDEX_NONE ((uint16_t)UINT16_MAX)
+#define LOOM_SYMBOL_REFERENCE_ATTR_INDEX_NONE ((uint8_t)UINT8_MAX)
 
 // Classifies where a symbol reference occurrence was found.
 typedef enum loom_symbol_reference_occurrence_kind_e {
@@ -73,20 +73,23 @@ typedef struct loom_symbol_reference_occurrence_t {
   loom_symbol_id_t source_symbol_id;
   // Module-local symbol referenced by this occurrence.
   loom_symbol_id_t target_symbol_id;
-  // Classified source of the occurrence.
-  loom_symbol_reference_occurrence_kind_t kind;
-  // Compile-time graph role declared by the owning attribute schema.
-  loom_symbol_reference_role_t role;
-  // Root region slot on the source symbol plus one, or zero for its contract.
-  uint8_t source_root_region_index_plus_one;
-  // Attribute index on user_op when the occurrence came from an op attribute.
-  uint16_t attr_index;
-  // Operation that owns the occurrence, or NULL for module-root records.
-  const loom_op_t* user_op;
+  // Target interfaces accepted by the owning attribute schema, or zero when
+  // the reference has no structural interface constraint.
+  loom_symbol_interface_flags_t target_interfaces;
   // Next occurrence with the same source symbol.
   loom_symbol_reference_occurrence_id_t next_outgoing_occurrence_id;
   // Next occurrence with the same target symbol.
   loom_symbol_reference_occurrence_id_t next_incoming_occurrence_id;
+  // Attribute index on user_op when the occurrence came from an op attribute.
+  uint8_t attr_index;
+  // Classified source of the occurrence.
+  uint8_t kind;
+  // Compile-time graph role declared by the owning attribute schema.
+  loom_symbol_reference_role_t role;
+  // Root region slot on the source symbol plus one, or zero for its contract.
+  uint8_t source_root_region_index_plus_one;
+  // Operation that owns the occurrence, or NULL for module-root records.
+  const loom_op_t* user_op;
 } loom_symbol_reference_occurrence_t;
 
 static_assert(sizeof(loom_symbol_reference_occurrence_t) == 32,

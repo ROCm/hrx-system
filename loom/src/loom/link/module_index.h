@@ -169,6 +169,9 @@ typedef struct loom_link_module_index_module_t {
     // Module-local target symbol ordinals in deterministic occurrence order.
     // Targets may repeat within a source row.
     const uint32_t* values;
+    // Target interface constraints parallel to values. Zero accepts any
+    // target interface.
+    const loom_symbol_interface_flags_t* target_interfaces;
     // Source root region indices plus one parallel to values. Zero identifies
     // a source symbol contract or a module-root occurrence.
     const uint8_t* source_root_region_indices_plus_one;

@@ -560,6 +560,46 @@ class TestMalformedSymbolReferences:
         with pytest.raises(BytecodeError, match="source root region index"):
             read_module(bytes(data))
 
+    def test_dependency_target_interfaces_must_be_known(self) -> None:
+        module = Module(name="test")
+        _make_func(module, "target", [], is_declaration=True)
+        _make_func(
+            module,
+            "caller",
+            [],
+            ops=[
+                Operation(
+                    name="func.call",
+                    attributes={"callee": SymbolName("target")},
+                ),
+                Operation(name="test.yield"),
+            ],
+        )
+        data = bytearray(write_module(module))
+        module_offset, _module_length = _module_range(data)
+        _entry_offset, section_offset, _section_length = _find_section_entry(
+            data, SECTION_SYMBOL_REFERENCES
+        )
+        offset = module_offset + section_offset
+        symbol_count, offset = decode_varint(data, offset)
+        dependency_count, offset = decode_varint(data, offset)
+        template_demand_count, offset = decode_varint(data, offset)
+        module_dependency_count, offset = decode_varint(data, offset)
+        assert (symbol_count, dependency_count, template_demand_count) == (2, 1, 0)
+        assert module_dependency_count == 0
+        target_dependency_count, offset = decode_varint(data, offset)
+        target_demand_count, offset = decode_varint(data, offset)
+        caller_dependency_count, offset = decode_varint(data, offset)
+        assert (target_dependency_count, target_demand_count) == (0, 0)
+        assert caller_dependency_count == 1
+        _source_root, offset = decode_varint(data, offset)
+        _target_symbol, offset = decode_varint(data, offset)
+        assert data[offset : offset + 2] == b"\x80\x02"
+        data[offset + 1] = 0x40
+
+        with pytest.raises(BytecodeError, match="target interfaces"):
+            read_module(bytes(data))
+
 
 class TestMalformedLocationMode:
     def test_full_locations_mode_is_rejected_until_implemented(self) -> None:

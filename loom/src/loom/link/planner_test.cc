@@ -23,6 +23,7 @@
 #include "loom/ops/command/ops.h"
 #include "loom/ops/config/ops.h"
 #include "loom/ops/func/ops.h"
+#include "loom/ops/kernel/ops.h"
 #include "loom/ops/module/ops.h"
 #include "loom/ops/target/ops.h"
 #include "loom/ops/template/ops.h"
@@ -62,6 +63,8 @@ class LinkPlannerTest : public ::testing::Test {
                     loom_config_dialect_op_semantics);
     RegisterDialect(LOOM_DIALECT_FUNC, loom_func_dialect_vtables,
                     loom_func_dialect_op_semantics);
+    RegisterDialect(LOOM_DIALECT_KERNEL, loom_kernel_dialect_vtables,
+                    loom_kernel_dialect_op_semantics);
     RegisterDialect(LOOM_DIALECT_MODULE, loom_module_dialect_vtables,
                     loom_module_dialect_op_semantics);
     RegisterDialect(LOOM_DIALECT_TARGET, loom_target_dialect_vtables,
@@ -522,6 +525,307 @@ command.program.def @root() launch() {
   IndexPtr bytecode_index = CreateIndex();
   AddBytecode(bytecode_index.get(), bytecode, IREE_SV("module.loombc"),
               LOOM_LINK_PROVIDER_ROLE_INPUT);
+  verify_index(bytecode_index.get());
+}
+
+TEST_F(LinkPlannerTest, InterleavedKernelFacetUpgradesPreservePerSymbolChains) {
+  const iree_string_view_t source = IREE_SV(R"(
+func.def @configuration_dependency(%value: index) -> (index) {
+  func.return %value : index
+}
+
+func.def @implementation_dependency() {
+  func.return
+}
+
+kernel.def @target(%count: index) {
+  %configured = func.call @configuration_dependency(%count) : (index) -> (index)
+  kernel.launch.config workgroups(%configured, %configured, %configured) workgroup_size(%configured, %configured, %configured) : index
+} launch() {
+  func.call @implementation_dependency() : () -> ()
+  kernel.return
+}
+
+func.def @interleaved_dependency() {
+  func.return
+}
+)");
+  loom_module_t* module = Parse(source);
+  const std::vector<uint8_t> bytecode = WriteModule(module);
+
+  auto verify_index = [&](const loom_link_module_index_t* index) {
+    const loom_link_module_index_module_t* indexed_module =
+        loom_link_module_index_module_at(index, 0);
+    ASSERT_NE(indexed_module, nullptr);
+    const loom_link_module_index_symbol_t* target =
+        loom_link_module_index_lookup_private(index, indexed_module,
+                                              IREE_SV("target"));
+    const loom_link_module_index_symbol_t* configuration_dependency =
+        loom_link_module_index_lookup_private(
+            index, indexed_module, IREE_SV("configuration_dependency"));
+    const loom_link_module_index_symbol_t* implementation_dependency =
+        loom_link_module_index_lookup_private(
+            index, indexed_module, IREE_SV("implementation_dependency"));
+    const loom_link_module_index_symbol_t* interleaved_dependency =
+        loom_link_module_index_lookup_private(
+            index, indexed_module, IREE_SV("interleaved_dependency"));
+    ASSERT_NE(target, nullptr);
+    ASSERT_NE(configuration_dependency, nullptr);
+    ASSERT_NE(implementation_dependency, nullptr);
+    ASSERT_NE(interleaved_dependency, nullptr);
+
+    const loom_link_plan_root_facet_t roots[] = {
+        {
+            /*.symbol_ordinal=*/target->ordinal,
+            /*.kind=*/LOOM_LINK_SYMBOL_FACET_KERNEL_CONFIGURATION,
+        },
+        {
+            /*.symbol_ordinal=*/interleaved_dependency->ordinal,
+            /*.kind=*/LOOM_LINK_SYMBOL_FACET_DEFINITION,
+        },
+        {
+            /*.symbol_ordinal=*/target->ordinal,
+            /*.kind=*/LOOM_LINK_SYMBOL_FACET_KERNEL_IMPLEMENTATION,
+        },
+    };
+    loom_link_plan_options_t options = {};
+    options.mode = LOOM_LINK_PLAN_SELECTIVE;
+    options.root_facets.count = IREE_ARRAYSIZE(roots);
+    options.root_facets.values = roots;
+    PlanPtr plan = BuildPlan(index, &options);
+
+    EXPECT_TRUE(ContainsSymbol(plan.get(), target));
+    EXPECT_TRUE(loom_link_plan_contains_facet(
+        plan.get(), target->ordinal, LOOM_LINK_SYMBOL_FACET_KERNEL_CONTRACT));
+    EXPECT_TRUE(loom_link_plan_contains_facet(
+        plan.get(), target->ordinal,
+        LOOM_LINK_SYMBOL_FACET_KERNEL_CONFIGURATION));
+    EXPECT_TRUE(loom_link_plan_contains_facet(
+        plan.get(), target->ordinal,
+        LOOM_LINK_SYMBOL_FACET_KERNEL_IMPLEMENTATION));
+    EXPECT_TRUE(ContainsSymbol(plan.get(), configuration_dependency));
+    EXPECT_TRUE(ContainsSymbol(plan.get(), interleaved_dependency));
+    EXPECT_TRUE(ContainsSymbol(plan.get(), implementation_dependency));
+  };
+
+  IndexPtr materialized_index = CreateIndex();
+  AddMaterialized(materialized_index.get(), module, IREE_SV("materialized"),
+                  LOOM_LINK_PROVIDER_ROLE_INPUT);
+  verify_index(materialized_index.get());
+
+  IndexPtr text_index = CreateIndex();
+  AddText(text_index.get(), source, IREE_SV("module.loom"),
+          LOOM_LINK_PROVIDER_ROLE_INPUT);
+  verify_index(text_index.get());
+
+  IndexPtr bytecode_index = CreateIndex();
+  AddBytecode(bytecode_index.get(), bytecode, IREE_SV("module.loombc"),
+              LOOM_LINK_PROVIDER_ROLE_INPUT);
+  verify_index(bytecode_index.get());
+}
+
+TEST_F(LinkPlannerTest, KernelReferencesSelectOnlyTheirRequiredFacets) {
+  const iree_string_view_t harness_source = IREE_SV(R"(
+kernel.decl @configured(%count: index) launch()
+kernel.entry.decl @dispatched() where [workgroup_size(1, 1, 1)]
+
+func.def @interleaved_dependency() {
+  func.return
+}
+
+config.def @local_configuration_dependency = 1 : index
+
+func.def @local_implementation_dependency() {
+  func.return
+}
+
+kernel.def @local(%count: index) {
+  %configured = config.get @local_configuration_dependency : index
+  kernel.launch.config workgroups(%count, %configured, %configured) workgroup_size(%configured, %configured, %configured) : index
+} launch() {
+  func.call @local_implementation_dependency() : () -> ()
+  kernel.return
+}
+
+func.def public @entry(%count: index) {
+  kernel.launch @configured[%count]() : [index]()
+  func.call @interleaved_dependency() : () -> ()
+  kernel.launch @configured[%count]() : [index]()
+  kernel.launch @local[%count]() : [index]()
+  kernel.dispatch @dispatched[%count]() : [index]()
+  func.return
+}
+)");
+  const iree_string_view_t wrong_library_source = IREE_SV(R"(
+func.def @configured(%count: index) {
+  func.return
+}
+)");
+  const iree_string_view_t library_source = IREE_SV(R"(
+config.def @configuration_dependency = 1 : index
+config.def @dispatched_configuration_dependency = 1 : index
+
+func.def @implementation_dependency() {
+  func.return
+}
+
+kernel.def @configured(%count: index) {
+  %configured = config.get @configuration_dependency : index
+  kernel.launch.config workgroups(%count, %configured, %configured) workgroup_size(%configured, %configured, %configured) : index
+} launch() {
+  func.call @implementation_dependency() : () -> ()
+  kernel.return
+}
+
+kernel.def @dispatched(%count: index) {
+  %configured = config.get @dispatched_configuration_dependency : index
+  kernel.launch.config workgroups(%count, %configured, %configured) workgroup_size(%configured, %configured, %configured) : index
+} launch() {
+  func.call @implementation_dependency() : () -> ()
+  kernel.return
+}
+)");
+  loom_module_t* harness = Parse(harness_source);
+  ASSERT_NE(harness, nullptr);
+  loom_module_t* wrong_library = Parse(wrong_library_source);
+  ASSERT_NE(wrong_library, nullptr);
+  loom_module_t* library = Parse(library_source);
+  ASSERT_NE(library, nullptr);
+  const std::vector<uint8_t> harness_bytecode = WriteModule(harness);
+  const std::vector<uint8_t> wrong_library_bytecode =
+      WriteModule(wrong_library);
+  const std::vector<uint8_t> library_bytecode = WriteModule(library);
+
+  auto verify_index = [&](const loom_link_module_index_t* index) {
+    iree_string_view_t roots[] = {IREE_SV("@entry")};
+    loom_link_plan_options_t options = {
+        /*.mode=*/LOOM_LINK_PLAN_SELECTIVE,
+        /*.root_symbols=*/{/*.count=*/IREE_ARRAYSIZE(roots), /*.values=*/roots},
+        /*.include_input_exports=*/false,
+        /*.unresolved_policy=*/LOOM_LINK_PLAN_UNRESOLVED_ERROR,
+        /*.test_symbol_policy=*/LOOM_LINK_PLAN_TEST_SYMBOL_KEEP,
+        /*.strip_symbol=*/nullptr,
+        /*.strip_symbol_user_data=*/nullptr,
+        /*.provider_resolver=*/nullptr,
+        /*.selected_template_providers=*/{},
+        /*.root_facets=*/{},
+        /*.dependency_policy=*/LOOM_LINK_PLAN_DEPENDENCY_REQUESTED_FACETS,
+    };
+    PlanPtr plan = BuildPlan(index, &options);
+
+    const loom_link_module_index_symbol_t* configured_declaration =
+        loom_link_module_index_lookup_global(index, IREE_SV("configured"));
+    ASSERT_NE(configured_declaration, nullptr);
+    const loom_link_module_index_symbol_t* wrong_provider =
+        loom_link_module_index_next_same_name(index, configured_declaration);
+    ASSERT_NE(wrong_provider, nullptr);
+    const loom_link_module_index_symbol_t* configured_provider =
+        loom_link_module_index_next_same_name(index, wrong_provider);
+    ASSERT_NE(configured_provider, nullptr);
+    const loom_link_module_index_symbol_t* dispatched_declaration =
+        loom_link_module_index_lookup_global(index, IREE_SV("dispatched"));
+    ASSERT_NE(dispatched_declaration, nullptr);
+    const loom_link_module_index_symbol_t* dispatched_provider =
+        loom_link_module_index_next_same_name(index, dispatched_declaration);
+    ASSERT_NE(dispatched_provider, nullptr);
+    const loom_link_module_index_module_t* library_module =
+        loom_link_module_index_module_at(index, 2);
+    const loom_link_module_index_module_t* harness_module =
+        loom_link_module_index_module_at(index, 0);
+    ASSERT_NE(harness_module, nullptr);
+    ASSERT_NE(library_module, nullptr);
+    const loom_link_module_index_symbol_t* local =
+        loom_link_module_index_lookup_private(index, harness_module,
+                                              IREE_SV("local"));
+    const loom_link_module_index_symbol_t* local_configuration_dependency =
+        loom_link_module_index_lookup_global(
+            index, IREE_SV("local_configuration_dependency"));
+    const loom_link_module_index_symbol_t* local_implementation_dependency =
+        loom_link_module_index_lookup_private(
+            index, harness_module, IREE_SV("local_implementation_dependency"));
+    const loom_link_module_index_symbol_t* configuration_dependency =
+        loom_link_module_index_lookup_global(
+            index, IREE_SV("configuration_dependency"));
+    const loom_link_module_index_symbol_t* implementation_dependency =
+        loom_link_module_index_lookup_private(
+            index, library_module, IREE_SV("implementation_dependency"));
+    const loom_link_module_index_symbol_t* dispatched_configuration_dependency =
+        loom_link_module_index_lookup_global(
+            index, IREE_SV("dispatched_configuration_dependency"));
+    ASSERT_NE(configuration_dependency, nullptr);
+    ASSERT_NE(dispatched_configuration_dependency, nullptr);
+    ASSERT_NE(implementation_dependency, nullptr);
+    ASSERT_NE(local, nullptr);
+    ASSERT_NE(local_configuration_dependency, nullptr);
+    ASSERT_NE(local_implementation_dependency, nullptr);
+
+    EXPECT_TRUE(ContainsSymbol(plan.get(), local));
+    EXPECT_TRUE(loom_link_plan_contains_facet(
+        plan.get(), local->ordinal, LOOM_LINK_SYMBOL_FACET_KERNEL_CONTRACT));
+    EXPECT_TRUE(loom_link_plan_contains_facet(
+        plan.get(), local->ordinal,
+        LOOM_LINK_SYMBOL_FACET_KERNEL_CONFIGURATION));
+    EXPECT_FALSE(loom_link_plan_contains_facet(
+        plan.get(), local->ordinal,
+        LOOM_LINK_SYMBOL_FACET_KERNEL_IMPLEMENTATION));
+    EXPECT_TRUE(ContainsSymbol(plan.get(), local_configuration_dependency));
+    EXPECT_FALSE(ContainsSymbol(plan.get(), local_implementation_dependency));
+
+    EXPECT_TRUE(ContainsSymbol(plan.get(), configured_declaration));
+    EXPECT_FALSE(ContainsSymbol(plan.get(), wrong_provider));
+    EXPECT_TRUE(ContainsSymbol(plan.get(), configured_provider));
+    EXPECT_TRUE(
+        loom_link_plan_contains_facet(plan.get(), configured_provider->ordinal,
+                                      LOOM_LINK_SYMBOL_FACET_KERNEL_CONTRACT));
+    EXPECT_TRUE(loom_link_plan_contains_facet(
+        plan.get(), configured_provider->ordinal,
+        LOOM_LINK_SYMBOL_FACET_KERNEL_CONFIGURATION));
+    EXPECT_FALSE(loom_link_plan_contains_facet(
+        plan.get(), configured_provider->ordinal,
+        LOOM_LINK_SYMBOL_FACET_KERNEL_IMPLEMENTATION));
+    EXPECT_TRUE(ContainsSymbol(plan.get(), configuration_dependency));
+
+    EXPECT_TRUE(ContainsSymbol(plan.get(), dispatched_declaration));
+    EXPECT_TRUE(ContainsSymbol(plan.get(), dispatched_provider));
+    EXPECT_TRUE(
+        loom_link_plan_contains_facet(plan.get(), dispatched_provider->ordinal,
+                                      LOOM_LINK_SYMBOL_FACET_KERNEL_CONTRACT));
+    EXPECT_FALSE(loom_link_plan_contains_facet(
+        plan.get(), dispatched_provider->ordinal,
+        LOOM_LINK_SYMBOL_FACET_KERNEL_CONFIGURATION));
+    EXPECT_FALSE(loom_link_plan_contains_facet(
+        plan.get(), dispatched_provider->ordinal,
+        LOOM_LINK_SYMBOL_FACET_KERNEL_IMPLEMENTATION));
+    EXPECT_FALSE(
+        ContainsSymbol(plan.get(), dispatched_configuration_dependency));
+    EXPECT_FALSE(ContainsSymbol(plan.get(), implementation_dependency));
+  };
+
+  IndexPtr materialized_index = CreateIndex();
+  AddMaterialized(materialized_index.get(), harness, IREE_SV("harness"),
+                  LOOM_LINK_PROVIDER_ROLE_INPUT);
+  AddMaterialized(materialized_index.get(), wrong_library,
+                  IREE_SV("wrong-library"), LOOM_LINK_PROVIDER_ROLE_LIBRARY);
+  AddMaterialized(materialized_index.get(), library, IREE_SV("library"),
+                  LOOM_LINK_PROVIDER_ROLE_LIBRARY);
+  verify_index(materialized_index.get());
+
+  IndexPtr text_index = CreateIndex();
+  AddText(text_index.get(), harness_source, IREE_SV("harness.loom"),
+          LOOM_LINK_PROVIDER_ROLE_INPUT);
+  AddText(text_index.get(), wrong_library_source, IREE_SV("wrong-library.loom"),
+          LOOM_LINK_PROVIDER_ROLE_LIBRARY);
+  AddText(text_index.get(), library_source, IREE_SV("library.loom"),
+          LOOM_LINK_PROVIDER_ROLE_LIBRARY);
+  verify_index(text_index.get());
+
+  IndexPtr bytecode_index = CreateIndex();
+  AddBytecode(bytecode_index.get(), harness_bytecode, IREE_SV("harness.loombc"),
+              LOOM_LINK_PROVIDER_ROLE_INPUT);
+  AddBytecode(bytecode_index.get(), wrong_library_bytecode,
+              IREE_SV("wrong-library.loombc"), LOOM_LINK_PROVIDER_ROLE_LIBRARY);
+  AddBytecode(bytecode_index.get(), library_bytecode, IREE_SV("library.loombc"),
+              LOOM_LINK_PROVIDER_ROLE_LIBRARY);
   verify_index(bytecode_index.get());
 }
 
