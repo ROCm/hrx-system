@@ -50,6 +50,7 @@ BAZEL_REPOSITORY_INTEGRATION_TEST_TARGETS = (
     "//build_tools/devtools:bazel_test",
     "//build_tools/devtools:ci_test",
     "//build_tools/devtools:cli_test",
+    "//build_tools/devtools:smoke_test_lib_test",
 )
 BAZEL_REPOSITORY_INTEGRATION_DYNAMIC_LIBRARY_TARGET = (
     "//build_tools/bazel/test:dynamic_library_environment_binary_fixture"

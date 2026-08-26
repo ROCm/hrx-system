@@ -120,7 +120,22 @@ def run_command(
     env: dict[str, str] | None = None,
 ) -> None:
     print("smoke:", " ".join(command), flush=True)
-    subprocess.run(command, cwd=checkout, env=env, check=True)
+    result = subprocess.run(
+        command,
+        cwd=checkout,
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+    )
+    if result.returncode != 0:
+        if result.stdout:
+            print(
+                result.stdout,
+                file=sys.stderr,
+                end="" if result.stdout.endswith("\n") else "\n",
+            )
+        result.check_returncode()
 
 
 def run_bin_wrapper(checkout: Path, wrapper_name: str, args: list[str]) -> None:
