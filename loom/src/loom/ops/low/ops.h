@@ -94,6 +94,12 @@ typedef enum loom_low_retain_e {
   LOOM_LOW_RETAIN_COUNT_ = 2,
 } loom_low_retain_t;
 
+// Import resolution policy. Absent (0) means required.
+typedef enum loom_low_func_decl_import_policy_e {
+  LOOM_LOW_FUNC_DECL_IMPORT_POLICY_OPTIONAL = 1,
+  LOOM_LOW_FUNC_DECL_IMPORT_POLICY_COUNT_ = 2,
+} loom_low_func_decl_import_policy_t;
+
 // External code source kind for an imported low function declaration.
 typedef enum loom_low_func_decl_import_kind_e {
   LOOM_LOW_FUNC_DECL_IMPORT_KIND_NATIVE = 2,
@@ -282,8 +288,11 @@ LOOM_DEFINE_ATTR_ENUM_TYPED(loom_low_func_decl_allocation, 11, loom_low_allocati
 LOOM_DEFINE_ATTR_ENUM_TYPED(loom_low_func_decl_schedule, 12, loom_low_schedule_t)
 LOOM_DEFINE_ATTR_PREDICATE_LIST(loom_low_func_decl_predicates, 13)
 LOOM_DEFINE_ATTR_ENUM_TYPED(loom_low_func_decl_retain, 14, loom_low_retain_t)
-LOOM_DEFINE_ATTR_ENUM_TYPED(loom_low_func_decl_import_kind, 15, loom_low_func_decl_import_kind_t)
-LOOM_DEFINE_ATTR_STRING(loom_low_func_decl_code_symbol, 16)
+LOOM_DEFINE_ATTR_ENUM_TYPED(loom_low_func_decl_import_policy, 15, loom_low_func_decl_import_policy_t)
+LOOM_DEFINE_ATTR_STRING(loom_low_func_decl_import_module, 16)
+LOOM_DEFINE_ATTR_STRING(loom_low_func_decl_import_symbol, 17)
+LOOM_DEFINE_ATTR_ENUM_TYPED(loom_low_func_decl_import_kind, 18, loom_low_func_decl_import_kind_t)
+LOOM_DEFINE_ATTR_STRING(loom_low_func_decl_code_symbol, 19)
 enum loom_low_func_decl_build_flag_bits_e {
   LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_VISIBILITY = 1u << 0,
   LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_RETAIN = 1u << 1,
@@ -291,15 +300,18 @@ enum loom_low_func_decl_build_flag_bits_e {
   LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_PURITY = 1u << 3,
   LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_ALLOCATION = 1u << 4,
   LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_SCHEDULE = 1u << 5,
-  LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_IMPORT_KIND = 1u << 6,
-  LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_CODE_SYMBOL = 1u << 7,
-  LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_TARGET = 1u << 8,
-  LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_ABI = 1u << 9,
-  LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_EXPORT_SYMBOL = 1u << 10,
-  LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_ABI_ATTRS = 1u << 11,
-  LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_ABI_LAYOUT = 1u << 12,
-  LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_EXPORT_ATTRS = 1u << 13,
-  LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_PREDICATES = 1u << 14,
+  LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_IMPORT_POLICY = 1u << 6,
+  LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_IMPORT_MODULE = 1u << 7,
+  LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_IMPORT_SYMBOL = 1u << 8,
+  LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_IMPORT_KIND = 1u << 9,
+  LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_CODE_SYMBOL = 1u << 10,
+  LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_TARGET = 1u << 11,
+  LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_ABI = 1u << 12,
+  LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_EXPORT_SYMBOL = 1u << 13,
+  LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_ABI_ATTRS = 1u << 14,
+  LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_ABI_LAYOUT = 1u << 15,
+  LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_EXPORT_ATTRS = 1u << 16,
+  LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_PREDICATES = 1u << 17,
 };
 typedef uint32_t loom_low_func_decl_build_flags_t;
 iree_status_t loom_low_func_decl_build(
@@ -311,6 +323,9 @@ iree_status_t loom_low_func_decl_build(
     loom_optional uint8_t purity,
     loom_optional uint8_t allocation,
     loom_optional uint8_t schedule,
+    loom_optional uint8_t import_policy,
+    loom_optional loom_string_id_t import_module,
+    loom_optional loom_string_id_t import_symbol,
     loom_optional uint8_t import_kind,
     loom_optional loom_string_id_t code_symbol,
     loom_string_id_t descriptor_set,

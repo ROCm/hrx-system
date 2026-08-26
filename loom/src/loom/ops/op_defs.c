@@ -734,6 +734,16 @@ loom_string_id_t loom_func_like_import_symbol(loom_func_like_t func) {
   return loom_attr_as_string_id(attr);
 }
 
+uint8_t loom_func_like_import_policy(loom_func_like_t func) {
+  if (!func.vtable ||
+      func.vtable->import_policy_attr_index == LOOM_ATTR_INDEX_NONE) {
+    return 0;
+  }
+  const loom_attribute_t attr =
+      loom_op_attrs(func.op)[func.vtable->import_policy_attr_index];
+  return loom_attr_is_absent(attr) ? 0 : loom_attr_as_enum(attr);
+}
+
 loom_symbol_ref_t loom_func_like_target(loom_func_like_t func) {
   if (!func.vtable || func.vtable->target_attr_index == LOOM_ATTR_INDEX_NONE) {
     return loom_symbol_ref_null();

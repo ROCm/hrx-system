@@ -1307,6 +1307,9 @@ loom_string_id_t loom_func_like_import_module(loom_func_like_t func);
 // LOOM_STRING_ID_INVALID if absent.
 loom_string_id_t loom_func_like_import_symbol(loom_func_like_t func);
 
+// Returns the import policy enum value, or zero when absent.
+uint8_t loom_func_like_import_policy(loom_func_like_t func);
+
 // Returns the target record symbol ref for a func-like op, or null if
 // |func| has no target contract.
 loom_symbol_ref_t loom_func_like_target(loom_func_like_t func);

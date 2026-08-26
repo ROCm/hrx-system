@@ -50,7 +50,13 @@ from loom.assembly import (
     TypesOf,
     kw,
 )
-from loom.dialect.func.defs import CallingConv, Purity, Retain, Visibility
+from loom.dialect.func.defs import (
+    CallingConv,
+    ImportPolicy,
+    Purity,
+    Retain,
+    Visibility,
+)
 from loom.dialect.target.defs import ExportAbiKind, ExportLinkage
 from loom.dsl import (
     ANY,
@@ -272,6 +278,9 @@ _KERNEL_COMMON_ATTRS = [
 ]
 
 _FUNC_DECL_IMPORT_ATTRS = [
+    AttrDef("import_policy", "enum", enum_def=ImportPolicy, optional=True),
+    AttrDef("import_module", "string", optional=True),
+    AttrDef("import_symbol", "string", optional=True),
     AttrDef("import_kind", "enum", enum_def=LowCodeImportKind, optional=True),
     AttrDef("code_symbol", "string", optional=True),
 ]
@@ -430,6 +439,22 @@ _FUNC_IMPORT_FORMAT: list[FormatElement] = [
     ),
 ]
 
+_FUNC_LINK_FORMAT: list[FormatElement] = [
+    OptionalGroup([Attr("import_policy")], anchor="import_policy"),
+    OptionalGroup(
+        [
+            kw("link"),
+            GLUE,
+            LPAREN,
+            Attr("import_module"),
+            OptionalGroup([COMMA, Attr("import_symbol")], anchor="import_symbol"),
+            GLUE,
+            RPAREN,
+        ],
+        anchor="import_module",
+    ),
+]
+
 _FUNC_SIGNATURE_FORMAT: list[FormatElement] = [
     SymbolRef("callee"),
     Scope(
@@ -472,6 +497,13 @@ _FUNC_LIKE_COMMON: dict[str, Any] = dict(
     cc="cc",
     purity="purity",
     predicates="predicates",
+)
+
+_FUNC_LIKE_DECL: dict[str, Any] = dict(
+    **_FUNC_LIKE_COMMON,
+    import_policy="import_policy",
+    import_module="import_module",
+    import_symbol="import_symbol",
 )
 
 _KERNEL_FUNC_LIKE_COMMON: dict[str, Any] = dict(
@@ -590,10 +622,11 @@ low_func_decl = Op(
         flags=[SymbolDefinitionFlag.DECLARATION],
     ),
     results=[Result("results", REGISTER, variadic=True)],
-    interfaces=[FuncLikeInterface(**_FUNC_LIKE_COMMON, args="args")],
+    interfaces=[FuncLikeInterface(**_FUNC_LIKE_DECL, args="args")],
     verify="loom_low_func_decl_verify",
     format=[
         *_FUNC_MODIFIER_FORMAT,
+        *_FUNC_LINK_FORMAT,
         *_FUNC_IMPORT_FORMAT,
         *_LOW_TARGET_FORMAT,
         *_FUNC_ABI_FORMAT,

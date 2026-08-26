@@ -1067,6 +1067,10 @@ typedef struct loom_func_like_vtable_t {
   // absent.
   uint8_t import_symbol_attr_index;
 
+  // Index of the optional import policy enum attr. LOOM_ATTR_INDEX_NONE if
+  // absent.
+  uint8_t import_policy_attr_index;
+
   // Index of the optional target record attr. LOOM_ATTR_INDEX_NONE if absent.
   uint8_t target_attr_index;
 

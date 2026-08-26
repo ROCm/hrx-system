@@ -5026,6 +5026,8 @@ class FuncLikeInterface(NamedTuple):
     import_module: str | None = None
     # Optional import symbol string attr for external declarations.
     import_symbol: str | None = None
+    # Optional import policy enum attr for external declarations.
+    import_policy: str | None = None
     # Optional symbol ref attr naming the resolved target record.
     target: str | None = None
     # Optional string attr naming the intrinsic contract under which the

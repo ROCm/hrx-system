@@ -734,9 +734,19 @@ typedef struct loom_low_lower_finalize_module_callback_t {
   void* user_data;
 } loom_low_lower_finalize_module_callback_t;
 
+typedef uint32_t loom_low_lower_policy_flags_t;
+
+enum loom_low_lower_policy_flag_bits_e {
+  // The policy lowers source module imports even when no physical target code
+  // import kind applies.
+  LOOM_LOW_LOWER_POLICY_FLAG_MODULE_IMPORTS = 1u << 0,
+};
+
 typedef struct loom_low_lower_policy_t {
   // Stable policy name used in diagnostics and status messages.
   iree_string_view_t name;
+  // Target-low policy capability flags.
+  loom_low_lower_policy_flags_t flags;
   // Catalog resolving compact diagnostic refs carried by this policy's
   // generated rules and contract fragments.
   const loom_error_catalog_t* error_catalog;
@@ -773,8 +783,8 @@ typedef struct loom_low_lower_policy_t {
   // Optionally emits conditional branches that need target-specific structural
   // control packets instead of plain low.cond_br.
   loom_low_lower_emit_cond_branch_callback_t emit_cond_branch;
-  // Low declaration import kind for target-bound source imports, or zero when
-  // this policy does not lower import declarations.
+  // Low declaration physical code import kind for target-bound source imports.
+  // Zero preserves only source module linkage on the low declaration.
   loom_low_func_decl_import_kind_t import_decl_kind;
   // Optional table-driven source-op lowering rule sets in selection order. Rule
   // sets may overlap; the first matching rule wins and failed diagnostics use

@@ -86,3 +86,4 @@
   LOOM_KW_REQUIRES = 77,  // "requires"
   LOOM_KW_SCOPE = 78,  // "scope"
   LOOM_KW_ORDERING = 79,  // "ordering"
+  LOOM_KW_LINK = 80,  // "link"

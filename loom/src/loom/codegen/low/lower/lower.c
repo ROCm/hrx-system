@@ -2213,7 +2213,6 @@ iree_status_t loom_low_lower_import_declaration(
   IREE_ASSERT(loom_func_like_isa(source_declaration));
   IREE_ASSERT(options != NULL);
   IREE_ASSERT(options->policy != NULL);
-  IREE_ASSERT_NE(options->policy->import_decl_kind, 0);
   *out_result = (loom_low_lower_result_t){
       .low_func_ref = loom_symbol_ref_null(),
   };
@@ -2256,16 +2255,33 @@ iree_status_t loom_low_lower_import_declaration(
   iree_status_t status = loom_low_lower_map_decl_signature_types(
       &context, &arg_types, &arg_count, &result_types, &result_count);
   if (iree_status_is_ok(status) && out_result->error_count == 0) {
-    loom_string_id_t code_symbol =
+    const uint8_t import_policy =
+        loom_func_like_import_policy(source_declaration);
+    const loom_string_id_t import_module =
+        loom_func_like_import_module(source_declaration);
+    const loom_string_id_t import_symbol =
         loom_func_like_import_symbol(source_declaration);
-    if (code_symbol == LOOM_STRING_ID_INVALID) {
+    loom_string_id_t code_symbol = import_symbol;
+    if (options->policy->import_decl_kind != 0 &&
+        code_symbol == LOOM_STRING_ID_INVALID) {
       code_symbol = module->symbols.entries[low_func_ref.symbol_id].name_id;
     }
-    IREE_ASSERT_NE(code_symbol, LOOM_STRING_ID_INVALID);
-    IREE_ASSERT_LT(code_symbol, module->strings.count);
-    loom_low_func_decl_build_flags_t build_flags =
-        LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_IMPORT_KIND |
-        LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_CODE_SYMBOL;
+    loom_low_func_decl_build_flags_t build_flags = 0;
+    if (import_policy != 0) {
+      build_flags |= LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_IMPORT_POLICY;
+    }
+    if (import_module != LOOM_STRING_ID_INVALID) {
+      build_flags |= LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_IMPORT_MODULE;
+    }
+    if (import_symbol != LOOM_STRING_ID_INVALID) {
+      build_flags |= LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_IMPORT_SYMBOL;
+    }
+    if (options->policy->import_decl_kind != 0) {
+      IREE_ASSERT_NE(code_symbol, LOOM_STRING_ID_INVALID);
+      IREE_ASSERT_LT(code_symbol, module->strings.count);
+      build_flags |= LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_IMPORT_KIND |
+                     LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_CODE_SYMBOL;
+    }
     const uint8_t visibility = loom_func_like_visibility(source_declaration);
     const uint8_t cc = loom_func_like_cc(source_declaration);
     const uint8_t purity = loom_func_like_purity(source_declaration);
@@ -2338,11 +2354,12 @@ iree_status_t loom_low_lower_import_declaration(
       if (iree_status_is_ok(status)) {
         status = loom_low_func_decl_build(
             &context.builder, build_flags, visibility, retain, cc, purity,
-            /*allocation=*/0, /*schedule=*/0,
-            (uint8_t)options->policy->import_decl_kind, code_symbol,
-            descriptor_set_key, options->target_ref, abi, abi_attrs, abi_layout,
-            export_symbol, export_attrs, low_func_ref, arg_types, arg_count,
-            result_types, result_count, /*tied_results=*/NULL,
+            /*allocation=*/0, /*schedule=*/0, import_policy, import_module,
+            import_symbol, (uint8_t)options->policy->import_decl_kind,
+            code_symbol, descriptor_set_key, options->target_ref, abi,
+            abi_attrs, abi_layout, export_symbol, export_attrs, low_func_ref,
+            arg_types, arg_count, result_types, result_count,
+            /*tied_results=*/NULL,
             /*tied_result_count=*/0, predicates, predicate_count,
             source_declaration.op->location, &context.low_func_op);
       }

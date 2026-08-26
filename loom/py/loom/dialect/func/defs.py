@@ -6,7 +6,7 @@
 
 """Func dialect op definitions.
 
-Four ops for runtime program structure:
+Eight ops for runtime program structure and first-class function values:
 
 Top-level (module-level symbols):
   func.def       — Function definition (has body, callable by name).
@@ -14,6 +14,10 @@ Top-level (module-level symbols):
 Body ops:
   func.call      — Runtime function call.
   func.return    — Return values from function body.
+  func.null      — Null first-class function value.
+  func.compare.null — Test a first-class function value for null.
+  func.address   — Address a local or imported function.
+  func.import.resolved — Test whether an optional import resolved.
 """
 
 from typing import Any
@@ -31,19 +35,24 @@ from loom.assembly import (
     FuncArgs,
     OptionalGroup,
     PredicateList,
+    Ref,
     Refs,
     Region,
+    ResultType,
     ResultTypeList,
     Scope,
     SymbolRef,
+    TypeOf,
     TypesOf,
     kw,
 )
 from loom.dialect.target.defs import ExportAbiKind
 from loom.dsl import (
     ANY,
+    I1,
     ISOLATED_FROM_ABOVE,
     POISON_BOUNDARY,
+    PURE,
     SYMBOL_DEFINE,
     TERMINATOR,
     UNKNOWN_EFFECTS,
@@ -116,6 +125,19 @@ Temperature = EnumDef(
         EnumCase("cold", 2, doc="Expected to execute on a cold path."),
     ],
     doc="Execution temperature hint. Absent (0) means unspecified.",
+)
+
+ImportPolicy = EnumDef(
+    "ImportPolicy",
+    [
+        # Value 0 is reserved for required imports.
+        EnumCase(
+            "optional",
+            1,
+            doc="Permit module linking to leave the import unresolved.",
+        ),
+    ],
+    doc="Import resolution policy. Absent (0) means required.",
 )
 
 InlinePolicyAttr = EnumDef(
@@ -269,6 +291,7 @@ _DECL_ATTRS = [
     AttrDef("visibility", "enum", enum_def=Visibility, optional=True),
     AttrDef("import_module", "string", optional=True),
     AttrDef("import_symbol", "string", optional=True),
+    AttrDef("import_policy", "enum", enum_def=ImportPolicy, optional=True),
     AttrDef("cc", "enum", enum_def=CallingConv, optional=True),
     AttrDef("purity", "enum", enum_def=Purity, optional=True),
     AttrDef("temperature", "enum", enum_def=Temperature, optional=True),
@@ -306,6 +329,7 @@ _FUNC_LIKE_DECL_CONTRACT: dict[str, Any] = dict(
     **_FUNC_LIKE_CONTRACT,
     import_module="import_module",
     import_symbol="import_symbol",
+    import_policy="import_policy",
 )
 
 # ============================================================================
@@ -374,6 +398,7 @@ func_decl = Op(
     format=[
         OptionalGroup([Attr("visibility")], anchor="visibility"),
         OptionalGroup([Attr("retain")], anchor="retain"),
+        OptionalGroup([Attr("import_policy")], anchor="import_policy"),
         *_IMPORT_FORMAT,
         OptionalGroup([Attr("cc")], anchor="cc"),
         OptionalGroup([Attr("purity")], anchor="purity"),
@@ -391,6 +416,73 @@ func_decl = Op(
         'func.decl public import("hal") @hal_buffer_view_create(%a: i32) -> (i64)',
         'func.decl import("hal", "buffer_view.create") @hal_buffer_view_create(%a: i32) -> (i64)',
     ],
+)
+
+# ============================================================================
+# First-class function values
+# ============================================================================
+
+func_null = Op(
+    "func.null",
+    group=func_ops,
+    phase=OpPhase.EXECUTABLE,
+    doc="Produce a null first-class function value of the declared type.",
+    results=[Result("result", ANY)],
+    traits=[PURE],
+    verify="loom_func_null_verify",
+    format=[COLON, ResultType("result")],
+    examples=["%null = func.null : (i32) -> (i32)"],
+)
+
+func_compare_null = Op(
+    "func.compare.null",
+    group=func_ops,
+    phase=OpPhase.EXECUTABLE,
+    doc="Return true when a first-class function value is null.",
+    operands=[Operand("function", ANY)],
+    results=[Result("result", I1)],
+    traits=[PURE],
+    verify="loom_func_compare_null_verify",
+    format=[Ref("function"), COLON, TypeOf("function")],
+    examples=["%is_null = func.compare.null %function : (i32) -> (i32)"],
+)
+
+func_address = Op(
+    "func.address",
+    group=func_ops,
+    phase=OpPhase.EXECUTABLE,
+    doc="Produce a first-class function value addressing a callable symbol.",
+    attrs=[
+        AttrDef(
+            "callee",
+            "symbol",
+            symbol_ref=SymbolReference("function", ["callable"]),
+        ),
+    ],
+    results=[Result("result", ANY)],
+    traits=[PURE],
+    verify="loom_func_address_verify",
+    format=[SymbolRef("callee"), COLON, ResultType("result")],
+    examples=["%function = func.address @callee : (i32) -> (i32)"],
+)
+
+func_import_resolved = Op(
+    "func.import.resolved",
+    group=func_ops,
+    phase=OpPhase.EXECUTABLE,
+    doc="Return true when an optional imported function resolved during linking.",
+    attrs=[
+        AttrDef(
+            "callee",
+            "symbol",
+            symbol_ref=SymbolReference("function", ["callable"]),
+        ),
+    ],
+    results=[Result("result", I1)],
+    traits=[PURE],
+    verify="loom_func_import_resolved_verify",
+    format=[SymbolRef("callee")],
+    examples=["%available = func.import.resolved @optional_feature"],
 )
 
 # ============================================================================
@@ -491,4 +583,8 @@ ALL_FUNC_OPS: tuple[Op, ...] = (
     func_decl,
     func_call,
     func_return,
+    func_null,
+    func_compare_null,
+    func_address,
+    func_import_resolved,
 )

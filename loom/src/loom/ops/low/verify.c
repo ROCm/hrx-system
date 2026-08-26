@@ -1725,6 +1725,8 @@ iree_status_t loom_low_func_decl_verify(const loom_module_t* module,
                                         iree_diagnostic_emitter_t emitter) {
   IREE_RETURN_IF_ERROR(loom_function_contract_verify(module, op, emitter));
   IREE_RETURN_IF_ERROR(loom_low_verify_function_exactness_modes(op, emitter));
+  IREE_RETURN_IF_ERROR(
+      loom_function_import_contract_verify(module, op, emitter));
   return loom_low_verify_decl_code_import(module, op, emitter);
 }
 

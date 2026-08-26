@@ -136,6 +136,7 @@ INTERFACES: tuple[InterfaceSpec, ...] = (
             InterfaceFieldSpec("callee", "callee_attr_index", "attr"),
             InterfaceFieldSpec("import_module", "import_module_attr_index", "attr"),
             InterfaceFieldSpec("import_symbol", "import_symbol_attr_index", "attr"),
+            InterfaceFieldSpec("import_policy", "import_policy_attr_index", "attr"),
             InterfaceFieldSpec("target", "target_attr_index", "attr"),
             InterfaceFieldSpec(
                 "repr_contract",

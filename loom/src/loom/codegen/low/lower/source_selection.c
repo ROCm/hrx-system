@@ -191,7 +191,9 @@ static iree_status_t loom_low_source_selection_try_symbol(
     return iree_ok_status();
   }
   if (kind == LOOM_LOW_SOURCE_SELECTION_IMPORT_DECL &&
-      policy->import_decl_kind == 0) {
+      policy->import_decl_kind == 0 &&
+      !iree_any_bit_set(policy->flags,
+                        LOOM_LOW_LOWER_POLICY_FLAG_MODULE_IMPORTS)) {
     return iree_ok_status();
   }
 

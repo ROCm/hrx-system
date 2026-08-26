@@ -23,6 +23,12 @@ iree_status_t loom_function_contract_verify(const loom_module_t* module,
                                             const loom_op_t* op,
                                             iree_diagnostic_emitter_t emitter);
 
+// Verifies generic module import policy and naming invariants on a function
+// declaration. Function kinds without import fields pass unchanged.
+iree_status_t loom_function_import_contract_verify(
+    const loom_module_t* module, const loom_op_t* op,
+    iree_diagnostic_emitter_t emitter);
+
 // Verifies a function implementation provider and its target applicability
 // contract. Provider target witnesses describe identity only; target-neutral
 // execution choices and limits belong to typed provider requirements.
@@ -38,6 +44,13 @@ iree_status_t loom_function_call_contract_verify(
     const loom_module_t* module, const loom_op_t* op, loom_symbol_ref_t callee,
     loom_value_slice_t operands, loom_value_slice_t results,
     iree_diagnostic_emitter_t emitter);
+
+// Verifies that |function_type| exactly describes |callee|'s argument and
+// result contract. Unresolved symbols are valid in partial modules and are
+// checked after link resolution.
+iree_status_t loom_function_type_contract_verify(
+    const loom_module_t* module, const loom_op_t* op, loom_symbol_ref_t callee,
+    loom_type_t function_type, iree_diagnostic_emitter_t emitter);
 
 #ifdef __cplusplus
 }  // extern "C"

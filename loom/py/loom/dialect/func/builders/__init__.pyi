@@ -41,6 +41,7 @@ class FuncBuilder(DialectBuilder):
         *,
         visibility: str | None = ...,
         retain: str | None = ...,
+        import_policy: str | None = ...,
         import_module: str | None = ...,
         import_symbol: str | None = ...,
         cc: str | None = ...,
@@ -81,3 +82,40 @@ class FuncBuilder(DialectBuilder):
         operands: list[ValueRef] = ...,
         location_id: int | None = ...,
     ) -> None: ...
+    def null(
+        self,
+        *,
+        results: list[Type | TiedResultSpec],
+        name: str | None = ...,
+        names: Sequence[str] | None = ...,
+        result_names: Sequence[str] | None = ...,
+        location_id: int | None = ...,
+    ) -> ValueRef: ...
+    def compare_null(
+        self,
+        *,
+        function: ValueRef,
+        name: str | None = ...,
+        names: Sequence[str] | None = ...,
+        result_names: Sequence[str] | None = ...,
+        location_id: int | None = ...,
+    ) -> ValueRef: ...
+    def address(
+        self,
+        *,
+        callee: str,
+        results: list[Type | TiedResultSpec],
+        name: str | None = ...,
+        names: Sequence[str] | None = ...,
+        result_names: Sequence[str] | None = ...,
+        location_id: int | None = ...,
+    ) -> ValueRef: ...
+    def resolved(
+        self,
+        *,
+        callee: str,
+        name: str | None = ...,
+        names: Sequence[str] | None = ...,
+        result_names: Sequence[str] | None = ...,
+        location_id: int | None = ...,
+    ) -> ValueRef: ...

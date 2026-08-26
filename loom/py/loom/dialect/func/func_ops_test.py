@@ -193,6 +193,9 @@ class TestFuncImportRoundTrip:
     def test_public_import_roundtrip(self) -> None:
         _roundtrip(_module_text('func.decl public import("upstream") @relu(%x: f32) -> (f32)'))
 
+    def test_optional_import_roundtrip(self) -> None:
+        _roundtrip(_module_text('func.decl optional import("runtime", "feature_v2") @feature(%x: i32) -> (i32)'))
+
     def test_mixed_module_roundtrip(self) -> None:
         _roundtrip(
             _module_text(
@@ -221,6 +224,11 @@ class TestFuncImportCrossFormatRoundTrip:
     def test_import_alias_survives_bytecode(self) -> None:
         self._cross_roundtrip(
             _module_text('func.decl import("math_lib", "matmul") @my_matmul(%a: f32) -> (f32)'),
+        )
+
+    def test_optional_import_survives_bytecode(self) -> None:
+        self._cross_roundtrip(
+            _module_text('func.decl optional import("runtime", "feature_v2") @feature(%x: i32) -> (i32)'),
         )
 
     def test_import_metadata_preserved(self) -> None:
@@ -252,6 +260,32 @@ class TestFuncCallRoundTrip:
 
     def test_call_multiple_args_and_results(self) -> None:
         _roundtrip("func.def @multi(%a: f32, %b: i32) -> (f32, i32) {\n  %r0, %r1 = func.call @process(%a, %b) : (f32, i32) -> (f32, i32)\n  func.return %r0, %r1 : f32, i32\n}\n")
+
+
+class TestFunctionValueRoundTrip:
+    def test_function_carrier_operations(self) -> None:
+        _roundtrip(
+            _module_text(
+                'func.decl optional import("runtime", "callback") @callback(%x: i32) -> (i32)',
+                "",
+                "func.def @probe() -> ((i32) -> (i32), i1, i1) {",
+                "  %function = func.address @callback : (i32) -> (i32)",
+                "  %available = func.import.resolved @callback",
+                "  %is_null = func.compare.null %function : (i32) -> (i32)",
+                "  func.return %function, %available, %is_null : (i32) -> (i32), i1, i1",
+                "}",
+            )
+        )
+
+    def test_typed_null(self) -> None:
+        _roundtrip(
+            _module_text(
+                "func.def @null() -> ((i32) -> (i32)) {",
+                "  %function = func.null : (i32) -> (i32)",
+                "  func.return %function : (i32) -> (i32)",
+                "}",
+            )
+        )
 
 
 class TestFuncReturnRoundTrip:

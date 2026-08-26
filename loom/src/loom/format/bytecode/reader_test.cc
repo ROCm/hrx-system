@@ -494,13 +494,13 @@ class ReaderTest : public ::testing::Test {
         &builder,
         LOOM_FUNC_DECL_BUILD_FLAG_HAS_IMPORT_MODULE |
             LOOM_FUNC_DECL_BUILD_FLAG_HAS_IMPORT_SYMBOL,
-        /*visibility=*/0, /*retain=*/0, import_module_id, import_symbol_id,
-        /*cc=*/0, /*purity=*/0, /*temperature=*/0, /*inline_policy=*/0,
-        loom_symbol_ref_null(), /*abi=*/0, loom_named_attr_slice_empty(),
-        LOOM_STRING_ID_INVALID, loom_named_attr_slice_empty(), callee,
-        arg_types, IREE_ARRAYSIZE(arg_types), result_types,
-        IREE_ARRAYSIZE(result_types), nullptr, 0, nullptr, 0,
-        LOOM_LOCATION_UNKNOWN, &decl_op));
+        /*visibility=*/0, /*retain=*/0, /*import_policy=*/0, import_module_id,
+        import_symbol_id, /*cc=*/0, /*purity=*/0, /*temperature=*/0,
+        /*inline_policy=*/0, loom_symbol_ref_null(), /*abi=*/0,
+        loom_named_attr_slice_empty(), LOOM_STRING_ID_INVALID,
+        loom_named_attr_slice_empty(), callee, arg_types,
+        IREE_ARRAYSIZE(arg_types), result_types, IREE_ARRAYSIZE(result_types),
+        nullptr, 0, nullptr, 0, LOOM_LOCATION_UNKNOWN, &decl_op));
     return module;
   }
 
