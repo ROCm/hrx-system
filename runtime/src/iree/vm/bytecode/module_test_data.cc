@@ -16,10 +16,12 @@
 #include "iree/vm/bytecode/wire/core/constant.h"
 #include "iree/vm/bytecode/wire/core/control.h"
 #include "iree/vm/bytecode/wire/core/conversion.h"
+#include "iree/vm/bytecode/wire/core/function.h"
 #include "iree/vm/bytecode/wire/core/global.h"
 #include "iree/vm/bytecode/wire/core/integer.h"
 #include "iree/vm/bytecode/wire/core/opcodes.h"
 #include "iree/vm/bytecode/wire/core/ref.h"
+#include "iree/vm/bytecode/wire/core/selectors.h"
 #include "iree/vm/bytecode/wire/core/value.h"
 #include "iree/vm/bytecode/wire/hal/device.h"
 #include "iree/vm/bytecode/wire/hal/opcodes.h"
@@ -198,6 +200,80 @@ std::vector<uint8_t> BuildOwnershipGlobals() {
   ByteBuffer section;
   section.Append(
       iree_vm_bytecode_v0_globals_header_t{1, 1, 0, 0, 0, 0, {0, 0}});
+  return section.Take();
+}
+
+std::vector<uint8_t> BuildFunctionSignatures() {
+  ByteBuffer section;
+  section.Append(iree_vm_bytecode_v0_signatures_header_t{2});
+  section.Append(iree_vm_bytecode_v0_signature_row_t{});
+  section.Append(iree_vm_bytecode_v0_signature_row_t{0, 0, 1, 0, 0, 0, 0});
+  section.Append(iree_vm_bytecode_v0_signature_descriptor_row_t{
+      IREE_VM_BYTECODE_SIGNATURE_KIND_I8, 0});
+  return section.Take();
+}
+
+std::vector<uint8_t> BuildFunctionCallableTypes() {
+  ByteBuffer section;
+  section.Append(iree_vm_bytecode_v0_callable_types_header_t{2});
+  section.Append(iree_vm_bytecode_v0_callable_type_row_t{0, 0});
+  section.Append(iree_vm_bytecode_v0_callable_type_row_t{1, 0});
+  return section.Take();
+}
+
+std::vector<uint8_t> BuildFunctionImports() {
+  ByteBuffer section;
+  section.Append(iree_vm_bytecode_v0_imports_header_t{1});
+  section.Append(iree_vm_bytecode_v0_import_group_row_t{0, 0, 1});
+  section.Append(iree_vm_bytecode_v0_import_entry_row_t{
+      1, 0, IREE_VM_BYTECODE_IMPORT_FLAG_OPTIONAL, 0});
+  return section.Take();
+}
+
+std::vector<uint8_t> BuildFunctionExports() {
+  ByteBuffer section;
+  section.Append(iree_vm_bytecode_v0_exports_header_t{1});
+  section.Append(iree_vm_bytecode_v0_export_row_t{2, 0, 0, 0});
+  return section.Take();
+}
+
+std::vector<uint8_t> BuildFunctionFunctions() {
+  ByteBuffer bytecode;
+  bytecode.Append(iree_vm_isa_control_block_record_t{
+      IREE_VM_ISA_CORE_OPCODE_CONTROL_BLOCK, {0, 0, 0}});
+  bytecode.Append(
+      iree_vm_isa_func_null_record_t{IREE_VM_ISA_CORE_OPCODE_FUNC_NULL, 0, 0});
+  bytecode.Append(iree_vm_isa_func_compare_null_record_t{
+      IREE_VM_ISA_CORE_OPCODE_FUNC_COMPARE_NULL, 0, 0, 0});
+  bytecode.Append(iree_vm_isa_func_copy_record_t{
+      IREE_VM_ISA_CORE_OPCODE_FUNC_COPY, 1, 0, 0});
+  bytecode.Append(iree_vm_isa_func_address_record_t{
+      IREE_VM_ISA_CORE_OPCODE_FUNC_ADDRESS, 2,
+      IREE_VM_ISA_CONTROL_CALL_TARGET_LOCAL, 0, 1, 0});
+  bytecode.Append(iree_vm_isa_func_address_record_t{
+      IREE_VM_ISA_CORE_OPCODE_FUNC_ADDRESS, 3,
+      IREE_VM_ISA_CONTROL_CALL_TARGET_OPTIONAL_IMPORT, 0, 0, 0});
+  bytecode.Append(iree_vm_isa_func_import_resolved_record_t{
+      IREE_VM_ISA_CORE_OPCODE_FUNC_IMPORT_RESOLVED, 1, 0});
+  bytecode.Append(iree_vm_isa_func_stack_store_record_t{
+      IREE_VM_ISA_CORE_OPCODE_FUNC_STACK_STORE, 2, 0});
+  bytecode.Append(iree_vm_isa_func_stack_load_record_t{
+      IREE_VM_ISA_CORE_OPCODE_FUNC_STACK_LOAD, 4, 0});
+  bytecode.Append(iree_vm_isa_control_return_record_t{
+      IREE_VM_ISA_CORE_OPCODE_CONTROL_RETURN, {0, 0, 0}});
+  bytecode.Append(iree_vm_isa_control_block_record_t{
+      IREE_VM_ISA_CORE_OPCODE_CONTROL_BLOCK, {0, 0, 0}});
+  bytecode.Append(iree_vm_isa_control_return_record_t{
+      IREE_VM_ISA_CORE_OPCODE_CONTROL_RETURN, {0, 0, 0}});
+  std::vector<uint8_t> bytecode_data = bytecode.Take();
+
+  ByteBuffer section;
+  section.Append(iree_vm_bytecode_v0_functions_header_t{2});
+  section.Append(iree_vm_bytecode_v0_function_row_t{
+      0, 0, 0, 48, 0, 0, 0, 2, 0, 5, 0, 1, {0, 0, 0}});
+  section.Append(iree_vm_bytecode_v0_function_row_t{
+      0, 0, 48, 8, 0, 0, 0, 0, 0, 0, 0, 0, {0, 0, 0}});
+  section.AppendBytes(bytecode_data.data(), bytecode_data.size());
   return section.Take();
 }
 
@@ -983,6 +1059,19 @@ std::vector<uint8_t> BuildRefStateModuleImage() {
       {IREE_VM_BYTECODE_SECTION_EXPORTS, 0, BuildRefStateExports()},
       {IREE_VM_BYTECODE_SECTION_FUNCTIONS, 0, BuildRefStateFunctions()},
       {IREE_VM_BYTECODE_SECTION_GLOBALS, 0, BuildRefStateGlobals()},
+  });
+}
+
+std::vector<uint8_t> BuildFunctionModuleImage() {
+  return BuildImage({
+      {IREE_VM_BYTECODE_SECTION_STRINGS, 0,
+       BuildStrings({"missing", "callback", "run"})},
+      {IREE_VM_BYTECODE_SECTION_SIGNATURES, 0, BuildFunctionSignatures()},
+      {IREE_VM_BYTECODE_SECTION_CALLABLE_TYPES, 0,
+       BuildFunctionCallableTypes()},
+      {IREE_VM_BYTECODE_SECTION_IMPORTS, 0, BuildFunctionImports()},
+      {IREE_VM_BYTECODE_SECTION_EXPORTS, 0, BuildFunctionExports()},
+      {IREE_VM_BYTECODE_SECTION_FUNCTIONS, 0, BuildFunctionFunctions()},
   });
 }
 

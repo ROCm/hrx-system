@@ -38,6 +38,9 @@ std::vector<uint8_t> BuildRefModuleImage();
 // Builds one typed-ref fixture covering ABI overflow and global ownership.
 std::vector<uint8_t> BuildRefStateModuleImage();
 
+// Builds one first-class function-carrier fixture covering every family op.
+std::vector<uint8_t> BuildFunctionModuleImage();
+
 // Builds the exact 17-record launch-configuration fixture plus empty and
 // full-signature no-op decomposition functions.
 std::vector<uint8_t> BuildLaunchConfigModuleImage();

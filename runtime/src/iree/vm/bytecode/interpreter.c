@@ -20,10 +20,12 @@
 #include "iree/vm/bytecode/wire/core/control.h"
 #include "iree/vm/bytecode/wire/core/conversion.h"
 #include "iree/vm/bytecode/wire/core/float.h"
+#include "iree/vm/bytecode/wire/core/function.h"
 #include "iree/vm/bytecode/wire/core/global.h"
 #include "iree/vm/bytecode/wire/core/integer.h"
 #include "iree/vm/bytecode/wire/core/opcodes.h"
 #include "iree/vm/bytecode/wire/core/ref.h"
+#include "iree/vm/bytecode/wire/core/selectors.h"
 #include "iree/vm/bytecode/wire/core/stack.h"
 #include "iree/vm/bytecode/wire/core/value.h"
 #include "iree/vm/invocation_storage.h"
@@ -269,7 +271,8 @@ static void iree_vm_bytecode_stack_pack_i64(uint8_t* target,
 static iree_status_t iree_vm_bytecode_publish_results(
     const iree_vm_bytecode_module_t* module,
     const iree_vm_bytecode_v0_function_row_t* function,
-    const iree_vm_call_packet_t* call, uint64_t* values, iree_vm_ref_t* refs) {
+    const iree_vm_call_packet_t* call, uint64_t* values, iree_vm_ref_t* refs,
+    iree_vm_function_ref_t* functions) {
   const iree_vm_bytecode_v0_signature_row_t* signature =
       &module->layout.signatures.rows[function->signature_ordinal_u16];
   if (signature->result_ref_count_u16) {
@@ -313,6 +316,15 @@ static iree_status_t iree_vm_bytecode_publish_results(
   for (uint16_t i = 0; i < direct_ref_count; ++i) {
     iree_vm_call_ref_result_store_move(call, i, &refs[i]);
   }
+  const uint16_t direct_function_count =
+      signature->result_function_count_u16 < 16
+          ? signature->result_function_count_u16
+          : 16;
+  if (direct_function_count != 0 &&
+      call->function_results.direct != functions) {
+    memcpy(call->function_results.direct, functions,
+           direct_function_count * sizeof(*functions));
+  }
   return iree_ok_status();
 }
 
@@ -330,12 +342,16 @@ iree_status_t iree_vm_bytecode_function_start(
   uint64_t* values = NULL;
   iree_vm_ref_t* refs = NULL;
   iree_vm_ref_t* local_refs = NULL;
+  iree_vm_function_ref_t* functions = NULL;
+  iree_vm_function_ref_t* local_functions = NULL;
   uint8_t* local_bytes = NULL;
   // Verification requires the register bank to cover every result, so the
   // final comparison is equality for every published image.
   if (function->local_byte_length_u16 == 0 &&
       function->ref_register_count_u16 == 0 &&
       function->local_ref_count_u32 == 0 &&
+      function->function_register_count_u16 == 0 &&
+      function->local_function_count_u32 == 0 &&
       function->value_register_count_u16 <= 16 &&
       function->value_register_count_u16 <= signature->result_value_count_u16) {
     // Result banks are invocation-owned staging until the root succeeds. A
@@ -345,26 +361,39 @@ iree_status_t iree_vm_bytecode_function_start(
   } else {
     const uint32_t ref_count =
         function->ref_register_count_u16 + function->local_ref_count_u32;
+    const uint32_t function_count = function->function_register_count_u16 +
+                                    function->local_function_count_u32;
     const iree_host_size_t frame_storage_size =
         function->value_register_count_u16 * sizeof(uint64_t) +
         (iree_host_size_t)ref_count * sizeof(iree_vm_ref_t) +
+        (iree_host_size_t)function_count * sizeof(iree_vm_function_ref_t) +
         function->local_byte_length_u16;
     uint8_t* frame_storage = NULL;
     IREE_RETURN_IF_ERROR(iree_vm_invocation_stack_reserve(
         invocation, frame_storage_size,
-        iree_max(iree_alignof(uint64_t), iree_alignof(iree_vm_ref_t)),
+        iree_max(iree_max(iree_alignof(uint64_t), iree_alignof(iree_vm_ref_t)),
+                 iree_alignof(iree_vm_function_ref_t)),
         &frame_checkpoint, &frame_storage));
     values = (uint64_t*)frame_storage;
     uint8_t* ref_storage =
         frame_storage + function->value_register_count_u16 * sizeof(uint64_t);
     refs = (iree_vm_ref_t*)ref_storage;
     local_refs = refs + function->ref_register_count_u16;
-    local_bytes = (uint8_t*)(local_refs + function->local_ref_count_u32);
+    functions =
+        (iree_vm_function_ref_t*)(local_refs + function->local_ref_count_u32);
+    local_functions = functions + function->function_register_count_u16;
+    local_bytes =
+        (uint8_t*)(local_functions + function->local_function_count_u32);
   }
   const uint32_t ref_count =
       function->ref_register_count_u16 + function->local_ref_count_u32;
   for (uint32_t i = 0; i < ref_count; ++i) {
     refs[i] = iree_vm_ref_null();
+  }
+  const uint32_t function_count = function->function_register_count_u16 +
+                                  function->local_function_count_u32;
+  if (function_count != 0) {
+    memset(functions, 0, function_count * sizeof(*functions));
   }
   const uint16_t direct_value_count = signature->argument_value_count_u16 < 16
                                           ? signature->argument_value_count_u16
@@ -376,6 +405,14 @@ iree_status_t iree_vm_bytecode_function_start(
                                         : 16;
   for (uint16_t i = 0; i < direct_ref_count; ++i) {
     iree_vm_call_ref_argument_load_move(&params->call, i, &refs[i]);
+  }
+  const uint16_t direct_function_count =
+      signature->argument_function_count_u16 < 16
+          ? signature->argument_function_count_u16
+          : 16;
+  if (direct_function_count != 0) {
+    memcpy(functions, params->call.function_arguments.direct,
+           direct_function_count * sizeof(*functions));
   }
 
   void* process_storage = params->execution.process_storage;
@@ -406,7 +443,7 @@ iree_status_t iree_vm_bytecode_function_start(
   }
   IREE_VM_BYTECODE_DISPATCH_CASE(CONTROL_RETURN, control_return) {
     status = iree_vm_bytecode_publish_results(module, function, &params->call,
-                                              values, refs);
+                                              values, refs, functions);
     if (iree_status_is_ok(status)) {
       *out_outcome = IREE_VM_EXECUTION_OUTCOME_COMPLETED;
     }
@@ -1093,6 +1130,82 @@ iree_status_t iree_vm_bytecode_function_start(
         record->selector_u8, values[record->a_v8], values[record->b_v8],
         values[record->c_v8]);
     IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_isa_float_math_ternary_f64_record_t);
+  }
+  IREE_VM_BYTECODE_DISPATCH_CASE(FUNC_NULL, func_null) {
+    const iree_vm_isa_func_null_record_t* record =
+        (const iree_vm_isa_func_null_record_t*)record_data;
+    functions[record->dst_f8] = iree_vm_function_ref_null();
+    IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_isa_func_null_record_t);
+  }
+  IREE_VM_BYTECODE_DISPATCH_CASE(FUNC_COMPARE_NULL, func_compare_null) {
+    const iree_vm_isa_func_compare_null_record_t* record =
+        (const iree_vm_isa_func_compare_null_record_t*)record_data;
+    values[record->dst_v8] =
+        iree_vm_function_ref_is_null(functions[record->src_f8]);
+    IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_isa_func_compare_null_record_t);
+  }
+  IREE_VM_BYTECODE_DISPATCH_CASE(FUNC_COPY, func_copy) {
+    const iree_vm_isa_func_copy_record_t* record =
+        (const iree_vm_isa_func_copy_record_t*)record_data;
+    functions[record->dst_f8] = functions[record->src_f8];
+    IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_isa_func_copy_record_t);
+  }
+  IREE_VM_BYTECODE_DISPATCH_CASE(FUNC_ADDRESS, func_address) {
+    const iree_vm_isa_func_address_record_t* record =
+        (const iree_vm_isa_func_address_record_t*)record_data;
+    const iree_vm_program_t* program = invocation->process->program;
+    const iree_vm_linked_module_t* linked_module =
+        params->execution.linked_module;
+    if (record->target_kind_u8 == IREE_VM_ISA_CONTROL_CALL_TARGET_LOCAL) {
+      uint32_t mapping = program
+                             ->callables[linked_module->callable_base +
+                                         record->callable_type_ordinal_u16]
+                             .mapping;
+      mapping &= ~IREE_VM_PROGRAM_CALLABLE_MAY_YIELD;
+      if (iree_any_bit_set(
+              module->layout.functions.rows[record->target_ordinal_u16]
+                  .flags_u16,
+              IREE_VM_BYTECODE_FUNCTION_FLAG_MAY_YIELD)) {
+        mapping |= IREE_VM_PROGRAM_CALLABLE_MAY_YIELD;
+      }
+      const uint16_t module_ordinal =
+          (uint16_t)(linked_module - program->linked_modules);
+      functions[record->dst_f8] = (iree_vm_function_ref_t){
+          (uint64_t)(uintptr_t)program,
+          iree_vm_program_pack_target_bits(module_ordinal,
+                                           record->target_ordinal_u16, mapping),
+      };
+    } else {
+      const uint64_t target_bits =
+          linked_module->import_target_bits[record->target_ordinal_u16];
+      functions[record->dst_f8] = target_bits
+                                      ? (iree_vm_function_ref_t){
+                                            (uint64_t)(uintptr_t)program,
+                                            target_bits,
+                                        }
+                                      : iree_vm_function_ref_null();
+    }
+    IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_isa_func_address_record_t);
+  }
+  IREE_VM_BYTECODE_DISPATCH_CASE(FUNC_IMPORT_RESOLVED, func_import_resolved) {
+    const iree_vm_isa_func_import_resolved_record_t* record =
+        (const iree_vm_isa_func_import_resolved_record_t*)record_data;
+    values[record->dst_v8] =
+        params->execution.linked_module
+            ->import_target_bits[record->import_ordinal_u16] != 0;
+    IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_isa_func_import_resolved_record_t);
+  }
+  IREE_VM_BYTECODE_DISPATCH_CASE(FUNC_STACK_LOAD, func_stack_load) {
+    const iree_vm_isa_func_stack_load_record_t* record =
+        (const iree_vm_isa_func_stack_load_record_t*)record_data;
+    functions[record->dst_f8] = local_functions[record->local_ordinal_u16];
+    IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_isa_func_stack_load_record_t);
+  }
+  IREE_VM_BYTECODE_DISPATCH_CASE(FUNC_STACK_STORE, func_stack_store) {
+    const iree_vm_isa_func_stack_store_record_t* record =
+        (const iree_vm_isa_func_stack_store_record_t*)record_data;
+    local_functions[record->local_ordinal_u16] = functions[record->src_f8];
+    IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_isa_func_stack_store_record_t);
   }
   IREE_VM_BYTECODE_DISPATCH_CASE(REF_NULL, ref_null) {
     const iree_vm_isa_ref_null_record_t* record =

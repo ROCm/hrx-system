@@ -11,6 +11,7 @@
 #include "iree/vm/bytecode/wire/core/control.h"
 #include "iree/vm/bytecode/wire/core/conversion.h"
 #include "iree/vm/bytecode/wire/core/float.h"
+#include "iree/vm/bytecode/wire/core/function.h"
 #include "iree/vm/bytecode/wire/core/global.h"
 #include "iree/vm/bytecode/wire/core/integer.h"
 #include "iree/vm/bytecode/wire/core/opcodes.h"
@@ -35,6 +36,12 @@ typedef enum iree_vm_bytecode_verification_form_e {
   IREE_VM_BYTECODE_VERIFICATION_FORM_CONSTANT_POOL_LOAD_I64,
   IREE_VM_BYTECODE_VERIFICATION_FORM_VALUE_UNARY_4,
   IREE_VM_BYTECODE_VERIFICATION_FORM_VALUE_SELECT,
+  IREE_VM_BYTECODE_VERIFICATION_FORM_FUNC_NULL,
+  IREE_VM_BYTECODE_VERIFICATION_FORM_FUNC_COMPARE_NULL,
+  IREE_VM_BYTECODE_VERIFICATION_FORM_FUNC_COPY,
+  IREE_VM_BYTECODE_VERIFICATION_FORM_FUNC_ADDRESS,
+  IREE_VM_BYTECODE_VERIFICATION_FORM_FUNC_IMPORT_RESOLVED,
+  IREE_VM_BYTECODE_VERIFICATION_FORM_FUNC_STACK_TRANSFER,
   IREE_VM_BYTECODE_VERIFICATION_FORM_GLOBAL_VALUE_IMMUTABLE_LOAD,
   IREE_VM_BYTECODE_VERIFICATION_FORM_GLOBAL_VALUE_IMMUTABLE_STORE,
   IREE_VM_BYTECODE_VERIFICATION_FORM_GLOBAL_VALUE_MUTABLE_LOAD,
@@ -116,6 +123,24 @@ static iree_status_t iree_vm_bytecode_verify_ref_register(
   if (ordinal >= register_count) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "ref register ordinal is out of range");
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t iree_vm_bytecode_verify_function_register(
+    uint8_t ordinal, uint16_t register_count) {
+  if (ordinal >= register_count) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "function register ordinal is out of range");
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t iree_vm_bytecode_verify_function_local(
+    uint16_t ordinal, uint32_t local_count) {
+  if (ordinal >= local_count) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "local function ordinal is out of range");
   }
   return iree_ok_status();
 }
@@ -222,6 +247,73 @@ static iree_status_t iree_vm_bytecode_verify_value_binary_selector_record(
   }
   return iree_vm_bytecode_verify_value_binary_record(record_data,
                                                      value_register_count);
+}
+
+// Verifies a function address against its selected immutable declaration.
+static iree_status_t iree_vm_bytecode_verify_function_address_record(
+    const iree_vm_bytecode_module_layout_t* layout,
+    const iree_vm_isa_func_address_record_t* record) {
+  if (record->zero_padding_u8 != 0) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "func.address padding is nonzero");
+  }
+  if (record->callable_type_ordinal_u16 >= layout->callable_types.count) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "func.address callable type is out of range");
+  }
+
+  const iree_vm_bytecode_v0_callable_type_row_t* callable_type =
+      &layout->callable_types.rows[record->callable_type_ordinal_u16];
+  switch (record->target_kind_u8) {
+    case IREE_VM_ISA_CONTROL_CALL_TARGET_LOCAL: {
+      if (record->target_ordinal_u16 >= layout->functions.count) {
+        return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "func.address local target is out of range");
+      }
+      const iree_vm_bytecode_v0_function_row_t* target =
+          &layout->functions.rows[record->target_ordinal_u16];
+      if (target->signature_ordinal_u16 !=
+              callable_type->signature_ordinal_u16 ||
+          (iree_any_bit_set(target->flags_u16,
+                            IREE_VM_BYTECODE_FUNCTION_FLAG_MAY_YIELD) &&
+           !iree_any_bit_set(callable_type->flags_u16,
+                             IREE_VM_BYTECODE_CALLABLE_TYPE_FLAG_MAY_YIELD))) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "func.address callable contract does not match its local target");
+      }
+      return iree_ok_status();
+    }
+    case IREE_VM_ISA_CONTROL_CALL_TARGET_REQUIRED_IMPORT:
+    case IREE_VM_ISA_CONTROL_CALL_TARGET_OPTIONAL_IMPORT: {
+      if (record->target_ordinal_u16 >= layout->imports.entry_count) {
+        return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "func.address import target is out of range");
+      }
+      const iree_vm_bytecode_v0_import_entry_row_t* import =
+          &layout->imports.entries[record->target_ordinal_u16];
+      const bool is_optional = iree_any_bit_set(
+          import->flags_u16, IREE_VM_BYTECODE_IMPORT_FLAG_OPTIONAL);
+      const bool expects_optional =
+          record->target_kind_u8 ==
+          IREE_VM_ISA_CONTROL_CALL_TARGET_OPTIONAL_IMPORT;
+      if (is_optional != expects_optional) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "func.address import target kind does not match its declaration");
+      }
+      if (import->callable_type_ordinal_u16 !=
+          record->callable_type_ordinal_u16) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "func.address callable contract does not match its import target");
+      }
+      return iree_ok_status();
+    }
+    default:
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "func.address target kind is invalid");
+  }
 }
 
 iree_status_t iree_vm_bytecode_function_verify(
@@ -433,6 +525,76 @@ iree_status_t iree_vm_bytecode_function_verify(
             record->true_v8, function->value_register_count_u16));
         IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_value_register(
             record->false_v8, function->value_register_count_u16));
+        break;
+      }
+      case IREE_VM_BYTECODE_VERIFICATION_FORM_FUNC_NULL: {
+        const iree_vm_isa_func_null_record_t* record =
+            (const iree_vm_isa_func_null_record_t*)record_data;
+        if (record->zero_padding_u16 != 0) {
+          return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                  "func.null padding is nonzero");
+        }
+        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_function_register(
+            record->dst_f8, function->function_register_count_u16));
+        break;
+      }
+      case IREE_VM_BYTECODE_VERIFICATION_FORM_FUNC_COMPARE_NULL: {
+        const iree_vm_isa_func_compare_null_record_t* record =
+            (const iree_vm_isa_func_compare_null_record_t*)record_data;
+        if (record->zero_padding_u8 != 0) {
+          return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                  "func.compare.null padding is nonzero");
+        }
+        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_value_register(
+            record->dst_v8, function->value_register_count_u16));
+        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_function_register(
+            record->src_f8, function->function_register_count_u16));
+        break;
+      }
+      case IREE_VM_BYTECODE_VERIFICATION_FORM_FUNC_COPY: {
+        const iree_vm_isa_func_copy_record_t* record =
+            (const iree_vm_isa_func_copy_record_t*)record_data;
+        if (record->zero_padding_u8 != 0) {
+          return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                  "func.copy padding is nonzero");
+        }
+        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_function_register(
+            record->dst_f8, function->function_register_count_u16));
+        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_function_register(
+            record->src_f8, function->function_register_count_u16));
+        break;
+      }
+      case IREE_VM_BYTECODE_VERIFICATION_FORM_FUNC_ADDRESS: {
+        const iree_vm_isa_func_address_record_t* record =
+            (const iree_vm_isa_func_address_record_t*)record_data;
+        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_function_register(
+            record->dst_f8, function->function_register_count_u16));
+        IREE_RETURN_IF_ERROR(
+            iree_vm_bytecode_verify_function_address_record(layout, record));
+        break;
+      }
+      case IREE_VM_BYTECODE_VERIFICATION_FORM_FUNC_IMPORT_RESOLVED: {
+        const iree_vm_isa_func_import_resolved_record_t* record =
+            (const iree_vm_isa_func_import_resolved_record_t*)record_data;
+        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_value_register(
+            record->dst_v8, function->value_register_count_u16));
+        if (record->import_ordinal_u16 >= layout->imports.entry_count ||
+            !iree_any_bit_set(
+                layout->imports.entries[record->import_ordinal_u16].flags_u16,
+                IREE_VM_BYTECODE_IMPORT_FLAG_OPTIONAL)) {
+          return iree_make_status(
+              IREE_STATUS_INVALID_ARGUMENT,
+              "func.import.resolved requires an optional import ordinal");
+        }
+        break;
+      }
+      case IREE_VM_BYTECODE_VERIFICATION_FORM_FUNC_STACK_TRANSFER: {
+        const iree_vm_isa_func_stack_load_record_t* record =
+            (const iree_vm_isa_func_stack_load_record_t*)record_data;
+        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_function_register(
+            record->dst_f8, function->function_register_count_u16));
+        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_function_local(
+            record->local_ordinal_u16, function->local_function_count_u32));
         break;
       }
       case IREE_VM_BYTECODE_VERIFICATION_FORM_GLOBAL_VALUE_IMMUTABLE_LOAD: {
@@ -1024,22 +1186,25 @@ iree_status_t iree_vm_bytecode_module_verify_executable(
         &plan->layout.functions.rows[i];
     const iree_vm_bytecode_v0_signature_row_t* signature =
         &plan->layout.signatures.rows[function->signature_ordinal_u16];
-    if (signature->argument_function_count_u16 != 0 ||
-        signature->result_function_count_u16 != 0) {
+    if (signature->argument_function_count_u16 > 16 ||
+        signature->result_function_count_u16 > 16) {
       return iree_make_status(
           IREE_STATUS_UNIMPLEMENTED,
-          "B0 bytecode functions do not support function banks");
+          "function argument and result overflow is not executable");
     }
-    if (function->switch_target_entry_count_u32 != 0 ||
-        function->local_function_count_u32 != 0) {
-      return iree_make_status(
-          IREE_STATUS_UNIMPLEMENTED,
-          "B0 bytecode functions do not support targets or local functions");
+    if (function->switch_target_entry_count_u32 != 0) {
+      return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
+                              "direct control targets are not executable");
     }
     if (function->local_ref_count_u32 > (uint32_t)UINT16_MAX + 1u) {
       return iree_make_status(
           IREE_STATUS_UNIMPLEMENTED,
           "B0 bytecode functions support only direct local ref slots");
+    }
+    if (function->local_function_count_u32 > (uint32_t)UINT16_MAX + 1u) {
+      return iree_make_status(
+          IREE_STATUS_UNIMPLEMENTED,
+          "bytecode functions support only direct local function slots");
     }
     IREE_RETURN_IF_ERROR(
         iree_vm_bytecode_function_verify(&plan->layout, function, i));

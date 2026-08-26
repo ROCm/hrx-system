@@ -22,6 +22,7 @@
 #include "iree/vm/bytecode/wire/core/constant.h"
 #include "iree/vm/bytecode/wire/core/control.h"
 #include "iree/vm/bytecode/wire/core/float.h"
+#include "iree/vm/bytecode/wire/core/function.h"
 #include "iree/vm/bytecode/wire/core/global.h"
 #include "iree/vm/bytecode/wire/core/integer.h"
 #include "iree/vm/bytecode/wire/core/opcodes.h"
@@ -1315,6 +1316,104 @@ TEST(VMBytecodeModuleTest, RejectsMalformedRefInstructions) {
           iree_allocator_system(), &module));
   EXPECT_EQ(module, nullptr);
   iree_vm_module_release(module);
+
+  iree_vm_environment_free(environment);
+}
+
+TEST(VMBytecodeModuleTest, RejectsMalformedFunctionInstructions) {
+  iree_vm_environment_t* environment = nullptr;
+  IREE_ASSERT_OK(
+      iree_vm_environment_allocate(iree_allocator_system(), &environment));
+
+  std::vector<uint8_t> valid_image = BuildFunctionModuleImage();
+  iree_vm_module_t* valid_module = nullptr;
+  IREE_ASSERT_OK(iree_vm_bytecode_module_create(
+      environment, IREE_SV("function"),
+      {iree_make_const_byte_span(valid_image.data(), valid_image.size()),
+       iree_allocator_null()},
+      iree_allocator_system(), &valid_module));
+  iree_vm_module_release(valid_module);
+
+  const auto expect_rejected = [&](const auto& mutate) {
+    std::vector<uint8_t> image = BuildFunctionModuleImage();
+    const MutableFunctionImage function = FindFunctionImage(&image, 0);
+    ASSERT_NE(function.row, nullptr);
+    mutate(function);
+    iree_vm_module_t* module = nullptr;
+    IREE_EXPECT_STATUS_IS(
+        IREE_STATUS_INVALID_ARGUMENT,
+        iree_vm_bytecode_module_create(
+            environment, IREE_SV("malformed_function"),
+            {iree_make_const_byte_span(image.data(), image.size()),
+             iree_allocator_null()},
+            iree_allocator_system(), &module));
+    EXPECT_EQ(module, nullptr);
+    iree_vm_module_release(module);
+  };
+
+  constexpr uint32_t kNullOffset = 4;
+  constexpr uint32_t kCompareNullOffset = 8;
+  constexpr uint32_t kCopyOffset = 12;
+  constexpr uint32_t kLocalAddressOffset = 16;
+  constexpr uint32_t kImportAddressOffset = 24;
+  constexpr uint32_t kImportResolvedOffset = 32;
+  constexpr uint32_t kStackStoreOffset = 36;
+  constexpr uint32_t kStackLoadOffset = 40;
+  expect_rejected([](MutableFunctionImage function) {
+    auto* record = reinterpret_cast<iree_vm_isa_func_null_record_t*>(
+        function.bytecode + kNullOffset);
+    record->dst_f8 = 5;
+  });
+  expect_rejected([](MutableFunctionImage function) {
+    auto* record = reinterpret_cast<iree_vm_isa_func_compare_null_record_t*>(
+        function.bytecode + kCompareNullOffset);
+    record->dst_v8 = 2;
+  });
+  expect_rejected([](MutableFunctionImage function) {
+    auto* record = reinterpret_cast<iree_vm_isa_func_copy_record_t*>(
+        function.bytecode + kCopyOffset);
+    record->src_f8 = 5;
+  });
+  expect_rejected([](MutableFunctionImage function) {
+    auto* record = reinterpret_cast<iree_vm_isa_func_address_record_t*>(
+        function.bytecode + kLocalAddressOffset);
+    record->target_kind_u8 = UINT8_MAX;
+  });
+  expect_rejected([](MutableFunctionImage function) {
+    auto* record = reinterpret_cast<iree_vm_isa_func_address_record_t*>(
+        function.bytecode + kLocalAddressOffset);
+    record->target_ordinal_u16 = 2;
+  });
+  expect_rejected([](MutableFunctionImage function) {
+    auto* record = reinterpret_cast<iree_vm_isa_func_address_record_t*>(
+        function.bytecode + kLocalAddressOffset);
+    record->callable_type_ordinal_u16 = 2;
+  });
+  expect_rejected([](MutableFunctionImage function) {
+    auto* record = reinterpret_cast<iree_vm_isa_func_address_record_t*>(
+        function.bytecode + kLocalAddressOffset);
+    record->callable_type_ordinal_u16 = 1;
+  });
+  expect_rejected([](MutableFunctionImage function) {
+    auto* record = reinterpret_cast<iree_vm_isa_func_address_record_t*>(
+        function.bytecode + kImportAddressOffset);
+    record->target_kind_u8 = IREE_VM_ISA_CONTROL_CALL_TARGET_REQUIRED_IMPORT;
+  });
+  expect_rejected([](MutableFunctionImage function) {
+    auto* record = reinterpret_cast<iree_vm_isa_func_import_resolved_record_t*>(
+        function.bytecode + kImportResolvedOffset);
+    record->import_ordinal_u16 = 1;
+  });
+  expect_rejected([](MutableFunctionImage function) {
+    auto* record = reinterpret_cast<iree_vm_isa_func_stack_store_record_t*>(
+        function.bytecode + kStackStoreOffset);
+    record->local_ordinal_u16 = 1;
+  });
+  expect_rejected([](MutableFunctionImage function) {
+    auto* record = reinterpret_cast<iree_vm_isa_func_stack_load_record_t*>(
+        function.bytecode + kStackLoadOffset);
+    record->dst_f8 = 5;
+  });
 
   iree_vm_environment_free(environment);
 }

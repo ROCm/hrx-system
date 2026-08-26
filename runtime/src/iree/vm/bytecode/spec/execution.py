@@ -48,6 +48,13 @@ EXECUTABLE_INSTRUCTIONS = (
     ExecutableInstruction("constant.pool.load.i64", "CONSTANT_POOL_LOAD_I64"),
     ExecutableInstruction("value.copy", "VALUE_UNARY_4"),
     ExecutableInstruction("value.select", "VALUE_SELECT"),
+    ExecutableInstruction("func.null", "FUNC_NULL"),
+    ExecutableInstruction("func.compare.null", "FUNC_COMPARE_NULL"),
+    ExecutableInstruction("func.copy", "FUNC_COPY"),
+    ExecutableInstruction("func.address", "FUNC_ADDRESS"),
+    ExecutableInstruction("func.import.resolved", "FUNC_IMPORT_RESOLVED"),
+    ExecutableInstruction("func.stack.load", "FUNC_STACK_TRANSFER"),
+    ExecutableInstruction("func.stack.store", "FUNC_STACK_TRANSFER"),
     ExecutableInstruction("global.value.immutable.load", "GLOBAL_VALUE_IMMUTABLE_LOAD"),
     ExecutableInstruction(
         "global.value.immutable.store", "GLOBAL_VALUE_IMMUTABLE_STORE"

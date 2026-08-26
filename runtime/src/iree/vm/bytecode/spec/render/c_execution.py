@@ -18,8 +18,12 @@ from model.isa.validation import (
     ALLOWED_VALUES,
     ANY_BITS,
     CONSTANT_POOL_ORDINAL,
+    CONSTRAINT_MEMBER,
     FIELDS_DISTINCT,
+    FUNCTION_ADDRESS,
+    FUNCTION_LOCAL_ORDINAL,
     GLOBAL_ORDINAL,
+    IMPORT_ORDINAL_OPTIONAL,
     LOCAL_BYTES_FIXED_BASE,
     LOCAL_BYTES_RANGE_BASE,
     LOCAL_BYTES_RANGE_LENGTH,
@@ -27,6 +31,7 @@ from model.isa.validation import (
     LOCAL_BYTES_REPEATED_BASE,
     LOCAL_BYTES_REPEATED_COUNT,
     REF_SLOT,
+    REGISTER_FUNCTION,
     REGISTER_REF,
     REGISTER_VALUE,
     RODATA_ORDINAL,
@@ -131,6 +136,14 @@ def _validate_verification_form(
             result_or_operand,
         )
 
+    def require_function(offset: int) -> None:
+        require_field(
+            offset,
+            1,
+            REGISTER_FUNCTION.entity_id,
+            result_or_operand,
+        )
+
     def require_ref_slot(offset: int) -> None:
         require_field(
             offset,
@@ -231,6 +244,82 @@ def _validate_verification_form(
         for offset in range(1, 5):
             require_value(offset)
         require_zero(5, 1, array_length=3)
+    elif verification_form == "FUNC_NULL":
+        if instruction.byte_length != 4:
+            raise ValueError(f"{instruction.mnemonic}: function null is not 4 bytes")
+        require_function(1)
+        require_zero(2, 2)
+    elif verification_form == "FUNC_COMPARE_NULL":
+        if instruction.byte_length != 4:
+            raise ValueError(
+                f"{instruction.mnemonic}: function null comparison is not 4 bytes"
+            )
+        require_value(1)
+        require_function(2)
+        require_zero(3, 1)
+    elif verification_form == "FUNC_COPY":
+        if instruction.byte_length != 4:
+            raise ValueError(f"{instruction.mnemonic}: function copy is not 4 bytes")
+        require_function(1)
+        require_function(2)
+        require_zero(3, 1)
+    elif verification_form == "FUNC_ADDRESS":
+        if instruction.byte_length != 8:
+            raise ValueError(f"{instruction.mnemonic}: function address is not 8 bytes")
+        require_function(1)
+        require_field(
+            2,
+            1,
+            SELECTOR.entity_id,
+            (InstructionFieldRole.IMMEDIATE,),
+            rule_arguments=(EntityReference("core.selector.control.call.target"),),
+        )
+        require_zero(3, 1)
+        for offset in (4, 6):
+            require_field(
+                offset,
+                2,
+                CONSTRAINT_MEMBER.entity_id,
+                (InstructionFieldRole.CONSTRAINT_MEMBER,),
+                rule_arguments=("func.address",),
+            )
+        expected_constraint = RuleUse(
+            FUNCTION_ADDRESS.entity_id,
+            (
+                FieldReference("target_kind_u8"),
+                FieldReference("target_ordinal_u16"),
+                FieldReference("callable_type_ordinal_u16"),
+            ),
+        )
+        if instruction.constraints != (expected_constraint,):
+            raise ValueError(
+                f"{instruction.mnemonic}: address constraint does not match its "
+                "runtime verification form"
+            )
+    elif verification_form == "FUNC_IMPORT_RESOLVED":
+        if instruction.byte_length != 4:
+            raise ValueError(
+                f"{instruction.mnemonic}: import resolution test is not 4 bytes"
+            )
+        require_value(1)
+        require_field(
+            2,
+            2,
+            IMPORT_ORDINAL_OPTIONAL.entity_id,
+            (InstructionFieldRole.IMMEDIATE,),
+        )
+    elif verification_form == "FUNC_STACK_TRANSFER":
+        if instruction.byte_length != 4:
+            raise ValueError(
+                f"{instruction.mnemonic}: function stack transfer is not 4 bytes"
+            )
+        require_function(1)
+        require_field(
+            2,
+            2,
+            FUNCTION_LOCAL_ORDINAL.entity_id,
+            (InstructionFieldRole.IMMEDIATE,),
+        )
     elif verification_form in (
         "GLOBAL_VALUE_IMMUTABLE_LOAD",
         "GLOBAL_VALUE_IMMUTABLE_STORE",
