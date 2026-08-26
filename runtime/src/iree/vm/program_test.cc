@@ -15,6 +15,7 @@
 #include "iree/testing/status_matchers.h"
 #include "iree/vm/program_storage.h"
 #include "iree/vm/program_test_provider.h"
+#include "iree/vm/variant.h"
 
 namespace {
 
@@ -274,8 +275,8 @@ TEST(VMProgramTest, LinksOneImmutableSlabAndPrecomputesTargets) {
       {app.module, iree_vm_module_span_from_array(libraries)},
       MakeCountingAllocator(&allocator), &program));
   ASSERT_NE(program, nullptr);
-  EXPECT_EQ(allocator.allocation_count, 2u);
-  EXPECT_EQ(allocator.free_count, 1u);
+  EXPECT_EQ(allocator.allocation_count, 1u);
+  EXPECT_EQ(allocator.free_count, 0u);
 
   ASSERT_EQ(program->linked_module_count, 3u);
   EXPECT_EQ(ToStringView(program->linked_modules[0].module->descriptor->name),
@@ -285,6 +286,14 @@ TEST(VMProgramTest, LinksOneImmutableSlabAndPrecomputesTargets) {
   EXPECT_EQ(ToStringView(program->linked_modules[2].module->descriptor->name),
             "root.app");
   EXPECT_EQ(program->executable_module_ordinal, 2u);
+  EXPECT_EQ(program->callable_mapping_count, 7u);
+  EXPECT_EQ(program->callable_abi_count, 3u);
+  EXPECT_TRUE(iree_host_ptr_has_alignment(
+      program->linked_modules, iree_alignof(iree_vm_linked_module_t)));
+  EXPECT_TRUE(iree_host_ptr_has_alignment(program->callable_mappings,
+                                          iree_alignof(uint32_t)));
+  EXPECT_TRUE(iree_host_ptr_has_alignment(
+      program->callable_abis, iree_alignof(iree_vm_program_callable_abi_t)));
 
   iree_host_size_t app_offset = 0;
   ASSERT_TRUE(iree_host_size_checked_align(1, iree_max_align_t, &app_offset));
@@ -315,6 +324,27 @@ TEST(VMProgramTest, LinksOneImmutableSlabAndPrecomputesTargets) {
       iree_vm_program_callable_may_yield(app_permissive_callback_mapping));
   EXPECT_FALSE(iree_vm_program_callable_may_yield(beta_callback_mapping));
 
+  const uint32_t callback_token =
+      iree_vm_program_callable_token(app_callback_mapping);
+  const iree_vm_program_callable_abi_t* callback_abi =
+      iree_vm_program_resolve_callable_abi(program, callback_token);
+  ASSERT_EQ(callback_abi, &program->callable_abis[callback_token - 1]);
+  EXPECT_EQ(callback_abi->argument_counts.value_count, 1u);
+  EXPECT_EQ(callback_abi->result_counts.value_count, 1u);
+  ASSERT_NE(callback_abi->value_arguments, nullptr);
+  EXPECT_TRUE(iree_host_ptr_has_alignment(
+      callback_abi->value_arguments,
+      iree_alignof(iree_vm_program_scalar_field_abi_t)));
+  EXPECT_EQ(callback_abi->value_arguments[0].variant_offset, 0u);
+  EXPECT_EQ(callback_abi->value_arguments[0].payload_mask, UINT32_MAX);
+  EXPECT_EQ(callback_abi->value_arguments[0].variant_metadata,
+            (IREE_VM_SCALAR_TYPE_I32 << 2) | IREE_VM_VARIANT_TAG_SCALAR);
+  EXPECT_EQ(callback_abi->root_layout.storage_size, 2 * sizeof(uint64_t));
+  EXPECT_EQ(iree_vm_program_resolve_callable_abi(program, 0), nullptr);
+  EXPECT_EQ(iree_vm_program_resolve_callable_abi(
+                program, program->callable_abi_count + 1),
+            nullptr);
+
   const uint64_t* app_imports = program->linked_modules[2].import_target_bits;
   ASSERT_NE(app_imports, nullptr);
   EXPECT_NE(app_imports[0], 0u);
@@ -340,10 +370,17 @@ TEST(VMProgramTest, LinksOneImmutableSlabAndPrecomputesTargets) {
       0u);
   EXPECT_TRUE(
       iree_vm_program_target_may_yield(program->initializer.target_bits));
-  EXPECT_EQ(program->initializer.arguments.count, 3u);
-  EXPECT_EQ(program->initializer.argument_counts.value_count, 1u);
-  EXPECT_EQ(program->initializer.argument_counts.ref_count, 1u);
-  EXPECT_EQ(program->initializer.argument_counts.function_count, 1u);
+  ASSERT_NE(program->initializer.callable_abi, nullptr);
+  EXPECT_EQ(program->initializer.callable_abi,
+            &program->callable_abis
+                 [iree_vm_program_callable_token(app_initialize_mapping) - 1]);
+  EXPECT_EQ(iree_vm_program_callable_abi_argument_count(
+                program->initializer.callable_abi),
+            3u);
+  EXPECT_EQ(program->initializer.callable_abi->argument_counts.value_count, 1u);
+  EXPECT_EQ(program->initializer.callable_abi->argument_counts.ref_count, 1u);
+  EXPECT_EQ(program->initializer.callable_abi->argument_counts.function_count,
+            1u);
 
   iree_vm_export_t run_export = {};
   iree_vm_export_t alias_export = {};
@@ -378,7 +415,7 @@ TEST(VMProgramTest, LinksOneImmutableSlabAndPrecomputesTargets) {
   EXPECT_EQ(alpha.destruction_count, 0);
   EXPECT_EQ(beta.destruction_count, 0);
   iree_vm_program_release(program);
-  EXPECT_EQ(allocator.free_count, 2u);
+  EXPECT_EQ(allocator.free_count, 1u);
   EXPECT_EQ(app.destruction_count, 1);
   EXPECT_EQ(alpha.destruction_count, 1);
   EXPECT_EQ(beta.destruction_count, 1);
@@ -428,7 +465,7 @@ TEST(VMProgramTest, SortsInsertionAndHeapBoundariesWithoutTransientStorage) {
   ExpectReverseOrderedComposition(17);
 }
 
-TEST(VMProgramTest, ReleasesSlabWhenCallableIndexAllocationFails) {
+TEST(VMProgramTest, RejectsSlabAllocationFailure) {
   TestModule app;
   TestModule alpha;
   TestModule beta;
@@ -437,7 +474,7 @@ TEST(VMProgramTest, ReleasesSlabWhenCallableIndexAllocationFails) {
   beta.Create(&kBetaDefinition);
 
   iree_vm_module_t* libraries[] = {beta.module, alpha.module};
-  CountingAllocator allocator = {iree_allocator_system(), 0, 0, 2};
+  CountingAllocator allocator = {iree_allocator_system(), 0, 0, 1};
   iree_vm_program_t* program = reinterpret_cast<iree_vm_program_t*>(1);
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_RESOURCE_EXHAUSTED,
@@ -445,8 +482,8 @@ TEST(VMProgramTest, ReleasesSlabWhenCallableIndexAllocationFails) {
           {app.module, iree_vm_module_span_from_array(libraries)},
           MakeCountingAllocator(&allocator), &program));
   EXPECT_EQ(program, nullptr);
-  EXPECT_EQ(allocator.allocation_count, 2u);
-  EXPECT_EQ(allocator.free_count, 1u);
+  EXPECT_EQ(allocator.allocation_count, 1u);
+  EXPECT_EQ(allocator.free_count, 0u);
   EXPECT_EQ(app.destruction_count, 0);
   EXPECT_EQ(alpha.destruction_count, 0);
   EXPECT_EQ(beta.destruction_count, 0);

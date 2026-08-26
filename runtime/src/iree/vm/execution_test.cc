@@ -244,6 +244,34 @@ TEST(VMExecutionTest, RejectsOverlappingCallerStorageBeforeTransaction) {
   harness.CreateProcess();
   iree_vm_function_t add = iree_vm_function_null();
   IREE_ASSERT_OK(harness.LookupApplication(IREE_SV("add"), &add));
+
+  iree_vm_variant_t overlapping_values[] = {
+      iree_vm_variant_from_i32(7),
+      iree_vm_variant_from_i32(11),
+  };
+  const iree_vm_variant_t untouched_overlapping_values[] = {
+      overlapping_values[0],
+      overlapping_values[1],
+  };
+  iree_vm_execution_outcome_t outcome = UINT32_MAX;
+  const int start_count = harness.application_counters.function_start_count;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      iree_vm_invocation_start(
+          harness.invocation, add,
+          iree_vm_variant_span_from_array(overlapping_values),
+          iree_vm_variant_span_from_ptr(&overlapping_values[1], 1), {},
+          &outcome));
+  EXPECT_EQ(overlapping_values[0].payload,
+            untouched_overlapping_values[0].payload);
+  EXPECT_EQ(overlapping_values[0].metadata,
+            untouched_overlapping_values[0].metadata);
+  EXPECT_EQ(overlapping_values[1].payload,
+            untouched_overlapping_values[1].payload);
+  EXPECT_EQ(overlapping_values[1].metadata,
+            untouched_overlapping_values[1].metadata);
+  EXPECT_EQ(outcome, UINT32_MAX);
+
   iree_vm_variant_t arguments[] = {
       iree_vm_variant_from_i32(7),
       iree_vm_variant_from_i32(11),
@@ -255,7 +283,6 @@ TEST(VMExecutionTest, RejectsOverlappingCallerStorageBeforeTransaction) {
   iree_vm_variant_t results[] = {iree_vm_variant_from_i64(0x1234)};
   auto* aliased_invocation_outcome =
       reinterpret_cast<iree_vm_execution_outcome_t*>(results);
-  const int start_count = harness.application_counters.function_start_count;
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,
       iree_vm_invocation_start(harness.invocation, add,
@@ -266,6 +293,21 @@ TEST(VMExecutionTest, RejectsOverlappingCallerStorageBeforeTransaction) {
   EXPECT_EQ(arguments[0].metadata, untouched_arguments[0].metadata);
   EXPECT_EQ(arguments[1].payload, untouched_arguments[1].payload);
   EXPECT_EQ(arguments[1].metadata, untouched_arguments[1].metadata);
+  EXPECT_EQ(harness.application_counters.function_start_count, start_count);
+
+  outcome = UINT32_MAX;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      iree_vm_invocation_start(
+          harness.invocation, add, iree_vm_variant_span_from_array(arguments),
+          iree_vm_variant_span_from_ptr(
+              reinterpret_cast<iree_vm_variant_t*>(harness.invocation), 1),
+          {}, &outcome));
+  EXPECT_EQ(arguments[0].payload, untouched_arguments[0].payload);
+  EXPECT_EQ(arguments[0].metadata, untouched_arguments[0].metadata);
+  EXPECT_EQ(arguments[1].payload, untouched_arguments[1].payload);
+  EXPECT_EQ(arguments[1].metadata, untouched_arguments[1].metadata);
+  EXPECT_EQ(outcome, UINT32_MAX);
   EXPECT_EQ(harness.application_counters.function_start_count, start_count);
 
   int32_t value = 0;

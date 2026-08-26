@@ -36,33 +36,91 @@ typedef struct iree_vm_program_bank_counts_t {
   uint16_t function_count;
 } iree_vm_program_bank_counts_t;
 
-// Transient execution view of one structurally interned callable declaration.
-// The source-ordered type pointers borrow stable module-owned storage. Ordinary
-// invocation resolves this view once from a function token and keeps it only
-// for the active operation; programs do not retain one view per declaration.
-typedef struct iree_vm_program_callable_t {
-  // Stable source-ordered argument types in the representative module.
-  const iree_vm_module_signature_type_t* argument_types;
-  // Stable source-ordered result types in the representative module.
-  const iree_vm_module_signature_type_t* result_types;
+// One scalar field mapped between source order and the physical value bank.
+typedef struct iree_vm_program_scalar_field_abi_t {
+  // Canonical payload bits permitted by the scalar type.
+  uint64_t payload_mask;
+  // Exact scalar variant metadata expected or published at the host boundary.
+  uint32_t variant_metadata;
+  // Byte offset of the source-ordered host variant.
+  uint32_t variant_offset;
+} iree_vm_program_scalar_field_abi_t;
+
+// One ref field mapped between source order and the physical ref bank.
+typedef struct iree_vm_program_ref_field_abi_t {
+  // Canonical resolved ref type expected at the host boundary.
+  iree_vm_ref_type_t type;
+  // Byte offset of the source-ordered host variant.
+  uint32_t variant_offset;
+} iree_vm_program_ref_field_abi_t;
+
+// One function field mapped between source order and the physical function
+// bank.
+typedef struct iree_vm_program_function_field_abi_t {
+  // Expected canonical callable mapping and suspension permission.
+  uint32_t callable_mapping;
+  // Byte offset of the source-ordered host variant.
+  uint32_t variant_offset;
+} iree_vm_program_function_field_abi_t;
+
+// Byte offsets for one contiguous root bank and its provider-visible overflow
+// window. An unused window points at offset zero and is never accessed for a
+// valid signature ordinal.
+typedef struct iree_vm_program_root_bank_layout_t {
+  // First cell in the complete contiguous bank.
+  uint32_t direct_offset;
+  // Cell 16 when present, otherwise the unused offset-zero sentinel.
+  uint32_t overflow_offset;
+} iree_vm_program_root_bank_layout_t;
+
+// Precomputed placement of every root bank in invocation-owned storage.
+typedef struct iree_vm_program_root_layout_t {
+  // Value argument bank placement.
+  iree_vm_program_root_bank_layout_t value_arguments;
+  // Ref argument bank placement.
+  iree_vm_program_root_bank_layout_t ref_arguments;
+  // Value result bank placement.
+  iree_vm_program_root_bank_layout_t value_results;
+  // Ref result bank placement.
+  iree_vm_program_root_bank_layout_t ref_results;
+  // Function argument bank placement.
+  iree_vm_program_root_bank_layout_t function_arguments;
+  // Function result bank placement.
+  iree_vm_program_root_bank_layout_t function_results;
+  // Exact invocation-owned bytes occupied by all banks.
+  uint32_t storage_size;
+} iree_vm_program_root_layout_t;
+
+// Program-linked ABI for one unique structural callable signature. A dense
+// nonzero callable token directly indexes this table without a module walk,
+// provider query, or signature scan.
+typedef struct iree_vm_program_callable_abi_t {
+  // Scalar argument fields in physical value-bank order.
+  const iree_vm_program_scalar_field_abi_t* value_arguments;
+  // Ref argument fields in physical ref-bank order.
+  const iree_vm_program_ref_field_abi_t* ref_arguments;
+  // Function argument fields in physical function-bank order.
+  const iree_vm_program_function_field_abi_t* function_arguments;
+  // Scalar result fields in physical value-bank order.
+  const iree_vm_program_scalar_field_abi_t* value_results;
+  // Ref result fields in physical ref-bank order.
+  const iree_vm_program_ref_field_abi_t* ref_results;
+  // Function result fields in physical function-bank order.
+  const iree_vm_program_function_field_abi_t* function_results;
   // Exact physical argument bank counts.
   iree_vm_program_bank_counts_t argument_counts;
   // Exact physical result bank counts.
   iree_vm_program_bank_counts_t result_counts;
-  // Program ordinal of the module resolving ref and nested callable ordinals.
-  uint16_t signature_module_ordinal;
-  // Shared scalar result type, or INVALID for empty or heterogeneous results.
-  iree_vm_scalar_type_t uniform_result_scalar_type;
-} iree_vm_program_callable_t;
+  // Precomputed root-bank placement for invocation marshalling.
+  iree_vm_program_root_layout_t root_layout;
+} iree_vm_program_callable_abi_t;
 
 // Cached executable initializer plan.
 typedef struct iree_vm_program_initializer_t {
   // Complete packed target bits, or zero when no initializer is exported.
   uint64_t target_bits;
-  // Stable source-ordered argument types in the executable module.
-  iree_vm_module_signature_type_span_t arguments;
-  // Exact physical argument bank counts.
-  iree_vm_program_bank_counts_t argument_counts;
+  // Direct canonical callable ABI, or null when no initializer is exported.
+  const iree_vm_program_callable_abi_t* callable_abi;
 } iree_vm_program_initializer_t;
 
 // Immutable program-local view of one retained generic module.
@@ -93,8 +151,12 @@ struct iree_vm_program_t {
   iree_vm_program_initializer_t initializer;
   // Flat four-byte mapping words for module-local callable declarations.
   uint32_t* callable_mappings;
-  // Total number of mapping words in |callable_mappings|.
+  // Program-linked ABIs indexed by dense nonzero structural token.
+  iree_vm_program_callable_abi_t* callable_abis;
+  // Total number of module-local entries in |callable_mappings|.
   uint32_t callable_mapping_count;
+  // Number of initialized unique entries in |callable_abis|.
+  uint32_t callable_abi_count;
   // Total max-aligned opaque process-state bytes.
   iree_host_size_t process_storage_size;
 };
@@ -105,10 +167,23 @@ static_assert(sizeof(void*) != 4 || sizeof(iree_vm_linked_module_t) == 16,
               "32-bit linked modules must remain 16 bytes");
 static_assert(sizeof(uint32_t) == 4,
               "callable mappings must remain four bytes");
-static_assert(sizeof(void*) != 8 || sizeof(iree_vm_program_callable_t) == 32,
-              "64-bit transient callable views must remain 32 bytes");
-static_assert(sizeof(void*) != 8 || sizeof(iree_vm_program_initializer_t) == 32,
-              "64-bit initializer plans must remain 32 bytes");
+static_assert(sizeof(void*) != 8 ||
+                  sizeof(iree_vm_program_scalar_field_abi_t) == 16,
+              "64-bit scalar field ABIs must remain 16 bytes");
+static_assert(sizeof(void*) != 8 ||
+                  sizeof(iree_vm_program_ref_field_abi_t) == 16,
+              "64-bit ref field ABIs must remain 16 bytes");
+static_assert(sizeof(iree_vm_program_function_field_abi_t) == 8,
+              "function field ABIs must remain 8 bytes");
+static_assert(sizeof(iree_vm_program_root_bank_layout_t) == 8,
+              "root bank layouts must remain 8 bytes");
+static_assert(sizeof(iree_vm_program_root_layout_t) == 52,
+              "root layouts must remain 52 bytes");
+static_assert(sizeof(void*) != 8 ||
+                  sizeof(iree_vm_program_callable_abi_t) == 112,
+              "64-bit callable ABIs must remain 112 bytes");
+static_assert(sizeof(void*) != 8 || sizeof(iree_vm_program_initializer_t) == 16,
+              "64-bit initializer records must remain 16 bytes");
 static_assert(sizeof(void*) != 8 || sizeof(iree_vm_program_t) <= 128,
               "64-bit program headers must fit the persistent size budget");
 
@@ -160,62 +235,43 @@ static inline bool iree_vm_program_target_may_yield(uint64_t target_bits) {
   return (target_bits >> 63) != 0;
 }
 
-// Returns the source-ordered signature of one callable plan.
-static inline iree_vm_module_signature_t iree_vm_program_callable_signature(
-    const iree_vm_program_callable_t* callable) {
-  const iree_vm_module_signature_t signature = {
-      {callable->argument_types,
-       (iree_host_size_t)callable->argument_counts.value_count +
-           callable->argument_counts.ref_count +
-           callable->argument_counts.function_count},
-      {callable->result_types,
-       (iree_host_size_t)callable->result_counts.value_count +
-           callable->result_counts.ref_count +
-           callable->result_counts.function_count},
-  };
-  return signature;
+// Returns the logical argument count of one callable ABI.
+static inline iree_host_size_t iree_vm_program_callable_abi_argument_count(
+    const iree_vm_program_callable_abi_t* callable_abi) {
+  return (iree_host_size_t)callable_abi->argument_counts.value_count +
+         callable_abi->argument_counts.ref_count +
+         callable_abi->argument_counts.function_count;
 }
 
-// Returns true when both signature sides use only value cells.
-static inline bool iree_vm_program_callable_is_scalar_only(
-    const iree_vm_program_callable_t* callable) {
-  return callable->argument_counts.ref_count == 0 &&
-         callable->argument_counts.function_count == 0 &&
-         callable->result_counts.ref_count == 0 &&
-         callable->result_counts.function_count == 0;
+// Returns the logical result count of one callable ABI.
+static inline iree_host_size_t iree_vm_program_callable_abi_result_count(
+    const iree_vm_program_callable_abi_t* callable_abi) {
+  return (iree_host_size_t)callable_abi->result_counts.value_count +
+         callable_abi->result_counts.ref_count +
+         callable_abi->result_counts.function_count;
 }
 
-// Returns whether one token names its canonical representative mapping.
+// Returns whether one token names a linked callable ABI.
 static inline bool iree_vm_program_callable_token_is_valid(
     const iree_vm_program_t* program, uint32_t callable_token) {
-  if (callable_token == 0 || callable_token > program->callable_mapping_count) {
-    return false;
-  }
-  return iree_vm_program_callable_token(
-             program->callable_mappings[callable_token - 1]) == callable_token;
+  return callable_token != 0 && callable_token <= program->callable_abi_count;
 }
 
-// Resolves one canonical token to a transient callable execution view. Returns
-// false without changing |out_callable| when the token is invalid.
-bool iree_vm_program_resolve_callable(const iree_vm_program_t* program,
-                                      uint32_t callable_token,
-                                      iree_vm_program_callable_t* out_callable);
-
-// Returns the linked module resolving one transient callable view.
-static inline const iree_vm_linked_module_t*
-iree_vm_program_callable_signature_module(
-    const iree_vm_program_t* program,
-    const iree_vm_program_callable_t* callable) {
-  return &program->linked_modules[callable->signature_module_ordinal];
+// Resolves one canonical token with a direct indexed load.
+static inline const iree_vm_program_callable_abi_t*
+iree_vm_program_resolve_callable_abi(const iree_vm_program_t* program,
+                                     uint32_t callable_token) {
+  return iree_vm_program_callable_token_is_valid(program, callable_token)
+             ? &program->callable_abis[callable_token - 1]
+             : NULL;
 }
 
 // Returns whether |function_ref| is null or satisfies one linked callable
-// declaration in |signature_module|. The check is structural and performs no
-// provider calls, name lookup, allocation, or retention.
-static inline bool iree_vm_program_function_ref_matches(
+// mapping. The check is structural and performs no provider calls, name lookup,
+// allocation, or retention.
+static inline bool iree_vm_program_function_ref_matches_mapping(
     const iree_vm_program_t* program, iree_vm_function_ref_t function_ref,
-    const iree_vm_linked_module_t* signature_module,
-    uint16_t expected_callable_type_ordinal) {
+    uint32_t expected_mapping) {
   if (iree_vm_function_ref_is_null(function_ref)) return true;
   if (function_ref.program_bits != (uint64_t)(uintptr_t)program ||
       (function_ref.target_bits & 3u) != 0) {
@@ -235,14 +291,23 @@ static inline bool iree_vm_program_function_ref_matches(
   if (!iree_vm_program_callable_token_is_valid(program, target_token)) {
     return false;
   }
-  const uint32_t expected_mapping =
-      program->callable_mappings[signature_module->callable_base +
-                                 expected_callable_type_ordinal];
   if (target_token != iree_vm_program_callable_token(expected_mapping)) {
     return false;
   }
   return !iree_vm_program_target_may_yield(function_ref.target_bits) ||
          iree_vm_program_callable_may_yield(expected_mapping);
+}
+
+// Returns whether |function_ref| satisfies one module-local callable type.
+static inline bool iree_vm_program_function_ref_matches(
+    const iree_vm_program_t* program, iree_vm_function_ref_t function_ref,
+    const iree_vm_linked_module_t* signature_module,
+    uint16_t expected_callable_type_ordinal) {
+  const uint32_t expected_mapping =
+      program->callable_mappings[signature_module->callable_base +
+                                 expected_callable_type_ordinal];
+  return iree_vm_program_function_ref_matches_mapping(program, function_ref,
+                                                      expected_mapping);
 }
 
 // Finds one exact retained module by implementation identity.

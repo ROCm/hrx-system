@@ -266,23 +266,13 @@ IREE_API_EXPORT iree_status_t iree_vm_process_create_start(
         "a program without initialize accepts no process arguments");
   }
 
-  iree_vm_program_callable_t initializer_callable = {0};
   iree_vm_root_preflight_t preflight = {0};
   iree_vm_call_packet_t root_packet;
   if (program->initializer.target_bits) {
-    initializer_callable = (iree_vm_program_callable_t){
-        .argument_types = program->initializer.arguments.data,
-        .result_types = NULL,
-        .argument_counts = program->initializer.argument_counts,
-        .result_counts = {0},
-        .signature_module_ordinal = iree_vm_program_target_module_ordinal(
-            program->initializer.target_bits),
-        .uniform_result_scalar_type = IREE_VM_SCALAR_TYPE_INVALID,
-    };
     IREE_RETURN_IF_ERROR(iree_vm_invocation_preflight_root(
         invocation, program, program->initializer.target_bits,
-        &initializer_callable, arguments, iree_vm_variant_span_empty(),
-        &preflight));
+        program->initializer.callable_abi, arguments,
+        iree_vm_variant_span_empty(), &preflight));
   }
 
   iree_vm_process_t* process = NULL;
@@ -296,8 +286,8 @@ IREE_API_EXPORT iree_status_t iree_vm_process_create_start(
   if (program->initializer.target_bits) {
     root_packet = iree_vm_invocation_commit_root(
         invocation, IREE_VM_INVOCATION_OPERATION_PROCESS_CREATE, process,
-        program->initializer.target_bits, &initializer_callable, arguments,
-        wake_callback, preflight);
+        program->initializer.target_bits, program->initializer.callable_abi,
+        arguments, wake_callback, preflight);
   } else {
     iree_vm_process_consume_arguments(arguments);
   }

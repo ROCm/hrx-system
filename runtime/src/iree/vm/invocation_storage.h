@@ -29,8 +29,8 @@ enum iree_vm_invocation_operation_e {
 };
 
 typedef struct iree_vm_root_call_t {
-  // Transient callable view resolved once for the active root operation.
-  iree_vm_program_callable_t callable;
+  // Program-linked callable ABI borrowed for the active root operation.
+  const iree_vm_program_callable_abi_t* callable_abi;
   // Complete packed root target bits.
   uint64_t target_bits;
 } iree_vm_root_call_t;
@@ -91,12 +91,12 @@ struct iree_vm_invocation_t {
   bool is_allocated;
 };
 
-static_assert(sizeof(void*) != 8 || sizeof(iree_vm_root_call_t) == 40,
-              "64-bit root call descriptions must remain 40 bytes");
+static_assert(sizeof(void*) != 8 || sizeof(iree_vm_root_call_t) == 16,
+              "64-bit root call descriptions must remain 16 bytes");
 static_assert(sizeof(void*) != 8 || sizeof(iree_vm_frame_t) == 48,
               "64-bit generic frames must remain 48 bytes");
-static_assert(sizeof(void*) != 8 || sizeof(iree_vm_invocation_t) == 112,
-              "64-bit invocation headers must remain 112 bytes");
+static_assert(sizeof(void*) != 8 || sizeof(iree_vm_invocation_t) == 88,
+              "64-bit invocation headers must remain 88 bytes");
 
 // Returns the max-aligned base of invocation-owned root call banks.
 static inline uint8_t* iree_vm_invocation_stack_base(
@@ -154,7 +154,7 @@ bool iree_vm_invocation_is_idle(const iree_vm_invocation_t* invocation);
 // Semantic failure consumes |arguments|; success leaves them unchanged.
 iree_status_t iree_vm_invocation_preflight_root(
     iree_vm_invocation_t* invocation, const iree_vm_program_t* program,
-    uint64_t target_bits, const iree_vm_program_callable_t* callable,
+    uint64_t target_bits, const iree_vm_program_callable_abi_t* callable_abi,
     iree_vm_variant_span_t arguments, iree_vm_variant_span_t results,
     iree_vm_root_preflight_t* out_preflight);
 
@@ -164,7 +164,7 @@ iree_status_t iree_vm_invocation_preflight_root(
 iree_vm_call_packet_t iree_vm_invocation_commit_root(
     iree_vm_invocation_t* invocation, iree_vm_invocation_operation_t operation,
     iree_vm_process_t* process, uint64_t target_bits,
-    const iree_vm_program_callable_t* callable,
+    const iree_vm_program_callable_abi_t* callable_abi,
     iree_vm_variant_span_t arguments,
     iree_vm_invocation_wake_callback_t wake_callback,
     iree_vm_root_preflight_t preflight);
