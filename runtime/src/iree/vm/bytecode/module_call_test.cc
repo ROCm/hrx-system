@@ -106,13 +106,7 @@ TEST(VMBytecodeModuleCallTest, RejectsMalformedCallInstructions) {
       iree_allocator_system(), &valid_module));
   iree_vm_module_release(valid_module);
 
-  const auto expect_rejected = [&](uint32_t function_ordinal,
-                                   const auto& mutate) {
-    std::vector<uint8_t> image = BuildCallModuleImage();
-    const MutableFunctionImage function =
-        FindFunctionImage(&image, function_ordinal);
-    ASSERT_NE(function.row, nullptr);
-    mutate(function);
+  const auto expect_image_rejected = [&](std::vector<uint8_t> image) {
     iree_vm_module_t* module = nullptr;
     IREE_EXPECT_STATUS_IS(
         IREE_STATUS_INVALID_ARGUMENT,
@@ -123,6 +117,15 @@ TEST(VMBytecodeModuleCallTest, RejectsMalformedCallInstructions) {
             iree_allocator_system(), &module));
     EXPECT_EQ(module, nullptr);
     iree_vm_module_release(module);
+  };
+  const auto expect_rejected = [&](uint32_t function_ordinal,
+                                   const auto& mutate) {
+    std::vector<uint8_t> image = BuildCallModuleImage();
+    const MutableFunctionImage function =
+        FindFunctionImage(&image, function_ordinal);
+    ASSERT_NE(function.row, nullptr);
+    mutate(function);
+    expect_image_rejected(std::move(image));
   };
 
   constexpr uint32_t kDirectCallOffset = 4;
@@ -149,6 +152,13 @@ TEST(VMBytecodeModuleCallTest, RejectsMalformedCallInstructions) {
   });
   expect_rejected(1, [](MutableFunctionImage function) {
     function.row->value_register_count_u16 = 0;
+  });
+  expect_rejected(0, [](MutableFunctionImage function) {
+    function.row->flags_u16 |= IREE_VM_BYTECODE_FUNCTION_FLAG_HAS_CALL;
+    const iree_vm_isa_control_call_record_t call = {
+        IREE_VM_ISA_CORE_OPCODE_CONTROL_CALL,
+        IREE_VM_ISA_CONTROL_CALL_TARGET_LOCAL, 0, 0, 0};
+    std::memcpy(function.bytecode + 8, &call, sizeof(call));
   });
   expect_rejected(1, [](MutableFunctionImage function) {
     function.row->flags_u16 &= ~IREE_VM_BYTECODE_FUNCTION_FLAG_HAS_CALL;
@@ -180,10 +190,33 @@ TEST(VMBytecodeModuleCallTest, RejectsMalformedCallInstructions) {
             function.bytecode + kIndirectCallOffset);
     record->zero_padding_u16 = 1;
   });
+  // A non-yielding callable address cannot describe a yielding local target.
+  expect_rejected(2, [](MutableFunctionImage function) {
+    auto* record = reinterpret_cast<iree_vm_isa_func_address_record_t*>(
+        function.bytecode + 4);
+    record->target_ordinal_u16 = 3;
+  });
   expect_rejected(4, [](MutableFunctionImage function) {
     function.row->callable_type_ordinal_u16 = 0;
     function.row->flags_u16 = 0;
   });
+
+  // Imported calls have their own verifier path independent of imported
+  // function-address materialization.
+  for (const iree_vm_isa_control_call_record_t call :
+       {iree_vm_isa_control_call_record_t{
+            IREE_VM_ISA_CORE_OPCODE_CONTROL_CALL,
+            IREE_VM_ISA_CONTROL_CALL_TARGET_REQUIRED_IMPORT, 0, 0, 0},
+        iree_vm_isa_control_call_record_t{
+            IREE_VM_ISA_CORE_OPCODE_CONTROL_CALL,
+            IREE_VM_ISA_CONTROL_CALL_TARGET_OPTIONAL_IMPORT, 1, 0, 0}}) {
+    std::vector<uint8_t> image = BuildFunctionModuleImage();
+    const MutableFunctionImage function = FindFunctionImage(&image, 0);
+    ASSERT_NE(function.row, nullptr);
+    function.row->flags_u16 |= IREE_VM_BYTECODE_FUNCTION_FLAG_HAS_CALL;
+    std::memcpy(function.bytecode + 4, &call, sizeof(call));
+    expect_image_rejected(std::move(image));
+  }
 
   iree_vm_environment_free(environment);
 }

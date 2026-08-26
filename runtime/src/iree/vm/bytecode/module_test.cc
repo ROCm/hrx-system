@@ -414,6 +414,13 @@ TEST(VMBytecodeModuleTest, RejectsMalformedDirectControlFlow) {
   constexpr uint32_t kReturnOffset =
       kSecondBlockOffset + sizeof(iree_vm_isa_control_block_record_t);
 
+  // Block and return delimiters require their canonical zero padding.
+  expect_rejected(
+      [](MutableFunctionImage function) { function.bytecode[1] = 1; });
+  expect_rejected([&](MutableFunctionImage function) {
+    function.bytecode[kReturnOffset + 1] = 1;
+  });
+
   // The declared count must exactly match decoded control.block records.
   expect_rejected(
       [](MutableFunctionImage function) { function.row->block_count_u32 = 3; });
@@ -442,6 +449,13 @@ TEST(VMBytecodeModuleTest, RejectsMalformedDirectControlFlow) {
         IREE_VM_ISA_CORE_OPCODE_CONTROL_BRANCH_S16, 0, -2};
     std::memcpy(function.bytecode + kSecondBlockOffset, &branch,
                 sizeof(branch));
+  });
+
+  // Wide conditional branches carry their own canonical padding field.
+  expect_rejected([&](MutableFunctionImage function) {
+    const iree_vm_isa_control_branch_if_s32_record_t branch = {
+        IREE_VM_ISA_CORE_OPCODE_CONTROL_BRANCH_IF_S32, 0, 1, 0};
+    std::memcpy(function.bytecode + kSwitchOffset, &branch, sizeof(branch));
   });
 
   // Yield uses the same verified direct-target domain as a wide branch while
@@ -1355,6 +1369,18 @@ TEST(VMBytecodeModuleTest, RejectsMalformedRefABIAndGlobalInstructions) {
       iree_vm_environment_allocate(iree_allocator_system(), &environment));
   IREE_ASSERT_OK(iree_vm_environment_register_ref_type_table(
       environment, &kRefStateTestTypeTable));
+  const auto expect_rejected = [&](const std::vector<uint8_t>& image) {
+    iree_vm_module_t* module = nullptr;
+    IREE_EXPECT_STATUS_IS(
+        IREE_STATUS_INVALID_ARGUMENT,
+        iree_vm_bytecode_module_create(
+            environment, IREE_SV("malformed_ref_state"),
+            {iree_make_const_byte_span(image.data(), image.size()),
+             iree_allocator_null()},
+            iree_allocator_system(), &module));
+    EXPECT_EQ(module, nullptr);
+    iree_vm_module_release(module);
+  };
   struct ByteMutation {
     // Function-table ordinal containing the byte to replace.
     uint32_t function_ordinal;
@@ -1390,18 +1416,31 @@ TEST(VMBytecodeModuleTest, RejectsMalformedRefABIAndGlobalInstructions) {
     ASSERT_NE(function.row, nullptr);
     ASSERT_LT(mutation.byte_offset, function.row->bytecode_length_u32);
     function.bytecode[mutation.byte_offset] = mutation.value;
-
-    iree_vm_module_t* module = nullptr;
-    IREE_EXPECT_STATUS_IS(
-        IREE_STATUS_INVALID_ARGUMENT,
-        iree_vm_bytecode_module_create(
-            environment, IREE_SV("malformed_ref_state"),
-            {iree_make_const_byte_span(image.data(), image.size()),
-             iree_allocator_null()},
-            iree_allocator_system(), &module));
-    EXPECT_EQ(module, nullptr);
-    iree_vm_module_release(module);
+    expect_rejected(image);
   }
+
+  // Overflow ref arguments/results and borrowed direct arguments share the
+  // caller's local ref storage. Both contributions must fit.
+  const auto expect_call_packet_rejected = [&](uint32_t local_ref_count,
+                                               uint16_t direct_ref_move_mask) {
+    std::vector<uint8_t> image = BuildRefStateModuleImage();
+    const MutableFunctionImage function = FindFunctionImage(&image, 0);
+    ASSERT_NE(function.row, nullptr);
+    function.row->flags_u16 |= IREE_VM_BYTECODE_FUNCTION_FLAG_HAS_CALL;
+    function.row->ref_register_count_u16 = 16;
+    function.row->local_ref_count_u32 = local_ref_count;
+    const iree_vm_isa_control_call_record_t call = {
+        IREE_VM_ISA_CORE_OPCODE_CONTROL_CALL,
+        IREE_VM_ISA_CONTROL_CALL_TARGET_LOCAL, 2, direct_ref_move_mask, 0};
+    std::memcpy(function.bytecode + sizeof(iree_vm_isa_control_block_record_t),
+                &call, sizeof(call));
+    expect_rejected(image);
+  };
+  // Two argument and result overflow slots do not fit in one local slot.
+  expect_call_packet_rejected(1, UINT16_MAX);
+  // Sixteen borrowed direct arguments require scratch beyond the two overflow
+  // slots that otherwise fit.
+  expect_call_packet_rejected(2, 0);
 
   iree_vm_environment_free(environment);
 }
@@ -1861,6 +1900,20 @@ TEST(VMBytecodeModuleTest, RejectsMalformedFunctionInstructions) {
   IREE_ASSERT_OK(
       iree_vm_environment_allocate(iree_allocator_system(), &environment));
 
+  const auto expect_image_status = [&](const std::vector<uint8_t>& image,
+                                       iree_status_code_t expected_code) {
+    iree_vm_module_t* module = nullptr;
+    IREE_EXPECT_STATUS_IS(
+        expected_code,
+        iree_vm_bytecode_module_create(
+            environment, IREE_SV("malformed_function"),
+            {iree_make_const_byte_span(image.data(), image.size()),
+             iree_allocator_null()},
+            iree_allocator_system(), &module));
+    EXPECT_EQ(module, nullptr);
+    iree_vm_module_release(module);
+  };
+
   std::vector<uint8_t> valid_image = BuildFunctionModuleImage();
   iree_vm_module_t* valid_module = nullptr;
   IREE_ASSERT_OK(iree_vm_bytecode_module_create(
@@ -1875,16 +1928,7 @@ TEST(VMBytecodeModuleTest, RejectsMalformedFunctionInstructions) {
     const MutableFunctionImage function = FindFunctionImage(&image, 0);
     ASSERT_NE(function.row, nullptr);
     mutate(function);
-    iree_vm_module_t* module = nullptr;
-    IREE_EXPECT_STATUS_IS(
-        IREE_STATUS_INVALID_ARGUMENT,
-        iree_vm_bytecode_module_create(
-            environment, IREE_SV("malformed_function"),
-            {iree_make_const_byte_span(image.data(), image.size()),
-             iree_allocator_null()},
-            iree_allocator_system(), &module));
-    EXPECT_EQ(module, nullptr);
-    iree_vm_module_release(module);
+    expect_image_status(image, IREE_STATUS_INVALID_ARGUMENT);
   };
 
   constexpr uint32_t kNullOffset = 4;
@@ -1918,6 +1962,11 @@ TEST(VMBytecodeModuleTest, RejectsMalformedFunctionInstructions) {
   expect_rejected([](MutableFunctionImage function) {
     auto* record = reinterpret_cast<iree_vm_isa_func_address_record_t*>(
         function.bytecode + kLocalAddressOffset);
+    record->zero_padding_u8 = 1;
+  });
+  expect_rejected([](MutableFunctionImage function) {
+    auto* record = reinterpret_cast<iree_vm_isa_func_address_record_t*>(
+        function.bytecode + kLocalAddressOffset);
     record->target_ordinal_u16 = 2;
   });
   expect_rejected([](MutableFunctionImage function) {
@@ -1936,6 +1985,16 @@ TEST(VMBytecodeModuleTest, RejectsMalformedFunctionInstructions) {
     record->target_kind_u8 = IREE_VM_ISA_CONTROL_CALL_TARGET_REQUIRED_IMPORT;
   });
   expect_rejected([](MutableFunctionImage function) {
+    auto* record = reinterpret_cast<iree_vm_isa_func_address_record_t*>(
+        function.bytecode + kImportAddressOffset);
+    record->target_ordinal_u16 = 1;
+  });
+  expect_rejected([](MutableFunctionImage function) {
+    auto* record = reinterpret_cast<iree_vm_isa_func_address_record_t*>(
+        function.bytecode + kImportAddressOffset);
+    record->callable_type_ordinal_u16 = 1;
+  });
+  expect_rejected([](MutableFunctionImage function) {
     auto* record = reinterpret_cast<iree_vm_isa_func_import_resolved_record_t*>(
         function.bytecode + kImportResolvedOffset);
     record->import_ordinal_u16 = 1;
@@ -1950,6 +2009,36 @@ TEST(VMBytecodeModuleTest, RejectsMalformedFunctionInstructions) {
         function.bytecode + kStackLoadOffset);
     record->dst_f8 = 5;
   });
+
+  // func.import.resolved accepts only optional imports, even when a required
+  // import with the same symbol and callable contract is otherwise valid.
+  {
+    std::vector<uint8_t> image = BuildFunctionModuleImage();
+    auto* imports = reinterpret_cast<iree_vm_bytecode_v0_imports_header_t*>(
+        FindSectionPayload(&image, IREE_VM_BYTECODE_SECTION_IMPORTS));
+    ASSERT_NE(imports, nullptr);
+    auto* groups =
+        reinterpret_cast<iree_vm_bytecode_v0_import_group_row_t*>(imports + 1);
+    auto* entries = reinterpret_cast<iree_vm_bytecode_v0_import_entry_row_t*>(
+        groups + imports->group_count_u32);
+    entries[0].flags_u16 = 0;
+    const MutableFunctionImage function = FindFunctionImage(&image, 0);
+    ASSERT_NE(function.row, nullptr);
+    auto* address = reinterpret_cast<iree_vm_isa_func_address_record_t*>(
+        function.bytecode + kImportAddressOffset);
+    address->target_kind_u8 = IREE_VM_ISA_CONTROL_CALL_TARGET_REQUIRED_IMPORT;
+
+    expect_image_status(image, IREE_STATUS_INVALID_ARGUMENT);
+  }
+
+  // Direct function-local ordinals cannot address beyond their u16 domain.
+  {
+    std::vector<uint8_t> image = BuildFunctionModuleImage();
+    MutableFunctionImage function = FindFunctionImage(&image, 0);
+    ASSERT_NE(function.row, nullptr);
+    function.row->local_function_count_u32 = (uint32_t)UINT16_MAX + 2u;
+    expect_image_status(image, IREE_STATUS_UNIMPLEMENTED);
+  }
 
   iree_vm_environment_free(environment);
 }
@@ -2144,6 +2233,22 @@ TEST(VMBytecodeModuleTest, RejectsMalformedFunctionStateInstructions) {
       reinterpret_cast<iree_vm_bytecode_v0_global_function_descriptor_row_t*>(
           globals + 1);
   descriptors[0].flags_u16 = 2;
+  expect_rejected(image);
+
+  // Function overflow arguments and results share the caller's function-local
+  // storage after the direct register prefix.
+  image = BuildFunctionStateModuleImage();
+  MutableFunctionImage function = FindFunctionImage(&image, 1);
+  ASSERT_NE(function.row, nullptr);
+  function.row->flags_u16 |= IREE_VM_BYTECODE_FUNCTION_FLAG_HAS_CALL;
+  function.row->function_register_count_u16 = 16;
+  // The 18-argument/result target needs four overflow slots.
+  function.row->local_function_count_u32 = 3;
+  const iree_vm_isa_control_call_record_t call = {
+      IREE_VM_ISA_CORE_OPCODE_CONTROL_CALL,
+      IREE_VM_ISA_CONTROL_CALL_TARGET_LOCAL, 4, 0, 0};
+  std::memcpy(function.bytecode + sizeof(iree_vm_isa_control_block_record_t),
+              &call, sizeof(call));
   expect_rejected(image);
 
   iree_vm_environment_free(environment);

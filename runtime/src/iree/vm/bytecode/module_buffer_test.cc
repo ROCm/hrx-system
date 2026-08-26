@@ -603,6 +603,14 @@ TEST(VMBytecodeModuleBufferTest, VerifiesBufferInstructionRecords) {
   copy_rodata.length_v8 = 6;
   expect_record_rejected("copy rodata value register", copy_rodata);
 
+  iree_vm_isa_buffer_rodata_load_record_t rodata_load = {};
+  rodata_load.opcode_u8 = IREE_VM_ISA_CORE_OPCODE_BUFFER_RODATA_LOAD;
+  rodata_load.dst_r8 = 2;
+  expect_record_rejected("rodata load ref register", rodata_load);
+  rodata_load.dst_r8 = 0;
+  rodata_load.rodata_u16 = 1;
+  expect_record_rejected("rodata load ordinal", rodata_load);
+
   std::vector<uint8_t> arbitrary_scale_image = BuildBufferModuleImage();
   MutableFunctionImage store =
       FindFunctionImage(&arbitrary_scale_image, kBufferStoreFunctionOrdinal);
