@@ -37,9 +37,23 @@ static iree_string_view_t loom_x86_descriptor_key(
 
 static iree_string_view_t loom_x86_descriptor_mnemonic(
     const loom_native_assembly_packet_context_t* context) {
-  return loom_native_assembly_descriptor_string(
-      context->schedule->target.descriptor_set,
-      context->packet->descriptor->mnemonic_string_offset);
+  const loom_low_descriptor_set_t* descriptor_set =
+      context->schedule->target.descriptor_set;
+  const loom_low_descriptor_t* descriptor = context->packet->descriptor;
+  loom_bstring_table_offset_t string_offset =
+      descriptor->mnemonic_string_offset;
+  if (descriptor->canonical_asm_form_ordinal !=
+      LOOM_LOW_ASM_FORM_ORDINAL_NONE) {
+    const loom_low_asm_form_t* form = loom_low_descriptor_set_asm_form_at(
+        descriptor_set, descriptor->canonical_asm_form_ordinal);
+    IREE_ASSERT(form != NULL,
+                "x86 descriptor canonical asm form must be present");
+    if (form->native_assembly_mnemonic_string_offset !=
+        LOOM_LOW_STRING_OFFSET_NONE) {
+      string_offset = form->native_assembly_mnemonic_string_offset;
+    }
+  }
+  return loom_native_assembly_descriptor_string(descriptor_set, string_offset);
 }
 
 static iree_status_t loom_x86_append_mnemonic(

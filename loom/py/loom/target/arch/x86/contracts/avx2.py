@@ -63,6 +63,8 @@ _F32 = Scalar("f32")
 _F64 = Scalar("f64")
 _V4I32 = Vector("i32", lanes=4)
 _V4F32 = Vector("f32", lanes=4)
+_V8I32 = Vector("i32", lanes=8)
+_V8F32 = Vector("f32", lanes=8)
 
 _DISP32_MIN = -(2**31)
 _DISP32_MAX = (2**31) - 1
@@ -539,23 +541,27 @@ def _memory_descriptor_key(
     operation: str,
     *,
     dynamic: bool,
+    register_suffix: str,
 ) -> str:
     indexed = ".indexed" if dynamic else ""
-    return f"x86.avx2.vmovdqu32.{operation}{indexed}.xmm"
+    return f"x86.avx2.vmovdqu32.{operation}{indexed}.{register_suffix}"
 
 
 def _memory_rules(
     descriptor_lookup: _DescriptorLookup,
 ) -> tuple[DescriptorRule, ...]:
     rules: list[DescriptorRule] = []
-    for value_type, lanes in (
-        (_V4I32, 4),
-        (_V4F32, 4),
+    for value_type, lanes, register_suffix in (
+        (_V4I32, 4, "xmm"),
+        (_V4F32, 4, "xmm"),
+        (_V8I32, 8, "ymm"),
+        (_V8F32, 8, "ymm"),
     ):
         for dynamic in (False, True):
             descriptor_key = _memory_descriptor_key(
                 "load",
                 dynamic=dynamic,
+                register_suffix=register_suffix,
             )
             rules.append(
                 _vector_load_rule(
@@ -601,6 +607,7 @@ def _memory_rules(
             descriptor_key = _memory_descriptor_key(
                 "store",
                 dynamic=dynamic,
+                register_suffix=register_suffix,
             )
             rules.append(
                 _vector_store_rule(

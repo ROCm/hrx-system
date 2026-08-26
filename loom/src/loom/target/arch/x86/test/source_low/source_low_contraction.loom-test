@@ -134,6 +134,48 @@ low.func.def target<x86.avx512_packed_dot.core>(@target) abi(object_function) @e
 
 x86.target<avx512_packed_dot> @target
 
+func.def target(@target) @encoded_i8_blocked_mma(
+    %lhs_buffer: buffer,
+    %rhs_buffer: buffer,
+    %output_buffer: buffer,
+    %origin: index) {
+  %base = index.constant 0 : offset
+  %bounded_origin = index.assume %origin [range(%origin, 0, 8)] : index
+  %blocks = index.constant 8 : index
+  %m = index.constant 1 : index
+  %n = index.constant 1 : index
+  %k = index.constant 4 : index
+  %lhs_schema = encoding.define #encoding.operand<element_format=i8, payload_elements=32, payload_registers=8> : encoding<schema>
+  %rhs_schema = encoding.define #encoding.operand<element_format=i8, payload_elements=32, payload_registers=8> : encoding<schema>
+  %lhs_view = buffer.view %lhs_buffer[%base] : buffer -> view<16xi32>
+  %rhs_view = buffer.view %rhs_buffer[%base] : buffer -> view<16xi32>
+  %output_view = buffer.view %output_buffer[%base] : buffer -> view<16xi32>
+  %lhs_words = vector.load %lhs_view[%bounded_origin] : view<16xi32> -> vector<8xi32>
+  %rhs_words = vector.load %rhs_view[%bounded_origin] : view<16xi32> -> vector<8xi32>
+  %init_words = vector.load %output_view[%bounded_origin] : view<16xi32> -> vector<8xi32>
+  %lhs = vector.fragment<lhs> %lhs_words shape [blocks(%blocks), %m, %k] using {schema = %lhs_schema : encoding<schema>} : vector<8xi32>
+  %rhs = vector.fragment<rhs> %rhs_words shape [blocks(%blocks), %k, %n] using {schema = %rhs_schema : encoding<schema>} : vector<8xi32>
+  %init = vector.fragment<init> %init_words shape [blocks(%blocks), %m, %n] : vector<8xi32>
+  %dot = vector.mma %lhs, %rhs, %init : vector<8xi32>, vector<8xi32>, vector<8xi32>
+  vector.store %dot, %output_view[%bounded_origin] : vector<8xi32>, view<16xi32>
+  func.return
+}
+
+// ----
+low.func.def target<x86.avx512_packed_dot.core>(@target) abi(object_function) @encoded_i8_blocked_mma(%lhs_view: reg<x86.gpr64>, %rhs_view: reg<x86.gpr64>, %output_view: reg<x86.gpr64>, %bounded_origin: reg<x86.gpr64>) asm {
+  %lhs = vmovdqu32.load.indexed.ymm %lhs_view, %bounded_origin {disp32 = 0, scale = 4}
+  %rhs = vmovdqu32.load.indexed.ymm %rhs_view, %bounded_origin {disp32 = 0, scale = 4}
+  %init = vmovdqu32.load.indexed.ymm %output_view, %bounded_origin {disp32 = 0, scale = 4}
+  %29 = copy %init : reg<x86.ymm> -> reg<x86.ymm>
+  %dot = avx_vnni_int8.vpdpbssd.ymm %29, %lhs, %rhs
+  vmovdqu32.store.indexed.ymm %dot, %output_view, %bounded_origin {disp32 = 0, scale = 4}
+  return
+}
+
+// ====
+
+x86.target<avx512_packed_dot> @target
+
 func.def target(@target) @non_scalar_fragment_mma(
     %lhs_data: vector<16xbf16>,
     %rhs_data: vector<16xbf16>,

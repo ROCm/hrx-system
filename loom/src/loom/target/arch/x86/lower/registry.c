@@ -54,6 +54,20 @@ static bool loom_x86_type_is_vector_4xf32(loom_type_t type) {
          loom_type_dim_static_size_at(type, 0) == 4;
 }
 
+static bool loom_x86_type_is_vector_8xi32(loom_type_t type) {
+  return loom_type_is_vector(type) && loom_type_rank(type) == 1 &&
+         loom_type_is_all_static(type) &&
+         loom_type_element_type(type) == LOOM_SCALAR_TYPE_I32 &&
+         loom_type_dim_static_size_at(type, 0) == 8;
+}
+
+static bool loom_x86_type_is_vector_8xf32(loom_type_t type) {
+  return loom_type_is_vector(type) && loom_type_rank(type) == 1 &&
+         loom_type_is_all_static(type) &&
+         loom_type_element_type(type) == LOOM_SCALAR_TYPE_F32 &&
+         loom_type_dim_static_size_at(type, 0) == 8;
+}
+
 static bool loom_x86_type_is_vector_4xi1(loom_type_t type) {
   return loom_type_is_vector(type) && loom_type_rank(type) == 1 &&
          loom_type_is_all_static(type) &&
@@ -159,6 +173,11 @@ static bool loom_x86_avx2_register_class_for_source_type(
       loom_x86_type_is_vector_4xi32(source_type) ||
       loom_x86_type_is_vector_4xf32(source_type)) {
     *out_register_class = LOOM_X86_REGISTER_CLASS_XMM;
+    return true;
+  }
+  if (loom_x86_type_is_vector_8xi32(source_type) ||
+      loom_x86_type_is_vector_8xf32(source_type)) {
+    *out_register_class = LOOM_X86_REGISTER_CLASS_YMM;
     return true;
   }
   return false;

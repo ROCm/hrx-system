@@ -109,6 +109,27 @@ low.func.def target<x86.avx2.core>(@target) abi(object_function) @i32x4_memory_i
 
 x86.target<avx2> @target
 
+func.def target(@target) @f32x8_memory_indexed(%input: buffer, %output: buffer, %i: index) {
+  %bounded_i = index.assume %i [range(%i, 0, 8)] : index
+  %buffer_base = index.constant 0 : offset
+  %input_view = buffer.view %input[%buffer_base] : buffer -> view<16xf32>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<16xf32>
+  %loaded = vector.load %input_view[%bounded_i] : view<16xf32> -> vector<8xf32>
+  vector.store %loaded, %output_view[%bounded_i] : vector<8xf32>, view<16xf32>
+  func.return
+}
+
+// ----
+low.func.def target<x86.avx2.core>(@target) abi(object_function) @f32x8_memory_indexed(%input_view: reg<x86.gpr64>, %output_view: reg<x86.gpr64>, %bounded_i: reg<x86.gpr64>) asm {
+  %loaded = vmovdqu32.load.indexed.ymm %input_view, %bounded_i {disp32 = 0, scale = 4}
+  vmovdqu32.store.indexed.ymm %loaded, %output_view, %bounded_i {disp32 = 0, scale = 4}
+  return
+}
+
+// ====
+
+x86.target<avx2> @target
+
 func.def target(@target) @i32x4_index_madd_scaled_bias_memory(%input: buffer, %output: buffer, %row: index) {
   %buffer_base = index.constant 0 : offset
   %stride = index.constant 4 : index
