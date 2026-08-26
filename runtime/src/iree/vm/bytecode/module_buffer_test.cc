@@ -17,6 +17,9 @@
 #include "iree/vm/bytecode/module.h"
 #include "iree/vm/bytecode/module_test_data.h"
 #include "iree/vm/bytecode/wire/core/buffer.h"
+#include "iree/vm/bytecode/wire/core/constant.h"
+#include "iree/vm/bytecode/wire/core/control.h"
+#include "iree/vm/bytecode/wire/core/opcodes.h"
 #include "iree/vm/bytecode/wire/core/selectors.h"
 #include "iree/vm/process.h"
 
@@ -167,6 +170,36 @@ TEST(VMBytecodeModuleBufferTest, RejectsMalformedBufferInstructions) {
     EXPECT_EQ(module, nullptr);
     iree_vm_module_release(module);
   };
+  const auto expect_record_rejected = [&](const char* label,
+                                          const auto& record) {
+    expect_rejected(
+        label, kBufferRoundtripFunctionBase,
+        [&](MutableFunctionImage function) {
+          function.row->value_register_count_u16 = 6;
+          function.row->ref_register_count_u16 = 2;
+          uint8_t* cursor = function.bytecode;
+          const uint8_t* const end =
+              function.bytecode + function.row->bytecode_length_u32;
+          const iree_vm_isa_control_block_record_t block = {
+              IREE_VM_ISA_CORE_OPCODE_CONTROL_BLOCK, {0, 0, 0}};
+          std::memcpy(cursor, &block, sizeof(block));
+          cursor += sizeof(block);
+          ASSERT_LE(sizeof(record), static_cast<size_t>(end - cursor));
+          std::memcpy(cursor, &record, sizeof(record));
+          cursor += sizeof(record);
+          const iree_vm_isa_constant_zero_record_t zero = {
+              IREE_VM_ISA_CORE_OPCODE_CONSTANT_ZERO, 0, 0};
+          while (cursor < end - sizeof(iree_vm_isa_control_return_record_t)) {
+            std::memcpy(cursor, &zero, sizeof(zero));
+            cursor += sizeof(zero);
+          }
+          const iree_vm_isa_control_return_record_t return_record = {
+              IREE_VM_ISA_CORE_OPCODE_CONTROL_RETURN, {0, 0, 0}};
+          std::memcpy(cursor, &return_record, sizeof(return_record));
+          cursor += sizeof(return_record);
+          ASSERT_EQ(cursor, end);
+        });
+  };
 
   expect_rejected("allocate ref register", kBufferAllocateFunctionOrdinal,
                   [](MutableFunctionImage function) {
@@ -277,6 +310,72 @@ TEST(VMBytecodeModuleBufferTest, RejectsMalformedBufferInstructions) {
                             function.bytecode + 4);
                     record->zero_padding_u8 = 1;
                   });
+
+  iree_vm_isa_buffer_fill_record_t fill = {};
+  fill.opcode_u8 = IREE_VM_ISA_CORE_OPCODE_BUFFER_FILL;
+  fill.length_v8 = 1;
+  fill.pattern_v8 = 2;
+  fill.pattern_width_u8 = 1;
+  fill.zero_padding_u16 = 1;
+  expect_record_rejected("fill padding", fill);
+  fill.zero_padding_u16 = 0;
+  fill.pattern_width_u8 = 3;
+  expect_record_rejected("fill pattern width", fill);
+  fill.pattern_width_u8 = 1;
+  fill.buffer_r8 = 2;
+  expect_record_rejected("fill ref register", fill);
+  fill.buffer_r8 = 0;
+  fill.offset_v8 = 6;
+  expect_record_rejected("fill value register", fill);
+
+  iree_vm_isa_buffer_copy_record_t copy = {};
+  copy.opcode_u8 = IREE_VM_ISA_CORE_OPCODE_BUFFER_COPY;
+  copy.source_r8 = 1;
+  copy.source_offset_v8 = 1;
+  copy.length_v8 = 2;
+  copy.zero_padding_u16 = 1;
+  expect_record_rejected("copy padding", copy);
+  copy.zero_padding_u16 = 0;
+  copy.source_r8 = 2;
+  expect_record_rejected("copy ref register", copy);
+  copy.source_r8 = 1;
+  copy.length_v8 = 6;
+  expect_record_rejected("copy value register", copy);
+
+  iree_vm_isa_buffer_compare_record_t compare = {};
+  compare.opcode_u8 = IREE_VM_ISA_CORE_OPCODE_BUFFER_COMPARE;
+  compare.rhs_r8 = 1;
+  compare.rhs_offset_v8 = 1;
+  compare.length_v8 = 2;
+  compare.zero_padding_u8 = 1;
+  expect_record_rejected("compare padding", compare);
+  compare.zero_padding_u8 = 0;
+  compare.dst_v8 = 6;
+  expect_record_rejected("compare result register", compare);
+  compare.dst_v8 = 0;
+  compare.rhs_r8 = 2;
+  expect_record_rejected("compare ref register", compare);
+
+  iree_vm_isa_buffer_copy_rodata_record_t copy_rodata = {};
+  copy_rodata.opcode_u8 = IREE_VM_ISA_CORE_OPCODE_BUFFER_COPY_RODATA;
+  copy_rodata.length_v8 = 1;
+  copy_rodata.zero_padding0_u8 = 1;
+  expect_record_rejected("copy rodata leading padding", copy_rodata);
+  copy_rodata.zero_padding0_u8 = 0;
+  copy_rodata.zero_padding1_u8 = 1;
+  expect_record_rejected("copy rodata trailing padding", copy_rodata);
+  copy_rodata.zero_padding1_u8 = 0;
+  copy_rodata.rodata_u16 = 1;
+  expect_record_rejected("copy rodata ordinal", copy_rodata);
+  copy_rodata.rodata_u16 = 0;
+  copy_rodata.source_offset_u32 = UINT32_MAX;
+  expect_record_rejected("copy rodata source offset", copy_rodata);
+  copy_rodata.source_offset_u32 = 0;
+  copy_rodata.target_r8 = 2;
+  expect_record_rejected("copy rodata ref register", copy_rodata);
+  copy_rodata.target_r8 = 0;
+  copy_rodata.length_v8 = 6;
+  expect_record_rejected("copy rodata value register", copy_rodata);
 
   std::vector<uint8_t> arbitrary_scale_image = BuildBufferModuleImage();
   MutableFunctionImage store =
@@ -447,6 +546,50 @@ TEST(VMBytecodeModuleBufferTest, AllocatesViewsAndTransfersEveryLaneFormat) {
   iree_vm_buffer_release(nested);
   iree_vm_buffer_release(whole);
   iree_vm_buffer_release(view);
+}
+
+TEST(VMBytecodeModuleBufferTest, CopiesBetweenBufferAndLocalStorage) {
+  BufferExecutionHarness harness;
+  IREE_ASSERT_OK(harness.Initialize());
+
+  const std::array<uint8_t, 16> initial_bytes = {0, 1, 2,  3,  4,  5,  6,  7,
+                                                 8, 9, 10, 11, 12, 13, 14, 15};
+  iree_vm_buffer_t* buffer = nullptr;
+  IREE_ASSERT_OK(iree_vm_buffer_clone(
+      IREE_VM_BUFFER_ACCESS_FLAG_READ | IREE_VM_BUFFER_ACCESS_FLAG_WRITE,
+      iree_make_const_byte_span(initial_bytes.data(), initial_bytes.size()), 0,
+      iree_allocator_system(), &buffer));
+
+  iree_vm_variant_t arguments[] = {
+      iree_vm_buffer_variant_from_ptr_borrowed(&harness.vm_types, buffer),
+      iree_vm_variant_from_i64(1),
+      iree_vm_variant_from_i64(8),
+  };
+  IREE_ASSERT_OK(harness.Invoke(IREE_SV("stack_copy"),
+                                iree_vm_variant_span_from_array(arguments),
+                                iree_vm_variant_span_empty()));
+  const auto* data =
+      static_cast<const uint8_t*>(iree_vm_buffer_const_data(buffer));
+  ASSERT_NE(data, nullptr);
+  EXPECT_EQ(std::memcmp(data + 8, initial_bytes.data() + 1, 4), 0);
+
+  iree_vm_buffer_t* view = nullptr;
+  IREE_ASSERT_OK(iree_vm_buffer_subspan(
+      buffer, 2, 10,
+      IREE_VM_BUFFER_ACCESS_FLAG_READ | IREE_VM_BUFFER_ACCESS_FLAG_WRITE,
+      iree_allocator_system(), &view));
+  iree_vm_variant_t view_arguments[] = {
+      iree_vm_buffer_variant_from_ptr_borrowed(&harness.vm_types, view),
+      iree_vm_variant_from_i64(1),
+      iree_vm_variant_from_i64(6),
+  };
+  IREE_ASSERT_OK(harness.Invoke(IREE_SV("stack_copy"),
+                                iree_vm_variant_span_from_array(view_arguments),
+                                iree_vm_variant_span_empty()));
+  EXPECT_EQ(std::memcmp(data + 8, initial_bytes.data() + 3, 4), 0);
+
+  iree_vm_buffer_release(view);
+  iree_vm_buffer_release(buffer);
 }
 
 TEST(VMBytecodeModuleBufferTest, FailsBeforePublishingOrMutating) {

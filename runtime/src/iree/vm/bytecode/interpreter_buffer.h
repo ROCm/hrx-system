@@ -44,6 +44,21 @@ static inline iree_status_t iree_vm_bytecode_buffer_check_deref(
   return iree_ok_status();
 }
 
+// Maps one byte range after proving its values are host-representable. The
+// mapped span is populated only after bounds, liveness, and rights checks all
+// succeed.
+static inline iree_status_t iree_vm_bytecode_buffer_map_range(
+    iree_vm_buffer_t* buffer, iree_vm_buffer_access_flags_t required_access,
+    uint64_t offset, uint64_t length, iree_byte_span_t* out_span) {
+  if (offset > IREE_HOST_SIZE_MAX || length > IREE_HOST_SIZE_MAX) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "buffer range is not representable on this host");
+  }
+  return iree_vm_buffer_map_range(buffer, required_access,
+                                  (iree_host_size_t)offset,
+                                  (iree_host_size_t)length, out_span);
+}
+
 // Resolves and maps one checked scaled lane range. Arithmetic remains u64
 // until host representability is proven. The mapped span is populated only
 // after arithmetic, bounds, liveness, and rights checks all succeed.
@@ -58,9 +73,8 @@ static inline iree_status_t iree_vm_bytecode_buffer_map_lanes(
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "buffer address arithmetic overflow");
   }
-  return iree_vm_buffer_map_range(buffer, required_access,
-                                  (iree_host_size_t)offset, access_length,
-                                  out_span);
+  return iree_vm_bytecode_buffer_map_range(buffer, required_access, offset,
+                                           access_length, out_span);
 }
 
 #endif  // IREE_VM_BYTECODE_INTERPRETER_BUFFER_H_

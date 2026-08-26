@@ -32,9 +32,10 @@ static inline iree_status_t iree_vm_bytecode_stack_resolve_index(
 
 // Repeats the low |pattern_width| bytes of |pattern| across |target|. The
 // caller handles an empty range before forming |target|.
-static inline void iree_vm_bytecode_stack_fill(uint8_t* target, uint16_t length,
-                                               uint64_t pattern,
-                                               uint8_t pattern_width) {
+static inline void iree_vm_bytecode_fill_pattern(uint8_t* target,
+                                                 iree_host_size_t length,
+                                                 uint64_t pattern,
+                                                 uint8_t pattern_width) {
   if (pattern_width == 1) {
     memset(target, (uint8_t)pattern, length);
     return;

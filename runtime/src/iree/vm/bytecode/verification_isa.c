@@ -92,6 +92,10 @@ typedef enum iree_vm_bytecode_verification_form_e {
   IREE_VM_BYTECODE_VERIFICATION_FORM_BUFFER_SUBSPAN,
   IREE_VM_BYTECODE_VERIFICATION_FORM_BUFFER_LOAD,
   IREE_VM_BYTECODE_VERIFICATION_FORM_BUFFER_STORE,
+  IREE_VM_BYTECODE_VERIFICATION_FORM_BUFFER_FILL,
+  IREE_VM_BYTECODE_VERIFICATION_FORM_BUFFER_COPY,
+  IREE_VM_BYTECODE_VERIFICATION_FORM_BUFFER_COMPARE,
+  IREE_VM_BYTECODE_VERIFICATION_FORM_BUFFER_COPY_RODATA,
   IREE_VM_BYTECODE_VERIFICATION_FORM_BUFFER_RODATA_LOAD,
   IREE_VM_BYTECODE_VERIFICATION_FORM_CONVERSION_INTEGER,
   IREE_VM_BYTECODE_VERIFICATION_FORM_CONVERSION_FLOAT_EXTEND,
@@ -104,6 +108,8 @@ typedef enum iree_vm_bytecode_verification_form_e {
   IREE_VM_BYTECODE_VERIFICATION_FORM_STACK_COPY,
   IREE_VM_BYTECODE_VERIFICATION_FORM_STACK_COMPARE,
   IREE_VM_BYTECODE_VERIFICATION_FORM_STACK_COPY_RODATA,
+  IREE_VM_BYTECODE_VERIFICATION_FORM_STACK_COPY_FROM_BUFFER,
+  IREE_VM_BYTECODE_VERIFICATION_FORM_STACK_COPY_TO_BUFFER,
   IREE_VM_BYTECODE_VERIFICATION_FORM_STACK_CONST_S16_I32,
   IREE_VM_BYTECODE_VERIFICATION_FORM_STACK_CONST_S16_I64,
   IREE_VM_BYTECODE_VERIFICATION_FORM_STACK_PACK_I32,
@@ -1563,6 +1569,93 @@ static iree_status_t iree_vm_bytecode_function_verify(
             record->src_v8, record->format_u8, function));
         break;
       }
+      case IREE_VM_BYTECODE_VERIFICATION_FORM_BUFFER_FILL: {
+        const iree_vm_isa_buffer_fill_record_t* record =
+            (const iree_vm_isa_buffer_fill_record_t*)record_data;
+        if (record->zero_padding_u16 != 0) {
+          return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                  "buffer.fill padding is nonzero");
+        }
+        if (record->pattern_width_u8 != 1 && record->pattern_width_u8 != 2 &&
+            record->pattern_width_u8 != 4 && record->pattern_width_u8 != 8) {
+          return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                  "buffer.fill pattern width is invalid");
+        }
+        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_ref_register(
+            record->buffer_r8, function->ref_register_count_u16));
+        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_value_register(
+            record->offset_v8, function->value_register_count_u16));
+        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_value_register(
+            record->length_v8, function->value_register_count_u16));
+        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_value_register(
+            record->pattern_v8, function->value_register_count_u16));
+        break;
+      }
+      case IREE_VM_BYTECODE_VERIFICATION_FORM_BUFFER_COPY: {
+        const iree_vm_isa_buffer_copy_record_t* record =
+            (const iree_vm_isa_buffer_copy_record_t*)record_data;
+        if (record->zero_padding_u16 != 0) {
+          return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                  "buffer.copy padding is nonzero");
+        }
+        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_ref_register(
+            record->target_r8, function->ref_register_count_u16));
+        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_value_register(
+            record->target_offset_v8, function->value_register_count_u16));
+        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_ref_register(
+            record->source_r8, function->ref_register_count_u16));
+        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_value_register(
+            record->source_offset_v8, function->value_register_count_u16));
+        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_value_register(
+            record->length_v8, function->value_register_count_u16));
+        break;
+      }
+      case IREE_VM_BYTECODE_VERIFICATION_FORM_BUFFER_COMPARE: {
+        const iree_vm_isa_buffer_compare_record_t* record =
+            (const iree_vm_isa_buffer_compare_record_t*)record_data;
+        if (record->zero_padding_u8 != 0) {
+          return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                  "buffer.compare padding is nonzero");
+        }
+        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_value_register(
+            record->dst_v8, function->value_register_count_u16));
+        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_ref_register(
+            record->lhs_r8, function->ref_register_count_u16));
+        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_value_register(
+            record->lhs_offset_v8, function->value_register_count_u16));
+        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_ref_register(
+            record->rhs_r8, function->ref_register_count_u16));
+        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_value_register(
+            record->rhs_offset_v8, function->value_register_count_u16));
+        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_value_register(
+            record->length_v8, function->value_register_count_u16));
+        break;
+      }
+      case IREE_VM_BYTECODE_VERIFICATION_FORM_BUFFER_COPY_RODATA: {
+        const iree_vm_isa_buffer_copy_rodata_record_t* record =
+            (const iree_vm_isa_buffer_copy_rodata_record_t*)record_data;
+        if (record->zero_padding0_u8 != 0 || record->zero_padding1_u8 != 0) {
+          return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                  "buffer.copy.rodata padding is nonzero");
+        }
+        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_ref_register(
+            record->target_r8, function->ref_register_count_u16));
+        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_value_register(
+            record->target_offset_v8, function->value_register_count_u16));
+        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_value_register(
+            record->length_v8, function->value_register_count_u16));
+        if (record->rodata_u16 >= layout->rodata.count) {
+          return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                  "buffer.copy.rodata ordinal is out of range");
+        }
+        if (record->source_offset_u32 >
+            layout->rodata.lengths[record->rodata_u16]) {
+          return iree_make_status(
+              IREE_STATUS_INVALID_ARGUMENT,
+              "buffer.copy.rodata source offset is out of range");
+        }
+        break;
+      }
       case IREE_VM_BYTECODE_VERIFICATION_FORM_BUFFER_RODATA_LOAD: {
         const iree_vm_isa_buffer_rodata_load_record_t* record =
             (const iree_vm_isa_buffer_rodata_load_record_t*)record_data;
@@ -1744,6 +1837,38 @@ static iree_status_t iree_vm_bytecode_function_verify(
           return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                                   "stack.copy.rodata range is out of bounds");
         }
+        break;
+      }
+      case IREE_VM_BYTECODE_VERIFICATION_FORM_STACK_COPY_FROM_BUFFER: {
+        const iree_vm_isa_stack_copy_from_buffer_record_t* record =
+            (const iree_vm_isa_stack_copy_from_buffer_record_t*)record_data;
+        if (record->zero_padding_u8 != 0) {
+          return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                  "stack.copy.from.buffer padding is nonzero");
+        }
+        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_local_range(
+            record->target_u16, record->length_u16,
+            function->local_byte_length_u16));
+        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_ref_register(
+            record->buffer_r8, function->ref_register_count_u16));
+        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_value_register(
+            record->source_offset_v8, function->value_register_count_u16));
+        break;
+      }
+      case IREE_VM_BYTECODE_VERIFICATION_FORM_STACK_COPY_TO_BUFFER: {
+        const iree_vm_isa_stack_copy_to_buffer_record_t* record =
+            (const iree_vm_isa_stack_copy_to_buffer_record_t*)record_data;
+        if (record->zero_padding_u8 != 0) {
+          return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                  "stack.copy.to.buffer padding is nonzero");
+        }
+        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_ref_register(
+            record->buffer_r8, function->ref_register_count_u16));
+        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_value_register(
+            record->target_offset_v8, function->value_register_count_u16));
+        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_local_range(
+            record->source_u16, record->length_u16,
+            function->local_byte_length_u16));
         break;
       }
       case IREE_VM_BYTECODE_VERIFICATION_FORM_STACK_CONST_S16_I32:

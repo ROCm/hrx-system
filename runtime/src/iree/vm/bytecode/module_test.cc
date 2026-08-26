@@ -1346,6 +1346,7 @@ TEST(VMBytecodeModuleTest, RejectsMalformedStackInstructions) {
     const MutableFunctionImage function = FindFunctionImage(&image, 1);
     ASSERT_NE(function.row, nullptr);
     function.row->local_byte_length_u16 = 64;
+    function.row->ref_register_count_u16 = 2;
 
     uint8_t* cursor = function.bytecode;
     const uint8_t* const end =
@@ -1484,6 +1485,36 @@ TEST(VMBytecodeModuleTest, RejectsMalformedStackInstructions) {
   copy_rodata.source_offset_u32 = 0;
   copy_rodata.target_u16 = 62;
   expect_rejected(copy_rodata);
+
+  iree_vm_isa_stack_copy_from_buffer_record_t copy_from_buffer = {};
+  copy_from_buffer.opcode_u8 = IREE_VM_ISA_CORE_OPCODE_STACK_COPY_FROM_BUFFER;
+  copy_from_buffer.length_u16 = 4;
+  copy_from_buffer.zero_padding_u8 = 1;
+  expect_rejected(copy_from_buffer);
+  copy_from_buffer.zero_padding_u8 = 0;
+  copy_from_buffer.target_u16 = 62;
+  expect_rejected(copy_from_buffer);
+  copy_from_buffer.target_u16 = 0;
+  copy_from_buffer.buffer_r8 = 2;
+  expect_rejected(copy_from_buffer);
+  copy_from_buffer.buffer_r8 = 0;
+  copy_from_buffer.source_offset_v8 = 6;
+  expect_rejected(copy_from_buffer);
+
+  iree_vm_isa_stack_copy_to_buffer_record_t copy_to_buffer = {};
+  copy_to_buffer.opcode_u8 = IREE_VM_ISA_CORE_OPCODE_STACK_COPY_TO_BUFFER;
+  copy_to_buffer.length_u16 = 4;
+  copy_to_buffer.zero_padding_u8 = 1;
+  expect_rejected(copy_to_buffer);
+  copy_to_buffer.zero_padding_u8 = 0;
+  copy_to_buffer.source_u16 = 62;
+  expect_rejected(copy_to_buffer);
+  copy_to_buffer.source_u16 = 0;
+  copy_to_buffer.buffer_r8 = 2;
+  expect_rejected(copy_to_buffer);
+  copy_to_buffer.buffer_r8 = 0;
+  copy_to_buffer.target_offset_v8 = 6;
+  expect_rejected(copy_to_buffer);
 
   iree_vm_isa_stack_const_s16_i32_record_t const_i32 = {};
   const_i32.opcode_u8 = IREE_VM_ISA_CORE_OPCODE_STACK_CONST_S16_I32;

@@ -1608,6 +1608,135 @@ static iree_status_t iree_vm_bytecode_execute(
                                        values + record->src_v8, target.data);
     IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_isa_buffer_store_record_t);
   }
+  IREE_VM_BYTECODE_DISPATCH_CASE(BUFFER_FILL, buffer_fill) {
+    const iree_vm_isa_buffer_fill_record_t* record =
+        (const iree_vm_isa_buffer_fill_record_t*)record_data;
+    const uint64_t offset = values[record->offset_v8];
+    const uint64_t length = values[record->length_v8];
+    const uint64_t pattern = values[record->pattern_v8];
+    iree_vm_buffer_t* buffer = NULL;
+    status = iree_vm_bytecode_buffer_check_deref(refs[record->buffer_r8],
+                                                 module->buffer_type, &buffer);
+    if (!iree_status_is_ok(status)) {
+      IREE_VM_BYTECODE_DISPATCH_TERMINATE();
+    }
+    iree_byte_span_t target = iree_byte_span_empty();
+    status = iree_vm_bytecode_buffer_map_range(
+        buffer, IREE_VM_BUFFER_ACCESS_FLAG_WRITE, offset, length, &target);
+    if (!iree_status_is_ok(status)) {
+      IREE_VM_BYTECODE_DISPATCH_TERMINATE();
+    }
+    if (length != 0) {
+      iree_vm_bytecode_fill_pattern(target.data, target.data_length, pattern,
+                                    record->pattern_width_u8);
+    }
+    IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_isa_buffer_fill_record_t);
+  }
+  IREE_VM_BYTECODE_DISPATCH_CASE(BUFFER_COPY, buffer_copy) {
+    const iree_vm_isa_buffer_copy_record_t* record =
+        (const iree_vm_isa_buffer_copy_record_t*)record_data;
+    const uint64_t target_offset = values[record->target_offset_v8];
+    const uint64_t source_offset = values[record->source_offset_v8];
+    const uint64_t length = values[record->length_v8];
+    iree_vm_buffer_t* target_buffer = NULL;
+    status = iree_vm_bytecode_buffer_check_deref(
+        refs[record->target_r8], module->buffer_type, &target_buffer);
+    if (!iree_status_is_ok(status)) {
+      IREE_VM_BYTECODE_DISPATCH_TERMINATE();
+    }
+    iree_vm_buffer_t* source_buffer = NULL;
+    status = iree_vm_bytecode_buffer_check_deref(
+        refs[record->source_r8], module->buffer_type, &source_buffer);
+    if (!iree_status_is_ok(status)) {
+      IREE_VM_BYTECODE_DISPATCH_TERMINATE();
+    }
+    iree_byte_span_t target = iree_byte_span_empty();
+    status = iree_vm_bytecode_buffer_map_range(target_buffer,
+                                               IREE_VM_BUFFER_ACCESS_FLAG_WRITE,
+                                               target_offset, length, &target);
+    if (!iree_status_is_ok(status)) {
+      IREE_VM_BYTECODE_DISPATCH_TERMINATE();
+    }
+    iree_byte_span_t source = iree_byte_span_empty();
+    status = iree_vm_bytecode_buffer_map_range(source_buffer,
+                                               IREE_VM_BUFFER_ACCESS_FLAG_READ,
+                                               source_offset, length, &source);
+    if (!iree_status_is_ok(status)) {
+      IREE_VM_BYTECODE_DISPATCH_TERMINATE();
+    }
+    if (length != 0) {
+      memmove(target.data, source.data, target.data_length);
+    }
+    IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_isa_buffer_copy_record_t);
+  }
+  IREE_VM_BYTECODE_DISPATCH_CASE(BUFFER_COMPARE, buffer_compare) {
+    const iree_vm_isa_buffer_compare_record_t* record =
+        (const iree_vm_isa_buffer_compare_record_t*)record_data;
+    const uint64_t lhs_offset = values[record->lhs_offset_v8];
+    const uint64_t rhs_offset = values[record->rhs_offset_v8];
+    const uint64_t length = values[record->length_v8];
+    iree_vm_buffer_t* lhs_buffer = NULL;
+    status = iree_vm_bytecode_buffer_check_deref(
+        refs[record->lhs_r8], module->buffer_type, &lhs_buffer);
+    if (!iree_status_is_ok(status)) {
+      IREE_VM_BYTECODE_DISPATCH_TERMINATE();
+    }
+    iree_vm_buffer_t* rhs_buffer = NULL;
+    status = iree_vm_bytecode_buffer_check_deref(
+        refs[record->rhs_r8], module->buffer_type, &rhs_buffer);
+    if (!iree_status_is_ok(status)) {
+      IREE_VM_BYTECODE_DISPATCH_TERMINATE();
+    }
+    iree_byte_span_t lhs = iree_byte_span_empty();
+    status = iree_vm_bytecode_buffer_map_range(
+        lhs_buffer, IREE_VM_BUFFER_ACCESS_FLAG_READ, lhs_offset, length, &lhs);
+    if (!iree_status_is_ok(status)) {
+      IREE_VM_BYTECODE_DISPATCH_TERMINATE();
+    }
+    iree_byte_span_t rhs = iree_byte_span_empty();
+    status = iree_vm_bytecode_buffer_map_range(
+        rhs_buffer, IREE_VM_BUFFER_ACCESS_FLAG_READ, rhs_offset, length, &rhs);
+    if (!iree_status_is_ok(status)) {
+      IREE_VM_BYTECODE_DISPATCH_TERMINATE();
+    }
+    const int ordering =
+        length == 0 ? 0 : memcmp(lhs.data, rhs.data, lhs.data_length);
+    values[record->dst_v8] = ordering < 0   ? UINT32_MAX
+                             : ordering > 0 ? UINT32_C(1)
+                                            : UINT32_C(0);
+    IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_isa_buffer_compare_record_t);
+  }
+  IREE_VM_BYTECODE_DISPATCH_CASE(BUFFER_COPY_RODATA, buffer_copy_rodata) {
+    const iree_vm_isa_buffer_copy_rodata_record_t* record =
+        (const iree_vm_isa_buffer_copy_rodata_record_t*)record_data;
+    const uint64_t target_offset = values[record->target_offset_v8];
+    const uint64_t length = values[record->length_v8];
+    iree_vm_buffer_t* target_buffer = NULL;
+    status = iree_vm_bytecode_buffer_check_deref(
+        refs[record->target_r8], module->buffer_type, &target_buffer);
+    if (!iree_status_is_ok(status)) {
+      IREE_VM_BYTECODE_DISPATCH_TERMINATE();
+    }
+    iree_byte_span_t target = iree_byte_span_empty();
+    status = iree_vm_bytecode_buffer_map_range(target_buffer,
+                                               IREE_VM_BUFFER_ACCESS_FLAG_WRITE,
+                                               target_offset, length, &target);
+    if (!iree_status_is_ok(status)) {
+      IREE_VM_BYTECODE_DISPATCH_TERMINATE();
+    }
+    iree_byte_span_t source = iree_byte_span_empty();
+    status = iree_vm_bytecode_buffer_map_range(
+        &module->rodata_roots[record->rodata_u16],
+        IREE_VM_BUFFER_ACCESS_FLAG_READ, record->source_offset_u32, length,
+        &source);
+    if (!iree_status_is_ok(status)) {
+      IREE_VM_BYTECODE_DISPATCH_TERMINATE();
+    }
+    if (length != 0) {
+      memcpy(target.data, source.data, target.data_length);
+    }
+    IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_isa_buffer_copy_rodata_record_t);
+  }
   IREE_VM_BYTECODE_DISPATCH_CASE(CONVERSION_INTEGER, conversion_integer) {
     do {
       const iree_vm_isa_conversion_integer_record_t* record =
@@ -1702,7 +1831,7 @@ static iree_status_t iree_vm_bytecode_execute(
     const iree_vm_isa_stack_fill_record_t* record =
         (const iree_vm_isa_stack_fill_record_t*)record_data;
     if (record->length_u16 != 0) {
-      iree_vm_bytecode_stack_fill(
+      iree_vm_bytecode_fill_pattern(
           local_bytes + record->target_base_u16, record->length_u16,
           values[record->pattern_v8], record->pattern_width_u8);
     }
@@ -1740,6 +1869,51 @@ static iree_status_t iree_vm_bytecode_execute(
              source + record->source_offset_u32, record->length_u16);
     }
     IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_isa_stack_copy_rodata_record_t);
+  }
+  IREE_VM_BYTECODE_DISPATCH_CASE(STACK_COPY_FROM_BUFFER,
+                                 stack_copy_from_buffer) {
+    const iree_vm_isa_stack_copy_from_buffer_record_t* record =
+        (const iree_vm_isa_stack_copy_from_buffer_record_t*)record_data;
+    const uint64_t source_offset = values[record->source_offset_v8];
+    iree_vm_buffer_t* source_buffer = NULL;
+    status = iree_vm_bytecode_buffer_check_deref(
+        refs[record->buffer_r8], module->buffer_type, &source_buffer);
+    if (!iree_status_is_ok(status)) {
+      IREE_VM_BYTECODE_DISPATCH_TERMINATE();
+    }
+    iree_byte_span_t source = iree_byte_span_empty();
+    status = iree_vm_bytecode_buffer_map_range(
+        source_buffer, IREE_VM_BUFFER_ACCESS_FLAG_READ, source_offset,
+        record->length_u16, &source);
+    if (!iree_status_is_ok(status)) {
+      IREE_VM_BYTECODE_DISPATCH_TERMINATE();
+    }
+    if (record->length_u16 != 0) {
+      memcpy(local_bytes + record->target_u16, source.data, record->length_u16);
+    }
+    IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_isa_stack_copy_from_buffer_record_t);
+  }
+  IREE_VM_BYTECODE_DISPATCH_CASE(STACK_COPY_TO_BUFFER, stack_copy_to_buffer) {
+    const iree_vm_isa_stack_copy_to_buffer_record_t* record =
+        (const iree_vm_isa_stack_copy_to_buffer_record_t*)record_data;
+    const uint64_t target_offset = values[record->target_offset_v8];
+    iree_vm_buffer_t* target_buffer = NULL;
+    status = iree_vm_bytecode_buffer_check_deref(
+        refs[record->buffer_r8], module->buffer_type, &target_buffer);
+    if (!iree_status_is_ok(status)) {
+      IREE_VM_BYTECODE_DISPATCH_TERMINATE();
+    }
+    iree_byte_span_t target = iree_byte_span_empty();
+    status = iree_vm_bytecode_buffer_map_range(
+        target_buffer, IREE_VM_BUFFER_ACCESS_FLAG_WRITE, target_offset,
+        record->length_u16, &target);
+    if (!iree_status_is_ok(status)) {
+      IREE_VM_BYTECODE_DISPATCH_TERMINATE();
+    }
+    if (record->length_u16 != 0) {
+      memcpy(target.data, local_bytes + record->source_u16, record->length_u16);
+    }
+    IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_isa_stack_copy_to_buffer_record_t);
   }
   IREE_VM_BYTECODE_DISPATCH_CASE(STACK_CONST_S16_I32, stack_const_s16_i32) {
     const iree_vm_isa_stack_const_s16_i32_record_t* record =

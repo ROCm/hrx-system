@@ -37,6 +37,7 @@ from model.isa.validation import (
     REGISTER_FUNCTION,
     REGISTER_REF,
     REGISTER_VALUE,
+    RODATA_OFFSET,
     RODATA_ORDINAL,
     RODATA_STATIC_OFFSET,
     SELECTOR,
@@ -761,6 +762,63 @@ def _validate_verification_form(
         )
         require_zero(7, 1)
         require_lane_range(register_field, "format_u8")
+    elif verification_form == "BUFFER_FILL":
+        if instruction.byte_length != 8:
+            raise ValueError(f"{instruction.mnemonic}: buffer fill is not 8 bytes")
+        require_ref(1)
+        require_value(2)
+        require_value(3)
+        require_value(4)
+        require_field(
+            5,
+            1,
+            ALLOWED_VALUES.entity_id,
+            (InstructionFieldRole.IMMEDIATE,),
+            rule_arguments=((1, 2, 4, 8),),
+        )
+        require_zero(6, 2)
+    elif verification_form == "BUFFER_COPY":
+        if instruction.byte_length != 8:
+            raise ValueError(f"{instruction.mnemonic}: buffer copy is not 8 bytes")
+        require_ref(1)
+        require_value(2)
+        require_ref(3)
+        require_value(4)
+        require_value(5)
+        require_zero(6, 2)
+    elif verification_form == "BUFFER_COMPARE":
+        if instruction.byte_length != 8:
+            raise ValueError(f"{instruction.mnemonic}: buffer compare is not 8 bytes")
+        require_value(1)
+        require_ref(2)
+        require_value(3)
+        require_ref(4)
+        require_value(5)
+        require_value(6)
+        require_zero(7, 1)
+    elif verification_form == "BUFFER_COPY_RODATA":
+        if instruction.byte_length != 12:
+            raise ValueError(
+                f"{instruction.mnemonic}: buffer rodata copy is not 12 bytes"
+            )
+        require_ref(1)
+        require_value(2)
+        require_zero(3, 1)
+        require_field(
+            4,
+            2,
+            RODATA_ORDINAL.entity_id,
+            (InstructionFieldRole.IMMEDIATE,),
+        )
+        require_value(6)
+        require_zero(7, 1)
+        require_field(
+            8,
+            4,
+            RODATA_OFFSET.entity_id,
+            (InstructionFieldRole.IMMEDIATE,),
+            rule_arguments=(FieldReference("rodata_u16"),),
+        )
     elif verification_form == "BUFFER_RODATA_LOAD":
         if instruction.byte_length != 4:
             raise ValueError(f"{instruction.mnemonic}: rodata load is not 4 bytes")
@@ -961,6 +1019,48 @@ def _validate_verification_form(
                 FieldReference("rodata_u16"),
                 FieldReference("length_u16"),
             ),
+        )
+    elif verification_form == "STACK_COPY_FROM_BUFFER":
+        if instruction.byte_length != 8:
+            raise ValueError(
+                f"{instruction.mnemonic}: stack-buffer copy is not 8 bytes"
+            )
+        require_zero(1, 1)
+        require_field(
+            2,
+            2,
+            LOCAL_BYTES_RANGE_BASE.entity_id,
+            (InstructionFieldRole.IMMEDIATE,),
+            rule_arguments=(FieldReference("length_u16"),),
+        )
+        require_ref(4)
+        require_value(5)
+        require_field(
+            6,
+            2,
+            LOCAL_BYTES_RANGE_LENGTH.entity_id,
+            (InstructionFieldRole.IMMEDIATE,),
+        )
+    elif verification_form == "STACK_COPY_TO_BUFFER":
+        if instruction.byte_length != 8:
+            raise ValueError(
+                f"{instruction.mnemonic}: stack-buffer copy is not 8 bytes"
+            )
+        require_ref(1)
+        require_value(2)
+        require_zero(3, 1)
+        require_field(
+            4,
+            2,
+            LOCAL_BYTES_RANGE_BASE.entity_id,
+            (InstructionFieldRole.IMMEDIATE,),
+            rule_arguments=(FieldReference("length_u16"),),
+        )
+        require_field(
+            6,
+            2,
+            LOCAL_BYTES_RANGE_LENGTH.entity_id,
+            (InstructionFieldRole.IMMEDIATE,),
         )
     elif verification_form in ("STACK_CONST_S16_I32", "STACK_CONST_S16_I64"):
         if instruction.byte_length != 8:

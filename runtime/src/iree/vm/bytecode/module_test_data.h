@@ -32,6 +32,7 @@ enum BufferFunctionOrdinal : uint32_t {
   kBufferStoreFunctionOrdinal = 19,
   kBufferSubspanFunctionOrdinal = 20,
   kBufferWrongLengthFunctionOrdinal = 21,
+  kBufferStackCopyFunctionOrdinal = 22,
 };
 
 // Finds one section payload in |image| or returns null when absent.

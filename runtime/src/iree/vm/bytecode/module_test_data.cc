@@ -22,6 +22,7 @@
 #include "iree/vm/bytecode/wire/core/opcodes.h"
 #include "iree/vm/bytecode/wire/core/ref.h"
 #include "iree/vm/bytecode/wire/core/selectors.h"
+#include "iree/vm/bytecode/wire/core/stack.h"
 #include "iree/vm/bytecode/wire/core/value.h"
 #include "iree/vm/bytecode/wire/hal/device.h"
 #include "iree/vm/bytecode/wire/hal/opcodes.h"
@@ -1214,6 +1215,8 @@ std::vector<uint8_t> BuildBufferSignatures() {
                    /*argument_ref_type=*/0, /*result_ref_type=*/0);
   append_signature(/*argument_value_count=*/0, /*result_value_count=*/1,
                    /*argument_ref_type=*/1, /*result_ref_type=*/-1);
+  append_signature(/*argument_value_count=*/2, /*result_value_count=*/0,
+                   /*argument_ref_type=*/0, /*result_ref_type=*/-1);
 
   ByteBuffer section;
   section.Append(iree_vm_bytecode_v0_signatures_header_t{
@@ -1225,8 +1228,8 @@ std::vector<uint8_t> BuildBufferSignatures() {
 
 std::vector<uint8_t> BuildBufferCallableTypes() {
   ByteBuffer section;
-  section.Append(iree_vm_bytecode_v0_callable_types_header_t{10});
-  for (uint16_t signature_ordinal = 0; signature_ordinal < 10;
+  section.Append(iree_vm_bytecode_v0_callable_types_header_t{11});
+  for (uint16_t signature_ordinal = 0; signature_ordinal < 11;
        ++signature_ordinal) {
     section.Append(
         iree_vm_bytecode_v0_callable_type_row_t{signature_ordinal, 0});
@@ -1236,7 +1239,7 @@ std::vector<uint8_t> BuildBufferCallableTypes() {
 
 std::vector<uint8_t> BuildBufferExports() {
   ByteBuffer section;
-  section.Append(iree_vm_bytecode_v0_exports_header_t{22});
+  section.Append(iree_vm_bytecode_v0_exports_header_t{23});
   section.Append(iree_vm_bytecode_v0_export_row_t{
       4, 0, kBufferAllocateFunctionOrdinal, 0});
   section.Append(
@@ -1250,12 +1253,14 @@ std::vector<uint8_t> BuildBufferExports() {
         static_cast<uint16_t>(7 + format), callable_type,
         static_cast<uint16_t>(kBufferRoundtripFunctionBase + format), 0});
   }
+  section.Append(iree_vm_bytecode_v0_export_row_t{
+      23, 10, kBufferStackCopyFunctionOrdinal, 0});
   section.Append(
-      iree_vm_bytecode_v0_export_row_t{23, 7, kBufferStoreFunctionOrdinal, 0});
+      iree_vm_bytecode_v0_export_row_t{24, 7, kBufferStoreFunctionOrdinal, 0});
   section.Append(iree_vm_bytecode_v0_export_row_t{
-      24, 8, kBufferSubspanFunctionOrdinal, 0});
+      25, 8, kBufferSubspanFunctionOrdinal, 0});
   section.Append(iree_vm_bytecode_v0_export_row_t{
-      25, 9, kBufferWrongLengthFunctionOrdinal, 0});
+      26, 9, kBufferWrongLengthFunctionOrdinal, 0});
   return section.Take();
 }
 
@@ -1270,7 +1275,8 @@ std::vector<uint8_t> BuildBufferFunctions() {
   };
   const auto end_function = [&](uint32_t offset, uint16_t callable_type,
                                 uint16_t value_register_count,
-                                uint16_t ref_register_count) {
+                                uint16_t ref_register_count,
+                                uint16_t local_byte_length = 0) {
     bytecode.Append(iree_vm_isa_control_return_record_t{
         IREE_VM_ISA_CORE_OPCODE_CONTROL_RETURN, {0, 0, 0}});
     rows.push_back(iree_vm_bytecode_v0_function_row_t{
@@ -1280,7 +1286,7 @@ std::vector<uint8_t> BuildBufferFunctions() {
         static_cast<uint32_t>(bytecode.size() - offset),
         0,
         0,
-        0,
+        local_byte_length,
         value_register_count,
         ref_register_count,
         0,
@@ -1347,6 +1353,14 @@ std::vector<uint8_t> BuildBufferFunctions() {
       IREE_VM_ISA_CORE_OPCODE_BUFFER_LENGTH, 0, 0, 0});
   end_function(offset, /*callable_type=*/9, /*value_register_count=*/1,
                /*ref_register_count=*/1);
+
+  offset = begin_function();
+  bytecode.Append(iree_vm_isa_stack_copy_from_buffer_record_t{
+      IREE_VM_ISA_CORE_OPCODE_STACK_COPY_FROM_BUFFER, 0, 0, 0, 0, 4});
+  bytecode.Append(iree_vm_isa_stack_copy_to_buffer_record_t{
+      IREE_VM_ISA_CORE_OPCODE_STACK_COPY_TO_BUFFER, 0, 1, 0, 0, 4});
+  end_function(offset, /*callable_type=*/10, /*value_register_count=*/2,
+               /*ref_register_count=*/1, /*local_byte_length=*/4);
 
   ByteBuffer section;
   section.Append(iree_vm_bytecode_v0_functions_header_t{
@@ -1651,13 +1665,14 @@ std::vector<uint8_t> BuildBufferModuleImage() {
             "roundtrip.01", "roundtrip.02", "roundtrip.03", "roundtrip.04",
             "roundtrip.05", "roundtrip.06", "roundtrip.07", "roundtrip.08",
             "roundtrip.09", "roundtrip.10", "roundtrip.11", "roundtrip.12",
-            "roundtrip.13", "roundtrip.14", "roundtrip.15", "store",
-            "subspan",      "wrong_length"})},
+            "roundtrip.13", "roundtrip.14", "roundtrip.15", "stack_copy",
+            "store",        "subspan",      "wrong_length"})},
       {IREE_VM_BYTECODE_SECTION_REF_TYPES, 0, BuildBufferRefTypes()},
       {IREE_VM_BYTECODE_SECTION_SIGNATURES, 0, BuildBufferSignatures()},
       {IREE_VM_BYTECODE_SECTION_CALLABLE_TYPES, 0, BuildBufferCallableTypes()},
       {IREE_VM_BYTECODE_SECTION_EXPORTS, 0, BuildBufferExports()},
       {IREE_VM_BYTECODE_SECTION_FUNCTIONS, 0, BuildBufferFunctions()},
+      {IREE_VM_BYTECODE_SECTION_RODATA, 0, BuildTestRodata()},
   });
 }
 
