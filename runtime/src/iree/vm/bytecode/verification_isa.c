@@ -624,7 +624,7 @@ static iree_status_t iree_vm_bytecode_function_verify(
         IREE_VM_BYTECODE_VERIFICATION_FORM_NONE) {
       return iree_make_status(
           IREE_STATUS_UNIMPLEMENTED,
-          "opcode 0x%02" PRIx8 " is outside the executable subset", opcode);
+          "opcode 0x%02" PRIx8 " is not executable Core bytecode", opcode);
     }
     const iree_host_size_t record_length = execution_info.record_length;
     IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_record_available(

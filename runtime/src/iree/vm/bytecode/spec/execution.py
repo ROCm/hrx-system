@@ -4,12 +4,12 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-"""Runtime executable-subset and verification-form declarations.
+"""Runtime execution and verification-form declarations.
 
-The ISA specification describes every legal instruction in a version. During
-the incremental runtime bring-up, this table separately names the instructions
-that the interpreter can execute and the handwritten verification form that
-owns their module-load checks.
+The ISA specification describes every legal instruction in a version. This
+table names the Core instructions that the interpreter executes and the
+handwritten verification form that owns their module-load checks. Projection
+tests require the table to cover the complete current Core page.
 """
 
 from __future__ import annotations

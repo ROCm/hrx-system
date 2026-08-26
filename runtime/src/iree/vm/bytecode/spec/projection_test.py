@@ -21,6 +21,7 @@ import unittest
 PACKAGE_ROOT = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(PACKAGE_ROOT))
 
+from execution import EXECUTABLE_INSTRUCTIONS  # noqa: E402
 from generate import (  # noqa: E402
     generated_documentation_outputs,
     generated_table_outputs,
@@ -88,6 +89,21 @@ class ProjectionTest(unittest.TestCase):
             sum(isinstance(entity, InstructionFamily) for entity in isa_entities),
             17,
         )
+
+    def test_runtime_execution_covers_the_complete_core_page(self) -> None:
+        core_instructions = {
+            entity.mnemonic
+            for entity in ISA_SPECIFICATION.entities
+            if isinstance(entity, Instruction) and entity.since.domain == "core"
+        }
+        executable_instructions = tuple(
+            instruction.mnemonic for instruction in EXECUTABLE_INSTRUCTIONS
+        )
+
+        self.assertEqual(
+            len(executable_instructions), len(set(executable_instructions))
+        )
+        self.assertEqual(set(executable_instructions), core_instructions)
 
     def test_every_selector_has_normative_meaning_and_a_consumer(self) -> None:
         tables = tuple(
