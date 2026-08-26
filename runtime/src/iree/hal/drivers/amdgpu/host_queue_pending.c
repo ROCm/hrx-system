@@ -1044,17 +1044,9 @@ static void iree_hal_amdgpu_pending_op_fail(iree_hal_amdgpu_pending_op_t* op,
   iree_arena_deinitialize(&op->arena);
 }
 
-// Cancels all pending operations on a queue with the given failure details.
-// Creates a status only for operations that do not already carry a wait error.
-// Called during deinitialize or on unrecoverable GPU fault.
-// Caller must ensure no concurrent submissions (shutdown path).
 void iree_hal_amdgpu_host_queue_cancel_pending(
     iree_hal_amdgpu_host_queue_t* queue, iree_status_code_t status_code,
     const char* status_message) {
-  iree_slim_mutex_lock(&queue->locks.submission_mutex);
-  queue->is_shutting_down = true;
-  iree_slim_mutex_unlock(&queue->locks.submission_mutex);
-
   for (;;) {
     iree_hal_amdgpu_pending_op_t* op = NULL;
     iree_slim_mutex_lock(&queue->locks.submission_mutex);

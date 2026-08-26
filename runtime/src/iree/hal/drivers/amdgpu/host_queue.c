@@ -507,6 +507,20 @@ static void iree_hal_amdgpu_host_queue_request_completion_thread_stop(
   }
 }
 
+// Permanently closes the queue to further submission. Idempotent, and the only
+// writer of |is_shutting_down|.
+//
+// Every notification epoch is published under submission_mutex, so taking the
+// mutex here waits out any publisher already inside the critical section and
+// keeps any later one out. A drain that runs after this returns therefore sees
+// a published epoch that can no longer advance.
+static void iree_hal_amdgpu_host_queue_close_submission(
+    iree_hal_amdgpu_host_queue_t* queue) {
+  iree_slim_mutex_lock(&queue->locks.submission_mutex);
+  queue->is_shutting_down = true;
+  iree_slim_mutex_unlock(&queue->locks.submission_mutex);
+}
+
 void iree_hal_amdgpu_host_queue_record_failure(
     iree_hal_amdgpu_host_queue_t* queue, iree_status_t status) {
   IREE_ASSERT_ARGUMENT(queue);
@@ -721,23 +735,36 @@ static int iree_hal_amdgpu_host_queue_completion_thread_main(void* entry_arg) {
             iree_hal_amdgpu_host_queue_last_drained_signal_value(queue);
       }
 
+      // An out-of-range index means every signal handle passed was null or
+      // invalid, so nothing can ever wake this wait again. Fail the queue and
+      // take the terminal path below rather than spinning on a dead wait.
+      if (IREE_UNLIKELY(signal_index >=
+                        IREE_HAL_AMDGPU_COMPLETION_WAIT_SIGNAL_COUNT)) {
+        iree_hal_amdgpu_host_queue_record_failure(
+            queue,
+            iree_make_status(
+                IREE_STATUS_INTERNAL,
+                "hsa_amd_signal_wait_any returned invalid signal index %u",
+                signal_index));
+      }
+
       if (signal_index == IREE_HAL_AMDGPU_COMPLETION_WAIT_STOP_SIGNAL ||
           iree_hal_amdgpu_host_queue_has_error(queue)) {
+        // Close admission before the final drain so no epoch can be published
+        // behind it. On the teardown path admission is already closed and this
+        // is a no-op; on the failure path it is what makes the drain final.
+        iree_hal_amdgpu_host_queue_close_submission(queue);
         iree_hal_amdgpu_host_queue_drain_completions(queue);
         if (iree_hal_amdgpu_host_queue_has_error(queue)) {
+          // Capacity-parked pending operations are retried by post-drain
+          // callbacks and the drain's own pass can enqueue more. Flush them
+          // under closed admission so they observe cancellation and run their
+          // normal failure path instead of being destroyed under the callback.
+          iree_hal_amdgpu_host_queue_run_post_drain_actions(queue);
           iree_hal_amdgpu_host_queue_cancel_pending(
               queue, IREE_STATUS_ABORTED,
               "AMDGPU queue stopped after an unrecoverable device error");
         }
-        keep_running = false;
-      } else if (IREE_UNLIKELY(signal_index >=
-                               IREE_HAL_AMDGPU_COMPLETION_WAIT_SIGNAL_COUNT)) {
-        iree_status_t error = iree_make_status(
-            IREE_STATUS_INTERNAL,
-            "hsa_amd_signal_wait_any returned invalid signal index %u",
-            signal_index);
-        iree_hal_amdgpu_host_queue_record_failure(queue, error);
-        iree_hal_amdgpu_host_queue_drain_completions(queue);
         keep_running = false;
       }
 
@@ -988,9 +1015,7 @@ void iree_hal_amdgpu_host_queue_deinitialize(
   IREE_ASSERT_ARGUMENT(queue);
   IREE_TRACE_ZONE_BEGIN(z0);
 
-  iree_slim_mutex_lock(&queue->locks.submission_mutex);
-  queue->is_shutting_down = true;
-  iree_slim_mutex_unlock(&queue->locks.submission_mutex);
+  iree_hal_amdgpu_host_queue_close_submission(queue);
 
   iree_hal_amdgpu_host_queue_wait_idle_before_teardown(queue);
 

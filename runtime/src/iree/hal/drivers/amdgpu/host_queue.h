@@ -334,9 +334,15 @@ typedef struct iree_hal_amdgpu_host_queue_t {
   // arrays.
   iree_hal_amdgpu_host_queue_command_buffer_scratch_t* command_buffer_scratch;
 
-  // Set under submission_mutex when queue teardown begins. Deferred ops whose
-  // waits race to completion after this point are failed with CANCELLED instead
-  // of issuing new AQL packets.
+  // Set under submission_mutex when the queue permanently closes admission,
+  // either for teardown or after a fatal queue failure. Never cleared. Every
+  // submission entry point rejects work with CANCELLED once it is set, and
+  // deferred ops whose waits race to completion after this point are failed
+  // with CANCELLED instead of issuing new AQL packets.
+  //
+  // Because notification epochs are published under submission_mutex, closing
+  // admission under that mutex also establishes that no epoch published later
+  // can escape the failure drain that follows.
   bool is_shutting_down;
 
   // Profiling data-family state for this queue. Mutated only by device
