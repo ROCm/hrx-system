@@ -214,11 +214,16 @@ SECTIONS = (
             "callable_type_count is in [1, 65536]. MAY_YIELD is permission: a "
             "non-yielding target satisfies either contract, while a yielding "
             "target cannot satisfy a contract with MAY_YIELD clear. Rows are "
-            "dense and topologically ordered: every FUNCTION descriptor in the "
-            "signature named by row N must name a callable ordinal below N. "
-            "Recursive callable types are invalid in version zero. Structurally "
-            "equal rows may have distinct ordinals; program creation may intern "
-            "their structure without changing the image."
+            "dense, unique, and strictly ordered by nesting depth, structural "
+            "signature, then flags. Structural signatures compare argument "
+            "count and source-ordered argument types followed by result count "
+            "and source-ordered result types. Scalar kinds compare by ID, ref "
+            "types by their canonical namespace and local-name order, and "
+            "nested callable types by their earlier canonical ordinal. Every "
+            "FUNCTION descriptor in row N names an ordinal below N. A row's "
+            "nesting depth is zero without FUNCTION descriptors and otherwise "
+            "one plus the maximum referenced depth. Recursive callable types "
+            "are invalid in version zero."
         ),
     ),
     Section(
@@ -1032,11 +1037,11 @@ VALIDATION_OBLIGATIONS = (
     ValidationObligation(
         entity_id="core.validation.module.callable_types.rows",
         since=CORE_0,
-        summary="Validate every signature ordinal and callable permission flag.",
+        summary="Validate every signature ordinal, callable permission flag, and reserved field.",
         scope=ValidationScope.SECTION,
         kind="validate_callable_rows",
         inputs=(RecordFieldReference(RECORDS_BY_KEY["callable_type_row"].entity_id),),
-        normative_text="Validate every signature ordinal and callable permission flag.",
+        normative_text="Validate every signature ordinal, callable permission flag, and reserved field.",
         section_id=SECTIONS_BY_KEY["callable_types"].entity_id,
     ),
     ValidationObligation(
@@ -1053,6 +1058,36 @@ VALIDATION_OBLIGATIONS = (
             RecordFieldReference(RECORDS_BY_KEY["signature_descriptor_row"].entity_id),
         ),
         normative_text="Require nested FUNCTION descriptors to name only earlier callable types.",
+        section_id=SECTIONS_BY_KEY["callable_types"].entity_id,
+    ),
+    ValidationObligation(
+        entity_id="core.validation.module.callable_types.depth",
+        since=CORE_0,
+        summary="Require each callable type to carry its exact canonical nesting depth.",
+        scope=ValidationScope.SECTION,
+        kind="validate_callable_depth",
+        inputs=(
+            RecordFieldReference(
+                RECORDS_BY_KEY["callable_type_row"].entity_id,
+                "nesting_depth_u16",
+            ),
+            RecordFieldReference(RECORDS_BY_KEY["signature_descriptor_row"].entity_id),
+        ),
+        normative_text="Require depth zero for leaf signatures and one plus the maximum child depth for signatures containing FUNCTION descriptors.",
+        section_id=SECTIONS_BY_KEY["callable_types"].entity_id,
+    ),
+    ValidationObligation(
+        entity_id="core.validation.module.callable_types.order",
+        since=CORE_0,
+        summary="Require strictly increasing canonical callable-type order.",
+        scope=ValidationScope.SECTION,
+        kind="validate_callable_order",
+        inputs=(
+            RecordFieldReference(RECORDS_BY_KEY["callable_type_row"].entity_id),
+            RecordFieldReference(RECORDS_BY_KEY["signature_row"].entity_id),
+            RecordFieldReference(RECORDS_BY_KEY["signature_descriptor_row"].entity_id),
+        ),
+        normative_text="Require strictly increasing nesting-depth, structural-signature, and flags order with no duplicate callable contracts.",
         section_id=SECTIONS_BY_KEY["callable_types"].entity_id,
     ),
     ValidationObligation(

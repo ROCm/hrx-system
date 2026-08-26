@@ -65,6 +65,8 @@ static const iree_vm_module_callable_type_declaration_t
                  IREE_ARRAYSIZE(iree_vm_test_callback_results)},
             },
             IREE_VM_CALLABLE_TYPE_FLAG_NONE,
+            0,
+            0,
         },
         {
             {
@@ -74,6 +76,8 @@ static const iree_vm_module_callable_type_declaration_t
                  IREE_ARRAYSIZE(iree_vm_test_run_results)},
             },
             IREE_VM_CALLABLE_TYPE_FLAG_MAY_YIELD,
+            1,
+            0,
         },
 };
 

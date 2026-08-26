@@ -411,7 +411,7 @@ _RECORD_DEFINITIONS = (
     _record(
         "callable_type_row",
         "iree_vm_bytecode_v0_callable_type_row_t",
-        4,
+        8,
         2,
         (
             WireField(
@@ -431,6 +431,20 @@ _RECORD_DEFINITIONS = (
                 encoding_id=U16.entity_id,
                 description="Callable behavior permission flags.",
                 validation=(RuleUse(ALLOWED_BITS.entity_id, (1,)),),
+            ),
+            WireField(
+                name="nesting_depth_u16",
+                offset=4,
+                encoding_id=U16.entity_id,
+                description="Maximum nested callable depth; leaf signatures are zero.",
+                validation=(RuleUse(ANY_BITS.entity_id, ()),),
+            ),
+            WireField(
+                name="reserved_u16",
+                offset=6,
+                encoding_id=U16.entity_id,
+                description="Reserved zero bits.",
+                validation=(RuleUse(ZERO.entity_id, ()),),
             ),
         ),
     ),

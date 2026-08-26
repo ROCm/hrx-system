@@ -587,8 +587,29 @@ void RunValidationObligation(ValidationObligation obligation) {
       auto* descriptors =
           reinterpret_cast<iree_vm_bytecode_v0_signature_descriptor_row_t*>(
               rows + header->signature_count_u32);
-      descriptors[2].type_ordinal_u16 = 1;
+      descriptors[43].type_ordinal_u16 = 2;
       ExpectStructureRejected(image, "topologically ordered");
+      break;
+    }
+    case ValidationObligation::CALLABLE_TYPES_DEPTH: {
+      std::vector<uint8_t> image = BuildOwnershipModuleImage();
+      auto* row = SectionRecord<iree_vm_bytecode_v0_callable_type_row_t>(
+          &image, IREE_VM_BYTECODE_SECTION_CALLABLE_TYPES,
+          sizeof(iree_vm_bytecode_v0_callable_types_header_t));
+      ASSERT_NE(row, nullptr);
+      row->nesting_depth_u16 = 1;
+      ExpectStructureRejected(image, "nesting depth is not canonical");
+      break;
+    }
+    case ValidationObligation::CALLABLE_TYPES_ORDER: {
+      std::vector<uint8_t> image = BuildOwnershipModuleImage();
+      auto* header = SectionRecord<iree_vm_bytecode_v0_callable_types_header_t>(
+          &image, IREE_VM_BYTECODE_SECTION_CALLABLE_TYPES);
+      ASSERT_NE(header, nullptr);
+      auto* rows = reinterpret_cast<iree_vm_bytecode_v0_callable_type_row_t*>(
+          header + 1);
+      rows[1] = rows[0];
+      ExpectStructureRejected(image, "unique and strictly ordered");
       break;
     }
     case ValidationObligation::IMPORTS_EXTENT: {
@@ -904,7 +925,7 @@ void RunValidationObligation(ValidationObligation obligation) {
 }
 
 TEST(VMBytecodeVerificationTest, CoversEveryModuleValidationObligation) {
-  EXPECT_EQ(IREE_ARRAYSIZE(kValidationObligations), 56u);
+  EXPECT_EQ(IREE_ARRAYSIZE(kValidationObligations), 58u);
   for (const ValidationObligationCase& test_case : kValidationObligations) {
     SCOPED_TRACE(test_case.entity_id);
     RunValidationObligation(test_case.obligation);

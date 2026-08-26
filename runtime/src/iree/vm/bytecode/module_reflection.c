@@ -149,6 +149,8 @@ void iree_vm_bytecode_module_query_callable_type(
       {{descriptors, argument_count},
        {descriptors + argument_count, result_count}},
       callable_type->flags_u16,
+      callable_type->nesting_depth_u16,
+      callable_type->reserved_u16,
   };
   *out_callable_type = declaration;
 }

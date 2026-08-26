@@ -121,11 +121,21 @@ typedef struct iree_vm_module_export_declaration_t {
 } iree_vm_module_export_declaration_t;
 
 // Transient implementation query result for one structural callable type.
+// Module callable-type tables are unique and strictly ordered by nesting depth,
+// structural signature, then flags. Structural signatures compare argument
+// count and source-ordered argument types followed by result count and
+// source-ordered result types. Types compare by kind, then ref namespace and
+// local name or earlier callable ordinal. Nested function types always name
+// earlier rows.
 typedef struct iree_vm_module_callable_type_declaration_t {
   // Exact structural signature.
   iree_vm_module_signature_t signature;
   // Permitted callable behavior.
   iree_vm_callable_type_flags_t flags;
+  // Maximum nested callable depth, with zero identifying a leaf signature.
+  uint16_t nesting_depth;
+  // Reserved zero bits for future callable attributes.
+  uint16_t reserved;
 } iree_vm_module_callable_type_declaration_t;
 
 //===----------------------------------------------------------------------===//

@@ -178,75 +178,32 @@ static const iree_vm_module_signature_type_t
         {IREE_VM_MODULE_SIGNATURE_TYPE_KIND_REF, 0},
 };
 
-static const iree_vm_module_signature_type_t
-    iree_vm_execution_test_function_arguments[] = {
-        {IREE_VM_MODULE_SIGNATURE_TYPE_KIND_FUNCTION, 0},
-        {IREE_VM_SCALAR_TYPE_I32, 0},
-        {IREE_VM_SCALAR_TYPE_I32, 0},
+enum iree_vm_execution_test_application_callable_ordinal_e {
+  IREE_VM_EXECUTION_TEST_APPLICATION_CALLABLE_INITIALIZE = 0,
+  IREE_VM_EXECUTION_TEST_APPLICATION_CALLABLE_YIELD_I32 = 1,
+  IREE_VM_EXECUTION_TEST_APPLICATION_CALLABLE_ECHO_REF = 2,
+  IREE_VM_EXECUTION_TEST_APPLICATION_CALLABLE_YIELD_REF = 3,
+  IREE_VM_EXECUTION_TEST_APPLICATION_CALLABLE_ADD = 4,
+  IREE_VM_EXECUTION_TEST_APPLICATION_CALLABLE_LAUNCH_CONFIG = 5,
+  IREE_VM_EXECUTION_TEST_APPLICATION_CALLABLE_MULTIPLY_F32 = 6,
+  IREE_VM_EXECUTION_TEST_APPLICATION_CALLABLE_FUNCTION = 7,
 };
 
-enum iree_vm_execution_test_callable_ordinal_e {
-  IREE_VM_EXECUTION_TEST_CALLABLE_ADD = 0,
-  IREE_VM_EXECUTION_TEST_CALLABLE_YIELD_I32 = 1,
-  IREE_VM_EXECUTION_TEST_CALLABLE_ECHO_REF = 2,
-  IREE_VM_EXECUTION_TEST_CALLABLE_FUNCTION = 3,
-  IREE_VM_EXECUTION_TEST_CALLABLE_INITIALIZE = 4,
-  IREE_VM_EXECUTION_TEST_CALLABLE_YIELD_REF = 5,
-  IREE_VM_EXECUTION_TEST_CALLABLE_LAUNCH_CONFIG = 6,
-  IREE_VM_EXECUTION_TEST_CALLABLE_MULTIPLY_F32 = 7,
+enum iree_vm_execution_test_math_callable_ordinal_e {
+  IREE_VM_EXECUTION_TEST_MATH_CALLABLE_YIELD_I32 = 0,
+  IREE_VM_EXECUTION_TEST_MATH_CALLABLE_ADD = 1,
+};
+
+static const iree_vm_module_signature_type_t
+    iree_vm_execution_test_function_arguments[] = {
+        {IREE_VM_MODULE_SIGNATURE_TYPE_KIND_FUNCTION,
+         IREE_VM_EXECUTION_TEST_APPLICATION_CALLABLE_ADD},
+        {IREE_VM_SCALAR_TYPE_I32, 0},
+        {IREE_VM_SCALAR_TYPE_I32, 0},
 };
 
 static const iree_vm_module_callable_type_declaration_t
     iree_vm_execution_test_application_callable_types[] = {
-        {
-            .signature =
-                {
-                    .arguments = {iree_vm_execution_test_add_arguments,
-                                  IREE_ARRAYSIZE(
-                                      iree_vm_execution_test_add_arguments)},
-                    .results = {iree_vm_execution_test_i32_result,
-                                IREE_ARRAYSIZE(
-                                    iree_vm_execution_test_i32_result)},
-                },
-            .flags = IREE_VM_CALLABLE_TYPE_FLAG_NONE,
-        },
-        {
-            .signature =
-                {
-                    .arguments = {iree_vm_execution_test_i32_argument,
-                                  IREE_ARRAYSIZE(
-                                      iree_vm_execution_test_i32_argument)},
-                    .results = {iree_vm_execution_test_i32_result,
-                                IREE_ARRAYSIZE(
-                                    iree_vm_execution_test_i32_result)},
-                },
-            .flags = IREE_VM_CALLABLE_TYPE_FLAG_MAY_YIELD,
-        },
-        {
-            .signature =
-                {
-                    .arguments = {iree_vm_execution_test_ref_argument,
-                                  IREE_ARRAYSIZE(
-                                      iree_vm_execution_test_ref_argument)},
-                    .results = {iree_vm_execution_test_ref_result,
-                                IREE_ARRAYSIZE(
-                                    iree_vm_execution_test_ref_result)},
-                },
-            .flags = IREE_VM_CALLABLE_TYPE_FLAG_NONE,
-        },
-        {
-            .signature =
-                {
-                    .arguments =
-                        {iree_vm_execution_test_function_arguments,
-                         IREE_ARRAYSIZE(
-                             iree_vm_execution_test_function_arguments)},
-                    .results = {iree_vm_execution_test_i32_result,
-                                IREE_ARRAYSIZE(
-                                    iree_vm_execution_test_i32_result)},
-                },
-            .flags = IREE_VM_CALLABLE_TYPE_FLAG_NONE,
-        },
         {
             .signature =
                 {
@@ -260,6 +217,30 @@ static const iree_vm_module_callable_type_declaration_t
         {
             .signature =
                 {
+                    .arguments = {iree_vm_execution_test_i32_argument,
+                                  IREE_ARRAYSIZE(
+                                      iree_vm_execution_test_i32_argument)},
+                    .results = {iree_vm_execution_test_i32_result,
+                                IREE_ARRAYSIZE(
+                                    iree_vm_execution_test_i32_result)},
+                },
+            .flags = IREE_VM_CALLABLE_TYPE_FLAG_MAY_YIELD,
+        },
+        {
+            .signature =
+                {
+                    .arguments = {iree_vm_execution_test_ref_argument,
+                                  IREE_ARRAYSIZE(
+                                      iree_vm_execution_test_ref_argument)},
+                    .results = {iree_vm_execution_test_ref_result,
+                                IREE_ARRAYSIZE(
+                                    iree_vm_execution_test_ref_result)},
+                },
+            .flags = IREE_VM_CALLABLE_TYPE_FLAG_NONE,
+        },
+        {
+            .signature =
+                {
                     .arguments = {iree_vm_execution_test_ref_argument,
                                   IREE_ARRAYSIZE(
                                       iree_vm_execution_test_ref_argument)},
@@ -268,6 +249,18 @@ static const iree_vm_module_callable_type_declaration_t
                                     iree_vm_execution_test_ref_result)},
                 },
             .flags = IREE_VM_CALLABLE_TYPE_FLAG_MAY_YIELD,
+        },
+        {
+            .signature =
+                {
+                    .arguments = {iree_vm_execution_test_add_arguments,
+                                  IREE_ARRAYSIZE(
+                                      iree_vm_execution_test_add_arguments)},
+                    .results = {iree_vm_execution_test_i32_result,
+                                IREE_ARRAYSIZE(
+                                    iree_vm_execution_test_i32_result)},
+                },
+            .flags = IREE_VM_CALLABLE_TYPE_FLAG_NONE,
         },
         {
             .signature =
@@ -296,22 +289,24 @@ static const iree_vm_module_callable_type_declaration_t
                 },
             .flags = IREE_VM_CALLABLE_TYPE_FLAG_NONE,
         },
-};
-
-static const iree_vm_module_callable_type_declaration_t
-    iree_vm_execution_test_math_callable_types[] = {
         {
             .signature =
                 {
-                    .arguments = {iree_vm_execution_test_add_arguments,
-                                  IREE_ARRAYSIZE(
-                                      iree_vm_execution_test_add_arguments)},
+                    .arguments =
+                        {iree_vm_execution_test_function_arguments,
+                         IREE_ARRAYSIZE(
+                             iree_vm_execution_test_function_arguments)},
                     .results = {iree_vm_execution_test_i32_result,
                                 IREE_ARRAYSIZE(
                                     iree_vm_execution_test_i32_result)},
                 },
             .flags = IREE_VM_CALLABLE_TYPE_FLAG_NONE,
+            .nesting_depth = 1,
         },
+};
+
+static const iree_vm_module_callable_type_declaration_t
+    iree_vm_execution_test_math_callable_types[] = {
         {
             .signature =
                 {
@@ -323,6 +318,18 @@ static const iree_vm_module_callable_type_declaration_t
                                     iree_vm_execution_test_i32_result)},
                 },
             .flags = IREE_VM_CALLABLE_TYPE_FLAG_MAY_YIELD,
+        },
+        {
+            .signature =
+                {
+                    .arguments = {iree_vm_execution_test_add_arguments,
+                                  IREE_ARRAYSIZE(
+                                      iree_vm_execution_test_add_arguments)},
+                    .results = {iree_vm_execution_test_i32_result,
+                                IREE_ARRAYSIZE(
+                                    iree_vm_execution_test_i32_result)},
+                },
+            .flags = IREE_VM_CALLABLE_TYPE_FLAG_NONE,
         },
 };
 
@@ -344,30 +351,40 @@ enum iree_vm_execution_test_application_function_ordinal_e {
 
 static const iree_vm_module_export_declaration_t
     iree_vm_execution_test_application_exports[] = {
-        {IREE_SVL("add"), IREE_VM_EXECUTION_TEST_CALLABLE_ADD,
+        {IREE_SVL("add"), IREE_VM_EXECUTION_TEST_APPLICATION_CALLABLE_ADD,
          IREE_VM_EXECUTION_TEST_APPLICATION_FUNCTION_ADD, 0},
-        {IREE_SVL("bad_yield_ref"), IREE_VM_EXECUTION_TEST_CALLABLE_ECHO_REF,
+        {IREE_SVL("bad_yield_ref"),
+         IREE_VM_EXECUTION_TEST_APPLICATION_CALLABLE_ECHO_REF,
          IREE_VM_EXECUTION_TEST_APPLICATION_FUNCTION_BAD_YIELD_REF, 0},
-        {IREE_SVL("call_function"), IREE_VM_EXECUTION_TEST_CALLABLE_FUNCTION,
+        {IREE_SVL("call_function"),
+         IREE_VM_EXECUTION_TEST_APPLICATION_CALLABLE_FUNCTION,
          IREE_VM_EXECUTION_TEST_APPLICATION_FUNCTION_CALL_FUNCTION, 0},
-        {IREE_SVL("call_import"), IREE_VM_EXECUTION_TEST_CALLABLE_ADD,
+        {IREE_SVL("call_import"),
+         IREE_VM_EXECUTION_TEST_APPLICATION_CALLABLE_ADD,
          IREE_VM_EXECUTION_TEST_APPLICATION_FUNCTION_CALL_IMPORT, 0},
-        {IREE_SVL("call_local"), IREE_VM_EXECUTION_TEST_CALLABLE_ADD,
+        {IREE_SVL("call_local"),
+         IREE_VM_EXECUTION_TEST_APPLICATION_CALLABLE_ADD,
          IREE_VM_EXECUTION_TEST_APPLICATION_FUNCTION_CALL_LOCAL, 0},
-        {IREE_SVL("echo_ref"), IREE_VM_EXECUTION_TEST_CALLABLE_ECHO_REF,
+        {IREE_SVL("echo_ref"),
+         IREE_VM_EXECUTION_TEST_APPLICATION_CALLABLE_ECHO_REF,
          IREE_VM_EXECUTION_TEST_APPLICATION_FUNCTION_ECHO_REF, 0},
-        {IREE_SVL("initialize"), IREE_VM_EXECUTION_TEST_CALLABLE_INITIALIZE,
+        {IREE_SVL("initialize"),
+         IREE_VM_EXECUTION_TEST_APPLICATION_CALLABLE_INITIALIZE,
          IREE_VM_EXECUTION_TEST_APPLICATION_FUNCTION_INITIALIZE, 0},
         {IREE_SVL("launch_config"),
-         IREE_VM_EXECUTION_TEST_CALLABLE_LAUNCH_CONFIG,
+         IREE_VM_EXECUTION_TEST_APPLICATION_CALLABLE_LAUNCH_CONFIG,
          IREE_VM_EXECUTION_TEST_APPLICATION_FUNCTION_LAUNCH_CONFIG, 0},
-        {IREE_SVL("multiply_f32"), IREE_VM_EXECUTION_TEST_CALLABLE_MULTIPLY_F32,
+        {IREE_SVL("multiply_f32"),
+         IREE_VM_EXECUTION_TEST_APPLICATION_CALLABLE_MULTIPLY_F32,
          IREE_VM_EXECUTION_TEST_APPLICATION_FUNCTION_MULTIPLY_F32, 0},
-        {IREE_SVL("nested_yield"), IREE_VM_EXECUTION_TEST_CALLABLE_YIELD_I32,
+        {IREE_SVL("nested_yield"),
+         IREE_VM_EXECUTION_TEST_APPLICATION_CALLABLE_YIELD_I32,
          IREE_VM_EXECUTION_TEST_APPLICATION_FUNCTION_NESTED_YIELD, 0},
-        {IREE_SVL("yield_ref"), IREE_VM_EXECUTION_TEST_CALLABLE_YIELD_REF,
+        {IREE_SVL("yield_ref"),
+         IREE_VM_EXECUTION_TEST_APPLICATION_CALLABLE_YIELD_REF,
          IREE_VM_EXECUTION_TEST_APPLICATION_FUNCTION_YIELD_REF, 0},
-        {IREE_SVL("yield_twice"), IREE_VM_EXECUTION_TEST_CALLABLE_YIELD_I32,
+        {IREE_SVL("yield_twice"),
+         IREE_VM_EXECUTION_TEST_APPLICATION_CALLABLE_YIELD_I32,
          IREE_VM_EXECUTION_TEST_APPLICATION_FUNCTION_YIELD_TWICE, 0},
 };
 
@@ -379,10 +396,10 @@ static const iree_vm_module_import_group_t
 static const iree_vm_module_import_declaration_t
     iree_vm_execution_test_application_imports[] = {
         {IREE_SVL("execution.math"), IREE_SVL("add"),
-         IREE_VM_EXECUTION_TEST_CALLABLE_ADD, IREE_VM_MODULE_IMPORT_FLAG_NONE,
-         0},
+         IREE_VM_EXECUTION_TEST_APPLICATION_CALLABLE_ADD,
+         IREE_VM_MODULE_IMPORT_FLAG_NONE, 0},
         {IREE_SVL("execution.math"), IREE_SVL("suspend_add"),
-         IREE_VM_EXECUTION_TEST_CALLABLE_YIELD_I32,
+         IREE_VM_EXECUTION_TEST_APPLICATION_CALLABLE_YIELD_I32,
          IREE_VM_MODULE_IMPORT_FLAG_NONE, 0},
 };
 
@@ -394,9 +411,10 @@ enum iree_vm_execution_test_math_function_ordinal_e {
 
 static const iree_vm_module_export_declaration_t
     iree_vm_execution_test_math_exports[] = {
-        {IREE_SVL("add"), IREE_VM_EXECUTION_TEST_CALLABLE_ADD,
+        {IREE_SVL("add"), IREE_VM_EXECUTION_TEST_MATH_CALLABLE_ADD,
          IREE_VM_EXECUTION_TEST_MATH_FUNCTION_ADD, 0},
-        {IREE_SVL("suspend_add"), IREE_VM_EXECUTION_TEST_CALLABLE_YIELD_I32,
+        {IREE_SVL("suspend_add"),
+         IREE_VM_EXECUTION_TEST_MATH_CALLABLE_YIELD_I32,
          IREE_VM_EXECUTION_TEST_MATH_FUNCTION_SUSPEND_ADD, 0},
 };
 
@@ -652,8 +670,9 @@ static iree_status_t iree_vm_execution_test_application_start(
       const iree_vm_function_ref_t function_ref =
           iree_vm_call_function_argument_load(&params->call, 0);
       return iree_vm_invocation_call_function_ref(
-          &params->execution, function_ref, IREE_VM_EXECUTION_TEST_CALLABLE_ADD,
-          &params->call, out_outcome);
+          &params->execution, function_ref,
+          IREE_VM_EXECUTION_TEST_APPLICATION_CALLABLE_ADD, &params->call,
+          out_outcome);
     }
     case IREE_VM_EXECUTION_TEST_APPLICATION_FUNCTION_CALL_IMPORT:
       return iree_vm_invocation_call_import(&params->execution, 0,
@@ -661,7 +680,7 @@ static iree_status_t iree_vm_execution_test_application_start(
     case IREE_VM_EXECUTION_TEST_APPLICATION_FUNCTION_CALL_LOCAL: {
       const iree_vm_module_local_function_t local_function = {
           IREE_VM_EXECUTION_TEST_APPLICATION_FUNCTION_ADD,
-          IREE_VM_EXECUTION_TEST_CALLABLE_ADD,
+          IREE_VM_EXECUTION_TEST_APPLICATION_CALLABLE_ADD,
           IREE_VM_MODULE_FUNCTION_FLAG_NONE,
       };
       return iree_vm_invocation_call_local(&params->execution, local_function,

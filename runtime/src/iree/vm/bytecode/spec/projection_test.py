@@ -70,7 +70,7 @@ class ProjectionTest(unittest.TestCase):
         )
         self.assertEqual(
             sum(isinstance(entity, ValidationObligation) for entity in module_entities),
-            56,
+            58,
         )
         self.assertEqual(
             sum(isinstance(entity, NumericValue) for entity in module_entities),
@@ -292,7 +292,7 @@ class ProjectionTest(unittest.TestCase):
             validation_obligations.count(
                 "IREE_VM_BYTECODE_MODULE_VALIDATION_OBLIGATION("
             ),
-            56,
+            58,
         )
         self.assertEqual(
             execution_table.count("IREE_VM_BYTECODE_EXECUTION_INFO_ROW("), 256

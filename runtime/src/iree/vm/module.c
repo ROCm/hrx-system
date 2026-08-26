@@ -163,10 +163,63 @@ static iree_status_t iree_vm_module_validate_signature_type(
                           type.kind);
 }
 
+static int iree_vm_module_compare_u32(uint32_t lhs, uint32_t rhs) {
+  return lhs < rhs ? -1 : lhs > rhs ? 1 : 0;
+}
+
+static int iree_vm_module_compare_signature_type(
+    const iree_vm_module_t* module, iree_vm_module_signature_type_t lhs,
+    iree_vm_module_signature_type_t rhs) {
+  int comparison = iree_vm_module_compare_u32(lhs.kind, rhs.kind);
+  if (comparison != 0) return comparison;
+  if (lhs.kind == IREE_VM_MODULE_SIGNATURE_TYPE_KIND_REF) {
+    const iree_vm_ref_type_key_t lhs_key = iree_vm_ref_type_key(
+        module->descriptor->ref_types.data[lhs.type_ordinal]);
+    const iree_vm_ref_type_key_t rhs_key = iree_vm_ref_type_key(
+        module->descriptor->ref_types.data[rhs.type_ordinal]);
+    comparison = iree_string_view_compare(lhs_key.namespace_name,
+                                          rhs_key.namespace_name);
+    if (comparison != 0) return comparison;
+    return iree_string_view_compare(lhs_key.type_name, rhs_key.type_name);
+  }
+  return iree_vm_module_compare_u32(lhs.type_ordinal, rhs.type_ordinal);
+}
+
+static int iree_vm_module_compare_signature_spans(
+    const iree_vm_module_t* module, iree_vm_module_signature_type_span_t lhs,
+    iree_vm_module_signature_type_span_t rhs) {
+  int comparison =
+      iree_vm_module_compare_u32((uint32_t)lhs.count, (uint32_t)rhs.count);
+  if (comparison != 0) return comparison;
+  for (iree_host_size_t i = 0; i < lhs.count; ++i) {
+    comparison =
+        iree_vm_module_compare_signature_type(module, lhs.data[i], rhs.data[i]);
+    if (comparison != 0) return comparison;
+  }
+  return 0;
+}
+
+static int iree_vm_module_compare_callable_types(
+    const iree_vm_module_t* module,
+    const iree_vm_module_callable_type_declaration_t* lhs,
+    const iree_vm_module_callable_type_declaration_t* rhs) {
+  int comparison =
+      iree_vm_module_compare_u32(lhs->nesting_depth, rhs->nesting_depth);
+  if (comparison != 0) return comparison;
+  comparison = iree_vm_module_compare_signature_spans(
+      module, lhs->signature.arguments, rhs->signature.arguments);
+  if (comparison != 0) return comparison;
+  comparison = iree_vm_module_compare_signature_spans(
+      module, lhs->signature.results, rhs->signature.results);
+  if (comparison != 0) return comparison;
+  return iree_vm_module_compare_u32(lhs->flags, rhs->flags);
+}
+
 static iree_status_t iree_vm_module_validate_signature_span(
-    const iree_vm_module_descriptor_t* descriptor,
-    iree_vm_module_signature_type_span_t span,
-    iree_host_size_t current_callable_ordinal, const char* label) {
+    const iree_vm_module_t* module, iree_vm_module_signature_type_span_t span,
+    iree_host_size_t current_callable_ordinal, const char* label,
+    uint32_t* inout_nesting_depth) {
+  const iree_vm_module_descriptor_t* descriptor = module->descriptor;
   if (span.count != 0 && !span.data) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "%s signature storage is required", label);
@@ -184,6 +237,17 @@ static iree_status_t iree_vm_module_validate_signature_span(
   for (iree_host_size_t i = 0; i < span.count; ++i) {
     IREE_RETURN_IF_ERROR(iree_vm_module_validate_signature_type(
         descriptor, span.data[i], current_callable_ordinal));
+    if (span.data[i].kind == IREE_VM_MODULE_SIGNATURE_TYPE_KIND_FUNCTION) {
+      iree_vm_module_callable_type_declaration_t child = {0};
+      module->vtable->query_callable_type(module, span.data[i].type_ordinal,
+                                          &child);
+      if (child.nesting_depth == UINT16_MAX) {
+        return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "callable type nesting depth overflows u16");
+      }
+      *inout_nesting_depth =
+          iree_max(*inout_nesting_depth, (uint32_t)child.nesting_depth + 1);
+    }
   }
   return iree_ok_status();
 }
@@ -191,20 +255,38 @@ static iree_status_t iree_vm_module_validate_signature_span(
 static iree_status_t iree_vm_module_validate_callable_types(
     const iree_vm_module_t* module) {
   const iree_vm_module_descriptor_t* descriptor = module->descriptor;
+  iree_vm_module_callable_type_declaration_t previous = {0};
   for (iree_host_size_t i = 0; i < descriptor->counts.callable_type_count;
        ++i) {
     iree_vm_module_callable_type_declaration_t callable_type = {0};
     module->vtable->query_callable_type(module, i, &callable_type);
     if ((callable_type.flags & ~(iree_vm_callable_type_flags_t)
-                                   IREE_VM_CALLABLE_TYPE_FLAG_MAY_YIELD) != 0) {
+                                   IREE_VM_CALLABLE_TYPE_FLAG_MAY_YIELD) != 0 ||
+        callable_type.reserved != 0) {
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "callable type %" PRIhsz " has unsupported flags",
+                              "callable type %" PRIhsz
+                              " has unsupported flags or reserved bits",
                               i);
     }
+    uint32_t expected_nesting_depth = 0;
     IREE_RETURN_IF_ERROR(iree_vm_module_validate_signature_span(
-        descriptor, callable_type.signature.arguments, i, "argument"));
+        module, callable_type.signature.arguments, i, "argument",
+        &expected_nesting_depth));
     IREE_RETURN_IF_ERROR(iree_vm_module_validate_signature_span(
-        descriptor, callable_type.signature.results, i, "result"));
+        module, callable_type.signature.results, i, "result",
+        &expected_nesting_depth));
+    if (callable_type.nesting_depth != expected_nesting_depth) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "callable type %" PRIhsz " has a noncanonical nesting depth", i);
+    }
+    if (i != 0 && iree_vm_module_compare_callable_types(module, &previous,
+                                                        &callable_type) >= 0) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "callable types must be unique and strictly ordered");
+    }
+    previous = callable_type;
   }
   return iree_ok_status();
 }

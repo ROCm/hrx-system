@@ -16,6 +16,9 @@ enum class DefinitionMode {
   kMinimal,
   kUnsortedExports,
   kRecursiveCallable,
+  kWrongCallableDepth,
+  kDuplicateCallables,
+  kUnsortedCallables,
   kImportsWithoutGroups,
   kSortedOverloadedImports,
   kUnsortedOverloadedImports,
@@ -63,7 +66,12 @@ struct ValidationModule {
         descriptor.counts.export_count = 2;
         break;
       case DefinitionMode::kRecursiveCallable:
+      case DefinitionMode::kWrongCallableDepth:
         descriptor.counts.callable_type_count = 1;
+        break;
+      case DefinitionMode::kDuplicateCallables:
+      case DefinitionMode::kUnsortedCallables:
+        descriptor.counts.callable_type_count = 2;
         break;
       case DefinitionMode::kImportsWithoutGroups:
         descriptor.counts.callable_type_count = 1;
@@ -165,7 +173,6 @@ struct ValidationModule {
   static void QueryCallableType(
       const iree_vm_module_t* module, iree_host_size_t ordinal,
       iree_vm_module_callable_type_declaration_t* out_callable_type) {
-    (void)ordinal;
     static const iree_vm_module_signature_type_t recursive_argument = {
         IREE_VM_MODULE_SIGNATURE_TYPE_KIND_FUNCTION,
         0,
@@ -175,6 +182,36 @@ struct ValidationModule {
       *out_callable_type = {
           {{&recursive_argument, 1}, {nullptr, 0}},
           IREE_VM_CALLABLE_TYPE_FLAG_NONE,
+          0,
+          0,
+      };
+    } else if (validation_module->mode == DefinitionMode::kWrongCallableDepth) {
+      *out_callable_type = {
+          {{nullptr, 0}, {nullptr, 0}},
+          IREE_VM_CALLABLE_TYPE_FLAG_NONE,
+          1,
+          0,
+      };
+    } else if (validation_module->mode == DefinitionMode::kDuplicateCallables) {
+      *out_callable_type = {};
+    } else if (validation_module->mode == DefinitionMode::kUnsortedCallables) {
+      *out_callable_type = {
+          {{nullptr, 0}, {nullptr, 0}},
+          ordinal == 0 ? IREE_VM_CALLABLE_TYPE_FLAG_MAY_YIELD
+                       : IREE_VM_CALLABLE_TYPE_FLAG_NONE,
+          0,
+          0,
+      };
+    } else if (validation_module->mode ==
+                   DefinitionMode::kSortedOverloadedImports ||
+               validation_module->mode ==
+                   DefinitionMode::kUnsortedOverloadedImports) {
+      *out_callable_type = {
+          {{nullptr, 0}, {nullptr, 0}},
+          ordinal == 0 ? IREE_VM_CALLABLE_TYPE_FLAG_NONE
+                       : IREE_VM_CALLABLE_TYPE_FLAG_MAY_YIELD,
+          0,
+          0,
       };
     } else {
       *out_callable_type = {};
@@ -231,6 +268,8 @@ TEST(VMModuleValidationTest, RejectsIncompleteOrIncompatibleVtables) {
 TEST(VMModuleValidationTest, RejectsMalformedSemanticGraphs) {
   for (DefinitionMode mode :
        {DefinitionMode::kUnsortedExports, DefinitionMode::kRecursiveCallable,
+        DefinitionMode::kWrongCallableDepth,
+        DefinitionMode::kDuplicateCallables, DefinitionMode::kUnsortedCallables,
         DefinitionMode::kImportsWithoutGroups,
         DefinitionMode::kUnsortedOverloadedImports,
         DefinitionMode::kUnsortedMetadata}) {

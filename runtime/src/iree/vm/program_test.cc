@@ -130,32 +130,46 @@ static const iree_vm_module_signature_type_t kInitializeArguments[] = {
 static const iree_vm_module_callable_type_declaration_t kAppCallableTypes[] = {
     {{{kCallbackArguments, IREE_ARRAYSIZE(kCallbackArguments)},
       {kCallbackResults, IREE_ARRAYSIZE(kCallbackResults)}},
-     IREE_VM_CALLABLE_TYPE_FLAG_NONE},
-    {{{kAppWorkArguments, IREE_ARRAYSIZE(kAppWorkArguments)},
-      {kAppWorkResults, IREE_ARRAYSIZE(kAppWorkResults)}},
-     IREE_VM_CALLABLE_TYPE_FLAG_MAY_YIELD},
-    {{{kInitializeArguments, IREE_ARRAYSIZE(kInitializeArguments)},
-      {nullptr, 0}},
-     IREE_VM_CALLABLE_TYPE_FLAG_MAY_YIELD},
+     IREE_VM_CALLABLE_TYPE_FLAG_NONE,
+     0,
+     0},
     {{{kCallbackArguments, IREE_ARRAYSIZE(kCallbackArguments)},
       {kCallbackResults, IREE_ARRAYSIZE(kCallbackResults)}},
-     IREE_VM_CALLABLE_TYPE_FLAG_MAY_YIELD},
+     IREE_VM_CALLABLE_TYPE_FLAG_MAY_YIELD,
+     0,
+     0},
+    {{{kAppWorkArguments, IREE_ARRAYSIZE(kAppWorkArguments)},
+      {kAppWorkResults, IREE_ARRAYSIZE(kAppWorkResults)}},
+     IREE_VM_CALLABLE_TYPE_FLAG_MAY_YIELD,
+     1,
+     0},
+    {{{kInitializeArguments, IREE_ARRAYSIZE(kInitializeArguments)},
+      {nullptr, 0}},
+     IREE_VM_CALLABLE_TYPE_FLAG_MAY_YIELD,
+     1,
+     0},
 };
 
 static const iree_vm_module_callable_type_declaration_t kAlphaCallableTypes[] =
     {
         {{{kCallbackArguments, IREE_ARRAYSIZE(kCallbackArguments)},
           {kCallbackResults, IREE_ARRAYSIZE(kCallbackResults)}},
-         IREE_VM_CALLABLE_TYPE_FLAG_NONE},
+         IREE_VM_CALLABLE_TYPE_FLAG_NONE,
+         0,
+         0},
         {{{kLibraryWorkArguments, IREE_ARRAYSIZE(kLibraryWorkArguments)},
           {kLibraryWorkResults, IREE_ARRAYSIZE(kLibraryWorkResults)}},
-         IREE_VM_CALLABLE_TYPE_FLAG_MAY_YIELD},
+         IREE_VM_CALLABLE_TYPE_FLAG_MAY_YIELD,
+         1,
+         0},
 };
 
 static const iree_vm_module_callable_type_declaration_t kBetaCallableTypes[] = {
     {{{kCallbackArguments, IREE_ARRAYSIZE(kCallbackArguments)},
       {kCallbackResults, IREE_ARRAYSIZE(kCallbackResults)}},
-     IREE_VM_CALLABLE_TYPE_FLAG_NONE},
+     IREE_VM_CALLABLE_TYPE_FLAG_NONE,
+     0,
+     0},
 };
 
 static const iree_vm_module_import_group_t kAppImportGroups[] = {
@@ -164,19 +178,19 @@ static const iree_vm_module_import_group_t kAppImportGroups[] = {
     {IREE_SVL("missing.feature"), 3, 1},
 };
 static const iree_vm_module_import_declaration_t kAppImports[] = {
-    {IREE_SVL("lib.alpha"), IREE_SVL("ref_work"), 1,
+    {IREE_SVL("lib.alpha"), IREE_SVL("ref_work"), 2,
      IREE_VM_MODULE_IMPORT_FLAG_NONE, 0},
-    {IREE_SVL("lib.alpha"), IREE_SVL("work"), 1,
+    {IREE_SVL("lib.alpha"), IREE_SVL("work"), 2,
      IREE_VM_MODULE_IMPORT_FLAG_NONE, 0},
-    {IREE_SVL("lib.beta"), IREE_SVL("support"), 3,
+    {IREE_SVL("lib.beta"), IREE_SVL("support"), 1,
      IREE_VM_MODULE_IMPORT_FLAG_NONE, 0},
     {IREE_SVL("missing.feature"), IREE_SVL("optional"), 0,
      IREE_VM_MODULE_IMPORT_FLAG_OPTIONAL, 0},
 };
 static const iree_vm_module_export_declaration_t kAppExports[] = {
-    {IREE_SVL("initialize"), 2, 0, 0},
-    {IREE_SVL("run"), 1, 1, 0},
-    {IREE_SVL("run_alias"), 1, 1, 0},
+    {IREE_SVL("initialize"), 3, 0, 0},
+    {IREE_SVL("run"), 2, 1, 0},
+    {IREE_SVL("run_alias"), 2, 1, 0},
 };
 
 static const iree_vm_module_import_group_t kAlphaImportGroups[] = {
@@ -283,10 +297,10 @@ TEST(VMProgramTest, LinksOneImmutableSlabAndPrecomputesTargets) {
   const uint32_t alpha_work_mapping = program->callable_mappings[1];
   const uint32_t beta_callback_mapping = program->callable_mappings[2];
   const uint32_t app_callback_mapping = program->callable_mappings[3];
-  const uint32_t app_work_mapping = program->callable_mappings[4];
-  const uint32_t app_initialize_mapping = program->callable_mappings[5];
   const uint32_t app_permissive_callback_mapping =
-      program->callable_mappings[6];
+      program->callable_mappings[4];
+  const uint32_t app_work_mapping = program->callable_mappings[5];
+  const uint32_t app_initialize_mapping = program->callable_mappings[6];
   EXPECT_EQ(iree_vm_program_callable_token(app_callback_mapping),
             iree_vm_program_callable_token(alpha_callback_mapping));
   EXPECT_EQ(iree_vm_program_callable_token(app_callback_mapping),
@@ -469,7 +483,9 @@ static const iree_vm_module_signature_type_t kEmptyResults[] = {
 static const iree_vm_module_callable_type_declaration_t
     kIncompatibleCallableTypes[] = {
         {{{nullptr, 0}, {kEmptyResults, IREE_ARRAYSIZE(kEmptyResults)}},
-         IREE_VM_CALLABLE_TYPE_FLAG_NONE},
+         IREE_VM_CALLABLE_TYPE_FLAG_NONE,
+         0,
+         0},
 };
 static const iree_vm_module_import_group_t kIncompatibleImportGroups[] = {
     {IREE_SVL("target"), 0, 1},
@@ -513,7 +529,9 @@ static const iree_vm_module_callable_type_declaration_t
     kYieldingCallableTypes[] = {
         {{{kCallbackArguments, IREE_ARRAYSIZE(kCallbackArguments)},
           {kCallbackResults, IREE_ARRAYSIZE(kCallbackResults)}},
-         IREE_VM_CALLABLE_TYPE_FLAG_MAY_YIELD},
+         IREE_VM_CALLABLE_TYPE_FLAG_MAY_YIELD,
+         0,
+         0},
 };
 static const iree_vm_module_import_group_t kYieldImportGroups[] = {
     {IREE_SVL("target.yield"), 0, 1},

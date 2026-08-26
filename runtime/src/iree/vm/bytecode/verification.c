@@ -605,6 +605,65 @@ static iree_status_t iree_vm_bytecode_verify_signatures(
   return iree_ok_status();
 }
 
+static int iree_vm_bytecode_compare_u32(uint32_t lhs, uint32_t rhs) {
+  return lhs < rhs ? -1 : lhs > rhs ? 1 : 0;
+}
+
+static int iree_vm_bytecode_compare_signature_descriptors(
+    const iree_vm_bytecode_v0_signature_descriptor_row_t* lhs,
+    const iree_vm_bytecode_v0_signature_descriptor_row_t* rhs, uint32_t count) {
+  for (uint32_t i = 0; i < count; ++i) {
+    int comparison =
+        iree_vm_bytecode_compare_u32(lhs[i].kind_u16, rhs[i].kind_u16);
+    if (comparison != 0) return comparison;
+    comparison = iree_vm_bytecode_compare_u32(lhs[i].type_ordinal_u16,
+                                              rhs[i].type_ordinal_u16);
+    if (comparison != 0) return comparison;
+  }
+  return 0;
+}
+
+static int iree_vm_bytecode_compare_callable_types(
+    const iree_vm_bytecode_module_layout_t* layout,
+    const iree_vm_bytecode_v0_callable_type_row_t* lhs,
+    const iree_vm_bytecode_v0_callable_type_row_t* rhs) {
+  int comparison = iree_vm_bytecode_compare_u32(lhs->nesting_depth_u16,
+                                                rhs->nesting_depth_u16);
+  if (comparison != 0) return comparison;
+
+  const iree_vm_bytecode_v0_signature_row_t* lhs_signature =
+      &layout->signatures.rows[lhs->signature_ordinal_u16];
+  const iree_vm_bytecode_v0_signature_row_t* rhs_signature =
+      &layout->signatures.rows[rhs->signature_ordinal_u16];
+  const uint32_t lhs_argument_count =
+      iree_vm_bytecode_signature_argument_count(lhs_signature);
+  const uint32_t rhs_argument_count =
+      iree_vm_bytecode_signature_argument_count(rhs_signature);
+  comparison =
+      iree_vm_bytecode_compare_u32(lhs_argument_count, rhs_argument_count);
+  if (comparison != 0) return comparison;
+  const iree_vm_bytecode_v0_signature_descriptor_row_t* lhs_descriptors =
+      iree_vm_bytecode_signature_descriptors(&layout->signatures,
+                                             lhs->signature_ordinal_u16);
+  const iree_vm_bytecode_v0_signature_descriptor_row_t* rhs_descriptors =
+      iree_vm_bytecode_signature_descriptors(&layout->signatures,
+                                             rhs->signature_ordinal_u16);
+  comparison = iree_vm_bytecode_compare_signature_descriptors(
+      lhs_descriptors, rhs_descriptors, lhs_argument_count);
+  if (comparison != 0) return comparison;
+  const uint32_t lhs_result_count =
+      iree_vm_bytecode_signature_result_count(lhs_signature);
+  const uint32_t rhs_result_count =
+      iree_vm_bytecode_signature_result_count(rhs_signature);
+  comparison = iree_vm_bytecode_compare_u32(lhs_result_count, rhs_result_count);
+  if (comparison != 0) return comparison;
+  comparison = iree_vm_bytecode_compare_signature_descriptors(
+      lhs_descriptors + lhs_argument_count,
+      rhs_descriptors + rhs_argument_count, lhs_result_count);
+  if (comparison != 0) return comparison;
+  return iree_vm_bytecode_compare_u32(lhs->flags_u16, rhs->flags_u16);
+}
+
 static iree_status_t iree_vm_bytecode_verify_callable_types(
     iree_const_byte_span_t span, iree_vm_bytecode_module_layout_t* layout) {
   if (iree_const_byte_span_is_empty(span)) {
@@ -638,6 +697,7 @@ static iree_status_t iree_vm_bytecode_verify_callable_types(
   for (uint32_t i = 0; i < header->callable_type_count_u32; ++i) {
     const iree_vm_bytecode_v0_callable_type_row_t* row = &rows[i];
     if (row->signature_ordinal_u16 >= layout->signatures.count ||
+        row->reserved_u16 != 0 ||
         (row->flags_u16 & ~IREE_VM_BYTECODE_CALLABLE_TYPE_FLAG_MAY_YIELD) !=
             0) {
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -651,13 +711,33 @@ static iree_status_t iree_vm_bytecode_verify_callable_types(
     const iree_vm_bytecode_v0_signature_descriptor_row_t* descriptors =
         iree_vm_bytecode_signature_descriptors(&layout->signatures,
                                                row->signature_ordinal_u16);
+    uint32_t expected_depth = 0;
     for (uint32_t j = 0; j < descriptor_count; ++j) {
-      if (descriptors[j].kind_u16 == IREE_VM_BYTECODE_SIGNATURE_KIND_FUNCTION &&
-          descriptors[j].type_ordinal_u16 >= i) {
+      if (descriptors[j].kind_u16 != IREE_VM_BYTECODE_SIGNATURE_KIND_FUNCTION) {
+        continue;
+      }
+      const uint16_t child_ordinal = descriptors[j].type_ordinal_u16;
+      if (child_ordinal >= i) {
         return iree_make_status(
             IREE_STATUS_INVALID_ARGUMENT,
             "callable function types must be topologically ordered");
       }
+      if (rows[child_ordinal].nesting_depth_u16 == UINT16_MAX) {
+        return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "callable type nesting depth overflows u16");
+      }
+      expected_depth = iree_max(
+          expected_depth, (uint32_t)rows[child_ordinal].nesting_depth_u16 + 1);
+    }
+    if (row->nesting_depth_u16 != expected_depth) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "callable type nesting depth is not canonical");
+    }
+    if (i != 0 && iree_vm_bytecode_compare_callable_types(layout, &rows[i - 1],
+                                                          row) >= 0) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "callable types must be unique and strictly ordered");
     }
   }
   for (uint32_t i = 0; i < layout->signatures.descriptor_count; ++i) {
