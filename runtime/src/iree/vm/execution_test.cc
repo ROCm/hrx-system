@@ -434,13 +434,32 @@ TEST(VMExecutionTest, RepeatedAndNestedSuspensionUseOneFrameStack) {
   EXPECT_EQ(results[0].metadata, untouched_result.metadata);
   EXPECT_EQ(wake_counter.count, 1);
 
-  iree_vm_variant_t wrong_results[2];
+  iree_vm_variant_t wrong_results[] = {
+      iree_vm_variant_from_i64(0x5678),
+      iree_vm_variant_from_i64(0x9ABC),
+  };
+  const iree_vm_variant_t untouched_wrong_results[] = {
+      wrong_results[0],
+      wrong_results[1],
+  };
+  const int application_resume_count =
+      harness.application_counters.function_resume_count;
+  const int math_resume_count = harness.math_counters.function_resume_count;
+  const int wake_count = wake_counter.count;
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,
       iree_vm_invocation_resume(harness.invocation,
                                 iree_vm_variant_span_from_array(wrong_results),
                                 &outcome));
   EXPECT_EQ(outcome, IREE_VM_EXECUTION_OUTCOME_SUSPENDED);
+  EXPECT_EQ(harness.application_counters.function_resume_count,
+            application_resume_count);
+  EXPECT_EQ(harness.math_counters.function_resume_count, math_resume_count);
+  EXPECT_EQ(wake_counter.count, wake_count);
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(wrong_results); ++i) {
+    EXPECT_EQ(wrong_results[i].payload, untouched_wrong_results[i].payload);
+    EXPECT_EQ(wrong_results[i].metadata, untouched_wrong_results[i].metadata);
+  }
 
   IREE_ASSERT_OK(iree_vm_invocation_resume(
       harness.invocation, iree_vm_variant_span_from_array(results), &outcome));
