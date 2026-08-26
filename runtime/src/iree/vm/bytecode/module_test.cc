@@ -20,6 +20,7 @@
 #include "iree/vm/bytecode/module_test_data.h"
 #include "iree/vm/bytecode/wire/core/constant.h"
 #include "iree/vm/bytecode/wire/core/control.h"
+#include "iree/vm/bytecode/wire/core/float.h"
 #include "iree/vm/bytecode/wire/core/global.h"
 #include "iree/vm/bytecode/wire/core/integer.h"
 #include "iree/vm/bytecode/wire/core/opcodes.h"
@@ -626,6 +627,89 @@ TEST(VMBytecodeModuleTest,
   ceildiv_u64.src_v8 = 1;
   ceildiv_u64.log2_u8 = 64;
   expect_rejected(ceildiv_u64);
+
+  iree_vm_environment_free(environment);
+}
+
+TEST(VMBytecodeModuleTest, RejectsMalformedFloatInstructions) {
+  iree_vm_environment_t* environment = nullptr;
+  IREE_ASSERT_OK(
+      iree_vm_environment_allocate(iree_allocator_system(), &environment));
+  const auto expect_rejected = [&](const auto& record) {
+    std::vector<uint8_t> image = BuildOwnershipModuleImage();
+    const MutableFunctionImage function = FindFunctionImage(&image, 1);
+    ASSERT_NE(function.row, nullptr);
+    constexpr uint32_t kInstructionOffset = 8;
+    ASSERT_LE(kInstructionOffset + sizeof(record),
+              function.row->bytecode_length_u32 -
+                  sizeof(iree_vm_isa_control_return_record_t));
+    std::memcpy(function.bytecode + kInstructionOffset, &record,
+                sizeof(record));
+
+    iree_vm_module_t* module = nullptr;
+    IREE_EXPECT_STATUS_IS(
+        IREE_STATUS_INVALID_ARGUMENT,
+        iree_vm_bytecode_module_create(
+            environment, IREE_SV("malformed_float"),
+            {iree_make_const_byte_span(image.data(), image.size()),
+             iree_allocator_null()},
+            iree_allocator_system(), &module));
+    EXPECT_EQ(module, nullptr);
+    iree_vm_module_release(module);
+  };
+
+  iree_vm_isa_float_minmax_f32_record_t minmax = {};
+  minmax.opcode_u8 = IREE_VM_ISA_CORE_OPCODE_FLOAT_MINMAX_F32;
+  minmax.dst_v8 = 0;
+  minmax.lhs_v8 = 0;
+  minmax.rhs_v8 = 1;
+  minmax.selector_u8 = IREE_VM_ISA_FLOAT_MINMAX_MAXNUM + 1;
+  expect_rejected(minmax);
+  minmax.selector_u8 = IREE_VM_ISA_FLOAT_MINMAX_MINIMUM;
+  minmax.zero_padding_u8[0] = 1;
+  expect_rejected(minmax);
+  minmax.zero_padding_u8[0] = 0;
+  minmax.lhs_v8 = 2;
+  expect_rejected(minmax);
+
+  iree_vm_isa_float_compare_f64_record_t compare = {};
+  compare.opcode_u8 = IREE_VM_ISA_CORE_OPCODE_FLOAT_COMPARE_F64;
+  compare.dst_v8 = 0;
+  compare.lhs_v8 = 0;
+  compare.rhs_v8 = 1;
+  compare.predicate_u8 = IREE_VM_ISA_FLOAT_COMPARE_UNO + 1;
+  expect_rejected(compare);
+  compare.predicate_u8 = IREE_VM_ISA_FLOAT_COMPARE_OEQ;
+  compare.zero_padding_u8[2] = 1;
+  expect_rejected(compare);
+  compare.zero_padding_u8[2] = 0;
+  compare.dst_v8 = 2;
+  expect_rejected(compare);
+
+  iree_vm_isa_float_classify_f32_record_t classify = {};
+  classify.opcode_u8 = IREE_VM_ISA_CORE_OPCODE_FLOAT_CLASSIFY_F32;
+  classify.dst_v8 = 0;
+  classify.src_v8 = 1;
+  classify.selector_u8 = IREE_VM_ISA_FLOAT_CLASSIFY_ISFINITE + 1;
+  expect_rejected(classify);
+  classify.selector_u8 = IREE_VM_ISA_FLOAT_CLASSIFY_ISNAN;
+  classify.src_v8 = 2;
+  expect_rejected(classify);
+
+  iree_vm_isa_float_clamp_f64_record_t clamp = {};
+  clamp.opcode_u8 = IREE_VM_ISA_CORE_OPCODE_FLOAT_CLAMP_F64;
+  clamp.dst_v8 = 0;
+  clamp.value_v8 = 0;
+  clamp.lower_v8 = 0;
+  clamp.upper_v8 = 1;
+  clamp.mode_u8 = IREE_VM_ISA_FLOAT_CLAMP_IEEE + 1;
+  expect_rejected(clamp);
+  clamp.mode_u8 = IREE_VM_ISA_FLOAT_CLAMP_ORDERED;
+  clamp.zero_padding_u16 = 1;
+  expect_rejected(clamp);
+  clamp.zero_padding_u16 = 0;
+  clamp.upper_v8 = 2;
+  expect_rejected(clamp);
 
   iree_vm_environment_free(environment);
 }

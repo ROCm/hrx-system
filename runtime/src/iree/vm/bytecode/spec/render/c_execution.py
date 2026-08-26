@@ -186,6 +186,54 @@ def _validate_verification_form(
             rule_arguments=(EntityReference("core.selector.integer.compare"),),
         )
         require_zero(5, 1, array_length=3)
+    elif verification_form in ("FLOAT_MINMAX", "FLOAT_COMPARE"):
+        if instruction.byte_length != 8:
+            raise ValueError(
+                f"{instruction.mnemonic}: floating selector record is not 8 bytes"
+            )
+        for offset in range(1, 4):
+            require_value(offset)
+        selector_table_id = {
+            "FLOAT_MINMAX": "core.selector.float.minmax",
+            "FLOAT_COMPARE": "core.selector.float.compare",
+        }[verification_form]
+        require_field(
+            4,
+            1,
+            SELECTOR.entity_id,
+            (InstructionFieldRole.IMMEDIATE,),
+            rule_arguments=(EntityReference(selector_table_id),),
+        )
+        require_zero(5, 1, array_length=3)
+    elif verification_form == "FLOAT_CLASSIFY":
+        if instruction.byte_length != 4:
+            raise ValueError(
+                f"{instruction.mnemonic}: float classify record is not 4 bytes"
+            )
+        require_value(1)
+        require_value(2)
+        require_field(
+            3,
+            1,
+            SELECTOR.entity_id,
+            (InstructionFieldRole.IMMEDIATE,),
+            rule_arguments=(EntityReference("core.selector.float.classify"),),
+        )
+    elif verification_form == "FLOAT_CLAMP":
+        if instruction.byte_length != 8:
+            raise ValueError(
+                f"{instruction.mnemonic}: float clamp record is not 8 bytes"
+            )
+        for offset in range(1, 5):
+            require_value(offset)
+        require_field(
+            5,
+            1,
+            SELECTOR.entity_id,
+            (InstructionFieldRole.IMMEDIATE,),
+            rule_arguments=(EntityReference("core.selector.float.clamp"),),
+        )
+        require_zero(6, 2)
     elif verification_form == "INTEGER_LEA":
         if instruction.byte_length != 8:
             raise ValueError(f"{instruction.mnemonic}: LEA record is not 8 bytes")

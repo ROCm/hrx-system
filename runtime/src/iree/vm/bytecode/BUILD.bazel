@@ -83,6 +83,7 @@ iree_runtime_cc_library(
     srcs = [
         "interpreter.c",
         "interpreter.h",
+        "interpreter_float.h",
         "interpreter_integer.h",
         "module.c",
         "verification_isa.c",
@@ -133,6 +134,20 @@ iree_runtime_cc_library(
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal",
         "//runtime/src/iree/vm",
+        "//runtime/src/iree/vm/bytecode/wire",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "interpreter_float_test",
+    srcs = [
+        "interpreter_float.h",
+        "interpreter_float_test.cc",
+    ],
+    deps = [
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
         "//runtime/src/iree/vm/bytecode/wire",
     ],
 )
