@@ -1081,6 +1081,35 @@ endif()
 if(IREE_HAL_DRIVER_AMDGPU)
 iree_cc_test(
   NAME
+    system_event_test
+  SRCS
+    "system_event_test.cc"
+  DEPS
+    ${CMAKE_DL_LIBS}
+    ::amdgpu
+    ::headers
+    iree::base
+    iree::base::core_headers
+    iree::base::internal
+    iree::base::testing::dynamic_library_test_library
+    iree::hal
+    iree::hal::drivers::amdgpu::util::libhsa
+    iree::io::file_handle
+    iree::testing::gtest
+    iree::testing::gtest_main
+    iree::testing::temp_file
+  LABELS
+    "iree-build-requirement=runtime.hal.amdgpu"
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+  RESOURCE_GROUP
+    iree-hal-drivers-amdgpu-tests
+)
+endif()
+
+if(IREE_HAL_DRIVER_AMDGPU)
+iree_cc_test(
+  NAME
     host_queue_failure_test
   SRCS
     "host_queue_failure_test.cc"

@@ -846,6 +846,26 @@ iree_runtime_cc_benchmark(
 )
 
 iree_runtime_cc_test(
+    name = "system_event_test",
+    srcs = ["system_event_test.cc"],
+    deps = [
+        ":amdgpu",
+        ":headers",
+        "//build_tools/bazel:dl",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base:core_headers",
+        "//runtime/src/iree/base/internal",
+        "//runtime/src/iree/base/testing:dynamic_library_test_library",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/drivers/amdgpu/util:libhsa",
+        "//runtime/src/iree/io:file_handle",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+        "//runtime/src/iree/testing:temp_file",
+    ],
+)
+
+iree_runtime_cc_test(
     name = "host_queue_failure_test",
     srcs = ["host_queue_failure_test.cc"],
     deps = [
