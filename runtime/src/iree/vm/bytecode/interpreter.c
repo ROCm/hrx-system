@@ -155,6 +155,25 @@ static inline const uint8_t* iree_vm_bytecode_direct_target(
          (ptrdiff_t)((int64_t)target_word_delta * 4);
 }
 
+// Materializes the terminal status for an integer division failure off the
+// successful instruction path.
+IREE_ATTRIBUTE_NOINLINE IREE_ATTRIBUTE_COLD static iree_status_t
+iree_vm_bytecode_make_integer_division_status(
+    iree_vm_bytecode_integer_division_failure_t failure) {
+  switch (failure) {
+    case IREE_VM_BYTECODE_INTEGER_DIVISION_FAILURE_DIVIDE_BY_ZERO:
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "integer division by zero");
+    case IREE_VM_BYTECODE_INTEGER_DIVISION_FAILURE_SIGNED_OVERFLOW:
+      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "signed integer division overflow");
+    case IREE_VM_BYTECODE_INTEGER_DIVISION_FAILURE_NONE:
+      break;
+  }
+  return iree_make_status(IREE_STATUS_INTERNAL,
+                          "invalid integer division failure");
+}
+
 // Captures an optional readable vm.buffer message before frame unwind. Invalid
 // diagnostic state never replaces the primary architectural failure code.
 IREE_ATTRIBUTE_NOINLINE IREE_ATTRIBUTE_COLD static iree_status_t
@@ -953,6 +972,94 @@ static iree_status_t iree_vm_bytecode_execute(
     const uint64_t rhs = values[record->rhs_v8];
     values[record->dst_v8] = lhs * rhs;
     IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_isa_integer_mul_i64_record_t);
+  }
+  IREE_VM_BYTECODE_DISPATCH_CASE(INTEGER_DIV_S32, integer_div_s32) {
+    const iree_vm_isa_integer_div_s32_record_t* record =
+        (const iree_vm_isa_integer_div_s32_record_t*)record_data;
+    const iree_vm_bytecode_integer_division_failure_t failure =
+        iree_vm_bytecode_execute_integer_div_s32(record, values);
+    if (failure != IREE_VM_BYTECODE_INTEGER_DIVISION_FAILURE_NONE) {
+      status = iree_vm_bytecode_make_integer_division_status(failure);
+      IREE_VM_BYTECODE_DISPATCH_TERMINATE();
+    }
+    IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_isa_integer_div_s32_record_t);
+  }
+  IREE_VM_BYTECODE_DISPATCH_CASE(INTEGER_DIV_S64, integer_div_s64) {
+    const iree_vm_isa_integer_div_s64_record_t* record =
+        (const iree_vm_isa_integer_div_s64_record_t*)record_data;
+    const iree_vm_bytecode_integer_division_failure_t failure =
+        iree_vm_bytecode_execute_integer_div_s64(record, values);
+    if (failure != IREE_VM_BYTECODE_INTEGER_DIVISION_FAILURE_NONE) {
+      status = iree_vm_bytecode_make_integer_division_status(failure);
+      IREE_VM_BYTECODE_DISPATCH_TERMINATE();
+    }
+    IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_isa_integer_div_s64_record_t);
+  }
+  IREE_VM_BYTECODE_DISPATCH_CASE(INTEGER_DIV_U32, integer_div_u32) {
+    const iree_vm_isa_integer_div_u32_record_t* record =
+        (const iree_vm_isa_integer_div_u32_record_t*)record_data;
+    const iree_vm_bytecode_integer_division_failure_t failure =
+        iree_vm_bytecode_execute_integer_div_u32(record, values);
+    if (failure != IREE_VM_BYTECODE_INTEGER_DIVISION_FAILURE_NONE) {
+      status = iree_vm_bytecode_make_integer_division_status(failure);
+      IREE_VM_BYTECODE_DISPATCH_TERMINATE();
+    }
+    IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_isa_integer_div_u32_record_t);
+  }
+  IREE_VM_BYTECODE_DISPATCH_CASE(INTEGER_DIV_U64, integer_div_u64) {
+    const iree_vm_isa_integer_div_u64_record_t* record =
+        (const iree_vm_isa_integer_div_u64_record_t*)record_data;
+    const iree_vm_bytecode_integer_division_failure_t failure =
+        iree_vm_bytecode_execute_integer_div_u64(record, values);
+    if (failure != IREE_VM_BYTECODE_INTEGER_DIVISION_FAILURE_NONE) {
+      status = iree_vm_bytecode_make_integer_division_status(failure);
+      IREE_VM_BYTECODE_DISPATCH_TERMINATE();
+    }
+    IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_isa_integer_div_u64_record_t);
+  }
+  IREE_VM_BYTECODE_DISPATCH_CASE(INTEGER_REM_S32, integer_rem_s32) {
+    const iree_vm_isa_integer_rem_s32_record_t* record =
+        (const iree_vm_isa_integer_rem_s32_record_t*)record_data;
+    const iree_vm_bytecode_integer_division_failure_t failure =
+        iree_vm_bytecode_execute_integer_rem_s32(record, values);
+    if (failure != IREE_VM_BYTECODE_INTEGER_DIVISION_FAILURE_NONE) {
+      status = iree_vm_bytecode_make_integer_division_status(failure);
+      IREE_VM_BYTECODE_DISPATCH_TERMINATE();
+    }
+    IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_isa_integer_rem_s32_record_t);
+  }
+  IREE_VM_BYTECODE_DISPATCH_CASE(INTEGER_REM_S64, integer_rem_s64) {
+    const iree_vm_isa_integer_rem_s64_record_t* record =
+        (const iree_vm_isa_integer_rem_s64_record_t*)record_data;
+    const iree_vm_bytecode_integer_division_failure_t failure =
+        iree_vm_bytecode_execute_integer_rem_s64(record, values);
+    if (failure != IREE_VM_BYTECODE_INTEGER_DIVISION_FAILURE_NONE) {
+      status = iree_vm_bytecode_make_integer_division_status(failure);
+      IREE_VM_BYTECODE_DISPATCH_TERMINATE();
+    }
+    IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_isa_integer_rem_s64_record_t);
+  }
+  IREE_VM_BYTECODE_DISPATCH_CASE(INTEGER_REM_U32, integer_rem_u32) {
+    const iree_vm_isa_integer_rem_u32_record_t* record =
+        (const iree_vm_isa_integer_rem_u32_record_t*)record_data;
+    const iree_vm_bytecode_integer_division_failure_t failure =
+        iree_vm_bytecode_execute_integer_rem_u32(record, values);
+    if (failure != IREE_VM_BYTECODE_INTEGER_DIVISION_FAILURE_NONE) {
+      status = iree_vm_bytecode_make_integer_division_status(failure);
+      IREE_VM_BYTECODE_DISPATCH_TERMINATE();
+    }
+    IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_isa_integer_rem_u32_record_t);
+  }
+  IREE_VM_BYTECODE_DISPATCH_CASE(INTEGER_REM_U64, integer_rem_u64) {
+    const iree_vm_isa_integer_rem_u64_record_t* record =
+        (const iree_vm_isa_integer_rem_u64_record_t*)record_data;
+    const iree_vm_bytecode_integer_division_failure_t failure =
+        iree_vm_bytecode_execute_integer_rem_u64(record, values);
+    if (failure != IREE_VM_BYTECODE_INTEGER_DIVISION_FAILURE_NONE) {
+      status = iree_vm_bytecode_make_integer_division_status(failure);
+      IREE_VM_BYTECODE_DISPATCH_TERMINATE();
+    }
+    IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_isa_integer_rem_u64_record_t);
   }
   IREE_VM_BYTECODE_DISPATCH_CASE(INTEGER_NEG_I32, integer_neg_i32) {
     const iree_vm_isa_integer_neg_i32_record_t* record =

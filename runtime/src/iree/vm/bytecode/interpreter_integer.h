@@ -14,6 +14,150 @@
 // Module-load verification guarantees that every register ordinal and closed
 // selector is valid. Sources are always captured before the destination is
 // written so that any source may alias the destination.
+
+// Terminal failure produced by one total integer division instruction.
+typedef enum iree_vm_bytecode_integer_division_failure_e {
+  IREE_VM_BYTECODE_INTEGER_DIVISION_FAILURE_NONE = 0,
+  IREE_VM_BYTECODE_INTEGER_DIVISION_FAILURE_DIVIDE_BY_ZERO = 1,
+  IREE_VM_BYTECODE_INTEGER_DIVISION_FAILURE_SIGNED_OVERFLOW = 2,
+} iree_vm_bytecode_integer_division_failure_t;
+
+// Returns the unsigned magnitude of the two's-complement bit pattern |value|.
+static inline IREE_ATTRIBUTE_ALWAYS_INLINE uint32_t
+iree_vm_bytecode_integer_magnitude_u32(uint32_t value) {
+  const uint32_t sign_mask = UINT32_C(0) - (value >> 31);
+  return (value ^ sign_mask) - sign_mask;
+}
+
+// Returns the unsigned magnitude of the two's-complement bit pattern |value|.
+static inline IREE_ATTRIBUTE_ALWAYS_INLINE uint64_t
+iree_vm_bytecode_integer_magnitude_u64(uint64_t value) {
+  const uint64_t sign_mask = UINT64_C(0) - (value >> 63);
+  return (value ^ sign_mask) - sign_mask;
+}
+
+static inline IREE_ATTRIBUTE_ALWAYS_INLINE
+    iree_vm_bytecode_integer_division_failure_t
+    iree_vm_bytecode_execute_integer_div_s32(
+        const iree_vm_isa_integer_div_s32_record_t* record, uint64_t* values) {
+  const uint32_t lhs = (uint32_t)values[record->lhs_v8];
+  const uint32_t rhs = (uint32_t)values[record->rhs_v8];
+  if (rhs == 0) {
+    return IREE_VM_BYTECODE_INTEGER_DIVISION_FAILURE_DIVIDE_BY_ZERO;
+  }
+  if (lhs == UINT32_C(0x80000000) && rhs == UINT32_MAX) {
+    return IREE_VM_BYTECODE_INTEGER_DIVISION_FAILURE_SIGNED_OVERFLOW;
+  }
+  const uint32_t quotient = iree_vm_bytecode_integer_magnitude_u32(lhs) /
+                            iree_vm_bytecode_integer_magnitude_u32(rhs);
+  const uint32_t sign_mask = UINT32_C(0) - ((lhs ^ rhs) >> 31);
+  values[record->dst_v8] = (quotient ^ sign_mask) - sign_mask;
+  return IREE_VM_BYTECODE_INTEGER_DIVISION_FAILURE_NONE;
+}
+
+static inline IREE_ATTRIBUTE_ALWAYS_INLINE
+    iree_vm_bytecode_integer_division_failure_t
+    iree_vm_bytecode_execute_integer_div_s64(
+        const iree_vm_isa_integer_div_s64_record_t* record, uint64_t* values) {
+  const uint64_t lhs = values[record->lhs_v8];
+  const uint64_t rhs = values[record->rhs_v8];
+  if (rhs == 0) {
+    return IREE_VM_BYTECODE_INTEGER_DIVISION_FAILURE_DIVIDE_BY_ZERO;
+  }
+  if (lhs == UINT64_C(0x8000000000000000) && rhs == UINT64_MAX) {
+    return IREE_VM_BYTECODE_INTEGER_DIVISION_FAILURE_SIGNED_OVERFLOW;
+  }
+  const uint64_t quotient = iree_vm_bytecode_integer_magnitude_u64(lhs) /
+                            iree_vm_bytecode_integer_magnitude_u64(rhs);
+  const uint64_t sign_mask = UINT64_C(0) - ((lhs ^ rhs) >> 63);
+  values[record->dst_v8] = (quotient ^ sign_mask) - sign_mask;
+  return IREE_VM_BYTECODE_INTEGER_DIVISION_FAILURE_NONE;
+}
+
+static inline IREE_ATTRIBUTE_ALWAYS_INLINE
+    iree_vm_bytecode_integer_division_failure_t
+    iree_vm_bytecode_execute_integer_div_u32(
+        const iree_vm_isa_integer_div_u32_record_t* record, uint64_t* values) {
+  const uint32_t lhs = (uint32_t)values[record->lhs_v8];
+  const uint32_t rhs = (uint32_t)values[record->rhs_v8];
+  if (rhs == 0) {
+    return IREE_VM_BYTECODE_INTEGER_DIVISION_FAILURE_DIVIDE_BY_ZERO;
+  }
+  values[record->dst_v8] = lhs / rhs;
+  return IREE_VM_BYTECODE_INTEGER_DIVISION_FAILURE_NONE;
+}
+
+static inline IREE_ATTRIBUTE_ALWAYS_INLINE
+    iree_vm_bytecode_integer_division_failure_t
+    iree_vm_bytecode_execute_integer_div_u64(
+        const iree_vm_isa_integer_div_u64_record_t* record, uint64_t* values) {
+  const uint64_t lhs = values[record->lhs_v8];
+  const uint64_t rhs = values[record->rhs_v8];
+  if (rhs == 0) {
+    return IREE_VM_BYTECODE_INTEGER_DIVISION_FAILURE_DIVIDE_BY_ZERO;
+  }
+  values[record->dst_v8] = lhs / rhs;
+  return IREE_VM_BYTECODE_INTEGER_DIVISION_FAILURE_NONE;
+}
+
+static inline IREE_ATTRIBUTE_ALWAYS_INLINE
+    iree_vm_bytecode_integer_division_failure_t
+    iree_vm_bytecode_execute_integer_rem_s32(
+        const iree_vm_isa_integer_rem_s32_record_t* record, uint64_t* values) {
+  const uint32_t lhs = (uint32_t)values[record->lhs_v8];
+  const uint32_t rhs = (uint32_t)values[record->rhs_v8];
+  if (rhs == 0) {
+    return IREE_VM_BYTECODE_INTEGER_DIVISION_FAILURE_DIVIDE_BY_ZERO;
+  }
+  const uint32_t remainder = iree_vm_bytecode_integer_magnitude_u32(lhs) %
+                             iree_vm_bytecode_integer_magnitude_u32(rhs);
+  const uint32_t sign_mask = UINT32_C(0) - (lhs >> 31);
+  values[record->dst_v8] = (remainder ^ sign_mask) - sign_mask;
+  return IREE_VM_BYTECODE_INTEGER_DIVISION_FAILURE_NONE;
+}
+
+static inline IREE_ATTRIBUTE_ALWAYS_INLINE
+    iree_vm_bytecode_integer_division_failure_t
+    iree_vm_bytecode_execute_integer_rem_s64(
+        const iree_vm_isa_integer_rem_s64_record_t* record, uint64_t* values) {
+  const uint64_t lhs = values[record->lhs_v8];
+  const uint64_t rhs = values[record->rhs_v8];
+  if (rhs == 0) {
+    return IREE_VM_BYTECODE_INTEGER_DIVISION_FAILURE_DIVIDE_BY_ZERO;
+  }
+  const uint64_t remainder = iree_vm_bytecode_integer_magnitude_u64(lhs) %
+                             iree_vm_bytecode_integer_magnitude_u64(rhs);
+  const uint64_t sign_mask = UINT64_C(0) - (lhs >> 63);
+  values[record->dst_v8] = (remainder ^ sign_mask) - sign_mask;
+  return IREE_VM_BYTECODE_INTEGER_DIVISION_FAILURE_NONE;
+}
+
+static inline IREE_ATTRIBUTE_ALWAYS_INLINE
+    iree_vm_bytecode_integer_division_failure_t
+    iree_vm_bytecode_execute_integer_rem_u32(
+        const iree_vm_isa_integer_rem_u32_record_t* record, uint64_t* values) {
+  const uint32_t lhs = (uint32_t)values[record->lhs_v8];
+  const uint32_t rhs = (uint32_t)values[record->rhs_v8];
+  if (rhs == 0) {
+    return IREE_VM_BYTECODE_INTEGER_DIVISION_FAILURE_DIVIDE_BY_ZERO;
+  }
+  values[record->dst_v8] = lhs % rhs;
+  return IREE_VM_BYTECODE_INTEGER_DIVISION_FAILURE_NONE;
+}
+
+static inline IREE_ATTRIBUTE_ALWAYS_INLINE
+    iree_vm_bytecode_integer_division_failure_t
+    iree_vm_bytecode_execute_integer_rem_u64(
+        const iree_vm_isa_integer_rem_u64_record_t* record, uint64_t* values) {
+  const uint64_t lhs = values[record->lhs_v8];
+  const uint64_t rhs = values[record->rhs_v8];
+  if (rhs == 0) {
+    return IREE_VM_BYTECODE_INTEGER_DIVISION_FAILURE_DIVIDE_BY_ZERO;
+  }
+  values[record->dst_v8] = lhs % rhs;
+  return IREE_VM_BYTECODE_INTEGER_DIVISION_FAILURE_NONE;
+}
+
 static inline IREE_ATTRIBUTE_ALWAYS_INLINE uint64_t
 iree_vm_bytecode_integer_compare_bits(uint64_t lhs, uint64_t rhs,
                                       uint64_t sign_bit, uint8_t predicate) {

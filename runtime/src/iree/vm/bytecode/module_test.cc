@@ -121,7 +121,8 @@ TEST(VMBytecodeModuleTest, RejectsBeforeTakingImageStorageOwnership) {
   const size_t bytecode_offset =
       sizeof(iree_vm_bytecode_v0_functions_header_t) +
       2 * sizeof(iree_vm_bytecode_v0_function_row_t);
-  functions[bytecode_offset + 4] = IREE_VM_ISA_CORE_OPCODE_INTEGER_DIV_S32;
+  // Core 0.0 deliberately leaves opcode 0x0F unassigned.
+  functions[bytecode_offset + 4] = 0x0F;
 
   CountingAllocator image_allocator = {iree_allocator_system(), 0, 0};
   void* owned_image = nullptr;
@@ -1051,6 +1052,83 @@ TEST(VMBytecodeModuleTest, PreservesIntegerSourcesAcrossDestinationAliasing) {
                 INT32_MIN);
 }
 
+TEST(VMBytecodeModuleTest, PreservesResultsOnIntegerDivisionFailure) {
+  const auto expect_failure = [](uint8_t opcode, int16_t divisor,
+                                 int32_t dividend,
+                                 iree_status_code_t expected_code) {
+    std::vector<uint8_t> image = BuildOwnershipModuleImage();
+    const MutableFunctionImage initializer = FindFunctionImage(&image, 0);
+    ASSERT_NE(initializer.row, nullptr);
+    constexpr uint32_t kInitializerImmediateOffset = 6;
+    initializer.bytecode[kInitializerImmediateOffset + 0] =
+        static_cast<uint8_t>(divisor);
+    initializer.bytecode[kInitializerImmediateOffset + 1] =
+        static_cast<uint8_t>(static_cast<uint16_t>(divisor) >> 8);
+
+    const MutableFunctionImage function = FindFunctionImage(&image, 1);
+    ASSERT_NE(function.row, nullptr);
+    constexpr uint32_t kArithmeticInstructionOffset = 8;
+    function.bytecode[kArithmeticInstructionOffset + 0] = opcode;
+    function.bytecode[kArithmeticInstructionOffset + 1] = 0;
+    function.bytecode[kArithmeticInstructionOffset + 2] = 0;
+    function.bytecode[kArithmeticInstructionOffset + 3] = 1;
+
+    iree_vm_environment_t* environment = nullptr;
+    IREE_ASSERT_OK(
+        iree_vm_environment_allocate(iree_allocator_system(), &environment));
+    iree_vm_module_t* module = nullptr;
+    IREE_ASSERT_OK(iree_vm_bytecode_module_create(
+        environment, IREE_SV("integer_division_failure"),
+        {iree_make_const_byte_span(image.data(), image.size()),
+         iree_allocator_null()},
+        iree_allocator_system(), &module));
+    iree_vm_environment_free(environment);
+
+    iree_vm_program_t* program = nullptr;
+    IREE_ASSERT_OK(iree_vm_program_create({module, iree_vm_module_span_empty()},
+                                          iree_allocator_system(), &program));
+    iree_vm_invocation_t* invocation = nullptr;
+    IREE_ASSERT_OK(iree_vm_invocation_allocate(
+        kInvocationStorageSize, iree_allocator_system(), &invocation));
+    iree_vm_process_t* process = nullptr;
+    IREE_ASSERT_OK(iree_vm_process_create(program, invocation,
+                                          iree_vm_variant_span_empty(),
+                                          iree_allocator_system(), &process));
+    iree_vm_function_t run = iree_vm_function_null();
+    IREE_ASSERT_OK(iree_vm_process_lookup_function(
+        process, IREE_SV("integer_division_failure"), IREE_SV("run"), &run));
+
+    iree_vm_variant_t arguments[] = {iree_vm_variant_from_i32(dividend)};
+    iree_vm_variant_t results[] = {
+        iree_vm_variant_from_i32(123),
+        iree_vm_variant_from_i64(456),
+    };
+    const std::array<uint8_t, sizeof(results)> untouched_results = [&] {
+      std::array<uint8_t, sizeof(results)> bytes;
+      std::memcpy(bytes.data(), results, sizeof(results));
+      return bytes;
+    }();
+    IREE_EXPECT_STATUS_IS(
+        expected_code,
+        iree_vm_invoke(invocation, run,
+                       iree_vm_variant_span_from_array(arguments),
+                       iree_vm_variant_span_from_array(results)));
+    EXPECT_EQ(std::memcmp(results, untouched_results.data(), sizeof(results)),
+              0);
+    iree_vm_variant_span_reset(iree_vm_variant_span_from_array(results));
+
+    iree_vm_invocation_free(invocation);
+    iree_vm_process_release(process);
+    iree_vm_program_release(program);
+    iree_vm_module_release(module);
+  };
+
+  expect_failure(IREE_VM_ISA_CORE_OPCODE_INTEGER_DIV_U32, 0, 1,
+                 IREE_STATUS_INVALID_ARGUMENT);
+  expect_failure(IREE_VM_ISA_CORE_OPCODE_INTEGER_DIV_S32, -1, INT32_MIN,
+                 IREE_STATUS_OUT_OF_RANGE);
+}
+
 TEST(VMBytecodeModuleTest, RejectsMalformedScalarStateInstructions) {
   iree_vm_environment_t* environment = nullptr;
   IREE_ASSERT_OK(
@@ -1146,6 +1224,28 @@ TEST(VMBytecodeModuleTest, RejectsMalformedScalarStateInstructions) {
     function.bytecode[kFirstBodyInstructionOffset + mutation.field_offset] =
         mutation.value;
     expect_rejected(image);
+  }
+
+  const uint8_t division_opcodes[] = {
+      IREE_VM_ISA_CORE_OPCODE_INTEGER_DIV_S32,
+      IREE_VM_ISA_CORE_OPCODE_INTEGER_DIV_S64,
+      IREE_VM_ISA_CORE_OPCODE_INTEGER_DIV_U32,
+      IREE_VM_ISA_CORE_OPCODE_INTEGER_DIV_U64,
+      IREE_VM_ISA_CORE_OPCODE_INTEGER_REM_S32,
+      IREE_VM_ISA_CORE_OPCODE_INTEGER_REM_S64,
+      IREE_VM_ISA_CORE_OPCODE_INTEGER_REM_U32,
+      IREE_VM_ISA_CORE_OPCODE_INTEGER_REM_U64,
+  };
+  for (uint8_t opcode : division_opcodes) {
+    for (uint8_t field_offset = 1; field_offset < 4; ++field_offset) {
+      std::vector<uint8_t> image = BuildScalarStateModuleImage();
+      const MutableFunctionImage function = FindFunctionImage(&image, 1);
+      ASSERT_NE(function.row, nullptr);
+      constexpr uint32_t kFirstBodyInstructionOffset = 4;
+      function.bytecode[kFirstBodyInstructionOffset] = opcode;
+      function.bytecode[kFirstBodyInstructionOffset + field_offset] = 6;
+      expect_rejected(image);
+    }
   }
 
   std::vector<uint8_t> partitioned_image = BuildScalarStateModuleImage();

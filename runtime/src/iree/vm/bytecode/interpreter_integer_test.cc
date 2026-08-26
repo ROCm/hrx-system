@@ -14,6 +14,39 @@ namespace iree::vm::bytecode::testing {
 namespace {
 
 template <typename Record, typename Execute>
+void ExpectDivisionResult(
+    Execute execute, uint64_t lhs, uint64_t rhs,
+    iree_vm_bytecode_integer_division_failure_t expected_failure,
+    uint64_t expected_result) {
+  constexpr uint64_t kDestinationSentinel = UINT64_C(0xA55AA55AA55AA55A);
+  uint64_t values[] = {lhs, rhs, kDestinationSentinel};
+  Record record = {};
+  record.dst_v8 = 2;
+  record.lhs_v8 = 0;
+  record.rhs_v8 = 1;
+  const iree_vm_bytecode_integer_division_failure_t failure =
+      execute(&record, values);
+  EXPECT_EQ(failure, expected_failure);
+  EXPECT_EQ(values[2], expected_result);
+}
+
+template <typename Record, typename Execute>
+void ExpectDivisionAliasing(Execute execute, uint64_t lhs, uint64_t rhs,
+                            uint64_t expected_result) {
+  for (uint8_t destination = 0; destination < 2; ++destination) {
+    SCOPED_TRACE(static_cast<int>(destination));
+    uint64_t values[] = {lhs, rhs};
+    Record record = {};
+    record.dst_v8 = destination;
+    record.lhs_v8 = 0;
+    record.rhs_v8 = 1;
+    EXPECT_EQ(execute(&record, values),
+              IREE_VM_BYTECODE_INTEGER_DIVISION_FAILURE_NONE);
+    EXPECT_EQ(values[destination], expected_result);
+  }
+}
+
+template <typename Record, typename Execute>
 void ExpectComparisonPredicates(Execute execute, uint64_t lhs, uint64_t rhs,
                                 const uint64_t (&expected)[10]) {
   for (uint8_t predicate = 0; predicate < IREE_ARRAYSIZE(expected);
@@ -28,6 +61,137 @@ void ExpectComparisonPredicates(Execute execute, uint64_t lhs, uint64_t rhs,
     execute(&record, values);
     EXPECT_EQ(values[2], expected[predicate]);
   }
+}
+
+TEST(VMBytecodeInterpreterIntegerTest, ExecutesDivS32Record) {
+  constexpr auto execute = iree_vm_bytecode_execute_integer_div_s32;
+  constexpr auto kOk = IREE_VM_BYTECODE_INTEGER_DIVISION_FAILURE_NONE;
+  ExpectDivisionResult<iree_vm_isa_integer_div_s32_record_t>(execute, 7, 3, kOk,
+                                                             2);
+  ExpectDivisionResult<iree_vm_isa_integer_div_s32_record_t>(
+      execute, UINT32_C(0xFFFFFFF9), 3, kOk, UINT32_C(0xFFFFFFFE));
+  ExpectDivisionResult<iree_vm_isa_integer_div_s32_record_t>(
+      execute, 7, UINT32_C(0xFFFFFFFD), kOk, UINT32_C(0xFFFFFFFE));
+  ExpectDivisionResult<iree_vm_isa_integer_div_s32_record_t>(
+      execute, UINT32_C(0x80000000), 1, kOk, UINT32_C(0x80000000));
+  ExpectDivisionResult<iree_vm_isa_integer_div_s32_record_t>(
+      execute, UINT32_C(0x80000000), UINT32_MAX,
+      IREE_VM_BYTECODE_INTEGER_DIVISION_FAILURE_SIGNED_OVERFLOW,
+      UINT64_C(0xA55AA55AA55AA55A));
+  ExpectDivisionResult<iree_vm_isa_integer_div_s32_record_t>(
+      execute, 1, 0, IREE_VM_BYTECODE_INTEGER_DIVISION_FAILURE_DIVIDE_BY_ZERO,
+      UINT64_C(0xA55AA55AA55AA55A));
+  ExpectDivisionAliasing<iree_vm_isa_integer_div_s32_record_t>(
+      execute, UINT32_C(0xFFFFFFF9), UINT32_C(0xFFFFFFFD), 2);
+}
+
+TEST(VMBytecodeInterpreterIntegerTest, ExecutesDivS64Record) {
+  constexpr auto execute = iree_vm_bytecode_execute_integer_div_s64;
+  constexpr auto kOk = IREE_VM_BYTECODE_INTEGER_DIVISION_FAILURE_NONE;
+  ExpectDivisionResult<iree_vm_isa_integer_div_s64_record_t>(execute, 7, 3, kOk,
+                                                             2);
+  ExpectDivisionResult<iree_vm_isa_integer_div_s64_record_t>(
+      execute, UINT64_C(0xFFFFFFFFFFFFFFF9), 3, kOk,
+      UINT64_C(0xFFFFFFFFFFFFFFFE));
+  ExpectDivisionResult<iree_vm_isa_integer_div_s64_record_t>(
+      execute, 7, UINT64_C(0xFFFFFFFFFFFFFFFD), kOk,
+      UINT64_C(0xFFFFFFFFFFFFFFFE));
+  ExpectDivisionResult<iree_vm_isa_integer_div_s64_record_t>(
+      execute, UINT64_C(0x8000000000000000), 1, kOk,
+      UINT64_C(0x8000000000000000));
+  ExpectDivisionResult<iree_vm_isa_integer_div_s64_record_t>(
+      execute, UINT64_C(0x8000000000000000), UINT64_MAX,
+      IREE_VM_BYTECODE_INTEGER_DIVISION_FAILURE_SIGNED_OVERFLOW,
+      UINT64_C(0xA55AA55AA55AA55A));
+  ExpectDivisionResult<iree_vm_isa_integer_div_s64_record_t>(
+      execute, 1, 0, IREE_VM_BYTECODE_INTEGER_DIVISION_FAILURE_DIVIDE_BY_ZERO,
+      UINT64_C(0xA55AA55AA55AA55A));
+  ExpectDivisionAliasing<iree_vm_isa_integer_div_s64_record_t>(
+      execute, UINT64_C(0xFFFFFFFFFFFFFFF9), UINT64_C(0xFFFFFFFFFFFFFFFD), 2);
+}
+
+TEST(VMBytecodeInterpreterIntegerTest, ExecutesDivU32Record) {
+  constexpr auto execute = iree_vm_bytecode_execute_integer_div_u32;
+  ExpectDivisionResult<iree_vm_isa_integer_div_u32_record_t>(
+      execute, UINT64_C(0xFFFFFFFFFFFFFFFF), 2,
+      IREE_VM_BYTECODE_INTEGER_DIVISION_FAILURE_NONE, UINT32_MAX / 2);
+  ExpectDivisionResult<iree_vm_isa_integer_div_u32_record_t>(
+      execute, 1, 0, IREE_VM_BYTECODE_INTEGER_DIVISION_FAILURE_DIVIDE_BY_ZERO,
+      UINT64_C(0xA55AA55AA55AA55A));
+  ExpectDivisionAliasing<iree_vm_isa_integer_div_u32_record_t>(
+      execute, UINT32_MAX, 2, UINT32_MAX / 2);
+}
+
+TEST(VMBytecodeInterpreterIntegerTest, ExecutesDivU64Record) {
+  constexpr auto execute = iree_vm_bytecode_execute_integer_div_u64;
+  ExpectDivisionResult<iree_vm_isa_integer_div_u64_record_t>(
+      execute, UINT64_MAX, 2, IREE_VM_BYTECODE_INTEGER_DIVISION_FAILURE_NONE,
+      UINT64_MAX / 2);
+  ExpectDivisionResult<iree_vm_isa_integer_div_u64_record_t>(
+      execute, 1, 0, IREE_VM_BYTECODE_INTEGER_DIVISION_FAILURE_DIVIDE_BY_ZERO,
+      UINT64_C(0xA55AA55AA55AA55A));
+  ExpectDivisionAliasing<iree_vm_isa_integer_div_u64_record_t>(
+      execute, UINT64_MAX, 2, UINT64_MAX / 2);
+}
+
+TEST(VMBytecodeInterpreterIntegerTest, ExecutesRemS32Record) {
+  constexpr auto execute = iree_vm_bytecode_execute_integer_rem_s32;
+  constexpr auto kOk = IREE_VM_BYTECODE_INTEGER_DIVISION_FAILURE_NONE;
+  ExpectDivisionResult<iree_vm_isa_integer_rem_s32_record_t>(execute, 7, 3, kOk,
+                                                             1);
+  ExpectDivisionResult<iree_vm_isa_integer_rem_s32_record_t>(
+      execute, UINT32_C(0xFFFFFFF9), 3, kOk, UINT32_MAX);
+  ExpectDivisionResult<iree_vm_isa_integer_rem_s32_record_t>(
+      execute, 7, UINT32_C(0xFFFFFFFD), kOk, 1);
+  ExpectDivisionResult<iree_vm_isa_integer_rem_s32_record_t>(
+      execute, UINT32_C(0x80000000), UINT32_MAX, kOk, 0);
+  ExpectDivisionResult<iree_vm_isa_integer_rem_s32_record_t>(
+      execute, 1, 0, IREE_VM_BYTECODE_INTEGER_DIVISION_FAILURE_DIVIDE_BY_ZERO,
+      UINT64_C(0xA55AA55AA55AA55A));
+  ExpectDivisionAliasing<iree_vm_isa_integer_rem_s32_record_t>(
+      execute, UINT32_C(0xFFFFFFF9), 3, UINT32_MAX);
+}
+
+TEST(VMBytecodeInterpreterIntegerTest, ExecutesRemS64Record) {
+  constexpr auto execute = iree_vm_bytecode_execute_integer_rem_s64;
+  constexpr auto kOk = IREE_VM_BYTECODE_INTEGER_DIVISION_FAILURE_NONE;
+  ExpectDivisionResult<iree_vm_isa_integer_rem_s64_record_t>(execute, 7, 3, kOk,
+                                                             1);
+  ExpectDivisionResult<iree_vm_isa_integer_rem_s64_record_t>(
+      execute, UINT64_C(0xFFFFFFFFFFFFFFF9), 3, kOk, UINT64_MAX);
+  ExpectDivisionResult<iree_vm_isa_integer_rem_s64_record_t>(
+      execute, 7, UINT64_C(0xFFFFFFFFFFFFFFFD), kOk, 1);
+  ExpectDivisionResult<iree_vm_isa_integer_rem_s64_record_t>(
+      execute, UINT64_C(0x8000000000000000), UINT64_MAX, kOk, 0);
+  ExpectDivisionResult<iree_vm_isa_integer_rem_s64_record_t>(
+      execute, 1, 0, IREE_VM_BYTECODE_INTEGER_DIVISION_FAILURE_DIVIDE_BY_ZERO,
+      UINT64_C(0xA55AA55AA55AA55A));
+  ExpectDivisionAliasing<iree_vm_isa_integer_rem_s64_record_t>(
+      execute, UINT64_C(0xFFFFFFFFFFFFFFF9), 3, UINT64_MAX);
+}
+
+TEST(VMBytecodeInterpreterIntegerTest, ExecutesRemU32Record) {
+  constexpr auto execute = iree_vm_bytecode_execute_integer_rem_u32;
+  ExpectDivisionResult<iree_vm_isa_integer_rem_u32_record_t>(
+      execute, UINT64_C(0xFFFFFFFFFFFFFFFF), 3,
+      IREE_VM_BYTECODE_INTEGER_DIVISION_FAILURE_NONE, UINT32_MAX % 3);
+  ExpectDivisionResult<iree_vm_isa_integer_rem_u32_record_t>(
+      execute, 1, 0, IREE_VM_BYTECODE_INTEGER_DIVISION_FAILURE_DIVIDE_BY_ZERO,
+      UINT64_C(0xA55AA55AA55AA55A));
+  ExpectDivisionAliasing<iree_vm_isa_integer_rem_u32_record_t>(
+      execute, UINT32_MAX, 3, UINT32_MAX % 3);
+}
+
+TEST(VMBytecodeInterpreterIntegerTest, ExecutesRemU64Record) {
+  constexpr auto execute = iree_vm_bytecode_execute_integer_rem_u64;
+  ExpectDivisionResult<iree_vm_isa_integer_rem_u64_record_t>(
+      execute, UINT64_MAX, 3, IREE_VM_BYTECODE_INTEGER_DIVISION_FAILURE_NONE,
+      UINT64_MAX % 3);
+  ExpectDivisionResult<iree_vm_isa_integer_rem_u64_record_t>(
+      execute, 1, 0, IREE_VM_BYTECODE_INTEGER_DIVISION_FAILURE_DIVIDE_BY_ZERO,
+      UINT64_C(0xA55AA55AA55AA55A));
+  ExpectDivisionAliasing<iree_vm_isa_integer_rem_u64_record_t>(
+      execute, UINT64_MAX, 3, UINT64_MAX % 3);
 }
 
 TEST(VMBytecodeInterpreterIntegerTest, ExecutesCompareI32Record) {
