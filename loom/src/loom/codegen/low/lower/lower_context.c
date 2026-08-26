@@ -699,7 +699,7 @@ static uint16_t loom_low_lower_source_block_index(
 
 iree_status_t loom_low_lower_lookup_successor_dest(
     loom_low_lower_context_t* context, const loom_op_t* source_terminator,
-    uint8_t successor_index, loom_block_t** out_low_dest) {
+    uint16_t successor_index, loom_block_t** out_low_dest) {
   *out_low_dest = NULL;
   IREE_ASSERT(source_terminator != NULL);
   IREE_ASSERT_LT(successor_index, source_terminator->successor_count);
@@ -748,7 +748,7 @@ iree_status_t loom_low_lower_materialize_structural_operand(
 
 iree_status_t loom_low_lower_remap_successor_args(
     loom_low_lower_context_t* context, const loom_op_t* source_terminator,
-    uint8_t successor_index, loom_block_t* low_dest,
+    uint16_t successor_index, loom_block_t* low_dest,
     const loom_value_id_t* source_args, uint16_t source_arg_count,
     loom_value_id_t** out_low_args) {
   *out_low_args = NULL;
@@ -793,7 +793,7 @@ iree_status_t loom_low_lower_remap_successor_args(
 
 iree_status_t loom_low_lower_interpose_successor_dest(
     loom_low_lower_context_t* context, const loom_op_t* source_terminator,
-    uint8_t successor_index, loom_block_t* interposed_low_block,
+    uint16_t successor_index, loom_block_t* interposed_low_block,
     loom_block_t** out_previous_low_dest) {
   *out_previous_low_dest = NULL;
   IREE_ASSERT(source_terminator != NULL);

@@ -21,7 +21,9 @@
 #include "loom/format/text/parser.h"
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
+#include "loom/ops/cfg/ops.h"
 #include "loom/ops/func/ops.h"
+#include "loom/ops/index/ops.h"
 #include "loom/ops/low/ops.h"
 #include "loom/ops/pass/ops.h"
 #include "loom/ops/scalar/ops.h"
@@ -82,7 +84,9 @@ class LowLowerPassTest : public ::testing::Test {
     loom_context_initialize(iree_allocator_system(), &context_);
     RegisterDialect(LOOM_DIALECT_PASS, loom_pass_dialect_vtables);
     RegisterDialect(LOOM_DIALECT_TARGET, loom_target_dialect_vtables);
+    RegisterDialect(LOOM_DIALECT_CFG, loom_cfg_dialect_vtables);
     RegisterDialect(LOOM_DIALECT_FUNC, loom_func_dialect_vtables);
+    RegisterDialect(LOOM_DIALECT_INDEX, loom_index_dialect_vtables);
     RegisterDialect(LOOM_DIALECT_LOW, loom_low_dialect_vtables);
     RegisterDialect(LOOM_DIALECT_SCALAR, loom_scalar_dialect_vtables);
     RegisterDialect(LOOM_DIALECT_TEMPLATE, loom_template_dialect_vtables);
@@ -621,6 +625,86 @@ TEST_F(LowLowerPassTest,
       RunSourceToLow(&policy_registry, module.get(), &collector);
   EXPECT_EQ(collector.count, 0);
   IREE_ASSERT_OK(status);
+}
+
+TEST_F(LowLowerPassTest, DenseSwitchLowersToDescriptorBackedTargetTable) {
+  ModulePtr module = Parse(
+      IREE_SV("test.target<low_core> @test_target\n"
+              "func.def target(@test_target) @dispatch(%selector: index) {\n"
+              "  cfg.switch %selector cases [0, 2] -> [^case0, ^case2] default "
+              "^fallback\n"
+              "^case0:\n"
+              "  func.return\n"
+              "^case2:\n"
+              "  func.return\n"
+              "^fallback:\n"
+              "  func.return\n"
+              "}\n"));
+
+  IREE_ASSERT_OK(RunSourceToLow(&policy_registry_, module.get()));
+  const loom_symbol_ref_t function_ref =
+      FindSymbolRef(module.get(), IREE_SV("dispatch"));
+  const loom_func_like_t function = loom_func_like_cast(
+      module.get(),
+      module->symbols.entries[function_ref.symbol_id].defining_op);
+  const loom_region_t* body = loom_func_like_body(function);
+  ASSERT_NE(body, nullptr);
+
+  const loom_op_t* switch_op = nullptr;
+  for (uint16_t block_index = 0; block_index < body->block_count;
+       ++block_index) {
+    const loom_op_t* op = nullptr;
+    loom_block_for_each_op(body->blocks[block_index], op) {
+      if (loom_low_switch_isa(op)) {
+        ASSERT_EQ(switch_op, nullptr);
+        switch_op = op;
+      }
+    }
+  }
+  ASSERT_NE(switch_op, nullptr);
+  const loom_successor_slice_t targets =
+      loom_low_switch_target_dests(switch_op);
+  ASSERT_EQ(targets.count, 3u);
+  EXPECT_NE(targets.blocks[0], loom_low_switch_default_dest(switch_op));
+  EXPECT_EQ(targets.blocks[1], loom_low_switch_default_dest(switch_op));
+  EXPECT_NE(targets.blocks[2], loom_low_switch_default_dest(switch_op));
+}
+
+TEST_F(LowLowerPassTest, UnsupportedSwitchExpandsBeforeLowLowering) {
+  ModulePtr module = Parse(
+      IREE_SV("test.target<low_core> @test_target\n"
+              "func.def target(@test_target) @dispatch(%selector: index) {\n"
+              "  cfg.switch %selector cases [-1, 2] -> [^negative, ^positive] "
+              "default ^fallback\n"
+              "^negative:\n"
+              "  func.return\n"
+              "^positive:\n"
+              "  func.return\n"
+              "^fallback:\n"
+              "  func.return\n"
+              "}\n"));
+
+  IREE_ASSERT_OK(RunSourceToLow(&policy_registry_, module.get()));
+  const loom_symbol_ref_t function_ref =
+      FindSymbolRef(module.get(), IREE_SV("dispatch"));
+  const loom_func_like_t function = loom_func_like_cast(
+      module.get(),
+      module->symbols.entries[function_ref.symbol_id].defining_op);
+  const loom_region_t* body = loom_func_like_body(function);
+  ASSERT_NE(body, nullptr);
+
+  iree_host_size_t switch_count = 0;
+  iree_host_size_t conditional_branch_count = 0;
+  for (uint16_t block_index = 0; block_index < body->block_count;
+       ++block_index) {
+    const loom_op_t* op = nullptr;
+    loom_block_for_each_op(body->blocks[block_index], op) {
+      switch_count += loom_low_switch_isa(op) ? 1 : 0;
+      conditional_branch_count += loom_low_cond_br_isa(op) ? 1 : 0;
+    }
+  }
+  EXPECT_EQ(switch_count, 0u);
+  EXPECT_EQ(conditional_branch_count, 2u);
 }
 
 }  // namespace

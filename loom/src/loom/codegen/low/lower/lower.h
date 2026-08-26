@@ -218,7 +218,7 @@ typedef struct loom_low_lower_prepare_branch_callback_t {
 
 typedef iree_status_t (*loom_low_lower_materialize_branch_arg_fn_t)(
     void* user_data, loom_low_lower_context_t* context,
-    const loom_op_t* source_terminator, uint8_t successor_index,
+    const loom_op_t* source_terminator, uint16_t successor_index,
     uint16_t arg_index, loom_value_id_t source_value_id,
     loom_value_id_t low_value_id, loom_type_t required_low_type,
     loom_value_id_t* out_low_value_id);
@@ -262,6 +262,28 @@ typedef struct loom_low_lower_emit_cond_branch_callback_t {
   // Caller-owned payload passed to |fn|.
   void* user_data;
 } loom_low_lower_emit_cond_branch_callback_t;
+
+typedef bool (*loom_low_lower_can_emit_switch_fn_t)(
+    void* user_data, const loom_module_t* module, const loom_op_t* source_op,
+    const loom_target_facts_t* target_facts);
+
+typedef iree_status_t (*loom_low_lower_emit_switch_fn_t)(
+    void* user_data, loom_low_lower_context_t* context,
+    const loom_op_t* source_op, loom_value_id_t low_selector,
+    loom_block_t* low_default_dest, loom_block_t* const* low_case_dests,
+    uint16_t case_count);
+
+typedef struct loom_low_lower_switch_policy_t {
+  // Returns true when |source_op| can remain a cfg.switch through planning and
+  // be emitted directly by |emit|. The query is read-only and runs before
+  // source value facts are acquired.
+  loom_low_lower_can_emit_switch_fn_t can_emit;
+  // Emits one cfg.switch accepted by |can_emit| after its selector and
+  // successors have been mapped to target-low IR.
+  loom_low_lower_emit_switch_fn_t emit;
+  // Caller-owned payload passed to |can_emit| and |emit|.
+  void* user_data;
+} loom_low_lower_switch_policy_t;
 
 typedef enum loom_low_lower_abi_layout_kind_e {
   // Low function boundary layout on low.func.def/decl.
@@ -783,6 +805,9 @@ typedef struct loom_low_lower_policy_t {
   // Optionally emits conditional branches that need target-specific structural
   // control packets instead of plain low.cond_br.
   loom_low_lower_emit_cond_branch_callback_t emit_cond_branch;
+  // Optionally preserves selected cfg.switch ops for target-owned direct
+  // emission. Both callbacks are either populated together or left NULL.
+  loom_low_lower_switch_policy_t switch_lowering;
   // Low declaration physical code import kind for target-bound source imports.
   // Zero preserves only source module linkage on the low declaration.
   loom_low_func_decl_import_kind_t import_decl_kind;
@@ -946,6 +971,15 @@ typedef struct loom_low_lower_resolved_descriptor_t {
   // Descriptor row selected from the active descriptor set.
   const loom_low_descriptor_t* descriptor;
 } loom_low_lower_resolved_descriptor_t;
+
+// Prepares cfg.switch terminators for one selected target policy before source
+// value facts are acquired. Switches accepted by |policy| remain structural;
+// all others expand to exact index comparisons and conditional branches.
+// |out_changed| is true when any source CFG was expanded.
+iree_status_t loom_low_lower_prepare_cfg_switches(
+    loom_module_t* module, loom_func_like_t source_function,
+    const loom_target_facts_t* target_facts,
+    const loom_low_lower_policy_t* policy, bool* out_changed);
 
 // Lowers one func.def-like source function into a target-low function in place.
 //
@@ -1268,7 +1302,7 @@ iree_status_t loom_low_lower_append_low_block(loom_low_lower_context_t* context,
 // terminators should prefer this over raw block lookup.
 iree_status_t loom_low_lower_lookup_successor_dest(
     loom_low_lower_context_t* context, const loom_op_t* source_terminator,
-    uint8_t successor_index, loom_block_t** out_low_dest);
+    uint16_t successor_index, loom_block_t** out_low_dest);
 
 // Maps one source successor payload to low values accepted by |low_dest|.
 //
@@ -1277,7 +1311,7 @@ iree_status_t loom_low_lower_lookup_successor_dest(
 // loom_low_lower_lookup_value loops when forwarding block arguments.
 iree_status_t loom_low_lower_remap_successor_args(
     loom_low_lower_context_t* context, const loom_op_t* source_terminator,
-    uint8_t successor_index, loom_block_t* low_dest,
+    uint16_t successor_index, loom_block_t* low_dest,
     const loom_value_id_t* source_args, uint16_t source_arg_count,
     loom_value_id_t** out_low_args);
 
@@ -1298,7 +1332,7 @@ iree_status_t loom_low_lower_materialize_structural_operand(
 // original edge behavior.
 iree_status_t loom_low_lower_interpose_successor_dest(
     loom_low_lower_context_t* context, const loom_op_t* source_terminator,
-    uint8_t successor_index, loom_block_t* interposed_low_block,
+    uint16_t successor_index, loom_block_t* interposed_low_block,
     loom_block_t** out_previous_low_dest);
 
 // Records one target-owned structural branch plan for |source_terminator|.

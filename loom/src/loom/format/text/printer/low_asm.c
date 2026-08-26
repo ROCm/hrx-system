@@ -91,6 +91,7 @@ static bool loom_print_low_asm_allows_canonical_op(loom_print_context_t* ctx,
          iree_string_view_equal(op_name, IREE_SV("low.cond_br")) ||
          iree_string_view_equal(op_name, IREE_SV("low.func.call")) ||
          iree_string_view_equal(op_name, IREE_SV("low.scf.condition")) ||
+         iree_string_view_equal(op_name, IREE_SV("low.switch")) ||
          iree_string_view_equal(op_name, IREE_SV("low.scf.yield")) ||
          iree_string_view_equal(op_name, IREE_SV("low.scf.if")) ||
          iree_string_view_equal(op_name, IREE_SV("low.scf.for")) ||
@@ -108,8 +109,12 @@ static iree_string_view_t loom_print_low_asm_packet_descriptor_key(
     const loom_text_low_asm_descriptor_set_t* descriptor_set,
     const loom_op_t* op) {
   iree_string_view_t op_name = loom_op_name(ctx->module, op);
-  if (!iree_string_view_equal(op_name, IREE_SV("low.op")) &&
-      !iree_string_view_equal(op_name, IREE_SV("low.const"))) {
+  const bool has_descriptor =
+      iree_string_view_equal(op_name, IREE_SV("low.op")) ||
+      iree_string_view_equal(op_name, IREE_SV("low.const")) ||
+      iree_string_view_equal(op_name, IREE_SV("low.br")) ||
+      iree_string_view_equal(op_name, IREE_SV("low.switch"));
+  if (!has_descriptor) {
     return iree_string_view_empty();
   }
   if (op->attribute_count == 0) {
@@ -583,8 +588,55 @@ static iree_status_t loom_print_low_asm_result_type_annotation(
   return iree_ok_status();
 }
 
+static iree_status_t loom_print_low_asm_branch(
+    loom_print_context_t* ctx, const loom_text_low_asm_statement_t* statement) {
+  IREE_RETURN_IF_ERROR(loom_print_emit(ctx, statement->packet.mnemonic, false));
+  IREE_RETURN_IF_ERROR(
+      loom_print_successor_ref(ctx, statement->op, /*successor_index=*/0));
+  if (statement->operand_count != 0) {
+    IREE_RETURN_IF_ERROR(loom_print_emit_cstr(ctx, "(", true));
+    IREE_RETURN_IF_ERROR(loom_print_low_asm_value_list(
+        ctx, statement->operands, statement->operand_count,
+        LOOM_PRINT_FIELD_OPERAND));
+    IREE_RETURN_IF_ERROR(loom_print_emit_cstr(ctx, ")", true));
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t loom_print_low_asm_switch(
+    loom_print_context_t* ctx, const loom_text_low_asm_statement_t* statement) {
+  IREE_RETURN_IF_ERROR(loom_print_emit(ctx, statement->packet.mnemonic, false));
+  IREE_RETURN_IF_ERROR(loom_print_low_asm_value_list(ctx, statement->operands,
+                                                     statement->operand_count,
+                                                     LOOM_PRINT_FIELD_OPERAND));
+  IREE_RETURN_IF_ERROR(loom_print_emit_cstr(ctx, "targets", false));
+  IREE_RETURN_IF_ERROR(loom_print_emit_cstr(ctx, "[", false));
+  for (uint16_t i = 1; i < statement->op->successor_count; ++i) {
+    if (i > 1) {
+      IREE_RETURN_IF_ERROR(loom_print_emit_cstr(ctx, ",", false));
+    }
+    IREE_RETURN_IF_ERROR(loom_print_successor_ref(ctx, statement->op, i));
+  }
+  IREE_RETURN_IF_ERROR(loom_print_emit_cstr(ctx, "]", false));
+  IREE_RETURN_IF_ERROR(loom_print_emit_cstr(ctx, "default", false));
+  return loom_print_successor_ref(ctx, statement->op,
+                                  /*successor_index=*/0);
+}
+
 static iree_status_t loom_print_low_asm_packet(
     loom_print_context_t* ctx, const loom_text_low_asm_statement_t* statement) {
+  switch (statement->packet.carrier) {
+    case LOOM_TEXT_LOW_ASM_CARRIER_BRANCH:
+      return loom_print_low_asm_branch(ctx, statement);
+    case LOOM_TEXT_LOW_ASM_CARRIER_SWITCH:
+      return loom_print_low_asm_switch(ctx, statement);
+    case LOOM_TEXT_LOW_ASM_CARRIER_PACKET:
+      break;
+    default:
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "unknown low asm carrier %u",
+                              (uint32_t)statement->packet.carrier);
+  }
   IREE_RETURN_IF_ERROR(loom_print_low_asm_result_list(ctx, statement));
   IREE_RETURN_IF_ERROR(loom_print_emit(ctx, statement->packet.mnemonic, false));
   if (statement->packet.operand_segment_count != 0) {

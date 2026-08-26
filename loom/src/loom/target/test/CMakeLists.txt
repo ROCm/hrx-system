@@ -90,9 +90,11 @@ loom_cc_library(
   DEPS
     ::descriptors
     iree::base
+    loom::codegen::low::builder
     loom::codegen::low::lower
     loom::error::error_defs
     loom::ir
+    loom::ops::cfg
     loom::target::registers
     loom::target::test::contracts
   TESTONLY

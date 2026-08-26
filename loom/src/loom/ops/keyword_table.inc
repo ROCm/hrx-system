@@ -87,3 +87,5 @@
     [LOOM_KW_SCOPE] = (const uint8_t*)"\x05" "scope",
     [LOOM_KW_ORDERING] = (const uint8_t*)"\x08" "ordering",
     [LOOM_KW_LINK] = (const uint8_t*)"\x04" "link",
+    [LOOM_KW_CASES] = (const uint8_t*)"\x05" "cases",
+    [LOOM_KW_TARGETS] = (const uint8_t*)"\x07" "targets",

@@ -834,6 +834,7 @@ static iree_status_t loom_target_low_legality_verify_op_class(
     case LOOM_OP_BUFFER_ASSUME_SAME_ROOT:
     case LOOM_OP_CFG_BR:
     case LOOM_OP_CFG_COND_BR:
+    case LOOM_OP_CFG_SWITCH:
     case LOOM_OP_FUNC_RETURN:
     case LOOM_OP_KERNEL_RETURN:
       return iree_ok_status();

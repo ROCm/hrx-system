@@ -88,6 +88,29 @@ typedef enum loom_low_descriptor_packet_kind_e {
   LOOM_LOW_DESCRIPTOR_PACKET_CONST = 2,
 } loom_low_descriptor_packet_kind_t;
 
+// Returns the descriptor ordinal carried by |op|, or
+// LOOM_LOW_DESCRIPTOR_ORDINAL_NONE when |op| has no descriptor binding.
+// Descriptorless low.br operations are ordinary structural branches.
+static inline uint32_t loom_low_descriptor_ordinal_for_op(const loom_op_t* op) {
+  if (loom_low_op_isa(op)) return loom_low_op_descriptor(op);
+  if (loom_low_const_isa(op)) return loom_low_const_descriptor(op);
+  if (loom_low_br_isa(op) && loom_low_br_descriptor_is_present(op)) {
+    return loom_low_br_descriptor(op);
+  }
+  if (loom_low_switch_isa(op)) return loom_low_switch_descriptor(op);
+  return LOOM_LOW_DESCRIPTOR_ORDINAL_NONE;
+}
+
+// Returns the descriptor attribute index on descriptor-bound |op|.
+static inline uint16_t loom_low_descriptor_attribute_index_for_op(
+    const loom_op_t* op) {
+  if (loom_low_op_isa(op)) return loom_low_op_descriptor_ATTR_INDEX;
+  if (loom_low_const_isa(op)) return loom_low_const_descriptor_ATTR_INDEX;
+  if (loom_low_br_isa(op)) return loom_low_br_descriptor_ATTR_INDEX;
+  if (loom_low_switch_isa(op)) return loom_low_switch_descriptor_ATTR_INDEX;
+  return LOOM_ATTR_INDEX_NONE;
+}
+
 // Target-bound descriptor row for one descriptor-backed low packet.
 //
 // Canonical Low IR stores a required dense descriptor ordinal in the enclosing

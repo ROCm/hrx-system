@@ -17,6 +17,7 @@ from loom.assembly import (
     BindingList,
     BlockArgs,
     BlockRef,
+    BlockRefs,
     Clause,
     Flags,
     FormatElement,
@@ -134,6 +135,15 @@ def translate_format_elements(op: Op) -> list[tuple[str, int, str]]:
                     if kind != FieldKind.SUCCESSOR:
                         raise ValueError(f"Op '{op.name}': BlockRef('{name}') references {kind.name}, expected SUCCESSOR")
                     elements.append(("LOOM_FORMAT_KIND_SUCCESSOR_REF", index, "0"))
+
+                case BlockRefs(field=name):
+                    kind, index = resolve_field(name)
+                    if kind != FieldKind.SUCCESSOR:
+                        raise ValueError(f"Op '{op.name}': BlockRefs('{name}') references {kind.name}, expected SUCCESSOR")
+                    descriptor = layout.fields[name]
+                    if not descriptor.variadic:
+                        raise ValueError(f"Op '{op.name}': BlockRefs('{name}') requires a variadic successor field")
+                    elements.append(("LOOM_FORMAT_KIND_SUCCESSOR_REFS", index, "0"))
 
                 case Attr(field=name):
                     kind, index = resolve_field(name)

@@ -60,6 +60,7 @@ __all__ = [
     "AlignedRefs",
     "TypedRefs",
     "BlockRef",
+    "BlockRefs",
     "Attr",
     "SymbolRef",
     "TypeOf",
@@ -203,6 +204,22 @@ class BlockRef:
     so CFG analyses and rewrites do not depend on display names.
 
     For builders: maps to a single Block parameter.
+    """
+
+    field: str
+
+
+@dataclass(frozen=True, slots=True)
+class BlockRefs:
+    """Variadic CFG successor block references, comma-separated.
+
+    Prints/parses: ^case0, ^case1, ^case2
+
+    The field names a trailing variadic successor on the op declaration. The
+    caller supplies delimiters so the same element can be embedded in brackets,
+    parentheses, or another declarative form.
+
+    For builders: maps to a list[Block] parameter.
     """
 
     field: str
@@ -899,6 +916,7 @@ type FormatElement = (
     | AlignedRefs
     | TypedRefs
     | BlockRef
+    | BlockRefs
     | Attr
     | SymbolRef
     | TypeOf

@@ -103,5 +103,23 @@ TEST_F(CfgFormatTest, BranchWithArgumentsRoundTrips) {
   EXPECT_NE(text.find("^exit(%value: i32):"), std::string::npos) << text;
 }
 
+TEST_F(CfgFormatTest, SwitchWithVariadicSuccessorsRoundTrips) {
+  std::string text = RoundTrip(
+      "test.func @cfg(%selector: index) {\n"
+      "  cfg.switch %selector cases [0, 2] -> [^case0, ^case2] default "
+      "^fallback\n"
+      "^case0:\n"
+      "  test.yield\n"
+      "^case2:\n"
+      "  test.yield\n"
+      "^fallback:\n"
+      "  test.yield\n"
+      "}\n");
+  EXPECT_NE(text.find("cfg.switch %selector cases [0, 2] -> [^case0, "
+                      "^case2] default ^fallback"),
+            std::string::npos)
+      << text;
+}
+
 }  // namespace
 }  // namespace loom

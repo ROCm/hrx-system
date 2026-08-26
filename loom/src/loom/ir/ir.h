@@ -1557,18 +1557,18 @@ typedef struct loom_op_t {
   uint16_t result_count;
   // Number of in-place result/operand ties in trailing storage.
   uint16_t tied_result_count;
+  // Number of successor block pointers in trailing storage.
+  uint16_t successor_count;
+  // Number of child region pointers in trailing storage.
+  uint8_t region_count;
+  // Number of attributes in trailing storage.
+  uint8_t attribute_count;
   // Effective generic semantic traits for this op instance.
   loom_trait_flags_t traits;
   // Source location (index into module's location table).
   // Carries the full source range for diagnostics and debug info.
   // Value locations are derived: value -> def -> op -> location.
   loom_location_id_t location;
-  // Number of child region pointers in trailing storage.
-  uint8_t region_count;
-  // Number of successor block pointers in trailing storage.
-  uint8_t successor_count;
-  // Number of attributes in trailing storage.
-  uint8_t attribute_count;
   // Per-op lifecycle, worklist, and source-presentation flags.
   loom_op_flags_t flags;
   // Per-op-instance flags: fast-math flags for float ops, overflow

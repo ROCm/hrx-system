@@ -109,7 +109,7 @@ bool loom_print_block_needs_synthetic_label(const loom_print_context_t* ctx,
     const loom_op_t* op = NULL;
     loom_block_for_each_op(source, op) {
       loom_block_t* const* successors = loom_op_const_successors(op);
-      for (uint8_t i = 0; i < op->successor_count; ++i) {
+      for (uint16_t i = 0; i < op->successor_count; ++i) {
         if (successors[i] == block) {
           return true;
         }
@@ -121,7 +121,7 @@ bool loom_print_block_needs_synthetic_label(const loom_print_context_t* ctx,
 
 iree_status_t loom_print_successor_ref(loom_print_context_t* ctx,
                                        const loom_op_t* op,
-                                       uint8_t successor_index) {
+                                       uint16_t successor_index) {
   if (successor_index >= op->successor_count) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,

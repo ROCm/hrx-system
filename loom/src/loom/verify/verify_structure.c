@@ -533,7 +533,7 @@ void loom_verify_successor_targets(loom_verify_state_t* state,
       op->parent_block ? op->parent_block->parent_region : NULL;
   iree_string_view_t op_name = loom_op_vtable_name(vtable);
   loom_block_t* const* successors = loom_op_const_successors(op);
-  for (uint8_t i = 0; i < op->successor_count; ++i) {
+  for (uint16_t i = 0; i < op->successor_count; ++i) {
     loom_diagnostic_field_ref_t successor_ref =
         loom_diagnostic_field_ref(LOOM_DIAGNOSTIC_FIELD_SUCCESSOR, i);
     if (!successors[i]) {

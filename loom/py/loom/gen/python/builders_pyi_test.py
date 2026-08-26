@@ -9,7 +9,7 @@
 from pathlib import Path
 from unittest import mock
 
-from loom.assembly import Attr, Ref
+from loom.assembly import Attr, OptionalGroup, Ref, ScopedEnumRef
 from loom.dsl import (
     ANY,
     I32,
@@ -135,6 +135,24 @@ def test_builders_pyi_imports_signed_enum_set_public_types() -> None:
     assert "from collections.abc import Mapping" in test_stub
     assert "from loom.ir import SignedEnumSetAttr" in test_stub
     assert "features: SignedEnumSetAttr | Mapping[str | int, bool]" in test_stub
+
+
+def test_builders_pyi_renders_optional_scoped_enum_once() -> None:
+    test_dialect = Dialect("test", dialect_id=0x7F)
+    generated = generate_builder_stub_files(
+        [
+            Op(
+                "test.branch",
+                group=test_dialect,
+                attrs=[AttrDef("descriptor", "scoped_enum", optional=True)],
+                format=[OptionalGroup([ScopedEnumRef("descriptor")], anchor="descriptor")],
+            )
+        ]
+    )
+    test_stub = generated["loom/py/loom/dialect/test/builders/__init__.pyi"]
+
+    assert "descriptor: str | None = ..." in test_stub
+    assert "str | None | None" not in test_stub
 
 
 def test_checked_in_file_set_owns_only_generated_stubs(

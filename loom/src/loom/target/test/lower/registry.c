@@ -4,8 +4,10 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+#include "loom/codegen/low/builder.h"
 #include "loom/error/error_catalog.h"
 #include "loom/ir/module.h"
+#include "loom/ops/cfg/ops.h"
 #include "loom/target/registers.h"
 #include "loom/target/test/contracts/core.h"
 #include "loom/target/test/contracts/core_lower_rules.h"
@@ -271,6 +273,69 @@ static iree_status_t loom_test_low_matrix_query(
   return iree_ok_status();
 }
 
+static bool loom_test_low_switch_target_count(const loom_op_t* source_op,
+                                              uint16_t* out_target_count) {
+  const loom_attribute_t case_keys = loom_cfg_switch_case_keys(source_op);
+  if (case_keys.kind != LOOM_ATTR_I64_ARRAY || case_keys.count == 0 ||
+      case_keys.i64_array == NULL || case_keys.i64_array[0] < 0 ||
+      case_keys.i64_array[case_keys.count - 1] > UINT16_MAX - 2) {
+    return false;
+  }
+  *out_target_count = (uint16_t)(case_keys.i64_array[case_keys.count - 1] + 1);
+  return true;
+}
+
+static bool loom_test_low_can_emit_switch(
+    void* user_data, const loom_module_t* module, const loom_op_t* source_op,
+    const loom_target_facts_t* target_facts) {
+  (void)user_data;
+  (void)module;
+  (void)target_facts;
+  uint16_t target_count = 0;
+  return loom_test_low_switch_target_count(source_op, &target_count);
+}
+
+static iree_status_t loom_test_low_emit_switch(
+    void* user_data, loom_low_lower_context_t* context,
+    const loom_op_t* source_op, loom_value_id_t low_selector,
+    loom_block_t* low_default_dest, loom_block_t* const* low_case_dests,
+    uint16_t case_count) {
+  (void)user_data;
+  uint16_t target_count = 0;
+  if (!loom_test_low_switch_target_count(source_op, &target_count)) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "test-low switch emission received an unsupported source switch");
+  }
+  const loom_attribute_t case_keys = loom_cfg_switch_case_keys(source_op);
+  if (case_keys.count != case_count) {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "test-low switch lowering plan is stale");
+  }
+
+  loom_block_t** low_target_dests = NULL;
+  IREE_RETURN_IF_ERROR(loom_low_lower_allocate_emission_array(
+      context, target_count, sizeof(*low_target_dests),
+      (void**)&low_target_dests));
+  for (uint16_t i = 0; i < target_count; ++i) {
+    low_target_dests[i] = low_default_dest;
+  }
+  for (uint16_t i = 0; i < case_count; ++i) {
+    low_target_dests[(uint16_t)case_keys.i64_array[i]] = low_case_dests[i];
+  }
+
+  const loom_low_descriptor_t* descriptor =
+      loom_low_descriptor_set_descriptor_at(
+          loom_low_lower_context_descriptor_set(context),
+          TEST_LOW_CORE_DESCRIPTOR_REF_TEST_SWITCH);
+  loom_op_t* low_switch_op = NULL;
+  return loom_low_build_resolved_descriptor_switch(
+      loom_low_lower_context_builder(context),
+      loom_low_lower_context_descriptor_set(context), descriptor, low_selector,
+      low_default_dest, low_target_dests, target_count, source_op->location,
+      &low_switch_op);
+}
+
 static const loom_low_lower_rule_set_t* const kTestLowRuleSets[] = {
     &loom_test_low_core_lower_rule_set,
 };
@@ -300,6 +365,12 @@ static const loom_low_lower_policy_t kTestLowLowerPolicy = {
         {
             .options = loom_test_low_matrix_options,
             .query = loom_test_low_matrix_query,
+        },
+    .switch_lowering =
+        {
+            .can_emit = loom_test_low_can_emit_switch,
+            .emit = loom_test_low_emit_switch,
+            .user_data = NULL,
         },
 };
 

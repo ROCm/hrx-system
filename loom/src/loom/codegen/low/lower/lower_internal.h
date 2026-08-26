@@ -109,7 +109,7 @@ typedef struct loom_low_lower_successor_interpositions_t {
   // NULL entries use the destination implied by the source successor block.
   loom_block_t** low_dests;
   // Number of entries in low_dests.
-  uint8_t low_dest_count;
+  uint16_t low_dest_count;
 } loom_low_lower_successor_interpositions_t;
 
 // Returns exact source execution evidence for an operation when loop and CFG

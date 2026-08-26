@@ -207,7 +207,7 @@ class OpCallable:
         values = _validate_and_normalize_kwargs(self._signature, kwargs)
         attributes: dict[str, Any] = {}
         operands: list[ValueRef | int] = []
-        successors: list[Block] = []
+        successor_values: dict[str, Block | Sequence[Block]] = {}
         func_args: list[ValueRef | int] = []
         block_args_by_region: dict[str, Sequence[tuple[str, Type]]] = {}
         regions: list[Region] = []
@@ -298,12 +298,22 @@ class OpCallable:
                 case BuilderParamKind.REGION_TABLE_CASES:
                     regions.extend(cast(Sequence[Region], value))
                 case BuilderParamKind.SUCCESSOR:
-                    successors.append(cast(Block, value))
+                    successor_values[param.name] = cast(Block, value)
+                case BuilderParamKind.SUCCESSOR_VARIADIC:
+                    successor_values[param.name] = cast(Sequence[Block], value or ())
                 case _:
                     raise ValueError(
                         f"{op.name}: unsupported builder parameter kind "
                         f"{param.kind.name}"
                     )
+
+        successors: list[Block] = []
+        for successor in op.successors:
+            value = successor_values[successor.name]
+            if successor.variadic:
+                successors.extend(cast(Sequence[Block], value))
+            else:
+                successors.append(cast(Block, value))
 
         operand_segment_counts = self._append_operands(op, values, operands, attributes)
 
@@ -501,6 +511,8 @@ def _default_value(param: BuilderParam) -> Any:
         case BuilderParamKind.OPERAND_DICT:
             return {}
         case BuilderParamKind.OPERAND_VARIADIC:
+            return []
+        case BuilderParamKind.SUCCESSOR_VARIADIC:
             return []
         case BuilderParamKind.REGION:
             return None

@@ -708,6 +708,174 @@ static iree_status_t loom_parse_low_asm_return(
                                         comment_count);
 }
 
+static iree_status_t loom_parse_low_asm_control_successor(
+    loom_parser_t* parser, uint16_t successor_index,
+    loom_parsed_op_t* parsed_spans) {
+  loom_token_t label_token = loom_token_none();
+  const uint32_t errors_before = parser->error_count;
+  LOOM_PARSE_EXPECT(parser, LOOM_TOKEN_BLOCK_LABEL, &label_token);
+  if (parser->error_count > errors_before) {
+    return iree_ok_status();
+  }
+  IREE_RETURN_IF_ERROR(loom_parsed_op_set_successor(
+      parsed_spans, &parser->parser_arena, successor_index, /*block=*/NULL,
+      label_token));
+  return loom_parsed_op_add_field_span(
+      parsed_spans, &parser->parser_arena, LOOM_LOCATION_FIELD_SUCCESSOR,
+      successor_index, label_token, label_token.line, label_token.end_column);
+}
+
+static iree_status_t loom_parse_low_asm_branch_args(
+    loom_parser_t* parser, loom_low_asm_value_list_t* args,
+    loom_parsed_op_t* parsed_spans) {
+  if (!loom_tokenizer_try_consume(&parser->tokenizer, LOOM_TOKEN_LPAREN)) {
+    return iree_ok_status();
+  }
+
+  const uint32_t errors_before = parser->error_count;
+  while (!loom_tokenizer_at(&parser->tokenizer, LOOM_TOKEN_RPAREN)) {
+    if (args->count == UINT16_MAX) {
+      return iree_make_status(
+          IREE_STATUS_RESOURCE_EXHAUSTED,
+          "low asm branch argument count exceeds uint16_t storage");
+    }
+    if (args->count > 0) {
+      LOOM_PARSE_EXPECT(parser, LOOM_TOKEN_COMMA, NULL);
+      if (parser->error_count > errors_before) {
+        return iree_ok_status();
+      }
+    }
+    loom_token_t value_token = loom_token_none();
+    LOOM_PARSE_EXPECT(parser, LOOM_TOKEN_SSA_VALUE, &value_token);
+    if (parser->error_count > errors_before) {
+      return iree_ok_status();
+    }
+    loom_value_id_t value = LOOM_VALUE_ID_INVALID;
+    IREE_RETURN_IF_ERROR(
+        loom_parser_resolve_value(parser, value_token, &value));
+    if (parser->error_count > errors_before) {
+      return iree_ok_status();
+    }
+    IREE_RETURN_IF_ERROR(loom_low_asm_value_list_append(parser, args, value));
+    IREE_RETURN_IF_ERROR(loom_parsed_op_add_field_span(
+        parsed_spans, &parser->parser_arena, LOOM_LOCATION_FIELD_OPERAND,
+        (uint16_t)(args->count - 1), value_token, value_token.line,
+        value_token.end_column));
+  }
+  LOOM_PARSE_EXPECT(parser, LOOM_TOKEN_RPAREN, NULL);
+  return iree_ok_status();
+}
+
+static iree_status_t loom_parse_low_asm_switch_successors(
+    loom_parser_t* parser, loom_parsed_op_t* parsed_spans) {
+  const uint32_t errors_before = parser->error_count;
+  IREE_RETURN_IF_ERROR(loom_parse_keyword(parser, LOOM_KW_TARGETS));
+  LOOM_PARSE_EXPECT(parser, LOOM_TOKEN_LBRACKET, NULL);
+  if (parser->error_count > errors_before) {
+    return iree_ok_status();
+  }
+
+  uint32_t successor_index = 1;
+  for (;;) {
+    if (successor_index == UINT16_MAX) {
+      return iree_make_status(
+          IREE_STATUS_RESOURCE_EXHAUSTED,
+          "low asm switch target count exceeds uint16_t storage");
+    }
+    IREE_RETURN_IF_ERROR(loom_parse_low_asm_control_successor(
+        parser, (uint16_t)successor_index, parsed_spans));
+    if (parser->error_count > errors_before) {
+      return iree_ok_status();
+    }
+    ++successor_index;
+    if (!loom_tokenizer_try_consume(&parser->tokenizer, LOOM_TOKEN_COMMA)) {
+      break;
+    }
+  }
+
+  LOOM_PARSE_EXPECT(parser, LOOM_TOKEN_RBRACKET, NULL);
+  IREE_RETURN_IF_ERROR(loom_parse_keyword(parser, LOOM_KW_DEFAULT));
+  if (parser->error_count > errors_before) {
+    return iree_ok_status();
+  }
+  return loom_parse_low_asm_control_successor(parser, /*successor_index=*/0,
+                                              parsed_spans);
+}
+
+static iree_status_t loom_parse_low_asm_control(
+    loom_parser_t* parser, const loom_text_low_asm_packet_descriptor_t* packet,
+    const loom_low_asm_result_names_t* result_names, loom_token_t start_token,
+    loom_token_t mnemonic_token, const iree_string_view_t* comments,
+    iree_host_size_t comment_count, loom_parsed_op_t* parsed_spans) {
+  const uint32_t errors_before = parser->error_count;
+  if (result_names->count != 0 || packet->result_count != 0 ||
+      packet->immediate_count != 0) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "low asm control instruction descriptor has an "
+                            "invalid result or immediate shape");
+  }
+
+  loom_low_asm_value_list_t operands;
+  loom_low_asm_value_list_initialize(&operands);
+  switch (packet->carrier) {
+    case LOOM_TEXT_LOW_ASM_CARRIER_BRANCH: {
+      IREE_RETURN_IF_ERROR(loom_parse_low_asm_control_successor(
+          parser, /*successor_index=*/0, parsed_spans));
+      if (parser->error_count > errors_before) {
+        return iree_ok_status();
+      }
+      IREE_RETURN_IF_ERROR(
+          loom_parse_low_asm_branch_args(parser, &operands, parsed_spans));
+      break;
+    }
+    case LOOM_TEXT_LOW_ASM_CARRIER_SWITCH: {
+      IREE_RETURN_IF_ERROR(loom_parse_low_asm_operands(
+          parser, packet, mnemonic_token, &operands));
+      if (parser->error_count > errors_before) {
+        return iree_ok_status();
+      }
+      IREE_RETURN_IF_ERROR(
+          loom_parse_low_asm_switch_successors(parser, parsed_spans));
+      break;
+    }
+    case LOOM_TEXT_LOW_ASM_CARRIER_PACKET:
+    default:
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "low asm packet is not a control instruction");
+  }
+  if (parser->error_count > errors_before) {
+    return iree_ok_status();
+  }
+
+  loom_location_id_t location = LOOM_LOCATION_UNKNOWN;
+  IREE_RETURN_IF_ERROR(loom_parse_low_asm_packet_location(
+      parser, start_token, mnemonic_token, parsed_spans, &location));
+  if (parser->error_count > errors_before) {
+    return iree_ok_status();
+  }
+
+  loom_op_t* op = NULL;
+  IREE_RETURN_IF_ERROR(parser->low_asm_environment.vtable->build_control(
+      parser->low_asm_environment.state, &parser->builder, packet,
+      operands.values, operands.count, parsed_spans->successors,
+      parsed_spans->successor_count, location, &op));
+  if (op == NULL) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "low asm control builder returned no operation");
+  }
+
+  loom_region_t* region =
+      op->parent_block ? op->parent_block->parent_region : NULL;
+  for (uint16_t i = 0; i < parsed_spans->successor_count; ++i) {
+    IREE_RETURN_IF_ERROR(loom_parser_pending_successor_refs_add(
+        &parser->pending_successor_refs, &parser->parser_arena, region, op, i,
+        parsed_spans->successor_label_tokens[i]));
+  }
+  op->flags |= parsed_spans->source_flags;
+  return loom_module_attach_op_comments(parser->module, op, comments,
+                                        comment_count);
+}
+
 static iree_status_t loom_parse_low_asm_instruction(
     loom_parser_t* parser,
     const loom_text_low_asm_descriptor_set_t* descriptor_set,
@@ -732,6 +900,12 @@ static iree_status_t loom_parse_low_asm_instruction(
     return loom_parser_emit_low_asm_result_count_mismatch(
         parser, mnemonic_token, packet.result_count,
         (uint32_t)result_names->count);
+  }
+
+  if (packet.carrier != LOOM_TEXT_LOW_ASM_CARRIER_PACKET) {
+    return loom_parse_low_asm_control(parser, &packet, result_names,
+                                      start_token, mnemonic_token, comments,
+                                      comment_count, parsed_spans);
   }
 
   loom_low_asm_value_list_t operands;
@@ -875,6 +1049,7 @@ static bool loom_low_asm_token_is_canonical_op(loom_parser_t* parser,
       iree_string_view_equal(token.text, IREE_SV("low.func.call")) ||
       iree_string_view_equal(token.text, IREE_SV("low.op")) ||
       iree_string_view_equal(token.text, IREE_SV("low.scf.condition")) ||
+      iree_string_view_equal(token.text, IREE_SV("low.switch")) ||
       iree_string_view_equal(token.text, IREE_SV("low.scf.yield")) ||
       iree_string_view_equal(token.text, IREE_SV("low.scf.if")) ||
       iree_string_view_equal(token.text, IREE_SV("low.scf.for")) ||

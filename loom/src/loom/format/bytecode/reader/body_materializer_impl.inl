@@ -485,7 +485,7 @@ static iree_status_t loom_bytecode_body_reader_read_op(
       loom_bytecode_reader_cursor_absolute_position(cursor);
   IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_uvarint(
       body_reader->values.decoder, cursor, &successor_count));
-  if (successor_count > UINT8_MAX || successor_count > IREE_HOST_SIZE_MAX) {
+  if (successor_count > UINT16_MAX || successor_count > IREE_HOST_SIZE_MAX) {
     return loom_bytecode_value_scope_emit_invalid(
         &body_reader->values, successor_count_offset,
         IREE_SV("successor_count_exceeds_field_width"));
@@ -683,13 +683,14 @@ static iree_status_t loom_bytecode_body_reader_read_op(
   if (operand_segment_count > 0) {
     IREE_RETURN_IF_ERROR(loom_builder_allocate_segmented_op_with_successors(
         builder, op_kind, (uint16_t)operand_count, operand_segment_counts,
-        operand_segment_count, (uint16_t)result_count, (uint8_t)successor_count,
+        operand_segment_count, (uint16_t)result_count,
+        (uint16_t)successor_count,
         (uint8_t)region_count, (uint16_t)tied_result_count,
         vtable->attribute_count, target_location_id, &op));
   } else {
     IREE_RETURN_IF_ERROR(loom_builder_allocate_op_with_successors(
         builder, op_kind, (uint16_t)operand_count, (uint16_t)result_count,
-        (uint8_t)successor_count, (uint8_t)region_count,
+        (uint16_t)successor_count, (uint8_t)region_count,
         (uint16_t)tied_result_count, vtable->attribute_count,
         target_location_id, &op));
   }

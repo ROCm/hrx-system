@@ -1617,6 +1617,26 @@ iree_status_t loom_low_cond_br_verify(const loom_module_t* module,
       loom_low_cond_br_false_dest(op), NULL, 0);
 }
 
+iree_status_t loom_low_switch_verify(const loom_module_t* module,
+                                     const loom_op_t* op,
+                                     iree_diagnostic_emitter_t emitter) {
+  const loom_successor_slice_t targets = loom_low_switch_target_dests(op);
+  if (targets.count == 0) {
+    return loom_low_emit_count_mismatch(
+        emitter, op, IREE_SV("target_dests"), 0,
+        IREE_SV("at least one target destination"), 1);
+  }
+  IREE_RETURN_IF_ERROR(loom_ops_verify_successor_args(
+      module, emitter, op, IREE_SV("low.switch"), 0,
+      loom_low_switch_default_dest(op), NULL, 0));
+  for (uint16_t i = 0; i < targets.count; ++i) {
+    IREE_RETURN_IF_ERROR(loom_ops_verify_successor_args(
+        module, emitter, op, IREE_SV("low.switch"), (uint16_t)(i + 1),
+        targets.blocks[i], NULL, 0));
+  }
+  return iree_ok_status();
+}
+
 iree_status_t loom_low_scf_if_verify(const loom_module_t* module,
                                      const loom_op_t* op,
                                      iree_diagnostic_emitter_t emitter) {

@@ -255,23 +255,40 @@ func.def @lowers_switch(%selector: index, %a: i32, %b: i32) -> (i32) {
 
 // ----
 func.def @lowers_switch(%selector: index, %a: i32, %b: i32) -> (i32) {
-  %9 = index.constant 0 : index
-  %10 = index.cmp eq, %selector, %9 : index
-  cfg.cond_br %10, ^_bb2, ^_bb1
+  cfg.switch %selector cases [0, 2] -> [^_bb1, ^_bb2] default ^_bb3
 ^_bb1:
-  %11 = index.constant 2 : index
-  %12 = index.cmp eq, %selector, %11 : index
-  cfg.cond_br %12, ^_bb3, ^_bb4
-^_bb2:
   %case0 = test.addi %a, %a : i32
-  cfg.br ^_bb5(%case0: i32)
-^_bb3:
+  cfg.br ^_bb4(%case0: i32)
+^_bb2:
   %case2 = test.addi %a, %b : i32
-  cfg.br ^_bb5(%case2: i32)
-^_bb4:
+  cfg.br ^_bb4(%case2: i32)
+^_bb3:
   %fallback = test.addi %b, %b : i32
-  cfg.br ^_bb5(%fallback: i32)
-^_bb5(%result: i32):
+  cfg.br ^_bb4(%fallback: i32)
+^_bb4(%result: i32):
+  func.return %result : i32
+}
+
+// ====
+
+func.def @lowers_lookup(%selector: index, %a: i32, %b: i32, %fallback: i32) -> (i32) {
+  %result = scf.lookup %selector {
+    0 = (%a),
+    2 = (%b)
+  } default(%fallback) : i32
+  func.return %result : i32
+}
+
+// ----
+func.def @lowers_lookup(%selector: index, %a: i32, %b: i32, %fallback: i32) -> (i32) {
+  cfg.switch %selector cases [0, 2] -> [^_bb1, ^_bb2] default ^_bb3
+^_bb1:
+  cfg.br ^_bb4(%a: i32)
+^_bb2:
+  cfg.br ^_bb4(%b: i32)
+^_bb3:
+  cfg.br ^_bb4(%fallback: i32)
+^_bb4(%result: i32):
   func.return %result : i32
 }
 

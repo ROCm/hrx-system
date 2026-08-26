@@ -380,6 +380,7 @@ static bool loom_low_lower_op_is_structural(const loom_module_t* module,
     case LOOM_OP_BUFFER_ASSUME_SAME_ROOT:
     case LOOM_OP_CFG_BR:
     case LOOM_OP_CFG_COND_BR:
+    case LOOM_OP_CFG_SWITCH:
     case LOOM_OP_FUNC_CALL:
     case LOOM_OP_FUNC_RETURN:
     case LOOM_OP_KERNEL_RETURN:
@@ -806,6 +807,10 @@ static void loom_low_lower_mark_structural_storage_demands(
           context, loom_cfg_cond_br_condition(source_op));
       return;
     }
+    case LOOM_OP_CFG_SWITCH:
+      loom_low_lower_mark_value_storage_required(
+          context, loom_cfg_switch_selector(source_op));
+      return;
     case LOOM_OP_SCF_FOR:
       loom_low_lower_mark_value_storage_required(
           context, loom_scf_for_lower_bound(source_op));
@@ -2975,6 +2980,33 @@ static iree_status_t loom_low_lower_structural_op(
       return loom_low_cond_br_build(&context->builder, low_condition,
                                     low_true_dest, low_false_dest,
                                     source_op->location, &low_cond_br_op);
+    }
+    case LOOM_OP_CFG_SWITCH: {
+      if (context->policy->switch_lowering.emit == NULL) {
+        return iree_make_status(
+            IREE_STATUS_FAILED_PRECONDITION,
+            "cfg.switch reached a target lowering policy without direct "
+            "switch emission");
+      }
+      loom_value_id_t low_selector = LOOM_VALUE_ID_INVALID;
+      IREE_RETURN_IF_ERROR(loom_low_lower_lookup_value(
+          context, loom_cfg_switch_selector(source_op), &low_selector));
+      loom_block_t* low_default_dest = NULL;
+      IREE_RETURN_IF_ERROR(loom_low_lower_lookup_successor_dest(
+          context, source_op, 0, &low_default_dest));
+      const loom_successor_slice_t case_dests =
+          loom_cfg_switch_case_dests(source_op);
+      loom_block_t** low_case_dests = NULL;
+      IREE_RETURN_IF_ERROR(loom_low_lower_allocate_emission_array(
+          context, case_dests.count, sizeof(*low_case_dests),
+          (void**)&low_case_dests));
+      for (uint16_t i = 0; i < case_dests.count; ++i) {
+        IREE_RETURN_IF_ERROR(loom_low_lower_lookup_successor_dest(
+            context, source_op, (uint16_t)(i + 1), &low_case_dests[i]));
+      }
+      return context->policy->switch_lowering.emit(
+          context->policy->switch_lowering.user_data, context, source_op,
+          low_selector, low_default_dest, low_case_dests, case_dests.count);
     }
     case LOOM_OP_SCF_YIELD:
       return loom_low_lower_emit_scf_yield(context, source_op);

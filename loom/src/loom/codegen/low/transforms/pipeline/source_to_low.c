@@ -9,6 +9,7 @@
 #include <string.h>
 
 #include "loom/codegen/low/launch_config_program.h"
+#include "loom/codegen/low/lower/lower.h"
 #include "loom/codegen/low/lower/source_selection.h"
 #include "loom/codegen/low/pipeline/pass_environment.h"
 #include "loom/pass/pipeline.h"
@@ -392,6 +393,14 @@ iree_status_t loom_low_source_to_low_run(loom_pass_t* pass,
     }
     const loom_target_low_legality_provider_list_t* legality_provider_list =
         loom_low_pass_capability_legality_provider_list(low_capability);
+    bool control_flow_changed = false;
+    status = loom_low_lower_prepare_cfg_switches(
+        module, selection->func, selection->target_facts, selection->policy,
+        &control_flow_changed);
+    if (!iree_status_is_ok(status)) break;
+    if (control_flow_changed) {
+      loom_pass_value_fact_owner_invalidate(pass->value_facts);
+    }
     loom_value_fact_table_t* fact_table = NULL;
     status = loom_pass_value_facts_acquire(
         pass, module,

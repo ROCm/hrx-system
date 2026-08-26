@@ -28,6 +28,11 @@ loom_trait_flags_t loom_low_descriptor_effective_traits(
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_low_descriptor_t* descriptor) {
   loom_trait_flags_t traits = 0;
+  if (descriptor->carrier == LOOM_LOW_DESCRIPTOR_CARRIER_BRANCH) {
+    traits |= LOOM_TRAIT_TERMINATOR | LOOM_TRAIT_STORAGE_RELATION;
+  } else if (descriptor->carrier == LOOM_LOW_DESCRIPTOR_CARRIER_SWITCH) {
+    traits |= LOOM_TRAIT_TERMINATOR;
+  }
   for (uint16_t i = 0; i < descriptor->effect_count; ++i) {
     const uint32_t effect_index = descriptor->effect_start + i;
     IREE_ASSERT(effect_index < descriptor_set->effect_count);

@@ -625,7 +625,7 @@ static iree_status_t loom_low_packet_json_write_successors(
   loom_json_array_writer_t array;
   IREE_RETURN_IF_ERROR(loom_json_array_begin(stream, &array));
   loom_block_t* const* successors = loom_op_const_successors(op);
-  for (uint8_t i = 0; i < op->successor_count; ++i) {
+  for (uint16_t i = 0; i < op->successor_count; ++i) {
     IREE_RETURN_IF_ERROR(loom_json_array_begin_element(&array));
     loom_json_object_writer_t object;
     IREE_RETURN_IF_ERROR(loom_json_object_begin(stream, &object));

@@ -315,6 +315,8 @@ typedef struct loom_low_allocation_table_t {
   iree_host_size_t packet_move_group_count;
   // Final sequential physical move rows shared by all move groups.
   const loom_low_move_t* moves;
+  // Number of initialized entries in |moves| across edge and packet groups.
+  iree_host_size_t move_count;
   // Indices into |moves| for the first row writing each cycle-scratch location.
   const iree_host_size_t* scratch_move_indices;
   // Number of final move rows across packet-local move groups.

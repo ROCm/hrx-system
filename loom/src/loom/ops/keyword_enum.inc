@@ -87,3 +87,5 @@
   LOOM_KW_SCOPE = 78,  // "scope"
   LOOM_KW_ORDERING = 79,  // "ordering"
   LOOM_KW_LINK = 80,  // "link"
+  LOOM_KW_CASES = 81,  // "cases"
+  LOOM_KW_TARGETS = 82,  // "targets"

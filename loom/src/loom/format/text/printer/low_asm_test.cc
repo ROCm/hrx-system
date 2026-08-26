@@ -316,6 +316,57 @@ TEST_F(LowAsmPrinterTest, PrintsStructuralIntrinsics) {
   loom_module_free(module);
 }
 
+TEST_F(LowAsmPrinterTest, PrintsDescriptorBackedControlFlow) {
+  const char* source =
+      "low.func.def target<test.low.core> @control("
+      "%selector: reg<test.i32>, %value: reg<test.i32>) -> "
+      "(reg<test.i32>) asm {\n"
+      "  test.switch %selector targets [^case0, ^fallback] "
+      "default ^fallback\n"
+      "^case0:\n"
+      "  test.br ^done(%value)\n"
+      "^fallback:\n"
+      "  low.br ^done(%value: reg<test.i32>)\n"
+      "^done(%result: reg<test.i32>):\n"
+      "  return %result\n"
+      "}\n";
+  loom_module_t* module = ParseOk(source);
+  ASSERT_NE(module, nullptr);
+  EXPECT_EQ(PrintModule(module), source);
+  loom_module_free(module);
+}
+
+TEST_F(LowAsmPrinterTest, CanonicalizesDescriptorBackedControlFlow) {
+  const char* source =
+      "low.func.def target<test.low.core> @control("
+      "%selector: reg<test.i32>) asm {\n"
+      "  low.switch<test.switch> %selector targets [^case0, ^fallback] "
+      "default ^fallback : reg<test.i32>\n"
+      "^case0:\n"
+      "  low.br<test.br> ^done\n"
+      "^fallback:\n"
+      "  low.br ^done\n"
+      "^done:\n"
+      "  return\n"
+      "}\n";
+  const char* expected =
+      "low.func.def target<test.low.core> @control("
+      "%selector: reg<test.i32>) asm {\n"
+      "  test.switch %selector targets [^case0, ^fallback] "
+      "default ^fallback\n"
+      "^case0:\n"
+      "  test.br ^done\n"
+      "^fallback:\n"
+      "  low.br ^done\n"
+      "^done:\n"
+      "  return\n"
+      "}\n";
+  loom_module_t* module = ParseOk(source);
+  ASSERT_NE(module, nullptr);
+  EXPECT_EQ(PrintModule(module), expected);
+  loom_module_free(module);
+}
+
 TEST_F(LowAsmPrinterTest, PrintsCanonicalStructuralCall) {
   const char* source =
       "test.target<low_core> @test_target\n"

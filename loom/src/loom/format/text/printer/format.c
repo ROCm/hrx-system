@@ -264,6 +264,24 @@ iree_status_t loom_print_format_elements(loom_print_context_t* ctx,
             loom_print_successor_ref(ctx, op, element->field_index));
         break;
       }
+      case LOOM_FORMAT_KIND_SUCCESSOR_REFS: {
+        if (element->field_index > op->successor_count) {
+          return iree_make_status(
+              IREE_STATUS_INVALID_ARGUMENT,
+              "format SUCCESSOR_REFS field_index %u out of range (op has %u "
+              "successors)",
+              element->field_index, op->successor_count);
+        }
+        for (uint16_t successor_index = element->field_index;
+             successor_index < op->successor_count; ++successor_index) {
+          if (successor_index > element->field_index) {
+            IREE_RETURN_IF_ERROR(loom_print_emit_cstr(ctx, ",", false));
+          }
+          IREE_RETURN_IF_ERROR(
+              loom_print_successor_ref(ctx, op, successor_index));
+        }
+        break;
+      }
       case LOOM_FORMAT_KIND_ATTR_VALUE: {
         if (element->field_index >= op->attribute_count) {
           return iree_make_status(

@@ -106,6 +106,7 @@ _SEMANTIC_INSTRUCTION_CLASSES = (
     ("memory.hal", (InstructionClass.GENERIC_MEMORY,)),
     ("control.branch", (InstructionClass.BRANCH,)),
     ("control.cond_branch", (InstructionClass.BRANCH,)),
+    ("control.switch", (InstructionClass.BRANCH,)),
     ("control.return", (InstructionClass.BRANCH,)),
     ("control.call", (InstructionClass.BRANCH,)),
     ("control.barrier", (InstructionClass.BARRIER,)),
@@ -903,7 +904,7 @@ def compile_descriptor_set(
             result_count,
         )
         rematerializable_results_by_descriptor[descriptor.key] = validation.validate_descriptor_constraints(descriptor)
-        validation.validate_descriptor_op_kind(descriptor, result_count)
+        validation.validate_descriptor_carrier(descriptor, result_count)
         validation.validate_descriptor_storage_continuations(
             descriptor,
             register_part_inputs,

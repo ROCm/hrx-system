@@ -183,7 +183,7 @@ low.func.def target<test.low.core>(@test_target) @add(%lhs: reg<test.i32>, %rhs:
 
 test.target<low_core> @test_target
 low.func.def target<test.low.core>(@test_target) @const_as_op() -> (reg<test.i32>) {
-  // ERROR@+1: STRUCTURE/039 {function_name="const_as_op", packet_key="test.const.zero.i32", actual_op_name="low.op", expected_op_name="low.const"}
+  // ERROR@+1: STRUCTURE/039 {function_name="const_as_op", descriptor_key="test.const.zero.i32", actual_op_name="low.op", expected_op_name="low.const"}
   %zero = low.op<test.const.zero.i32>() : () -> reg<test.i32>
   low.return %zero : reg<test.i32>
 }
@@ -192,7 +192,7 @@ low.func.def target<test.low.core>(@test_target) @const_as_op() -> (reg<test.i32
 
 test.target<low_core> @test_target
 low.func.def target<test.low.core>(@test_target) @op_as_const() -> (reg<test.i32>) {
-  // ERROR@+1: STRUCTURE/039 {function_name="op_as_const", packet_key="test.ambiguous", actual_op_name="low.const", expected_op_name="low.op"}
+  // ERROR@+1: STRUCTURE/039 {function_name="op_as_const", descriptor_key="test.ambiguous", actual_op_name="low.const", expected_op_name="low.op"}
   %value = low.const<test.ambiguous> : reg<test.i32>
   low.return %value : reg<test.i32>
 }

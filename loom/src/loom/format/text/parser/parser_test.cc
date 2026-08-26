@@ -337,7 +337,7 @@ TEST_F(ParserTest, ParsedOpScratchFrameRejectsStorageOverflow) {
   loom_parsed_op_reset(scratch);
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_RESOURCE_EXHAUSTED,
-      loom_parsed_op_set_successor(scratch, &parser.parser_arena, UINT8_MAX,
+      loom_parsed_op_set_successor(scratch, &parser.parser_arena, UINT16_MAX,
                                    nullptr, loom_token_none()));
 
   loom_parsed_op_reset(scratch);

@@ -18,6 +18,7 @@ from loom.target.low_descriptors import (
     Constraint,
     ConstraintKind,
     Descriptor,
+    DescriptorCarrier,
     DescriptorFlag,
     DescriptorOpKind,
     DescriptorSet,
@@ -302,14 +303,6 @@ _SHUFFLE_BYTE_IMMEDIATES = tuple(
     for i in range(16)
 )
 
-_TARGET_BLOCK_IMMEDIATE = Immediate(
-    "target_block",
-    ImmediateKind.ORDINAL,
-    flags=(ImmediateFlag.SYMBOLIC,),
-    bit_width=32,
-    unsigned_max=(2**32) - 1,
-)
-
 _TRUE_BLOCK_IMMEDIATE = Immediate(
     "true_block",
     ImmediateKind.ORDINAL,
@@ -476,6 +469,16 @@ TEST_LOW_CMP_EQ_I32_DESCRIPTOR = Descriptor(
     key="test.cmp.eq.i32",
     mnemonic="test.cmp.eq.i32",
     semantic_tag="integer.cmp.eq.i32",
+    operands=(_i32_result(), _i32_operand("lhs"), _i32_operand("rhs")),
+    asm_forms=_asm(results=("dst",), operands=("lhs", "rhs")),
+    schedule_class=_SCHEDULE_SCALAR_ALU,
+    flags=(DescriptorFlag.DEAD_REMOVABLE,),
+)
+
+TEST_LOW_CMP_ULT_I32_DESCRIPTOR = Descriptor(
+    key="test.cmp.ult.i32",
+    mnemonic="test.cmp.ult.i32",
+    semantic_tag="integer.cmp.ult.i32",
     operands=(_i32_result(), _i32_operand("lhs"), _i32_operand("rhs")),
     asm_forms=_asm(results=("dst",), operands=("lhs", "rhs")),
     schedule_class=_SCHEDULE_SCALAR_ALU,
@@ -1067,8 +1070,20 @@ TEST_LOW_BR_DESCRIPTOR = Descriptor(
     mnemonic="test.br",
     semantic_tag="control.branch",
     operands=(),
-    immediates=(_TARGET_BLOCK_IMMEDIATE,),
-    asm_forms=_asm(immediates=("target_block",)),
+    carrier=DescriptorCarrier.BRANCH,
+    asm_forms=_asm(),
+    effects=(_CONTROL_EFFECT,),
+    schedule_class=_SCHEDULE_CONTROL,
+    flags=(DescriptorFlag.SIDE_EFFECTING, DescriptorFlag.TERMINATOR),
+)
+
+TEST_LOW_SWITCH_DESCRIPTOR = Descriptor(
+    key="test.switch",
+    mnemonic="test.switch",
+    semantic_tag="control.switch",
+    operands=(_i32_operand("selector"),),
+    carrier=DescriptorCarrier.SWITCH,
+    asm_forms=_asm(operands=("selector",)),
     effects=(_CONTROL_EFFECT,),
     schedule_class=_SCHEDULE_CONTROL,
     flags=(DescriptorFlag.SIDE_EFFECTING, DescriptorFlag.TERMINATOR),
@@ -1320,6 +1335,7 @@ TEST_LOW_CORE_DESCRIPTOR_SET = DescriptorSet(
         TEST_LOW_WRITE_HIGH16_I32_DESCRIPTOR,
         TEST_LOW_SPV_OP_IADD_I32_DESCRIPTOR,
         TEST_LOW_CMP_EQ_I32_DESCRIPTOR,
+        TEST_LOW_CMP_ULT_I32_DESCRIPTOR,
         TEST_LOW_SELECT_I32_DESCRIPTOR,
         TEST_LOW_ADD_V4I32_DESCRIPTOR,
         TEST_LOW_EARLY_CLOBBER_V4I32_DESCRIPTOR,
@@ -1352,6 +1368,7 @@ TEST_LOW_CORE_DESCRIPTOR_SET = DescriptorSet(
         TEST_LOW_CALL_I32_DESCRIPTOR,
         TEST_LOW_BARRIER_DESCRIPTOR,
         TEST_LOW_BR_DESCRIPTOR,
+        TEST_LOW_SWITCH_DESCRIPTOR,
         TEST_LOW_COND_BR_I32_DESCRIPTOR,
         TEST_LOW_RETURN_I32_DESCRIPTOR,
         TEST_LOW_RETURN_VOID_DESCRIPTOR,

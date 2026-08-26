@@ -29,6 +29,7 @@ from loom.assembly import (
     BindingList,
     BlockArgs,
     BlockRef,
+    BlockRefs,
     Clause,
     FormatElement,
     FuncArgs,
@@ -732,10 +733,19 @@ low_br = Op(
             doc="Register values forwarded to the destination block arguments.",
         )
     ],
+    attrs=[
+        AttrDef(
+            "descriptor",
+            "scoped_enum",
+            optional=True,
+            doc="Optional target operation selected for this structural edge.",
+        )
+    ],
     successors=[Successor("dest", doc="Destination low block.")],
     traits=[TERMINATOR, STORAGE_RELATION],
     verify="loom_low_br_verify",
     format=[
+        OptionalGroup([ScopedEnumRef("descriptor")], anchor="descriptor"),
         BlockRef("dest"),
         OptionalGroup(
             [GLUE, LPAREN, TypedRefs("args"), RPAREN],
@@ -744,6 +754,7 @@ low_br = Op(
     ],
     examples=[
         "low.br ^done",
+        "low.br<test.br> ^done",
         "low.br ^join(%value: reg<test.i32>)",
     ],
 )
@@ -776,6 +787,46 @@ low_cond_br = Op(
     ],
     examples=[
         "low.cond_br %condition, ^then, ^else : reg<test.i32>",
+    ],
+)
+
+# ============================================================================
+# low.switch — descriptor-backed dense target switch
+# ============================================================================
+
+low_switch = Op(
+    "low.switch",
+    group=low_ops,
+    phase=OpPhase.EXECUTABLE,
+    doc="Descriptor-backed dense switch with one default and an ordered target table.",
+    operands=[Operand("selector", REGISTER, doc="Zero-based selector for the target table.")],
+    attrs=[AttrDef("descriptor", "scoped_enum")],
+    successors=[
+        Successor("default_dest", doc="Sequential destination for out-of-range selectors."),
+        Successor(
+            "target_dests",
+            variadic=True,
+            doc="Ordered dense target table; repeated destinations represent holes.",
+        ),
+    ],
+    successor_selector="selector",
+    traits=[TERMINATOR],
+    verify="loom_low_switch_verify",
+    generate_c_builder=False,
+    format=[
+        ScopedEnumRef("descriptor"),
+        Ref("selector"),
+        kw("targets"),
+        LBRACKET,
+        BlockRefs("target_dests"),
+        RBRACKET,
+        kw("default"),
+        BlockRef("default_dest"),
+        COLON,
+        TypeOf("selector"),
+    ],
+    examples=[
+        "low.switch<test.switch> %selector targets [^case0, ^case1] default ^fallback : reg<test.i32>",
     ],
 )
 
@@ -1673,4 +1724,5 @@ ALL_LOW_OPS: tuple[Op, ...] = (
     low_scf_while,
     low_schedule_fence,
     low_assume,
+    low_switch,
 )

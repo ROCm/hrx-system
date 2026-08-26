@@ -232,28 +232,6 @@ static loom_block_t* loom_parser_find_block_by_label(
   return NULL;
 }
 
-static iree_status_t loom_parser_add_pending_successor_ref(
-    loom_parser_t* parser, loom_region_t* region, loom_op_t* op,
-    uint8_t successor_index, loom_token_t label_token) {
-  loom_parser_pending_successor_refs_t* pending =
-      &parser->pending_successor_refs;
-  if (pending->count >= pending->capacity) {
-    iree_host_size_t capacity = pending->capacity;
-    IREE_RETURN_IF_ERROR(iree_arena_grow_array(
-        &parser->parser_arena, pending->count, pending->count + 1,
-        sizeof(loom_parser_pending_successor_ref_t), &capacity,
-        (void**)&pending->entries));
-    pending->capacity = capacity;
-  }
-  pending->entries[pending->count++] = (loom_parser_pending_successor_ref_t){
-      .region = region,
-      .op = op,
-      .label_token = label_token,
-      .successor_index = successor_index,
-  };
-  return iree_ok_status();
-}
-
 static iree_status_t loom_parser_resolve_pending_successor_refs(
     loom_parser_t* parser, loom_region_t* region,
     iree_host_size_t pending_start) {
@@ -479,11 +457,11 @@ static iree_status_t loom_finalize_op(
            parsed->successor_count * sizeof(loom_block_t*));
     loom_region_t* successor_region =
         op->parent_block ? op->parent_block->parent_region : NULL;
-    for (uint8_t i = 0; i < parsed->successor_count; ++i) {
+    for (uint16_t i = 0; i < parsed->successor_count; ++i) {
       if (parsed->successor_label_tokens[i].kind == LOOM_TOKEN_BLOCK_LABEL) {
-        IREE_RETURN_IF_ERROR(loom_parser_add_pending_successor_ref(
-            parser, successor_region, op, i,
-            parsed->successor_label_tokens[i]));
+        IREE_RETURN_IF_ERROR(loom_parser_pending_successor_refs_add(
+            &parser->pending_successor_refs, &parser->parser_arena,
+            successor_region, op, i, parsed->successor_label_tokens[i]));
       }
     }
   }

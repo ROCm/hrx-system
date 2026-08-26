@@ -2061,7 +2061,7 @@ static iree_status_t loom_builder_validate_operand_segments(
 static iree_status_t loom_builder_allocate_op_storage(
     loom_builder_t* builder, loom_op_kind_t kind, uint16_t operand_count,
     const uint16_t* operand_segment_counts, uint8_t operand_segment_count,
-    uint16_t result_count, uint8_t successor_count, uint8_t region_count,
+    uint16_t result_count, uint16_t successor_count, uint8_t region_count,
     uint16_t tied_result_count, uint8_t attribute_count,
     loom_location_id_t location, loom_op_t** out_op) {
   *out_op = NULL;
@@ -2150,7 +2150,7 @@ iree_status_t loom_builder_allocate_op(
 
 iree_status_t loom_builder_allocate_op_with_successors(
     loom_builder_t* builder, loom_op_kind_t kind, uint16_t operand_count,
-    uint16_t result_count, uint8_t successor_count, uint8_t region_count,
+    uint16_t result_count, uint16_t successor_count, uint8_t region_count,
     uint16_t tied_result_count, uint8_t attribute_count,
     loom_location_id_t location, loom_op_t** out_op) {
   return loom_builder_allocate_op_storage(
@@ -2173,7 +2173,7 @@ iree_status_t loom_builder_allocate_segmented_op(
 iree_status_t loom_builder_allocate_segmented_op_with_successors(
     loom_builder_t* builder, loom_op_kind_t kind, uint16_t operand_count,
     const uint16_t* operand_segment_counts, uint8_t operand_segment_count,
-    uint16_t result_count, uint8_t successor_count, uint8_t region_count,
+    uint16_t result_count, uint16_t successor_count, uint8_t region_count,
     uint16_t tied_result_count, uint8_t attribute_count,
     loom_location_id_t location, loom_op_t** out_op) {
   return loom_builder_allocate_op_storage(
@@ -2597,7 +2597,7 @@ static iree_status_t loom_region_remove_verify_kept_op_successors(
     const loom_region_t* region, const bool* remove_blocks,
     const loom_op_t* op) {
   loom_block_t* const* successors = loom_op_const_successors(op);
-  for (uint8_t successor_index = 0; successor_index < op->successor_count;
+  for (uint16_t successor_index = 0; successor_index < op->successor_count;
        ++successor_index) {
     if (loom_region_remove_block_is_removed(region, remove_blocks,
                                             successors[successor_index])) {

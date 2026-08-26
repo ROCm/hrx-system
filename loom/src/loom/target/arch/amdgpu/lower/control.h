@@ -24,7 +24,7 @@ iree_status_t loom_amdgpu_prepare_branch(
 // destination block argument.
 iree_status_t loom_amdgpu_materialize_branch_arg(
     void* user_data, loom_low_lower_context_t* context,
-    const loom_op_t* source_terminator, uint8_t successor_index,
+    const loom_op_t* source_terminator, uint16_t successor_index,
     uint16_t arg_index, loom_value_id_t source_value_id,
     loom_value_id_t low_value_id, loom_type_t required_low_type,
     loom_value_id_t* out_low_value_id);

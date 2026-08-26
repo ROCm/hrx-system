@@ -63,7 +63,7 @@ typedef struct loom_region_slice_t {
 // accessors on CFG terminators.
 typedef struct loom_successor_slice_t {
   loom_block_t** blocks;
-  uint8_t count;
+  uint16_t count;
 } loom_successor_slice_t;
 
 // Returns the value ID at |index| in the slice. |index| must be less than
@@ -264,6 +264,10 @@ enum loom_format_kind_e {
   // [align(16) %a, align(256) %b]. field_index references the variadic
   // operand field and data references its i64 array alignment attribute.
   LOOM_FORMAT_KIND_ALIGNED_REFS = 32,
+
+  // Variadic CFG successor block references: ^case0, ^case1, ^case2.
+  // field_index is the first successor in the trailing variadic span.
+  LOOM_FORMAT_KIND_SUCCESSOR_REFS = 33,
 };
 typedef uint8_t loom_format_kind_t;
 
@@ -1750,7 +1754,7 @@ loom_attribute_t loom_memory_access_atomic_scope(loom_memory_access_t access);
   static inline loom_successor_slice_t func_name(const loom_op_t* op) { \
     loom_successor_slice_t slice;                                       \
     slice.blocks = loom_op_successors(op) + (fixed_count);              \
-    slice.count = (uint8_t)(op->successor_count - (fixed_count));       \
+    slice.count = (uint16_t)(op->successor_count - (fixed_count));      \
     return slice;                                                       \
   }
 
@@ -1809,6 +1813,19 @@ loom_attribute_t loom_memory_access_atomic_scope(loom_memory_access_t access);
   enum { func_name##_ATTR_INDEX = (index) };                     \
   static inline uint32_t func_name(const loom_op_t* op) {        \
     return loom_attr_as_scoped_enum(loom_op_attrs(op)[(index)]); \
+  }
+
+// Defines functions that query and read an optional representation-scoped
+// enum by index.
+#define LOOM_DEFINE_OPTIONAL_ATTR_SCOPED_ENUM(func_name, index)       \
+  enum { func_name##_ATTR_INDEX = (index) };                          \
+  static inline bool func_name##_is_present(const loom_op_t* op) {    \
+    return !loom_attr_is_absent(loom_op_attrs(op)[(index)]);          \
+  }                                                                   \
+  static inline uint32_t func_name(const loom_op_t* op) {             \
+    return func_name##_is_present(op)                                 \
+               ? loom_attr_as_scoped_enum(loom_op_attrs(op)[(index)]) \
+               : UINT32_MAX;                                          \
   }
 
 // Defines a function that reads a symbol attribute by index.
@@ -2155,7 +2172,7 @@ iree_status_t loom_builder_allocate_op(
 // fills the ordinary trailing fields through their accessors.
 iree_status_t loom_builder_allocate_op_with_successors(
     loom_builder_t* builder, loom_op_kind_t kind, uint16_t operand_count,
-    uint16_t result_count, uint8_t successor_count, uint8_t region_count,
+    uint16_t result_count, uint16_t successor_count, uint8_t region_count,
     uint16_t tied_result_count, uint8_t attribute_count,
     loom_location_id_t location, loom_op_t** out_op);
 
@@ -2172,7 +2189,7 @@ iree_status_t loom_builder_allocate_segmented_op(
 iree_status_t loom_builder_allocate_segmented_op_with_successors(
     loom_builder_t* builder, loom_op_kind_t kind, uint16_t operand_count,
     const uint16_t* operand_segment_counts, uint8_t operand_segment_count,
-    uint16_t result_count, uint8_t successor_count, uint8_t region_count,
+    uint16_t result_count, uint16_t successor_count, uint8_t region_count,
     uint16_t tied_result_count, uint8_t attribute_count,
     loom_location_id_t location, loom_op_t** out_op);
 

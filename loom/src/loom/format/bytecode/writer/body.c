@@ -332,7 +332,7 @@ static iree_status_t loom_bytecode_write_operation(
   loom_block_t* const* successors = loom_op_const_successors(op);
   IREE_RETURN_IF_ERROR(
       loom_bytecode_page_writer_write_uvarint(writer, op->successor_count));
-  for (uint8_t i = 0; i < op->successor_count; ++i) {
+  for (uint16_t i = 0; i < op->successor_count; ++i) {
     uint16_t block_index = 0;
     IREE_RETURN_IF_ERROR(loom_bytecode_find_successor_block_index(
         op, successors[i], &block_index));

@@ -48,7 +48,8 @@ enum {
   LOOM_OP_LOW_SCF_WHILE = LOOM_OP_KIND(LOOM_DIALECT_LOW, 25),
   LOOM_OP_LOW_SCHEDULE_FENCE = LOOM_OP_KIND(LOOM_DIALECT_LOW, 26),
   LOOM_OP_LOW_ASSUME = LOOM_OP_KIND(LOOM_DIALECT_LOW, 27),
-  LOOM_OP_LOW_COUNT_ = 28,
+  LOOM_OP_LOW_SWITCH = LOOM_OP_KIND(LOOM_DIALECT_LOW, 28),
+  LOOM_OP_LOW_COUNT_ = 29,
 };
 
 // Function visibility. Absent (0) means private (module-internal).
@@ -630,6 +631,7 @@ iree_status_t loom_low_storage_address_verify(
 LOOM_DEFINE_ISA(loom_low_br_isa, LOOM_OP_LOW_BR)
 LOOM_DEFINE_VARIADIC_OPERANDS(loom_low_br_args, 0)
 LOOM_DEFINE_SUCCESSOR(loom_low_br_dest, 0)
+LOOM_DEFINE_OPTIONAL_ATTR_SCOPED_ENUM(loom_low_br_descriptor, 0)
 iree_status_t loom_low_br_build(
     loom_builder_t* builder,
     loom_block_t* dest,
@@ -852,6 +854,17 @@ iree_status_t loom_low_assume_facts(
     const loom_module_t* module, const loom_op_t* op,
     const loom_value_facts_t* operand_facts,
     loom_value_facts_t* result_facts);
+
+// LOOM_OP_LOW_SWITCH: Descriptor-backed dense switch with one default and an ordered target table.
+// low.switch<test.switch> %selector targets [^case0, ^case1] default ^fallback : reg<test.i32>
+LOOM_DEFINE_ISA(loom_low_switch_isa, LOOM_OP_LOW_SWITCH)
+LOOM_DEFINE_OPERAND(loom_low_switch_selector, 0)
+LOOM_DEFINE_SUCCESSOR(loom_low_switch_default_dest, 0)
+LOOM_DEFINE_VARIADIC_SUCCESSORS(loom_low_switch_target_dests, 1)
+LOOM_DEFINE_ATTR_SCOPED_ENUM(loom_low_switch_descriptor, 0)
+iree_status_t loom_low_switch_verify(
+    const loom_module_t* module, const loom_op_t* op,
+    iree_diagnostic_emitter_t emitter);
 
 // Returns the vtable array for the low dialect.
 const loom_op_vtable_t* const* loom_low_dialect_vtables(

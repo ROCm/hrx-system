@@ -449,9 +449,8 @@ class TestAttrDef:
                 open_enum=True,
             )
 
-    def test_scoped_enum_is_never_optional_or_defaulted(self) -> None:
-        with _raises(ValueError, match="scoped_enum attributes are required"):
-            AttrDef("descriptor", "scoped_enum", optional=True)
+    def test_scoped_enum_may_be_optional_but_never_defaulted(self) -> None:
+        assert AttrDef("descriptor", "scoped_enum", optional=True).optional
         with _raises(ValueError, match="scoped_enum attributes cannot have defaults"):
             AttrDef("descriptor", "scoped_enum", default=0)
 
@@ -3102,12 +3101,26 @@ class TestComparisonOp:
 
 class TestScopedEnumOp:
     def test_scoped_enum_requires_one_top_level_reference(self) -> None:
-        with _raises(ValueError, match="exactly one top-level ScopedEnumRef"):
+        with _raises(ValueError, match="exactly one ScopedEnumRef"):
             Op("test.packet", attrs=[AttrDef("descriptor", "scoped_enum")])
         op = Op(
             "test.packet",
             attrs=[AttrDef("descriptor", "scoped_enum")],
             format=[ScopedEnumRef("descriptor")],
+        )
+        assert op.attr("descriptor") is not None
+
+    def test_optional_scoped_enum_requires_matching_optional_group(self) -> None:
+        with _raises(ValueError, match="anchored to itself"):
+            Op(
+                "test.packet",
+                attrs=[AttrDef("descriptor", "scoped_enum", optional=True)],
+                format=[ScopedEnumRef("descriptor")],
+            )
+        op = Op(
+            "test.packet",
+            attrs=[AttrDef("descriptor", "scoped_enum", optional=True)],
+            format=[OptionalGroup([ScopedEnumRef("descriptor")], anchor="descriptor")],
         )
         assert op.attr("descriptor") is not None
 

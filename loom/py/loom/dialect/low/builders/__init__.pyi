@@ -247,6 +247,7 @@ class LowBuilder(DialectBuilder):
     def br(
         self,
         *,
+        descriptor: str | None = ...,
         dest: Block,
         args: list[ValueRef] = ...,
         location_id: int | None = ...,
@@ -354,3 +355,12 @@ class LowBuilder(DialectBuilder):
         result_names: Sequence[str] | None = ...,
         location_id: int | None = ...,
     ) -> list[ValueRef]: ...
+    def switch(
+        self,
+        *,
+        descriptor: str,
+        selector: ValueRef,
+        target_dests: list[Block] = ...,
+        default_dest: Block,
+        location_id: int | None = ...,
+    ) -> None: ...

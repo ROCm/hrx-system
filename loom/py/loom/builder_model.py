@@ -26,6 +26,7 @@ from loom.assembly import (
     BindingList,
     BlockArgs,
     BlockRef,
+    BlockRefs,
     Clause,
     Flags,
     FormatElement,
@@ -113,6 +114,7 @@ class BuilderParamKind(Enum):
     REGION_TABLE_DEFAULT = auto()
     RESULT_TYPES = auto()
     SUCCESSOR = auto()
+    SUCCESSOR_VARIADIC = auto()
 
 
 @dataclass(frozen=True, slots=True)
@@ -408,6 +410,7 @@ def _extract_params(op: Op) -> list[BuilderParam]:  # noqa: C901
                         name=name,
                         kind=BuilderParamKind.ATTR,
                         type_hint="str",
+                        required=not attr_def.optional,
                         attr_def=attr_def,
                         doc=attr_def.doc,
                     )
@@ -476,6 +479,17 @@ def _extract_params(op: Op) -> list[BuilderParam]:  # noqa: C901
                             kind=BuilderParamKind.SUCCESSOR,
                             type_hint="Block",
                             doc=f"Successor: {name}",
+                        )
+                    )
+
+                case BlockRefs(field=name):
+                    params.append(
+                        BuilderParam(
+                            name=name,
+                            kind=BuilderParamKind.SUCCESSOR_VARIADIC,
+                            type_hint="list[Block]",
+                            required=False,
+                            doc=f"Variadic successors: {name}",
                         )
                     )
 

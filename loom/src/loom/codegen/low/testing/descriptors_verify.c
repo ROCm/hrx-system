@@ -1916,9 +1916,67 @@ static iree_status_t loom_low_verify_descriptor_operand_roles(
   return iree_ok_status();
 }
 
-static iree_status_t loom_low_verify_descriptor_op_kind(
+static iree_status_t loom_low_verify_descriptor_carrier(
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_low_descriptor_t* descriptor, uint32_t descriptor_index) {
+  if (descriptor->carrier_reserved != 0) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "low descriptor %" PRIu32
+                            " has nonzero reserved carrier bits",
+                            descriptor_index);
+  }
+  if (descriptor->carrier == LOOM_LOW_DESCRIPTOR_CARRIER_BRANCH ||
+      descriptor->carrier == LOOM_LOW_DESCRIPTOR_CARRIER_SWITCH) {
+    if (descriptor->op_kind != LOOM_LOW_DESCRIPTOR_OP_KIND_OP) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "low descriptor %" PRIu32
+          " structural carrier selects non-operation kind %u",
+          descriptor_index, (unsigned)descriptor->op_kind);
+    }
+    if (descriptor->result_count != 0) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "low descriptor %" PRIu32
+                              " structural carrier has %" PRIu16 " results",
+                              descriptor_index, descriptor->result_count);
+    }
+    if (descriptor->immediate_count != 0) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "low descriptor %" PRIu32
+                              " structural carrier has %" PRIu16
+                              " ordinary immediates",
+                              descriptor_index, descriptor->immediate_count);
+    }
+    const uint16_t required_operand_count =
+        descriptor->carrier == LOOM_LOW_DESCRIPTOR_CARRIER_SWITCH ? 1 : 0;
+    if (descriptor->operand_count != required_operand_count) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "low descriptor %" PRIu32 " structural carrier has %" PRIu16
+          " operands instead of %" PRIu16,
+          descriptor_index, descriptor->operand_count, required_operand_count);
+    }
+    if (descriptor->carrier == LOOM_LOW_DESCRIPTOR_CARRIER_SWITCH) {
+      const loom_low_operand_t* selector =
+          &descriptor_set->operands[descriptor->operand_start];
+      if (!loom_low_operand_role_is_packet_operand(selector->role) ||
+          iree_any_bit_set(selector->flags,
+                           LOOM_LOW_OPERAND_FLAG_OPTIONAL |
+                               LOOM_LOW_OPERAND_FLAG_VARIADIC)) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "low descriptor %" PRIu32
+            " switch carrier requires one non-optional selector operand",
+            descriptor_index);
+      }
+    }
+    return iree_ok_status();
+  }
+  if (descriptor->carrier != LOOM_LOW_DESCRIPTOR_CARRIER_PACKET) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "low descriptor %" PRIu32 " has invalid carrier %u",
+                            descriptor_index, (unsigned)descriptor->carrier);
+  }
   switch (descriptor->op_kind) {
     case LOOM_LOW_DESCRIPTOR_OP_KIND_OP:
       return iree_ok_status();
@@ -2260,7 +2318,7 @@ static iree_status_t loom_low_verify_descriptor(
   }
   IREE_RETURN_IF_ERROR(loom_low_verify_descriptor_operand_roles(
       descriptor_set, descriptor, descriptor_index));
-  IREE_RETURN_IF_ERROR(loom_low_verify_descriptor_op_kind(
+  IREE_RETURN_IF_ERROR(loom_low_verify_descriptor_carrier(
       descriptor_set, descriptor, descriptor_index));
   IREE_RETURN_IF_ERROR(loom_low_verify_descriptor_state_operands(
       descriptor_set, descriptor, descriptor_index));

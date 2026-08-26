@@ -908,16 +908,10 @@ class AttrDef:
             raise ValueError(
                 f"AttrDef '{self.name}': open_enum requires an enum attribute"
             )
-        if self.attr_type == ATTR_TYPE_SCOPED_ENUM:
-            if self.optional:
-                raise ValueError(
-                    f"AttrDef '{self.name}': scoped_enum attributes are required"
-                )
-            if self.default is not None:
-                raise ValueError(
-                    f"AttrDef '{self.name}': scoped_enum attributes cannot "
-                    "have defaults"
-                )
+        if self.attr_type == ATTR_TYPE_SCOPED_ENUM and self.default is not None:
+            raise ValueError(
+                f"AttrDef '{self.name}': scoped_enum attributes cannot have defaults"
+            )
         if self.symbol_ref is not None and self.attr_type not in (
             ATTR_TYPE_SYMBOL,
             ATTR_TYPE_SYMBOL_ARRAY,
@@ -4155,6 +4149,7 @@ def _collect_format_fields(elements: tuple[FormatElement, ...]) -> set[str]:
         BindingList,
         BlockArgs,
         BlockRef,
+        BlockRefs,
         Clause,
         EncodingOf,
         Flags,
@@ -4188,7 +4183,13 @@ def _collect_format_fields(elements: tuple[FormatElement, ...]) -> set[str]:
     fields: set[str] = set()
     for elem in elements:
         match elem:
-            case Ref(field=f) | Refs(field=f) | TypedRefs(field=f) | BlockRef(field=f):
+            case (
+                Ref(field=f)
+                | Refs(field=f)
+                | TypedRefs(field=f)
+                | BlockRef(field=f)
+                | BlockRefs(field=f)
+            ):
                 fields.add(f)
             case AlignedRefs(refs=refs, alignments=alignments):
                 fields.add(refs)
@@ -4448,8 +4449,8 @@ def _validate_scoped_enum_fields(
     format_elements: tuple[FormatElement, ...],
     attrs: tuple[AttrDef, ...],
 ) -> None:
-    """Validates required representation-scoped enum syntax."""
-    from loom.assembly import ScopedEnumRef
+    """Validates representation-scoped enum syntax and optionality."""
+    from loom.assembly import Clause, OptionalGroup, Scope, ScopedEnumRef
 
     scoped_attrs = [attr for attr in attrs if attr.attr_type == ATTR_TYPE_SCOPED_ENUM]
     if len(scoped_attrs) > 1:
@@ -4457,13 +4458,24 @@ def _validate_scoped_enum_fields(
             f"Op '{op_name}': at most one scoped_enum attr may define its "
             "representation-scoped identity"
         )
-    direct_refs = [
-        element.field
-        for element in format_elements
-        if isinstance(element, ScopedEnumRef)
-    ]
+    refs: list[tuple[str, str | None, bool]] = []
+
+    def collect_refs(
+        elements: tuple[FormatElement, ...],
+        optional_anchor: str | None = None,
+        nested: bool = False,
+    ) -> None:
+        for element in elements:
+            if isinstance(element, ScopedEnumRef):
+                refs.append((element.field, optional_anchor, nested))
+            elif isinstance(element, OptionalGroup):
+                collect_refs(element.elements, element.anchor, True)
+            elif isinstance(element, Clause | Scope):
+                collect_refs(element.elements, optional_anchor, True)
+
+    collect_refs(format_elements)
     attrs_by_name = {attr.name: attr for attr in attrs}
-    for field in direct_refs:
+    for field, _optional_anchor, _nested in refs:
         attr = attrs_by_name.get(field)
         if attr is None or attr.attr_type != ATTR_TYPE_SCOPED_ENUM:
             raise ValueError(
@@ -4471,11 +4483,22 @@ def _validate_scoped_enum_fields(
                 "scoped_enum attr"
             )
     for attr in scoped_attrs:
-        ref_count = direct_refs.count(attr.name)
-        if ref_count != 1:
+        attr_refs = [ref for ref in refs if ref[0] == attr.name]
+        if len(attr_refs) != 1:
             raise ValueError(
                 f"Op '{op_name}': scoped_enum attr '{attr.name}' requires "
-                "exactly one top-level ScopedEnumRef"
+                "exactly one ScopedEnumRef"
+            )
+        _field, optional_anchor, nested = attr_refs[0]
+        if attr.optional and optional_anchor != attr.name:
+            raise ValueError(
+                f"Op '{op_name}': optional scoped_enum attr '{attr.name}' "
+                "requires a containing OptionalGroup anchored to itself"
+            )
+        if not attr.optional and nested:
+            raise ValueError(
+                f"Op '{op_name}': required scoped_enum attr '{attr.name}' "
+                "requires a top-level ScopedEnumRef"
             )
 
 

@@ -33,6 +33,7 @@ from loom.target.low_descriptors import (
     DescriptorAsmSurface,
     DescriptorCategory,
     DescriptorFlag,
+    DescriptorOpKind,
     Effect,
     EffectKind,
     EncodingFieldValue,
@@ -68,6 +69,7 @@ from loom.target.low_descriptors import (
 from loom.target.test.descriptors import (
     TEST_LOW_ADD_I32_DESCRIPTOR,
     TEST_LOW_BARRIER_DESCRIPTOR,
+    TEST_LOW_BR_DESCRIPTOR,
     TEST_LOW_COND_BR_I32_DESCRIPTOR,
     TEST_LOW_CONST_I32_DESCRIPTOR,
     TEST_LOW_CORE_DESCRIPTOR_SET,
@@ -75,6 +77,7 @@ from loom.target.test.descriptors import (
     TEST_LOW_STATE_ADD_I32_DESCRIPTOR,
     TEST_LOW_STATE_ADD_I32_RHS_ZERO_DESCRIPTOR,
     TEST_LOW_STATE_ADD_SCHEDULE_STATE_DESCRIPTOR,
+    TEST_LOW_SWITCH_DESCRIPTOR,
     TEST_LOW_WRITE_HIGH16_I32_DESCRIPTOR,
     TEST_LOW_WRITE_LOW16_I32_DESCRIPTOR,
 )
@@ -1836,6 +1839,46 @@ def test_generator_rejects_low_const_asm_operand() -> None:
     with pytest.raises(
         ValueError,
         match=re.escape("descriptor 'test.const.i32' low.const asm form 'test.const.i32' must expose exactly one result and no operands"),
+    ):
+        generate_descriptor_set(descriptor_set)
+
+
+def test_generator_rejects_control_carrier_const_kind() -> None:
+    descriptor = replace(TEST_LOW_BR_DESCRIPTOR, op_kind=DescriptorOpKind.CONST)
+    descriptor_set = replace(TEST_LOW_CORE_DESCRIPTOR_SET, descriptors=(descriptor,))
+
+    with pytest.raises(
+        ValueError,
+        match=re.escape("descriptor 'test.br' uses low.br but selects operation kind 'CONST'"),
+    ):
+        generate_descriptor_set(descriptor_set)
+
+
+def test_generator_rejects_low_br_descriptor_operands() -> None:
+    descriptor = replace(
+        TEST_LOW_BR_DESCRIPTOR,
+        operands=(TEST_LOW_STATE_ADD_SCHEDULE_STATE_DESCRIPTOR.operands[-1],),
+    )
+    descriptor_set = replace(TEST_LOW_CORE_DESCRIPTOR_SET, descriptors=(descriptor,))
+
+    with pytest.raises(
+        ValueError,
+        match=re.escape("descriptor 'test.br' uses low.br but declares 1 descriptor operands"),
+    ):
+        generate_descriptor_set(descriptor_set)
+
+
+def test_generator_rejects_optional_low_switch_selector() -> None:
+    selector = replace(
+        TEST_LOW_SWITCH_DESCRIPTOR.operands[0],
+        flags=(OperandFlag.OPTIONAL,),
+    )
+    descriptor = replace(TEST_LOW_SWITCH_DESCRIPTOR, operands=(selector,))
+    descriptor_set = replace(TEST_LOW_CORE_DESCRIPTOR_SET, descriptors=(descriptor,))
+
+    with pytest.raises(
+        ValueError,
+        match=re.escape("descriptor 'test.switch' uses low.switch but declares a descriptor operand shape other than one required selector"),
     ):
         generate_descriptor_set(descriptor_set)
 

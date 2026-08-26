@@ -99,9 +99,11 @@ loom_cc_library(
     visibility = _TEST_LOW_LOWER_VISIBILITY,
     deps = [
         ":descriptors",
+        "//loom/src/loom/codegen/low:builder",
         "//loom/src/loom/codegen/low/lower",
         "//loom/src/loom/error:error_defs",
         "//loom/src/loom/ir",
+        "//loom/src/loom/ops/cfg",
         "//loom/src/loom/target:registers",
         "//loom/src/loom/target/test/contracts",
         "//runtime/src/iree/base",

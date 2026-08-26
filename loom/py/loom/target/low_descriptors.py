@@ -251,6 +251,14 @@ class DescriptorOpKind(CEnum):
     CONST = "LOOM_LOW_DESCRIPTOR_OP_KIND_CONST"
 
 
+class DescriptorCarrier(CEnum):
+    """Canonical Low structural carrier for a descriptor."""
+
+    PACKET = "LOOM_LOW_DESCRIPTOR_CARRIER_PACKET"
+    BRANCH = "LOOM_LOW_DESCRIPTOR_CARRIER_BRANCH"
+    SWITCH = "LOOM_LOW_DESCRIPTOR_CARRIER_SWITCH"
+
+
 class InstructionClass(CEnum):
     """Target-neutral semantic classes for generated low descriptors."""
 
@@ -613,6 +621,7 @@ class Descriptor:
     semantic_tag: str | None
     operands: tuple[Operand, ...]
     schedule_class: str
+    carrier: DescriptorCarrier = DescriptorCarrier.PACKET
     op_kind: DescriptorOpKind = DescriptorOpKind.OP
     immediates: tuple[Immediate, ...] = ()
     encoding_field_values: tuple[EncodingFieldValue, ...] = ()

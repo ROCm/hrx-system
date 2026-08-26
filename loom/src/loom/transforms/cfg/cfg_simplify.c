@@ -237,10 +237,11 @@ static iree_status_t loom_cfg_simplify_replace_direct_br(
   return loom_rewriter_erase(state->rewriter, old_br);
 }
 
-static iree_status_t loom_cfg_simplify_replace_cond_br_with_br(
-    loom_cfg_simplify_state_t* state, loom_op_t* cond_br, loom_block_t* dest) {
+static iree_status_t loom_cfg_simplify_replace_branch_with_br(
+    loom_cfg_simplify_state_t* state, loom_op_t* branch_op,
+    loom_block_t* dest) {
   IREE_RETURN_IF_ERROR(
-      loom_cfg_simplify_replace_br(state, cond_br, dest, NULL, 0));
+      loom_cfg_simplify_replace_br(state, branch_op, dest, NULL, 0));
   ++state->statistics->branches_folded;
   return iree_ok_status();
 }
@@ -252,7 +253,7 @@ static iree_status_t loom_cfg_simplify_fold_cond_br(
   loom_block_t* false_dest = loom_cfg_cond_br_false_dest(op);
   if (true_dest == false_dest && true_dest && true_dest->arg_count == 0) {
     IREE_RETURN_IF_ERROR(
-        loom_cfg_simplify_replace_cond_br_with_br(state, op, true_dest));
+        loom_cfg_simplify_replace_branch_with_br(state, op, true_dest));
     *out_changed = true;
     return iree_ok_status();
   }
@@ -266,7 +267,43 @@ static iree_status_t loom_cfg_simplify_fold_cond_br(
   loom_block_t* chosen_dest = condition ? true_dest : false_dest;
   if (!chosen_dest || chosen_dest->arg_count != 0) return iree_ok_status();
   IREE_RETURN_IF_ERROR(
-      loom_cfg_simplify_replace_cond_br_with_br(state, op, chosen_dest));
+      loom_cfg_simplify_replace_branch_with_br(state, op, chosen_dest));
+  *out_changed = true;
+  return iree_ok_status();
+}
+
+static iree_status_t loom_cfg_simplify_fold_switch(
+    loom_cfg_simplify_state_t* state, loom_op_t* op, bool* out_changed) {
+  if (!loom_cfg_switch_isa(op)) return iree_ok_status();
+
+  int64_t selector = 0;
+  const loom_value_facts_t facts = loom_value_fact_table_lookup(
+      state->fact_table, loom_cfg_switch_selector(op));
+  if (!loom_value_facts_as_exact_i64(facts, &selector)) {
+    return iree_ok_status();
+  }
+
+  const loom_attribute_t case_keys = loom_cfg_switch_case_keys(op);
+  const loom_successor_slice_t case_dests = loom_cfg_switch_case_dests(op);
+  loom_block_t* chosen_dest = loom_cfg_switch_default_dest(op);
+  iree_host_size_t lower = 0;
+  iree_host_size_t upper = case_keys.count;
+  while (lower < upper) {
+    const iree_host_size_t middle = lower + (upper - lower) / 2;
+    const int64_t case_key = case_keys.i64_array[middle];
+    if (selector < case_key) {
+      upper = middle;
+    } else if (selector > case_key) {
+      lower = middle + 1;
+    } else {
+      chosen_dest = case_dests.blocks[middle];
+      break;
+    }
+  }
+  if (!chosen_dest || chosen_dest->arg_count != 0) return iree_ok_status();
+
+  IREE_RETURN_IF_ERROR(
+      loom_cfg_simplify_replace_branch_with_br(state, op, chosen_dest));
   *out_changed = true;
   return iree_ok_status();
 }
@@ -278,6 +315,8 @@ static iree_status_t loom_cfg_simplify_fold_block_branches(
     loom_op_t* next_op = op->next_op;
     IREE_RETURN_IF_ERROR(
         loom_cfg_simplify_fold_cond_br(state, op, out_changed));
+    if (*out_changed) return iree_ok_status();
+    IREE_RETURN_IF_ERROR(loom_cfg_simplify_fold_switch(state, op, out_changed));
     if (*out_changed) return iree_ok_status();
     IREE_RETURN_IF_ERROR(loom_cfg_simplify_push_child_regions(state, op));
     op = next_op;
@@ -570,7 +609,7 @@ static iree_status_t loom_cfg_simplify_fold_path_sensitive_cond_br(
   loom_block_t* chosen_dest = condition ? true_dest : false_dest;
   if (!chosen_dest || chosen_dest->arg_count != 0) return iree_ok_status();
   IREE_RETURN_IF_ERROR(
-      loom_cfg_simplify_replace_cond_br_with_br(state, op, chosen_dest));
+      loom_cfg_simplify_replace_branch_with_br(state, op, chosen_dest));
   *out_changed = true;
   return iree_ok_status();
 }
@@ -597,7 +636,7 @@ static iree_status_t loom_cfg_simplify_thread_predecessor_to_block(
   }
   loom_block_t** successors = loom_op_successors(predecessor_terminator);
   bool changed = false;
-  for (uint8_t successor_index = 0;
+  for (uint16_t successor_index = 0;
        successor_index < predecessor_terminator->successor_count;
        ++successor_index) {
     if (successors[successor_index] != old_dest) continue;
@@ -1492,7 +1531,7 @@ static bool loom_cfg_simplify_successors_equal_after_map(
     const loom_op_t* source_op, const loom_op_t* target_op) {
   loom_block_t* const* source_successors = loom_op_const_successors(source_op);
   loom_block_t* const* target_successors = loom_op_const_successors(target_op);
-  for (uint8_t i = 0; i < source_op->successor_count; ++i) {
+  for (uint16_t i = 0; i < source_op->successor_count; ++i) {
     loom_block_t* source_successor = source_successors[i];
     loom_block_t* target_successor = target_successors[i];
     if (source_successor == source_block || source_successor == target_block ||
@@ -1677,7 +1716,7 @@ static bool loom_cfg_simplify_alpha_block_fingerprint(
     }
 
     loom_block_t* const* successors = loom_op_const_successors(op);
-    for (uint8_t i = 0; i < op->successor_count; ++i) {
+    for (uint16_t i = 0; i < op->successor_count; ++i) {
       fingerprint =
           loom_cfg_simplify_hash_u32(successors[i]->region_index, fingerprint);
     }
@@ -1780,7 +1819,7 @@ static iree_status_t loom_cfg_simplify_redirect_successor(
 
   loom_block_t** successors = loom_op_successors(terminator);
   bool changed = false;
-  for (uint8_t successor_index = 0;
+  for (uint16_t successor_index = 0;
        successor_index < terminator->successor_count; ++successor_index) {
     if (successors[successor_index] != old_dest) continue;
     successors[successor_index] = new_dest;

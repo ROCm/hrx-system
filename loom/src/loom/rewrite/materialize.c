@@ -164,7 +164,7 @@ static iree_status_t loom_ir_clone_op_successors(
     const loom_ir_clone_region_projection_t* region_projection,
     const loom_op_t* source_op, loom_block_t** target_successors) {
   loom_block_t* const* source_successors = loom_op_const_successors(source_op);
-  for (uint8_t i = 0; i < source_op->successor_count; ++i) {
+  for (uint16_t i = 0; i < source_op->successor_count; ++i) {
     uint16_t block_index = 0;
     if (region_projection &&
         loom_region_try_block_index(region_projection->source_region,
@@ -575,7 +575,7 @@ static iree_status_t loom_ir_remap_op_operands_in_place(
 static iree_status_t loom_ir_remap_op_successors_in_place(
     loom_op_t* op, loom_ir_remap_t* remap) {
   loom_block_t** successors = loom_op_successors(op);
-  for (uint8_t i = 0; i < op->successor_count; ++i) {
+  for (uint16_t i = 0; i < op->successor_count; ++i) {
     loom_block_t* target_block = NULL;
     if (!loom_ir_remap_try_lookup_block(remap, successors[i], &target_block)) {
       continue;

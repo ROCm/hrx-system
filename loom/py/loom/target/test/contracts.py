@@ -49,6 +49,7 @@ from loom.target.test.descriptors import (
     TEST_LOW_ADD_F32_DESCRIPTOR,
     TEST_LOW_ADD_I32_DESCRIPTOR,
     TEST_LOW_CMP_EQ_I32_DESCRIPTOR,
+    TEST_LOW_CMP_ULT_I32_DESCRIPTOR,
     TEST_LOW_CONST_I32_DESCRIPTOR,
     TEST_LOW_CORE_DESCRIPTOR_SET,
     TEST_LOW_DOT4I_S8S8_DESCRIPTOR,
@@ -134,6 +135,7 @@ def _compare_rule(
 
 
 _I32 = Scalar("i32")
+_I1 = Scalar("i1")
 _F32 = Scalar("f32")
 _INDEX = Scalar("index")
 _OFFSET = Scalar("offset")
@@ -339,6 +341,22 @@ TEST_LOW_CORE_CONTRACT_FRAGMENT = ContractFragment(
             TEST_LOW_MUL_I32_DESCRIPTOR,
             _I32,
             semantic_tag="integer.mul.i32",
+        ),
+        _compare_rule(
+            index.index_cmp,
+            TEST_LOW_CMP_EQ_I32_DESCRIPTOR,
+            predicate="eq",
+            operand_type=_INDEX,
+            result_type=_I1,
+            semantic_tag="integer.cmp.eq.i32",
+        ),
+        _compare_rule(
+            index.index_cmp,
+            TEST_LOW_CMP_ULT_I32_DESCRIPTOR,
+            predicate="ult",
+            operand_type=_OFFSET,
+            result_type=_I1,
+            semantic_tag="integer.cmp.ult.i32",
         ),
         _binary_rule(
             scalar_arithmetic.scalar_addf,

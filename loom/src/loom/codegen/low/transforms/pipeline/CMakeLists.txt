@@ -91,7 +91,9 @@ loom_cc_test(
     loom::error::error_defs
     loom::format::text::parser
     loom::ir
+    loom::ops::cfg
     loom::ops::func
+    loom::ops::index
     loom::ops::low
     loom::ops::pass
     loom::ops::scalar

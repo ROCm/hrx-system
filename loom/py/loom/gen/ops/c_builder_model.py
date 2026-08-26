@@ -19,6 +19,7 @@ from loom.assembly import (
     BindingList,
     BlockArgs,
     BlockRef,
+    BlockRefs,
     Clause,
     Flags,
     FormatElement,
@@ -417,6 +418,22 @@ def extract_c_params(op: Op, shared_enums: SharedEnumMap) -> list[dict[str, Any]
                         }
                     )
 
+                case BlockRefs(field=name):
+                    desc = layout.fields.get(name)
+                    if desc is None or desc.kind != FieldKind.SUCCESSOR:
+                        kind_name = desc.kind.name if desc else "UNKNOWN"
+                        raise ValueError(f"Op '{op.name}': BlockRefs('{name}') references {kind_name}, expected SUCCESSOR")
+                    if not desc.variadic:
+                        raise ValueError(f"Op '{op.name}': BlockRefs('{name}') requires a variadic successor field")
+                    params.append(
+                        {
+                            "name": name,
+                            "kind": "successor_variadic",
+                            "c_type": "loom_block_t* const*",
+                            "index": desc.index,
+                        }
+                    )
+
                 case OperandDict(operands=operand_field, names=names_field):
                     params.append(
                         {
@@ -688,6 +705,14 @@ def extract_c_params(op: Op, shared_enums: SharedEnumMap) -> list[dict[str, Any]
                     append_attr_param(name)
 
                 case ScopedEnumRef(field=name):
+                    attr_def = op.attr(name)
+                    if attr_def is not None and attr_def.optional:
+                        # The context-free builder constructs the structural
+                        # form with the optional domain-scoped attribute
+                        # absent. Domain-aware builders materialize the
+                        # descriptor-backed form.
+                        covered_attrs.add(name)
+                        continue
                     raise ValueError(f"Op '{op.name}': scoped enum field '{name}' requires a domain-aware handwritten C builder")
 
                 case StableKeyRef(key=name, stable_id=stable_id):
@@ -807,6 +832,9 @@ def build_c_param_list(op: Op, params: list[dict[str, object]], layout: FieldLay
                 c_params.append(f"{opt}{consume}loom_value_id_t {name}")
             case "successor":
                 c_params.append(f"loom_block_t* {name}")
+            case "successor_variadic":
+                c_params.append(f"loom_block_t* const* {name}")
+                c_params.append(f"iree_host_size_t {name}_count")
             case "operand_variadic":
                 c_params.append(f"{consume}const loom_value_id_t* {name}")
                 c_params.append(f"iree_host_size_t {name}_count")

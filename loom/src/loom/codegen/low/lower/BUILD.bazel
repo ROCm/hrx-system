@@ -32,6 +32,7 @@ loom_cc_library(
         "contract_query.c",
         "lower.c",
         "lower_context.c",
+        "lower_control.c",
         "lower_policy.c",
         "lower_report.c",
         "lower_rule_descriptor.c",

@@ -189,9 +189,9 @@ iree_status_t loom_parsed_op_add_segmented_operand(
 
 iree_status_t loom_parsed_op_set_successor(loom_parsed_op_t* parsed,
                                            iree_arena_allocator_t* arena,
-                                           uint8_t index, loom_block_t* block,
+                                           uint16_t index, loom_block_t* block,
                                            loom_token_t label_token) {
-  if (index == UINT8_MAX) {
+  if (index == UINT16_MAX) {
     return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
                             "successor field index exceeds storage limit");
   }
@@ -200,15 +200,15 @@ iree_status_t loom_parsed_op_set_successor(loom_parsed_op_t* parsed,
     iree_host_size_t capacity = parsed->successor_capacity;
     IREE_RETURN_IF_ERROR(loom_parser_grow_bounded_array(
         arena, parsed->successor_count, required_capacity,
-        sizeof(loom_block_t*), UINT8_MAX, "parsed op successor", &capacity,
+        sizeof(loom_block_t*), UINT16_MAX, "parsed op successor", &capacity,
         (void**)&parsed->successors));
     iree_host_size_t token_capacity = parsed->successor_capacity;
     IREE_RETURN_IF_ERROR(loom_parser_grow_bounded_array(
         arena, parsed->successor_count, capacity, sizeof(loom_token_t),
-        UINT8_MAX, "parsed op successor label", &token_capacity,
+        UINT16_MAX, "parsed op successor label", &token_capacity,
         (void**)&parsed->successor_label_tokens));
     IREE_ASSERT(token_capacity == capacity);
-    parsed->successor_capacity = (uint8_t)capacity;
+    parsed->successor_capacity = (uint16_t)capacity;
   }
   while (parsed->successor_count <= index) {
     parsed->successors[parsed->successor_count] = NULL;
@@ -422,4 +422,25 @@ void loom_parser_pending_block_args_truncate(
   if (pending_block_args->count > count) {
     pending_block_args->count = count;
   }
+}
+
+iree_status_t loom_parser_pending_successor_refs_add(
+    loom_parser_pending_successor_refs_t* pending,
+    iree_arena_allocator_t* arena, loom_region_t* region, loom_op_t* op,
+    uint16_t successor_index, loom_token_t label_token) {
+  if (pending->count >= pending->capacity) {
+    iree_host_size_t capacity = pending->capacity;
+    IREE_RETURN_IF_ERROR(
+        iree_arena_grow_array(arena, pending->count, pending->count + 1,
+                              sizeof(loom_parser_pending_successor_ref_t),
+                              &capacity, (void**)&pending->entries));
+    pending->capacity = capacity;
+  }
+  pending->entries[pending->count++] = (loom_parser_pending_successor_ref_t){
+      .region = region,
+      .op = op,
+      .label_token = label_token,
+      .successor_index = successor_index,
+  };
+  return iree_ok_status();
 }

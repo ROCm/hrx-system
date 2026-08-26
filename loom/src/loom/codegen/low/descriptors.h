@@ -837,6 +837,16 @@ enum loom_low_descriptor_op_kind_e {
 };
 typedef uint8_t loom_low_descriptor_op_kind_t;
 
+enum loom_low_descriptor_carrier_e {
+  // Descriptor packets use low.op or low.const according to |op_kind|.
+  LOOM_LOW_DESCRIPTOR_CARRIER_PACKET = 0,
+  // Descriptor uses the one-successor low.br structural carrier.
+  LOOM_LOW_DESCRIPTOR_CARRIER_BRANCH = 1,
+  // Descriptor uses the multi-successor low.switch structural carrier.
+  LOOM_LOW_DESCRIPTOR_CARRIER_SWITCH = 2,
+};
+typedef uint8_t loom_low_descriptor_carrier_t;
+
 typedef struct loom_low_descriptor_t {
   // Durable descriptor identity derived from the descriptor key. This is
   // stable across descriptor table reordering and unrelated descriptor
@@ -868,6 +878,10 @@ typedef struct loom_low_descriptor_t {
   loom_low_descriptor_flags_t flags;
   // Canonical low IR operation used to represent this descriptor packet.
   loom_low_descriptor_op_kind_t op_kind;
+  // Canonical Low packet or structural carrier for this descriptor.
+  loom_low_descriptor_carrier_t carrier;
+  // Reserved for future carrier behavior. Must be zero.
+  uint8_t carrier_reserved;
   // Number of feature-mask words required by this descriptor.
   uint16_t feature_mask_word_count;
   // Number of target-owned fixed encoding field values for this descriptor.

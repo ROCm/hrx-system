@@ -212,6 +212,8 @@ def _descriptor_row_lines(
             f".semantic_tag_string_offset = {c_spelling.optional_string_expr(pool, f'semantic_{descriptor.key}' if descriptor.semantic_tag is not None else None)},",
             f".feature_mask_word_start = {descriptor_rows[i]['feature_mask_word_start']},",
             f".feature_mask_word_count = {descriptor_rows[i]['feature_mask_word_count']},",
+            f".carrier = {descriptor.carrier.c_name},",
+            ".carrier_reserved = 0,",
             f".encoding_field_value_start = {descriptor_rows[i]['encoding_field_value_start']},",
             f".encoding_field_value_count = {descriptor_rows[i]['encoding_field_value_count']},",
             f".encoding_format_id = {descriptor.encoding_format_id},",

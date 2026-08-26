@@ -232,18 +232,26 @@ static iree_string_view_t loom_low_verify_string_or_empty(
 }
 
 static iree_string_view_t loom_low_verify_descriptor_op_name(
-    loom_low_descriptor_op_kind_t op_kind) {
-  switch (op_kind) {
-    case LOOM_LOW_DESCRIPTOR_OP_KIND_OP:
-      return IREE_SV("low.op");
-    case LOOM_LOW_DESCRIPTOR_OP_KIND_CONST:
-      return IREE_SV("low.const");
+    const loom_low_descriptor_t* descriptor) {
+  switch (descriptor->carrier) {
+    case LOOM_LOW_DESCRIPTOR_CARRIER_PACKET:
+      switch (descriptor->op_kind) {
+        case LOOM_LOW_DESCRIPTOR_OP_KIND_OP:
+          return IREE_SV("low.op");
+        case LOOM_LOW_DESCRIPTOR_OP_KIND_CONST:
+          return IREE_SV("low.const");
+      }
+      break;
+    case LOOM_LOW_DESCRIPTOR_CARRIER_BRANCH:
+      return IREE_SV("low.br");
+    case LOOM_LOW_DESCRIPTOR_CARRIER_SWITCH:
+      return IREE_SV("low.switch");
   }
-  IREE_ASSERT_UNREACHABLE("invalid descriptor operation kind");
+  IREE_ASSERT_UNREACHABLE("invalid descriptor carrier");
   IREE_BUILTIN_UNREACHABLE();
 }
 
-static iree_status_t loom_low_verify_emit_packet_op_kind_mismatch(
+static iree_status_t loom_low_verify_emit_descriptor_op_mismatch(
     loom_low_function_verify_state_t* function_state, const loom_op_t* op,
     iree_string_view_t descriptor_key, uint16_t descriptor_attr_index,
     iree_string_view_t actual_op_name, iree_string_view_t expected_op_name) {
@@ -1729,9 +1737,9 @@ static iree_status_t loom_low_verify_packet(
   const iree_string_view_t actual_op_name =
       loom_op_name(function_state->state->module, op);
   const iree_string_view_t expected_op_name =
-      loom_low_verify_descriptor_op_name(descriptor->op_kind);
+      loom_low_verify_descriptor_op_name(descriptor);
   if (!iree_string_view_equal(actual_op_name, expected_op_name)) {
-    IREE_RETURN_IF_ERROR(loom_low_verify_emit_packet_op_kind_mismatch(
+    IREE_RETURN_IF_ERROR(loom_low_verify_emit_descriptor_op_mismatch(
         function_state, op, descriptor_key, descriptor_attr_index,
         actual_op_name, expected_op_name));
     return loom_low_verify_define_full_register_results(function_state, op);
@@ -1795,6 +1803,51 @@ static iree_status_t loom_low_verify_packet(
   } else {
     IREE_RETURN_IF_ERROR(
         loom_low_verify_define_full_register_results(function_state, op));
+  }
+  if (loom_low_verify_should_stop(function_state->state)) {
+    return iree_ok_status();
+  }
+  return loom_low_verify_descriptor_features(function_state, op, descriptor_key,
+                                             descriptor_attr_index, descriptor);
+}
+
+static iree_status_t loom_low_verify_control_descriptor(
+    loom_low_function_verify_state_t* function_state, const loom_op_t* op,
+    const loom_low_descriptor_t* descriptor) {
+  const loom_low_descriptor_set_t* descriptor_set =
+      function_state->target->descriptor_set;
+  const iree_string_view_t descriptor_key = loom_low_descriptor_set_string(
+      descriptor_set, descriptor->key_string_offset);
+  const uint16_t descriptor_attr_index =
+      loom_low_descriptor_attribute_index_for_op(op);
+  const iree_string_view_t actual_op_name =
+      loom_op_name(function_state->state->module, op);
+  const iree_string_view_t expected_op_name =
+      loom_low_verify_descriptor_op_name(descriptor);
+  if (!iree_string_view_equal(actual_op_name, expected_op_name)) {
+    IREE_RETURN_IF_ERROR(loom_low_verify_emit_descriptor_op_mismatch(
+        function_state, op, descriptor_key, descriptor_attr_index,
+        actual_op_name, expected_op_name));
+    return loom_low_verify_structural_register_parts(function_state, op);
+  }
+
+  if (descriptor->carrier == LOOM_LOW_DESCRIPTOR_CARRIER_BRANCH) {
+    IREE_RETURN_IF_ERROR(
+        loom_low_verify_structural_register_parts(function_state, op));
+  } else {
+    IREE_ASSERT_EQ(descriptor->carrier, LOOM_LOW_DESCRIPTOR_CARRIER_SWITCH);
+    IREE_RETURN_IF_ERROR(
+        loom_low_verify_descriptor_registers(function_state, op, descriptor));
+    if (loom_low_verify_should_stop(function_state->state)) {
+      return iree_ok_status();
+    }
+    IREE_RETURN_IF_ERROR(
+        loom_low_verify_descriptor_constraints(function_state, op, descriptor));
+    if (loom_low_verify_should_stop(function_state->state)) {
+      return iree_ok_status();
+    }
+    IREE_RETURN_IF_ERROR(loom_low_verify_descriptor_register_parts(
+        function_state, op, descriptor_key, descriptor));
   }
   if (loom_low_verify_should_stop(function_state->state)) {
     return iree_ok_status();
@@ -1944,20 +1997,23 @@ static iree_status_t loom_low_verify_walk_op(void* user_data, loom_op_t* op,
         &function_state->storage_space_sizes));
   }
 
-  loom_low_descriptor_packet_t packet = {0};
-  const loom_low_descriptor_packet_kind_t packet_kind =
-      loom_low_descriptor_packet_kind(op);
-  if (packet_kind != LOOM_LOW_DESCRIPTOR_PACKET_NONE) {
-    const uint32_t descriptor_ordinal =
-        loom_low_descriptor_packet_ordinal(op, packet_kind);
+  const uint32_t descriptor_ordinal = loom_low_descriptor_ordinal_for_op(op);
+  const loom_low_descriptor_t* control_descriptor = NULL;
+  if (descriptor_ordinal != LOOM_LOW_DESCRIPTOR_ORDINAL_NONE) {
     if (descriptor_ordinal >=
         function_state->target->descriptor_set->descriptor_count) {
       return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                              "Low packet descriptor ordinal %" PRIu32
+                              "Low descriptor ordinal %" PRIu32
                               " is outside the active representation contract",
                               descriptor_ordinal);
     }
+    if (loom_low_br_isa(op) || loom_low_switch_isa(op)) {
+      control_descriptor = &function_state->target->descriptor_set
+                                ->descriptors[descriptor_ordinal];
+    }
   }
+
+  loom_low_descriptor_packet_t packet = {0};
   loom_low_descriptor_packet_initialize(function_state->target->descriptor_set,
                                         op, &packet);
   if (packet.kind == LOOM_LOW_DESCRIPTOR_PACKET_NONE) {
@@ -1973,8 +2029,13 @@ static iree_status_t loom_low_verify_walk_op(void* user_data, loom_op_t* op,
     }
     IREE_RETURN_IF_ERROR(
         loom_low_verify_reference_source_preserving_ops(function_state, op));
-    IREE_RETURN_IF_ERROR(
-        loom_low_verify_structural_register_parts(function_state, op));
+    if (control_descriptor != NULL) {
+      IREE_RETURN_IF_ERROR(loom_low_verify_control_descriptor(
+          function_state, op, control_descriptor));
+    } else {
+      IREE_RETURN_IF_ERROR(
+          loom_low_verify_structural_register_parts(function_state, op));
+    }
     if (loom_traits_are_compile_time_only(op->traits)) {
       return iree_ok_status();
     }

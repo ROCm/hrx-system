@@ -21,7 +21,8 @@ extern "C" {
 enum {
   LOOM_OP_CFG_BR = LOOM_OP_KIND(LOOM_DIALECT_CFG, 0),
   LOOM_OP_CFG_COND_BR = LOOM_OP_KIND(LOOM_DIALECT_CFG, 1),
-  LOOM_OP_CFG_COUNT_ = 2,
+  LOOM_OP_CFG_SWITCH = LOOM_OP_KIND(LOOM_DIALECT_CFG, 2),
+  LOOM_OP_CFG_COUNT_ = 3,
 };
 
 // LOOM_OP_CFG_BR: Unconditional branch to a successor block, forwarding zero or more block argument values.
@@ -54,6 +55,27 @@ iree_status_t loom_cfg_cond_br_build(
     loom_location_id_t location,
     loom_op_t** out_op);
 iree_status_t loom_cfg_cond_br_verify(
+    const loom_module_t* module, const loom_op_t* op,
+    iree_diagnostic_emitter_t emitter);
+
+// LOOM_OP_CFG_SWITCH: Branch to one of a sorted set of case destinations or a default destination.
+// cfg.switch %selector cases [0, 2] -> [^case0, ^case2] default ^fallback
+LOOM_DEFINE_ISA(loom_cfg_switch_isa, LOOM_OP_CFG_SWITCH)
+LOOM_DEFINE_OPERAND(loom_cfg_switch_selector, 0)
+LOOM_DEFINE_SUCCESSOR(loom_cfg_switch_default_dest, 0)
+LOOM_DEFINE_VARIADIC_SUCCESSORS(loom_cfg_switch_case_dests, 1)
+LOOM_DEFINE_ATTR_I64_ARRAY(loom_cfg_switch_case_keys, 0)
+iree_status_t loom_cfg_switch_build(
+    loom_builder_t* builder,
+    loom_value_id_t selector,
+    const int64_t* case_keys,
+    iree_host_size_t case_keys_count,
+    loom_block_t* const* case_dests,
+    iree_host_size_t case_dests_count,
+    loom_block_t* default_dest,
+    loom_location_id_t location,
+    loom_op_t** out_op);
+iree_status_t loom_cfg_switch_verify(
     const loom_module_t* module, const loom_op_t* op,
     iree_diagnostic_emitter_t emitter);
 

@@ -11,6 +11,7 @@
 
 #include "iree/base/internal/arena.h"
 #include "loom/codegen/low/function.h"
+#include "loom/codegen/low/lower/lower.h"
 #include "loom/codegen/low/lower/source_selection.h"
 #include "loom/codegen/low/pipeline/pass_environment.h"
 #include "loom/codegen/low/pipeline/pipeline.h"
@@ -208,6 +209,16 @@ iree_status_t loom_low_source_workload_run_pipeline(
     for (iree_host_size_t i = 0;
          i < selection_list.count && iree_status_is_ok(status); ++i) {
       const loom_low_source_selection_t* selection = &selection_list.values[i];
+      bool control_flow_changed = false;
+      status = loom_low_lower_prepare_cfg_switches(
+          module, selection->func, selection->target_facts, selection->policy,
+          &control_flow_changed);
+      if (!iree_status_is_ok(status)) {
+        break;
+      }
+      if (control_flow_changed) {
+        loom_pass_value_fact_owner_invalidate(&value_facts);
+      }
       loom_value_fact_table_t* fact_table = NULL;
       status = loom_pass_value_fact_owner_acquire(
           &value_facts, module,
