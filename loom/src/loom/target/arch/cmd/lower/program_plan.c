@@ -81,10 +81,9 @@ static iree_status_t loom_cmd_program_plan_build_cleanup_body(
                                 loom_named_attr_slice_empty(), &run_op);
 }
 
-static iree_status_t loom_cmd_program_plan_build_function_preparation_body(
+static iree_status_t loom_cmd_program_plan_build_unroll_body(
     loom_builder_t* builder, void* user_data) {
   (void)user_data;
-  IREE_RETURN_IF_ERROR(loom_cmd_program_plan_build_cleanup_body(builder, NULL));
   loom_op_t* run_op = NULL;
   IREE_RETURN_IF_ERROR(
       loom_pass_ir_build_run(builder, 0, IREE_SV("unroll-scf-for"),
@@ -106,10 +105,12 @@ static iree_status_t loom_cmd_program_plan_build_post_inline_body(
 static iree_status_t loom_cmd_program_plan_build_preparation_body(
     loom_builder_t* builder, void* user_data) {
   (void)user_data;
+  // Minimize pure calls while loops and control flow are still compact. This
+  // lets CSE reuse equal configuration calls before inlining expands them.
   loom_op_t* for_op = NULL;
   IREE_RETURN_IF_ERROR(loom_pass_ir_build_for(
-      builder, LOOM_PASS_ANCHOR_FUNC,
-      loom_cmd_program_plan_build_function_preparation_body, NULL, &for_op));
+      builder, LOOM_PASS_ANCHOR_FUNC, loom_cmd_program_plan_build_cleanup_body,
+      NULL, &for_op));
   loom_op_t* run_op = NULL;
   IREE_RETURN_IF_ERROR(
       loom_pass_ir_build_run(builder, 0, IREE_SV("inline-callables"),
@@ -118,6 +119,11 @@ static iree_status_t loom_cmd_program_plan_build_preparation_body(
   IREE_RETURN_IF_ERROR(loom_pass_ir_build_if_changed(
       builder, loom_cmd_program_plan_build_post_inline_body, NULL,
       &if_changed_op));
+  // Expand loops only after each remaining syntactic call has been inlined.
+  // Per-function cleanup runs only when unrolling changed that function.
+  IREE_RETURN_IF_ERROR(loom_pass_ir_build_for(
+      builder, LOOM_PASS_ANCHOR_FUNC, loom_cmd_program_plan_build_unroll_body,
+      NULL, &for_op));
   return loom_pass_ir_build_run(builder, 0, IREE_SV("symbol-dce"),
                                 loom_named_attr_slice_empty(), &run_op);
 }

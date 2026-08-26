@@ -208,12 +208,13 @@ low.func.def public retain target<cmd.core> abi(command_program) abi_layout({ent
 
 // RUN: emit command-program @unrolled_targetless
 
-kernel.def @copy_element() {
+kernel.def @copy_element(%element: index) {
   %c1 = index.constant 1 : index
-  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+  %workgroups = index.add %element, %c1 : index
+  kernel.launch.config workgroups(%workgroups, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
 } launch(%source: buffer, %target: buffer) {
   %base = index.constant 0 : offset
-  %element = index.constant 0 : index
+  %element = kernel.workgroup.id<x> : index
   %source_view = buffer.view %source[%base] : buffer -> view<1xi32>
   %target_view = buffer.view %target[%base] : buffer -> view<1xi32>
   %value = view.load %source_view[%element] : view<1xi32> -> i32
@@ -226,22 +227,23 @@ command.program.def public @unrolled_targetless() launch(%source: buffer, %targe
   %loop_end = index.constant 2 : index
   %loop_step = index.constant 1 : index
   scf.for %iteration = [%loop_begin to %loop_end step %loop_step] unroll {
-    kernel.launch @copy_element(%source, %target) : (buffer, buffer)
+    kernel.launch @copy_element[%iteration](%source, %target) : [index](buffer, buffer)
   }
   command.return
 }
 
 // ----
 low.func.def public retain target<cmd.core> abi(command_program) abi_layout({entry_count = 1, executable_count = 1, fixed_buffer_count = 0, rebindable_binding_count = 2}) @unrolled_targetless() asm {
-  %25 = resource<command_input> {index = 0, source_type = buffer} : reg<cmd.binding>
-  %26 = resource<command_input> {index = 1, source_type = buffer} : reg<cmd.binding>
-  %27 = resource<command_input> {index = 0, source_type = index} : reg<cmd.executable>
-  %28 = resource<command_input> {index = 0, source_type = index} : reg<cmd.entry>
-  %29 = cmd.constant.u64 0
-  %30 = cmd.constant.u64 -1
-  %31 = cmd.constant.u32 1
-  cmd.dispatch.direct<%27, %28>[%31, %31, %31](%25, %29, %30, %26, %29, %30)
-  cmd.dispatch.direct.barrier<%27, %28>[%31, %31, %31](%25, %29, %30, %26, %29, %30)
+  %26 = resource<command_input> {index = 0, source_type = buffer} : reg<cmd.binding>
+  %27 = resource<command_input> {index = 1, source_type = buffer} : reg<cmd.binding>
+  %28 = resource<command_input> {index = 0, source_type = index} : reg<cmd.executable>
+  %29 = resource<command_input> {index = 0, source_type = index} : reg<cmd.entry>
+  %30 = cmd.constant.u64 0
+  %31 = cmd.constant.u64 -1
+  %32 = cmd.constant.u32 1
+  cmd.dispatch.direct<%28, %29>[%32, %32, %32](%26, %30, %31, %27, %30, %31)
+  %33 = cmd.constant.u32 2
+  cmd.dispatch.direct.barrier<%28, %29>[%33, %32, %32](%26, %30, %31, %27, %30, %31)
   return
 }
 
