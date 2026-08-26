@@ -13,6 +13,7 @@ from collections.abc import Sequence
 from execution import ExecutableInstruction
 from model.isa import Instruction, InstructionFieldRole
 from model.isa.validation import (
+    ALLOWED_RANGE,
     ANY_BITS,
     CONSTANT_POOL_ORDINAL,
     GLOBAL_ORDINAL,
@@ -22,7 +23,7 @@ from model.isa.validation import (
     SELECTOR,
     ZERO,
 )
-from model.schema import ScalarEncoding
+from model.schema import EntityReference, ScalarEncoding
 from model.specification import Projection
 
 
@@ -43,6 +44,7 @@ def _require_field(
     rule_id: str,
     roles: tuple[InstructionFieldRole, ...],
     array_length: int = 1,
+    rule_arguments: tuple[object, ...] | None = None,
 ) -> None:
     fields = tuple(field for field in instruction.fields if field.offset == offset)
     if len(fields) != 1:
@@ -58,6 +60,10 @@ def _require_field(
         or field.array_length != array_length
         or field.role not in roles
         or tuple(rule.rule_id for rule in field.validation) != (rule_id,)
+        or (
+            rule_arguments is not None
+            and tuple(field.validation[0].arguments) != rule_arguments
+        )
     ):
         raise ValueError(
             f"{instruction.mnemonic}.{field.name}: field does not match its "
@@ -83,6 +89,7 @@ def _validate_verification_form(
         roles: tuple[InstructionFieldRole, ...],
         *,
         array_length: int = 1,
+        rule_arguments: tuple[object, ...] | None = None,
     ) -> None:
         _require_field(
             instruction,
@@ -92,6 +99,7 @@ def _validate_verification_form(
             rule_id=rule_id,
             roles=roles,
             array_length=array_length,
+            rule_arguments=rule_arguments,
         )
         verified_field_offsets.add(offset)
 
@@ -165,6 +173,43 @@ def _validate_verification_form(
             raise ValueError(f"{instruction.mnemonic}: binary record is not 4 bytes")
         for offset in range(1, 4):
             require_value(offset)
+    elif verification_form == "INTEGER_COMPARE":
+        if instruction.byte_length != 8:
+            raise ValueError(f"{instruction.mnemonic}: compare record is not 8 bytes")
+        for offset in range(1, 4):
+            require_value(offset)
+        require_field(
+            4,
+            1,
+            SELECTOR.entity_id,
+            (InstructionFieldRole.IMMEDIATE,),
+            rule_arguments=(EntityReference("core.selector.integer.compare"),),
+        )
+        require_zero(5, 1, array_length=3)
+    elif verification_form == "INTEGER_LEA":
+        if instruction.byte_length != 8:
+            raise ValueError(f"{instruction.mnemonic}: LEA record is not 8 bytes")
+        for offset in range(1, 4):
+            require_value(offset)
+        require_zero(5, 1)
+    elif verification_form in (
+        "INTEGER_CEILDIV_POW2_U32",
+        "INTEGER_CEILDIV_POW2_U64",
+    ):
+        if instruction.byte_length != 4:
+            raise ValueError(
+                f"{instruction.mnemonic}: power-of-two ceildiv record is not 4 bytes"
+            )
+        require_value(1)
+        require_value(2)
+        maximum_log2 = 31 if verification_form.endswith("U32") else 63
+        require_field(
+            3,
+            1,
+            ALLOWED_RANGE.entity_id,
+            (InstructionFieldRole.IMMEDIATE,),
+            rule_arguments=(0, maximum_log2),
+        )
     elif verification_form == "BUFFER_RODATA_LOAD":
         if instruction.byte_length != 4:
             raise ValueError(f"{instruction.mnemonic}: rodata load is not 4 bytes")
@@ -191,11 +236,17 @@ def _validate_verification_form(
             )
         require_value(1)
         require_value(2)
+        selector_table_id = {
+            "CONVERSION_INTEGER": "core.selector.integer.convert",
+            "CONVERSION_FLOAT_EXTEND": "core.selector.float.extend",
+            "CONVERSION_FLOAT_TO_INTEGER": "core.selector.float.to.integer",
+        }[verification_form]
         require_field(
             3,
             1,
             SELECTOR.entity_id,
             (InstructionFieldRole.IMMEDIATE,),
+            rule_arguments=(EntityReference(selector_table_id),),
         )
     else:
         raise ValueError(

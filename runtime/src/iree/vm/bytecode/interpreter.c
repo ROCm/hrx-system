@@ -8,6 +8,7 @@
 
 #include <string.h>
 
+#include "iree/vm/bytecode/interpreter_integer.h"
 #include "iree/vm/bytecode/module_reader.h"
 #include "iree/vm/bytecode/wire/core/buffer.h"
 #include "iree/vm/bytecode/wire/core/constant.h"
@@ -585,6 +586,46 @@ iree_status_t iree_vm_bytecode_function_start(
     const uint64_t rhs = values[record->rhs_v8];
     values[record->dst_v8] = lhs ^ rhs;
     IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_isa_integer_xor_i64_record_t);
+  }
+  IREE_VM_BYTECODE_DISPATCH_CASE(INTEGER_COMPARE_I32, integer_compare_i32) {
+    const iree_vm_isa_integer_compare_i32_record_t* record =
+        (const iree_vm_isa_integer_compare_i32_record_t*)record_data;
+    iree_vm_bytecode_execute_integer_compare_i32(record, values);
+    IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_isa_integer_compare_i32_record_t);
+  }
+  IREE_VM_BYTECODE_DISPATCH_CASE(INTEGER_COMPARE_I64, integer_compare_i64) {
+    const iree_vm_isa_integer_compare_i64_record_t* record =
+        (const iree_vm_isa_integer_compare_i64_record_t*)record_data;
+    iree_vm_bytecode_execute_integer_compare_i64(record, values);
+    IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_isa_integer_compare_i64_record_t);
+  }
+  IREE_VM_BYTECODE_DISPATCH_CASE(INTEGER_LEA_I32, integer_lea_i32) {
+    const iree_vm_isa_integer_lea_i32_record_t* record =
+        (const iree_vm_isa_integer_lea_i32_record_t*)record_data;
+    iree_vm_bytecode_execute_integer_lea_i32(record, values);
+    IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_isa_integer_lea_i32_record_t);
+  }
+  IREE_VM_BYTECODE_DISPATCH_CASE(INTEGER_LEA_I64, integer_lea_i64) {
+    const iree_vm_isa_integer_lea_i64_record_t* record =
+        (const iree_vm_isa_integer_lea_i64_record_t*)record_data;
+    iree_vm_bytecode_execute_integer_lea_i64(record, values);
+    IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_isa_integer_lea_i64_record_t);
+  }
+  IREE_VM_BYTECODE_DISPATCH_CASE(INTEGER_CEILDIV_POW2_U32,
+                                 integer_ceildiv_pow2_u32) {
+    const iree_vm_isa_integer_ceildiv_pow2_u32_record_t* record =
+        (const iree_vm_isa_integer_ceildiv_pow2_u32_record_t*)record_data;
+    iree_vm_bytecode_execute_integer_ceildiv_pow2_u32(record, values);
+    IREE_VM_BYTECODE_DISPATCH_NEXT(
+        iree_vm_isa_integer_ceildiv_pow2_u32_record_t);
+  }
+  IREE_VM_BYTECODE_DISPATCH_CASE(INTEGER_CEILDIV_POW2_U64,
+                                 integer_ceildiv_pow2_u64) {
+    const iree_vm_isa_integer_ceildiv_pow2_u64_record_t* record =
+        (const iree_vm_isa_integer_ceildiv_pow2_u64_record_t*)record_data;
+    iree_vm_bytecode_execute_integer_ceildiv_pow2_u64(record, values);
+    IREE_VM_BYTECODE_DISPATCH_NEXT(
+        iree_vm_isa_integer_ceildiv_pow2_u64_record_t);
   }
   IREE_VM_BYTECODE_DISPATCH_CASE(BUFFER_RODATA_LOAD, buffer_rodata_load) {
     const iree_vm_isa_buffer_rodata_load_record_t* record =

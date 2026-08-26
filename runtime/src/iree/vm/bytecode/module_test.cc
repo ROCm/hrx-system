@@ -21,6 +21,7 @@
 #include "iree/vm/bytecode/wire/core/constant.h"
 #include "iree/vm/bytecode/wire/core/control.h"
 #include "iree/vm/bytecode/wire/core/global.h"
+#include "iree/vm/bytecode/wire/core/integer.h"
 #include "iree/vm/bytecode/wire/core/opcodes.h"
 #include "iree/vm/bytecode/wire/module_format.h"
 #include "iree/vm/process.h"
@@ -555,6 +556,76 @@ TEST(VMBytecodeModuleTest, RejectsMalformedScalarStateInstructions) {
   ASSERT_NE(globals, nullptr);
   globals->immutable_value_count_u32 = 1;
   expect_rejected(partitioned_image);
+
+  iree_vm_environment_free(environment);
+}
+
+TEST(VMBytecodeModuleTest,
+     RejectsMalformedIntegerComparisonAndAddressingInstructions) {
+  iree_vm_environment_t* environment = nullptr;
+  IREE_ASSERT_OK(
+      iree_vm_environment_allocate(iree_allocator_system(), &environment));
+  const auto expect_rejected = [&](const auto& record) {
+    std::vector<uint8_t> image = BuildOwnershipModuleImage();
+    const MutableFunctionImage function = FindFunctionImage(&image, 1);
+    ASSERT_NE(function.row, nullptr);
+    constexpr uint32_t kInstructionOffset = 8;
+    ASSERT_LE(kInstructionOffset + sizeof(record),
+              function.row->bytecode_length_u32 -
+                  sizeof(iree_vm_isa_control_return_record_t));
+    std::memcpy(function.bytecode + kInstructionOffset, &record,
+                sizeof(record));
+
+    iree_vm_module_t* module = nullptr;
+    IREE_EXPECT_STATUS_IS(
+        IREE_STATUS_INVALID_ARGUMENT,
+        iree_vm_bytecode_module_create(
+            environment, IREE_SV("malformed_integer"),
+            {iree_make_const_byte_span(image.data(), image.size()),
+             iree_allocator_null()},
+            iree_allocator_system(), &module));
+    EXPECT_EQ(module, nullptr);
+    iree_vm_module_release(module);
+  };
+
+  iree_vm_isa_integer_compare_i32_record_t compare_i32 = {};
+  compare_i32.opcode_u8 = IREE_VM_ISA_CORE_OPCODE_INTEGER_COMPARE_I32;
+  compare_i32.dst_v8 = 0;
+  compare_i32.lhs_v8 = 0;
+  compare_i32.rhs_v8 = 1;
+  compare_i32.predicate_u8 = IREE_VM_ISA_INTEGER_COMPARE_UGE + 1;
+  expect_rejected(compare_i32);
+  compare_i32.predicate_u8 = IREE_VM_ISA_INTEGER_COMPARE_EQ;
+  compare_i32.zero_padding_u8[0] = 1;
+  expect_rejected(compare_i32);
+  compare_i32.zero_padding_u8[0] = 0;
+  compare_i32.dst_v8 = 2;
+  expect_rejected(compare_i32);
+
+  iree_vm_isa_integer_lea_i64_record_t lea_i64 = {};
+  lea_i64.opcode_u8 = IREE_VM_ISA_CORE_OPCODE_INTEGER_LEA_I64;
+  lea_i64.dst_v8 = 0;
+  lea_i64.base_v8 = 0;
+  lea_i64.index_v8 = 1;
+  lea_i64.zero_padding_u8 = 1;
+  expect_rejected(lea_i64);
+  lea_i64.zero_padding_u8 = 0;
+  lea_i64.index_v8 = 2;
+  expect_rejected(lea_i64);
+
+  iree_vm_isa_integer_ceildiv_pow2_u32_record_t ceildiv_u32 = {};
+  ceildiv_u32.opcode_u8 = IREE_VM_ISA_CORE_OPCODE_INTEGER_CEILDIV_POW2_U32;
+  ceildiv_u32.dst_v8 = 0;
+  ceildiv_u32.src_v8 = 1;
+  ceildiv_u32.log2_u8 = 32;
+  expect_rejected(ceildiv_u32);
+
+  iree_vm_isa_integer_ceildiv_pow2_u64_record_t ceildiv_u64 = {};
+  ceildiv_u64.opcode_u8 = IREE_VM_ISA_CORE_OPCODE_INTEGER_CEILDIV_POW2_U64;
+  ceildiv_u64.dst_v8 = 0;
+  ceildiv_u64.src_v8 = 1;
+  ceildiv_u64.log2_u8 = 64;
+  expect_rejected(ceildiv_u64);
 
   iree_vm_environment_free(environment);
 }

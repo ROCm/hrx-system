@@ -31,6 +31,10 @@ typedef enum iree_vm_bytecode_verification_form_e {
   IREE_VM_BYTECODE_VERIFICATION_FORM_GLOBAL_VALUE_MUTABLE_LOAD,
   IREE_VM_BYTECODE_VERIFICATION_FORM_GLOBAL_VALUE_MUTABLE_STORE,
   IREE_VM_BYTECODE_VERIFICATION_FORM_VALUE_BINARY_4,
+  IREE_VM_BYTECODE_VERIFICATION_FORM_INTEGER_COMPARE,
+  IREE_VM_BYTECODE_VERIFICATION_FORM_INTEGER_LEA,
+  IREE_VM_BYTECODE_VERIFICATION_FORM_INTEGER_CEILDIV_POW2_U32,
+  IREE_VM_BYTECODE_VERIFICATION_FORM_INTEGER_CEILDIV_POW2_U64,
   IREE_VM_BYTECODE_VERIFICATION_FORM_BUFFER_RODATA_LOAD,
   IREE_VM_BYTECODE_VERIFICATION_FORM_CONVERSION_INTEGER,
   IREE_VM_BYTECODE_VERIFICATION_FORM_CONVERSION_FLOAT_EXTEND,
@@ -319,6 +323,68 @@ iree_status_t iree_vm_bytecode_function_verify(
       case IREE_VM_BYTECODE_VERIFICATION_FORM_VALUE_BINARY_4: {
         IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_value_binary_record(
             record_data, function->value_register_count_u16));
+        break;
+      }
+      case IREE_VM_BYTECODE_VERIFICATION_FORM_INTEGER_COMPARE: {
+        const iree_vm_isa_integer_compare_i32_record_t* record =
+            (const iree_vm_isa_integer_compare_i32_record_t*)record_data;
+        if (record->predicate_u8 > IREE_VM_ISA_INTEGER_COMPARE_UGE) {
+          return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                  "integer.compare predicate is invalid");
+        }
+        if (record->zero_padding_u8[0] != 0 ||
+            record->zero_padding_u8[1] != 0 ||
+            record->zero_padding_u8[2] != 0) {
+          return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                  "integer.compare padding is nonzero");
+        }
+        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_value_register(
+            record->dst_v8, function->value_register_count_u16));
+        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_value_register(
+            record->lhs_v8, function->value_register_count_u16));
+        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_value_register(
+            record->rhs_v8, function->value_register_count_u16));
+        break;
+      }
+      case IREE_VM_BYTECODE_VERIFICATION_FORM_INTEGER_LEA: {
+        const iree_vm_isa_integer_lea_i32_record_t* record =
+            (const iree_vm_isa_integer_lea_i32_record_t*)record_data;
+        if (record->zero_padding_u8 != 0) {
+          return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                  "integer.lea padding is nonzero");
+        }
+        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_value_register(
+            record->dst_v8, function->value_register_count_u16));
+        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_value_register(
+            record->base_v8, function->value_register_count_u16));
+        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_value_register(
+            record->index_v8, function->value_register_count_u16));
+        break;
+      }
+      case IREE_VM_BYTECODE_VERIFICATION_FORM_INTEGER_CEILDIV_POW2_U32: {
+        const iree_vm_isa_integer_ceildiv_pow2_u32_record_t* record =
+            (const iree_vm_isa_integer_ceildiv_pow2_u32_record_t*)record_data;
+        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_value_register(
+            record->dst_v8, function->value_register_count_u16));
+        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_value_register(
+            record->src_v8, function->value_register_count_u16));
+        if (record->log2_u8 > 31) {
+          return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                  "integer.ceildiv.pow2.u32 log2 is invalid");
+        }
+        break;
+      }
+      case IREE_VM_BYTECODE_VERIFICATION_FORM_INTEGER_CEILDIV_POW2_U64: {
+        const iree_vm_isa_integer_ceildiv_pow2_u64_record_t* record =
+            (const iree_vm_isa_integer_ceildiv_pow2_u64_record_t*)record_data;
+        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_value_register(
+            record->dst_v8, function->value_register_count_u16));
+        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_value_register(
+            record->src_v8, function->value_register_count_u16));
+        if (record->log2_u8 > 63) {
+          return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                  "integer.ceildiv.pow2.u64 log2 is invalid");
+        }
         break;
       }
       case IREE_VM_BYTECODE_VERIFICATION_FORM_BUFFER_RODATA_LOAD: {

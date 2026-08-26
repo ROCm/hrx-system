@@ -56,6 +56,7 @@ iree_cc_library(
   SRCS
     "interpreter.c"
     "interpreter.h"
+    "interpreter_integer.h"
     "module.c"
     "verification_isa.c"
   DEPS
@@ -104,6 +105,19 @@ iree_cc_library(
     iree::vm
     iree::vm::bytecode::wire
   PUBLIC
+)
+
+iree_cc_test(
+  NAME
+    interpreter_integer_test
+  SRCS
+    "interpreter_integer.h"
+    "interpreter_integer_test.cc"
+  DEPS
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+    iree::vm::bytecode::wire
 )
 
 iree_cc_test(
