@@ -9,6 +9,8 @@ from collections.abc import Callable, Sequence
 from loom.diagnostics import DiagnosticEngine
 from loom.dialect.func import ALL_FUNC_OPS
 from loom.dialect.scalar import ALL_SCALAR_OPS
+from loom.dialect.scalar.bitwise import ALL_BITWISE_OPS
+from loom.dsl import OpPhase
 from loom.ir import (
     Block,
     Module,
@@ -45,6 +47,10 @@ _FLOAT_TYPES = tuple(
 _ADDRESS_TYPES = tuple(ScalarType(kind) for kind in (ScalarTypeKind.INDEX, ScalarTypeKind.OFFSET))
 _PAYLOAD_TYPES = _INTEGER_TYPES + _FLOAT_TYPES
 _SCALAR_TYPES = _ADDRESS_TYPES + _PAYLOAD_TYPES
+
+
+def test_scalar_bitwise_ops_are_executable() -> None:
+    assert all(op.effective_phase == OpPhase.EXECUTABLE for op in ALL_BITWISE_OPS)
 
 
 def _verify_cast(op_name: str, source_type: ScalarType, result_type: ScalarType) -> DiagnosticEngine:
