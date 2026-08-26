@@ -1609,7 +1609,7 @@ def test_gfx11_wmma_wave64_asm_forms_keep_native_mnemonics_unsuffixed() -> None:
         assert form.mnemonic is None
         assert form.native_assembly_mnemonic == native_mnemonic
         assert form.results == ("dst",)
-        assert form.operands == ("a", "b", "acc")
+        assert form.operands == ("lhs", "rhs", "acc")
 
         zero_descriptor = descriptors[f"{descriptor_key}.acc_zero"]
         assert tuple(constraint.kind for constraint in zero_descriptor.constraints) == (
@@ -1623,8 +1623,8 @@ def test_gfx11_wmma_wave64_asm_forms_keep_native_mnemonics_unsuffixed() -> None:
         assert zero_form.native_assembly_mnemonic == native_mnemonic
         expected_native_values = (
             NativeAsmValue(NativeAsmValueKind.RESULT, field_name="dst"),
-            NativeAsmValue(NativeAsmValueKind.OPERAND, field_name="a"),
-            NativeAsmValue(NativeAsmValueKind.OPERAND, field_name="b"),
+            NativeAsmValue(NativeAsmValueKind.OPERAND, field_name="lhs"),
+            NativeAsmValue(NativeAsmValueKind.OPERAND, field_name="rhs"),
             NativeAsmValue(NativeAsmValueKind.LITERAL, literal="0"),
         )
         if ".v_wmma_i32_" in descriptor_key:
@@ -1682,8 +1682,8 @@ def test_wmma_zero_accumulator_asm_forms_print_native_base_mnemonic() -> None:
     assert zero_form.native_assembly_mnemonic == "v_wmma_f32_16x16x16_f16"
     assert zero_form.native_assembly_values == (
         NativeAsmValue(NativeAsmValueKind.RESULT, field_name="dst"),
-        NativeAsmValue(NativeAsmValueKind.OPERAND, field_name="a"),
-        NativeAsmValue(NativeAsmValueKind.OPERAND, field_name="b"),
+        NativeAsmValue(NativeAsmValueKind.OPERAND, field_name="lhs"),
+        NativeAsmValue(NativeAsmValueKind.OPERAND, field_name="rhs"),
         NativeAsmValue(NativeAsmValueKind.LITERAL, literal="0"),
     )
 

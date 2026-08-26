@@ -586,11 +586,11 @@ TEST_LOW_MMA_I32_2X2X2_DESCRIPTOR = Descriptor(
     semantic_tag="matrix.mma.i32.2x2x2",
     operands=(
         Operand("dst", OperandRole.RESULT, _I32_ALT, unit_count=4),
-        Operand("a", OperandRole.OPERAND, _I32_ALT, unit_count=4),
-        Operand("b", OperandRole.OPERAND, _I32_ALT, unit_count=4),
+        Operand("lhs", OperandRole.OPERAND, _I32_ALT, unit_count=4),
+        Operand("rhs", OperandRole.OPERAND, _I32_ALT, unit_count=4),
         Operand("acc", OperandRole.OPERAND, _I32_ALT, unit_count=4),
     ),
-    asm_forms=_asm(results=("dst",), operands=("a", "b", "acc")),
+    asm_forms=_asm(results=("dst",), operands=("lhs", "rhs", "acc")),
     schedule_class=_SCHEDULE_VECTOR_ALU,
     flags=(DescriptorFlag.DEAD_REMOVABLE,),
 )

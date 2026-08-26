@@ -3051,46 +3051,45 @@ static loom_value_id_t loom_low_lower_descriptor_matrix_auxiliary_source_value(
 static iree_status_t loom_low_lower_descriptor_matrix_packet_value(
     loom_low_lower_context_t* context,
     const loom_low_lower_descriptor_matrix_plan_t* plan,
-    iree_string_view_t field_name, loom_value_id_t low_lhs,
+    loom_low_operand_source_binding_t source_binding, loom_value_id_t low_lhs,
     loom_value_id_t low_rhs, loom_value_id_t low_init,
     loom_value_id_t* out_low_value) {
-  if (iree_string_view_equal(field_name, IREE_SV("a"))) {
-    *out_low_value = low_lhs;
-    return iree_ok_status();
+  switch (source_binding) {
+    case LOOM_LOW_OPERAND_SOURCE_BINDING_LHS:
+      *out_low_value = low_lhs;
+      return iree_ok_status();
+    case LOOM_LOW_OPERAND_SOURCE_BINDING_RHS:
+      *out_low_value = low_rhs;
+      return iree_ok_status();
+    case LOOM_LOW_OPERAND_SOURCE_BINDING_ACCUMULATOR:
+      *out_low_value = low_init;
+      return iree_ok_status();
+    case LOOM_LOW_OPERAND_SOURCE_BINDING_SPARSE_METADATA: {
+      const loom_value_id_t source_value =
+          loom_low_lower_descriptor_matrix_sparse_source_value(
+              &plan->contract_request);
+      return loom_low_lower_lookup_value(context, source_value, out_low_value);
+    }
+    case LOOM_LOW_OPERAND_SOURCE_BINDING_LHS_SCALE: {
+      const loom_value_id_t source_value =
+          loom_low_lower_descriptor_matrix_auxiliary_source_value(
+              &plan->contract_request.lhs,
+              LOOM_CONTRACT_AUXILIARY_OPERAND_KEY_SCALE);
+      return loom_low_lower_lookup_value(context, source_value, out_low_value);
+    }
+    case LOOM_LOW_OPERAND_SOURCE_BINDING_RHS_SCALE: {
+      const loom_value_id_t source_value =
+          loom_low_lower_descriptor_matrix_auxiliary_source_value(
+              &plan->contract_request.rhs,
+              LOOM_CONTRACT_AUXILIARY_OPERAND_KEY_SCALE);
+      return loom_low_lower_lookup_value(context, source_value, out_low_value);
+    }
+    case LOOM_LOW_OPERAND_SOURCE_BINDING_NONE:
+    default:
+      IREE_ASSERT_UNREACHABLE(
+          "descriptor-matrix selected packet operand has no source binding");
+      IREE_BUILTIN_UNREACHABLE();
   }
-  if (iree_string_view_equal(field_name, IREE_SV("b"))) {
-    *out_low_value = low_rhs;
-    return iree_ok_status();
-  }
-  if (iree_string_view_equal(field_name, IREE_SV("acc"))) {
-    *out_low_value = low_init;
-    return iree_ok_status();
-  }
-  if (iree_string_view_equal(field_name, IREE_SV("index")) ||
-      iree_string_view_equal(field_name, IREE_SV("metadata")) ||
-      iree_string_view_equal(field_name, IREE_SV("sparsity"))) {
-    const loom_value_id_t source_value =
-        loom_low_lower_descriptor_matrix_sparse_source_value(
-            &plan->contract_request);
-    return loom_low_lower_lookup_value(context, source_value, out_low_value);
-  }
-  if (iree_string_view_equal(field_name, IREE_SV("scale_src0"))) {
-    const loom_value_id_t source_value =
-        loom_low_lower_descriptor_matrix_auxiliary_source_value(
-            &plan->contract_request.lhs,
-            LOOM_CONTRACT_AUXILIARY_OPERAND_KEY_SCALE);
-    return loom_low_lower_lookup_value(context, source_value, out_low_value);
-  }
-  if (iree_string_view_equal(field_name, IREE_SV("scale_src1"))) {
-    const loom_value_id_t source_value =
-        loom_low_lower_descriptor_matrix_auxiliary_source_value(
-            &plan->contract_request.rhs,
-            LOOM_CONTRACT_AUXILIARY_OPERAND_KEY_SCALE);
-    return loom_low_lower_lookup_value(context, source_value, out_low_value);
-  }
-  IREE_ASSERT_UNREACHABLE(
-      "descriptor-matrix selected packet field is unmapped");
-  IREE_BUILTIN_UNREACHABLE();
 }
 
 static iree_status_t loom_low_lower_descriptor_matrix_packet_operands(
@@ -3129,10 +3128,8 @@ static iree_status_t loom_low_lower_descriptor_matrix_packet_operands(
     if (!loom_low_operand_role_is_packet_operand(operand->role)) {
       continue;
     }
-    iree_string_view_t field_name = loom_low_descriptor_set_string(
-        descriptor_set, operand->field_name_string_offset);
     IREE_RETURN_IF_ERROR(loom_low_lower_descriptor_matrix_packet_value(
-        context, plan, field_name, low_lhs, low_rhs, low_init,
+        context, plan, operand->source_binding, low_lhs, low_rhs, low_init,
         &operands[operand->source_value_index]));
   }
 

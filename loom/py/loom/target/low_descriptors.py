@@ -50,6 +50,37 @@ class OperandRole(CEnum):
     IMPLICIT = "LOOM_LOW_OPERAND_ROLE_IMPLICIT"
 
 
+class OperandSourceBinding(CEnum):
+    NONE = "LOOM_LOW_OPERAND_SOURCE_BINDING_NONE"
+    LHS = "LOOM_LOW_OPERAND_SOURCE_BINDING_LHS"
+    RHS = "LOOM_LOW_OPERAND_SOURCE_BINDING_RHS"
+    ACCUMULATOR = "LOOM_LOW_OPERAND_SOURCE_BINDING_ACCUMULATOR"
+    SPARSE_METADATA = "LOOM_LOW_OPERAND_SOURCE_BINDING_SPARSE_METADATA"
+    LHS_SCALE = "LOOM_LOW_OPERAND_SOURCE_BINDING_LHS_SCALE"
+    RHS_SCALE = "LOOM_LOW_OPERAND_SOURCE_BINDING_RHS_SCALE"
+
+
+_OPERAND_SOURCE_BINDINGS = {
+    "lhs": OperandSourceBinding.LHS,
+    "rhs": OperandSourceBinding.RHS,
+    "acc": OperandSourceBinding.ACCUMULATOR,
+    "sparse_metadata": OperandSourceBinding.SPARSE_METADATA,
+    "lhs_scale": OperandSourceBinding.LHS_SCALE,
+    "rhs_scale": OperandSourceBinding.RHS_SCALE,
+}
+
+
+def operand_source_binding(field_name: str, role: OperandRole) -> OperandSourceBinding:
+    """Returns the canonical dynamic source binding for an input operand."""
+    if role not in (
+        OperandRole.OPERAND,
+        OperandRole.PREDICATE,
+        OperandRole.RESOURCE,
+    ):
+        return OperandSourceBinding.NONE
+    return _OPERAND_SOURCE_BINDINGS.get(field_name, OperandSourceBinding.NONE)
+
+
 class OperandAddressMapKind(CEnum):
     DIRECT = "LOOM_LOW_OPERAND_ADDRESS_MAP_DIRECT"
     LOW_SUBSET = "LOOM_LOW_OPERAND_ADDRESS_MAP_LOW_SUBSET"

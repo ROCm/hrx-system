@@ -473,8 +473,8 @@ def _gfx125x_wmma_descriptor(
         semantic_tag=f"matrix.wmma.{name}",
         operands=(
             _encoded_operand(_vgpr_result(units=result_units), "VDST"),
-            _encoded_operand(_vgpr_operand("a", units=lhs_units), "SRC0"),
-            _encoded_operand(_vgpr_operand("b", units=rhs_units), "SRC1"),
+            _encoded_operand(_vgpr_operand("lhs", units=lhs_units), "SRC0"),
+            _encoded_operand(_vgpr_operand("rhs", units=rhs_units), "SRC1"),
             _encoded_operand(
                 _vgpr_const_operand("acc", units=accumulator_units), "SRC2"
             ),
@@ -493,13 +493,13 @@ def _gfx125x_wmma_descriptor(
         ),
         asm_forms=_asm(
             results=("dst",),
-            operands=("a", "b", "acc"),
+            operands=("lhs", "rhs", "acc"),
             immediates=immediate_fields,
             named_immediates=True,
             native_assembly_values=(
                 _native_result("dst"),
-                _native_operand("a"),
-                _native_operand("b"),
+                _native_operand("lhs"),
+                _native_operand("rhs"),
                 _native_operand("acc"),
                 *(
                     _gfx125x_matrix_reuse_native_values()
@@ -541,8 +541,8 @@ def _gfx125x_wmma_f8f6f4_descriptor(
         semantic_tag=f"matrix.wmma.{name}",
         operands=(
             _encoded_operand(_vgpr_result(units=8), "VDST"),
-            _encoded_operand(_vgpr_operand("a", units=lhs_units), "SRC0"),
-            _encoded_operand(_vgpr_operand("b", units=rhs_units), "SRC1"),
+            _encoded_operand(_vgpr_operand("lhs", units=lhs_units), "SRC0"),
+            _encoded_operand(_vgpr_operand("rhs", units=rhs_units), "SRC1"),
             _encoded_operand(_vgpr_const_operand("acc", units=8), "SRC2"),
         ),
         immediates=(
@@ -560,13 +560,13 @@ def _gfx125x_wmma_f8f6f4_descriptor(
         asm_forms=_asm(
             native_assembly_mnemonic="v_wmma_f32_16x16x128_f8f6f4",
             results=("dst",),
-            operands=("a", "b", "acc"),
+            operands=("lhs", "rhs", "acc"),
             immediates=("matrix_a_fmt", "matrix_b_fmt"),
             named_immediates=True,
             native_assembly_values=(
                 _native_result("dst"),
-                _native_operand("a"),
-                _native_operand("b"),
+                _native_operand("lhs"),
+                _native_operand("rhs"),
                 _native_operand("acc"),
                 *_gfx125x_matrix_format_native_values(),
             ),
@@ -689,16 +689,16 @@ def _gfx125x_wmma_scale_descriptor(
         semantic_tag=f"matrix.wmma.{name}",
         operands=(
             _encoded_operand(_vgpr_result(units=result_units), "VDST"),
-            _encoded_operand(_vgpr_operand("a", units=lhs_units), "SRC0"),
-            _encoded_operand(_vgpr_operand("b", units=rhs_units), "SRC1"),
+            _encoded_operand(_vgpr_operand("lhs", units=lhs_units), "SRC0"),
+            _encoded_operand(_vgpr_operand("rhs", units=rhs_units), "SRC1"),
             _encoded_operand(
                 _vgpr_const_operand("acc", units=accumulator_units), "SRC2"
             ),
             _encoded_operand(
-                _sgpr_vgpr_operand("scale_src0", units=scale_units), "SCALE_SRC0"
+                _sgpr_vgpr_operand("lhs_scale", units=scale_units), "SCALE_SRC0"
             ),
             _encoded_operand(
-                _sgpr_vgpr_operand("scale_src1", units=scale_units), "SCALE_SRC1"
+                _sgpr_vgpr_operand("rhs_scale", units=scale_units), "SCALE_SRC1"
             ),
         ),
         immediates=_gfx125x_wmma_scale_immediates(matrix_physical_formats),
@@ -714,16 +714,16 @@ def _gfx125x_wmma_scale_descriptor(
         asm_forms=_asm(
             native_assembly_mnemonic=native_assembly_mnemonic,
             results=("dst",),
-            operands=("a", "b", "acc", "scale_src0", "scale_src1"),
+            operands=("lhs", "rhs", "acc", "lhs_scale", "rhs_scale"),
             immediates=immediate_fields,
             named_immediates=True,
             native_assembly_values=(
                 _native_result("dst"),
-                _native_operand("a"),
-                _native_operand("b"),
+                _native_operand("lhs"),
+                _native_operand("rhs"),
                 _native_operand("acc"),
-                _native_operand("scale_src0"),
-                _native_operand("scale_src1"),
+                _native_operand("lhs_scale"),
+                _native_operand("rhs_scale"),
                 *_gfx125x_wmma_scale_native_values(has_matrix_format_selectors),
             ),
         ),
@@ -804,9 +804,11 @@ def _gfx125x_swmmac_descriptor(
         operands=(
             _encoded_operand(_vgpr_result(units=result_units), "VDST"),
             _encoded_operand(_vgpr_operand("acc", units=accumulator_units), "VDST"),
-            _encoded_operand(_vgpr_operand("a", units=lhs_units), "SRC0"),
-            _encoded_operand(_vgpr_operand("b", units=rhs_units), "SRC1"),
-            _encoded_operand(_sgpr_vgpr_operand("index", units=index_units), "SRC2"),
+            _encoded_operand(_vgpr_operand("lhs", units=lhs_units), "SRC0"),
+            _encoded_operand(_vgpr_operand("rhs", units=rhs_units), "SRC1"),
+            _encoded_operand(
+                _sgpr_vgpr_operand("sparse_metadata", units=index_units), "SRC2"
+            ),
         ),
         immediates=(
             _gfx125x_swmmac_index_immediate(index_immediate),
@@ -819,7 +821,7 @@ def _gfx125x_swmmac_descriptor(
         ),
         asm_forms=_asm(
             results=("dst",),
-            operands=("acc", "a", "b", "index"),
+            operands=("acc", "lhs", "rhs", "sparse_metadata"),
             immediates=(
                 index_immediate,
                 *integer_immediate_fields,
@@ -828,9 +830,9 @@ def _gfx125x_swmmac_descriptor(
             named_immediates=True,
             native_assembly_values=(
                 _native_result("dst"),
-                _native_operand("a"),
-                _native_operand("b"),
-                _native_operand("index"),
+                _native_operand("lhs"),
+                _native_operand("rhs"),
+                _native_operand("sparse_metadata"),
                 _native_amdgpu_named_i64_immediate(index_immediate, name="index_key"),
                 *_gfx125x_matrix_reuse_native_values(),
                 *(

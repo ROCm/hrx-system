@@ -26,7 +26,7 @@ extern "C" {
 #endif
 
 // ABI version for descriptor sets consumed by this header.
-#define LOOM_LOW_DESCRIPTOR_SET_ABI_VERSION 35u
+#define LOOM_LOW_DESCRIPTOR_SET_ABI_VERSION 36u
 
 // Sentinel for absent string-table offsets.
 #define LOOM_LOW_STRING_OFFSET_NONE LOOM_BSTRING_TABLE_OFFSET_NONE
@@ -64,7 +64,9 @@ extern "C" {
 // Sentinel for absent resources.
 #define LOOM_LOW_RESOURCE_NONE UINT16_MAX
 
-typedef enum loom_low_operand_role_e {
+typedef uint8_t loom_low_operand_role_t;
+
+enum loom_low_operand_role_e {
   // Unknown or uninitialized operand role.
   LOOM_LOW_OPERAND_ROLE_UNKNOWN = 0,
   // SSA result defined by the descriptor.
@@ -79,7 +81,28 @@ typedef enum loom_low_operand_role_e {
   LOOM_LOW_OPERAND_ROLE_RESOURCE = 5,
   // Target-owned implicit architectural operand.
   LOOM_LOW_OPERAND_ROLE_IMPLICIT = 6,
-} loom_low_operand_role_t;
+};
+
+// Canonical source binding compiled from descriptor operand field names.
+// Dynamic contract adapters use this instead of inspecting target-owned text.
+typedef uint8_t loom_low_operand_source_binding_t;
+
+enum loom_low_operand_source_binding_e {
+  // The operand has no canonical dynamic source binding.
+  LOOM_LOW_OPERAND_SOURCE_BINDING_NONE = 0,
+  // Left-hand contraction input.
+  LOOM_LOW_OPERAND_SOURCE_BINDING_LHS = 1,
+  // Right-hand contraction input.
+  LOOM_LOW_OPERAND_SOURCE_BINDING_RHS = 2,
+  // Contraction accumulator input.
+  LOOM_LOW_OPERAND_SOURCE_BINDING_ACCUMULATOR = 3,
+  // Sparse contraction metadata or index input.
+  LOOM_LOW_OPERAND_SOURCE_BINDING_SPARSE_METADATA = 4,
+  // Scale associated with the left-hand contraction input.
+  LOOM_LOW_OPERAND_SOURCE_BINDING_LHS_SCALE = 5,
+  // Scale associated with the right-hand contraction input.
+  LOOM_LOW_OPERAND_SOURCE_BINDING_RHS_SCALE = 6,
+};
 
 typedef enum loom_low_operand_address_map_kind_e {
   // Operand can directly address any unit assigned by its register class.
@@ -544,6 +567,10 @@ typedef struct loom_low_operand_t {
   uint16_t source_value_index;
   // Semantic role this operand row plays.
   loom_low_operand_role_t role;
+  // Canonical source binding for dynamic contract adapters.
+  loom_low_operand_source_binding_t source_binding;
+  // Reserved bytes preserving the compact operand row layout.
+  uint16_t reserved0;
   // Operand flags used by verifier, allocator, and emitter.
   loom_low_operand_flags_t flags;
   // First register-class alternative row for this operand.
@@ -577,7 +604,11 @@ static_assert(sizeof(loom_low_operand_t) == 36,
 static_assert(offsetof(loom_low_operand_t, source_value_index) == 6,
               "source value index must occupy the existing layout padding");
 static_assert(offsetof(loom_low_operand_t, role) == 8,
-              "source value index must not move following descriptor fields");
+              "operand role must not move following descriptor fields");
+static_assert(offsetof(loom_low_operand_t, source_binding) == 9,
+              "source binding must occupy operand role padding");
+static_assert(offsetof(loom_low_operand_t, flags) == 12,
+              "source binding must not move operand flags");
 
 typedef struct loom_low_immediate_t {
   // String-table offset for the immediate field name.
