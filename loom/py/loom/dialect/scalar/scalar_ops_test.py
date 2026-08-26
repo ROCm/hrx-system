@@ -10,6 +10,7 @@ from loom.diagnostics import DiagnosticEngine
 from loom.dialect.func import ALL_FUNC_OPS
 from loom.dialect.scalar import ALL_SCALAR_OPS
 from loom.dialect.scalar.bitwise import ALL_BITWISE_OPS
+from loom.dialect.scalar.math import ALL_MATH_OPS
 from loom.dsl import OpPhase
 from loom.ir import (
     Block,
@@ -51,6 +52,32 @@ _SCALAR_TYPES = _ADDRESS_TYPES + _PAYLOAD_TYPES
 
 def test_scalar_bitwise_ops_are_executable() -> None:
     assert all(op.effective_phase == OpPhase.EXECUTABLE for op in ALL_BITWISE_OPS)
+
+
+def test_scalar_runtime_operations_are_executable() -> None:
+    operation_by_name = {op.name: op for op in ALL_SCALAR_OPS}
+    for operation_name in (
+        "scalar.negi",
+        "scalar.absi",
+        "scalar.minsi",
+        "scalar.maxsi",
+        "scalar.minui",
+        "scalar.maxui",
+        "scalar.ceildivsi",
+        "scalar.ceildivui",
+        "scalar.floordivsi",
+        "scalar.absf",
+        "scalar.minimumf",
+        "scalar.maximumf",
+        "scalar.copysignf",
+        "scalar.isnanf",
+        "scalar.isinff",
+        "scalar.isfinitef",
+        "scalar.signf",
+        "scalar.signi",
+    ):
+        assert operation_by_name[operation_name].effective_phase == OpPhase.EXECUTABLE
+    assert all(op.effective_phase == OpPhase.EXECUTABLE for op in ALL_MATH_OPS)
 
 
 def _verify_cast(op_name: str, source_type: ScalarType, result_type: ScalarType) -> DiagnosticEngine:
