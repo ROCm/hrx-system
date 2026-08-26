@@ -93,13 +93,26 @@ static iree_status_t loom_cmd_program_plan_build_unroll_body(
       builder, loom_cmd_program_plan_build_cleanup_body, NULL, &if_changed_op);
 }
 
+static iree_status_t loom_cmd_program_plan_build_post_inline_cleanup_body(
+    loom_builder_t* builder, void* user_data) {
+  (void)user_data;
+  loom_op_t* run_op = NULL;
+  IREE_RETURN_IF_ERROR(
+      loom_pass_ir_build_run(builder, 0, IREE_SV("canonicalize"),
+                             loom_named_attr_slice_empty(), &run_op));
+  IREE_RETURN_IF_ERROR(loom_pass_ir_build_run(
+      builder, 0, IREE_SV("licm"), loom_named_attr_slice_empty(), &run_op));
+  return loom_pass_ir_build_run(builder, 0, IREE_SV("cse"),
+                                loom_named_attr_slice_empty(), &run_op);
+}
+
 static iree_status_t loom_cmd_program_plan_build_post_inline_body(
     loom_builder_t* builder, void* user_data) {
   (void)user_data;
   loom_op_t* for_op = NULL;
-  return loom_pass_ir_build_for(builder, LOOM_PASS_ANCHOR_FUNC,
-                                loom_cmd_program_plan_build_cleanup_body, NULL,
-                                &for_op);
+  return loom_pass_ir_build_for(
+      builder, LOOM_PASS_ANCHOR_FUNC,
+      loom_cmd_program_plan_build_post_inline_cleanup_body, NULL, &for_op);
 }
 
 static iree_status_t loom_cmd_program_plan_build_preparation_body(
