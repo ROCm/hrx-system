@@ -19,7 +19,7 @@ from loom.importers.tilelang.context import (
 from loom.importers.tilelang.converter import TileLangConverter
 from loom.importers.tilelang.nodes import node_text
 from loom.importers.tilelang.ops.topology import THREAD_AXES, map_thread_axis
-from loom.ir import I1, INDEX
+from loom.ir import INDEX
 
 DistributedBodyEmitter = Callable[
     [tuple[ValueRef, ...], TileLangConversionContext], None
@@ -105,7 +105,6 @@ def materialize_distributed_1d_plan(
     lane_base = context.builder.index.mul(
         lhs=thread_index,
         rhs=lane_count,
-        results=[INDEX],
         name=context.fresh_name(f"{index_name}_base"),
     )
     return Distributed1DPlan(
@@ -147,7 +146,6 @@ def emit_distributed_1d(
                 predicate="slt",
                 lhs=plan.thread_index,
                 rhs=extent_value,
-                results=[I1],
                 name=context.fresh_name(f"{index_name}_active"),
             )
         context.map_distributed_index(
@@ -200,7 +198,6 @@ def emit_distributed_1d(
                 predicate="slt",
                 lhs=index,
                 rhs=extent_value,
-                results=[I1],
                 name=child.fresh_name(f"{index_name}_active"),
             )
         _emit_body(owner, child, (index,), emit_body, guard=guard)
@@ -251,7 +248,6 @@ def _emit_unrolled_lanes(
                 predicate="slt",
                 lhs=index,
                 rhs=extent_value,
-                results=[I1],
                 name=context.fresh_name(f"{index_name}_active"),
             )
         _emit_body(owner, context, (index,), emit_body, guard=guard)

@@ -251,6 +251,16 @@ py_test(
 )
 
 py_test(
+    name = "smoke_test_lib_test",
+    srcs = [
+        "environment.py",
+        "smoke_test_lib.py",
+        "smoke_test_lib_test.py",
+    ],
+    main = "smoke_test_lib_test.py",
+)
+
+py_test(
     name = "setup_test",
     srcs = [
         "__init__.py",

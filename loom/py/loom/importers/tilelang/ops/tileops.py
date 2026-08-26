@@ -2019,7 +2019,6 @@ def _index_mul_const(
     return context.builder.index.mul(
         lhs=lhs,
         rhs=_index_const(context, rhs),
-        results=[INDEX],
         name=context.fresh_name(name),
     )
 
@@ -2033,7 +2032,6 @@ def _index_div_const(
     return context.builder.index.div(
         lhs=lhs,
         rhs=_index_const(context, rhs),
-        results=[INDEX],
         name=context.fresh_name(name),
     )
 
@@ -2047,7 +2045,6 @@ def _index_rem_const(
     return context.builder.index.rem(
         lhs=lhs,
         rhs=_index_const(context, rhs),
-        results=[INDEX],
         name=context.fresh_name(name),
     )
 
@@ -2851,13 +2848,11 @@ def _unflatten_loop_indices(
         indices[position] = context.builder.index.rem(
             lhs=running,
             rhs=extent,
-            results=[INDEX],
             name=context.fresh_name("i_rem"),
         )
         running = context.builder.index.div(
             lhs=running,
             rhs=extent,
-            results=[INDEX],
             name=context.fresh_name("i_div"),
         )
     indices[0] = running
@@ -2881,7 +2876,6 @@ def _unflatten_vector_chunk_indices(
     indices[-1] = context.builder.index.mul(
         lhs=indices[-1],
         rhs=lane_count_value,
-        results=[INDEX],
         name=context.fresh_name("i_offset"),
     )
     return tuple(indices)

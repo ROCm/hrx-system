@@ -11,7 +11,6 @@ from __future__ import annotations
 from loom.builder import ValueRef
 from loom.importers.tilelang.context import TileLangConversionContext
 from loom.importers.tilelang.nodes import node_text
-from loom.ir import I1
 
 
 def coerce_condition(
@@ -30,7 +29,6 @@ def coerce_condition(
             predicate="ne",
             lhs=condition,
             rhs=zero,
-            results=[I1],
             name=context.fresh_name("cmp"),
         )
     if _is_integer_type(source_type):
@@ -39,7 +37,6 @@ def coerce_condition(
             predicate="ne",
             lhs=condition,
             rhs=zero,
-            results=[I1],
             name=context.fresh_name("cmp"),
         )
     context.record_blocked(

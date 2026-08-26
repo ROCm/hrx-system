@@ -364,7 +364,6 @@ def _flatten_logical_indices(
         product = context.builder.index.mul(
             lhs=running,
             rhs=extent,
-            results=[INDEX],
             name=context.fresh_name("mul"),
         )
         running = context.builder.index.add(
@@ -390,13 +389,11 @@ def _unflatten_physical_index(
         remapped[position] = context.builder.index.rem(
             lhs=running,
             rhs=extent,
-            results=[INDEX],
             name=context.fresh_name("rem"),
         )
         running = context.builder.index.div(
             lhs=running,
             rhs=extent,
-            results=[INDEX],
             name=context.fresh_name("div"),
         )
     remapped[0] = running
