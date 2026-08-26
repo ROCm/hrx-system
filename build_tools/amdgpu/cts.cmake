@@ -150,14 +150,18 @@ function(iree_amdgpu_hal_cts_testdata)
     endforeach()
 
     set(_DATA_NAME "${_RULE_NAME}_${_TARGET_FRAGMENT}_data")
-    set(_DATA_HEADER "${_DATA_NAME}.h")
+    # The object directory already contains the full data target name. Use the
+    # expansion ordinal to keep the generated source basename unique without
+    # repeating the target fragment in Windows object paths.
+    set(_DATA_FILE_NAME "${_RULE_NAME}_data${_TARGET_ORDINAL}")
+    set(_DATA_HEADER "${_DATA_FILE_NAME}.h")
     iree_c_embed_data(
       NAME
         "${_DATA_NAME}"
       SRCS
         ${_TARGET_SRCS}
       C_FILE_OUTPUT
-        "${_DATA_NAME}.c"
+        "${_DATA_FILE_NAME}.c"
       H_FILE_OUTPUT
         "${_DATA_HEADER}"
       IDENTIFIER
@@ -170,9 +174,6 @@ function(iree_amdgpu_hal_cts_testdata)
     set(_REGISTRATION_TARGET_NAME
       "${_RULE_TARGET_NAME}_${_TARGET_FRAGMENT}"
     )
-    # The object directory already contains the full target fragment. Use the
-    # expansion ordinal to keep the private source basename unique without
-    # repeating that fragment in Windows object paths.
     set(_REGISTRATION "${_RULE_NAME}_reg${_TARGET_ORDINAL}.cc")
     math(EXPR _TARGET_ORDINAL "${_TARGET_ORDINAL} + 1")
     set(_REGISTRATION_TEMPLATE
