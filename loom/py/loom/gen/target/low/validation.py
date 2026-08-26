@@ -638,6 +638,7 @@ def validate_descriptor_operands(descriptor: Descriptor) -> DescriptorOperandLay
     minimum_packet_operand_count = 0
     seen_non_result = False
     variadic_operand_index: int | None = None
+    has_variable_unit_count = False
     for operand_index, operand in enumerate(descriptor.operands):
         if operand.role is OperandRole.OPERAND_RESULT:
             raise ValueError(f"descriptor '{descriptor.key}' operand '{operand.field_name}' uses OPERAND_RESULT; use separate result and operand rows plus an explicit constraint")
@@ -666,6 +667,14 @@ def validate_descriptor_operands(descriptor: Descriptor) -> DescriptorOperandLay
                 raise ValueError(f"descriptor '{descriptor.key}' variadic operand '{operand.field_name}' cannot participate in a fixed instruction encoding")
         elif operand_role_is_packet_input(operand.role):
             minimum_packet_operand_count += 1
+        if operand.unit_count <= 0:
+            raise ValueError(f"descriptor '{descriptor.key}' operand '{operand.field_name}' unit count must be nonzero")
+        if OperandFlag.VARIABLE_UNIT_COUNT in operand.flags:
+            if operand.role not in (OperandRole.RESULT, OperandRole.OPERAND):
+                raise ValueError(f"descriptor '{descriptor.key}' variable-unit operand '{operand.field_name}' must be a result or ordinary operand")
+            if OperandFlag.VARIADIC in operand.flags:
+                raise ValueError(f"descriptor '{descriptor.key}' variable-unit operand '{operand.field_name}' cannot be variadic")
+            has_variable_unit_count = True
         if not operand.reg_alts:
             raise ValueError(f"descriptor '{descriptor.key}' operand '{operand.field_name}' has no register-class alternatives")
         validate_u16(
@@ -719,6 +728,8 @@ def validate_descriptor_operands(descriptor: Descriptor) -> DescriptorOperandLay
             raise ValueError(f"descriptor '{descriptor.key}' with variadic operands cannot declare storage leases")
         if descriptor.operand_forms:
             raise ValueError(f"descriptor '{descriptor.key}' with variadic operands cannot declare operand forms")
+    if has_variable_unit_count and descriptor.asm_forms:
+        raise ValueError(f"descriptor '{descriptor.key}' with variable-unit operands cannot declare compact asm forms")
     return DescriptorOperandLayout(
         result_count=result_count,
         minimum_packet_operand_count=minimum_packet_operand_count,

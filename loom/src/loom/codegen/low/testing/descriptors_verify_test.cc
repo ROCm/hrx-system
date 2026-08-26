@@ -809,6 +809,46 @@ TEST(LowDescriptorsTest, AcceptsAssemblyImplicitPacketOperand) {
   IREE_ASSERT_OK(loom_low_descriptor_set_verify(&tables.set));
 }
 
+TEST(LowDescriptorsTest, AcceptsVariableUnitCountOperand) {
+  TestTables tables;
+  InitializeTestTables(&tables);
+  tables.operands[1].flags = LOOM_LOW_OPERAND_FLAG_VARIABLE_UNIT_COUNT;
+  tables.operands[1].unit_count = 64;
+  tables.operands[2].flags = LOOM_LOW_OPERAND_FLAG_VARIABLE_UNIT_COUNT;
+  tables.operands[2].unit_count = 64;
+
+  IREE_ASSERT_OK(loom_low_descriptor_set_verify(&tables.set));
+}
+
+TEST(LowDescriptorsTest, RejectsZeroUnitCountOperand) {
+  TestTables tables;
+  InitializeTestTables(&tables);
+  tables.operands[2].unit_count = 0;
+
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_low_descriptor_set_verify(&tables.set));
+}
+
+TEST(LowDescriptorsTest, RejectsVariableUnitCountPredicate) {
+  TestTables tables;
+  InitializeTestTables(&tables);
+  tables.operands[2].role = LOOM_LOW_OPERAND_ROLE_PREDICATE;
+  tables.operands[2].flags = LOOM_LOW_OPERAND_FLAG_VARIABLE_UNIT_COUNT;
+
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_low_descriptor_set_verify(&tables.set));
+}
+
+TEST(LowDescriptorsTest, RejectsVariableUnitCountCompactAssembly) {
+  TestTables tables;
+  InitializeTestTables(&tables);
+  AddAsmForms(&tables);
+  tables.operands[1].flags = LOOM_LOW_OPERAND_FLAG_VARIABLE_UNIT_COUNT;
+
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_low_descriptor_set_verify(&tables.set));
+}
+
 TEST(LowDescriptorsTest, RejectsImplicitRowsWithoutImplicitFlag) {
   TestTables tables;
   InitializeTestTables(&tables);

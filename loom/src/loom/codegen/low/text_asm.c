@@ -684,7 +684,8 @@ static iree_status_t loom_low_descriptor_text_asm_result_accepts_type(
   if (!loom_low_type_is_register(type)) {
     return iree_ok_status();
   }
-  if (loom_low_register_type_unit_count(type) != operand->unit_count) {
+  if (!loom_low_operand_accepts_unit_count(
+          operand, loom_low_register_type_unit_count(type))) {
     return iree_ok_status();
   }
   if (loom_low_register_type_descriptor_set_stable_id(type) !=

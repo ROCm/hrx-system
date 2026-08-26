@@ -1763,11 +1763,25 @@ static iree_status_t loom_low_verify_descriptor_effect_contract(
 static iree_status_t loom_low_verify_descriptor_canonical_asm_form(
     const loom_low_descriptor_set_t* descriptor_set,
     uint32_t descriptor_index) {
+  const loom_low_descriptor_t* descriptor =
+      &descriptor_set->descriptors[descriptor_index];
   const loom_low_descriptor_view_t* descriptor_view =
       &descriptor_set->descriptor_views[descriptor_index];
   if (descriptor_view->canonical_asm_form_ordinal ==
       LOOM_LOW_ASM_FORM_ORDINAL_NONE) {
     return iree_ok_status();
+  }
+  for (uint16_t i = 0; i < descriptor->operand_count; ++i) {
+    const loom_low_operand_t* operand =
+        &descriptor_set->operands[descriptor->operand_start + i];
+    if (iree_any_bit_set(operand->flags,
+                         LOOM_LOW_OPERAND_FLAG_VARIABLE_UNIT_COUNT)) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "low descriptor %" PRIu32
+          " has compact assembly for a variable-unit operand",
+          descriptor_index);
+    }
   }
   if (descriptor_view->canonical_asm_form_ordinal >=
       descriptor_set->asm_form_count) {
@@ -2352,7 +2366,8 @@ static iree_status_t loom_low_verify_operand(
           LOOM_LOW_OPERAND_FLAG_SCHEDULE_ONLY_STATE |
           LOOM_LOW_OPERAND_FLAG_REMATERIALIZABLE |
           LOOM_LOW_OPERAND_FLAG_STORAGE_CONTINUATION |
-          LOOM_LOW_OPERAND_FLAG_VARIADIC,
+          LOOM_LOW_OPERAND_FLAG_VARIADIC |
+          LOOM_LOW_OPERAND_FLAG_VARIABLE_UNIT_COUNT,
       "operand", operand_index));
   IREE_RETURN_IF_ERROR(loom_low_verify_required_string(
       descriptor_set, operand->field_name_string_offset, "operand.field_name"));
@@ -2385,6 +2400,28 @@ static iree_status_t loom_low_verify_operand(
                             "low operand %" PRIu32
                             " has invalid address map %u",
                             operand_index, (unsigned)operand->address_map_kind);
+  }
+  if (operand->unit_count == 0) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "low operand %" PRIu32 " has zero unit count",
+                            operand_index);
+  }
+  if (iree_any_bit_set(operand->flags,
+                       LOOM_LOW_OPERAND_FLAG_VARIABLE_UNIT_COUNT) &&
+      operand->role != LOOM_LOW_OPERAND_ROLE_RESULT &&
+      operand->role != LOOM_LOW_OPERAND_ROLE_OPERAND) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "low variable-unit operand %" PRIu32
+                            " is not a result or ordinary operand",
+                            operand_index);
+  }
+  if (iree_all_bits_set(operand->flags,
+                        LOOM_LOW_OPERAND_FLAG_VARIABLE_UNIT_COUNT |
+                            LOOM_LOW_OPERAND_FLAG_VARIADIC)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "low variable-unit operand %" PRIu32
+                            " is also variadic",
+                            operand_index);
   }
   if (operand->address_map_kind == LOOM_LOW_OPERAND_ADDRESS_MAP_DIRECT &&
       operand->addressable_unit_count != 0) {

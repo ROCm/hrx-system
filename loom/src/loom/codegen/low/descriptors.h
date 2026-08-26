@@ -146,6 +146,9 @@ typedef uint16_t loom_low_operand_flags_t;
 // Operand row describes zero or more trailing packet operands. Variadic rows
 // are explicit packet operands and must terminate the descriptor operand list.
 #define LOOM_LOW_OPERAND_FLAG_VARIADIC ((uint16_t)1u << 9)
+// Operand accepts a nonzero allocation-unit count no greater than
+// |unit_count|. The actual count is carried by the Low SSA register type.
+#define LOOM_LOW_OPERAND_FLAG_VARIABLE_UNIT_COUNT ((uint16_t)1u << 10)
 
 // Bitset of register-class alternative flags.
 typedef uint16_t loom_low_reg_class_alt_flags_t;
@@ -578,7 +581,8 @@ typedef struct loom_low_operand_t {
   uint16_t reg_class_alt_start;
   // Number of register-class alternatives accepted by this operand.
   uint16_t reg_class_alt_count;
-  // Number of allocation units consumed or produced.
+  // Exact allocation-unit count, or inclusive maximum when the variable-unit
+  // flag is set.
   uint16_t unit_count;
   // Operand register-address mapping.
   loom_low_operand_address_map_kind_t address_map_kind;
@@ -610,6 +614,16 @@ static_assert(offsetof(loom_low_operand_t, source_binding) == 9,
               "source binding must occupy operand role padding");
 static_assert(offsetof(loom_low_operand_t, flags) == 12,
               "source binding must not move operand flags");
+
+// Returns true when |actual_unit_count| satisfies the operand width contract.
+static inline bool loom_low_operand_accepts_unit_count(
+    const loom_low_operand_t* operand, uint32_t actual_unit_count) {
+  if (actual_unit_count == 0) return false;
+  return iree_any_bit_set(operand->flags,
+                          LOOM_LOW_OPERAND_FLAG_VARIABLE_UNIT_COUNT)
+             ? actual_unit_count <= operand->unit_count
+             : actual_unit_count == operand->unit_count;
+}
 
 typedef struct loom_low_immediate_t {
   // String-table offset for the immediate field name.

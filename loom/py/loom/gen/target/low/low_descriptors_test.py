@@ -1582,6 +1582,76 @@ def test_generator_emits_trailing_variadic_operand_segment() -> None:
     assert ".asm_operand_segments = kTestLowCoreAsmOperandSegments," in generated.source
 
 
+def test_generator_emits_bounded_variable_unit_count_operand() -> None:
+    dst, lhs, rhs = TEST_LOW_ADD_I32_DESCRIPTOR.operands
+    descriptor = replace(
+        TEST_LOW_ADD_I32_DESCRIPTOR,
+        operands=(
+            replace(
+                dst,
+                flags=(OperandFlag.VARIABLE_UNIT_COUNT,),
+                unit_count=64,
+            ),
+            replace(
+                lhs,
+                flags=(OperandFlag.VARIABLE_UNIT_COUNT,),
+                unit_count=64,
+            ),
+            rhs,
+        ),
+        asm_forms=(),
+    )
+    descriptor_set = replace(
+        TEST_LOW_CORE_DESCRIPTOR_SET,
+        descriptors=(descriptor,),
+    )
+
+    generated = generate_descriptor_set(descriptor_set)
+
+    assert "LOOM_LOW_OPERAND_FLAG_VARIABLE_UNIT_COUNT" in generated.source
+    assert ".unit_count = 64," in generated.source
+
+
+def test_generator_rejects_zero_unit_count_operand() -> None:
+    dst, lhs, rhs = TEST_LOW_ADD_I32_DESCRIPTOR.operands
+    descriptor = replace(
+        TEST_LOW_ADD_I32_DESCRIPTOR,
+        operands=(dst, replace(lhs, unit_count=0), rhs),
+    )
+    descriptor_set = replace(
+        TEST_LOW_CORE_DESCRIPTOR_SET,
+        descriptors=(descriptor,),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=re.escape("descriptor 'test.add.i32' operand 'lhs' unit count must be nonzero"),
+    ):
+        generate_descriptor_set(descriptor_set)
+
+
+def test_generator_rejects_variable_unit_count_compact_assembly() -> None:
+    dst, lhs, rhs = TEST_LOW_ADD_I32_DESCRIPTOR.operands
+    descriptor = replace(
+        TEST_LOW_ADD_I32_DESCRIPTOR,
+        operands=(
+            replace(dst, flags=(OperandFlag.VARIABLE_UNIT_COUNT,)),
+            lhs,
+            rhs,
+        ),
+    )
+    descriptor_set = replace(
+        TEST_LOW_CORE_DESCRIPTOR_SET,
+        descriptors=(descriptor,),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=re.escape("descriptor 'test.add.i32' with variable-unit operands cannot declare compact asm forms"),
+    ):
+        generate_descriptor_set(descriptor_set)
+
+
 def test_generator_rejects_non_trailing_variadic_operand() -> None:
     lhs, rhs = TEST_LOW_ADD_I32_DESCRIPTOR.operands[1:]
     descriptor = replace(

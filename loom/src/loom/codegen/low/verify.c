@@ -971,20 +971,28 @@ static bool loom_low_verify_operand_accepts_register_class(
 
 static iree_status_t loom_low_verify_format_register_constraint(
     loom_low_function_verify_state_t* function_state,
-    iree_string_view_t expected_reg_classes, uint32_t expected_unit_count,
-    iree_string_view_t* out_constraint) {
+    iree_string_view_t expected_reg_classes, uint32_t minimum_unit_count,
+    uint32_t maximum_unit_count, iree_string_view_t* out_constraint) {
   const iree_host_size_t maximum_unit_count_digits = 10;
   const iree_host_size_t byte_capacity =
-      IREE_SV("register class in [] with  unit(s)").size +
-      expected_reg_classes.size + maximum_unit_count_digits;
+      IREE_SV("register class in [] with  through  unit(s)").size +
+      expected_reg_classes.size + 2 * maximum_unit_count_digits;
   char* storage = NULL;
   IREE_RETURN_IF_ERROR(iree_arena_allocate(
       &function_state->state->arena, byte_capacity + 1, (void**)&storage));
-  int length =
-      iree_snprintf(storage, byte_capacity + 1,
-                    "register class in [%.*s] with %" PRIu32 " unit(s)",
-                    (int)expected_reg_classes.size, expected_reg_classes.data,
-                    expected_unit_count);
+  int length = 0;
+  if (minimum_unit_count == maximum_unit_count) {
+    length = iree_snprintf(storage, byte_capacity + 1,
+                           "register class in [%.*s] with %" PRIu32 " unit(s)",
+                           (int)expected_reg_classes.size,
+                           expected_reg_classes.data, maximum_unit_count);
+  } else {
+    length = iree_snprintf(
+        storage, byte_capacity + 1,
+        "register class in [%.*s] with %" PRIu32 " through %" PRIu32 " unit(s)",
+        (int)expected_reg_classes.size, expected_reg_classes.data,
+        minimum_unit_count, maximum_unit_count);
+  }
   if (length < 0 || (iree_host_size_t)length > byte_capacity) {
     IREE_ASSERT_UNREACHABLE("failed to format register constraint");
     IREE_BUILTIN_UNREACHABLE();
@@ -997,11 +1005,11 @@ static iree_status_t loom_low_verify_emit_register_type_mismatch(
     loom_low_function_verify_state_t* function_state, const loom_op_t* op,
     loom_diagnostic_field_ref_t field_ref, iree_string_view_t field_name,
     loom_type_t actual_type, iree_string_view_t expected_reg_classes,
-    uint32_t expected_unit_count) {
+    uint32_t minimum_unit_count, uint32_t maximum_unit_count) {
   iree_string_view_t expected_constraint = iree_string_view_empty();
   IREE_RETURN_IF_ERROR(loom_low_verify_format_register_constraint(
-      function_state, expected_reg_classes, expected_unit_count,
-      &expected_constraint));
+      function_state, expected_reg_classes, minimum_unit_count,
+      maximum_unit_count, &expected_constraint));
   const loom_error_def_t* error = field_ref.kind == LOOM_DIAGNOSTIC_FIELD_RESULT
                                       ? LOOM_ERR_TYPE_004
                                       : LOOM_ERR_TYPE_003;
@@ -1300,8 +1308,8 @@ static iree_status_t loom_low_verify_descriptor_register_field(
 
   bool accepted = false;
   if (loom_low_type_is_register(actual_type) &&
-      loom_low_register_type_unit_count(actual_type) ==
-          descriptor_operand->unit_count) {
+      loom_low_operand_accepts_unit_count(
+          descriptor_operand, loom_low_register_type_unit_count(actual_type))) {
     uint16_t descriptor_register_class_id = LOOM_LOW_REG_CLASS_NONE;
     bool found_descriptor_register_class =
         loom_low_register_type_resolver_try_resolve(
@@ -1327,7 +1335,12 @@ static iree_status_t loom_low_verify_descriptor_register_field(
       field_index);
   return loom_low_verify_emit_register_type_mismatch(
       function_state, op, field_ref, field_name, actual_type,
-      expected_reg_classes, descriptor_operand->unit_count);
+      expected_reg_classes,
+      iree_any_bit_set(descriptor_operand->flags,
+                       LOOM_LOW_OPERAND_FLAG_VARIABLE_UNIT_COUNT)
+          ? 1
+          : descriptor_operand->unit_count,
+      descriptor_operand->unit_count);
 }
 
 static iree_status_t loom_low_verify_descriptor_registers(
