@@ -7,6 +7,7 @@
 #include "loom/link/linker.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "loom/analysis/symbol_references.h"
@@ -2159,6 +2160,83 @@ iree_status_t loom_linker_add_module(loom_linker_t* linker,
   return status;
 }
 
+// Clones exact definitions in authored source operation order. Exact
+// selections are sorted by symbol ordinal, which is also source order for
+// ordinary modules. Authored operation moves can make those orders diverge;
+// only that uncommon case needs a sorted projection.
+static iree_status_t loom_linker_clone_exact_symbol_ops(
+    loom_linker_source_t* source) {
+  bool source_ordered = true;
+  bool has_definition = false;
+  uint64_t previous_block_ordinal = 0;
+  for (iree_host_size_t i = 0; i < source->exact.count; ++i) {
+    const uint16_t source_symbol_id = (uint16_t)source->exact.ordinals[i];
+    const loom_symbol_t* source_symbol =
+        &source->module->symbols.entries[source_symbol_id];
+    if (source_symbol->defining_op == NULL) {
+      continue;
+    }
+    const uint64_t block_ordinal = source_symbol->defining_op->block_ordinal;
+    if (has_definition && block_ordinal < previous_block_ordinal) {
+      source_ordered = false;
+      break;
+    }
+    has_definition = true;
+    previous_block_ordinal = block_ordinal;
+  }
+  if (source_ordered) {
+    iree_status_t status = iree_ok_status();
+    for (iree_host_size_t i = 0;
+         i < source->exact.count && iree_status_is_ok(status); ++i) {
+      const uint16_t source_symbol_id = (uint16_t)source->exact.ordinals[i];
+      const loom_symbol_t* source_symbol =
+          &source->module->symbols.entries[source_symbol_id];
+      if (source_symbol->defining_op == NULL) {
+        continue;
+      }
+      status = loom_linker_clone_or_merge_symbol_op(
+          source, source_symbol_id, source->target_symbols[i],
+          source->exact.outputs ? source->exact.outputs[i]
+                                : LOOM_LINKER_SYMBOL_OUTPUT_AUTHORED);
+    }
+    return status;
+  }
+
+  loom_linker_exact_symbol_op_t* selected_ops = NULL;
+  IREE_RETURN_IF_ERROR(
+      iree_arena_allocate_array(source->arena, source->exact.count,
+                                sizeof(*selected_ops), (void**)&selected_ops));
+
+  iree_host_size_t selected_op_count = 0;
+  for (iree_host_size_t i = 0; i < source->exact.count; ++i) {
+    const uint16_t source_symbol_id = (uint16_t)source->exact.ordinals[i];
+    const loom_symbol_t* source_symbol =
+        &source->module->symbols.entries[source_symbol_id];
+    if (source_symbol->defining_op == NULL) {
+      continue;
+    }
+    selected_ops[selected_op_count++] = (loom_linker_exact_symbol_op_t){
+        .source_op = source_symbol->defining_op,
+        .source_symbol_id = source_symbol_id,
+        .selection_ordinal = i,
+    };
+  }
+  loom_linker_sort_exact_symbol_ops(selected_ops, selected_op_count);
+
+  iree_status_t status = iree_ok_status();
+  for (iree_host_size_t i = 0;
+       i < selected_op_count && iree_status_is_ok(status); ++i) {
+    const loom_linker_exact_symbol_op_t* selected_op = &selected_ops[i];
+    status = loom_linker_clone_or_merge_symbol_op(
+        source, selected_op->source_symbol_id,
+        source->target_symbols[selected_op->selection_ordinal],
+        source->exact.outputs
+            ? source->exact.outputs[selected_op->selection_ordinal]
+            : LOOM_LINKER_SYMBOL_OUTPUT_AUTHORED);
+  }
+  return status;
+}
+
 static iree_status_t loom_linker_add_exact_selection(
     loom_linker_t* linker, const loom_module_t* source_module,
     loom_linker_exact_selection_t selection,
@@ -2227,7 +2305,7 @@ static iree_status_t loom_linker_add_exact_selection(
         &source, source_symbol_id, &source.target_symbols[i], &target_ref);
   }
 
-  if (selection.dense) {
+  if (iree_status_is_ok(status) && selection.dense) {
     const loom_block_t* source_block =
         loom_region_const_entry_block(source_module->body);
     for (const loom_op_t* source_op = source_block->first_op;
@@ -2246,37 +2324,8 @@ static iree_status_t loom_linker_add_exact_selection(
                                              /*before_op=*/NULL, &cloned_op);
       }
     }
-  } else {
-    loom_linker_exact_symbol_op_t* selected_ops = NULL;
-    if (iree_status_is_ok(status) && selection.count > 0) {
-      status = iree_arena_allocate_array(&source_arena, selection.count,
-                                         sizeof(*selected_ops),
-                                         (void**)&selected_ops);
-    }
-    iree_host_size_t selected_op_count = 0;
-    for (iree_host_size_t i = 0;
-         i < selection.count && iree_status_is_ok(status); ++i) {
-      const uint16_t source_symbol_id = (uint16_t)selection.ordinals[i];
-      const loom_op_t* source_op =
-          source_module->symbols.entries[source_symbol_id].defining_op;
-      if (!source_op) continue;
-      selected_ops[selected_op_count++] = (loom_linker_exact_symbol_op_t){
-          .source_op = source_op,
-          .source_symbol_id = source_symbol_id,
-          .selection_ordinal = i,
-      };
-    }
-    loom_linker_sort_exact_symbol_ops(selected_ops, selected_op_count);
-    for (iree_host_size_t i = 0;
-         i < selected_op_count && iree_status_is_ok(status); ++i) {
-      const loom_linker_exact_symbol_op_t* selected_op = &selected_ops[i];
-      status = loom_linker_clone_or_merge_symbol_op(
-          &source, selected_op->source_symbol_id,
-          source.target_symbols[selected_op->selection_ordinal],
-          source.exact.outputs
-              ? source.exact.outputs[selected_op->selection_ordinal]
-              : LOOM_LINKER_SYMBOL_OUTPUT_AUTHORED);
-    }
+  } else if (iree_status_is_ok(status)) {
+    status = loom_linker_clone_exact_symbol_ops(&source);
   }
 
   iree_host_size_t max_anchor_count = 0;

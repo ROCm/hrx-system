@@ -30,6 +30,17 @@ iree_c_embed_data(
 )
 
 loom_cc_library(
+    name = "benchmark_support",
+    testonly = True,
+    srcs = ["util/benchmark_support.cc"],
+    hdrs = ["util/benchmark_support.h"],
+    deps = [
+        "//loom/binding/c:loomc",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
     name = "compile_pool_prototype",
     testonly = True,
     srcs = ["util/compile_pool_prototype.c"],
@@ -49,6 +60,7 @@ loom_cc_library(
     hdrs = ["compile_throughput_benchmark.h"],
     deps = [
         ":benchmark_kernels",
+        ":benchmark_support",
         ":compile_pool_prototype",
         "//loom/binding/c:loomc",
         "//runtime/src/iree/base",
@@ -64,6 +76,20 @@ loom_cc_benchmark(
     ],
     deps = [
         ":compile_throughput_benchmark_harness",
+        "//loom/binding/c:loomc",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:benchmark_main",
+    ],
+)
+
+loom_cc_benchmark(
+    name = "link_throughput_benchmark",
+    srcs = ["link_throughput_benchmark.cc"],
+    args = [
+        "--benchmark_filter=Smoke",
+    ],
+    deps = [
+        ":benchmark_support",
         "//loom/binding/c:loomc",
         "//runtime/src/iree/base",
         "//runtime/src/iree/testing:benchmark_main",

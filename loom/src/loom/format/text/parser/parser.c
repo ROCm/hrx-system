@@ -280,10 +280,10 @@ static iree_status_t loom_parser_resolve_pending_successor_refs(
 }
 
 static iree_status_t loom_parser_verify_symbols_resolved(
-    loom_parser_t* parser) {
-  loom_symbol_reference_table_t reference_table;
+    loom_parser_t* parser, iree_arena_allocator_t* symbol_reference_arena,
+    loom_symbol_reference_table_t* out_symbol_references) {
   IREE_RETURN_IF_ERROR(loom_symbol_reference_table_build(
-      parser->module, &parser->parser_arena, &reference_table));
+      parser->module, symbol_reference_arena, out_symbol_references));
 
   for (iree_host_size_t i = 0;
        i < parser->symbol_origins.count && !loom_parser_at_error_limit(parser);
@@ -296,10 +296,11 @@ static iree_status_t loom_parser_verify_symbols_resolved(
     bool has_reference = false;
     bool has_availability = false;
     loom_symbol_reference_occurrence_id_t occurrence_id =
-        reference_table.symbols[origin.symbol_id].first_incoming_occurrence_id;
+        out_symbol_references->symbols[origin.symbol_id]
+            .first_incoming_occurrence_id;
     while (occurrence_id != LOOM_SYMBOL_REFERENCE_OCCURRENCE_ID_INVALID) {
       const loom_symbol_reference_occurrence_t* occurrence =
-          &reference_table.occurrences[occurrence_id];
+          &out_symbol_references->occurrences[occurrence_id];
       has_reference = true;
       if (occurrence->role == LOOM_SYMBOL_REFERENCE_ROLE_AVAILABILITY) {
         has_availability = true;
@@ -1157,13 +1158,17 @@ static iree_status_t loom_parse_module_body(loom_parser_t* parser) {
 // Public API
 //===----------------------------------------------------------------------===//
 
-iree_status_t loom_text_parse(iree_string_view_t source,
-                              iree_string_view_t filename,
-                              loom_context_t* context,
-                              iree_arena_block_pool_t* block_pool,
-                              const loom_text_parse_options_t* options,
-                              loom_module_t** out_module) {
+static iree_status_t loom_text_parse_impl(
+    iree_string_view_t source, iree_string_view_t filename,
+    loom_context_t* context, iree_arena_block_pool_t* block_pool,
+    const loom_text_parse_options_t* options,
+    iree_arena_allocator_t* symbol_reference_arena,
+    loom_symbol_reference_table_t* out_symbol_references,
+    loom_module_t** out_module) {
   *out_module = NULL;
+  if (out_symbol_references) {
+    *out_symbol_references = (loom_symbol_reference_table_t){0};
+  }
 
   // Allocate the module using the context's host allocator.
   loom_module_t* module = NULL;
@@ -1233,7 +1238,12 @@ iree_status_t loom_text_parse(iree_string_view_t source,
   // within this parse and must resolve before parsing completes. Availability
   // references intentionally preserve unresolved provider anchors.
   if (iree_status_is_ok(status) && parser.error_count == 0) {
-    status = loom_parser_verify_symbols_resolved(&parser);
+    loom_symbol_reference_table_t transient_symbol_references = {0};
+    status = loom_parser_verify_symbols_resolved(
+        &parser,
+        symbol_reference_arena ? symbol_reference_arena : &parser.parser_arena,
+        out_symbol_references ? out_symbol_references
+                              : &transient_symbol_references);
   }
 
   // Build use-def chains in one pass.
@@ -1247,6 +1257,9 @@ iree_status_t loom_text_parse(iree_string_view_t source,
 
   // Infrastructure failures propagate directly.
   if (!iree_status_is_ok(status)) {
+    if (out_symbol_references) {
+      *out_symbol_references = (loom_symbol_reference_table_t){0};
+    }
     loom_module_free(module);
     return status;
   }
@@ -1254,10 +1267,38 @@ iree_status_t loom_text_parse(iree_string_view_t source,
   // Parse errors were emitted as diagnostics but no infrastructure failure.
   // The caller checks *out_module; NULL means parse errors occurred.
   if (parser.error_count > 0) {
+    if (out_symbol_references) {
+      *out_symbol_references = (loom_symbol_reference_table_t){0};
+    }
     loom_module_free(module);
     return iree_ok_status();
   }
 
   *out_module = module;
   return iree_ok_status();
+}
+
+iree_status_t loom_text_parse(iree_string_view_t source,
+                              iree_string_view_t filename,
+                              loom_context_t* context,
+                              iree_arena_block_pool_t* block_pool,
+                              const loom_text_parse_options_t* options,
+                              loom_module_t** out_module) {
+  return loom_text_parse_impl(source, filename, context, block_pool, options,
+                              /*symbol_reference_arena=*/NULL,
+                              /*out_symbol_references=*/NULL, out_module);
+}
+
+iree_status_t loom_text_parse_with_symbol_references(
+    iree_string_view_t source, iree_string_view_t filename,
+    loom_context_t* context, iree_arena_block_pool_t* block_pool,
+    const loom_text_parse_options_t* options,
+    iree_arena_allocator_t* symbol_reference_arena,
+    loom_symbol_reference_table_t* out_symbol_references,
+    loom_module_t** out_module) {
+  IREE_ASSERT_ARGUMENT(symbol_reference_arena);
+  IREE_ASSERT_ARGUMENT(out_symbol_references);
+  return loom_text_parse_impl(source, filename, context, block_pool, options,
+                              symbol_reference_arena, out_symbol_references,
+                              out_module);
 }

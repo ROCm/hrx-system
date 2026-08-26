@@ -27,6 +27,20 @@ iree_c_embed_data(
 
 loom_cc_library(
   NAME
+    benchmark_support
+  HDRS
+    "util/benchmark_support.h"
+  SRCS
+    "util/benchmark_support.cc"
+  DEPS
+    iree::base
+    loom::binding::c::loomc
+  TESTONLY
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
     compile_pool_prototype
   HDRS
     "util/compile_pool_prototype.h"
@@ -50,6 +64,7 @@ loom_cc_library(
     "compile_throughput_benchmark.cc"
   DEPS
     ::benchmark_kernels
+    ::benchmark_support
     ::compile_pool_prototype
     iree::base
     iree::third_party::google_benchmark
@@ -65,6 +80,21 @@ loom_cc_benchmark(
     "targetless_compile_throughput_benchmark.cc"
   DEPS
     ::compile_throughput_benchmark_harness
+    iree::base
+    iree::testing::benchmark_main
+    loom::binding::c::loomc
+  ARGS
+    "--benchmark_filter=Smoke"
+  TESTONLY
+)
+
+loom_cc_benchmark(
+  NAME
+    link_throughput_benchmark
+  SRCS
+    "link_throughput_benchmark.cc"
+  DEPS
+    ::benchmark_support
     iree::base
     iree::testing::benchmark_main
     loom::binding::c::loomc
