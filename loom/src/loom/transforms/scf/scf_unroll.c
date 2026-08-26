@@ -73,6 +73,14 @@ iree_status_t loom_scf_unroll_create(loom_pass_t* pass,
 
 #define LOOM_SCF_UNROLL_INITIAL_LOOP_CAPACITY 16
 
+static bool loom_scf_unroll_policy_present(loom_op_t* op) {
+  return loom_scf_for_unroll_factor_is_present(op) ||
+         !loom_attr_is_absent(
+             loom_op_attrs(op)[loom_scf_for_unroll_policy_ATTR_INDEX]) ||
+         !loom_attr_is_absent(
+             loom_op_attrs(op)[loom_scf_for_unroll_schedule_ATTR_INDEX]);
+}
+
 typedef struct loom_scf_unroll_loop_list_t {
   // Collected scf.for operations in traversal order.
   loom_op_t** ops;
@@ -87,6 +95,8 @@ typedef struct loom_scf_unroll_collect_context_t {
   iree_arena_allocator_t* arena;
   // Collected scf.for operations.
   loom_scf_unroll_loop_list_t* loops;
+  // True when at least one collected loop requests unrolling.
+  bool has_policy;
 } loom_scf_unroll_collect_context_t;
 
 static iree_status_t loom_scf_unroll_loop_list_initialize(
@@ -118,6 +128,9 @@ static iree_status_t loom_scf_unroll_collect_loop(
   *out_result = LOOM_WALK_CONTINUE;
   if (!loom_scf_for_isa(op)) {
     return iree_ok_status();
+  }
+  if (!collect_context->has_policy) {
+    collect_context->has_policy = loom_scf_unroll_policy_present(op);
   }
   return loom_scf_unroll_loop_list_push(collect_context->arena,
                                         collect_context->loops, op);
@@ -550,14 +563,6 @@ static iree_status_t loom_scf_unroll_emit_trip_count_error(
       return iree_ok_status();
   }
   return iree_ok_status();
-}
-
-static bool loom_scf_unroll_policy_present(loom_op_t* op) {
-  return loom_scf_for_unroll_factor_is_present(op) ||
-         !loom_attr_is_absent(
-             loom_op_attrs(op)[loom_scf_for_unroll_policy_ATTR_INDEX]) ||
-         !loom_attr_is_absent(
-             loom_op_attrs(op)[loom_scf_for_unroll_schedule_ATTR_INDEX]);
 }
 
 static bool loom_scf_unroll_shape_is_supported(loom_op_t* op,
@@ -2970,11 +2975,14 @@ static iree_status_t loom_scf_unroll_process_function_once(
                          },
                          context->pass->arena, &walk_result));
 
-  // Fact computation is proportional to the entire function and is only
-  // needed when at least one loop may be processed. In particular, avoid
-  // recomputing facts for the expanded function on the terminal convergence
-  // iteration after full unrolling removed every loop.
-  if (loops.count == 0) return iree_ok_status();
+  // Fact computation is proportional to the entire function. Avoid it when
+  // the terminal convergence iteration has no loops or when all remaining
+  // loops have no unroll policy. Report mode still resolves trip counts for
+  // policy-free loops to explain why they remain structured.
+  if (loops.count == 0 ||
+      (!collect_context.has_policy && !context->reports_enabled)) {
+    return iree_ok_status();
+  }
   IREE_RETURN_IF_ERROR(loom_pass_value_facts_acquire(
       context->pass, context->module,
       loom_pass_value_fact_scope_function(function), &context->fact_table));
