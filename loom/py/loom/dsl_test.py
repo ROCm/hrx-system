@@ -74,6 +74,7 @@ from loom.dsl import (
     NO_RETURN,
     NON_DETERMINISTIC,
     OFFSET,
+    PAYLOAD_SCALAR,
     POISON,
     POOL,
     PURE,
@@ -260,6 +261,7 @@ class TestTypeConstraints:
         assert ADDRESS == TypeConstraint.ADDRESS
         assert BUFFER == TypeConstraint.BUFFER
         assert BYTE_PATTERN_SCALAR == TypeConstraint.BYTE_PATTERN_SCALAR
+        assert PAYLOAD_SCALAR == TypeConstraint.PAYLOAD_SCALAR
         assert dsl.I32 == TypeConstraint.I32
         assert STORAGE == TypeConstraint.STORAGE
         assert ANY_ENCODING == TypeConstraint.ANY_ENCODING
@@ -270,6 +272,7 @@ class TestTypeConstraints:
     def test_values(self) -> None:
         assert TILE.value == "tile"
         assert FLOAT.value == "float"
+        assert PAYLOAD_SCALAR.value == "payload_scalar"
         assert ANY_ENCODING.value == "encoding"
         assert ENCODING_LAYOUT.value == "encoding<layout>"
         assert ENCODING_SCHEMA.value == "encoding<schema>"
@@ -2717,7 +2720,6 @@ class TestEffects:
                 results=[Result("results", INTEGER, variadic=True)],
                 traits=[PURE, POISON],
             )
-
 
     def test_no_return_requires_terminator_with_or_without_effects(self) -> None:
         with _raises(ValueError, match="NO_RETURN requires the TERMINATOR trait"):

@@ -100,7 +100,7 @@ func.def @valid_integer_constant_boundaries() {
 // Logical coordinate constants must be authored with index.constant so that
 // address-domain values are structurally unambiguous.
 func.def @index_constant_requires_index_dialect() -> (index) {
-  // ERROR@+1: TYPE/004 "result" "index" "integer or floating-point scalar; use index.constant"
+  // ERROR@+1: TYPE/004 "result" "index" "integer or floating-point scalar"
   %c = scalar.constant 0 : index
   func.return %c : index
 }
@@ -109,7 +109,7 @@ func.def @index_constant_requires_index_dialect() -> (index) {
 
 // Physical byte offset constants use the index dialect too.
 func.def @offset_constant_requires_index_dialect() -> (offset) {
-  // ERROR@+1: TYPE/004 "result" "offset" "integer or floating-point scalar; use index.constant"
+  // ERROR@+1: TYPE/004 "result" "offset" "integer or floating-point scalar"
   %c = scalar.constant 0 : offset
   func.return %c : offset
 }
@@ -119,7 +119,17 @@ func.def @offset_constant_requires_index_dialect() -> (offset) {
 // scalar.assume constrains scalar payload values; address-domain facts use
 // index.assume.
 func.def @assume_rejects_index_payload(%x: index) -> (i64) {
-  // ERROR@+1: TYPE/004 "values[0]" "index" "integer or floating-point scalar; use index.assume"
+  // ERROR@+2: TYPE/003 "values[0]" "index" "integer or floating-point scalar"
+  // ERROR@+1: TYPE/001 "values[0]" "index" "results[0]" "i64"
+  %r = scalar.assume %x [] : i64
+  func.return %r : i64
+}
+
+// ====
+
+func.def @assume_rejects_offset_payload(%x: offset) -> (i64) {
+  // ERROR@+2: TYPE/003 "values[0]" "offset" "integer or floating-point scalar"
+  // ERROR@+1: TYPE/001 "values[0]" "offset" "results[0]" "i64"
   %r = scalar.assume %x [] : i64
   func.return %r : i64
 }
@@ -237,6 +247,24 @@ func.def @trunci_equal_width(%x: i64) {
 func.def @bitcast_width_mismatch(%x: f32) {
   // ERROR@+1: TYPE/004 "provably same total bit count as input"
   %r = scalar.bitcast %x : f32 to i64
+  func.return
+}
+
+// ====
+
+// Logical address domains are not scalar payload bits. Their physical width is
+// target-dependent and conversions use index.cast.
+func.def @bitcast_rejects_index(%x: index) {
+  // ERROR@+1: TYPE/003 "input" "index" "integer or floating-point scalar"
+  %r = scalar.bitcast %x : index to i64
+  func.return
+}
+
+// ====
+
+func.def @bitcast_rejects_offset_result(%x: i64) {
+  // ERROR@+1: TYPE/004 "result" "offset" "integer or floating-point scalar"
+  %r = scalar.bitcast %x : i64 to offset
   func.return
 }
 

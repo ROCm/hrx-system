@@ -63,6 +63,7 @@ __all__ = [
     "VIEW",
     "BUFFER",
     "INTEGER",
+    "PAYLOAD_SCALAR",
     "BYTE_PATTERN_SCALAR",
     "INDEX_OR_NON_I1_INTEGER_SCALAR",
     "INTEGER_ELEMENT",
@@ -310,6 +311,7 @@ class TypeConstraint(Enum):
       BUFFER   → BufferType
       INTEGER  → ScalarType with kind in {I1, I8, I16, I32, I64}
       FLOAT    → ScalarType with kind in {F8*, F16, BF16, F32, F64}
+      PAYLOAD_SCALAR → ScalarType with integer or floating-point kind
       BITWISE_SCALAR → ScalarType index, non-i1 integer, or floating-point
       BYTE_PATTERN_SCALAR → 8/16/32/64-bit integer or floating-point scalar
       INDEX_OR_NON_I1_INTEGER_SCALAR → ScalarType index or non-i1 integer
@@ -356,6 +358,7 @@ class TypeConstraint(Enum):
     BUFFER = "buffer"
     INTEGER = "integer"
     FLOAT = "float"
+    PAYLOAD_SCALAR = "payload_scalar"
     BITWISE_SCALAR = "bitwise_scalar"
     BYTE_PATTERN_SCALAR = "byte_pattern_scalar"
     INDEX_OR_NON_I1_INTEGER_SCALAR = "index_or_non_i1_integer_scalar"
@@ -396,6 +399,7 @@ VIEW = TypeConstraint.VIEW
 BUFFER = TypeConstraint.BUFFER
 INTEGER = TypeConstraint.INTEGER
 FLOAT = TypeConstraint.FLOAT
+PAYLOAD_SCALAR = TypeConstraint.PAYLOAD_SCALAR
 BITWISE_SCALAR = TypeConstraint.BITWISE_SCALAR
 BYTE_PATTERN_SCALAR = TypeConstraint.BYTE_PATTERN_SCALAR
 INDEX_OR_NON_I1_INTEGER_SCALAR = TypeConstraint.INDEX_OR_NON_I1_INTEGER_SCALAR
@@ -2045,6 +2049,22 @@ def _type_satisfies_field_constraint(
             return False
         scalar_kind = value_type.kind
         return scalar_kind == ScalarTypeKind.INDEX or scalar_kind in {
+            ScalarTypeKind.I8,
+            ScalarTypeKind.I16,
+            ScalarTypeKind.I32,
+            ScalarTypeKind.I64,
+            ScalarTypeKind.F8E4M3,
+            ScalarTypeKind.F8E5M2,
+            ScalarTypeKind.F16,
+            ScalarTypeKind.BF16,
+            ScalarTypeKind.F32,
+            ScalarTypeKind.F64,
+        }
+    if constraint == PAYLOAD_SCALAR:
+        if not isinstance(value_type, ScalarType):
+            return False
+        return value_type.kind in {
+            ScalarTypeKind.I1,
             ScalarTypeKind.I8,
             ScalarTypeKind.I16,
             ScalarTypeKind.I32,

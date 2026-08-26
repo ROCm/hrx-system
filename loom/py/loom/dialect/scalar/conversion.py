@@ -18,6 +18,7 @@ from loom.dsl import (
     DISTRIBUTION_TRANSFER,
     FLOAT,
     INTEGER,
+    PAYLOAD_SCALAR,
     POISON,
     PURE,
     SCALAR,
@@ -168,8 +169,8 @@ scalar_bitcast = cast_op(
     "scalar.bitcast",
     group=scalar_ops,
     phase=OpPhase.EXECUTABLE,
-    from_constraint=SCALAR,
-    to_constraint=SCALAR,
+    from_constraint=PAYLOAD_SCALAR,
+    to_constraint=PAYLOAD_SCALAR,
     doc=("Bitwise reinterpretation between scalar types with the same bit count. No numeric conversion is performed."),
     constraints=[TotalBitCountEqual("input", "result")],
     canonicalize="loom_scalar_bitcast_canonicalize",
@@ -191,12 +192,11 @@ scalar_constant = Op(
         "operations interpret the resulting bit pattern. Logical coordinate "
         "and byte-offset constants use index.constant."
     ),
-    results=[Result("result", SCALAR)],
+    results=[Result("result", PAYLOAD_SCALAR)],
     attrs=[AttrDef("value", "any", doc="The constant value.")],
     constraints=[AttrMatchesElementType("value", "result")],
     traits=[PURE, CONSTANT_LIKE],
     facts="loom_scalar_constant_facts",
-    verify="loom_scalar_constant_verify",
     format=[Attr("value"), COLON, TypeOf("result")],
     examples=[
         "%c42 = scalar.constant 42 : i32",
