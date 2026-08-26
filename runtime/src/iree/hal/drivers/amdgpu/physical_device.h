@@ -26,6 +26,10 @@
 #include "iree/hal/pool.h"
 #include "iree/hal/pool_set.h"
 
+#ifdef __cplusplus
+extern "C" {
+#endif  // __cplusplus
+
 typedef struct iree_hal_amdgpu_host_memory_pools_t
     iree_hal_amdgpu_host_memory_pools_t;
 typedef struct iree_hal_amdgpu_pm4_command_buffer_resident_pool_t
@@ -382,5 +386,9 @@ void iree_hal_amdgpu_physical_device_deinitialize(
 // Releases any unused pooled resources.
 iree_status_t iree_hal_amdgpu_physical_device_trim(
     iree_hal_amdgpu_physical_device_t* physical_device);
+
+#ifdef __cplusplus
+}  // extern "C"
+#endif  // __cplusplus
 
 #endif  // IREE_HAL_DRIVERS_AMDGPU_PHYSICAL_DEVICE_H_

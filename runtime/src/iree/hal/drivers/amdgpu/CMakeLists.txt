@@ -1080,6 +1080,32 @@ endif()
 if(IREE_HAL_DRIVER_AMDGPU)
 iree_cc_test(
   NAME
+    host_queue_failure_test
+  SRCS
+    "host_queue_failure_test.cc"
+  DEPS
+    ::amdgpu
+    ::headers
+    iree::base
+    iree::base::internal
+    iree::base::threading
+    iree::hal
+    iree::hal::cts::util::test_base
+    iree::hal::drivers::amdgpu::util::packet
+    iree::testing::gtest
+    iree::testing::gtest_main
+  LABELS
+    "iree-build-requirement=runtime.hal.amdgpu"
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+  RESOURCE_GROUP
+    iree-hal-drivers-amdgpu-tests
+)
+endif()
+
+if(IREE_HAL_DRIVER_AMDGPU)
+iree_cc_test(
+  NAME
     host_queue_pending_test
   SRCS
     "host_queue_pending_test.cc"

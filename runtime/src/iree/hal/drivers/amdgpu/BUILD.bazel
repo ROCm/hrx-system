@@ -845,6 +845,23 @@ iree_runtime_cc_benchmark(
 )
 
 iree_runtime_cc_test(
+    name = "host_queue_failure_test",
+    srcs = ["host_queue_failure_test.cc"],
+    deps = [
+        ":amdgpu",
+        ":headers",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
+        "//runtime/src/iree/base/threading",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/cts/util:test_base",
+        "//runtime/src/iree/hal/drivers/amdgpu/util:packet",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_test(
     name = "host_queue_pending_test",
     srcs = ["host_queue_pending_test.cc"],
     deps = [
