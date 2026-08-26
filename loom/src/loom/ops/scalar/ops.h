@@ -636,7 +636,7 @@ iree_status_t loom_scalar_maximumf_facts(
     const loom_value_facts_t* operand_facts,
     loom_value_facts_t* result_facts);
 
-// LOOM_OP_SCALAR_MINNUMF: C99 fmin (NaN ignored, returns the non-NaN operand).
+// LOOM_OP_SCALAR_MINNUMF: Number-selecting minimum. One NaN selects the numeric operand, two NaNs produce NaN, and opposite signed zeros select -0.
 // %result = scalar.minnumf %lhs, %rhs : f32
 LOOM_DEFINE_ISA(loom_scalar_minnumf_isa, LOOM_OP_SCALAR_MINNUMF)
 LOOM_DEFINE_OPERAND(loom_scalar_minnumf_lhs, 0)
@@ -654,7 +654,7 @@ iree_status_t loom_scalar_minnumf_facts(
     const loom_value_facts_t* operand_facts,
     loom_value_facts_t* result_facts);
 
-// LOOM_OP_SCALAR_MAXNUMF: C99 fmax (NaN ignored, returns the non-NaN operand).
+// LOOM_OP_SCALAR_MAXNUMF: Number-selecting maximum. One NaN selects the numeric operand, two NaNs produce NaN, and opposite signed zeros select +0.
 // %result = scalar.maxnumf %lhs, %rhs : f32
 LOOM_DEFINE_ISA(loom_scalar_maxnumf_isa, LOOM_OP_SCALAR_MAXNUMF)
 LOOM_DEFINE_OPERAND(loom_scalar_maxnumf_lhs, 0)
