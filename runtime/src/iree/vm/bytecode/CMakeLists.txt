@@ -67,6 +67,7 @@ iree_cc_library(
     "interpreter_frame.c"
     "interpreter_frame.h"
     "interpreter_integer.h"
+    "interpreter_integer_dispatch.c.inc"
     "interpreter_stack.h"
     "module.c"
     "verification_isa.c"
