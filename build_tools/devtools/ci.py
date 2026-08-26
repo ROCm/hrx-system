@@ -186,7 +186,12 @@ def amdgpu_libhsa_test_env() -> tuple[tuple[str, str], ...]:
         rocm_root = os.environ.get("HRX_ROCM_ROOT")
         if not rocm_root:
             return ()
-        libhsa_path = str(Path(rocm_root) / "lib" / "libhsa-runtime64.so.1")
+        relative_path = (
+            Path("bin/hsa-runtime64.dll")
+            if sys.platform == "win32"
+            else Path("lib/libhsa-runtime64.so.1")
+        )
+        libhsa_path = str(Path(rocm_root) / relative_path)
     return (("IREE_HAL_AMDGPU_LIBHSA_PATH", libhsa_path),)
 
 
@@ -693,7 +698,7 @@ def cmake_amdgpu_steps(
             f"Test IREE CMake AMDGPU package tests{sanitizer_name}",
             regex="^iree/hal/drivers/amdgpu/",
             exclude_regex=xfail_regex,
-            env=sanitizer_env(sanitizer),
+            env=sanitizer_env(sanitizer) + amdgpu_libhsa_test_env(),
             parallelism=1,
         )
     )
@@ -713,7 +718,7 @@ def cmake_amdgpu_steps(
             label_regex=ci_config.AMDGPU_CTEST_RESOURCE_LABEL_REGEX,
             label_exclude_regex=resource_label_exclude_regex,
             exclude_regex=resource_exclude_regex,
-            env=sanitizer_env(sanitizer),
+            env=sanitizer_env(sanitizer) + amdgpu_libhsa_test_env(),
             parallelism=1,
         )
     )

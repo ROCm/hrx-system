@@ -805,7 +805,7 @@ iree_cmake_extra_content(
 )
 
 iree_amdgpu_hal_cts_testdata(
-    name = "testdata_amdgpu_pm4_command_buffer_benchmark",
+    name = "pm4_command_buffer_testdata",
     srcs = ["pm4_command_buffer_benchmark_testdata.c"],
     identifier = "iree_pm4_command_buffer_benchmark_testdata_amdgpu",
     internal_hdrs = [
@@ -826,7 +826,7 @@ iree_runtime_cc_benchmark(
     deps = [
         ":amdgpu",
         ":headers",
-        ":testdata_amdgpu_pm4_command_buffer_benchmark",
+        ":pm4_command_buffer_testdata",
         "//runtime/src/iree/async",
         "//runtime/src/iree/async/util:proactor_pool",
         "//runtime/src/iree/base",
