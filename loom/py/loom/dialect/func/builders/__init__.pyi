@@ -82,6 +82,13 @@ class FuncBuilder(DialectBuilder):
         operands: list[ValueRef] = ...,
         location_id: int | None = ...,
     ) -> None: ...
+    def fail(
+        self,
+        *,
+        status: str,
+        message: ValueRef,
+        location_id: int | None = ...,
+    ) -> None: ...
     def null(
         self,
         *,

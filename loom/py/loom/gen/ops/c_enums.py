@@ -131,6 +131,7 @@ TRAIT_MAP: dict[str, str] = {
     "Idempotent": "LOOM_TRAIT_IDEMPOTENT",
     "Involution": "LOOM_TRAIT_INVOLUTION",
     "Terminator": "LOOM_TRAIT_TERMINATOR",
+    "NoReturn": "LOOM_TRAIT_NO_RETURN",
     "ConstantLike": "LOOM_TRAIT_CONSTANT_LIKE",
     "Poison": "LOOM_TRAIT_POISON",
     "Elementwise": "LOOM_TRAIT_ELEMENTWISE",

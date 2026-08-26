@@ -118,6 +118,11 @@ class TestFuncDeclRoundTrip:
             parser.parse("func.decl @bad(%a: f32) -> (f32) {\n  func.return %a : f32\n}\n")
 
 
+class TestFuncFailRoundTrip:
+    def test_explicit_status(self) -> None:
+        _roundtrip("func.def @fail(%message: buffer) {\n  func.fail invalid_argument, %message : buffer\n}\n")
+
+
 class TestFuncImportParsing:
     def test_basic_import(self) -> None:
         module = _parse_module(_module_text('func.decl import("linalg_lib") @matmul(%a: f32, %b: f32) -> (f32)'))

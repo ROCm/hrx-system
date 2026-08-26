@@ -742,6 +742,10 @@ enum loom_trait_bits_e {
   // sentinel that propagates through ordinary pure computation until erased
   // or rejected at an observation boundary.
   LOOM_TRAIT_POISON = 1u << 28,
+  // Terminator exits the enclosing callable without yielding to its immediate
+  // parent region. It may replace a region's ordinary yield-style terminator
+  // because execution has no continuation in that region.
+  LOOM_TRAIT_NO_RETURN = 1u << 29,
 };
 typedef uint32_t loom_trait_flags_t;
 

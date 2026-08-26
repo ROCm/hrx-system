@@ -33,3 +33,10 @@ class CfgBuilder(DialectBuilder):
         default_dest: Block,
         location_id: int | None = ...,
     ) -> None: ...
+    def assert_(
+        self,
+        *,
+        condition: ValueRef,
+        message: ValueRef,
+        location_id: int | None = ...,
+    ) -> None: ...

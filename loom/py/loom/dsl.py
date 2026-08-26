@@ -136,6 +136,7 @@ __all__ = [
     "IDEMPOTENT",
     "INVOLUTION",
     "TERMINATOR",
+    "NO_RETURN",
     "CONSTANT_LIKE",
     "POISON",
     "ELEMENTWISE",
@@ -1165,6 +1166,10 @@ COMMUTATIVE = Trait("Commutative")
 IDEMPOTENT = Trait("Idempotent")
 INVOLUTION = Trait("Involution")
 TERMINATOR = Trait("Terminator")
+# Terminator that exits the enclosing callable instead of yielding to its
+# immediate parent region. Such a path need not use the region's ordinary
+# yield-style terminator because it has no continuation in that region.
+NO_RETURN = Trait("NoReturn")
 CONSTANT_LIKE = Trait("ConstantLike")
 POISON = Trait("Poison")
 ELEMENTWISE = Trait("Elementwise")
@@ -4826,11 +4831,21 @@ def _validate_ownership_effects(
         )
 
 
+def _validate_trait_requirements(
+    op_name: str,
+    traits: tuple[Trait, ...],
+) -> None:
+    """Validate requirements that apply to every trait combination."""
+    trait_names = {t.name for t in traits}
+    if "NoReturn" in trait_names and "Terminator" not in trait_names:
+        raise ValueError(f"Op '{op_name}': NO_RETURN requires the TERMINATOR trait.")
+
+
 def _validate_no_effect_conflicts(
     op_name: str,
     traits: tuple[Trait, ...],
 ) -> None:
-    """Validate trait-only ops for effect-related conflicts."""
+    """Validate effect-related conflicts on ops without explicit effects."""
     trait_names = {t.name for t in traits}
     if "CommandEffect" in trait_names and not trait_names.intersection(
         {"UnknownEffects", "MemoryFence", "NonDeterministic", "Convergent"}
@@ -5839,6 +5854,7 @@ class Op:
                     f"Op '{name}': successor_selector field "
                     f"'{successor_selector}' must not be variadic"
                 )
+        _validate_trait_requirements(name, tuple(traits))
         # Validate memory effect declarations.
         if frozen_effects:
             _validate_effects(name, frozen_effects, frozen_operands, tuple(traits))

@@ -25,11 +25,12 @@ enum {
   LOOM_OP_FUNC_DECL = LOOM_OP_KIND(LOOM_DIALECT_FUNC, 1),
   LOOM_OP_FUNC_CALL = LOOM_OP_KIND(LOOM_DIALECT_FUNC, 2),
   LOOM_OP_FUNC_RETURN = LOOM_OP_KIND(LOOM_DIALECT_FUNC, 3),
-  LOOM_OP_FUNC_NULL = LOOM_OP_KIND(LOOM_DIALECT_FUNC, 4),
-  LOOM_OP_FUNC_COMPARE_NULL = LOOM_OP_KIND(LOOM_DIALECT_FUNC, 5),
-  LOOM_OP_FUNC_ADDRESS = LOOM_OP_KIND(LOOM_DIALECT_FUNC, 6),
-  LOOM_OP_FUNC_IMPORT_RESOLVED = LOOM_OP_KIND(LOOM_DIALECT_FUNC, 7),
-  LOOM_OP_FUNC_COUNT_ = 8,
+  LOOM_OP_FUNC_FAIL = LOOM_OP_KIND(LOOM_DIALECT_FUNC, 4),
+  LOOM_OP_FUNC_NULL = LOOM_OP_KIND(LOOM_DIALECT_FUNC, 5),
+  LOOM_OP_FUNC_COMPARE_NULL = LOOM_OP_KIND(LOOM_DIALECT_FUNC, 6),
+  LOOM_OP_FUNC_ADDRESS = LOOM_OP_KIND(LOOM_DIALECT_FUNC, 7),
+  LOOM_OP_FUNC_IMPORT_RESOLVED = LOOM_OP_KIND(LOOM_DIALECT_FUNC, 8),
+  LOOM_OP_FUNC_COUNT_ = 9,
 };
 
 // Function visibility. Absent (0) means private (module-internal).
@@ -71,6 +72,28 @@ typedef enum loom_func_decl_import_policy_e {
   LOOM_FUNC_DECL_IMPORT_POLICY_OPTIONAL = 1,
   LOOM_FUNC_DECL_IMPORT_POLICY_COUNT_ = 2,
 } loom_func_decl_import_policy_t;
+
+// Non-OK program status returned by func.fail.
+typedef enum loom_func_fail_status_e {
+  LOOM_FUNC_FAIL_STATUS_CANCELLED = 1,
+  LOOM_FUNC_FAIL_STATUS_UNKNOWN = 2,
+  LOOM_FUNC_FAIL_STATUS_INVALID_ARGUMENT = 3,
+  LOOM_FUNC_FAIL_STATUS_DEADLINE_EXCEEDED = 4,
+  LOOM_FUNC_FAIL_STATUS_NOT_FOUND = 5,
+  LOOM_FUNC_FAIL_STATUS_ALREADY_EXISTS = 6,
+  LOOM_FUNC_FAIL_STATUS_PERMISSION_DENIED = 7,
+  LOOM_FUNC_FAIL_STATUS_RESOURCE_EXHAUSTED = 8,
+  LOOM_FUNC_FAIL_STATUS_FAILED_PRECONDITION = 9,
+  LOOM_FUNC_FAIL_STATUS_ABORTED = 10,
+  LOOM_FUNC_FAIL_STATUS_OUT_OF_RANGE = 11,
+  LOOM_FUNC_FAIL_STATUS_UNIMPLEMENTED = 12,
+  LOOM_FUNC_FAIL_STATUS_INTERNAL = 13,
+  LOOM_FUNC_FAIL_STATUS_UNAVAILABLE = 14,
+  LOOM_FUNC_FAIL_STATUS_DATA_LOSS = 15,
+  LOOM_FUNC_FAIL_STATUS_UNAUTHENTICATED = 16,
+  LOOM_FUNC_FAIL_STATUS_INCOMPATIBLE = 18,
+  LOOM_FUNC_FAIL_STATUS_COUNT_ = 19,
+} loom_func_fail_status_t;
 
 // LOOM_OP_FUNC_DEF: Function definition. Callable by name via func.call.
 // func.def @negate(%input: f32) -> (f32) {
@@ -251,6 +274,18 @@ iree_status_t loom_func_return_build(
     loom_builder_t* builder,
     const loom_value_id_t* operands,
     iree_host_size_t operands_count,
+    loom_location_id_t location,
+    loom_op_t** out_op);
+
+// LOOM_OP_FUNC_FAIL: Terminate the current invocation with a status and diagnostic message.
+// func.fail invalid_argument, %message : buffer
+LOOM_DEFINE_ISA(loom_func_fail_isa, LOOM_OP_FUNC_FAIL)
+LOOM_DEFINE_OPERAND(loom_func_fail_message, 0)
+LOOM_DEFINE_ATTR_ENUM_TYPED(loom_func_fail_status, 0, loom_func_fail_status_t)
+iree_status_t loom_func_fail_build(
+    loom_builder_t* builder,
+    loom_func_fail_status_t status,
+    loom_value_id_t message,
     loom_location_id_t location,
     loom_op_t** out_op);
 

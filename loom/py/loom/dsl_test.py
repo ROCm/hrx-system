@@ -71,6 +71,7 @@ from loom.dsl import (
     INVOLUTION,
     MEMORY_FENCE,
     MODULE_SCOPE,
+    NO_RETURN,
     NON_DETERMINISTIC,
     OFFSET,
     POISON,
@@ -2716,6 +2717,20 @@ class TestEffects:
                 results=[Result("results", INTEGER, variadic=True)],
                 traits=[PURE, POISON],
             )
+
+
+    def test_no_return_requires_terminator_with_or_without_effects(self) -> None:
+        with _raises(ValueError, match="NO_RETURN requires the TERMINATOR trait"):
+            Op("test.bad", traits=[NO_RETURN])
+        with _raises(ValueError, match="NO_RETURN requires the TERMINATOR trait"):
+            Op(
+                "test.bad_effect",
+                operands=[Operand("pool", POOL)],
+                traits=[NO_RETURN],
+                effects=[Reads("pool")],
+            )
+
+        Op("test.no_return", traits=[TERMINATOR, NO_RETURN, UNKNOWN_EFFECTS])
 
     def test_allocating_result(self) -> None:
         op = Op(

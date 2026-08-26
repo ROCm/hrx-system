@@ -14,6 +14,7 @@ blocks when a selected arm needs values.
 
 from loom.assembly import (
     ARROW,
+    COLON,
     COMMA,
     GLUE,
     LBRACKET,
@@ -26,14 +27,18 @@ from loom.assembly import (
     OptionalGroup,
     Ref,
     TypedRefs,
+    TypeOf,
     kw,
 )
 from loom.dsl import (
     ANY,
     ATTR_TYPE_I64_ARRAY,
+    BUFFER,
     I1,
     INDEX,
+    POISON_BOUNDARY,
     TERMINATOR,
+    UNKNOWN_EFFECTS,
     AttrDef,
     Dialect,
     Op,
@@ -162,8 +167,41 @@ cfg_switch = Op(
     ],
 )
 
+# ============================================================================
+# cfg.assert — conditional program failure
+# ============================================================================
+
+cfg_assert = Op(
+    "cfg.assert",
+    group=cfg_ops,
+    doc="Continue when the condition is true or fail with the diagnostic message when false.",
+    operands=[
+        Operand(
+            "condition",
+            I1,
+            doc="Scalar i1 condition that must be true.",
+            role=OperandRole.CONTROL_CONDITION,
+        ),
+        Operand(
+            "message",
+            BUFFER,
+            doc="Diagnostic message captured on failure.",
+        ),
+    ],
+    traits=[UNKNOWN_EFFECTS, POISON_BOUNDARY],
+    format=[
+        Ref("condition"),
+        COMMA,
+        Ref("message"),
+        COLON,
+        TypeOf("message"),
+    ],
+    examples=["cfg.assert %condition, %message : buffer"],
+)
+
 ALL_CFG_OPS: tuple[Op, ...] = (
     cfg_br,
     cfg_cond_br,
     cfg_switch,
+    cfg_assert,
 )

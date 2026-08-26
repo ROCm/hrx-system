@@ -24,6 +24,8 @@ static const loom_pass_trait_name_t kLoomPassTraitNames[] = {
     {IREE_SVL("involution"), LOOM_TRAIT_INVOLUTION},
     {IREE_SVL("Terminator"), LOOM_TRAIT_TERMINATOR},
     {IREE_SVL("terminator"), LOOM_TRAIT_TERMINATOR},
+    {IREE_SVL("NoReturn"), LOOM_TRAIT_NO_RETURN},
+    {IREE_SVL("no-return"), LOOM_TRAIT_NO_RETURN},
     {IREE_SVL("ConstantLike"), LOOM_TRAIT_CONSTANT_LIKE},
     {IREE_SVL("constant-like"), LOOM_TRAIT_CONSTANT_LIKE},
     {IREE_SVL("Elementwise"), LOOM_TRAIT_ELEMENTWISE},

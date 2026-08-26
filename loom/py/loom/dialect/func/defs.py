@@ -6,7 +6,7 @@
 
 """Func dialect op definitions.
 
-Eight ops for runtime program structure and first-class function values:
+Nine ops for runtime program structure and first-class function values:
 
 Top-level (module-level symbols):
   func.def       — Function definition (has body, callable by name).
@@ -14,6 +14,7 @@ Top-level (module-level symbols):
 Body ops:
   func.call      — Runtime function call.
   func.return    — Return values from function body.
+  func.fail      — Terminate with an explicit program status.
   func.null      — Null first-class function value.
   func.compare.null — Test a first-class function value for null.
   func.address   — Address a local or imported function.
@@ -49,8 +50,10 @@ from loom.assembly import (
 from loom.dialect.target.defs import ExportAbiKind
 from loom.dsl import (
     ANY,
+    BUFFER,
     I1,
     ISOLATED_FROM_ABOVE,
+    NO_RETURN,
     POISON_BOUNDARY,
     PURE,
     SYMBOL_DEFINE,
@@ -138,6 +141,30 @@ ImportPolicy = EnumDef(
         ),
     ],
     doc="Import resolution policy. Absent (0) means required.",
+)
+
+StatusCode = EnumDef(
+    "StatusCode",
+    [
+        EnumCase("cancelled", 1, doc="Operation was cancelled."),
+        EnumCase("unknown", 2, doc="Unknown failure."),
+        EnumCase("invalid_argument", 3, doc="Invalid argument."),
+        EnumCase("deadline_exceeded", 4, doc="Deadline exceeded."),
+        EnumCase("not_found", 5, doc="Requested entity was not found."),
+        EnumCase("already_exists", 6, doc="Entity already exists."),
+        EnumCase("permission_denied", 7, doc="Permission was denied."),
+        EnumCase("resource_exhausted", 8, doc="Resource was exhausted."),
+        EnumCase("failed_precondition", 9, doc="Precondition was not met."),
+        EnumCase("aborted", 10, doc="Operation was aborted."),
+        EnumCase("out_of_range", 11, doc="Value was out of range."),
+        EnumCase("unimplemented", 12, doc="Operation is not implemented."),
+        EnumCase("internal", 13, doc="Internal failure."),
+        EnumCase("unavailable", 14, doc="Service is unavailable."),
+        EnumCase("data_loss", 15, doc="Unrecoverable data loss."),
+        EnumCase("unauthenticated", 16, doc="Authentication is required."),
+        EnumCase("incompatible", 18, doc="Contracts are incompatible."),
+    ],
+    doc="Non-OK program status returned by func.fail.",
 )
 
 InlinePolicyAttr = EnumDef(
@@ -575,6 +602,41 @@ func_return = Op(
 )
 
 # ============================================================================
+# func.fail — fail the current invocation
+# ============================================================================
+
+func_fail = Op(
+    "func.fail",
+    group=func_ops,
+    phase=OpPhase.EXECUTABLE,
+    doc="Terminate the current invocation with a status and diagnostic message.",
+    operands=[
+        Operand(
+            "message",
+            BUFFER,
+            doc="Diagnostic message captured before the invocation unwinds.",
+        ),
+    ],
+    attrs=[
+        AttrDef(
+            "status",
+            "enum",
+            enum_def=StatusCode,
+            doc="Non-OK status returned by the invocation.",
+        ),
+    ],
+    traits=[TERMINATOR, NO_RETURN, POISON_BOUNDARY, UNKNOWN_EFFECTS],
+    format=[
+        Attr("status"),
+        COMMA,
+        Ref("message"),
+        COLON,
+        TypeOf("message"),
+    ],
+    examples=["func.fail invalid_argument, %message : buffer"],
+)
+
+# ============================================================================
 # All ops
 # ============================================================================
 
@@ -583,6 +645,7 @@ ALL_FUNC_OPS: tuple[Op, ...] = (
     func_decl,
     func_call,
     func_return,
+    func_fail,
     func_null,
     func_compare_null,
     func_address,
