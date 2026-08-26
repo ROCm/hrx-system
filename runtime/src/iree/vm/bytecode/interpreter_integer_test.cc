@@ -14,6 +14,34 @@ namespace iree::vm::bytecode::testing {
 namespace {
 
 template <typename Record, typename Execute>
+void ExpectBinaryResult(Execute execute, uint64_t lhs, uint64_t rhs,
+                        uint64_t expected) {
+  for (uint8_t destination = 0; destination < 3; ++destination) {
+    SCOPED_TRACE(static_cast<int>(destination));
+    uint64_t values[] = {lhs, rhs, UINT64_C(0xA55AA55AA55AA55A)};
+    Record record = {};
+    record.dst_v8 = destination;
+    record.lhs_v8 = 0;
+    record.rhs_v8 = 1;
+    execute(&record, values);
+    EXPECT_EQ(values[destination], expected);
+  }
+}
+
+template <typename Record, typename Execute>
+void ExpectUnaryResult(Execute execute, uint64_t source, uint64_t expected) {
+  for (uint8_t destination = 0; destination < 2; ++destination) {
+    SCOPED_TRACE(static_cast<int>(destination));
+    uint64_t values[] = {source, UINT64_C(0xA55AA55AA55AA55A)};
+    Record record = {};
+    record.dst_v8 = destination;
+    record.src_v8 = 0;
+    execute(&record, values);
+    EXPECT_EQ(values[destination], expected);
+  }
+}
+
+template <typename Record, typename Execute>
 void ExpectDivisionResult(
     Execute execute, uint64_t lhs, uint64_t rhs,
     iree_vm_bytecode_integer_division_failure_t expected_failure,
@@ -61,6 +89,194 @@ void ExpectComparisonPredicates(Execute execute, uint64_t lhs, uint64_t rhs,
     execute(&record, values);
     EXPECT_EQ(values[2], expected[predicate]);
   }
+}
+
+TEST(VMBytecodeInterpreterIntegerTest, ExecutesShiftLeftRecords) {
+  constexpr auto execute_i32 = iree_vm_bytecode_execute_integer_shift_left_i32;
+  ExpectBinaryResult<iree_vm_isa_integer_shift_left_i32_record_t>(execute_i32,
+                                                                  1, 0, 1);
+  ExpectBinaryResult<iree_vm_isa_integer_shift_left_i32_record_t>(
+      execute_i32, 1, 31, UINT32_C(0x80000000));
+  ExpectBinaryResult<iree_vm_isa_integer_shift_left_i32_record_t>(execute_i32,
+                                                                  3, 32, 3);
+  ExpectBinaryResult<iree_vm_isa_integer_shift_left_i32_record_t>(
+      execute_i32, UINT64_MAX, 255, UINT32_C(0x80000000));
+
+  constexpr auto execute_i64 = iree_vm_bytecode_execute_integer_shift_left_i64;
+  ExpectBinaryResult<iree_vm_isa_integer_shift_left_i64_record_t>(execute_i64,
+                                                                  1, 0, 1);
+  ExpectBinaryResult<iree_vm_isa_integer_shift_left_i64_record_t>(
+      execute_i64, 1, 63, UINT64_C(0x8000000000000000));
+  ExpectBinaryResult<iree_vm_isa_integer_shift_left_i64_record_t>(execute_i64,
+                                                                  3, 64, 3);
+  ExpectBinaryResult<iree_vm_isa_integer_shift_left_i64_record_t>(
+      execute_i64, 1, UINT64_MAX, UINT64_C(0x8000000000000000));
+}
+
+TEST(VMBytecodeInterpreterIntegerTest, ExecutesArithmeticShiftRightRecords) {
+  constexpr auto execute_i32 = iree_vm_bytecode_execute_integer_shift_right_s32;
+  ExpectBinaryResult<iree_vm_isa_integer_shift_right_s32_record_t>(
+      execute_i32, UINT32_C(0x80000000), 0, UINT32_C(0x80000000));
+  ExpectBinaryResult<iree_vm_isa_integer_shift_right_s32_record_t>(
+      execute_i32, UINT32_C(0x80000000), 31, UINT32_MAX);
+  ExpectBinaryResult<iree_vm_isa_integer_shift_right_s32_record_t>(
+      execute_i32, UINT32_C(0x80000000), 32, UINT32_C(0x80000000));
+  ExpectBinaryResult<iree_vm_isa_integer_shift_right_s32_record_t>(
+      execute_i32, UINT64_MAX, 255, UINT32_MAX);
+
+  constexpr auto execute_i64 = iree_vm_bytecode_execute_integer_shift_right_s64;
+  ExpectBinaryResult<iree_vm_isa_integer_shift_right_s64_record_t>(
+      execute_i64, UINT64_C(0x8000000000000000), 0,
+      UINT64_C(0x8000000000000000));
+  ExpectBinaryResult<iree_vm_isa_integer_shift_right_s64_record_t>(
+      execute_i64, UINT64_C(0x8000000000000000), 63, UINT64_MAX);
+  ExpectBinaryResult<iree_vm_isa_integer_shift_right_s64_record_t>(
+      execute_i64, UINT64_C(0x8000000000000000), 64,
+      UINT64_C(0x8000000000000000));
+  ExpectBinaryResult<iree_vm_isa_integer_shift_right_s64_record_t>(
+      execute_i64, UINT64_MAX, UINT64_MAX, UINT64_MAX);
+}
+
+TEST(VMBytecodeInterpreterIntegerTest, ExecutesLogicalShiftRightRecords) {
+  constexpr auto execute_i32 = iree_vm_bytecode_execute_integer_shift_right_u32;
+  ExpectBinaryResult<iree_vm_isa_integer_shift_right_u32_record_t>(
+      execute_i32, UINT32_C(0x80000000), 0, UINT32_C(0x80000000));
+  ExpectBinaryResult<iree_vm_isa_integer_shift_right_u32_record_t>(
+      execute_i32, UINT32_C(0x80000000), 31, 1);
+  ExpectBinaryResult<iree_vm_isa_integer_shift_right_u32_record_t>(
+      execute_i32, UINT32_C(0x80000000), 32, UINT32_C(0x80000000));
+  ExpectBinaryResult<iree_vm_isa_integer_shift_right_u32_record_t>(
+      execute_i32, UINT64_MAX, 255, 1);
+
+  constexpr auto execute_i64 = iree_vm_bytecode_execute_integer_shift_right_u64;
+  ExpectBinaryResult<iree_vm_isa_integer_shift_right_u64_record_t>(
+      execute_i64, UINT64_C(0x8000000000000000), 0,
+      UINT64_C(0x8000000000000000));
+  ExpectBinaryResult<iree_vm_isa_integer_shift_right_u64_record_t>(
+      execute_i64, UINT64_C(0x8000000000000000), 63, 1);
+  ExpectBinaryResult<iree_vm_isa_integer_shift_right_u64_record_t>(
+      execute_i64, UINT64_C(0x8000000000000000), 64,
+      UINT64_C(0x8000000000000000));
+  ExpectBinaryResult<iree_vm_isa_integer_shift_right_u64_record_t>(
+      execute_i64, UINT64_MAX, UINT64_MAX, 1);
+}
+
+TEST(VMBytecodeInterpreterIntegerTest, ExecutesRotateLeftRecords) {
+  constexpr auto execute_i32 = iree_vm_bytecode_execute_integer_rotate_left_i32;
+  ExpectBinaryResult<iree_vm_isa_integer_rotate_left_i32_record_t>(execute_i32,
+                                                                   1, 0, 1);
+  ExpectBinaryResult<iree_vm_isa_integer_rotate_left_i32_record_t>(
+      execute_i32, UINT32_C(0x12345678), 4, UINT32_C(0x23456781));
+  ExpectBinaryResult<iree_vm_isa_integer_rotate_left_i32_record_t>(
+      execute_i32, 1, 31, UINT32_C(0x80000000));
+  ExpectBinaryResult<iree_vm_isa_integer_rotate_left_i32_record_t>(execute_i32,
+                                                                   1, 32, 1);
+  ExpectBinaryResult<iree_vm_isa_integer_rotate_left_i32_record_t>(
+      execute_i32, 1, 255, UINT32_C(0x80000000));
+
+  constexpr auto execute_i64 = iree_vm_bytecode_execute_integer_rotate_left_i64;
+  ExpectBinaryResult<iree_vm_isa_integer_rotate_left_i64_record_t>(execute_i64,
+                                                                   1, 0, 1);
+  ExpectBinaryResult<iree_vm_isa_integer_rotate_left_i64_record_t>(
+      execute_i64, UINT64_C(0x0123456789ABCDEF), 8,
+      UINT64_C(0x23456789ABCDEF01));
+  ExpectBinaryResult<iree_vm_isa_integer_rotate_left_i64_record_t>(
+      execute_i64, 1, 63, UINT64_C(0x8000000000000000));
+  ExpectBinaryResult<iree_vm_isa_integer_rotate_left_i64_record_t>(execute_i64,
+                                                                   1, 64, 1);
+  ExpectBinaryResult<iree_vm_isa_integer_rotate_left_i64_record_t>(
+      execute_i64, 1, UINT64_MAX, UINT64_C(0x8000000000000000));
+}
+
+TEST(VMBytecodeInterpreterIntegerTest, ExecutesRotateRightRecords) {
+  constexpr auto execute_i32 =
+      iree_vm_bytecode_execute_integer_rotate_right_i32;
+  ExpectBinaryResult<iree_vm_isa_integer_rotate_right_i32_record_t>(execute_i32,
+                                                                    1, 0, 1);
+  ExpectBinaryResult<iree_vm_isa_integer_rotate_right_i32_record_t>(
+      execute_i32, UINT32_C(0x12345678), 4, UINT32_C(0x81234567));
+  ExpectBinaryResult<iree_vm_isa_integer_rotate_right_i32_record_t>(execute_i32,
+                                                                    1, 31, 2);
+  ExpectBinaryResult<iree_vm_isa_integer_rotate_right_i32_record_t>(execute_i32,
+                                                                    1, 32, 1);
+  ExpectBinaryResult<iree_vm_isa_integer_rotate_right_i32_record_t>(execute_i32,
+                                                                    1, 255, 2);
+
+  constexpr auto execute_i64 =
+      iree_vm_bytecode_execute_integer_rotate_right_i64;
+  ExpectBinaryResult<iree_vm_isa_integer_rotate_right_i64_record_t>(execute_i64,
+                                                                    1, 0, 1);
+  ExpectBinaryResult<iree_vm_isa_integer_rotate_right_i64_record_t>(
+      execute_i64, UINT64_C(0x0123456789ABCDEF), 8,
+      UINT64_C(0xEF0123456789ABCD));
+  ExpectBinaryResult<iree_vm_isa_integer_rotate_right_i64_record_t>(execute_i64,
+                                                                    1, 63, 2);
+  ExpectBinaryResult<iree_vm_isa_integer_rotate_right_i64_record_t>(execute_i64,
+                                                                    1, 64, 1);
+  ExpectBinaryResult<iree_vm_isa_integer_rotate_right_i64_record_t>(
+      execute_i64, 1, UINT64_MAX, 2);
+}
+
+TEST(VMBytecodeInterpreterIntegerTest, ExecutesCountLeadingZerosRecords) {
+  constexpr auto execute_i32 =
+      iree_vm_bytecode_execute_integer_count_leading_zeros_i32;
+  ExpectUnaryResult<iree_vm_isa_integer_count_leading_zeros_i32_record_t>(
+      execute_i32, 0, 32);
+  ExpectUnaryResult<iree_vm_isa_integer_count_leading_zeros_i32_record_t>(
+      execute_i32, 1, 31);
+  ExpectUnaryResult<iree_vm_isa_integer_count_leading_zeros_i32_record_t>(
+      execute_i32, UINT32_C(0x80000000), 0);
+  ExpectUnaryResult<iree_vm_isa_integer_count_leading_zeros_i32_record_t>(
+      execute_i32, UINT64_C(0xFFFFFFFF00000000), 32);
+
+  constexpr auto execute_i64 =
+      iree_vm_bytecode_execute_integer_count_leading_zeros_i64;
+  ExpectUnaryResult<iree_vm_isa_integer_count_leading_zeros_i64_record_t>(
+      execute_i64, 0, 64);
+  ExpectUnaryResult<iree_vm_isa_integer_count_leading_zeros_i64_record_t>(
+      execute_i64, 1, 63);
+  ExpectUnaryResult<iree_vm_isa_integer_count_leading_zeros_i64_record_t>(
+      execute_i64, UINT64_C(0x8000000000000000), 0);
+}
+
+TEST(VMBytecodeInterpreterIntegerTest, ExecutesCountTrailingZerosRecords) {
+  constexpr auto execute_i32 =
+      iree_vm_bytecode_execute_integer_count_trailing_zeros_i32;
+  ExpectUnaryResult<iree_vm_isa_integer_count_trailing_zeros_i32_record_t>(
+      execute_i32, 0, 32);
+  ExpectUnaryResult<iree_vm_isa_integer_count_trailing_zeros_i32_record_t>(
+      execute_i32, 1, 0);
+  ExpectUnaryResult<iree_vm_isa_integer_count_trailing_zeros_i32_record_t>(
+      execute_i32, UINT32_C(0x80000000), 31);
+  ExpectUnaryResult<iree_vm_isa_integer_count_trailing_zeros_i32_record_t>(
+      execute_i32, UINT64_C(0xFFFFFFFF00000000), 32);
+
+  constexpr auto execute_i64 =
+      iree_vm_bytecode_execute_integer_count_trailing_zeros_i64;
+  ExpectUnaryResult<iree_vm_isa_integer_count_trailing_zeros_i64_record_t>(
+      execute_i64, 0, 64);
+  ExpectUnaryResult<iree_vm_isa_integer_count_trailing_zeros_i64_record_t>(
+      execute_i64, 1, 0);
+  ExpectUnaryResult<iree_vm_isa_integer_count_trailing_zeros_i64_record_t>(
+      execute_i64, UINT64_C(0x8000000000000000), 63);
+}
+
+TEST(VMBytecodeInterpreterIntegerTest, ExecutesPopcountRecords) {
+  constexpr auto execute_i32 = iree_vm_bytecode_execute_integer_popcount_i32;
+  ExpectUnaryResult<iree_vm_isa_integer_popcount_i32_record_t>(execute_i32, 0,
+                                                               0);
+  ExpectUnaryResult<iree_vm_isa_integer_popcount_i32_record_t>(
+      execute_i32, UINT32_C(0xAAAAAAAA), 16);
+  ExpectUnaryResult<iree_vm_isa_integer_popcount_i32_record_t>(execute_i32,
+                                                               UINT64_MAX, 32);
+
+  constexpr auto execute_i64 = iree_vm_bytecode_execute_integer_popcount_i64;
+  ExpectUnaryResult<iree_vm_isa_integer_popcount_i64_record_t>(execute_i64, 0,
+                                                               0);
+  ExpectUnaryResult<iree_vm_isa_integer_popcount_i64_record_t>(
+      execute_i64, UINT64_C(0xAAAAAAAAAAAAAAAA), 32);
+  ExpectUnaryResult<iree_vm_isa_integer_popcount_i64_record_t>(execute_i64,
+                                                               UINT64_MAX, 64);
 }
 
 TEST(VMBytecodeInterpreterIntegerTest, ExecutesDivS32Record) {

@@ -1226,7 +1226,7 @@ TEST(VMBytecodeModuleTest, RejectsMalformedScalarStateInstructions) {
     expect_rejected(image);
   }
 
-  const uint8_t division_opcodes[] = {
+  const uint8_t binary_value_opcodes[] = {
       IREE_VM_ISA_CORE_OPCODE_INTEGER_DIV_S32,
       IREE_VM_ISA_CORE_OPCODE_INTEGER_DIV_S64,
       IREE_VM_ISA_CORE_OPCODE_INTEGER_DIV_U32,
@@ -1235,8 +1235,18 @@ TEST(VMBytecodeModuleTest, RejectsMalformedScalarStateInstructions) {
       IREE_VM_ISA_CORE_OPCODE_INTEGER_REM_S64,
       IREE_VM_ISA_CORE_OPCODE_INTEGER_REM_U32,
       IREE_VM_ISA_CORE_OPCODE_INTEGER_REM_U64,
+      IREE_VM_ISA_CORE_OPCODE_INTEGER_SHIFT_LEFT_I32,
+      IREE_VM_ISA_CORE_OPCODE_INTEGER_SHIFT_LEFT_I64,
+      IREE_VM_ISA_CORE_OPCODE_INTEGER_SHIFT_RIGHT_S32,
+      IREE_VM_ISA_CORE_OPCODE_INTEGER_SHIFT_RIGHT_S64,
+      IREE_VM_ISA_CORE_OPCODE_INTEGER_SHIFT_RIGHT_U32,
+      IREE_VM_ISA_CORE_OPCODE_INTEGER_SHIFT_RIGHT_U64,
+      IREE_VM_ISA_CORE_OPCODE_INTEGER_ROTATE_LEFT_I32,
+      IREE_VM_ISA_CORE_OPCODE_INTEGER_ROTATE_LEFT_I64,
+      IREE_VM_ISA_CORE_OPCODE_INTEGER_ROTATE_RIGHT_I32,
+      IREE_VM_ISA_CORE_OPCODE_INTEGER_ROTATE_RIGHT_I64,
   };
-  for (uint8_t opcode : division_opcodes) {
+  for (uint8_t opcode : binary_value_opcodes) {
     for (uint8_t field_offset = 1; field_offset < 4; ++field_offset) {
       std::vector<uint8_t> image = BuildScalarStateModuleImage();
       const MutableFunctionImage function = FindFunctionImage(&image, 1);
@@ -1246,6 +1256,34 @@ TEST(VMBytecodeModuleTest, RejectsMalformedScalarStateInstructions) {
       function.bytecode[kFirstBodyInstructionOffset + field_offset] = 6;
       expect_rejected(image);
     }
+  }
+
+  const uint8_t bit_count_opcodes[] = {
+      IREE_VM_ISA_CORE_OPCODE_INTEGER_COUNT_LEADING_ZEROS_I32,
+      IREE_VM_ISA_CORE_OPCODE_INTEGER_COUNT_LEADING_ZEROS_I64,
+      IREE_VM_ISA_CORE_OPCODE_INTEGER_COUNT_TRAILING_ZEROS_I32,
+      IREE_VM_ISA_CORE_OPCODE_INTEGER_COUNT_TRAILING_ZEROS_I64,
+      IREE_VM_ISA_CORE_OPCODE_INTEGER_POPCOUNT_I32,
+      IREE_VM_ISA_CORE_OPCODE_INTEGER_POPCOUNT_I64,
+  };
+  for (uint8_t opcode : bit_count_opcodes) {
+    for (uint8_t field_offset = 1; field_offset < 3; ++field_offset) {
+      std::vector<uint8_t> image = BuildScalarStateModuleImage();
+      const MutableFunctionImage function = FindFunctionImage(&image, 1);
+      ASSERT_NE(function.row, nullptr);
+      constexpr uint32_t kFirstBodyInstructionOffset = 4;
+      function.bytecode[kFirstBodyInstructionOffset] = opcode;
+      function.bytecode[kFirstBodyInstructionOffset + field_offset] = 6;
+      expect_rejected(image);
+    }
+
+    std::vector<uint8_t> image = BuildScalarStateModuleImage();
+    const MutableFunctionImage function = FindFunctionImage(&image, 1);
+    ASSERT_NE(function.row, nullptr);
+    constexpr uint32_t kFirstBodyInstructionOffset = 4;
+    function.bytecode[kFirstBodyInstructionOffset] = opcode;
+    function.bytecode[kFirstBodyInstructionOffset + 3] = 1;
+    expect_rejected(image);
   }
 
   std::vector<uint8_t> partitioned_image = BuildScalarStateModuleImage();

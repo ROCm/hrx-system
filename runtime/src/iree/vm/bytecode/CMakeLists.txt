@@ -173,6 +173,7 @@ iree_cc_test(
     "interpreter_integer_test.cc"
   DEPS
     iree::base
+    iree::base::internal
     iree::testing::gtest
     iree::testing::gtest_main
     iree::vm::bytecode::wire

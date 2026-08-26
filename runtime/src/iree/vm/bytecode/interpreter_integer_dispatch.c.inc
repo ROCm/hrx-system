@@ -294,6 +294,132 @@
     values[record->dst_v8] = lhs ^ rhs;
     IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_isa_integer_xor_i64_record_t);
   }
+  IREE_VM_BYTECODE_DISPATCH_CASE(INTEGER_SHIFT_LEFT_I32,
+                                 integer_shift_left_i32) {
+    const iree_vm_isa_integer_shift_left_i32_record_t* record =
+        (const iree_vm_isa_integer_shift_left_i32_record_t*)record_data;
+    iree_vm_bytecode_execute_integer_shift_left_i32(record, values);
+    IREE_VM_BYTECODE_DISPATCH_NEXT(
+        iree_vm_isa_integer_shift_left_i32_record_t);
+  }
+  IREE_VM_BYTECODE_DISPATCH_CASE(INTEGER_SHIFT_LEFT_I64,
+                                 integer_shift_left_i64) {
+    const iree_vm_isa_integer_shift_left_i64_record_t* record =
+        (const iree_vm_isa_integer_shift_left_i64_record_t*)record_data;
+    iree_vm_bytecode_execute_integer_shift_left_i64(record, values);
+    IREE_VM_BYTECODE_DISPATCH_NEXT(
+        iree_vm_isa_integer_shift_left_i64_record_t);
+  }
+  IREE_VM_BYTECODE_DISPATCH_CASE(INTEGER_SHIFT_RIGHT_S32,
+                                 integer_shift_right_s32) {
+    const iree_vm_isa_integer_shift_right_s32_record_t* record =
+        (const iree_vm_isa_integer_shift_right_s32_record_t*)record_data;
+    iree_vm_bytecode_execute_integer_shift_right_s32(record, values);
+    IREE_VM_BYTECODE_DISPATCH_NEXT(
+        iree_vm_isa_integer_shift_right_s32_record_t);
+  }
+  IREE_VM_BYTECODE_DISPATCH_CASE(INTEGER_SHIFT_RIGHT_S64,
+                                 integer_shift_right_s64) {
+    const iree_vm_isa_integer_shift_right_s64_record_t* record =
+        (const iree_vm_isa_integer_shift_right_s64_record_t*)record_data;
+    iree_vm_bytecode_execute_integer_shift_right_s64(record, values);
+    IREE_VM_BYTECODE_DISPATCH_NEXT(
+        iree_vm_isa_integer_shift_right_s64_record_t);
+  }
+  IREE_VM_BYTECODE_DISPATCH_CASE(INTEGER_SHIFT_RIGHT_U32,
+                                 integer_shift_right_u32) {
+    const iree_vm_isa_integer_shift_right_u32_record_t* record =
+        (const iree_vm_isa_integer_shift_right_u32_record_t*)record_data;
+    iree_vm_bytecode_execute_integer_shift_right_u32(record, values);
+    IREE_VM_BYTECODE_DISPATCH_NEXT(
+        iree_vm_isa_integer_shift_right_u32_record_t);
+  }
+  IREE_VM_BYTECODE_DISPATCH_CASE(INTEGER_SHIFT_RIGHT_U64,
+                                 integer_shift_right_u64) {
+    const iree_vm_isa_integer_shift_right_u64_record_t* record =
+        (const iree_vm_isa_integer_shift_right_u64_record_t*)record_data;
+    iree_vm_bytecode_execute_integer_shift_right_u64(record, values);
+    IREE_VM_BYTECODE_DISPATCH_NEXT(
+        iree_vm_isa_integer_shift_right_u64_record_t);
+  }
+  IREE_VM_BYTECODE_DISPATCH_CASE(INTEGER_ROTATE_LEFT_I32,
+                                 integer_rotate_left_i32) {
+    const iree_vm_isa_integer_rotate_left_i32_record_t* record =
+        (const iree_vm_isa_integer_rotate_left_i32_record_t*)record_data;
+    iree_vm_bytecode_execute_integer_rotate_left_i32(record, values);
+    IREE_VM_BYTECODE_DISPATCH_NEXT(
+        iree_vm_isa_integer_rotate_left_i32_record_t);
+  }
+  IREE_VM_BYTECODE_DISPATCH_CASE(INTEGER_ROTATE_LEFT_I64,
+                                 integer_rotate_left_i64) {
+    const iree_vm_isa_integer_rotate_left_i64_record_t* record =
+        (const iree_vm_isa_integer_rotate_left_i64_record_t*)record_data;
+    iree_vm_bytecode_execute_integer_rotate_left_i64(record, values);
+    IREE_VM_BYTECODE_DISPATCH_NEXT(
+        iree_vm_isa_integer_rotate_left_i64_record_t);
+  }
+  IREE_VM_BYTECODE_DISPATCH_CASE(INTEGER_ROTATE_RIGHT_I32,
+                                 integer_rotate_right_i32) {
+    const iree_vm_isa_integer_rotate_right_i32_record_t* record =
+        (const iree_vm_isa_integer_rotate_right_i32_record_t*)record_data;
+    iree_vm_bytecode_execute_integer_rotate_right_i32(record, values);
+    IREE_VM_BYTECODE_DISPATCH_NEXT(
+        iree_vm_isa_integer_rotate_right_i32_record_t);
+  }
+  IREE_VM_BYTECODE_DISPATCH_CASE(INTEGER_ROTATE_RIGHT_I64,
+                                 integer_rotate_right_i64) {
+    const iree_vm_isa_integer_rotate_right_i64_record_t* record =
+        (const iree_vm_isa_integer_rotate_right_i64_record_t*)record_data;
+    iree_vm_bytecode_execute_integer_rotate_right_i64(record, values);
+    IREE_VM_BYTECODE_DISPATCH_NEXT(
+        iree_vm_isa_integer_rotate_right_i64_record_t);
+  }
+  IREE_VM_BYTECODE_DISPATCH_CASE(INTEGER_COUNT_LEADING_ZEROS_I32,
+                                 integer_count_leading_zeros_i32) {
+    const iree_vm_isa_integer_count_leading_zeros_i32_record_t* record =
+        (const iree_vm_isa_integer_count_leading_zeros_i32_record_t*)record_data;
+    iree_vm_bytecode_execute_integer_count_leading_zeros_i32(record, values);
+    IREE_VM_BYTECODE_DISPATCH_NEXT(
+        iree_vm_isa_integer_count_leading_zeros_i32_record_t);
+  }
+  IREE_VM_BYTECODE_DISPATCH_CASE(INTEGER_COUNT_LEADING_ZEROS_I64,
+                                 integer_count_leading_zeros_i64) {
+    const iree_vm_isa_integer_count_leading_zeros_i64_record_t* record =
+        (const iree_vm_isa_integer_count_leading_zeros_i64_record_t*)record_data;
+    iree_vm_bytecode_execute_integer_count_leading_zeros_i64(record, values);
+    IREE_VM_BYTECODE_DISPATCH_NEXT(
+        iree_vm_isa_integer_count_leading_zeros_i64_record_t);
+  }
+  IREE_VM_BYTECODE_DISPATCH_CASE(INTEGER_COUNT_TRAILING_ZEROS_I32,
+                                 integer_count_trailing_zeros_i32) {
+    const iree_vm_isa_integer_count_trailing_zeros_i32_record_t* record =
+        (const iree_vm_isa_integer_count_trailing_zeros_i32_record_t*)
+            record_data;
+    iree_vm_bytecode_execute_integer_count_trailing_zeros_i32(record, values);
+    IREE_VM_BYTECODE_DISPATCH_NEXT(
+        iree_vm_isa_integer_count_trailing_zeros_i32_record_t);
+  }
+  IREE_VM_BYTECODE_DISPATCH_CASE(INTEGER_COUNT_TRAILING_ZEROS_I64,
+                                 integer_count_trailing_zeros_i64) {
+    const iree_vm_isa_integer_count_trailing_zeros_i64_record_t* record =
+        (const iree_vm_isa_integer_count_trailing_zeros_i64_record_t*)
+            record_data;
+    iree_vm_bytecode_execute_integer_count_trailing_zeros_i64(record, values);
+    IREE_VM_BYTECODE_DISPATCH_NEXT(
+        iree_vm_isa_integer_count_trailing_zeros_i64_record_t);
+  }
+  IREE_VM_BYTECODE_DISPATCH_CASE(INTEGER_POPCOUNT_I32, integer_popcount_i32) {
+    const iree_vm_isa_integer_popcount_i32_record_t* record =
+        (const iree_vm_isa_integer_popcount_i32_record_t*)record_data;
+    iree_vm_bytecode_execute_integer_popcount_i32(record, values);
+    IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_isa_integer_popcount_i32_record_t);
+  }
+  IREE_VM_BYTECODE_DISPATCH_CASE(INTEGER_POPCOUNT_I64, integer_popcount_i64) {
+    const iree_vm_isa_integer_popcount_i64_record_t* record =
+        (const iree_vm_isa_integer_popcount_i64_record_t*)record_data;
+    iree_vm_bytecode_execute_integer_popcount_i64(record, values);
+    IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_isa_integer_popcount_i64_record_t);
+  }
   IREE_VM_BYTECODE_DISPATCH_CASE(INTEGER_COMPARE_I32, integer_compare_i32) {
     const iree_vm_isa_integer_compare_i32_record_t* record =
         (const iree_vm_isa_integer_compare_i32_record_t*)record_data;

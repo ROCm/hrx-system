@@ -8,6 +8,7 @@
 #define IREE_VM_BYTECODE_INTERPRETER_INTEGER_H_
 
 #include "iree/base/api.h"
+#include "iree/base/internal/math.h"
 #include "iree/vm/bytecode/wire/core/integer.h"
 
 // Executes verified Core integer records against a physical value bank.
@@ -156,6 +157,164 @@ static inline IREE_ATTRIBUTE_ALWAYS_INLINE
   }
   values[record->dst_v8] = lhs % rhs;
   return IREE_VM_BYTECODE_INTEGER_DIVISION_FAILURE_NONE;
+}
+
+// Performs a total arithmetic right shift over a two's-complement bit pattern.
+static inline IREE_ATTRIBUTE_ALWAYS_INLINE uint32_t
+iree_vm_bytecode_integer_shift_right_s32(uint32_t source, uint32_t count) {
+  count &= 31;
+  const uint32_t sign_mask = UINT32_C(0) - (source >> 31);
+  const uint32_t fill_mask = ~(UINT32_MAX >> count);
+  return (source >> count) | (sign_mask & fill_mask);
+}
+
+// Performs a total arithmetic right shift over a two's-complement bit pattern.
+static inline IREE_ATTRIBUTE_ALWAYS_INLINE uint64_t
+iree_vm_bytecode_integer_shift_right_s64(uint64_t source, uint32_t count) {
+  count &= 63;
+  const uint64_t sign_mask = UINT64_C(0) - (source >> 63);
+  const uint64_t fill_mask = ~(UINT64_MAX >> count);
+  return (source >> count) | (sign_mask & fill_mask);
+}
+
+static inline IREE_ATTRIBUTE_ALWAYS_INLINE void
+iree_vm_bytecode_execute_integer_shift_left_i32(
+    const iree_vm_isa_integer_shift_left_i32_record_t* record,
+    uint64_t* values) {
+  const uint32_t source = (uint32_t)values[record->lhs_v8];
+  const uint32_t count = (uint32_t)values[record->rhs_v8] & 31;
+  values[record->dst_v8] = source << count;
+}
+
+static inline IREE_ATTRIBUTE_ALWAYS_INLINE void
+iree_vm_bytecode_execute_integer_shift_left_i64(
+    const iree_vm_isa_integer_shift_left_i64_record_t* record,
+    uint64_t* values) {
+  const uint64_t source = values[record->lhs_v8];
+  const uint32_t count = (uint32_t)(values[record->rhs_v8] & 63);
+  values[record->dst_v8] = source << count;
+}
+
+static inline IREE_ATTRIBUTE_ALWAYS_INLINE void
+iree_vm_bytecode_execute_integer_shift_right_s32(
+    const iree_vm_isa_integer_shift_right_s32_record_t* record,
+    uint64_t* values) {
+  const uint32_t source = (uint32_t)values[record->lhs_v8];
+  const uint32_t count = (uint32_t)values[record->rhs_v8];
+  values[record->dst_v8] =
+      iree_vm_bytecode_integer_shift_right_s32(source, count);
+}
+
+static inline IREE_ATTRIBUTE_ALWAYS_INLINE void
+iree_vm_bytecode_execute_integer_shift_right_s64(
+    const iree_vm_isa_integer_shift_right_s64_record_t* record,
+    uint64_t* values) {
+  const uint64_t source = values[record->lhs_v8];
+  const uint32_t count = (uint32_t)values[record->rhs_v8];
+  values[record->dst_v8] =
+      iree_vm_bytecode_integer_shift_right_s64(source, count);
+}
+
+static inline IREE_ATTRIBUTE_ALWAYS_INLINE void
+iree_vm_bytecode_execute_integer_shift_right_u32(
+    const iree_vm_isa_integer_shift_right_u32_record_t* record,
+    uint64_t* values) {
+  const uint32_t source = (uint32_t)values[record->lhs_v8];
+  const uint32_t count = (uint32_t)values[record->rhs_v8] & 31;
+  values[record->dst_v8] = source >> count;
+}
+
+static inline IREE_ATTRIBUTE_ALWAYS_INLINE void
+iree_vm_bytecode_execute_integer_shift_right_u64(
+    const iree_vm_isa_integer_shift_right_u64_record_t* record,
+    uint64_t* values) {
+  const uint64_t source = values[record->lhs_v8];
+  const uint32_t count = (uint32_t)(values[record->rhs_v8] & 63);
+  values[record->dst_v8] = source >> count;
+}
+
+static inline IREE_ATTRIBUTE_ALWAYS_INLINE void
+iree_vm_bytecode_execute_integer_rotate_left_i32(
+    const iree_vm_isa_integer_rotate_left_i32_record_t* record,
+    uint64_t* values) {
+  const uint32_t source = (uint32_t)values[record->lhs_v8];
+  const uint32_t count = (uint32_t)values[record->rhs_v8];
+  values[record->dst_v8] = iree_math_rotl_u32(source, count);
+}
+
+static inline IREE_ATTRIBUTE_ALWAYS_INLINE void
+iree_vm_bytecode_execute_integer_rotate_left_i64(
+    const iree_vm_isa_integer_rotate_left_i64_record_t* record,
+    uint64_t* values) {
+  const uint64_t source = values[record->lhs_v8];
+  const uint32_t count = (uint32_t)values[record->rhs_v8];
+  values[record->dst_v8] = iree_math_rotl_u64(source, count);
+}
+
+static inline IREE_ATTRIBUTE_ALWAYS_INLINE void
+iree_vm_bytecode_execute_integer_rotate_right_i32(
+    const iree_vm_isa_integer_rotate_right_i32_record_t* record,
+    uint64_t* values) {
+  const uint32_t source = (uint32_t)values[record->lhs_v8];
+  const uint32_t count = (uint32_t)values[record->rhs_v8];
+  values[record->dst_v8] = iree_math_rotr_u32(source, count);
+}
+
+static inline IREE_ATTRIBUTE_ALWAYS_INLINE void
+iree_vm_bytecode_execute_integer_rotate_right_i64(
+    const iree_vm_isa_integer_rotate_right_i64_record_t* record,
+    uint64_t* values) {
+  const uint64_t source = values[record->lhs_v8];
+  const uint32_t count = (uint32_t)values[record->rhs_v8];
+  values[record->dst_v8] = iree_math_rotr_u64(source, count);
+}
+
+static inline IREE_ATTRIBUTE_ALWAYS_INLINE void
+iree_vm_bytecode_execute_integer_count_leading_zeros_i32(
+    const iree_vm_isa_integer_count_leading_zeros_i32_record_t* record,
+    uint64_t* values) {
+  const uint32_t source = (uint32_t)values[record->src_v8];
+  values[record->dst_v8] = iree_math_count_leading_zeros_u32(source);
+}
+
+static inline IREE_ATTRIBUTE_ALWAYS_INLINE void
+iree_vm_bytecode_execute_integer_count_leading_zeros_i64(
+    const iree_vm_isa_integer_count_leading_zeros_i64_record_t* record,
+    uint64_t* values) {
+  const uint64_t source = values[record->src_v8];
+  values[record->dst_v8] = iree_math_count_leading_zeros_u64(source);
+}
+
+static inline IREE_ATTRIBUTE_ALWAYS_INLINE void
+iree_vm_bytecode_execute_integer_count_trailing_zeros_i32(
+    const iree_vm_isa_integer_count_trailing_zeros_i32_record_t* record,
+    uint64_t* values) {
+  const uint32_t source = (uint32_t)values[record->src_v8];
+  values[record->dst_v8] =
+      source == 0 ? 32 : iree_math_count_trailing_zeros_u32(source);
+}
+
+static inline IREE_ATTRIBUTE_ALWAYS_INLINE void
+iree_vm_bytecode_execute_integer_count_trailing_zeros_i64(
+    const iree_vm_isa_integer_count_trailing_zeros_i64_record_t* record,
+    uint64_t* values) {
+  const uint64_t source = values[record->src_v8];
+  values[record->dst_v8] =
+      source == 0 ? 64 : iree_math_count_trailing_zeros_u64(source);
+}
+
+static inline IREE_ATTRIBUTE_ALWAYS_INLINE void
+iree_vm_bytecode_execute_integer_popcount_i32(
+    const iree_vm_isa_integer_popcount_i32_record_t* record, uint64_t* values) {
+  const uint32_t source = (uint32_t)values[record->src_v8];
+  values[record->dst_v8] = iree_math_count_ones_u32(source);
+}
+
+static inline IREE_ATTRIBUTE_ALWAYS_INLINE void
+iree_vm_bytecode_execute_integer_popcount_i64(
+    const iree_vm_isa_integer_popcount_i64_record_t* record, uint64_t* values) {
+  const uint64_t source = values[record->src_v8];
+  values[record->dst_v8] = iree_math_count_ones_u64(source);
 }
 
 static inline IREE_ATTRIBUTE_ALWAYS_INLINE uint64_t

@@ -206,6 +206,7 @@ iree_runtime_cc_test(
     ],
     deps = [
         "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
         "//runtime/src/iree/vm/bytecode/wire",
