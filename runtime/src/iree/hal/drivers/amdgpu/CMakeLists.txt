@@ -334,6 +334,7 @@ iree_cc_library(
     "virtual_memory.h"
     "virtual_queue.h"
   DEPS
+    ${CMAKE_DL_LIBS}
     ::access_policy
     ::atomic_memory
     ::buffer

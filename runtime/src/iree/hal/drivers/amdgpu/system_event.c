@@ -4,6 +4,11 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+// dl_iterate_phdr, dladdr and the RTLD_NOLOAD/RTLD_NODELETE flags used to pin
+// the callback's module are GNU extensions, so this must precede any system
+// header.
+#define _GNU_SOURCE
+
 #include "iree/hal/drivers/amdgpu/system_event.h"
 
 #include <string.h>
@@ -13,6 +18,11 @@
 #include "iree/hal/drivers/amdgpu/host_queue.h"
 #include "iree/hal/drivers/amdgpu/logical_device.h"
 #include "iree/hal/drivers/amdgpu/physical_device.h"
+
+#if defined(IREE_PLATFORM_LINUX)
+#include <dlfcn.h>
+#include <link.h>
+#endif  // IREE_PLATFORM_LINUX
 
 struct iree_hal_amdgpu_system_event_agent_target_t {
   // HSA agent handle copied at registration. Immutable for the registration.
@@ -217,6 +227,120 @@ static hsa_status_t iree_hal_amdgpu_system_event_callback(
              : HSA_STATUS_ERROR;
 }
 
+#if defined(IREE_PLATFORM_LINUX)
+
+// State threaded through the dl_iterate_phdr walk that classifies an address.
+typedef struct iree_hal_amdgpu_module_search_t {
+  // Address being located. Set by the caller.
+  const void* address;
+  // Classification of the object containing |address|. Left unset when no
+  // loaded object contains it.
+  iree_hal_amdgpu_module_pin_t result;
+  // Whether any loaded object contains |address|.
+  bool found;
+} iree_hal_amdgpu_module_search_t;
+
+// dl_iterate_phdr callback locating the loaded object that contains an address.
+static int iree_hal_amdgpu_module_search_visit(struct dl_phdr_info* info,
+                                               size_t info_size,
+                                               void* user_data) {
+  (void)info_size;
+  iree_hal_amdgpu_module_search_t* search =
+      (iree_hal_amdgpu_module_search_t*)user_data;
+  const uintptr_t address = (uintptr_t)search->address;
+  for (ElfW(Half) i = 0; i < info->dlpi_phnum; ++i) {
+    const ElfW(Phdr)* phdr = &info->dlpi_phdr[i];
+    if (phdr->p_type != PT_LOAD) continue;
+    const uintptr_t segment_start = (uintptr_t)info->dlpi_addr + phdr->p_vaddr;
+    if (address < segment_start || address >= segment_start + phdr->p_memsz) {
+      continue;
+    }
+    search->found = true;
+    // The loader names the main program with an empty string. Nothing in a
+    // process can unload the main program, so an address in it needs no pin,
+    // and that includes a link with no dynamic loader at all, where this is
+    // the only object there is.
+    search->result = (info->dlpi_name == NULL || info->dlpi_name[0] == '\0')
+                         ? IREE_HAL_AMDGPU_MODULE_PIN_NOT_REQUIRED
+                         : IREE_HAL_AMDGPU_MODULE_PIN_ACQUIRED;
+    return 1;
+  }
+  return 0;
+}
+
+#endif  // IREE_PLATFORM_LINUX
+
+iree_status_t iree_hal_amdgpu_system_event_pin_module_containing(
+    const void* address, iree_hal_amdgpu_module_pin_t* out_pin) {
+  IREE_ASSERT_ARGUMENT(address);
+  IREE_ASSERT_ARGUMENT(out_pin);
+  *out_pin = IREE_HAL_AMDGPU_MODULE_PIN_NOT_REQUIRED;
+#if defined(IREE_PLATFORM_WINDOWS)
+  // Pinning the main program's own module is legal and is what happens when the
+  // driver is linked into the executable, so there is no not-required case to
+  // report here.
+  HMODULE module = NULL;
+  if (GetModuleHandleEx(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+                            GET_MODULE_HANDLE_EX_FLAG_PIN,
+                        (LPCSTR)address, &module) == 0) {
+    return iree_make_status(IREE_STATUS_NOT_FOUND,
+                            "no loaded module contains address %p", address);
+  }
+  *out_pin = IREE_HAL_AMDGPU_MODULE_PIN_ACQUIRED;
+  return iree_ok_status();
+#elif defined(IREE_PLATFORM_LINUX)
+  // dl_iterate_phdr reports every object the loader has mapped, including the
+  // main program, and it works in a link with no dynamic loader where dladdr
+  // reports nothing at all. Classifying from the walk is what keeps the three
+  // outcomes apart: dlopen returns NULL both for the main program and for a
+  // real failure, so inferring from it would report a pin that never happened.
+  iree_hal_amdgpu_module_search_t search = {
+      .address = address,
+      .result = IREE_HAL_AMDGPU_MODULE_PIN_NOT_REQUIRED,
+      .found = false,
+  };
+  dl_iterate_phdr(iree_hal_amdgpu_module_search_visit, &search);
+  if (!search.found) {
+    return iree_make_status(IREE_STATUS_NOT_FOUND,
+                            "no loaded module contains address %p", address);
+  }
+  if (search.result == IREE_HAL_AMDGPU_MODULE_PIN_NOT_REQUIRED) {
+    *out_pin = IREE_HAL_AMDGPU_MODULE_PIN_NOT_REQUIRED;
+    return iree_ok_status();
+  }
+  // RTLD_NOLOAD resolves the already-resident object without loading anything
+  // and RTLD_NODELETE makes its mapping permanent, so the handle taken here can
+  // be released rather than leaked. The walk above proved the object is mapped
+  // and named, so a NULL here is a real failure to pin and is reported as one.
+  Dl_info dl_info;
+  if (dladdr(address, &dl_info) == 0 || dl_info.dli_fname == NULL ||
+      dl_info.dli_fname[0] == '\0') {
+    return iree_make_status(IREE_STATUS_NOT_FOUND,
+                            "loaded module containing address %p cannot be "
+                            "named for pinning",
+                            address);
+  }
+  void* handle =
+      dlopen(dl_info.dli_fname, RTLD_LAZY | RTLD_NOLOAD | RTLD_NODELETE);
+  if (handle == NULL) {
+    const char* message = dlerror();
+    return iree_make_status(IREE_STATUS_UNAVAILABLE,
+                            "module '%s' containing address %p cannot be "
+                            "pinned into the process: %s",
+                            dl_info.dli_fname, address,
+                            message ? message : "no error reported");
+  }
+  dlclose(handle);
+  *out_pin = IREE_HAL_AMDGPU_MODULE_PIN_ACQUIRED;
+  return iree_ok_status();
+#else
+  return iree_make_status(
+      IREE_STATUS_UNIMPLEMENTED,
+      "no module pin is available on this platform, so the AMDGPU system event "
+      "callback cannot be given a lifetime the HSA runtime will respect");
+#endif  // IREE_PLATFORM_WINDOWS
+}
+
 iree_status_t iree_hal_amdgpu_system_event_register_device(
     const iree_hal_amdgpu_libhsa_t* libhsa,
     iree_hal_amdgpu_logical_device_t* logical_device,
@@ -228,6 +352,10 @@ iree_status_t iree_hal_amdgpu_system_event_register_device(
   *out_registration = NULL;
   iree_call_once(&iree_hal_amdgpu_system_event_once,
                  iree_hal_amdgpu_system_event_initialize);
+
+  iree_hal_amdgpu_module_pin_t pin = IREE_HAL_AMDGPU_MODULE_PIN_NOT_REQUIRED;
+  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_system_event_pin_module_containing(
+      (const void*)iree_hal_amdgpu_system_event_callback, &pin));
 
   const iree_host_size_t agent_count = logical_device->physical_device_count;
   iree_host_size_t total_size = 0;

@@ -302,6 +302,7 @@ iree_runtime_cc_library(
         ":profile_events",
         ":queue_affinity",
         ":source_context",
+        "//build_tools/bazel:dl",
         "//runtime/src/iree/async",
         "//runtime/src/iree/async/util:proactor_pool",
         "//runtime/src/iree/base",

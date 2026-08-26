@@ -72,10 +72,40 @@ typedef struct iree_hal_amdgpu_system_event_agent_target_t
 typedef struct iree_hal_amdgpu_system_event_registration_t
     iree_hal_amdgpu_system_event_registration_t;
 
+// What pinning the module containing an address did.
+typedef enum iree_hal_amdgpu_module_pin_e {
+  // The address is in code the process has no way to unload, so no pin was
+  // needed: the main program on POSIX, including a link with no dynamic loader.
+  IREE_HAL_AMDGPU_MODULE_PIN_NOT_REQUIRED = 0,
+  // The module containing the address is now permanently mapped.
+  IREE_HAL_AMDGPU_MODULE_PIN_ACQUIRED = 1,
+} iree_hal_amdgpu_module_pin_t;
+
+// Makes the code containing |address| stay mapped and callable for the life of
+// the process and reports in |out_pin| whether that took a pin or whether the
+// containing module was already unloadable-by-nobody.
+//
+// This is what lets a callback pointer be handed to a component that never
+// gives it back. It fails rather than reporting success it cannot support: when
+// no loaded module contains |address|, when the module containing it cannot be
+// pinned, and on platforms offering no pin at all. A failed pin is never
+// reported as "nothing to pin".
+//
+// Exposed for coverage of that contract; registration below is the only
+// production caller.
+iree_status_t iree_hal_amdgpu_system_event_pin_module_containing(
+    const void* address, iree_hal_amdgpu_module_pin_t* out_pin);
+
 // Registers |logical_device| to receive process-wide HSA system events and
 // returns the registration in |out_registration|. Registration is a cold
 // device-creation operation and must run after the device's physical devices
 // have their agents.
+//
+// Pins the module implementing the callback into the process before handing its
+// pointer to the HSA runtime, and fails if it cannot. The runtime keeps that
+// pointer until its final shutdown and offers no unregister, so a module that
+// can still be unloaded would leave the runtime able to jump into unmapped
+// code; refusing to register is the only honest answer.
 //
 // The registration copies the device's GPU agent handles and borrows
 // |logical_device| until its device status is retired. It starts with no queue
