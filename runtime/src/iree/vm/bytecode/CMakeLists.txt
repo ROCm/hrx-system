@@ -71,6 +71,12 @@ iree_cc_library(
     "interpreter_stack.h"
     "module.c"
     "verification_isa.c"
+    "verification_isa_buffer.c"
+    "verification_isa_buffer.h"
+    "verification_isa_registers.c"
+    "verification_isa_registers.h"
+    "verification_isa_stack.c"
+    "verification_isa_stack.h"
   DEPS
     ::module
     iree::base

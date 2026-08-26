@@ -5,11 +5,12 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 #include "iree/base/alignment.h"
-#include "iree/vm/bytecode/interpreter_atomic.h"
 #include "iree/vm/bytecode/module_reader.h"
 #include "iree/vm/bytecode/verification.h"
+#include "iree/vm/bytecode/verification_isa_buffer.h"
+#include "iree/vm/bytecode/verification_isa_registers.h"
+#include "iree/vm/bytecode/verification_isa_stack.h"
 #include "iree/vm/bytecode/wire/core/abi.h"
-#include "iree/vm/bytecode/wire/core/buffer.h"
 #include "iree/vm/bytecode/wire/core/constant.h"
 #include "iree/vm/bytecode/wire/core/control.h"
 #include "iree/vm/bytecode/wire/core/conversion.h"
@@ -20,7 +21,6 @@
 #include "iree/vm/bytecode/wire/core/opcodes.h"
 #include "iree/vm/bytecode/wire/core/ref.h"
 #include "iree/vm/bytecode/wire/core/selectors.h"
-#include "iree/vm/bytecode/wire/core/stack.h"
 #include "iree/vm/bytecode/wire/core/value.h"
 
 typedef enum iree_vm_bytecode_verification_form_e {
@@ -144,60 +144,6 @@ static_assert(sizeof(iree_vm_bytecode_execution_info_t) == 2,
 static_assert(IREE_ARRAYSIZE(iree_vm_bytecode_execution_info) == 256,
               "VM execution table must cover every byte opcode");
 
-static iree_status_t iree_vm_bytecode_verify_value_register(
-    uint8_t ordinal, uint16_t register_count) {
-  if (ordinal >= register_count) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "value register ordinal is out of range");
-  }
-  return iree_ok_status();
-}
-
-static iree_status_t iree_vm_bytecode_verify_ref_register(
-    uint8_t ordinal, uint16_t register_count) {
-  if (ordinal >= register_count) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "ref register ordinal is out of range");
-  }
-  return iree_ok_status();
-}
-
-static iree_status_t iree_vm_bytecode_verify_function_register(
-    uint8_t ordinal, uint16_t register_count) {
-  if (ordinal >= register_count) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "function register ordinal is out of range");
-  }
-  return iree_ok_status();
-}
-
-static iree_status_t iree_vm_bytecode_verify_function_local(
-    uint16_t ordinal, uint32_t local_count) {
-  if (ordinal >= local_count) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "local function ordinal is out of range");
-  }
-  return iree_ok_status();
-}
-
-static iree_status_t iree_vm_bytecode_verify_ref_slot(uint16_t ordinal,
-                                                      uint32_t slot_count) {
-  if (ordinal >= slot_count) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "local ref slot ordinal is out of range");
-  }
-  return iree_ok_status();
-}
-
-static iree_status_t iree_vm_bytecode_verify_value_register_range(
-    uint8_t base, uint8_t count, uint16_t register_count) {
-  if (base > register_count || count > register_count - base) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "value register range is out of bounds");
-  }
-  return iree_ok_status();
-}
-
 static bool iree_vm_bytecode_integer_carrier_width_is_valid(uint8_t width) {
   return width == 8 || width == 16 || width == 32 || width == 64;
 }
@@ -240,48 +186,6 @@ static iree_status_t iree_vm_bytecode_verify_integer_bitstream_record(
   return iree_ok_status();
 }
 
-static iree_status_t iree_vm_bytecode_verify_local_range(
-    uint16_t base, uint32_t length, uint16_t local_byte_length) {
-  if (base > local_byte_length || length > local_byte_length - base) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "local byte range is out of bounds");
-  }
-  return iree_ok_status();
-}
-
-static iree_status_t iree_vm_bytecode_verify_lane_register_range(
-    uint8_t register_base, uint8_t format,
-    const iree_vm_bytecode_v0_function_row_t* function) {
-  if (format > IREE_VM_ISA_MEMORY_FORMAT_I64_X8) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "memory format is invalid");
-  }
-  const uint8_t lane_count = (uint8_t)(1u << (format & 3u));
-  return iree_vm_bytecode_verify_value_register_range(
-      register_base, lane_count, function->value_register_count_u16);
-}
-
-static iree_status_t iree_vm_bytecode_verify_stack_lane_range(
-    uint16_t base, uint8_t register_base, uint8_t format,
-    const iree_vm_bytecode_v0_function_row_t* function) {
-  IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_lane_register_range(
-      register_base, format, function));
-  const uint8_t access_length =
-      (uint8_t)(1u << ((format >> 2) + (format & 3u)));
-  return iree_vm_bytecode_verify_local_range(base, access_length,
-                                             function->local_byte_length_u16);
-}
-
-static iree_status_t iree_vm_bytecode_verify_stack_fixed_range(
-    uint16_t base, uint32_t length, uint8_t alignment,
-    uint16_t local_byte_length) {
-  if ((base & (alignment - 1u)) != 0) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "local byte range has invalid alignment");
-  }
-  return iree_vm_bytecode_verify_local_range(base, length, local_byte_length);
-}
-
 static iree_status_t iree_vm_bytecode_verify_record_available(
     uint32_t remaining_length, iree_host_size_t required_length,
     uint8_t opcode) {
@@ -297,63 +201,6 @@ static bool iree_vm_bytecode_control_status_is_assigned(uint8_t status) {
   return (status >= IREE_VM_ISA_CONTROL_STATUS_CANCELLED &&
           status <= IREE_VM_ISA_CONTROL_STATUS_UNAUTHENTICATED) ||
          status == IREE_VM_ISA_CONTROL_STATUS_INCOMPATIBLE;
-}
-
-static iree_status_t iree_vm_bytecode_verify_atomic_carrier(uint8_t carrier) {
-  if (!iree_vm_bytecode_atomic_carrier_is_supported(carrier)) {
-    return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
-                            "atomic carrier is unsupported on this target");
-  }
-  return iree_ok_status();
-}
-
-static iree_status_t iree_vm_bytecode_verify_atomic_apply_selectors(
-    uint8_t selector0, uint8_t selector1, uint8_t minimum_kind) {
-  const uint8_t kind = selector0 & 0x0Fu;
-  const uint8_t ordering = selector1 & 0x07u;
-  const uint8_t scope = (selector1 >> 3) & 0x07u;
-  if ((selector0 & 0x70u) != 0 || (selector1 & 0xC0u) != 0 ||
-      kind < minimum_kind ||
-      ordering > IREE_VM_ISA_BUFFER_ATOMIC_ORDERING_SEQ_CST ||
-      scope > IREE_VM_ISA_BUFFER_ATOMIC_SCOPE_SYSTEM) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "buffer atomic selectors are invalid");
-  }
-  return iree_ok_status();
-}
-
-static bool iree_vm_bytecode_atomic_ordering_pair_is_valid(
-    uint8_t success_ordering, uint8_t failure_ordering) {
-  switch (success_ordering) {
-    case IREE_VM_ISA_BUFFER_ATOMIC_ORDERING_RELAXED:
-    case IREE_VM_ISA_BUFFER_ATOMIC_ORDERING_RELEASE:
-      return failure_ordering == IREE_VM_ISA_BUFFER_ATOMIC_ORDERING_RELAXED;
-    case IREE_VM_ISA_BUFFER_ATOMIC_ORDERING_ACQUIRE:
-    case IREE_VM_ISA_BUFFER_ATOMIC_ORDERING_ACQ_REL:
-      return failure_ordering == IREE_VM_ISA_BUFFER_ATOMIC_ORDERING_RELAXED ||
-             failure_ordering == IREE_VM_ISA_BUFFER_ATOMIC_ORDERING_ACQUIRE;
-    case IREE_VM_ISA_BUFFER_ATOMIC_ORDERING_SEQ_CST:
-      return failure_ordering == IREE_VM_ISA_BUFFER_ATOMIC_ORDERING_RELAXED ||
-             failure_ordering == IREE_VM_ISA_BUFFER_ATOMIC_ORDERING_ACQUIRE ||
-             failure_ordering == IREE_VM_ISA_BUFFER_ATOMIC_ORDERING_SEQ_CST;
-    default:
-      return false;
-  }
-}
-
-static iree_status_t iree_vm_bytecode_verify_atomic_cmpxchg_selectors(
-    uint8_t selector0, uint8_t selector1) {
-  const uint8_t success_ordering = selector0 & 0x07u;
-  const uint8_t failure_ordering = (selector0 >> 3) & 0x07u;
-  const uint8_t scope = selector1 & 0x07u;
-  if ((selector0 & 0x40u) != 0 || (selector1 & 0xF8u) != 0 ||
-      !iree_vm_bytecode_atomic_ordering_pair_is_valid(success_ordering,
-                                                      failure_ordering) ||
-      scope > IREE_VM_ISA_BUFFER_ATOMIC_SCOPE_SYSTEM) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "buffer atomic cmpxchg selectors are invalid");
-  }
-  return iree_ok_status();
 }
 
 // Verifies the shared opcode/dst/lhs/rhs value-register layout.
@@ -1605,242 +1452,22 @@ static iree_status_t iree_vm_bytecode_function_verify(
             record->slot_u16, function->local_ref_count_u32));
         break;
       }
-      case IREE_VM_BYTECODE_VERIFICATION_FORM_BUFFER_ALLOCATE: {
-        const iree_vm_isa_buffer_allocate_record_t* record =
-            (const iree_vm_isa_buffer_allocate_record_t*)record_data;
-        if (record->zero_padding_u8 != 0) {
-          return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                                  "buffer.allocate padding is nonzero");
-        }
-        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_ref_register(
-            record->dst_r8, function->ref_register_count_u16));
-        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_value_register(
-            record->length_v8, function->value_register_count_u16));
-        break;
-      }
-      case IREE_VM_BYTECODE_VERIFICATION_FORM_BUFFER_LENGTH: {
-        const iree_vm_isa_buffer_length_record_t* record =
-            (const iree_vm_isa_buffer_length_record_t*)record_data;
-        if (record->zero_padding_u8 != 0) {
-          return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                                  "buffer.length padding is nonzero");
-        }
-        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_value_register(
-            record->dst_v8, function->value_register_count_u16));
-        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_ref_register(
-            record->buffer_r8, function->ref_register_count_u16));
-        break;
-      }
-      case IREE_VM_BYTECODE_VERIFICATION_FORM_BUFFER_SUBSPAN: {
-        const iree_vm_isa_buffer_subspan_record_t* record =
-            (const iree_vm_isa_buffer_subspan_record_t*)record_data;
-        if (record->zero_padding_u8[0] != 0 ||
-            record->zero_padding_u8[1] != 0 ||
-            record->zero_padding_u8[2] != 0) {
-          return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                                  "buffer.subspan padding is nonzero");
-        }
-        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_ref_register(
-            record->dst_r8, function->ref_register_count_u16));
-        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_ref_register(
-            record->buffer_r8, function->ref_register_count_u16));
-        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_value_register(
-            record->offset_v8, function->value_register_count_u16));
-        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_value_register(
-            record->length_v8, function->value_register_count_u16));
-        break;
-      }
-      case IREE_VM_BYTECODE_VERIFICATION_FORM_BUFFER_LOAD: {
-        const iree_vm_isa_buffer_load_record_t* record =
-            (const iree_vm_isa_buffer_load_record_t*)record_data;
-        if (record->zero_padding_u8 != 0) {
-          return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                                  "buffer.load padding is nonzero");
-        }
-        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_ref_register(
-            record->buffer_r8, function->ref_register_count_u16));
-        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_value_register(
-            record->base_v8, function->value_register_count_u16));
-        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_value_register(
-            record->index_v8, function->value_register_count_u16));
-        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_lane_register_range(
-            record->dst_v8, record->format_u8, function));
-        break;
-      }
-      case IREE_VM_BYTECODE_VERIFICATION_FORM_BUFFER_STORE: {
-        const iree_vm_isa_buffer_store_record_t* record =
-            (const iree_vm_isa_buffer_store_record_t*)record_data;
-        if (record->zero_padding_u8 != 0) {
-          return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                                  "buffer.store padding is nonzero");
-        }
-        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_ref_register(
-            record->buffer_r8, function->ref_register_count_u16));
-        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_value_register(
-            record->base_v8, function->value_register_count_u16));
-        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_value_register(
-            record->index_v8, function->value_register_count_u16));
-        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_lane_register_range(
-            record->src_v8, record->format_u8, function));
-        break;
-      }
-      case IREE_VM_BYTECODE_VERIFICATION_FORM_BUFFER_ATOMIC_REDUCE: {
-        const iree_vm_isa_buffer_atomic_reduce_record_t* record =
-            (const iree_vm_isa_buffer_atomic_reduce_record_t*)record_data;
-        if (record->zero_padding_u16 != 0) {
-          return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                                  "buffer.atomic.reduce padding is nonzero");
-        }
-        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_atomic_apply_selectors(
-            record->selector0_u8, record->selector1_u8,
-            IREE_VM_ISA_BUFFER_ATOMIC_KIND_ADD_INTEGER));
-        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_ref_register(
-            record->buffer_r8, function->ref_register_count_u16));
-        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_value_register(
-            record->offset_v8, function->value_register_count_u16));
-        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_value_register(
-            record->operand_v8, function->value_register_count_u16));
-        IREE_RETURN_IF_ERROR(
-            iree_vm_bytecode_verify_atomic_carrier(record->selector0_u8 >> 7));
-        break;
-      }
-      case IREE_VM_BYTECODE_VERIFICATION_FORM_BUFFER_ATOMIC_RMW: {
-        const iree_vm_isa_buffer_atomic_rmw_record_t* record =
-            (const iree_vm_isa_buffer_atomic_rmw_record_t*)record_data;
-        if (record->zero_padding_u8 != 0) {
-          return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                                  "buffer.atomic.rmw padding is nonzero");
-        }
-        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_atomic_apply_selectors(
-            record->selector0_u8, record->selector1_u8,
-            IREE_VM_ISA_BUFFER_ATOMIC_KIND_EXCHANGE_INTEGER));
-        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_value_register(
-            record->old_v8, function->value_register_count_u16));
-        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_ref_register(
-            record->buffer_r8, function->ref_register_count_u16));
-        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_value_register(
-            record->offset_v8, function->value_register_count_u16));
-        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_value_register(
-            record->operand_v8, function->value_register_count_u16));
-        IREE_RETURN_IF_ERROR(
-            iree_vm_bytecode_verify_atomic_carrier(record->selector0_u8 >> 7));
-        break;
-      }
-      case IREE_VM_BYTECODE_VERIFICATION_FORM_BUFFER_ATOMIC_CMPXCHG: {
-        const iree_vm_isa_buffer_atomic_cmpxchg_record_t* record =
-            (const iree_vm_isa_buffer_atomic_cmpxchg_record_t*)record_data;
-        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_atomic_cmpxchg_selectors(
-            record->selector0_u8, record->selector1_u8));
-        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_value_register(
-            record->old_v8, function->value_register_count_u16));
-        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_ref_register(
-            record->buffer_r8, function->ref_register_count_u16));
-        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_value_register(
-            record->offset_v8, function->value_register_count_u16));
-        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_value_register(
-            record->expected_v8, function->value_register_count_u16));
-        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_value_register(
-            record->replacement_v8, function->value_register_count_u16));
-        IREE_RETURN_IF_ERROR(
-            iree_vm_bytecode_verify_atomic_carrier(record->selector0_u8 >> 7));
-        break;
-      }
-      case IREE_VM_BYTECODE_VERIFICATION_FORM_BUFFER_FILL: {
-        const iree_vm_isa_buffer_fill_record_t* record =
-            (const iree_vm_isa_buffer_fill_record_t*)record_data;
-        if (record->zero_padding_u16 != 0) {
-          return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                                  "buffer.fill padding is nonzero");
-        }
-        if (record->pattern_width_u8 != 1 && record->pattern_width_u8 != 2 &&
-            record->pattern_width_u8 != 4 && record->pattern_width_u8 != 8) {
-          return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                                  "buffer.fill pattern width is invalid");
-        }
-        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_ref_register(
-            record->buffer_r8, function->ref_register_count_u16));
-        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_value_register(
-            record->offset_v8, function->value_register_count_u16));
-        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_value_register(
-            record->length_v8, function->value_register_count_u16));
-        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_value_register(
-            record->pattern_v8, function->value_register_count_u16));
-        break;
-      }
-      case IREE_VM_BYTECODE_VERIFICATION_FORM_BUFFER_COPY: {
-        const iree_vm_isa_buffer_copy_record_t* record =
-            (const iree_vm_isa_buffer_copy_record_t*)record_data;
-        if (record->zero_padding_u16 != 0) {
-          return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                                  "buffer.copy padding is nonzero");
-        }
-        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_ref_register(
-            record->target_r8, function->ref_register_count_u16));
-        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_value_register(
-            record->target_offset_v8, function->value_register_count_u16));
-        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_ref_register(
-            record->source_r8, function->ref_register_count_u16));
-        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_value_register(
-            record->source_offset_v8, function->value_register_count_u16));
-        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_value_register(
-            record->length_v8, function->value_register_count_u16));
-        break;
-      }
-      case IREE_VM_BYTECODE_VERIFICATION_FORM_BUFFER_COMPARE: {
-        const iree_vm_isa_buffer_compare_record_t* record =
-            (const iree_vm_isa_buffer_compare_record_t*)record_data;
-        if (record->zero_padding_u8 != 0) {
-          return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                                  "buffer.compare padding is nonzero");
-        }
-        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_value_register(
-            record->dst_v8, function->value_register_count_u16));
-        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_ref_register(
-            record->lhs_r8, function->ref_register_count_u16));
-        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_value_register(
-            record->lhs_offset_v8, function->value_register_count_u16));
-        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_ref_register(
-            record->rhs_r8, function->ref_register_count_u16));
-        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_value_register(
-            record->rhs_offset_v8, function->value_register_count_u16));
-        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_value_register(
-            record->length_v8, function->value_register_count_u16));
-        break;
-      }
-      case IREE_VM_BYTECODE_VERIFICATION_FORM_BUFFER_COPY_RODATA: {
-        const iree_vm_isa_buffer_copy_rodata_record_t* record =
-            (const iree_vm_isa_buffer_copy_rodata_record_t*)record_data;
-        if (record->zero_padding0_u8 != 0 || record->zero_padding1_u8 != 0) {
-          return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                                  "buffer.copy.rodata padding is nonzero");
-        }
-        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_ref_register(
-            record->target_r8, function->ref_register_count_u16));
-        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_value_register(
-            record->target_offset_v8, function->value_register_count_u16));
-        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_value_register(
-            record->length_v8, function->value_register_count_u16));
-        if (record->rodata_u16 >= layout->rodata.count) {
-          return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                                  "buffer.copy.rodata ordinal is out of range");
-        }
-        if (record->source_offset_u32 >
-            layout->rodata.lengths[record->rodata_u16]) {
-          return iree_make_status(
-              IREE_STATUS_INVALID_ARGUMENT,
-              "buffer.copy.rodata source offset is out of range");
-        }
-        break;
-      }
+      case IREE_VM_BYTECODE_VERIFICATION_FORM_BUFFER_ALLOCATE:
+      case IREE_VM_BYTECODE_VERIFICATION_FORM_BUFFER_LENGTH:
+      case IREE_VM_BYTECODE_VERIFICATION_FORM_BUFFER_SUBSPAN:
+      case IREE_VM_BYTECODE_VERIFICATION_FORM_BUFFER_LOAD:
+      case IREE_VM_BYTECODE_VERIFICATION_FORM_BUFFER_STORE:
+      case IREE_VM_BYTECODE_VERIFICATION_FORM_BUFFER_ATOMIC_REDUCE:
+      case IREE_VM_BYTECODE_VERIFICATION_FORM_BUFFER_ATOMIC_RMW:
+      case IREE_VM_BYTECODE_VERIFICATION_FORM_BUFFER_ATOMIC_CMPXCHG:
+      case IREE_VM_BYTECODE_VERIFICATION_FORM_BUFFER_FILL:
+      case IREE_VM_BYTECODE_VERIFICATION_FORM_BUFFER_COPY:
+      case IREE_VM_BYTECODE_VERIFICATION_FORM_BUFFER_COMPARE:
+      case IREE_VM_BYTECODE_VERIFICATION_FORM_BUFFER_COPY_RODATA:
       case IREE_VM_BYTECODE_VERIFICATION_FORM_BUFFER_RODATA_LOAD: {
-        const iree_vm_isa_buffer_rodata_load_record_t* record =
-            (const iree_vm_isa_buffer_rodata_load_record_t*)record_data;
-        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_ref_register(
-            record->dst_r8, function->ref_register_count_u16));
-        if (record->rodata_u16 >= layout->rodata.count) {
-          return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                                  "rodata ordinal is out of range");
-        }
+        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_buffer_record(
+            layout, function,
+            iree_make_const_byte_span(record_data, record_length)));
         break;
       }
       case IREE_VM_BYTECODE_VERIFICATION_FORM_CONVERSION_INTEGER: {
@@ -1887,203 +1514,23 @@ static iree_status_t iree_vm_bytecode_function_verify(
         }
         break;
       }
-      case IREE_VM_BYTECODE_VERIFICATION_FORM_STACK_LOAD: {
-        const iree_vm_isa_stack_load_record_t* record =
-            (const iree_vm_isa_stack_load_record_t*)record_data;
-        if (record->zero_padding_u8[0] != 0 ||
-            record->zero_padding_u8[1] != 0 ||
-            record->zero_padding_u8[2] != 0) {
-          return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                                  "stack.load padding is nonzero");
-        }
-        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_stack_lane_range(
-            record->base_u16, record->dst_v8, record->format_u8, function));
-        break;
-      }
-      case IREE_VM_BYTECODE_VERIFICATION_FORM_STACK_STORE: {
-        const iree_vm_isa_stack_store_record_t* record =
-            (const iree_vm_isa_stack_store_record_t*)record_data;
-        if (record->zero_padding_u8 != 0 || record->zero_padding_u16 != 0) {
-          return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                                  "stack.store padding is nonzero");
-        }
-        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_stack_lane_range(
-            record->base_u16, record->src_v8, record->format_u8, function));
-        break;
-      }
-      case IREE_VM_BYTECODE_VERIFICATION_FORM_STACK_LOAD_INDEXED: {
-        const iree_vm_isa_stack_load_indexed_record_t* record =
-            (const iree_vm_isa_stack_load_indexed_record_t*)record_data;
-        if (record->scale_u8 == 0) {
-          return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                                  "stack.load.indexed scale is zero");
-        }
-        if (record->zero_padding_u8 != 0) {
-          return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                                  "stack.load.indexed padding is nonzero");
-        }
-        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_value_register(
-            record->index_v8, function->value_register_count_u16));
-        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_stack_lane_range(
-            record->base_u16, record->dst_v8, record->format_u8, function));
-        break;
-      }
-      case IREE_VM_BYTECODE_VERIFICATION_FORM_STACK_STORE_INDEXED: {
-        const iree_vm_isa_stack_store_indexed_record_t* record =
-            (const iree_vm_isa_stack_store_indexed_record_t*)record_data;
-        if (record->scale_u8 == 0) {
-          return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                                  "stack.store.indexed scale is zero");
-        }
-        if (record->zero_padding_u8 != 0) {
-          return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                                  "stack.store.indexed padding is nonzero");
-        }
-        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_value_register(
-            record->index_v8, function->value_register_count_u16));
-        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_stack_lane_range(
-            record->base_u16, record->src_v8, record->format_u8, function));
-        break;
-      }
-      case IREE_VM_BYTECODE_VERIFICATION_FORM_STACK_FILL: {
-        const iree_vm_isa_stack_fill_record_t* record =
-            (const iree_vm_isa_stack_fill_record_t*)record_data;
-        if (record->zero_padding_u8 != 0) {
-          return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                                  "stack.fill padding is nonzero");
-        }
-        if (record->pattern_width_u8 != 1 && record->pattern_width_u8 != 2 &&
-            record->pattern_width_u8 != 4 && record->pattern_width_u8 != 8) {
-          return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                                  "stack.fill pattern width is invalid");
-        }
-        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_value_register(
-            record->pattern_v8, function->value_register_count_u16));
-        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_local_range(
-            record->target_base_u16, record->length_u16,
-            function->local_byte_length_u16));
-        break;
-      }
-      case IREE_VM_BYTECODE_VERIFICATION_FORM_STACK_COPY: {
-        const iree_vm_isa_stack_copy_record_t* record =
-            (const iree_vm_isa_stack_copy_record_t*)record_data;
-        if (record->zero_padding_u8 != 0) {
-          return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                                  "stack.copy padding is nonzero");
-        }
-        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_local_range(
-            record->target_u16, record->length_u16,
-            function->local_byte_length_u16));
-        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_local_range(
-            record->source_u16, record->length_u16,
-            function->local_byte_length_u16));
-        break;
-      }
-      case IREE_VM_BYTECODE_VERIFICATION_FORM_STACK_COMPARE: {
-        const iree_vm_isa_stack_compare_record_t* record =
-            (const iree_vm_isa_stack_compare_record_t*)record_data;
-        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_value_register(
-            record->dst_v8, function->value_register_count_u16));
-        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_local_range(
-            record->lhs_u16, record->length_u16,
-            function->local_byte_length_u16));
-        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_local_range(
-            record->rhs_u16, record->length_u16,
-            function->local_byte_length_u16));
-        break;
-      }
-      case IREE_VM_BYTECODE_VERIFICATION_FORM_STACK_COPY_RODATA: {
-        const iree_vm_isa_stack_copy_rodata_record_t* record =
-            (const iree_vm_isa_stack_copy_rodata_record_t*)record_data;
-        if (record->zero_padding_u8 != 0) {
-          return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                                  "stack.copy.rodata padding is nonzero");
-        }
-        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_local_range(
-            record->target_u16, record->length_u16,
-            function->local_byte_length_u16));
-        if (record->rodata_u16 >= layout->rodata.count) {
-          return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                                  "stack.copy.rodata ordinal is out of range");
-        }
-        const uint64_t rodata_length =
-            layout->rodata.lengths[record->rodata_u16];
-        if (record->source_offset_u32 > rodata_length ||
-            record->length_u16 > rodata_length - record->source_offset_u32) {
-          return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                                  "stack.copy.rodata range is out of bounds");
-        }
-        break;
-      }
-      case IREE_VM_BYTECODE_VERIFICATION_FORM_STACK_COPY_FROM_BUFFER: {
-        const iree_vm_isa_stack_copy_from_buffer_record_t* record =
-            (const iree_vm_isa_stack_copy_from_buffer_record_t*)record_data;
-        if (record->zero_padding_u8 != 0) {
-          return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                                  "stack.copy.from.buffer padding is nonzero");
-        }
-        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_local_range(
-            record->target_u16, record->length_u16,
-            function->local_byte_length_u16));
-        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_ref_register(
-            record->buffer_r8, function->ref_register_count_u16));
-        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_value_register(
-            record->source_offset_v8, function->value_register_count_u16));
-        break;
-      }
-      case IREE_VM_BYTECODE_VERIFICATION_FORM_STACK_COPY_TO_BUFFER: {
-        const iree_vm_isa_stack_copy_to_buffer_record_t* record =
-            (const iree_vm_isa_stack_copy_to_buffer_record_t*)record_data;
-        if (record->zero_padding_u8 != 0) {
-          return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                                  "stack.copy.to.buffer padding is nonzero");
-        }
-        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_ref_register(
-            record->buffer_r8, function->ref_register_count_u16));
-        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_value_register(
-            record->target_offset_v8, function->value_register_count_u16));
-        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_local_range(
-            record->source_u16, record->length_u16,
-            function->local_byte_length_u16));
-        break;
-      }
+      case IREE_VM_BYTECODE_VERIFICATION_FORM_STACK_LOAD:
+      case IREE_VM_BYTECODE_VERIFICATION_FORM_STACK_STORE:
+      case IREE_VM_BYTECODE_VERIFICATION_FORM_STACK_LOAD_INDEXED:
+      case IREE_VM_BYTECODE_VERIFICATION_FORM_STACK_STORE_INDEXED:
+      case IREE_VM_BYTECODE_VERIFICATION_FORM_STACK_FILL:
+      case IREE_VM_BYTECODE_VERIFICATION_FORM_STACK_COPY:
+      case IREE_VM_BYTECODE_VERIFICATION_FORM_STACK_COMPARE:
+      case IREE_VM_BYTECODE_VERIFICATION_FORM_STACK_COPY_RODATA:
+      case IREE_VM_BYTECODE_VERIFICATION_FORM_STACK_COPY_FROM_BUFFER:
+      case IREE_VM_BYTECODE_VERIFICATION_FORM_STACK_COPY_TO_BUFFER:
       case IREE_VM_BYTECODE_VERIFICATION_FORM_STACK_CONST_S16_I32:
-      case IREE_VM_BYTECODE_VERIFICATION_FORM_STACK_CONST_S16_I64: {
-        const iree_vm_isa_stack_const_s16_i32_record_t* record =
-            (const iree_vm_isa_stack_const_s16_i32_record_t*)record_data;
-        if (record->zero_padding_u8 != 0) {
-          return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                                  "stack.const.s16 padding is nonzero");
-        }
-        const uint8_t element_byte_length =
-            execution_info.verification_form ==
-                    IREE_VM_BYTECODE_VERIFICATION_FORM_STACK_CONST_S16_I32
-                ? 4
-                : 8;
-        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_stack_fixed_range(
-            record->target_u16,
-            (uint32_t)record->count_u16 * element_byte_length,
-            element_byte_length, function->local_byte_length_u16));
-        break;
-      }
+      case IREE_VM_BYTECODE_VERIFICATION_FORM_STACK_CONST_S16_I64:
       case IREE_VM_BYTECODE_VERIFICATION_FORM_STACK_PACK_I32:
       case IREE_VM_BYTECODE_VERIFICATION_FORM_STACK_PACK_I64: {
-        if (record_data[1] != 0) {
-          return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                                  "stack.pack padding is nonzero");
-        }
-        const uint16_t target_u16 =
-            ((const iree_vm_isa_stack_pack_i32_u16_x2_record_t*)record_data)
-                ->target_u16;
-        const bool is_i32 = execution_info.verification_form ==
-                            IREE_VM_BYTECODE_VERIFICATION_FORM_STACK_PACK_I32;
-        const uint8_t immediate_byte_length = is_i32 ? 2 : 4;
-        const uint8_t destination_byte_length = is_i32 ? 4 : 8;
-        const uint32_t lane_count =
-            (uint32_t)(record_length - 4) / immediate_byte_length;
-        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_stack_fixed_range(
-            target_u16, lane_count * destination_byte_length,
-            destination_byte_length, function->local_byte_length_u16));
+        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_stack_record(
+            layout, function,
+            iree_make_const_byte_span(record_data, record_length)));
         break;
       }
       default:
