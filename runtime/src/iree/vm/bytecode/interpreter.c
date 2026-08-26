@@ -34,6 +34,29 @@
 #include "iree/vm/bytecode/execution_tables.inl"
 #undef IREE_VM_BYTECODE_DEFINE_EXECUTABLE_OPCODE_LIST
 
+#define IREE_VM_BYTECODE_ASSERT_CONTROL_STATUS(name)            \
+  IREE_STATIC_ASSERT_ENUM_EQ(IREE_VM_ISA_CONTROL_STATUS_##name, \
+                             IREE_STATUS_##name,                \
+                             "VM control status must match iree_status_t")
+IREE_VM_BYTECODE_ASSERT_CONTROL_STATUS(CANCELLED);
+IREE_VM_BYTECODE_ASSERT_CONTROL_STATUS(UNKNOWN);
+IREE_VM_BYTECODE_ASSERT_CONTROL_STATUS(INVALID_ARGUMENT);
+IREE_VM_BYTECODE_ASSERT_CONTROL_STATUS(DEADLINE_EXCEEDED);
+IREE_VM_BYTECODE_ASSERT_CONTROL_STATUS(NOT_FOUND);
+IREE_VM_BYTECODE_ASSERT_CONTROL_STATUS(ALREADY_EXISTS);
+IREE_VM_BYTECODE_ASSERT_CONTROL_STATUS(PERMISSION_DENIED);
+IREE_VM_BYTECODE_ASSERT_CONTROL_STATUS(RESOURCE_EXHAUSTED);
+IREE_VM_BYTECODE_ASSERT_CONTROL_STATUS(FAILED_PRECONDITION);
+IREE_VM_BYTECODE_ASSERT_CONTROL_STATUS(ABORTED);
+IREE_VM_BYTECODE_ASSERT_CONTROL_STATUS(OUT_OF_RANGE);
+IREE_VM_BYTECODE_ASSERT_CONTROL_STATUS(UNIMPLEMENTED);
+IREE_VM_BYTECODE_ASSERT_CONTROL_STATUS(INTERNAL);
+IREE_VM_BYTECODE_ASSERT_CONTROL_STATUS(UNAVAILABLE);
+IREE_VM_BYTECODE_ASSERT_CONTROL_STATUS(DATA_LOSS);
+IREE_VM_BYTECODE_ASSERT_CONTROL_STATUS(UNAUTHENTICATED);
+IREE_VM_BYTECODE_ASSERT_CONTROL_STATUS(INCOMPATIBLE);
+#undef IREE_VM_BYTECODE_ASSERT_CONTROL_STATUS
+
 // Clang and GCC labels-as-values remove the shared loop branch and let each
 // opcode site predict its own successor. Other compilers retain the portable
 // switch loop over the same handler bodies.
@@ -127,6 +150,31 @@ static inline const uint8_t* iree_vm_bytecode_direct_target(
     int32_t target_word_delta) {
   return record_data + record_length +
          (ptrdiff_t)((int64_t)target_word_delta * 4);
+}
+
+// Captures an optional readable vm.buffer message before frame unwind. Invalid
+// diagnostic state never replaces the primary architectural failure code.
+IREE_ATTRIBUTE_NOINLINE IREE_ATTRIBUTE_COLD static iree_status_t
+iree_vm_bytecode_make_program_status(iree_status_code_t code,
+                                     iree_vm_ref_type_t buffer_type,
+                                     iree_vm_ref_t message_ref) {
+  iree_string_view_t message = iree_string_view_empty();
+#if (IREE_STATUS_FEATURES & IREE_STATUS_FEATURE_ANNOTATIONS) != 0
+  if (message_ref.object && iree_vm_ref_type(message_ref) == buffer_type) {
+    const iree_vm_buffer_t* buffer =
+        (const iree_vm_buffer_t*)message_ref.object;
+    const iree_host_size_t length = iree_vm_buffer_length(buffer);
+    const void* data = iree_vm_buffer_const_data(buffer);
+    if (data || length == 0) {
+      message = iree_make_string_view((const char*)data, length);
+    }
+  }
+#else
+  (void)buffer_type;
+  (void)message_ref;
+#endif  // has IREE_STATUS_FEATURE_ANNOTATIONS
+  return iree_status_allocate_copy(code, iree_make_cstring_view(__FILE__),
+                                   __LINE__, message);
 }
 
 // Returns whether |ref| satisfies one resolved ref-global descriptor.
@@ -569,6 +617,25 @@ iree_status_t iree_vm_bytecode_function_start(
       IREE_VM_BYTECODE_DISPATCH_CONTINUE();
     }
     IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_isa_control_switch_record_t);
+  }
+  IREE_VM_BYTECODE_DISPATCH_CASE(CONTROL_ASSERT, control_assert) {
+    const iree_vm_isa_control_assert_record_t* record =
+        (const iree_vm_isa_control_assert_record_t*)record_data;
+    if (IREE_LIKELY(values[record->condition_v8] != 0)) {
+      IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_isa_control_assert_record_t);
+    }
+    status = iree_vm_bytecode_make_program_status(
+        IREE_STATUS_FAILED_PRECONDITION, module->buffer_type,
+        refs[record->message_r8_nullable]);
+    IREE_VM_BYTECODE_DISPATCH_TERMINATE();
+  }
+  IREE_VM_BYTECODE_DISPATCH_CASE(CONTROL_FAIL, control_fail) {
+    const iree_vm_isa_control_fail_record_t* record =
+        (const iree_vm_isa_control_fail_record_t*)record_data;
+    status = iree_vm_bytecode_make_program_status(
+        (iree_status_code_t)record->status_u8, module->buffer_type,
+        refs[record->message_r8_nullable]);
+    IREE_VM_BYTECODE_DISPATCH_TERMINATE();
   }
   IREE_VM_BYTECODE_DISPATCH_CASE(VALUE_ABI_ARGUMENT_LOAD,
                                  value_abi_argument_load) {

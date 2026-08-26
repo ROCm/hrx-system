@@ -46,6 +46,8 @@ EXECUTABLE_INSTRUCTIONS = (
         "control.branch.unless.s32", "CONTROL_BRANCH_CONDITIONAL_S32"
     ),
     ExecutableInstruction("control.switch", "CONTROL_SWITCH"),
+    ExecutableInstruction("control.assert", "CONTROL_ASSERT"),
+    ExecutableInstruction("control.fail", "CONTROL_FAIL"),
     ExecutableInstruction("value.abi.argument.load", "VALUE_ABI_ARGUMENT_LOAD"),
     ExecutableInstruction("value.abi.result.store", "VALUE_ABI_RESULT_STORE"),
     ExecutableInstruction("ref.abi.argument.load.borrow", "REF_ABI_ARGUMENT_LOAD"),

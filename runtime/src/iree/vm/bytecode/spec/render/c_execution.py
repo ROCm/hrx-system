@@ -264,6 +264,24 @@ def _validate_verification_form(
                 f"{instruction.mnemonic}: switch-target constraint does not "
                 "match its runtime verification form"
             )
+    elif verification_form == "CONTROL_ASSERT":
+        if instruction.byte_length != 4:
+            raise ValueError(f"{instruction.mnemonic}: assertion record is not 4 bytes")
+        require_value(1)
+        require_ref(2)
+        require_zero(3, 1)
+    elif verification_form == "CONTROL_FAIL":
+        if instruction.byte_length != 4:
+            raise ValueError(f"{instruction.mnemonic}: failure record is not 4 bytes")
+        require_field(
+            1,
+            1,
+            SELECTOR.entity_id,
+            (InstructionFieldRole.IMMEDIATE,),
+            rule_arguments=(EntityReference("core.selector.control.status"),),
+        )
+        require_ref(2)
+        require_zero(3, 1)
     elif verification_form in (
         "VALUE_ABI_ARGUMENT_LOAD",
         "VALUE_ABI_RESULT_STORE",

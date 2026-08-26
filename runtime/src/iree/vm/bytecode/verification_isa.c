@@ -30,6 +30,8 @@ typedef enum iree_vm_bytecode_verification_form_e {
   IREE_VM_BYTECODE_VERIFICATION_FORM_CONTROL_BRANCH_CONDITIONAL_S16,
   IREE_VM_BYTECODE_VERIFICATION_FORM_CONTROL_BRANCH_CONDITIONAL_S32,
   IREE_VM_BYTECODE_VERIFICATION_FORM_CONTROL_SWITCH,
+  IREE_VM_BYTECODE_VERIFICATION_FORM_CONTROL_ASSERT,
+  IREE_VM_BYTECODE_VERIFICATION_FORM_CONTROL_FAIL,
   IREE_VM_BYTECODE_VERIFICATION_FORM_VALUE_ABI_ARGUMENT_LOAD,
   IREE_VM_BYTECODE_VERIFICATION_FORM_VALUE_ABI_RESULT_STORE,
   IREE_VM_BYTECODE_VERIFICATION_FORM_REF_ABI_ARGUMENT_LOAD,
@@ -219,6 +221,12 @@ static iree_status_t iree_vm_bytecode_verify_record_available(
                             opcode);
   }
   return iree_ok_status();
+}
+
+static bool iree_vm_bytecode_control_status_is_assigned(uint8_t status) {
+  return (status >= IREE_VM_ISA_CONTROL_STATUS_CANCELLED &&
+          status <= IREE_VM_ISA_CONTROL_STATUS_UNAUTHENTICATED) ||
+         status == IREE_VM_ISA_CONTROL_STATUS_INCOMPATIBLE;
 }
 
 // Verifies the shared opcode/dst/lhs/rhs value-register layout.
@@ -563,6 +571,39 @@ static iree_status_t iree_vm_bytecode_function_verify(
                                   "control.switch target slice is out of "
                                   "range");
         }
+        break;
+      }
+      case IREE_VM_BYTECODE_VERIFICATION_FORM_CONTROL_ASSERT: {
+        const iree_vm_isa_control_assert_record_t* record =
+            (const iree_vm_isa_control_assert_record_t*)record_data;
+        if (record_length == remaining_length) {
+          return iree_make_status(
+              IREE_STATUS_INVALID_ARGUMENT,
+              "control.assert requires a sequential record");
+        }
+        if (record->zero_padding_u8 != 0) {
+          return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                  "control.assert padding is nonzero");
+        }
+        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_value_register(
+            record->condition_v8, function->value_register_count_u16));
+        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_ref_register(
+            record->message_r8_nullable, function->ref_register_count_u16));
+        break;
+      }
+      case IREE_VM_BYTECODE_VERIFICATION_FORM_CONTROL_FAIL: {
+        const iree_vm_isa_control_fail_record_t* record =
+            (const iree_vm_isa_control_fail_record_t*)record_data;
+        if (!iree_vm_bytecode_control_status_is_assigned(record->status_u8)) {
+          return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                  "control.fail status is invalid");
+        }
+        if (record->zero_padding_u8 != 0) {
+          return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                  "control.fail padding is nonzero");
+        }
+        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_ref_register(
+            record->message_r8_nullable, function->ref_register_count_u16));
         break;
       }
       case IREE_VM_BYTECODE_VERIFICATION_FORM_VALUE_ABI_ARGUMENT_LOAD: {
@@ -1454,7 +1495,8 @@ static iree_status_t iree_vm_bytecode_function_verify(
   }
   if (final_form != IREE_VM_BYTECODE_VERIFICATION_FORM_CONTROL_RETURN &&
       final_form != IREE_VM_BYTECODE_VERIFICATION_FORM_CONTROL_BRANCH_S16 &&
-      final_form != IREE_VM_BYTECODE_VERIFICATION_FORM_CONTROL_BRANCH_S32) {
+      final_form != IREE_VM_BYTECODE_VERIFICATION_FORM_CONTROL_BRANCH_S32 &&
+      final_form != IREE_VM_BYTECODE_VERIFICATION_FORM_CONTROL_FAIL) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
         "function %" PRIu32 " falls through past its final record", ordinal);

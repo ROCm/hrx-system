@@ -314,7 +314,7 @@ IREE_API_EXPORT iree_status_t iree_vm_bytecode_module_create(
   iree_status_t status = iree_vm_bytecode_resolve_ref_types(
       environment, &module->layout, module->resolved_ref_types);
   uint32_t initialized_rodata_root_count = 0;
-  if (iree_status_is_ok(status) && module->layout.rodata.count != 0) {
+  if (iree_status_is_ok(status)) {
     status =
         iree_vm_bytecode_resolve_buffer_type(environment, &module->buffer_type);
   }

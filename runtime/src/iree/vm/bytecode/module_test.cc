@@ -537,6 +537,115 @@ TEST(VMBytecodeModuleTest, RejectsMalformedDirectControlFlow) {
   iree_vm_environment_free(environment);
 }
 
+TEST(VMBytecodeModuleTest, RejectsMalformedProgramFailure) {
+  constexpr uint32_t kAssertOffset = sizeof(iree_vm_isa_control_block_record_t);
+  constexpr uint32_t kBranchOffset =
+      kAssertOffset + sizeof(iree_vm_isa_control_assert_record_t);
+  constexpr uint32_t kSecondBlockOffset =
+      kBranchOffset + sizeof(iree_vm_isa_control_branch_s16_record_t);
+  constexpr uint32_t kFinalOffset =
+      kSecondBlockOffset + sizeof(iree_vm_isa_control_block_record_t);
+
+  const auto build_assert_image = [&]() {
+    std::vector<uint8_t> image = BuildSwitchInspectionModuleImage();
+    MutableFunctionImage function = FindFunctionImage(&image, 0);
+    function.row->ref_register_count_u16 = 1;
+    const iree_vm_isa_control_assert_record_t assert_record = {
+        IREE_VM_ISA_CORE_OPCODE_CONTROL_ASSERT, 0, 0, 0};
+    std::memcpy(function.bytecode + kAssertOffset, &assert_record,
+                sizeof(assert_record));
+    const iree_vm_isa_control_branch_s16_record_t branch_record = {
+        IREE_VM_ISA_CORE_OPCODE_CONTROL_BRANCH_S16, 0, 0};
+    std::memcpy(function.bytecode + kBranchOffset, &branch_record,
+                sizeof(branch_record));
+    return image;
+  };
+  const auto build_fail_image = [&]() {
+    std::vector<uint8_t> image = BuildSwitchInspectionModuleImage();
+    MutableFunctionImage function = FindFunctionImage(&image, 0);
+    function.row->ref_register_count_u16 = 1;
+    const iree_vm_isa_control_fail_record_t fail_record = {
+        IREE_VM_ISA_CORE_OPCODE_CONTROL_FAIL,
+        IREE_VM_ISA_CONTROL_STATUS_INVALID_ARGUMENT, 0, 0};
+    std::memcpy(function.bytecode + kFinalOffset, &fail_record,
+                sizeof(fail_record));
+    return image;
+  };
+
+  iree_vm_environment_t* environment = nullptr;
+  IREE_ASSERT_OK(
+      iree_vm_environment_allocate(iree_allocator_system(), &environment));
+  const auto expect_accepted = [&](std::vector<uint8_t> image) {
+    iree_vm_module_t* module = nullptr;
+    IREE_ASSERT_OK(iree_vm_bytecode_module_create(
+        environment, IREE_SV("valid_failure"),
+        {iree_make_const_byte_span(image.data(), image.size()),
+         iree_allocator_null()},
+        iree_allocator_system(), &module));
+    iree_vm_module_release(module);
+  };
+  const auto expect_rejected = [&](std::vector<uint8_t> image,
+                                   const auto& mutate) {
+    MutableFunctionImage function = FindFunctionImage(&image, 0);
+    mutate(function);
+    iree_vm_module_t* module =
+        reinterpret_cast<iree_vm_module_t*>(uintptr_t{1});
+    IREE_EXPECT_STATUS_IS(
+        IREE_STATUS_INVALID_ARGUMENT,
+        iree_vm_bytecode_module_create(
+            environment, IREE_SV("malformed_failure"),
+            {iree_make_const_byte_span(image.data(), image.size()),
+             iree_allocator_null()},
+            iree_allocator_system(), &module));
+    EXPECT_EQ(module, nullptr);
+  };
+
+  expect_accepted(build_assert_image());
+  expect_accepted(build_fail_image());
+
+  expect_rejected(build_assert_image(), [&](MutableFunctionImage function) {
+    auto* record = reinterpret_cast<iree_vm_isa_control_assert_record_t*>(
+        function.bytecode + kAssertOffset);
+    record->condition_v8 = 1;
+  });
+  expect_rejected(build_assert_image(), [&](MutableFunctionImage function) {
+    auto* record = reinterpret_cast<iree_vm_isa_control_assert_record_t*>(
+        function.bytecode + kAssertOffset);
+    record->message_r8_nullable = 1;
+  });
+  expect_rejected(build_assert_image(), [&](MutableFunctionImage function) {
+    auto* record = reinterpret_cast<iree_vm_isa_control_assert_record_t*>(
+        function.bytecode + kAssertOffset);
+    record->zero_padding_u8 = 1;
+  });
+  expect_rejected(build_assert_image(), [&](MutableFunctionImage function) {
+    const iree_vm_isa_control_assert_record_t record = {
+        IREE_VM_ISA_CORE_OPCODE_CONTROL_ASSERT, 0, 0, 0};
+    std::memcpy(function.bytecode + kFinalOffset, &record, sizeof(record));
+  });
+
+  for (uint8_t status :
+       {uint8_t{0}, uint8_t{17}, static_cast<uint8_t>(UINT8_MAX)}) {
+    expect_rejected(build_fail_image(), [&](MutableFunctionImage function) {
+      auto* record = reinterpret_cast<iree_vm_isa_control_fail_record_t*>(
+          function.bytecode + kFinalOffset);
+      record->status_u8 = status;
+    });
+  }
+  expect_rejected(build_fail_image(), [&](MutableFunctionImage function) {
+    auto* record = reinterpret_cast<iree_vm_isa_control_fail_record_t*>(
+        function.bytecode + kFinalOffset);
+    record->message_r8_nullable = 1;
+  });
+  expect_rejected(build_fail_image(), [&](MutableFunctionImage function) {
+    auto* record = reinterpret_cast<iree_vm_isa_control_fail_record_t*>(
+        function.bytecode + kFinalOffset);
+    record->zero_padding_u8 = 1;
+  });
+
+  iree_vm_environment_free(environment);
+}
+
 TEST(VMBytecodeModuleTest, ExecutesScalarStateInstructions) {
   std::vector<uint8_t> image = BuildScalarStateModuleImage();
   iree_vm_environment_t* environment = nullptr;
