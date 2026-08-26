@@ -40,6 +40,9 @@ typedef enum iree_vm_bytecode_verification_form_e {
   IREE_VM_BYTECODE_VERIFICATION_FORM_FLOAT_COMPARE,
   IREE_VM_BYTECODE_VERIFICATION_FORM_FLOAT_CLASSIFY,
   IREE_VM_BYTECODE_VERIFICATION_FORM_FLOAT_CLAMP,
+  IREE_VM_BYTECODE_VERIFICATION_FORM_FLOAT_MATH_UNARY,
+  IREE_VM_BYTECODE_VERIFICATION_FORM_FLOAT_MATH_BINARY,
+  IREE_VM_BYTECODE_VERIFICATION_FORM_FLOAT_MATH_TERNARY,
   IREE_VM_BYTECODE_VERIFICATION_FORM_BUFFER_RODATA_LOAD,
   IREE_VM_BYTECODE_VERIFICATION_FORM_CONVERSION_INTEGER,
   IREE_VM_BYTECODE_VERIFICATION_FORM_CONVERSION_FLOAT_EXTEND,
@@ -440,6 +443,48 @@ iree_status_t iree_vm_bytecode_function_verify(
             record->lower_v8, function->value_register_count_u16));
         IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_value_register(
             record->upper_v8, function->value_register_count_u16));
+        break;
+      }
+      case IREE_VM_BYTECODE_VERIFICATION_FORM_FLOAT_MATH_UNARY: {
+        const iree_vm_isa_float_math_unary_f32_record_t* record =
+            (const iree_vm_isa_float_math_unary_f32_record_t*)record_data;
+        if (record->selector_u8 > IREE_VM_ISA_FLOAT_MATH_UNARY_GELU_TANH) {
+          return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                  "float.math.unary selector is invalid");
+        }
+        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_value_register(
+            record->dst_v8, function->value_register_count_u16));
+        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_value_register(
+            record->src_v8, function->value_register_count_u16));
+        break;
+      }
+      case IREE_VM_BYTECODE_VERIFICATION_FORM_FLOAT_MATH_BINARY: {
+        IREE_RETURN_IF_ERROR(
+            iree_vm_bytecode_verify_value_binary_selector_record(
+                record_data, function->value_register_count_u16,
+                IREE_VM_ISA_FLOAT_MATH_BINARY_GELU_LOGISTIC,
+                "float.math.binary"));
+        break;
+      }
+      case IREE_VM_BYTECODE_VERIFICATION_FORM_FLOAT_MATH_TERNARY: {
+        const iree_vm_isa_float_math_ternary_f32_record_t* record =
+            (const iree_vm_isa_float_math_ternary_f32_record_t*)record_data;
+        if (record->selector_u8 != IREE_VM_ISA_FLOAT_MATH_TERNARY_FMA) {
+          return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                  "float.math.ternary selector is invalid");
+        }
+        if (record->zero_padding_u16 != 0) {
+          return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                  "float.math.ternary padding is nonzero");
+        }
+        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_value_register(
+            record->dst_v8, function->value_register_count_u16));
+        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_value_register(
+            record->a_v8, function->value_register_count_u16));
+        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_value_register(
+            record->b_v8, function->value_register_count_u16));
+        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_value_register(
+            record->c_v8, function->value_register_count_u16));
         break;
       }
       case IREE_VM_BYTECODE_VERIFICATION_FORM_BUFFER_RODATA_LOAD: {

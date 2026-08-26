@@ -9,6 +9,7 @@
 #include <string.h>
 
 #include "iree/vm/bytecode/interpreter_float.h"
+#include "iree/vm/bytecode/interpreter_float_math.h"
 #include "iree/vm/bytecode/interpreter_integer.h"
 #include "iree/vm/bytecode/module_reader.h"
 #include "iree/vm/bytecode/wire/core/buffer.h"
@@ -772,6 +773,53 @@ iree_status_t iree_vm_bytecode_function_start(
         (const iree_vm_isa_float_copysign_f64_record_t*)record_data;
     iree_vm_bytecode_execute_float_copysign_f64(record, values);
     IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_isa_float_copysign_f64_record_t);
+  }
+  IREE_VM_BYTECODE_DISPATCH_CASE(FLOAT_MATH_UNARY_F32, float_math_unary_f32) {
+    const iree_vm_isa_float_math_unary_f32_record_t* record =
+        (const iree_vm_isa_float_math_unary_f32_record_t*)record_data;
+    values[record->dst_v8] = iree_vm_bytecode_float_math_unary_f32(
+        record->selector_u8, (uint32_t)values[record->src_v8]);
+    IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_isa_float_math_unary_f32_record_t);
+  }
+  IREE_VM_BYTECODE_DISPATCH_CASE(FLOAT_MATH_UNARY_F64, float_math_unary_f64) {
+    const iree_vm_isa_float_math_unary_f64_record_t* record =
+        (const iree_vm_isa_float_math_unary_f64_record_t*)record_data;
+    values[record->dst_v8] = iree_vm_bytecode_float_math_unary_f64(
+        record->selector_u8, values[record->src_v8]);
+    IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_isa_float_math_unary_f64_record_t);
+  }
+  IREE_VM_BYTECODE_DISPATCH_CASE(FLOAT_MATH_BINARY_F32, float_math_binary_f32) {
+    const iree_vm_isa_float_math_binary_f32_record_t* record =
+        (const iree_vm_isa_float_math_binary_f32_record_t*)record_data;
+    values[record->dst_v8] = iree_vm_bytecode_float_math_binary_f32(
+        record->selector_u8, (uint32_t)values[record->lhs_v8],
+        (uint32_t)values[record->rhs_v8]);
+    IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_isa_float_math_binary_f32_record_t);
+  }
+  IREE_VM_BYTECODE_DISPATCH_CASE(FLOAT_MATH_BINARY_F64, float_math_binary_f64) {
+    const iree_vm_isa_float_math_binary_f64_record_t* record =
+        (const iree_vm_isa_float_math_binary_f64_record_t*)record_data;
+    values[record->dst_v8] = iree_vm_bytecode_float_math_binary_f64(
+        record->selector_u8, values[record->lhs_v8], values[record->rhs_v8]);
+    IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_isa_float_math_binary_f64_record_t);
+  }
+  IREE_VM_BYTECODE_DISPATCH_CASE(FLOAT_MATH_TERNARY_F32,
+                                 float_math_ternary_f32) {
+    const iree_vm_isa_float_math_ternary_f32_record_t* record =
+        (const iree_vm_isa_float_math_ternary_f32_record_t*)record_data;
+    values[record->dst_v8] = iree_vm_bytecode_float_math_ternary_f32(
+        record->selector_u8, (uint32_t)values[record->a_v8],
+        (uint32_t)values[record->b_v8], (uint32_t)values[record->c_v8]);
+    IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_isa_float_math_ternary_f32_record_t);
+  }
+  IREE_VM_BYTECODE_DISPATCH_CASE(FLOAT_MATH_TERNARY_F64,
+                                 float_math_ternary_f64) {
+    const iree_vm_isa_float_math_ternary_f64_record_t* record =
+        (const iree_vm_isa_float_math_ternary_f64_record_t*)record_data;
+    values[record->dst_v8] = iree_vm_bytecode_float_math_ternary_f64(
+        record->selector_u8, values[record->a_v8], values[record->b_v8],
+        values[record->c_v8]);
+    IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_isa_float_math_ternary_f64_record_t);
   }
   IREE_VM_BYTECODE_DISPATCH_CASE(BUFFER_RODATA_LOAD, buffer_rodata_load) {
     const iree_vm_isa_buffer_rodata_load_record_t* record =

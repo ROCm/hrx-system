@@ -711,6 +711,62 @@ TEST(VMBytecodeModuleTest, RejectsMalformedFloatInstructions) {
   clamp.upper_v8 = 2;
   expect_rejected(clamp);
 
+  iree_vm_isa_float_math_unary_f32_record_t unary_f32 = {};
+  unary_f32.opcode_u8 = IREE_VM_ISA_CORE_OPCODE_FLOAT_MATH_UNARY_F32;
+  unary_f32.dst_v8 = 0;
+  unary_f32.src_v8 = 1;
+  unary_f32.selector_u8 = IREE_VM_ISA_FLOAT_MATH_UNARY_GELU_TANH + 1;
+  expect_rejected(unary_f32);
+
+  iree_vm_isa_float_math_unary_f64_record_t unary_f64 = {};
+  unary_f64.opcode_u8 = IREE_VM_ISA_CORE_OPCODE_FLOAT_MATH_UNARY_F64;
+  unary_f64.dst_v8 = 0;
+  unary_f64.src_v8 = 2;
+  unary_f64.selector_u8 = IREE_VM_ISA_FLOAT_MATH_UNARY_EXP;
+  expect_rejected(unary_f64);
+
+  iree_vm_isa_float_math_binary_f32_record_t binary_f32 = {};
+  binary_f32.opcode_u8 = IREE_VM_ISA_CORE_OPCODE_FLOAT_MATH_BINARY_F32;
+  binary_f32.dst_v8 = 0;
+  binary_f32.lhs_v8 = 0;
+  binary_f32.rhs_v8 = 1;
+  binary_f32.selector_u8 = IREE_VM_ISA_FLOAT_MATH_BINARY_GELU_LOGISTIC + 1;
+  expect_rejected(binary_f32);
+
+  iree_vm_isa_float_math_binary_f64_record_t binary_f64 = {};
+  binary_f64.opcode_u8 = IREE_VM_ISA_CORE_OPCODE_FLOAT_MATH_BINARY_F64;
+  binary_f64.dst_v8 = 0;
+  binary_f64.lhs_v8 = 0;
+  binary_f64.rhs_v8 = 1;
+  binary_f64.selector_u8 = IREE_VM_ISA_FLOAT_MATH_BINARY_POW;
+  binary_f64.zero_padding_u8[1] = 1;
+  expect_rejected(binary_f64);
+  binary_f64.zero_padding_u8[1] = 0;
+  binary_f64.rhs_v8 = 2;
+  expect_rejected(binary_f64);
+
+  iree_vm_isa_float_math_ternary_f32_record_t ternary_f32 = {};
+  ternary_f32.opcode_u8 = IREE_VM_ISA_CORE_OPCODE_FLOAT_MATH_TERNARY_F32;
+  ternary_f32.dst_v8 = 0;
+  ternary_f32.a_v8 = 0;
+  ternary_f32.b_v8 = 0;
+  ternary_f32.c_v8 = 1;
+  ternary_f32.selector_u8 = IREE_VM_ISA_FLOAT_MATH_TERNARY_FMA + 1;
+  expect_rejected(ternary_f32);
+
+  iree_vm_isa_float_math_ternary_f64_record_t ternary_f64 = {};
+  ternary_f64.opcode_u8 = IREE_VM_ISA_CORE_OPCODE_FLOAT_MATH_TERNARY_F64;
+  ternary_f64.dst_v8 = 0;
+  ternary_f64.a_v8 = 0;
+  ternary_f64.b_v8 = 0;
+  ternary_f64.c_v8 = 1;
+  ternary_f64.selector_u8 = IREE_VM_ISA_FLOAT_MATH_TERNARY_FMA;
+  ternary_f64.zero_padding_u16 = 1;
+  expect_rejected(ternary_f64);
+  ternary_f64.zero_padding_u16 = 0;
+  ternary_f64.a_v8 = 2;
+  expect_rejected(ternary_f64);
+
   iree_vm_environment_free(environment);
 }
 

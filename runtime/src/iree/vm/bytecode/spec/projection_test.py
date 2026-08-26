@@ -259,6 +259,13 @@ class ProjectionTest(unittest.TestCase):
             execution_table.count("IREE_VM_BYTECODE_EXECUTION_INFO_ROW("), 256
         )
         self.assertIn("OP(INTEGER_XOR_I64, integer_xor_i64)", execution_table)
+        self.assertIn("OP(FLOAT_MATH_UNARY_F32, float_math_unary_f32)", execution_table)
+        self.assertIn(
+            "OP(FLOAT_MATH_BINARY_F64, float_math_binary_f64)", execution_table
+        )
+        self.assertIn(
+            "OP(FLOAT_MATH_TERNARY_F32, float_math_ternary_f32)", execution_table
+        )
 
     def test_every_entity_has_exactly_one_markdown_anchor(self) -> None:
         module_projection = latest_projection(MODULE_SPECIFICATION)

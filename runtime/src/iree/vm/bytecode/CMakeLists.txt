@@ -57,6 +57,8 @@ iree_cc_library(
     "interpreter.c"
     "interpreter.h"
     "interpreter_float.h"
+    "interpreter_float_math.c"
+    "interpreter_float_math.h"
     "interpreter_integer.h"
     "module.c"
     "verification_isa.c"
@@ -116,6 +118,21 @@ iree_cc_test(
     "interpreter_float_test.cc"
   DEPS
     iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+    iree::vm::bytecode::wire
+)
+
+iree_cc_test(
+  NAME
+    interpreter_float_math_test
+  SRCS
+    "interpreter_float_math.h"
+    "interpreter_float_math_test.cc"
+  DEPS
+    ::bytecode
+    iree::base
+    iree::base::internal::fpu_state
     iree::testing::gtest
     iree::testing::gtest_main
     iree::vm::bytecode::wire
