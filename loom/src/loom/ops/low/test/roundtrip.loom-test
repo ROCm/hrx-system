@@ -67,6 +67,23 @@ low.func.def target<test.low.core>(@test_target) @widen_function_ref(%sync: reg<
 
 test.target<low_core> @test_target
 
+low.func.def target<test.low.core>(@test_target) @asm_indirect_call(%target: reg<test.ptr : func.ref<yieldable (i32) -> (i32)>>, %value: reg<test.i32 : i32>) -> (reg<test.i32 : i32>) asm {
+  %called = low.func.call.indirect %target(%value) : (reg<test.i32 : i32>) -> (reg<test.i32 : i32>)
+  return %called
+}
+
+// ----
+test.target<low_core> @test_target
+
+low.func.def target<test.low.core>(@test_target) @asm_indirect_call(%target: reg<test.ptr : func.ref<yieldable (i32) -> (i32)>>, %value: reg<test.i32 : i32>) -> (reg<test.i32 : i32>) {
+  %called = low.func.call.indirect %target(%value) : (reg<test.i32 : i32>) -> (reg<test.i32 : i32>)
+  low.return %called : reg<test.i32 : i32>
+}
+
+// ====
+
+test.target<low_core> @test_target
+
 low.func.def target<test.low.core>(@test_target) @storage_view(%value: reg<test.i32>) -> (reg<test.i32>) {
   %storage = low.storage.reserve {byte_alignment = 16, byte_length = 64} : low.storage<scratch>
   %whole = low.storage.view %storage {byte_length = 64} : low.storage<scratch> -> low.storage<scratch>

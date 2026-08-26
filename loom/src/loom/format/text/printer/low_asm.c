@@ -90,6 +90,7 @@ static bool loom_print_low_asm_allows_canonical_op(loom_print_context_t* ctx,
   return iree_string_view_equal(op_name, IREE_SV("low.br")) ||
          iree_string_view_equal(op_name, IREE_SV("low.cond_br")) ||
          iree_string_view_equal(op_name, IREE_SV("low.func.call")) ||
+         iree_string_view_equal(op_name, IREE_SV("low.func.call.indirect")) ||
          iree_string_view_equal(op_name, IREE_SV("low.scf.condition")) ||
          iree_string_view_equal(op_name, IREE_SV("low.switch")) ||
          iree_string_view_equal(op_name, IREE_SV("low.scf.yield")) ||
