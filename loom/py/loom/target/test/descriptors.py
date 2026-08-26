@@ -424,6 +424,31 @@ TEST_LOW_MUL_I32_DESCRIPTOR = Descriptor(
     flags=(DescriptorFlag.DEAD_REMOVABLE,),
 )
 
+TEST_LOW_VARIABLE_I32_DESCRIPTOR = Descriptor(
+    key="test.variable.i32",
+    mnemonic="test.variable.i32",
+    semantic_tag="test.variable.i32",
+    operands=(
+        Operand(
+            "dst",
+            OperandRole.RESULT,
+            _I32_ALT,
+            flags=(OperandFlag.VARIABLE_UNIT_COUNT,),
+            unit_count=64,
+        ),
+        Operand(
+            "src",
+            OperandRole.OPERAND,
+            _I32_ALT,
+            flags=(OperandFlag.VARIABLE_UNIT_COUNT,),
+            unit_count=64,
+        ),
+    ),
+    asm_forms=_asm(results=("dst",), operands=("src",)),
+    schedule_class=_SCHEDULE_SCALAR_ALU,
+    flags=(DescriptorFlag.DEAD_REMOVABLE,),
+)
+
 TEST_LOW_TIED_ANY_DESCRIPTOR = Descriptor(
     key="test.tied.any",
     mnemonic="test.tied.any",
@@ -1322,6 +1347,7 @@ TEST_LOW_CORE_DESCRIPTOR_SET = DescriptorSet(
         TEST_LOW_ADD_I32_DESCRIPTOR,
         TEST_LOW_CONVERGENT_I32_DESCRIPTOR,
         TEST_LOW_MUL_I32_DESCRIPTOR,
+        TEST_LOW_VARIABLE_I32_DESCRIPTOR,
         TEST_LOW_ADD_F32_DESCRIPTOR,
         TEST_LOW_SUB_F32_DESCRIPTOR,
         TEST_LOW_MUL_F32_DESCRIPTOR,

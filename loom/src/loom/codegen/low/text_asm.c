@@ -760,6 +760,13 @@ static iree_status_t loom_low_descriptor_text_asm_infer_result_type(
         IREE_SV("tied operand type must be one of: "), out_diagnostic_detail);
   }
 
+  if (iree_any_bit_set(operand->flags,
+                       LOOM_LOW_OPERAND_FLAG_VARIABLE_UNIT_COUNT)) {
+    *out_diagnostic_detail =
+        IREE_SV("result type annotation is required for variable-unit result");
+    return iree_ok_status();
+  }
+
   bool found = false;
   bool ambiguous = false;
   uint16_t reg_class_id = LOOM_LOW_REG_CLASS_NONE;
@@ -870,6 +877,11 @@ loom_low_descriptor_text_asm_result_type_annotation_required(
       return iree_ok_status();
     }
     *out_required = false;
+    return iree_ok_status();
+  }
+
+  if (iree_any_bit_set(operand->flags,
+                       LOOM_LOW_OPERAND_FLAG_VARIABLE_UNIT_COUNT)) {
     return iree_ok_status();
   }
 

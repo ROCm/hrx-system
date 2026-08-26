@@ -245,6 +245,19 @@ TEST_F(LowAsmPrinterTest, PrintsExplicitAmbiguousResultType) {
   loom_module_free(module);
 }
 
+TEST_F(LowAsmPrinterTest, PrintsExplicitVariableUnitResultType) {
+  const char* source =
+      "low.func.def target<test.low.core> @variable("
+      "%source: reg<test.i32 x3>) -> (reg<test.i32 x5>) asm {\n"
+      "  %result = test.variable.i32 %source : reg<test.i32 x5>\n"
+      "  return %result\n"
+      "}\n";
+  loom_module_t* module = ParseOk(source);
+  ASSERT_NE(module, nullptr);
+  EXPECT_EQ(PrintModule(module), source);
+  loom_module_free(module);
+}
+
 TEST_F(LowAsmPrinterTest, PreservesSemanticRegisterResultTypes) {
   const char* source =
       "low.func.def target<test.low.core> @typed(%arg: "

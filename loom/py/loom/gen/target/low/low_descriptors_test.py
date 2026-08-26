@@ -1630,7 +1630,7 @@ def test_generator_rejects_zero_unit_count_operand() -> None:
         generate_descriptor_set(descriptor_set)
 
 
-def test_generator_rejects_variable_unit_count_compact_assembly() -> None:
+def test_generator_accepts_variable_unit_count_compact_assembly() -> None:
     dst, lhs, rhs = TEST_LOW_ADD_I32_DESCRIPTOR.operands
     descriptor = replace(
         TEST_LOW_ADD_I32_DESCRIPTOR,
@@ -1645,11 +1645,11 @@ def test_generator_rejects_variable_unit_count_compact_assembly() -> None:
         descriptors=(descriptor,),
     )
 
-    with pytest.raises(
-        ValueError,
-        match=re.escape("descriptor 'test.add.i32' with variable-unit operands cannot declare compact asm forms"),
-    ):
-        generate_descriptor_set(descriptor_set)
+    compiled = compiler.compile_descriptor_set(descriptor_set)
+    generated = generate_descriptor_set(descriptor_set)
+
+    assert len(compiled.asm_forms) == 1
+    assert "LOOM_LOW_OPERAND_FLAG_VARIABLE_UNIT_COUNT" in generated.source
 
 
 def test_generator_rejects_non_trailing_variadic_operand() -> None:
