@@ -622,9 +622,9 @@ static iree_status_t iree_vm_bytecode_function_verify(
         (iree_vm_bytecode_verification_form_t)execution_info.verification_form;
     if (execution_info.verification_form ==
         IREE_VM_BYTECODE_VERIFICATION_FORM_NONE) {
-      return iree_make_status(
-          IREE_STATUS_UNIMPLEMENTED,
-          "opcode 0x%02" PRIx8 " is not executable Core bytecode", opcode);
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "opcode 0x%02" PRIx8 " is unassigned in Core 0.0",
+                              opcode);
     }
     const iree_host_size_t record_length = execution_info.record_length;
     IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_record_available(
@@ -1590,7 +1590,7 @@ iree_status_t iree_vm_bytecode_module_verify_executable(
     if (function->local_ref_count_u32 > (uint32_t)UINT16_MAX + 1u) {
       return iree_make_status(
           IREE_STATUS_UNIMPLEMENTED,
-          "B0 bytecode functions support only direct local ref slots");
+          "bytecode functions support only direct local ref slots");
     }
     if (function->local_function_count_u32 > (uint32_t)UINT16_MAX + 1u) {
       return iree_make_status(

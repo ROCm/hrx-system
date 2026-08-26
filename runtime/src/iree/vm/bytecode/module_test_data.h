@@ -42,7 +42,7 @@ uint8_t* FindSectionPayload(std::vector<uint8_t>* image, uint16_t section_type);
 MutableFunctionImage FindFunctionImage(std::vector<uint8_t>* image,
                                        uint32_t ordinal);
 
-// Builds the exact B0 ownership and reflection fixture.
+// Builds the exact Core 0.0 ownership and reflection fixture.
 std::vector<uint8_t> BuildOwnershipModuleImage();
 
 // Builds one typed-ref fixture covering register and local-slot ownership.

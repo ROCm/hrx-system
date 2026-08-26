@@ -138,7 +138,7 @@ TEST(VMBytecodeModuleTest, RejectsBeforeTakingImageStorageOwnership) {
       iree_vm_environment_allocate(iree_allocator_system(), &environment));
   iree_vm_module_t* module = reinterpret_cast<iree_vm_module_t*>(uintptr_t{1});
   IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_UNIMPLEMENTED,
+      IREE_STATUS_INVALID_ARGUMENT,
       iree_vm_bytecode_module_create(
           environment, IREE_SV("ownership"),
           {iree_make_const_byte_span(owned_image, image.size()),

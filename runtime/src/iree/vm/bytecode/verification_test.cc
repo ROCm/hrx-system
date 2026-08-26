@@ -710,7 +710,8 @@ void RunValidationObligation(ValidationObligation obligation) {
       MutableFunctionImage function = FindFunctionImage(&image, 0);
       ASSERT_NE(function.bytecode, nullptr);
       function.bytecode[4] = 0x0F;
-      ExpectExecutableRejected(image, IREE_STATUS_UNIMPLEMENTED, "opcode 0x0f");
+      ExpectExecutableRejected(image, IREE_STATUS_INVALID_ARGUMENT,
+                               "unassigned in Core 0.0");
       break;
     }
     case ValidationObligation::FUNCTIONS_BLOCK_COUNT: {

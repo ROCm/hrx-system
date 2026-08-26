@@ -9,13 +9,13 @@
 
 #include "iree/vm/bytecode/module_storage.h"
 
-// Starts and synchronously executes one verified B0 bytecode function.
+// Starts and synchronously executes one verified Core 0.0 bytecode function.
 iree_status_t iree_vm_bytecode_function_start(
     iree_vm_module_t* base_module,
     const iree_vm_module_function_start_params_t* params,
     iree_vm_execution_outcome_t* out_outcome);
 
-// Resumes one suspended verified B0 bytecode function frame.
+// Resumes one suspended verified Core 0.0 bytecode function frame.
 iree_status_t iree_vm_bytecode_function_resume(
     iree_vm_module_t* base_module,
     const iree_vm_module_function_resume_params_t* params,

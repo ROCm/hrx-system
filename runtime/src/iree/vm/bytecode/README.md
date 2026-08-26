@@ -41,6 +41,8 @@ and inspected through runtime APIs, and mutated to exercise production
 verification failures. Compact authored cases are durable inputs; generated
 binary and JSON change detectors are not.
 
-This directory currently specifies the bytecode contract. It does not claim a
-shipping loader, verifier, interpreter, or Loom target; those consumers land as
-separate implementation units after this authority is accepted.
+The runtime loader, verifier, interpreter, and inspection tooling implement the
+complete Core 0.0 page. Loom emits canonical Core 0.0 images from verified VM
+target-Low programs. An unassigned Core opcode is malformed input, not a
+request for a fallback executor. The HAL 0.0 page remains an optional specified
+extension and is not part of the Core runtime link.
