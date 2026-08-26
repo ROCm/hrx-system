@@ -589,7 +589,7 @@ low.func.def target<x86.avx512.core>(@x86_target) @x86_fragment(%base: reg<x86.g
 
 // ----
   vextractf32x4 xmm0, zmm0, 2
-  vmovdqu32 [rax + 112], xmm0
+  vmovdqu [rax + 112], xmm0
   ret
 
 // ====
@@ -626,7 +626,7 @@ low.func.def target<x86.avx2.core>(@x86_target) @x86_fragment(%base: reg<x86.gpr
   vpextrd edx, xmm1, 3
   add eax, edx
   vpinsrd xmm0, xmm0, eax, 0
-  vmovdqu32 [rcx], xmm0
+  vmovdqu [rcx], xmm0
   ret
 
 // ====
@@ -641,7 +641,7 @@ low.func.def target<x86.avx512.core>(@x86_target) @x86_fragment(%base: reg<x86.g
 
 // ----
   vpermilps xmm0, xmm0, 39
-  vmovdqu32 [rax + 32], xmm0
+  vmovdqu [rax + 32], xmm0
   ret
 
 // ====
@@ -660,7 +660,7 @@ low.func.def target<x86.avx512.core>(@x86_target) @x86_fragment(%base: reg<x86.g
   vpermilps xmm2, xmm1, 1
   vaddss xmm0, xmm2, xmm0
   vinsertps xmm0, xmm1, xmm0, 32
-  vmovdqu32 [rax + 48], xmm0
+  vmovdqu [rax + 48], xmm0
   ret
 
 // ====
@@ -683,7 +683,22 @@ low.func.def target<x86.avx512.core>(@x86_target) @x86_fragment(%base: reg<x86.g
   vpermilps xmm2, xmm0, 177
   vaddps xmm0, xmm0, xmm2
   vaddss xmm0, xmm1, xmm0
-  vmovdqu32 [rax + 64], xmm0
+  vmovdqu [rax + 64], xmm0
+  ret
+
+// ====
+
+x86.target<avx2> @x86_target
+
+low.func.def target<x86.avx2.core>(@x86_target) @x86_fragment(%input: reg<x86.gpr64>, %output: reg<x86.gpr64>) asm {
+  %loaded = vmovdqu32.load.ymm %input {disp32 = 16}
+  vmovdqu32.store.ymm %loaded, %output {disp32 = 32}
+  return
+}
+
+// ----
+  vmovdqu ymm0, [rax + 16]
+  vmovdqu [rcx + 32], ymm0
   ret
 
 // ====
@@ -705,7 +720,7 @@ low.func.def target<x86.avx2.core>(@x86_target) @x86_fragment(%base: reg<x86.gpr
   vsubss xmm0, xmm0, xmm1
   vmulss xmm0, xmm0, xmm2
   vfmadd231ss xmm1, xmm0, xmm2
-  vmovdqu32 [rax + 96], xmm1
+  vmovdqu [rax + 96], xmm1
   ret
 
 // ====

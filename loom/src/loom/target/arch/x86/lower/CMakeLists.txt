@@ -14,9 +14,11 @@ loom_cc_library(
   NAME
     lower
   HDRS
+    "contraction.h"
     "internal.h"
     "lower.h"
   SRCS
+    "contraction.c"
     "packed_dot.c"
     "registry.c"
   DEPS
@@ -26,6 +28,8 @@ loom_cc_library(
     loom::error::error_defs
     loom::ir
     loom::target::arch::x86::contracts
+    loom::target::arch::x86::packed_dot_contract
+    loom::target::arch::x86::packed_dot_contract_projection
     loom::target::arch::x86::register_classes
   PUBLIC
 )

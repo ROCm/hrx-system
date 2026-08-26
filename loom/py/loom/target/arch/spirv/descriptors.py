@@ -958,12 +958,12 @@ def _cooperative_matrix_mul_add_descriptor(
         semantic_tag=key,
         operands=(
             _id_result(),
-            _id_operand("a"),
-            _id_operand("b"),
+            _id_operand("lhs"),
+            _id_operand("rhs"),
             _id_operand("acc"),
         ),
         feature_mask_words=(case.feature_bits,),
-        asm_forms=_asm(results=("dst",), operands=("a", "b", "acc")),
+        asm_forms=_asm(results=("dst",), operands=("lhs", "rhs", "acc")),
         schedule_class=_SCHEDULE_MATRIX,
         flags=(DescriptorFlag.DEAD_REMOVABLE,),
     )

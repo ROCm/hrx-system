@@ -29,11 +29,23 @@ bool loom_contract_request_from_vector_dot_op(
     loom_lowering_policy_t policy, loom_contract_request_t* out_request,
     loom_contract_diagnostic_t* out_diagnostic);
 
+typedef enum loom_contract_vector_mma_fragment_projection_e {
+  // Use the target-supplied fragment and K-group facts verbatim.
+  LOOM_CONTRACT_VECTOR_MMA_FRAGMENT_PROJECTION_EXPLICIT = 0,
+  // Derive one packed-vector instruction from physical operand payloads.
+  LOOM_CONTRACT_VECTOR_MMA_FRAGMENT_PROJECTION_PACKED_VECTOR = 1,
+} loom_contract_vector_mma_fragment_projection_t;
+
 typedef struct loom_contract_vector_mma_options_t {
+  // How target-independent physical fragment facts are constructed.
+  loom_contract_vector_mma_fragment_projection_t fragment_projection;
+
   // Number of K payload elements reduced into each accumulator contribution.
+  // Ignored when fragment_projection derives this value from packed vectors.
   uint16_t k_group_size;
 
   // Fragment ownership facts required by the target projection.
+  // Ignored when fragment_projection derives these facts from packed vectors.
   loom_contract_fragment_t fragment;
 
   // Requested target primitive capability class.

@@ -16,6 +16,7 @@
 #define LOOM_TARGET_ARCH_X86_PACKED_DOT_CONTRACT_H_
 
 #include "iree/base/api.h"
+#include "loom/codegen/low/descriptors.h"
 #include "loom/target/arch/x86/feature_bits.h"
 
 #ifdef __cplusplus
@@ -78,6 +79,9 @@ typedef uint32_t loom_x86_packed_dot_contract_flags_t;
 // Descriptor performs a saturating add into the accumulator lane.
 #define LOOM_X86_PACKED_DOT_CONTRACT_FLAG_SATURATING ((uint32_t)1u << 0)
 
+// Stable generated reference into the packed-dot semantic descriptor table.
+typedef uint16_t loom_x86_packed_dot_descriptor_ref_t;
+
 typedef struct loom_x86_packed_dot_shape_t {
   // Native vector width in bits.
   uint16_t vector_bit_width;
@@ -116,6 +120,8 @@ typedef struct loom_x86_packed_dot_descriptor_t {
   loom_x86_packed_dot_numeric_type_t accumulator_numeric_type;
   // Result lane numeric type.
   loom_x86_packed_dot_numeric_type_t result_numeric_type;
+  // Stable generated reference used for direct low-descriptor projection.
+  loom_x86_packed_dot_descriptor_ref_t low_descriptor_ref;
 } loom_x86_packed_dot_descriptor_t;
 
 // Bitset of structural reasons that prevented a packed-dot contract match.
@@ -153,8 +159,8 @@ typedef struct loom_x86_packed_dot_match_request_t {
   loom_x86_packed_dot_numeric_type_t result_numeric_type;
   // Processor feature bits available to the target.
   loom_x86_packed_dot_feature_bits_t feature_bits;
-  // Descriptor flags the selected contract must carry.
-  loom_x86_packed_dot_contract_flags_t required_flags;
+  // Exact semantic flags required of the selected instruction.
+  loom_x86_packed_dot_contract_flags_t semantic_flags;
 } loom_x86_packed_dot_match_request_t;
 
 typedef struct loom_x86_packed_dot_match_diagnostic_t {
@@ -206,6 +212,13 @@ bool loom_x86_packed_dot_is_available(
 const loom_x86_packed_dot_descriptor_t* loom_x86_packed_dot_select(
     const loom_x86_packed_dot_match_request_t* request,
     loom_x86_packed_dot_match_diagnostic_t* out_diagnostic);
+
+// Resolves |descriptor| directly in |descriptor_set| without text matching or
+// scanning. Returns NULL when the selected descriptor set does not contain the
+// semantic descriptor.
+const loom_low_descriptor_t* loom_x86_packed_dot_low_descriptor(
+    const loom_low_descriptor_set_t* descriptor_set,
+    const loom_x86_packed_dot_descriptor_t* descriptor);
 
 #ifdef __cplusplus
 }

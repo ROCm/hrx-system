@@ -160,6 +160,8 @@ class ContractVectorTest : public ::testing::Test {
 
   loom_contract_vector_mma_options_t GpuMatrixMmaOptions() {
     return (loom_contract_vector_mma_options_t){
+        /*.fragment_projection=*/
+        LOOM_CONTRACT_VECTOR_MMA_FRAGMENT_PROJECTION_EXPLICIT,
         /*.k_group_size=*/1,
         /*.fragment=*/
         (loom_contract_fragment_t){
@@ -170,6 +172,17 @@ class ContractVectorTest : public ::testing::Test {
             /*.subgroup_size=*/64,
         },
         /*.capability_class=*/LOOM_CONTRACT_CAPABILITY_CLASS_GPU_MATRIX,
+        /*.policy=*/LOOM_LOWERING_POLICY_TARGET_PRIMITIVE_REQUIRED,
+    };
+  }
+
+  loom_contract_vector_mma_options_t PackedVectorMmaOptions() {
+    return (loom_contract_vector_mma_options_t){
+        /*.fragment_projection=*/
+        LOOM_CONTRACT_VECTOR_MMA_FRAGMENT_PROJECTION_PACKED_VECTOR,
+        /*.k_group_size=*/0,
+        /*.fragment=*/{},
+        /*.capability_class=*/LOOM_CONTRACT_CAPABILITY_CLASS_CPU_PACKED_DOT,
         /*.policy=*/LOOM_LOWERING_POLICY_TARGET_PRIMITIVE_REQUIRED,
     };
   }
@@ -322,6 +335,92 @@ func.def @dense_mma(%lhs_data: vector<8xf16>, %rhs_data: vector<8xf16>, %init_da
             LOOM_CONTRACT_CAPABILITY_CLASS_GPU_MATRIX);
   EXPECT_EQ(request.fragment.atom_bits, LOOM_CONTRACT_FRAGMENT_SUBGROUP_LANE);
   EXPECT_EQ(request.fragment.subgroup_size, 64);
+  loom_pass_value_fact_owner_deinitialize(&value_facts);
+}
+
+TEST_F(ContractVectorTest, DerivesPackedVectorMmaFragmentFromPayloads) {
+  static const char kSource[] = R"(
+func.def @packed_bf16_mma(%lhs_data: vector<16xbf16>, %rhs_data: vector<16xbf16>, %init_data: vector<8xf32>) -> (vector<8xf32>) {
+  %blocks = index.constant 8 : index
+  %m = index.constant 1 : index
+  %n = index.constant 1 : index
+  %k = index.constant 2 : index
+  %lhs = vector.fragment<lhs> %lhs_data shape [blocks(%blocks), %m, %k] : vector<16xbf16>
+  %rhs = vector.fragment<rhs> %rhs_data shape [blocks(%blocks), %k, %n] : vector<16xbf16>
+  %init = vector.fragment<init> %init_data shape [blocks(%blocks), %m, %n] : vector<8xf32>
+  %result = vector.mma %lhs, %rhs, %init : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+  func.return %result : vector<8xf32>
+}
+)";
+
+  loom_module_t* module = nullptr;
+  IREE_ASSERT_OK(ParseAndVerify(kSource, &module));
+  ModulePtr module_ptr(module);
+
+  loom_pass_value_fact_owner_t value_facts = {};
+  loom_pass_value_fact_owner_initialize(module->arena.block_pool, &value_facts);
+  loom_value_fact_table_t* fact_table = nullptr;
+  IREE_ASSERT_OK(loom_pass_value_fact_owner_acquire(
+      &value_facts, module_ptr.get(),
+      loom_pass_value_fact_scope_function(FirstFunction(module_ptr.get())),
+      &fact_table));
+
+  const loom_op_t* op = FirstVectorMmaOp(module_ptr.get());
+  ASSERT_NE(op, nullptr);
+  const loom_contract_vector_mma_options_t options = PackedVectorMmaOptions();
+  loom_contract_request_t request = {};
+  ASSERT_TRUE(loom_contract_request_from_vector_mma_op(
+      module_ptr.get(), fact_table, op, &options, &request, nullptr));
+
+  EXPECT_EQ(request.shape.block_count, 8);
+  EXPECT_EQ(request.shape.m, 1);
+  EXPECT_EQ(request.shape.n, 1);
+  EXPECT_EQ(request.shape.k, 2);
+  EXPECT_EQ(request.k_group_size, 2);
+  EXPECT_EQ(request.fragment.atom_bits, LOOM_CONTRACT_FRAGMENT_VECTOR_LANE);
+  EXPECT_EQ(request.fragment.vector_bit_width, 256);
+  EXPECT_EQ(request.fragment.source_lane_count, 16);
+  EXPECT_EQ(request.fragment.result_lane_count, 8);
+  EXPECT_EQ(request.capability_class,
+            LOOM_CONTRACT_CAPABILITY_CLASS_CPU_PACKED_DOT);
+  loom_pass_value_fact_owner_deinitialize(&value_facts);
+}
+
+TEST_F(ContractVectorTest, RejectsUnequalPackedVectorRegisterWidths) {
+  static const char kSource[] = R"(
+func.def @packed_bf16_mma(%lhs_data: vector<8xbf16>, %rhs_data: vector<8xbf16>, %init_data: vector<8xf32>) -> (vector<8xf32>) {
+  %blocks = index.constant 8 : index
+  %m = index.constant 1 : index
+  %n = index.constant 1 : index
+  %k = index.constant 1 : index
+  %lhs = vector.fragment<lhs> %lhs_data shape [blocks(%blocks), %m, %k] : vector<8xbf16>
+  %rhs = vector.fragment<rhs> %rhs_data shape [blocks(%blocks), %k, %n] : vector<8xbf16>
+  %init = vector.fragment<init> %init_data shape [blocks(%blocks), %m, %n] : vector<8xf32>
+  %result = vector.mma %lhs, %rhs, %init : vector<8xbf16>, vector<8xbf16>, vector<8xf32>
+  func.return %result : vector<8xf32>
+}
+)";
+
+  loom_module_t* module = nullptr;
+  IREE_ASSERT_OK(ParseAndVerify(kSource, &module));
+  ModulePtr module_ptr(module);
+
+  loom_pass_value_fact_owner_t value_facts = {};
+  loom_pass_value_fact_owner_initialize(module->arena.block_pool, &value_facts);
+  loom_value_fact_table_t* fact_table = nullptr;
+  IREE_ASSERT_OK(loom_pass_value_fact_owner_acquire(
+      &value_facts, module_ptr.get(),
+      loom_pass_value_fact_scope_function(FirstFunction(module_ptr.get())),
+      &fact_table));
+
+  const loom_op_t* op = FirstVectorMmaOp(module_ptr.get());
+  ASSERT_NE(op, nullptr);
+  const loom_contract_vector_mma_options_t options = PackedVectorMmaOptions();
+  loom_contract_request_t request = {};
+  loom_contract_diagnostic_t diagnostic = {};
+  EXPECT_FALSE(loom_contract_request_from_vector_mma_op(
+      module_ptr.get(), fact_table, op, &options, &request, &diagnostic));
+  EXPECT_EQ(diagnostic.rejection_bits, LOOM_CONTRACT_REJECTION_FRAGMENT);
   loom_pass_value_fact_owner_deinitialize(&value_facts);
 }
 

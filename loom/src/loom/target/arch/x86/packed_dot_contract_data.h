@@ -21,6 +21,10 @@ extern "C" {
 extern const loom_x86_packed_dot_descriptor_t
     loom_x86_packed_dot_builtin_descriptors[];
 extern const iree_host_size_t loom_x86_packed_dot_builtin_descriptor_count;
+extern const uint32_t* const
+    loom_x86_packed_dot_low_descriptor_ordinal_tables[];
+extern const iree_host_size_t
+    loom_x86_packed_dot_low_descriptor_ordinal_table_count;
 
 #ifdef __cplusplus
 }  // extern "C"

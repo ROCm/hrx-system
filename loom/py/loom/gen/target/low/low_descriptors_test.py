@@ -53,6 +53,7 @@ from loom.target.low_descriptors import (
     OperandFormMatch,
     OperandFormMatchKind,
     OperandRole,
+    OperandSourceBinding,
     RegClassAlt,
     RegClassAltFlag,
     RegClassFlag,
@@ -62,6 +63,7 @@ from loom.target.low_descriptors import (
     StorageLeaseKind,
     StorageLeaseReleaseScope,
     descriptor_stable_id,
+    operand_source_binding,
 )
 from loom.target.test.descriptors import (
     TEST_LOW_ADD_I32_DESCRIPTOR,
@@ -1834,6 +1836,35 @@ def test_compiler_indexes_every_descriptor_source_value_role() -> None:
     assert compiled.operand_source_value_indices == [0, 1, 0, 1, 2, None]
     assert ".source_value_index = 2," in generated.source
     assert ".source_value_index = LOOM_LOW_ID_NONE," in generated.source
+
+
+@pytest.mark.parametrize(
+    ("field_name", "role", "expected_binding"),
+    [
+        ("lhs", OperandRole.OPERAND, OperandSourceBinding.LHS),
+        ("rhs", OperandRole.OPERAND, OperandSourceBinding.RHS),
+        ("acc", OperandRole.OPERAND, OperandSourceBinding.ACCUMULATOR),
+        (
+            "sparse_metadata",
+            OperandRole.OPERAND,
+            OperandSourceBinding.SPARSE_METADATA,
+        ),
+        ("lhs_scale", OperandRole.OPERAND, OperandSourceBinding.LHS_SCALE),
+        ("rhs_scale", OperandRole.OPERAND, OperandSourceBinding.RHS_SCALE),
+        ("value", OperandRole.OPERAND, OperandSourceBinding.NONE),
+        ("lhs", OperandRole.RESULT, OperandSourceBinding.NONE),
+    ],
+)
+def test_operand_source_binding_uses_canonical_field_names(field_name: str, role: OperandRole, expected_binding: OperandSourceBinding) -> None:
+    assert operand_source_binding(field_name, role) is expected_binding
+
+
+def test_generator_compiles_canonical_operand_source_bindings() -> None:
+    generated = generate_descriptor_set(TEST_LOW_CORE_DESCRIPTOR_SET)
+
+    assert ".source_binding = LOOM_LOW_OPERAND_SOURCE_BINDING_LHS," in generated.source
+    assert ".source_binding = LOOM_LOW_OPERAND_SOURCE_BINDING_RHS," in generated.source
+    assert ".source_binding = LOOM_LOW_OPERAND_SOURCE_BINDING_NONE," in generated.source
 
 
 def test_generator_rejects_ambiguous_asm_mnemonics() -> None:

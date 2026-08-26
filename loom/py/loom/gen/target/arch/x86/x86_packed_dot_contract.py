@@ -34,6 +34,8 @@ from loom.gen.support.generated_file import (  # noqa: E402
     maintain_generated_file_set,
 )
 from loom.target.arch.x86.packed_dot_data import X86_PACKED_DOT_DESCRIPTORS  # noqa: E402
+from loom.target.arch.x86.target_info import sorted_descriptor_set_infos  # noqa: E402
+from loom.target.descriptor_sets import resolve_descriptor_set  # noqa: E402
 from loom.target.low_descriptors import descriptor_stable_id  # noqa: E402
 
 DESCRIPTION = "x86 packed-dot contract header"
@@ -47,6 +49,16 @@ def _join_source(lines: Sequence[str]) -> str:
 
 def _hex_u64_literal(value: int) -> str:
     return f"UINT64_C(0x{value:x})"
+
+
+def _low_descriptor_ordinal_tables() -> tuple[tuple[int | None, ...] | None, ...]:
+    tables: list[tuple[int | None, ...] | None] = []
+    for descriptor_set_info in sorted_descriptor_set_infos():
+        descriptor_set = resolve_descriptor_set(descriptor_set_info.key)
+        descriptor_ordinals = {descriptor.key: ordinal for ordinal, descriptor in enumerate(descriptor_set.descriptors)}
+        table = tuple(descriptor_ordinals.get(descriptor.key) for descriptor in X86_PACKED_DOT_DESCRIPTORS)
+        tables.append(table if any(value is not None for value in table) else None)
+    return tuple(tables)
 
 
 def _emit_header() -> str:
@@ -76,6 +88,10 @@ def _emit_header() -> str:
         "extern const loom_x86_packed_dot_descriptor_t",
         "    loom_x86_packed_dot_builtin_descriptors[];",
         "extern const iree_host_size_t loom_x86_packed_dot_builtin_descriptor_count;",
+        "extern const uint32_t* const",
+        "    loom_x86_packed_dot_low_descriptor_ordinal_tables[];",
+        "extern const iree_host_size_t",
+        "    loom_x86_packed_dot_low_descriptor_ordinal_table_count;",
         "",
         "#ifdef __cplusplus",
         '}  // extern "C"',
@@ -102,7 +118,7 @@ def _emit_source() -> str:
         "const loom_x86_packed_dot_descriptor_t",
         "    loom_x86_packed_dot_builtin_descriptors[] = {",
     ]
-    for descriptor in X86_PACKED_DOT_DESCRIPTORS:
+    for descriptor_ref, descriptor in enumerate(X86_PACKED_DOT_DESCRIPTORS):
         lines.extend(
             [
                 "    {",
@@ -124,6 +140,7 @@ def _emit_source() -> str:
                 f"        .rhs_numeric_type = {descriptor.rhs_numeric_type},",
                 f"        .accumulator_numeric_type = {descriptor.accumulator_numeric_type},",
                 f"        .result_numeric_type = {descriptor.result_numeric_type},",
+                f"        .low_descriptor_ref = UINT16_C({descriptor_ref}),",
                 "    },",
             ]
         )
@@ -133,6 +150,31 @@ def _emit_source() -> str:
             "",
             "const iree_host_size_t loom_x86_packed_dot_builtin_descriptor_count =",
             f"    {len(X86_PACKED_DOT_DESCRIPTORS)};",
+            "",
+        ]
+    )
+    ordinal_tables = _low_descriptor_ordinal_tables()
+    for descriptor_set_ordinal, table in enumerate(ordinal_tables):
+        if table is None:
+            continue
+        lines.extend(
+            [
+                "static const uint32_t",
+                f"    kLoomX86PackedDotLowDescriptorOrdinals{descriptor_set_ordinal}[] = {{",
+            ]
+        )
+        lines.extend("    LOOM_LOW_DESCRIPTOR_ORDINAL_NONE," if descriptor_ordinal is None else f"    UINT32_C({descriptor_ordinal})," for descriptor_ordinal in table)
+        lines.extend(["};", ""])
+    lines.extend(
+        [
+            "const uint32_t* const",
+            "    loom_x86_packed_dot_low_descriptor_ordinal_tables[] = {",
+            *("        NULL," if table is None else f"        kLoomX86PackedDotLowDescriptorOrdinals{ordinal}," for ordinal, table in enumerate(ordinal_tables)),
+            "};",
+            "",
+            "const iree_host_size_t",
+            "    loom_x86_packed_dot_low_descriptor_ordinal_table_count =",
+            f"        {len(ordinal_tables)};",
             "",
         ]
     )

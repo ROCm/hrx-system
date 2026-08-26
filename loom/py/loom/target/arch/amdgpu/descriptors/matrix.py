@@ -49,7 +49,7 @@ def _v_wmma_16x16x16_overlay(
         asm_forms = _asm(
             native_assembly_mnemonic=mnemonic,
             results=("dst",),
-            operands=("a", "b", "acc"),
+            operands=("lhs", "rhs", "acc"),
         )
     return AmdgpuDescriptorOverlay(
         descriptor_key=descriptor_key,
@@ -66,12 +66,12 @@ def _v_wmma_16x16x16_overlay(
             ),
             AmdgpuOperandOverlay(
                 "SRC0",
-                _vgpr_operand("a", units=input_units),
+                _vgpr_operand("lhs", units=input_units),
                 size_exception_reason=input_size_exception_reason,
             ),
             AmdgpuOperandOverlay(
                 "SRC1",
-                _vgpr_operand("b", units=input_units),
+                _vgpr_operand("rhs", units=input_units),
                 size_exception_reason=input_size_exception_reason,
             ),
             AmdgpuOperandOverlay(
@@ -348,13 +348,13 @@ def _v_wmma_i32_16x16x16_overlay(
     asm_forms = _asm(
         native_assembly_mnemonic=mnemonic if low_mnemonic_suffix else None,
         results=("dst",),
-        operands=("a", "b", "acc"),
+        operands=("lhs", "rhs", "acc"),
         immediates=tuple(immediate.field_name for immediate in immediates),
         named_immediates=True,
         native_assembly_values=(
             _native_result("dst"),
-            _native_operand("a"),
-            _native_operand("b"),
+            _native_operand("lhs"),
+            _native_operand("rhs"),
             _native_operand("acc"),
             *native_modifiers,
         ),
@@ -374,12 +374,12 @@ def _v_wmma_i32_16x16x16_overlay(
             ),
             AmdgpuOperandOverlay(
                 "SRC0",
-                _vgpr_operand("a", units=operand_units),
+                _vgpr_operand("lhs", units=operand_units),
                 size_exception_reason=operand_size_exception_reason,
             ),
             AmdgpuOperandOverlay(
                 "SRC1",
-                _vgpr_operand("b", units=operand_units),
+                _vgpr_operand("rhs", units=operand_units),
                 size_exception_reason=operand_size_exception_reason,
             ),
             AmdgpuOperandOverlay(
@@ -507,9 +507,9 @@ def _cdna4_f8f6f4_matrix_asm_forms(
     mnemonic: str, *, has_scale_operands: bool
 ) -> tuple[AsmForm, ...]:
     operands = (
-        ("a", "b", "acc", "scale_src0", "scale_src1")
+        ("lhs", "rhs", "acc", "lhs_scale", "rhs_scale")
         if has_scale_operands
-        else ("a", "b", "acc")
+        else ("lhs", "rhs", "acc")
     )
     return _asm(
         native_assembly_mnemonic=mnemonic,
@@ -556,7 +556,7 @@ def _v_mfma_overlay(
             AmdgpuOperandOverlay("VDST", _vgpr_agpr_result(units=accumulator_units)),
             AmdgpuOperandOverlay(
                 "SRC0",
-                _vgpr_agpr_operand("a", units=lhs_units),
+                _vgpr_agpr_operand("lhs", units=lhs_units),
                 size_exception_reason=(
                     _cdna4_f8f6f4_operand_width_exception_reason(lhs_units)
                     if matrix_physical_formats is not None
@@ -565,7 +565,7 @@ def _v_mfma_overlay(
             ),
             AmdgpuOperandOverlay(
                 "SRC1",
-                _vgpr_agpr_operand("b", units=rhs_units),
+                _vgpr_agpr_operand("rhs", units=rhs_units),
                 size_exception_reason=(
                     _cdna4_f8f6f4_operand_width_exception_reason(rhs_units)
                     if matrix_physical_formats is not None
@@ -614,14 +614,14 @@ def _v_mfma_scale_overlay(
             AmdgpuOperandOverlay("VDST", _vgpr_agpr_result(units=accumulator_units)),
             AmdgpuOperandOverlay(
                 "SRC0",
-                _vgpr_agpr_operand("a", units=lhs_units),
+                _vgpr_agpr_operand("lhs", units=lhs_units),
                 size_exception_reason=(
                     _cdna4_f8f6f4_operand_width_exception_reason(lhs_units)
                 ),
             ),
             AmdgpuOperandOverlay(
                 "SRC1",
-                _vgpr_agpr_operand("b", units=rhs_units),
+                _vgpr_agpr_operand("rhs", units=rhs_units),
                 size_exception_reason=(
                     _cdna4_f8f6f4_operand_width_exception_reason(rhs_units)
                 ),
@@ -629,8 +629,8 @@ def _v_mfma_scale_overlay(
             AmdgpuOperandOverlay(
                 "SRC2", _vgpr_agpr_const_operand("acc", units=accumulator_units)
             ),
-            AmdgpuOperandOverlay("SCALE_SRC0", _sgpr_vgpr_operand("scale_src0")),
-            AmdgpuOperandOverlay("SCALE_SRC1", _sgpr_vgpr_operand("scale_src1")),
+            AmdgpuOperandOverlay("SCALE_SRC0", _sgpr_vgpr_operand("lhs_scale")),
+            AmdgpuOperandOverlay("SCALE_SRC1", _sgpr_vgpr_operand("rhs_scale")),
         ),
         immediate_fields=("CBSZ", "BLGP"),
         immediates=_cdna4_f8f6f4_matrix_format_immediates(matrix_physical_formats),
@@ -1085,20 +1085,20 @@ def _v_smfmac_f32_overlay(
                 _vgpr_agpr_operand("acc", units=accumulator_units),
                 role_exception_reason=_SMFMAC_VDST_ACCUMULATOR_REASON,
             ),
-            AmdgpuOperandOverlay("SRC0", _vgpr_agpr_operand("a", units=lhs_units)),
-            AmdgpuOperandOverlay("SRC1", _vgpr_agpr_operand("b", units=rhs_units)),
-            AmdgpuOperandOverlay("SRC2", _vgpr_operand("index")),
+            AmdgpuOperandOverlay("SRC0", _vgpr_agpr_operand("lhs", units=lhs_units)),
+            AmdgpuOperandOverlay("SRC1", _vgpr_agpr_operand("rhs", units=rhs_units)),
+            AmdgpuOperandOverlay("SRC2", _vgpr_operand("sparse_metadata")),
         ),
         constraints=_DESTRUCTIVE_ACCUMULATOR_CONSTRAINTS,
         flags=(DescriptorFlag.DEAD_REMOVABLE,),
         asm_forms=_asm(
             results=("dst",),
-            operands=("acc", "a", "b", "index"),
+            operands=("acc", "lhs", "rhs", "sparse_metadata"),
             native_assembly_values=(
                 _native_result("dst"),
-                _native_operand("a"),
-                _native_operand("b"),
-                _native_operand("index"),
+                _native_operand("lhs"),
+                _native_operand("rhs"),
+                _native_operand("sparse_metadata"),
             ),
         ),
     )
@@ -1359,15 +1359,15 @@ def _v_swmmac_overlay(
             ),
             AmdgpuOperandOverlay(
                 "SRC0",
-                _vgpr_operand("a", units=lhs_units),
+                _vgpr_operand("lhs", units=lhs_units),
                 size_exception_reason=lhs_size_exception_reason,
             ),
             AmdgpuOperandOverlay(
                 "SRC1",
-                _vgpr_operand("b", units=rhs_units),
+                _vgpr_operand("rhs", units=rhs_units),
                 size_exception_reason=rhs_size_exception_reason,
             ),
-            AmdgpuOperandOverlay("SRC2", _vgpr_operand("index")),
+            AmdgpuOperandOverlay("SRC2", _vgpr_operand("sparse_metadata")),
         ),
         immediate_fields=immediate_fields,
         immediates=immediates,
@@ -1377,14 +1377,14 @@ def _v_swmmac_overlay(
         asm_forms=_asm(
             native_assembly_mnemonic=mnemonic if low_mnemonic_suffix else None,
             results=("dst",),
-            operands=("acc", "a", "b", "index"),
+            operands=("acc", "lhs", "rhs", "sparse_metadata"),
             immediates=tuple(immediate.field_name for immediate in immediates),
             named_immediates=True,
             native_assembly_values=(
                 _native_result("dst"),
-                _native_operand("a"),
-                _native_operand("b"),
-                _native_operand("index"),
+                _native_operand("lhs"),
+                _native_operand("rhs"),
+                _native_operand("sparse_metadata"),
                 *native_modifiers,
             ),
         ),

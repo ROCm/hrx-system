@@ -346,6 +346,18 @@ typedef struct loom_low_lower_descriptor_matrix_t {
   void* user_data;
 } loom_low_lower_descriptor_matrix_t;
 
+// Constructs the common matrix-contract rejection diagnostic used by target
+// descriptor-matrix callbacks. Target callbacks supply the narrow constraint
+// that rejected the request and retain source/target rejection bitsets for
+// compile-report consumers.
+iree_status_t loom_low_lower_descriptor_matrix_reject(
+    const loom_target_contract_query_environment_t* environment,
+    const loom_target_contract_descriptor_matrix_rule_t* rule,
+    const loom_op_t* source_op, iree_string_view_t constraint,
+    loom_contract_rejection_bits_t source_rejection_bits,
+    uint32_t target_rejection_bits, uint32_t missing_feature_bits,
+    loom_target_contract_query_result_t* out_result);
+
 typedef struct loom_low_lower_selected_plan_view_t {
   // Source op this selected plan lowers.
   const loom_op_t* source_op;

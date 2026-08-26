@@ -1386,6 +1386,25 @@ TEST(LowDescriptorsTest, RejectsInvalidOperandRole) {
                         loom_low_descriptor_set_verify(&tables.set));
 }
 
+TEST(LowDescriptorsTest, RejectsInvalidOperandSourceBinding) {
+  TestTables tables;
+  InitializeTestTables(&tables);
+  tables.operands[2].source_binding =
+      static_cast<loom_low_operand_source_binding_t>(99);
+
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_low_descriptor_set_verify(&tables.set));
+}
+
+TEST(LowDescriptorsTest, RejectsResultOperandSourceBinding) {
+  TestTables tables;
+  InitializeTestTables(&tables);
+  tables.operands[0].source_binding = LOOM_LOW_OPERAND_SOURCE_BINDING_LHS;
+
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_low_descriptor_set_verify(&tables.set));
+}
+
 TEST(LowDescriptorsTest, RejectsInvalidImmediateKind) {
   TestTables tables;
   InitializeTestTables(&tables);

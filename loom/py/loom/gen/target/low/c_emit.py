@@ -31,6 +31,7 @@ from loom.target.low_descriptors import (
     InstructionClass,
     Operand,
     descriptor_stable_id,
+    operand_source_binding,
 )
 
 
@@ -462,6 +463,8 @@ def emit_source_for_views(
                 f".field_name_string_offset = {pool.ref(f'field_{operand.field_name}')},",
                 ".source_value_index = " + ("LOOM_LOW_ID_NONE" if compiled.operand_source_value_indices[i] is None else str(compiled.operand_source_value_indices[i])) + ",",
                 f".role = {operand.role.c_name},",
+                f".source_binding = {operand_source_binding(operand.field_name, operand.role).c_name},",
+                ".reserved0 = 0,",
                 f".flags = {_operand_flag_expr(operand, compiled.operand_rematerializable[i])},",
                 f".reg_class_alt_start = {compiled.operand_alt_starts[i]},",
                 f".reg_class_alt_count = {len(operand.reg_alts)},",

@@ -241,4 +241,14 @@ TEST(ContractTest, MapsScalarNumericTypes) {
   EXPECT_EQ(numeric_type, LOOM_CONTRACT_NUMERIC_BF8);
 }
 
+TEST(ContractTest, ReportsNumericTypeBitWidths) {
+  EXPECT_EQ(loom_contract_numeric_bit_width(LOOM_CONTRACT_NUMERIC_UNKNOWN), 0);
+  EXPECT_EQ(loom_contract_numeric_bit_width(LOOM_CONTRACT_NUMERIC_I4), 4);
+  EXPECT_EQ(loom_contract_numeric_bit_width(LOOM_CONTRACT_NUMERIC_FP6), 6);
+  EXPECT_EQ(loom_contract_numeric_bit_width(LOOM_CONTRACT_NUMERIC_BF8), 8);
+  EXPECT_EQ(loom_contract_numeric_bit_width(LOOM_CONTRACT_NUMERIC_BF16), 16);
+  EXPECT_EQ(loom_contract_numeric_bit_width(LOOM_CONTRACT_NUMERIC_TF32), 32);
+  EXPECT_EQ(loom_contract_numeric_bit_width(LOOM_CONTRACT_NUMERIC_F64), 64);
+}
+
 }  // namespace

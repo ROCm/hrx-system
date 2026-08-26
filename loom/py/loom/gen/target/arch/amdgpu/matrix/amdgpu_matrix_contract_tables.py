@@ -208,7 +208,7 @@ class _MatrixDescriptorShape:
     rhs_register_count: int
     accumulator_register_count: int
     result_register_count: int
-    has_sparse_index: bool
+    has_sparse_metadata: bool
     has_scale_operands: bool
 
 
@@ -381,21 +381,18 @@ def _matrix_descriptor_shape_from_operands(
     operands: Iterable[Operand],
 ) -> _MatrixDescriptorShape | None:
     operand_units = {operand.field_name: operand.unit_count for operand in operands}
-    if any(field_name not in operand_units for field_name in ("a", "b", "acc", "dst")):
+    if any(field_name not in operand_units for field_name in ("lhs", "rhs", "acc", "dst")):
         return None
-    has_scale_a_pair = "scale_a" in operand_units or "scale_b" in operand_units
-    has_scale_src_pair = "scale_src0" in operand_units or "scale_src1" in operand_units
-    if has_scale_a_pair and ("scale_a" not in operand_units or "scale_b" not in operand_units):
-        raise ValueError("AMDGPU matrix descriptor has incomplete scale_a/scale_b operands")
-    if has_scale_src_pair and ("scale_src0" not in operand_units or "scale_src1" not in operand_units):
-        raise ValueError("AMDGPU matrix descriptor has incomplete scale_src0/scale_src1 operands")
+    has_scale_operands = "lhs_scale" in operand_units or "rhs_scale" in operand_units
+    if has_scale_operands and ("lhs_scale" not in operand_units or "rhs_scale" not in operand_units):
+        raise ValueError("AMDGPU matrix descriptor has incomplete lhs_scale/rhs_scale operands")
     return _MatrixDescriptorShape(
-        lhs_register_count=operand_units["a"],
-        rhs_register_count=operand_units["b"],
+        lhs_register_count=operand_units["lhs"],
+        rhs_register_count=operand_units["rhs"],
         accumulator_register_count=operand_units["acc"],
         result_register_count=operand_units["dst"],
-        has_sparse_index="index" in operand_units,
-        has_scale_operands=has_scale_a_pair or has_scale_src_pair,
+        has_sparse_metadata="sparse_metadata" in operand_units,
+        has_scale_operands=has_scale_operands,
     )
 
 
@@ -415,7 +412,7 @@ def _matrix_descriptor_shape_sort_key(
         shape.rhs_register_count,
         shape.accumulator_register_count,
         shape.result_register_count,
-        shape.has_sparse_index,
+        shape.has_sparse_metadata,
         shape.has_scale_operands,
     )
 
@@ -457,7 +454,7 @@ def _contract_matrix_descriptor_shape(
         rhs_register_count=contract.rhs.register_count,
         accumulator_register_count=contract.accumulator.register_count,
         result_register_count=contract.result.register_count,
-        has_sparse_index="sparse" in contract.flags,
+        has_sparse_metadata="sparse" in contract.flags,
         has_scale_operands=has_scale_operands,
     )
 
@@ -469,9 +466,9 @@ def _contract_has_abstract_matrix_format_payload(
 
 
 def _format_matrix_descriptor_shape(shape: _MatrixDescriptorShape) -> str:
-    sparse_suffix = ", sparse" if shape.has_sparse_index else ""
+    sparse_suffix = ", sparse" if shape.has_sparse_metadata else ""
     scale_suffix = ", scaled" if shape.has_scale_operands else ""
-    return f"a={shape.lhs_register_count}, b={shape.rhs_register_count}, acc={shape.accumulator_register_count}, dst={shape.result_register_count}{sparse_suffix}{scale_suffix}"
+    return f"lhs={shape.lhs_register_count}, rhs={shape.rhs_register_count}, acc={shape.accumulator_register_count}, dst={shape.result_register_count}{sparse_suffix}{scale_suffix}"
 
 
 def _validate_contract_descriptor_shape(

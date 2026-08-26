@@ -319,6 +319,22 @@ static bool loom_low_operand_role_is_valid(loom_low_operand_role_t role) {
   }
 }
 
+static bool loom_low_operand_source_binding_is_valid(
+    loom_low_operand_source_binding_t source_binding) {
+  switch (source_binding) {
+    case LOOM_LOW_OPERAND_SOURCE_BINDING_NONE:
+    case LOOM_LOW_OPERAND_SOURCE_BINDING_LHS:
+    case LOOM_LOW_OPERAND_SOURCE_BINDING_RHS:
+    case LOOM_LOW_OPERAND_SOURCE_BINDING_ACCUMULATOR:
+    case LOOM_LOW_OPERAND_SOURCE_BINDING_SPARSE_METADATA:
+    case LOOM_LOW_OPERAND_SOURCE_BINDING_LHS_SCALE:
+    case LOOM_LOW_OPERAND_SOURCE_BINDING_RHS_SCALE:
+      return true;
+    default:
+      return false;
+  }
+}
+
 static iree_status_t loom_low_verify_asm_operand_indices(
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_low_descriptor_t* descriptor, uint32_t descriptor_index,
@@ -2280,6 +2296,20 @@ static iree_status_t loom_low_verify_operand(
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "low operand %" PRIu32 " has invalid role %u",
                             operand_index, (unsigned)operand->role);
+  }
+  if (!loom_low_operand_source_binding_is_valid(operand->source_binding)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "low operand %" PRIu32
+                            " has invalid source binding %u",
+                            operand_index, (unsigned)operand->source_binding);
+  }
+  if (operand->source_binding != LOOM_LOW_OPERAND_SOURCE_BINDING_NONE &&
+      !loom_low_operand_role_is_packet_operand(operand->role)) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "low operand %" PRIu32
+        " has source binding %u but is not a packet operand",
+        operand_index, (unsigned)operand->source_binding);
   }
   if (!loom_low_operand_address_map_kind_is_valid(operand->address_map_kind)) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,

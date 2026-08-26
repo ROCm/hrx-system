@@ -114,6 +114,28 @@ const loom_x86_packed_dot_descriptor_t* loom_x86_packed_dot_descriptor_at(
   return &loom_x86_packed_dot_builtin_descriptors[index];
 }
 
+const loom_low_descriptor_t* loom_x86_packed_dot_low_descriptor(
+    const loom_low_descriptor_set_t* descriptor_set,
+    const loom_x86_packed_dot_descriptor_t* descriptor) {
+  if (descriptor_set == NULL || descriptor == NULL ||
+      descriptor->low_descriptor_ref >=
+          loom_x86_packed_dot_builtin_descriptor_count ||
+      descriptor_set->descriptor_set_ordinal >=
+          loom_x86_packed_dot_low_descriptor_ordinal_table_count) {
+    return NULL;
+  }
+  const uint32_t* descriptor_ordinals =
+      loom_x86_packed_dot_low_descriptor_ordinal_tables
+          [descriptor_set->descriptor_set_ordinal];
+  if (descriptor_ordinals == NULL) {
+    return NULL;
+  }
+  const uint32_t descriptor_ordinal =
+      descriptor_ordinals[descriptor->low_descriptor_ref];
+  return loom_low_descriptor_set_descriptor_at(descriptor_set,
+                                               descriptor_ordinal);
+}
+
 bool loom_x86_packed_dot_is_available(
     const loom_x86_packed_dot_descriptor_t* descriptor,
     loom_x86_packed_dot_feature_bits_t feature_bits) {
@@ -174,7 +196,7 @@ loom_x86_packed_dot_payload_rejection_bits(
 static bool loom_x86_packed_dot_flags_match(
     const loom_x86_packed_dot_descriptor_t* descriptor,
     const loom_x86_packed_dot_match_request_t* request) {
-  return (request->required_flags & ~descriptor->flags) == 0;
+  return descriptor->flags == request->semantic_flags;
 }
 
 const loom_x86_packed_dot_descriptor_t* loom_x86_packed_dot_select(
