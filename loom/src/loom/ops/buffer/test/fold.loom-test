@@ -17,3 +17,18 @@ func.def @pack_static_ranges() -> (offset, offset, offset, offset) {
   %tail_offset = index.constant 36 : offset
   func.return %total, %header_offset, %payload_offset, %tail_offset : offset, offset, offset, offset
 }
+
+// ====
+
+// Length queries reuse the physical extent carried by buffer-root facts.
+func.def @length_of_fixed_alloca() -> (offset) {
+  %byte_length = index.constant 48 : offset
+  %buffer = buffer.alloca<private> align(16) %byte_length : buffer
+  %actual_length = buffer.length %buffer
+  func.return %actual_length : offset
+}
+// ----
+func.def @length_of_fixed_alloca() -> (offset) {
+  %actual_length = index.constant 48 : offset
+  func.return %actual_length : offset
+}

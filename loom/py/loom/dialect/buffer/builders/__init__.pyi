@@ -88,3 +88,62 @@ class BufferBuilder(DialectBuilder):
         result_names: Sequence[str] | None = ...,
         location_id: int | None = ...,
     ) -> list[ValueRef]: ...
+    def length(
+        self,
+        *,
+        buffer: ValueRef,
+        name: str | None = ...,
+        names: Sequence[str] | None = ...,
+        result_names: Sequence[str] | None = ...,
+        location_id: int | None = ...,
+    ) -> ValueRef: ...
+    def load_i8_u(
+        self,
+        *,
+        source: ValueRef,
+        byte_offset: ValueRef,
+        name: str | None = ...,
+        names: Sequence[str] | None = ...,
+        result_names: Sequence[str] | None = ...,
+        location_id: int | None = ...,
+    ) -> ValueRef: ...
+    def store_i8(
+        self,
+        *,
+        value: ValueRef,
+        target: ValueRef,
+        byte_offset: ValueRef,
+        location_id: int | None = ...,
+    ) -> None: ...
+    def copy(
+        self,
+        *,
+        source: ValueRef,
+        source_offset: ValueRef,
+        target: ValueRef,
+        target_offset: ValueRef,
+        byte_length: ValueRef,
+        location_id: int | None = ...,
+    ) -> None: ...
+    def fill(
+        self,
+        *,
+        pattern: ValueRef,
+        target: ValueRef,
+        target_offset: ValueRef,
+        byte_length: ValueRef,
+        location_id: int | None = ...,
+    ) -> None: ...
+    def compare(
+        self,
+        *,
+        lhs: ValueRef,
+        lhs_offset: ValueRef,
+        rhs: ValueRef,
+        rhs_offset: ValueRef,
+        byte_length: ValueRef,
+        name: str | None = ...,
+        names: Sequence[str] | None = ...,
+        result_names: Sequence[str] | None = ...,
+        location_id: int | None = ...,
+    ) -> ValueRef: ...

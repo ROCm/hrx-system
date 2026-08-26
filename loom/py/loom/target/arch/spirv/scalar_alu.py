@@ -161,6 +161,13 @@ FLOAT_SCALAR_ALU_TYPES = (
     ),
 )
 
+BFLOAT16_SCALAR_TYPE = ScalarAluType(
+    source_type="bf16",
+    suffix="bf16",
+    scalar_enum="LOOM_SPIRV_SCALAR_TYPE_BF16",
+    feature_atoms=("bfloat16_type_khr",),
+)
+
 SCALAR_ALU_TYPES = SIGNED_INTEGER_SCALAR_ALU_TYPES + FLOAT_SCALAR_ALU_TYPES
 
 OFFSET64_ALU_TYPE = ScalarAluType(

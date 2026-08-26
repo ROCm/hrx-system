@@ -28,7 +28,7 @@ from loom.dialect.test import (
     test_options_attr,
     test_tile_attr,
 )
-from loom.dsl import AttrDef, Dialect, EnumCase, EnumDef, Op
+from loom.dsl import AttrDef, Dialect, EnumCase, EnumDef, Op, Result, TypeConstraint
 from loom.format.text.printer import Printer
 from loom.ir import (
     F32,
@@ -93,6 +93,23 @@ def test_dynamic_builder_constructs_binary_op_with_result_name() -> None:
     assert len(block.ops) == 1
     assert block.ops[0].name == "test.addi"
     assert block.ops[0].operands == [lhs.id, rhs.id]
+
+
+def test_dynamic_builder_synthesizes_exact_result_type() -> None:
+    op = Op(
+        "fixed.result",
+        group=Dialect("fixed"),
+        results=[Result("result", TypeConstraint.I32)],
+        format=[],
+    )
+    block = Block()
+    _module, builder = module_builder(insertion_block=block, ops=[op])
+
+    result = builder.fixed.result(name="order")
+
+    assert isinstance(result, ValueRef)
+    assert result.name == "order"
+    assert result.type == I32
 
 
 def test_dynamic_builder_inserts_module_scope_operation_without_block() -> None:

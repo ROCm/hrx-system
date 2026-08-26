@@ -259,6 +259,7 @@ typedef enum loom_amdgpu_scalar_i64_alu_kind_e {
   LOOM_AMDGPU_SCALAR_I64_ALU_KIND_VGPR_SUB = 2,
   LOOM_AMDGPU_SCALAR_I64_ALU_KIND_VGPR_MUL_LO = 3,
   LOOM_AMDGPU_SCALAR_I64_ALU_KIND_VGPR_SHL = 4,
+  LOOM_AMDGPU_SCALAR_I64_ALU_KIND_VGPR_LSHR_LITERAL = 5,
 } loom_amdgpu_scalar_i64_alu_kind_t;
 
 typedef struct loom_amdgpu_scalar_i64_alu_plan_t {
@@ -270,6 +271,8 @@ typedef struct loom_amdgpu_scalar_i64_alu_plan_t {
   loom_value_id_t result;
   // Lowering strategy selected for the scalar i64 ALU op.
   loom_amdgpu_scalar_i64_alu_kind_t kind;
+  // Exact shift amount used by literal-shift lowering strategies.
+  uint8_t shift_amount;
 } loom_amdgpu_scalar_i64_alu_plan_t;
 
 typedef enum loom_amdgpu_scalar_i64_ctpop_kind_e {
@@ -1236,6 +1239,7 @@ typedef enum loom_amdgpu_memory_payload_format_e {
   LOOM_AMDGPU_MEMORY_PAYLOAD_FORMAT_GENERIC = 0,
   LOOM_AMDGPU_MEMORY_PAYLOAD_FORMAT_LOW_16BIT_FLOAT = 1,
   LOOM_AMDGPU_MEMORY_PAYLOAD_FORMAT_SIGNED_16BIT_INTEGER = 2,
+  LOOM_AMDGPU_MEMORY_PAYLOAD_FORMAT_UNSIGNED_8BIT_INTEGER = 3,
   LOOM_AMDGPU_MEMORY_PAYLOAD_FORMAT_COUNT_,
 } loom_amdgpu_memory_payload_format_t;
 

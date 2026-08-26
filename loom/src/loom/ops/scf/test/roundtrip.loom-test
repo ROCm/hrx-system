@@ -17,6 +17,16 @@ func.def @simple_loop(%lo: index, %hi: index, %step: index) {
 
 // ====
 
+// Physical byte ranges use the offset domain without narrowing to index.
+func.def @offset_loop(%lo: offset, %hi: offset, %step: offset) {
+  scf.for %byte_offset = [%lo to %hi step %step] {
+    test.use %byte_offset : offset
+  }
+  func.return
+}
+
+// ====
+
 // scf.for with a single iter_arg accumulating a constant.
 func.def @sum_loop(%lo: index, %hi: index, %step: index, %init: f32) -> (f32) {
   %result = scf.for %iv = [%lo to %hi step %step](%acc = %init : f32) -> (f32) {

@@ -777,7 +777,6 @@ LOOM_DEFINE_RESULT(loom_kernel_subgroup_vote_any_result, 0)
 iree_status_t loom_kernel_subgroup_vote_any_build(
     loom_builder_t* builder,
     loom_value_id_t predicate,
-    loom_type_t result_type,
     loom_location_id_t location,
     loom_op_t** out_op);
 iree_status_t loom_kernel_subgroup_vote_any_facts(
@@ -794,7 +793,6 @@ LOOM_DEFINE_RESULT(loom_kernel_subgroup_vote_all_result, 0)
 iree_status_t loom_kernel_subgroup_vote_all_build(
     loom_builder_t* builder,
     loom_value_id_t predicate,
-    loom_type_t result_type,
     loom_location_id_t location,
     loom_op_t** out_op);
 iree_status_t loom_kernel_subgroup_vote_all_facts(
@@ -940,7 +938,6 @@ LOOM_DEFINE_RESULT(loom_kernel_workgroup_vote_any_result, 0)
 iree_status_t loom_kernel_workgroup_vote_any_build(
     loom_builder_t* builder,
     loom_value_id_t predicate,
-    loom_type_t result_type,
     loom_location_id_t location,
     loom_op_t** out_op);
 iree_status_t loom_kernel_workgroup_vote_facts(
@@ -957,7 +954,6 @@ LOOM_DEFINE_RESULT(loom_kernel_workgroup_vote_all_result, 0)
 iree_status_t loom_kernel_workgroup_vote_all_build(
     loom_builder_t* builder,
     loom_value_id_t predicate,
-    loom_type_t result_type,
     loom_location_id_t location,
     loom_op_t** out_op);
 iree_status_t loom_kernel_workgroup_vote_facts(

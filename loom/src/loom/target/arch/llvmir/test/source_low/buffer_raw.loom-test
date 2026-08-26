@@ -1,0 +1,21 @@
+// RUN: emit source-low output=low
+
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+
+func.def target(@target) @raw_byte_roundtrip(%source: buffer, %source_offset: offset, %target: buffer, %target_offset: offset) -> (i32) {
+  %byte = buffer.load.i8.u %source[%source_offset]
+  buffer.store.i8 %byte, %target[%target_offset]
+  func.return %byte : i32
+}
+
+// ----
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @raw_byte_roundtrip(%source: reg<llvmir.ptr>, %source_offset: reg<llvmir.i64>, %target: reg<llvmir.ptr>, %target_offset: reg<llvmir.i64>) -> (reg<llvmir.i32>) asm {
+  %11 = load.indexed.i8 %source, %source_offset, 0, 1
+  %byte = zext.i8.i32 %11
+  %13 = trunc.i32.i8 %byte
+  store.indexed.i8 %13, %target, %target_offset, 0, 1
+  return %byte
+}

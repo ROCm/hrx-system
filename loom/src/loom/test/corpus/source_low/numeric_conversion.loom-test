@@ -616,6 +616,13 @@ func.def @scalar_extsi_i32_to_i64(%input: i32) -> (i64) {
 
 // ====
 
+func.def @scalar_extui_i1_to_i32(%input: i1) -> (i32) {
+  %converted = scalar.extui %input : i1 to i32
+  func.return %converted : i32
+}
+
+// ====
+
 func.def @scalar_extui_i8_to_i16(%input: i8) -> (i16) {
   %converted = scalar.extui %input : i8 to i16
   func.return %converted : i16

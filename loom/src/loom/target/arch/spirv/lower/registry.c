@@ -53,6 +53,21 @@ static bool loom_spirv_source_type_is_offset64(loom_type_t type) {
          loom_type_element_type(type) == LOOM_SCALAR_TYPE_OFFSET;
 }
 
+static bool loom_spirv_source_type_is_fp8(loom_type_t type) {
+  if (!loom_type_is_scalar(type)) return false;
+  const loom_scalar_type_t scalar_type = loom_type_element_type(type);
+  return scalar_type == LOOM_SCALAR_TYPE_F8E4M3 ||
+         scalar_type == LOOM_SCALAR_TYPE_F8E5M2;
+}
+
+static bool loom_spirv_source_type_supported(void* user_data,
+                                             const loom_module_t* module,
+                                             loom_type_t source_type) {
+  (void)user_data;
+  (void)module;
+  return loom_spirv_source_type_is_fp8(source_type);
+}
+
 static bool loom_spirv_source_value_fragment(
     const loom_value_fact_table_t* fact_table, loom_value_id_t source_value_id,
     loom_vector_fragment_fact_t* out_fragment) {
@@ -146,6 +161,11 @@ static iree_status_t loom_spirv_map_type(void* user_data,
                                          loom_type_t source_type,
                                          loom_type_t* out_low_type) {
   (void)user_data;
+  if (loom_spirv_source_type_is_fp8(source_type)) {
+    return loom_spirv_make_typed_register_type(
+        context, SPIRV_LOGICAL_CORE_REG_CLASS_ID_ID,
+        loom_type_scalar(LOOM_SCALAR_TYPE_I8), out_low_type);
+  }
   if (loom_spirv_source_type_is_id(source_type)) {
     return loom_spirv_make_typed_register_type(
         context, SPIRV_LOGICAL_CORE_REG_CLASS_ID_ID, source_type, out_low_type);
@@ -306,6 +326,8 @@ static const loom_low_lower_policy_t kSpirvLowLowerPolicy = {
     .map_type = {.fn = loom_spirv_map_type, .user_data = NULL},
     .map_value = {.fn = loom_spirv_map_value, .user_data = NULL},
     .map_argument = {.fn = loom_spirv_map_argument, .user_data = NULL},
+    .source_type_supported = {.fn = loom_spirv_source_type_supported,
+                              .user_data = NULL},
     .rule_sets =
         {
             .count = IREE_ARRAYSIZE(kSpirvRuleSets),

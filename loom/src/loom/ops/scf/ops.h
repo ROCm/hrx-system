@@ -45,7 +45,7 @@ typedef enum loom_scf_for_unroll_schedule_e {
   LOOM_SCF_FOR_UNROLL_SCHEDULE_COUNT_ = 3,
 } loom_scf_for_unroll_schedule_t;
 
-// LOOM_OP_SCF_FOR: Bounded counted loop with optional loop-carried state.
+// LOOM_OP_SCF_FOR: Bounded counted loop over an index or offset domain with optional loop-carried state.
 // scf.for %iv = [%c0 to %n step %c1] {
 //   scf.yield
 // }
@@ -245,9 +245,6 @@ iree_status_t loom_scf_while_build(
     iree_host_size_t tied_result_count,
     loom_location_id_t location,
     loom_op_t** out_op);
-iree_status_t loom_scf_while_verify(
-    const loom_module_t* module, const loom_op_t* op,
-    iree_diagnostic_emitter_t emitter);
 
 // LOOM_OP_SCF_SCHEDULE_FENCE: Compiler hint separating independently reorderable source ranges. The fence has no runtime effect and emits no target instruction.
 // scf.schedule.fence

@@ -73,8 +73,7 @@ static iree_status_t loom_vector_to_scalar_build_table_quantize_compare(
   loom_op_t* cmp_op = NULL;
   IREE_RETURN_IF_ERROR(loom_scalar_cmpf_build(
       &state->rewriter->builder, 0, predicate, threshold_lane, input_lane,
-      operand_type, loom_type_scalar(LOOM_SCALAR_TYPE_I1), state->location,
-      &cmp_op));
+      state->location, &cmp_op));
   *out_condition = loom_scalar_cmpf_result(cmp_op);
   return iree_ok_status();
 }
@@ -114,8 +113,7 @@ static iree_status_t loom_vector_to_scalar_apply_table_quantize_nan_policy(
       state, threshold_count, state->result_scalar_type, &max_code));
   loom_op_t* isnan_op = NULL;
   IREE_RETURN_IF_ERROR(loom_scalar_isnanf_build(
-      &state->rewriter->builder, input_lane,
-      loom_type_scalar(LOOM_SCALAR_TYPE_I1), state->location, &isnan_op));
+      &state->rewriter->builder, input_lane, state->location, &isnan_op));
   return loom_vector_to_scalar_build_select_lane(
       state, loom_scalar_isnanf_result(isnan_op), max_code, quantized_lane,
       out_lane);

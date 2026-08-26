@@ -121,6 +121,13 @@ static const loom_amdgpu_lower_dispatch_row_t
                 loom_amdgpu_emit_scalar_i64_alu_dispatch,
                 loom_amdgpu_low_legality_verify_scalar_i64_alu, 2,
                 LOOM_AMDGPU_PRESELECT_TARGET_PLAN),
+        [LOOM_AMDGPU_OP_INDEX(LOOM_OP_SCALAR_SHRUI)] =
+            LOOM_AMDGPU_GENERATED_PRESELECT_DATA_SOURCE_POLICY_ROW(
+                LOOM_OP_SCALAR_SHRUI, loom_amdgpu_scalar_i64_alu_plan_t,
+                loom_amdgpu_select_scalar_i64_alu_dispatch,
+                loom_amdgpu_emit_scalar_i64_alu_dispatch,
+                loom_amdgpu_low_legality_verify_scalar_i64_alu, 2,
+                LOOM_AMDGPU_PRESELECT_TARGET_PLAN),
         [LOOM_AMDGPU_OP_INDEX(LOOM_OP_SCALAR_REMSI)] = LOOM_AMDGPU_LEGALITY_ROW(
             LOOM_OP_SCALAR_REMSI,
             loom_amdgpu_low_legality_verify_scalar_remsi_i64),
@@ -214,6 +221,20 @@ static const loom_amdgpu_lower_dispatch_row_t
                 loom_amdgpu_emit_buffer_dispatch,
                 loom_amdgpu_low_legality_record_buffer_op,
                 LOOM_AMDGPU_STORAGE_NONE),
+        [LOOM_AMDGPU_OP_INDEX(LOOM_OP_BUFFER_LOAD_I8_U)] =
+            LOOM_AMDGPU_MEMORY_DATA_STORAGE_ROW(
+                LOOM_OP_BUFFER_LOAD_I8_U, loom_amdgpu_memory_access_plan_t,
+                loom_amdgpu_select_memory_load_dispatch,
+                loom_amdgpu_emit_memory_load_dispatch,
+                loom_amdgpu_low_legality_verify_memory,
+                LOOM_AMDGPU_STORAGE_MEMORY_PLAN),
+        [LOOM_AMDGPU_OP_INDEX(LOOM_OP_BUFFER_STORE_I8)] =
+            LOOM_AMDGPU_MEMORY_DATA_STORAGE_ROW(
+                LOOM_OP_BUFFER_STORE_I8, loom_amdgpu_memory_access_plan_t,
+                loom_amdgpu_select_memory_store_dispatch,
+                loom_amdgpu_emit_memory_store_dispatch,
+                loom_amdgpu_low_legality_verify_memory,
+                LOOM_AMDGPU_STORAGE_MEMORY_PLAN),
 };
 
 static const loom_amdgpu_lower_dispatch_row_t

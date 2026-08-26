@@ -111,6 +111,7 @@ from loom.target.arch.amdgpu.descriptors import (
     _amdgpu_trans_schedule_class_name,
     _amdgpu_trans_schedule_classes,
     _categorize_amdgpu_descriptors,
+    _exec_value_read,
     _gfx9_4_generic_core_overlays,
     _gfx11_core_overlays,
     _gfx12_5_generic_core_overlays,
@@ -744,6 +745,19 @@ def test_execution_masked_descriptors_read_exec_state() -> None:
         _with_execution_mask_state_read(masked_descriptor).operands
         == masked_descriptor.operands
     )
+
+
+def test_materialized_exec_value_is_a_semantic_state_read() -> None:
+    exec_operand = _exec_value_read()
+
+    assert exec_operand.field_name == "exec_in"
+    assert exec_operand.role is OperandRole.IMPLICIT
+    assert exec_operand.reg_alts == (
+        RegClassAlt(_REG_EXEC, flags=(RegClassAltFlag.PHYSICAL_ONLY,)),
+    )
+    assert OperandFlag.IMPLICIT in exec_operand.flags
+    assert OperandFlag.STATE_READ in exec_operand.flags
+    assert OperandFlag.SCHEDULE_ONLY_STATE not in exec_operand.flags
 
 
 def test_trans_descriptors_use_descriptor_specific_schedule_classes() -> None:

@@ -74,8 +74,14 @@ uint16_t loom_low_storage_relation_count(const loom_module_t* module,
       }
       break;
     }
+    case LOOM_OP_LOW_SCF_CONDITION:
+      count += loom_low_scf_condition_forwarded(op).count * 2;
+      break;
     case LOOM_OP_LOW_SCF_FOR:
       count += loom_low_scf_for_iter_args(op).count;
+      break;
+    case LOOM_OP_LOW_SCF_WHILE:
+      count += loom_low_scf_while_iter_args(op).count;
       break;
     default:
       IREE_ASSERT_UNREACHABLE(
@@ -318,36 +324,89 @@ static void loom_low_storage_relation_get_branch(
   };
 }
 
-static void loom_low_storage_relation_get_scf_for(
+static void loom_low_storage_relation_get_scf_loop_entry(
     const loom_module_t* module, const loom_op_t* op, uint16_t relation_index,
     loom_low_storage_relation_t* out_relation) {
-  loom_value_slice_t iter_args = loom_low_scf_for_iter_args(op);
+  const bool is_for = loom_low_scf_for_isa(op);
+  IREE_ASSERT(is_for || loom_low_scf_while_isa(op),
+              "structured loop entry relation requires a loop op");
+  const loom_value_slice_t iter_args = is_for
+                                           ? loom_low_scf_for_iter_args(op)
+                                           : loom_low_scf_while_iter_args(op);
   IREE_ASSERT(relation_index < iter_args.count,
-              "low.scf.for storage relation index must be in range");
-  const loom_block_t* body_block =
-      loom_region_const_entry_block(loom_low_scf_for_body(op));
-  IREE_ASSERT(body_block->arg_count == iter_args.count + 1,
-              "verified low.scf.for body args must match iter_args");
-  const loom_value_id_t destination_value_id =
-      loom_block_arg_id(body_block, (uint16_t)(relation_index + 1));
+              "structured loop storage relation index must be in range");
+  const loom_block_t* body_block = loom_region_const_entry_block(
+      is_for ? loom_low_scf_for_body(op) : loom_low_scf_while_before(op));
+  const uint16_t implicit_arg_count = is_for ? 1 : 0;
+  IREE_ASSERT(body_block->arg_count == iter_args.count + implicit_arg_count,
+              "verified structured loop entry args must match iter_args");
+  const loom_value_id_t destination_value_id = loom_block_arg_id(
+      body_block, (uint16_t)(relation_index + implicit_arg_count));
   const loom_value_id_t source_value_id = iter_args.values[relation_index];
   const uint32_t destination_unit_count =
       loom_low_storage_relation_value_unit_count(module, destination_value_id);
   const uint32_t source_unit_count =
       loom_low_storage_relation_value_unit_count(module, source_value_id);
   IREE_ASSERT_EQ(destination_unit_count, source_unit_count,
-                 "verified low.scf.for storage relation must use matching "
+                 "verified structured loop storage relation must use matching "
                  "unit counts");
   *out_relation = (loom_low_storage_relation_t){
       .op = op,
       .destination_value_id = destination_value_id,
       .source_value_id = source_value_id,
-      .source_operand_index = (uint16_t)(relation_index + 3),
+      .source_operand_index = (uint16_t)(relation_index + (is_for ? 3 : 0)),
       .destination_unit_offset = 0,
       .source_unit_offset = 0,
       .unit_count = destination_unit_count,
       .kind = LOOM_LOW_STORAGE_RELATION_SAME_STORAGE,
-      .cause = LOOM_LOW_STORAGE_RELATION_CAUSE_LOW_SCF_FOR,
+      .cause = LOOM_LOW_STORAGE_RELATION_CAUSE_LOW_SCF_LOOP_ENTRY,
+      .flags = LOOM_LOW_STORAGE_RELATION_FLAG_PREFERRED,
+  };
+}
+
+static void loom_low_storage_relation_get_scf_condition(
+    const loom_module_t* module, const loom_op_t* op, uint16_t relation_index,
+    loom_low_storage_relation_t* out_relation) {
+  const loom_op_t* parent_op = op->parent_op;
+  IREE_ASSERT(parent_op != NULL && loom_low_scf_while_isa(parent_op),
+              "verified low.scf.condition parent must be low.scf.while");
+  const loom_value_slice_t forwarded = loom_low_scf_condition_forwarded(op);
+  IREE_ASSERT(relation_index < forwarded.count * 2,
+              "low.scf.condition storage relation index must be in range");
+  const uint16_t value_index = (uint16_t)(relation_index >= forwarded.count
+                                              ? relation_index - forwarded.count
+                                              : relation_index);
+  const loom_value_id_t source_value_id = forwarded.values[value_index];
+  loom_value_id_t destination_value_id = LOOM_VALUE_ID_INVALID;
+  if (relation_index < forwarded.count) {
+    const loom_block_t* after_block =
+        loom_region_const_entry_block(loom_low_scf_while_after(parent_op));
+    IREE_ASSERT(after_block->arg_count == forwarded.count,
+                "verified low.scf.while after args must match condition "
+                "payload");
+    destination_value_id = loom_block_arg_id(after_block, value_index);
+  } else {
+    IREE_ASSERT(parent_op->result_count == forwarded.count,
+                "verified low.scf.while results must match condition payload");
+    destination_value_id = loom_op_const_results(parent_op)[value_index];
+  }
+  const uint32_t destination_unit_count =
+      loom_low_storage_relation_value_unit_count(module, destination_value_id);
+  const uint32_t source_unit_count =
+      loom_low_storage_relation_value_unit_count(module, source_value_id);
+  IREE_ASSERT_EQ(destination_unit_count, source_unit_count,
+                 "verified low.scf.condition storage relation must use "
+                 "matching unit counts");
+  *out_relation = (loom_low_storage_relation_t){
+      .op = op,
+      .destination_value_id = destination_value_id,
+      .source_value_id = source_value_id,
+      .source_operand_index = (uint16_t)(value_index + 1),
+      .destination_unit_offset = 0,
+      .source_unit_offset = 0,
+      .unit_count = destination_unit_count,
+      .kind = LOOM_LOW_STORAGE_RELATION_SAME_STORAGE,
+      .cause = LOOM_LOW_STORAGE_RELATION_CAUSE_LOW_SCF_CONDITION,
       .flags = LOOM_LOW_STORAGE_RELATION_FLAG_PREFERRED,
   };
 }
@@ -379,12 +438,20 @@ static void loom_low_storage_relation_get_scf_yield(
                   "verified low.scf.for results must match yield values");
       destination_value_id = loom_op_const_results(parent_op)[value_index];
     }
+  } else if (loom_low_scf_while_isa(parent_op)) {
+    IREE_ASSERT(relation_index < values.count,
+                "low.scf.while yield relation index must match values");
+    const loom_block_t* before_block =
+        loom_region_const_entry_block(loom_low_scf_while_before(parent_op));
+    IREE_ASSERT(before_block->arg_count == values.count,
+                "verified low.scf.while before args must match yield values");
+    destination_value_id = loom_block_arg_id(before_block, value_index);
   } else {
     IREE_ASSERT(relation_index < values.count,
                 "non-loop low.scf.yield relation index must match values");
     IREE_ASSERT(loom_low_scf_if_isa(parent_op),
-                "verified low.scf.yield parent must be low.scf.if or "
-                "low.scf.for");
+                "verified low.scf.yield parent must be low.scf.if, "
+                "low.scf.for, or low.scf.while");
     IREE_ASSERT(value_index < parent_op->result_count,
                 "verified low.scf.if results must match yield values");
     destination_value_id = loom_op_const_results(parent_op)[value_index];
@@ -456,9 +523,14 @@ void loom_low_storage_relation_get(const loom_module_t* module,
       loom_low_storage_relation_get_scf_yield(module, op, relation_index,
                                               out_relation);
       return;
+    case LOOM_OP_LOW_SCF_CONDITION:
+      loom_low_storage_relation_get_scf_condition(module, op, relation_index,
+                                                  out_relation);
+      return;
     case LOOM_OP_LOW_SCF_FOR:
-      loom_low_storage_relation_get_scf_for(module, op, relation_index,
-                                            out_relation);
+    case LOOM_OP_LOW_SCF_WHILE:
+      loom_low_storage_relation_get_scf_loop_entry(module, op, relation_index,
+                                                   out_relation);
       return;
     default:
       IREE_ASSERT_UNREACHABLE(

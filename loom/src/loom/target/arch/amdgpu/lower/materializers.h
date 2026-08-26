@@ -40,6 +40,12 @@ iree_status_t loom_amdgpu_value_can_materialize_as_vgpr_address(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     loom_value_id_t value_id, bool* out_can_materialize);
 
+// Returns true when a source address scalar can be materialized as a one-unit
+// SGPR operand for scalar address arithmetic.
+iree_status_t loom_amdgpu_value_can_materialize_as_sgpr_address(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    loom_value_id_t value_id, bool* out_can_materialize);
+
 // Returns true when a source scalar i1 value can be materialized as an
 // EXEC-width SGPR mask for divergent predicate arithmetic.
 iree_status_t loom_amdgpu_value_can_materialize_as_native_i1_mask(
@@ -67,9 +73,14 @@ iree_status_t loom_amdgpu_lookup_or_materialize_vgpr_i64(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     loom_value_id_t source_value, loom_value_id_t* out_low_value);
 
-// Looks up a lowered address scalar and materializes exact source constants
-// into VGPRs when a vector-style packet cannot consume the existing lowering.
+// Looks up a lowered address scalar and returns its low 32 bits in one VGPR,
+// materializing constants and uniform values when required.
 iree_status_t loom_amdgpu_lookup_or_materialize_vgpr_address(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    loom_value_id_t source_value, loom_value_id_t* out_low_value);
+
+// Looks up a lowered address scalar and returns its low 32-bit SGPR unit.
+iree_status_t loom_amdgpu_lookup_or_materialize_sgpr_address(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     loom_value_id_t source_value, loom_value_id_t* out_low_value);
 

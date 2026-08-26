@@ -12,6 +12,7 @@ from collections.abc import Sequence
 from typing import Any
 
 from loom.assembly import StableKeyRef
+from loom.builder_model import fixed_result_type_constraints
 from loom.dsl import EncodingFamilyDef, Op, ParameterizedAttrDef, TypeConstraint
 from loom.fields import FieldKind, compute_layout
 from loom.gen.ops import c_builder_model, c_queries
@@ -170,6 +171,7 @@ def _emit_builder_bytes_storage(
 
 _FIXED_RESULT_TYPE_C_EXPRS: dict[TypeConstraint, str] = {
     TypeConstraint.I1: "loom_type_scalar(LOOM_SCALAR_TYPE_I1)",
+    TypeConstraint.I32: "loom_type_scalar(LOOM_SCALAR_TYPE_I32)",
     TypeConstraint.INDEX: "loom_type_scalar(LOOM_SCALAR_TYPE_INDEX)",
     TypeConstraint.OFFSET: "loom_type_scalar(LOOM_SCALAR_TYPE_OFFSET)",
 }
@@ -1031,6 +1033,21 @@ def _generate_builder_implementation(
                 lines.append("  IREE_RETURN_IF_ERROR(loom_builder_define_results(")
                 lines.append(f"      builder, result_types, {layout.fixed_result_count},")
                 lines.append("      loom_op_results(*out_op)));")
+
+    fixed_result_constraints = fixed_result_type_constraints(op)
+    has_result_type_param = any(param["kind"] in ("result_type", "result_types") for param in params)
+    if fixed_result_constraints and not has_result_type_param and inferred_result_source is None:
+        fixed_result_exprs = [_fixed_result_type_c_expr(constraint) for constraint in fixed_result_constraints]
+        if len(fixed_result_exprs) == 1:
+            lines.append("  IREE_RETURN_IF_ERROR(loom_builder_define_result(")
+            lines.append(f"      builder, {fixed_result_exprs[0]}, &loom_op_results(*out_op)[0]));")
+        else:
+            lines.append(f"  loom_type_t result_types_storage[{len(fixed_result_exprs)}] = {{")
+            lines.extend(f"      {expr}," for expr in fixed_result_exprs)
+            lines.append("  };")
+            lines.append("  IREE_RETURN_IF_ERROR(loom_builder_define_results(")
+            lines.append(f"      builder, result_types_storage, {len(fixed_result_exprs)},")
+            lines.append("      loom_op_results(*out_op)));")
 
     if inferred_result_source is not None:
         inferred_result_name = _c_parameter_name(inferred_result_source)

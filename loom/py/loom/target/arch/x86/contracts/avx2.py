@@ -14,7 +14,9 @@ from loom.dialect.buffer import ALL_BUFFER_OPS
 from loom.dialect.index import ALL_INDEX_OPS
 from loom.dialect.scalar import ALL_SCALAR_OPS
 from loom.dialect.scalar import arithmetic as scalar_arithmetic
+from loom.dialect.scalar import conversion as scalar_conversion
 from loom.dialect.scalar import math as scalar_math
+from loom.dialect.scf import ALL_SCF_OPS
 from loom.dialect.vector import ALL_VECTOR_OPS
 from loom.dialect.vector import defs as vector
 from loom.dialect.view import ALL_VIEW_OPS
@@ -56,7 +58,9 @@ from loom.target.low_descriptors import Descriptor
 _DescriptorLookup = Callable[[str], Descriptor]
 
 _I32 = Scalar("i32")
+_I64 = Scalar("i64")
 _F32 = Scalar("f32")
+_F64 = Scalar("f64")
 _V4I32 = Vector("i32", lanes=4)
 _V4F32 = Vector("f32", lanes=4)
 
@@ -123,6 +127,31 @@ def _binary_rule(
                     "lhs": ValueRef.operand("lhs"),
                     "rhs": ValueRef.operand("rhs"),
                 },
+                results={"dst": ValueRef.result("result")},
+            ),
+        ),
+    )
+
+
+def _conversion_rule(
+    source_op: Op,
+    source_type: TypePattern,
+    result_type: TypePattern,
+    descriptor_key: str,
+    descriptor_lookup: _DescriptorLookup,
+) -> DescriptorRule:
+    descriptor = descriptor_lookup(descriptor_key)
+    return DescriptorRule(
+        source_op=source_op,
+        descriptor=descriptor,
+        guards=(
+            Guard.value_type("input", source_type),
+            Guard.value_type("result", result_type),
+        ),
+        emit=(
+            _op_emit(
+                descriptor=descriptor,
+                operands={"input": ValueRef.operand("input")},
                 results={"dst": ValueRef.result("result")},
             ),
         ),
@@ -699,6 +728,34 @@ def x86_avx2_core_cases(
 ) -> Sequence[ContractCase]:
     return (
         *x86_scalar_core_cases(descriptor_lookup),
+        _conversion_rule(
+            scalar_conversion.scalar_bitcast,
+            _F32,
+            _I32,
+            "x86.avx2.vmovd.gpr32.xmm",
+            descriptor_lookup,
+        ),
+        _conversion_rule(
+            scalar_conversion.scalar_bitcast,
+            _I32,
+            _F32,
+            "x86.avx2.vmovd.xmm.gpr32",
+            descriptor_lookup,
+        ),
+        _conversion_rule(
+            scalar_conversion.scalar_bitcast,
+            _F64,
+            _I64,
+            "x86.avx2.vmovq.gpr64.xmm",
+            descriptor_lookup,
+        ),
+        _conversion_rule(
+            scalar_conversion.scalar_bitcast,
+            _I64,
+            _F64,
+            "x86.avx2.vmovq.xmm.gpr64",
+            descriptor_lookup,
+        ),
         _binary_rule(
             scalar_arithmetic.scalar_addf,
             _F32,
@@ -794,6 +851,7 @@ X86_AVX2_CONTRACT_DIALECT_OPS = {
     "buffer": ALL_BUFFER_OPS,
     "index": ALL_INDEX_OPS,
     "scalar": ALL_SCALAR_OPS,
+    "scf": ALL_SCF_OPS,
     "vector": ALL_VECTOR_OPS,
     "view": ALL_VIEW_OPS,
 }

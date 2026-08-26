@@ -111,6 +111,18 @@ static iree_status_t loom_wasm_low_verify_scf_for(
   return iree_ok_status();
 }
 
+static iree_status_t loom_wasm_low_verify_scf_condition(
+    loom_low_verify_context_t* context, loom_wasm_low_verify_state_t* state,
+    const loom_op_t* op) {
+  const loom_type_t condition_type = loom_module_value_type(
+      state->module, loom_low_scf_condition_condition(op));
+  if (loom_wasm_low_type_is_i32(condition_type)) {
+    return iree_ok_status();
+  }
+  return loom_wasm_low_emit_branch_condition_type_mismatch(context, state, op,
+                                                           condition_type);
+}
+
 static iree_status_t loom_wasm_low_begin_function(
     const loom_low_verify_provider_t* provider,
     loom_low_verify_context_t* context, void** out_provider_state) {
@@ -153,6 +165,9 @@ static iree_status_t loom_wasm_low_verify_op(
   }
   if (loom_low_scf_for_isa(packet->op)) {
     return loom_wasm_low_verify_scf_for(context, state, packet->op);
+  }
+  if (loom_low_scf_condition_isa(packet->op)) {
+    return loom_wasm_low_verify_scf_condition(context, state, packet->op);
   }
   return iree_ok_status();
 }

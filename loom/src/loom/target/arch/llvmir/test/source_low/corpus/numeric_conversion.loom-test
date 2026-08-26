@@ -1161,6 +1161,25 @@ low.func.def target<llvmir.generic.core>(@target) abi(object_function) @scalar_e
 
 // ====
 
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+func.def target(@target) @scalar_extui_i1_to_i32(%input: i1) -> (i32) {
+  %converted = scalar.extui %input : i1 to i32
+  func.return %converted : i32
+}
+
+// ----
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @scalar_extui_i1_to_i32(%input: reg<llvmir.i1>) -> (reg<llvmir.i32>) asm {
+  %8 = const.i32 1
+  %9 = const.i32 0
+  %converted = select.i32 %input, %8, %9
+  return %converted
+}
+
+// ====
+
 // XFAIL: LLVMIR narrow scalar conversion forms are unsupported
 llvmir.target<object> @target {
   triple = "loom-direct64-unknown-none",

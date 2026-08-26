@@ -84,6 +84,7 @@ loom_cc_library(
         "//loom/src/loom/pass:types",
         "//loom/src/loom/target:function_version",
         "//loom/src/loom/target:pass_environment",
+        "//loom/src/loom/util:cfg_graph",
         "//loom/src/loom/util:dominance",
         "//runtime/src/iree/base",
     ],

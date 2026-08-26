@@ -221,6 +221,7 @@ INTERFACES: tuple[InterfaceSpec, ...] = (
         fields=(
             InterfaceFieldSpec("operation_kind", "operation_kind", "memory_access_operation"),
             InterfaceFieldSpec("view", "view_operand_index", "operand", required=True),
+            InterfaceFieldSpec("byte_offset", "byte_offset_operand_index", "operand"),
             InterfaceFieldSpec("value", "value_operand_index", "operand"),
             InterfaceFieldSpec("expected", "expected_operand_index", "operand"),
             InterfaceFieldSpec("replacement", "replacement_operand_index", "operand"),
@@ -512,8 +513,11 @@ def _validate_loop_like_interface(op: Op, iface: LoopLikeInterface, interface_na
         for bound_name in bound_names:
             c_queries.resolve_operand_index(op, bound_name, interface_name)
         iv_index = c_queries.resolve_block_arg_index(op, iface.body, iface.iv, interface_name)
-        if iv_index + 1 != len(body.implicit_args):
-            raise ValueError(f"{interface_name} on {op.name!r}: carried body arguments must immediately follow the induction variable")
+        expected_iv_type = f"type_of:{iface.lower_bound}"
+        if body.implicit_args[iv_index][1] != expected_iv_type:
+            raise ValueError(f"{interface_name} on {op.name!r}: induction variable {iface.iv!r} must use {expected_iv_type!r}")
+        if iv_index != 0 or len(body.implicit_args) != 1:
+            raise ValueError(f"{interface_name} on {op.name!r}: induction variable must be the only implicit body argument")
     else:
         if iface.iv is not None:
             raise ValueError(f"{interface_name} on {op.name!r}: condition loops cannot declare an induction variable")
@@ -532,6 +536,12 @@ def _validate_memory_access_interface(op: Op, iface: MemoryAccessInterface, inte
         indices_operand = op.operands[indices_index]
         if not indices_operand.variadic:
             raise ValueError(f"{interface_name} on {op.name!r}: operand {iface.indices!r} must be variadic")
+
+    byte_offset_index = _resolve_soft_memory_field(op, iface, "byte_offset", "operand", interface_name)
+    offsets_index = _resolve_soft_memory_field(op, iface, "offsets", "operand", interface_name)
+    static_indices_index = _resolve_soft_memory_field(op, iface, "static_indices", "attr", interface_name)
+    if byte_offset_index is not None and (offsets_index is not None or indices_index is not None or static_indices_index is not None):
+        raise ValueError(f"{interface_name} on {op.name!r}: byte_offset is mutually exclusive with logical indices and per-lane offsets")
 
     cache_scope_index = _resolve_soft_memory_field(op, iface, "cache_scope", "attr", interface_name)
     cache_temporal_index = _resolve_soft_memory_field(op, iface, "cache_temporal", "attr", interface_name)

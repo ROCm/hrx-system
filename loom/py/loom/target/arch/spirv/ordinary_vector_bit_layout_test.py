@@ -95,8 +95,8 @@ def test_bit_layout_cases_are_the_exact_equal_total_bit_product() -> None:
 
 
 def test_bit_layout_reuses_every_existing_scalar_descriptor() -> None:
-    assert len(SCALAR_BITCAST_CONVERSIONS) == 6
-    assert len(ORDINARY_VECTOR_BIT_LAYOUT_REUSED_SCALAR_CASES) == 6
+    assert len(SCALAR_BITCAST_CONVERSIONS) == 8
+    assert len(ORDINARY_VECTOR_BIT_LAYOUT_REUSED_SCALAR_CASES) == 8
     assert {case.key for case in ORDINARY_VECTOR_BIT_LAYOUT_REUSED_SCALAR_CASES} == {
         row.key for row in SCALAR_BITCAST_CONVERSIONS
     }
@@ -114,8 +114,8 @@ def test_bit_layout_reuses_every_existing_scalar_descriptor() -> None:
 
 
 def test_bit_layout_instruction_rows_are_exact_and_unique() -> None:
-    assert len(ORDINARY_VECTOR_BIT_LAYOUT_INSTRUCTION_CASES) == 102
-    assert len(ORDINARY_VECTOR_BIT_LAYOUT_INSTRUCTIONS) == 102
+    assert len(ORDINARY_VECTOR_BIT_LAYOUT_INSTRUCTION_CASES) == 100
+    assert len(ORDINARY_VECTOR_BIT_LAYOUT_INSTRUCTIONS) == 100
 
     keys = tuple(row.key for row in ORDINARY_VECTOR_BIT_LAYOUT_INSTRUCTIONS)
     assert len(set(keys)) == len(keys)

@@ -54,6 +54,10 @@ iree_status_t loom_wasm_binary_write_u32_leb(loom_wasm_binary_writer_t* writer,
 iree_status_t loom_wasm_binary_write_i32_leb(loom_wasm_binary_writer_t* writer,
                                              int32_t value);
 
+// Appends a signed 64-bit integer using Wasm signed LEB128 encoding.
+iree_status_t loom_wasm_binary_write_i64_leb(loom_wasm_binary_writer_t* writer,
+                                             int64_t value);
+
 // Appends a little-endian 64-bit payload.
 iree_status_t loom_wasm_binary_write_u64_le(loom_wasm_binary_writer_t* writer,
                                             uint64_t value);

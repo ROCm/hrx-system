@@ -1,0 +1,103 @@
+// RUN: emit source-low output=low control-flow=structured-low
+
+// Vulkan shader plus StorageBuffer8BitAccess, deliberately without Int8.
+spirv.target<vulkan1_3> @target {contract_feature_bits = 130}
+
+func.def target(@target) @copy(%source: buffer, %source_offset: offset, %target: buffer, %target_offset: offset, %byte_length: offset) {
+  buffer.copy %source[%source_offset], %target[%target_offset], %byte_length
+  func.return
+}
+
+// ----
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @copy(%source: reg<spirv.ptr.storage_buffer>, %source_offset: reg<spirv.offset64>, %target: reg<spirv.ptr.storage_buffer>, %target_offset: reg<spirv.offset64>, %byte_length: reg<spirv.offset64>) asm {
+  %16 = OpConstant.offset64 0
+  %17 = OpConstant.offset64 1
+  low.scf.for [%16 to %byte_length step %17] do(%18: reg<spirv.offset64>) {
+    %19 = OpIAdd.offset64 %source_offset, %18
+    %20 = OpPtrAccessChain.storage_buffer.raw_u8.byte_offset %source, %19
+    %21 = OpLoad.storage_buffer.raw_u8 %20
+    %22 = OpUConvert.raw_u8.u32 %21
+    %23 = OpBitcast.u32.i32 %22
+    %24 = OpIAdd.offset64 %target_offset, %18
+    %25 = OpPtrAccessChain.storage_buffer.raw_u8.byte_offset %target, %24
+    %26 = OpBitcast.i32.u32 %23
+    %27 = OpUConvert.u32.raw_u8 %26
+    OpStore.storage_buffer.raw_u8 %25, %27
+  }
+  return
+}
+
+// ====
+
+// Vulkan shader plus StorageBuffer8BitAccess, deliberately without Int8.
+spirv.target<vulkan1_3> @target {contract_feature_bits = 130}
+
+func.def target(@target) @fill(%pattern: i32, %target: buffer, %target_offset: offset, %byte_length: offset) {
+  buffer.fill %pattern, %target[%target_offset], %byte_length : i32
+  func.return
+}
+
+// ----
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @fill(%pattern: reg<spirv.id : i32>, %target: reg<spirv.ptr.storage_buffer>, %target_offset: reg<spirv.offset64>, %byte_length: reg<spirv.offset64>) asm {
+  %19 = OpConstant.offset64 0
+  %20 = OpConstant.offset64 1
+  %21 = OpConstant.i32 8
+  %22 = OpConstant.i32 24
+  %25 = low.scf.for [%19 to %byte_length step %20] iter_args(%pattern: reg<spirv.id : i32>) -> (reg<spirv.id : i32>) do(%23: reg<spirv.offset64>, %24: reg<spirv.id : i32>) {
+    %26 = OpIAdd.offset64 %target_offset, %23
+    %27 = OpPtrAccessChain.storage_buffer.raw_u8.byte_offset %target, %26
+    %28 = OpBitcast.i32.u32 %24
+    %29 = OpUConvert.u32.raw_u8 %28
+    OpStore.storage_buffer.raw_u8 %27, %29
+    %30 = OpShiftRightLogical %24, %21
+    %31 = OpShiftLeftLogical %24, %22
+    %32 = OpBitwiseOr %30, %31
+    low.scf.yield %32 : reg<spirv.id : i32>
+  }
+  return
+}
+
+// ====
+
+// Vulkan shader plus StorageBuffer8BitAccess, deliberately without Int8.
+spirv.target<vulkan1_3> @target {contract_feature_bits = 130}
+
+func.def target(@target) @compare(%lhs: buffer, %lhs_offset: offset, %rhs: buffer, %rhs_offset: offset, %byte_length: offset) -> (i32) {
+  %order = buffer.compare %lhs[%lhs_offset], %rhs[%rhs_offset], %byte_length
+  func.return %order : i32
+}
+
+// ----
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @compare(%lhs: reg<spirv.ptr.storage_buffer>, %lhs_offset: reg<spirv.offset64>, %rhs: reg<spirv.ptr.storage_buffer>, %rhs_offset: reg<spirv.offset64>, %byte_length: reg<spirv.offset64>) -> (reg<spirv.id : i32>) asm {
+  %36 = OpConstant.offset64 0
+  %37 = OpConstant.offset64 1
+  %38 = OpConstant.i32 0
+  %39 = OpConstant.i32 -1
+  %40 = OpConstant.i32 1
+  %45, %order = low.scf.while(%41 = %36 : reg<spirv.offset64>, %42 = %38 : reg<spirv.id : i32>) -> (reg<spirv.offset64>, reg<spirv.id : i32>) {
+    %47 = OpULessThan.offset64 %41, %byte_length
+    %48 = OpIEqual %42, %38
+    %49 = OpLogicalAnd.bool %47, %48
+    low.scf.condition %49, %41, %42 : reg<spirv.id : i1>, reg<spirv.offset64>, reg<spirv.id : i32>
+  } do(%43: reg<spirv.offset64>, %44: reg<spirv.id : i32>) {
+    %50 = OpIAdd.offset64 %lhs_offset, %43
+    %51 = OpPtrAccessChain.storage_buffer.raw_u8.byte_offset %lhs, %50
+    %52 = OpLoad.storage_buffer.raw_u8 %51
+    %53 = OpUConvert.raw_u8.u32 %52
+    %54 = OpBitcast.u32.i32 %53
+    %55 = OpIAdd.offset64 %rhs_offset, %43
+    %56 = OpPtrAccessChain.storage_buffer.raw_u8.byte_offset %rhs, %55
+    %57 = OpLoad.storage_buffer.raw_u8 %56
+    %58 = OpUConvert.raw_u8.u32 %57
+    %59 = OpBitcast.u32.i32 %58
+    %60 = OpIEqual %54, %59
+    %61 = OpBitcast.i32.u32 %54
+    %62 = OpBitcast.i32.u32 %59
+    %63 = OpULessThan.u32 %61, %62
+    %64 = OpSelect %63, %39, %40
+    %65 = OpSelect %60, %38, %64
+    %66 = OpIAdd.offset64 %43, %37
+    low.scf.yield %66, %65 : reg<spirv.offset64>, reg<spirv.id : i32>
+  }
+  return %order
+}

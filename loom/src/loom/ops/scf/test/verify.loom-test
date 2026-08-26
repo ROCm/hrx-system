@@ -14,6 +14,17 @@ func.def @for_iter_args_too_few(%lo: index, %hi: index, %step: index, %init: f32
 
 // ====
 
+// All counted-loop bounds share one address domain.
+func.def @for_bound_type_mismatch(%lo: offset, %hi: index, %step: offset) {
+  // ERROR@+1: TYPE/001 "lower_bound" "upper_bound"
+  scf.for %byte_offset = [%lo to %hi step %step] {
+    test.use %byte_offset : offset
+  }
+  func.return
+}
+
+// ====
+
 // scf.for with more iter_args than results: count check fires the
 // other direction.
 func.def @for_iter_args_too_many(%lo: index, %hi: index, %step: index, %a: f32, %b: f32) -> (f32) {
@@ -140,7 +151,7 @@ func.def @while_after_arg_type_mismatch(%cond: i1, %init: index) -> (index) {
 // scf.condition forwards one value for each after-region entry block arg.
 func.def @while_condition_forward_count_mismatch(%cond: i1, %init: index) -> (index) {
   %r = scf.while(%before = %init : index) -> (index) {
-    // ERROR@+1: STRUCTURE/013 "forwarded" "0" "after block args" "1"
+    // ERROR@+1: STRUCTURE/013 "forwarded" "0" "target block args" "1"
     scf.condition %cond : i1
   } do(%body: index) {
     scf.yield %body : index
@@ -153,7 +164,7 @@ func.def @while_condition_forward_count_mismatch(%cond: i1, %init: index) -> (in
 // scf.condition forwarded values must match the after-region block arg types.
 func.def @while_condition_forward_type_mismatch(%cond: i1, %init: index, %wrong: f32) -> (index) {
   %r = scf.while(%before = %init : index) -> (index) {
-    // ERROR@+1: TYPE/001 "forwarded[0]" "after[0]"
+    // ERROR@+1: TYPE/001 "forwarded[0]" "target[0]"
     scf.condition %cond, %wrong : i1, f32
   } do(%body: index) {
     scf.yield %body : index
@@ -173,6 +184,20 @@ func.def @while_wrong_before_terminator(%cond: i1, %init: index) -> (index) {
     scf.yield %body : index
   }
   func.return %r : index
+}
+
+// ====
+
+// scf.condition is meaningful only as the direct terminator of a scf.while
+// before region. Nesting it under another structured op must not reach while
+// lowering as malformed IR.
+func.def @while_condition_requires_direct_while_parent(%cond: i1) {
+  // ERROR@+1: STRUCTURE/018 "scf.if" "0" "scf.yield" "scf.condition"
+  scf.if %cond {
+    // ERROR@+1: STRUCTURE/029 "scf.condition" "parent" "scf.while" "scf.if"
+    scf.condition %cond : i1
+  }
+  func.return
 }
 
 // ====

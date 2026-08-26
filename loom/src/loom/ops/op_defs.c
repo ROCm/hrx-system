@@ -38,6 +38,8 @@ const char* loom_constraint_relation_name(loom_constraint_relation_t relation) {
       [LOOM_RELATION_ATTR_IN_RANGE_RANK] = "AttrInRangeRank",
       [LOOM_RELATION_REGION_ARG_COUNT] = "RegionArgCount",
       [LOOM_RELATION_REGION_ARG_MATCH] = "RegionArgMatch",
+      [LOOM_RELATION_CONDITION_FORWARD_COUNT] = "ConditionForwardCount",
+      [LOOM_RELATION_CONDITION_FORWARD_MATCH] = "ConditionForwardMatch",
       [LOOM_RELATION_YIELD_COUNT] = "YieldCount",
       [LOOM_RELATION_YIELD_MATCH] = "YieldMatch",
       [LOOM_RELATION_VARIADIC_MATCH] = "VariadicMatch",
@@ -1388,6 +1390,13 @@ loom_value_id_t loom_memory_access_view(loom_memory_access_t access) {
   const loom_memory_access_vtable_t* vtable = loom_memory_access_vtable(access);
   return loom_memory_access_operand(
       access, vtable ? vtable->view_operand_index : LOOM_OPERAND_INDEX_NONE);
+}
+
+loom_value_id_t loom_memory_access_byte_offset(loom_memory_access_t access) {
+  const loom_memory_access_vtable_t* vtable = loom_memory_access_vtable(access);
+  return loom_memory_access_operand(
+      access,
+      vtable ? vtable->byte_offset_operand_index : LOOM_OPERAND_INDEX_NONE);
 }
 
 loom_value_id_t loom_memory_access_value(loom_memory_access_t access) {

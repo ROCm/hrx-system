@@ -1883,6 +1883,27 @@ def test_generate_builders_define_mixed_fixed_results() -> None:
     assert "builder, result_types_storage, 2," in builders_c
 
 
+def test_generate_builders_synthesize_exact_result_types() -> None:
+    op = Op(
+        "test.add",
+        group=Dialect("test"),
+        operands=[
+            Operand("lhs", TypeConstraint.I32),
+            Operand("rhs", TypeConstraint.I32),
+        ],
+        results=[Result("result", TypeConstraint.I32)],
+        format=[Ref("lhs"), COMMA, Ref("rhs")],
+    )
+
+    ops_h = generate_ops_h("test", 0, [op])
+    builders_c = generate_builders_c("test", [op])
+
+    assert "loom_type_t result_type" not in ops_h
+    assert "const loom_type_t* result_types" not in ops_h
+    assert "loom_type_scalar(LOOM_SCALAR_TYPE_I32)" in builders_c
+    assert "loom_builder_define_result" in builders_c
+
+
 def test_generate_builders_keep_array_for_multiple_dynamic_fixed_results() -> None:
     op = Op(
         "test.dynamic_results",
@@ -2649,6 +2670,7 @@ def _make_counted_loop_op(
     *,
     body_arg_source: str | None = "iter_args",
     step: str | None = "step",
+    iv_type: str = "type_of:lower_bound",
     constraints: list[Constraint] | None = None,
 ) -> Op:
     if constraints is None:
@@ -2672,7 +2694,7 @@ def _make_counted_loop_op(
                 "body",
                 single_block=True,
                 terminator="test.yield",
-                implicit_args=(("iv", "index"),),
+                implicit_args=(("iv", iv_type),),
                 arg_source=body_arg_source,
             )
         ],
@@ -2739,6 +2761,16 @@ def test_generate_tables_rejects_loop_like_unprojected_body_state() -> None:
         _generate_counted_loop_tables(op)
 
 
+def test_generate_tables_rejects_counted_loop_iv_type_mismatch() -> None:
+    op = _make_counted_loop_op(iv_type="index")
+
+    with _raises_value_error(
+        r"LoopLikeInterface on 'test\.for': induction variable 'iv' "
+        r"must use 'type_of:lower_bound'"
+    ):
+        _generate_counted_loop_tables(op)
+
+
 def test_generate_tables_memory_access_defaults_use_matching_fields() -> None:
     op = Op(
         "test.load",
@@ -2758,6 +2790,7 @@ def test_generate_tables_memory_access_defaults_use_matching_fields() -> None:
     assert "static const loom_memory_access_vtable_t loom_test_load_memory_access" in tables_c
     assert ".operation_kind = LOOM_MEMORY_ACCESS_OPERATION_LOAD," in tables_c
     assert ".view_operand_index = 0," in tables_c
+    assert ".byte_offset_operand_index = 255," in tables_c
     assert ".value_operand_index = 255," in tables_c
     assert ".indices_operand_field_index = 1," in tables_c
     assert ".static_indices_attr_index = 0," in tables_c
@@ -2902,6 +2935,44 @@ def test_generate_tables_memory_access_accepts_segmented_indices_field() -> None
     assert "LOOM_OP_VTABLE_SEGMENTED_OPERANDS" in tables_c
     assert ".view_operand_index = 0," in tables_c
     assert ".indices_operand_field_index = 1," in tables_c
+
+
+def test_generate_tables_memory_access_accepts_physical_byte_offset() -> None:
+    op = Op(
+        "test.load",
+        group=Dialect("test"),
+        operands=[
+            Operand("source", ANY),
+            Operand("byte_offset", ANY),
+        ],
+        results=[Result("result", ANY)],
+        effects=[Reads("source")],
+        interfaces=[MemoryAccessInterface(view="source")],
+    )
+
+    tables_c = generate_tables_c("test", 0, [op])
+
+    assert ".view_operand_index = 0," in tables_c
+    assert ".byte_offset_operand_index = 1," in tables_c
+    assert ".indices_operand_field_index = 255," in tables_c
+
+
+def test_generate_tables_memory_access_rejects_mixed_byte_and_logical_offsets() -> None:
+    op = Op(
+        "test.load",
+        group=Dialect("test"),
+        operands=[
+            Operand("view", ANY),
+            Operand("byte_offset", ANY),
+            Operand("indices", ANY, variadic=True),
+        ],
+        results=[Result("result", ANY)],
+        effects=[Reads("view")],
+        interfaces=[MemoryAccessInterface()],
+    )
+
+    with _raises_value_error(r"MemoryAccessInterface on 'test\.load': byte_offset is mutually exclusive"):
+        generate_tables_c("test", 0, [op])
 
 
 def test_generate_tables_memory_access_rejects_explicit_missing_field() -> None:

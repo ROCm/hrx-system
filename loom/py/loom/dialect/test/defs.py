@@ -1665,7 +1665,7 @@ test_loop = Op(
             doc="Loop body.",
             single_block=True,
             terminator="test.yield",
-            implicit_args=(("iv", "index"),),
+            implicit_args=(("iv", "type_of:lower_bound"),),
             arg_source="iter_args",
         )
     ],

@@ -74,9 +74,10 @@ func.def target(@target) @unsupported_semantic_math(%input: f32) -> (f32) {
 
 spirv.target<vulkan1_3> @target
 
-func.def target(@target) @unsupported_source_type(%value: f8E4M3) {
-  // ERROR@-1: TARGET/031 {target_key="target", export_name="unsupported_source_type", config_key="target", op_name="func.def", function_name="unsupported_source_type", actual_type="f8E4M3", type_constraint="scalar.fp8_decode_or_contract"}
-  func.return
+func.def target(@target) @fp8_bits_do_not_imply_fp8_arithmetic(%lhs: f8E4M3, %rhs: f8E4M3) -> (f8E4M3) {
+  // ERROR@+1: LOWERING/036 {op_name="scalar.addf", element_type="f8E4M3"}
+  %result = scalar.addf %lhs, %rhs : f8E4M3
+  func.return %result : f8E4M3
 }
 
 // ====

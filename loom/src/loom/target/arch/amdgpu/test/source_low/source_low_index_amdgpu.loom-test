@@ -20,6 +20,63 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @index_u
 // ====
 
 amdgpu.target<gfx11-generic> @target
+kernel.def target(@target) @offset_loop_narrows_induction_operand() {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch(%output: buffer) {
+  %begin = index.constant 0 : offset
+  %end = index.constant 2 : offset
+  %step = index.constant 1 : offset
+  %value = scalar.constant 42 : i8
+  scf.for %byte_offset = [%begin to %end step %step] {
+    %output_view = buffer.view %output[%byte_offset] : buffer -> view<1xi8>
+    view.store %value, %output_view[0] : i8, view<1xi8>
+  }
+  kernel.return
+}
+
+// ----
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @offset_loop_narrows_induction_operand() asm {
+  %output_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %begin = s_mov_b32 0
+  %end = s_mov_b32 2
+  %step = s_mov_b32 1
+  %value = v_mov_b32 42
+  low.br ^_bb3
+^_bb1(%47: reg<amdgpu.sgpr>, %48: reg<amdgpu.sgpr>):
+  %22 = v_mov_b32_copy %47
+  %24 = v_mov_b32_copy %48
+  %25 = v_mov_b32_copy %end
+  %26 = v_mov_b32 0
+  %27 = v_cmp_lt_u32 %24, %26
+  %28 = v_cmp_lt_u32 %22, %25
+  %29 = v_cmp_eq_i32 %24, %26
+  %30 = s_and_b64 %29, %28
+  %31 = s_or_b64 %27, %30
+  %33, %34 = s_and_saveexec_b64 %31
+  low.cond_br %34, ^_bb2, ^_bb4 : reg<amdgpu.scc>
+^_bb2:
+  %35 = v_mov_b32 0
+  %37 = slice %output_view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %38 = slice %output_view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %39 = s_mov_b32 0
+  %40 = s_add_u32 %37, %47
+  %41 = s_addc_u32 %38, %39
+  %42 = concat(%40, %41) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  global_store_b8_saddr %35, %value, %42
+  %44 = s_add_u32 %47, %step
+  low.br ^_bb1(%44: reg<amdgpu.sgpr>, %39: reg<amdgpu.sgpr>)
+^_bb3:
+  %32 = s_mov_b64_exec_read
+  low.br ^_bb1(%begin: reg<amdgpu.sgpr>, %begin: reg<amdgpu.sgpr>)
+^_bb4:
+  s_mov_b64_exec %32
+  return
+}
+
+// ====
+
+amdgpu.target<gfx11-generic> @target
 func.def target(@target) @index_uniform_multiply(%lhs: i32) -> (index) {
   %lhs_index = index.cast %lhs : i32 to index
   %bounded_lhs = index.assume %lhs_index [range(%lhs_index, 0, 1023)] : index
@@ -51,6 +108,26 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @index_u
   %adjustment = s_mov_b32 15
   %difference = s_sub_u32 %value, %adjustment
   return %difference
+}
+
+// ====
+
+amdgpu.target<gfx11-generic> @target
+func.def target(@target) @index_uniform_signed_shifts(%value0: index, %amount0: index) -> (index, index, index) {
+  %value = index.assume %value0 [range(%value0, -1024, -1)] : index
+  %amount = index.assume %amount0 [range(%amount0, 1, 4)] : index
+  %left = index.shli %value, %amount : index
+  %arithmetic_right = index.shrsi %value, %amount : index
+  %logical_right = index.shrui %value, %amount : index
+  func.return %left, %arithmetic_right, %logical_right : index, index, index
+}
+
+// ----
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @index_uniform_signed_shifts(%value: reg<amdgpu.sgpr>, %amount: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) asm {
+  %left = s_lshl_b32 %value, %amount
+  %arithmetic_right = s_ashr_i32 %value, %amount
+  %logical_right = s_lshr_b32 %value, %amount
+  return %left, %arithmetic_right, %logical_right
 }
 
 // ====
@@ -435,4 +512,30 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @dynamic
   %14 = v_add_u32 %7, %13
   %lanes = concat(%7, %9, %11, %14) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
   return %lanes
+}
+
+// ====
+
+amdgpu.target<gfx11-generic> @target
+func.def target(@target) @offset_compare_uniform(%lhs: offset, %rhs: offset) -> (i1) {
+  %result = index.cmp ult, %lhs, %rhs : offset
+  func.return %result : i1
+}
+
+// ----
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @offset_compare_uniform(%lhs: reg<amdgpu.sgpr x2>, %rhs: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.sgpr x2>) asm {
+  %7 = slice %lhs[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %8 = v_mov_b32_copy %7
+  %9 = slice %lhs[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %10 = v_mov_b32_copy %9
+  %11 = slice %rhs[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %12 = v_mov_b32_copy %11
+  %13 = slice %rhs[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %14 = v_mov_b32_copy %13
+  %15 = v_cmp_lt_u32 %10, %14
+  %16 = v_cmp_lt_u32 %8, %12
+  %17 = v_cmp_eq_i32 %10, %14
+  %18 = s_and_b64 %17, %16
+  %result = s_or_b64 %15, %18
+  return %result
 }

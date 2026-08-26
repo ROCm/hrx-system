@@ -33,6 +33,7 @@ TYPE_CONSTRAINT_MAP: dict[TypeConstraint, str] = {
     TypeConstraint.INTEGER: "LOOM_TYPE_CONSTRAINT_INTEGER",
     TypeConstraint.FLOAT: "LOOM_TYPE_CONSTRAINT_FLOAT",
     TypeConstraint.BITWISE_SCALAR: "LOOM_TYPE_CONSTRAINT_BITWISE_SCALAR",
+    TypeConstraint.BYTE_PATTERN_SCALAR: "LOOM_TYPE_CONSTRAINT_BYTE_PATTERN_SCALAR",
     TypeConstraint.INDEX_OR_NON_I1_INTEGER_SCALAR: "LOOM_TYPE_CONSTRAINT_INDEX_OR_NON_I1_INTEGER_SCALAR",
     TypeConstraint.INTEGER_ELEMENT: "LOOM_TYPE_CONSTRAINT_INTEGER_ELEMENT",
     TypeConstraint.FLOAT_ELEMENT: "LOOM_TYPE_CONSTRAINT_FLOAT_ELEMENT",
@@ -57,6 +58,7 @@ TYPE_CONSTRAINT_MAP: dict[TypeConstraint, str] = {
     TypeConstraint.REGISTER: "LOOM_TYPE_CONSTRAINT_REGISTER",
     TypeConstraint.STORAGE: "LOOM_TYPE_CONSTRAINT_STORAGE",
     TypeConstraint.I1: "LOOM_TYPE_CONSTRAINT_I1",
+    TypeConstraint.I32: "LOOM_TYPE_CONSTRAINT_I32",
 }
 
 CALL_LIKE_KIND_MAP: dict[CallLikeKind, str] = {
@@ -292,6 +294,14 @@ CONSTRAINT_MAP: dict[str, tuple[str, str]] = {
     "BlockArgsMatchElementTypes": (
         "LOOM_RELATION_REGION_ARG_MATCH",
         "LOOM_PROPERTY_ELEMENT_TYPE",
+    ),
+    "ConditionForwardedCountMatchesBlockArgs": (
+        "LOOM_RELATION_CONDITION_FORWARD_COUNT",
+        "LOOM_PROPERTY_TYPE",
+    ),
+    "ConditionForwardedTypesMatchBlockArgs": (
+        "LOOM_RELATION_CONDITION_FORWARD_MATCH",
+        "LOOM_PROPERTY_TYPE",
     ),
     "YieldCountMatchesResults": ("LOOM_RELATION_YIELD_COUNT", "LOOM_PROPERTY_TYPE"),
     "YieldTypesMatchResults": ("LOOM_RELATION_YIELD_MATCH", "LOOM_PROPERTY_TYPE"),

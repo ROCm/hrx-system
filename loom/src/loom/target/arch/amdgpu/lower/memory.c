@@ -2469,6 +2469,10 @@ static loom_type_t loom_amdgpu_memory_access_source_vector_type(
   const loom_memory_access_t access =
       loom_memory_access_cast(module, source_op);
   IREE_ASSERT(loom_memory_access_isa(access));
+  if (loom_memory_access_byte_offset(access) != LOOM_VALUE_ID_INVALID) {
+    return loom_type_shaped_1d(LOOM_TYPE_VECTOR, LOOM_SCALAR_TYPE_I8,
+                               loom_dim_pack_static(1), /*encoding_id=*/0);
+  }
   const loom_value_id_t value = loom_memory_access_value(access);
   if (value != LOOM_VALUE_ID_INVALID) {
     return loom_amdgpu_memory_access_value_vector_type(module, value);
@@ -2553,6 +2557,12 @@ static bool loom_amdgpu_memory_access_selects_signed_i16_descriptor(
          source_op->result_count == 1 &&
          loom_amdgpu_static_vector_lane_count(vector_type, LOOM_SCALAR_TYPE_I16,
                                               1) == 1;
+}
+
+static bool loom_amdgpu_memory_access_selects_unsigned_i8_descriptor(
+    const loom_op_t* source_op, loom_low_source_memory_operation_kind_t kind) {
+  return kind == LOOM_LOW_SOURCE_MEMORY_OPERATION_LOAD &&
+         source_op->kind == LOOM_OP_BUFFER_LOAD_I8_U;
 }
 
 static bool loom_amdgpu_memory_access_select_packet(
@@ -2871,6 +2881,11 @@ bool loom_amdgpu_memory_access_plan_select(
                                                               vector_type)) {
     access.payload_format =
         LOOM_AMDGPU_MEMORY_PAYLOAD_FORMAT_SIGNED_16BIT_INTEGER;
+  }
+  if (loom_amdgpu_memory_access_selects_unsigned_i8_descriptor(source_op,
+                                                               kind)) {
+    access.payload_format =
+        LOOM_AMDGPU_MEMORY_PAYLOAD_FORMAT_UNSIGNED_8BIT_INTEGER;
   }
   if (loom_amdgpu_memory_access_requires_ds_pair_split(&selection_context,
                                                        &access)) {

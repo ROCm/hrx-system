@@ -12,6 +12,7 @@ from unittest import mock
 from loom.assembly import Attr, Ref
 from loom.dsl import (
     ANY,
+    I32,
     AttrDef,
     Dialect,
     EnumCase,
@@ -47,6 +48,25 @@ def test_builders_pyi_uses_per_dialect_builders_dirs() -> None:
     assert "class TestBuilder(DialectBuilder):" in test_stub
     assert "def add(" in test_stub
     assert "results: list[Type | TiedResultSpec]" in test_stub
+    assert "name: str | None = ..." in test_stub
+
+
+def test_builders_pyi_omits_exact_result_type_parameter() -> None:
+    test_dialect = Dialect("test", dialect_id=0x7F)
+    generated = generate_builder_stub_files(
+        [
+            Op(
+                "test.compare",
+                group=test_dialect,
+                results=[Result("order", I32)],
+                format=[],
+            )
+        ]
+    )
+
+    test_stub = generated["loom/py/loom/dialect/test/builders/__init__.pyi"]
+    assert "def compare(" in test_stub
+    assert "results:" not in test_stub
     assert "name: str | None = ..." in test_stub
 
 

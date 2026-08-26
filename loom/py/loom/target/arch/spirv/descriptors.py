@@ -71,6 +71,7 @@ from loom.target.arch.spirv.scalar_conversion import (
     ScalarConversion,
 )
 from loom.target.arch.spirv.scalar_memory import (
+    RAW_STORAGE_BUFFER_BYTE,
     STORAGE_BUFFER_SCALARS,
     StorageBufferScalar,
 )
@@ -715,6 +716,33 @@ def _storage_buffer_descriptors() -> tuple[Descriptor, ...]:
         descriptors.append(_load_storage_buffer_descriptor(scalar))
         descriptors.append(_store_storage_buffer_descriptor(scalar))
     return tuple(descriptors)
+
+
+def _raw_storage_buffer_byte_descriptors() -> tuple[Descriptor, ...]:
+    scalar = RAW_STORAGE_BUFFER_BYTE
+    convert_from_byte_key = f"spirv.op_uconvert.{scalar.suffix}.u32"
+    convert_to_byte_key = f"spirv.op_uconvert.u32.{scalar.suffix}"
+    return (
+        _ptr_access_chain_storage_buffer_descriptor(scalar),
+        _load_storage_buffer_descriptor(scalar),
+        _store_storage_buffer_descriptor(scalar),
+        _unary_typed_descriptor(
+            key=convert_from_byte_key,
+            mnemonic=f"OpUConvert.{scalar.suffix}.u32",
+            semantic_tag=convert_from_byte_key,
+            operands=(_id_result(), _id_operand("input")),
+            result_value_type=None,
+            feature_bits=scalar.feature_bits,
+        ),
+        _unary_typed_descriptor(
+            key=convert_to_byte_key,
+            mnemonic=f"OpUConvert.u32.{scalar.suffix}",
+            semantic_tag=convert_to_byte_key,
+            operands=(_id_result(), _id_operand("input")),
+            result_value_type=None,
+            feature_bits=scalar.feature_bits,
+        ),
+    )
 
 
 def _access_chain_workgroup_descriptor(
@@ -1410,6 +1438,7 @@ SPIRV_LOGICAL_CORE_DESCRIPTOR_SET = DescriptorSet(
         *_compare_descriptors(),
         *_select_descriptors(),
         *_storage_buffer_descriptors(),
+        *_raw_storage_buffer_byte_descriptors(),
         *_workgroup_descriptors(),
         *_control_barrier_descriptors(),
         *_cooperative_matrix_descriptors(),

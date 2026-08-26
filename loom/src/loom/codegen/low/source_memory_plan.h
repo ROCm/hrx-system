@@ -6,11 +6,11 @@
 
 // Source memory access planning.
 //
-// This layer owns the target-independent half of vector memory lowering:
-// decomposing a typed view/vector access plus value facts into a compact source
-// plan with arena-compatible lifetime. Targets wrap this plan with their own
-// addressing modes, descriptor choices, register classes, and machine-specific
-// fallback decisions.
+// This layer owns the target-independent half of memory lowering: decomposing
+// typed view/vector accesses and physical byte accesses plus value facts into a
+// compact source plan with arena-compatible lifetime. Targets wrap this plan
+// with their own addressing modes, descriptor choices, register classes, and
+// machine-specific fallback decisions.
 
 #ifndef LOOM_CODEGEN_LOW_SOURCE_MEMORY_PLAN_H_
 #define LOOM_CODEGEN_LOW_SOURCE_MEMORY_PLAN_H_
@@ -199,9 +199,9 @@ typedef struct loom_low_source_memory_dynamic_realization_t {
 typedef struct loom_low_source_memory_access_plan_t {
   // Source operation category being planned.
   loom_low_source_memory_operation_kind_t operation_kind;
-  // Source view SSA value consumed by the memory operation.
+  // Source view or memory-object SSA value consumed by the memory operation.
   loom_value_id_t view_value_id;
-  // Source view SSA value that materializes the memory resource base.
+  // Source view or memory-object SSA value materializing the resource base.
   loom_value_id_t base_view_value_id;
   // Target-independent memory space selected from source view facts.
   loom_value_fact_memory_space_t memory_space;
@@ -340,8 +340,10 @@ void loom_low_source_memory_access_plan_make_summary(
     loom_low_memory_access_summary_t* out_summary);
 
 // Builds a target-independent source memory plan for source memory ops from an
-// analyzed function-local view-region table. Planning only performs
-// non-mutating summary lookups and never walks source producers.
+// analyzed function-local view-region table. Logical accesses are decomposed
+// through their typed view; physical accesses use their explicit byte offset
+// and buffer-reference facts. Planning only performs non-mutating summary
+// lookups and never walks source producers.
 //
 // Returns false when the source op cannot be decomposed into a complete source
 // plan. Targets are responsible for checking their own memory spaces, address

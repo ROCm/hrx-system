@@ -1366,10 +1366,12 @@ LOOM_DEFINE_OPERAND(loom_scalar_cmpi_rhs, 1)
 LOOM_DEFINE_RESULT(loom_scalar_cmpi_result, 0)
 LOOM_DEFINE_ATTR_ENUM_TYPED(loom_scalar_cmpi_predicate, 0, loom_scalar_cmpi_predicate_t)
 iree_status_t loom_scalar_cmpi_build(
-    loom_builder_t* builder, uint8_t predicate,
-    loom_value_id_t lhs, loom_value_id_t rhs,
-    loom_type_t operand_type, loom_type_t result_type,
-    loom_location_id_t location, loom_op_t** out_op);
+    loom_builder_t* builder,
+    loom_scalar_cmpi_predicate_t predicate,
+    loom_value_id_t lhs,
+    loom_value_id_t rhs,
+    loom_location_id_t location,
+    loom_op_t** out_op);
 iree_status_t loom_scalar_cmpi_canonicalize(loom_op_t* op, loom_rewriter_t* rewriter);
 iree_status_t loom_scalar_cmpi_facts(
     loom_fact_context_t* context,
@@ -1386,10 +1388,12 @@ LOOM_DEFINE_RESULT(loom_scalar_cmpf_result, 0)
 LOOM_DEFINE_ATTR_ENUM_TYPED(loom_scalar_cmpf_predicate, 0, loom_scalar_cmpf_predicate_t)
 LOOM_DEFINE_INSTANCE_FLAGS(loom_scalar_cmpf_fastmath)
 iree_status_t loom_scalar_cmpf_build(
-    loom_builder_t* builder, uint8_t instance_flags,
-    uint8_t predicate, loom_value_id_t lhs,
-    loom_value_id_t rhs, loom_type_t operand_type,
-    loom_type_t result_type, loom_location_id_t location,
+    loom_builder_t* builder,
+    uint8_t instance_flags,
+    loom_scalar_cmpf_predicate_t predicate,
+    loom_value_id_t lhs,
+    loom_value_id_t rhs,
+    loom_location_id_t location,
     loom_op_t** out_op);
 iree_status_t loom_scalar_cmpf_canonicalize(loom_op_t* op, loom_rewriter_t* rewriter);
 iree_status_t loom_scalar_cmpf_facts(
@@ -1404,8 +1408,9 @@ LOOM_DEFINE_ISA(loom_scalar_isnanf_isa, LOOM_OP_SCALAR_ISNANF)
 LOOM_DEFINE_OPERAND(loom_scalar_isnanf_input, 0)
 LOOM_DEFINE_RESULT(loom_scalar_isnanf_result, 0)
 iree_status_t loom_scalar_isnanf_build(
-    loom_builder_t* builder, loom_value_id_t input,
-    loom_type_t result_type, loom_location_id_t location,
+    loom_builder_t* builder,
+    loom_value_id_t input,
+    loom_location_id_t location,
     loom_op_t** out_op);
 iree_status_t loom_scalar_isnanf_facts(
     loom_fact_context_t* context,
@@ -1419,8 +1424,9 @@ LOOM_DEFINE_ISA(loom_scalar_isinff_isa, LOOM_OP_SCALAR_ISINFF)
 LOOM_DEFINE_OPERAND(loom_scalar_isinff_input, 0)
 LOOM_DEFINE_RESULT(loom_scalar_isinff_result, 0)
 iree_status_t loom_scalar_isinff_build(
-    loom_builder_t* builder, loom_value_id_t input,
-    loom_type_t result_type, loom_location_id_t location,
+    loom_builder_t* builder,
+    loom_value_id_t input,
+    loom_location_id_t location,
     loom_op_t** out_op);
 iree_status_t loom_scalar_isinff_facts(
     loom_fact_context_t* context,
@@ -1434,8 +1440,9 @@ LOOM_DEFINE_ISA(loom_scalar_isfinitef_isa, LOOM_OP_SCALAR_ISFINITEF)
 LOOM_DEFINE_OPERAND(loom_scalar_isfinitef_input, 0)
 LOOM_DEFINE_RESULT(loom_scalar_isfinitef_result, 0)
 iree_status_t loom_scalar_isfinitef_build(
-    loom_builder_t* builder, loom_value_id_t input,
-    loom_type_t result_type, loom_location_id_t location,
+    loom_builder_t* builder,
+    loom_value_id_t input,
+    loom_location_id_t location,
     loom_op_t** out_op);
 iree_status_t loom_scalar_isfinitef_facts(
     loom_fact_context_t* context,

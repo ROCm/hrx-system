@@ -19,6 +19,7 @@
 #include "loom/ops/op_defs.h"
 #include "loom/target/function_version.h"
 #include "loom/target/pass_environment.h"
+#include "loom/util/cfg_graph.h"
 #include "loom/util/dominance.h"
 
 #define LOOM_CSE_STATISTICS(V, statistics_type)                        \
@@ -413,8 +414,9 @@ static void loom_cse_table_invalidate_all(loom_cse_table_t* table) {
 // Multi-block regions use the computed CFG dominator tree even if no cleanup
 // pass has stamped the region flag yet. Every reachable block scope is parented
 // by its immediate dominator scope. That makes producers from any dominating
-// block visible to dominated descendants without speculating work across
-// control-flow predicates.
+// block visible to dominated descendants. Mutable-state expressions only walk
+// through straight-line block edges; joins and loop headers may observe state
+// changed along another incoming path or a prior loop iteration.
 //
 // Arena allocation: all scopes and tables are allocated from a
 // dedicated scope arena that is reset between top-level blocks.
@@ -422,31 +424,41 @@ static void loom_cse_table_invalidate_all(loom_cse_table_t* table) {
 // the sum of all subtrees across the function.
 
 typedef struct loom_cse_scope_t {
+  // CSE candidates defined in this block.
   loom_cse_table_t table;
+  // Whether mutable-state candidates must not be reused from parent scopes.
+  bool blocks_stateful_parent_lookup;
+  // Dominating scope whose candidates may be visible in this block.
   struct loom_cse_scope_t* parent;
 } loom_cse_scope_t;
 
 // Allocates a new scope with a hash table sized for |block|.
 static iree_status_t loom_cse_scope_allocate(iree_arena_allocator_t* arena,
                                              loom_cse_scope_t* parent,
+                                             bool blocks_stateful_parent_lookup,
                                              const loom_block_t* block,
                                              loom_cse_scope_t** out_scope) {
   IREE_RETURN_IF_ERROR(
       iree_arena_allocate(arena, sizeof(loom_cse_scope_t), (void**)out_scope));
   (*out_scope)->parent = parent;
+  (*out_scope)->blocks_stateful_parent_lookup = blocks_stateful_parent_lookup;
   iree_host_size_t capacity = iree_host_size_next_power_of_two(
       iree_max((iree_host_size_t)block->op_count * 2, 16));
   return loom_cse_table_initialize(arena, capacity, block->op_count,
                                    &(*out_scope)->table);
 }
 
-// Walks the scope chain looking for an equivalent op.
+// Walks the scope chain looking for an equivalent op. Stateful expressions may
+// only cross block boundaries known to execute in a straight line. Pure
+// expressions remain reusable anywhere their definition dominates.
 static loom_op_t* loom_cse_scope_lookup(const loom_cse_scope_t* scope,
                                         const loom_module_t* module,
-                                        const loom_op_t* op, uint32_t hash) {
+                                        const loom_op_t* op, uint32_t hash,
+                                        bool is_stateful) {
   for (const loom_cse_scope_t* s = scope; s; s = s->parent) {
     loom_op_t* found = loom_cse_table_find(&s->table, module, op, hash);
     if (found) return found;
+    if (is_stateful && s->blocks_stateful_parent_lookup) break;
   }
   return NULL;
 }
@@ -551,6 +563,30 @@ static loom_cse_scope_t* loom_cse_cfg_scope_parent_for_block(
              : parent_scope;
 }
 
+// Returns true when mutable state observed in a dominating scope may have
+// changed before a later dynamic execution of |block|. A single edge from the
+// immediate dominator is the only inter-block path that is unconditionally
+// straight-line. The region entry is also straight-line when it has no CFG
+// predecessors; entry from its containing op is represented by |parent_scope|.
+static bool loom_cse_cfg_block_blocks_stateful_parent_lookup(
+    const loom_cfg_graph_t* cfg_graph, const loom_dominance_info_t* dominance,
+    const loom_region_t* region, uint16_t block_index) {
+  if (cfg_graph->malformed) return true;
+  const loom_cfg_block_info_t* block_info = &cfg_graph->blocks[block_index];
+  if (block_index == 0 && block_info->predecessor_count == 0) return false;
+  if (block_info->predecessor_count != 1) return true;
+
+  const loom_block_t* immediate_dominator =
+      loom_dominance_immediate_dominator_block(dominance, block_info->block);
+  uint16_t immediate_dominator_index = 0;
+  if (!loom_region_try_block_index(region, immediate_dominator,
+                                   &immediate_dominator_index)) {
+    return true;
+  }
+  return cfg_graph->predecessor_indices[block_info->predecessor_start] !=
+         immediate_dominator_index;
+}
+
 static iree_status_t loom_cse_compute_cfg_block_order(
     iree_arena_allocator_t* arena, const loom_dominance_info_t* dominance,
     loom_region_t* region, uint16_t** out_order) {
@@ -619,11 +655,18 @@ static iree_status_t loom_cse_push_cfg_region_block_frames(
   memset(block_scopes, 0,
          (iree_host_size_t)region->block_count * sizeof(*block_scopes));
 
+  loom_cfg_graph_t cfg_graph = {0};
+  IREE_RETURN_IF_ERROR(
+      loom_cfg_graph_build(dominance->module, region, scope_arena, &cfg_graph));
+
   for (uint16_t block_index = 0; block_index < region->block_count;
        ++block_index) {
     loom_block_t* block = loom_region_block(region, block_index);
     IREE_RETURN_IF_ERROR(loom_cse_scope_allocate(
-        scope_arena, /*parent=*/NULL, block, &block_scopes[block_index]));
+        scope_arena, /*parent=*/NULL,
+        loom_cse_cfg_block_blocks_stateful_parent_lookup(&cfg_graph, dominance,
+                                                         region, block_index),
+        block, &block_scopes[block_index]));
   }
   for (uint16_t block_index = 0; block_index < region->block_count;
        ++block_index) {
@@ -663,8 +706,9 @@ static iree_status_t loom_cse_push_region_block_frames(
   if (region->block_count == 1) {
     loom_block_t* entry_block = loom_region_entry_block(region);
     loom_cse_scope_t* child_scope = NULL;
-    IREE_RETURN_IF_ERROR(loom_cse_scope_allocate(scope_arena, parent_scope,
-                                                 entry_block, &child_scope));
+    IREE_RETURN_IF_ERROR(loom_cse_scope_allocate(
+        scope_arena, parent_scope, /*blocks_stateful_parent_lookup=*/false,
+        entry_block, &child_scope));
     loom_cse_stack_push(stack, entry_block, child_scope);
     return iree_ok_status();
   }
@@ -898,8 +942,10 @@ iree_status_t loom_cse_run(loom_pass_t* pass, loom_module_t* module,
 
       // Look up the scope chain for an equivalent op.
       uint32_t hash = loom_cse_hash_op(module, op);
+      const bool is_stateful = !iree_any_bit_set(traits, LOOM_TRAIT_PURE) ||
+                               low_state.dependencies != 0;
       loom_op_t* existing =
-          loom_cse_scope_lookup(frame->scope, module, op, hash);
+          loom_cse_scope_lookup(frame->scope, module, op, hash, is_stateful);
       if (existing) {
         // Replace all uses and erase.
         loom_value_id_t* op_results = loom_op_results(op);

@@ -632,6 +632,63 @@ low.func.def target<test.low.core>(@test_target) @for_unroll_policy_is_exclusive
 
 test.target<low_core> @test_target
 
+low.func.def target<test.low.core>(@test_target) @while_condition_forward_count_mismatch(%condition: reg<test.i32>, %init: reg<test.i32>) -> (reg<test.i32>) {
+  %result = low.scf.while(%before = %init : reg<test.i32>) -> (reg<test.i32>) {
+    // ERROR@+1: STRUCTURE/013 "forwarded" "0" "target block args" "1"
+    low.scf.condition %condition : reg<test.i32>
+  } do(%body: reg<test.i32>) {
+    low.scf.yield %body : reg<test.i32>
+  }
+  low.return %result : reg<test.i32>
+}
+
+// ====
+
+test.target<low_core> @test_target
+
+low.func.def target<test.low.core>(@test_target) @while_condition_forward_type_mismatch(%condition: reg<test.i32>, %init: reg<test.i32>, %wrong: reg<test.ptr>) -> (reg<test.i32>) {
+  %result = low.scf.while(%before = %init : reg<test.i32>) -> (reg<test.i32>) {
+    // ERROR@+1: TYPE/001 "forwarded[0]" "target[0]"
+    low.scf.condition %condition, %wrong : reg<test.i32>, reg<test.ptr>
+  } do(%body: reg<test.i32>) {
+    low.scf.yield %body : reg<test.i32>
+  }
+  low.return %result : reg<test.i32>
+}
+
+// ====
+
+test.target<low_core> @test_target
+
+low.func.def target<test.low.core>(@test_target) @while_wrong_before_terminator(%condition: reg<test.i32>, %init: reg<test.i32>) -> (reg<test.i32>) {
+  // ERROR@+1: STRUCTURE/018 "low.scf.while" "0" "low.scf.condition" "low.scf.yield"
+  %result = low.scf.while(%before = %init : reg<test.i32>) -> (reg<test.i32>) {
+    low.scf.yield %before : reg<test.i32>
+  } do(%body: reg<test.i32>) {
+    low.scf.yield %body : reg<test.i32>
+  }
+  low.return %result : reg<test.i32>
+}
+
+// ====
+
+test.target<low_core> @test_target
+
+// low.scf.condition is meaningful only as the direct terminator of a
+// low.scf.while condition region.
+low.func.def target<test.low.core>(@test_target) @while_condition_requires_direct_while_parent(%condition: reg<test.i32>) {
+  // ERROR@+1: STRUCTURE/018 "low.scf.if" "0" "low.scf.yield" "low.scf.condition"
+  low.scf.if %condition {
+    // ERROR@+1: STRUCTURE/029 "low.scf.condition" "parent" "low.scf.while" "low.scf.if"
+    low.scf.condition %condition : reg<test.i32>
+  }
+  low.return
+}
+
+// ====
+
+test.target<low_core> @test_target
+
 low.func.def target<test.low.core>(@test_target) @if_wrong_terminator(%condition: reg<test.i32>) {
   // ERROR@+1: STRUCTURE/018 "low.scf.if" "0" "low.scf.yield" "low.return"
   low.scf.if %condition {

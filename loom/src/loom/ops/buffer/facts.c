@@ -286,3 +286,59 @@ iree_status_t loom_buffer_view_facts(loom_fact_context_t* context,
       context, module, loom_buffer_view_buffer(op), operand_facts[0],
       operand_facts[1], result_type, &result_facts[0]);
 }
+
+iree_status_t loom_buffer_length_facts(loom_fact_context_t* context,
+                                       const loom_module_t* module,
+                                       const loom_op_t* op,
+                                       const loom_value_facts_t* operand_facts,
+                                       loom_value_facts_t* result_facts) {
+  loom_value_fact_buffer_reference_t reference = {0};
+  if (!loom_value_facts_query_buffer_reference(context, operand_facts[0],
+                                               &reference)) {
+    result_facts[0] = loom_buffer_nonnegative_unknown_facts();
+    return iree_ok_status();
+  }
+
+  if (reference.nullability == LOOM_VALUE_FACT_REFERENCE_NULLABILITY_NULL) {
+    result_facts[0] = loom_value_facts_exact_i64(0);
+    return iree_ok_status();
+  }
+
+  loom_value_facts_t extent =
+      loom_buffer_clamp_nonnegative(reference.maximum_byte_extent);
+  if (reference.nullability == LOOM_VALUE_FACT_REFERENCE_NULLABILITY_NON_NULL) {
+    result_facts[0] = extent;
+    return iree_ok_status();
+  }
+
+  // A buffer with unknown nullability has either its physical extent or the
+  // null length of zero. Zero preserves every known positive divisor.
+  result_facts[0] =
+      loom_value_facts_make(0, extent.range_hi, extent.known_divisor);
+  return iree_ok_status();
+}
+
+iree_status_t loom_buffer_load_i8_u_facts(
+    loom_fact_context_t* context, const loom_module_t* module,
+    const loom_op_t* op, const loom_value_facts_t* operand_facts,
+    loom_value_facts_t* result_facts) {
+  (void)context;
+  (void)module;
+  (void)op;
+  (void)operand_facts;
+  result_facts[0] = loom_value_facts_make(0, UINT8_MAX, 1);
+  return iree_ok_status();
+}
+
+iree_status_t loom_buffer_compare_facts(loom_fact_context_t* context,
+                                        const loom_module_t* module,
+                                        const loom_op_t* op,
+                                        const loom_value_facts_t* operand_facts,
+                                        loom_value_facts_t* result_facts) {
+  (void)context;
+  (void)module;
+  (void)op;
+  (void)operand_facts;
+  result_facts[0] = loom_value_facts_make(-1, 1, 1);
+  return iree_ok_status();
+}

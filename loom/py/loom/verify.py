@@ -32,6 +32,7 @@ from loom.ir import (
     Module,
     Operation,
     PoolType,
+    Region,
     RegisterType,
     ScalarType,
     ScalarTypeKind,
@@ -42,6 +43,7 @@ from loom.ir import (
     SymbolNameSet,
     Type,
     TypeKind,
+    Value,
 )
 
 __all__ = [
@@ -85,6 +87,14 @@ class VerifierRegistry:
     def layout(self, op_decl: Op) -> FieldLayout:
         """Return the positional field layout for an op declaration."""
         return self.layout_by_name[op_decl.name]
+
+
+@dataclass(frozen=True, slots=True)
+class _ConstraintRegionValue:
+    """Resolved region data consumed by declarative constraint predicates."""
+
+    entry_args: tuple[Value | None, ...] | None
+    terminator_operands: tuple[Value | None, ...] | None
 
 
 @dataclass(slots=True)
@@ -609,11 +619,18 @@ class ModuleVerifier:
                     case FieldKind.ATTR:
                         values[field_name] = operation.attributes.get(field_name)
                     case FieldKind.REGION:
-                        values[field_name] = (
-                            resolved.regions(field_name)
-                            if field_desc.variadic
-                            else resolved.region(field_name)
-                        )
+                        region_decl = op_decl.regions[field_desc.index]
+                        if field_desc.variadic:
+                            values[field_name] = [
+                                self._constraint_region_value(
+                                    region, region_decl.terminator
+                                )
+                                for region in resolved.regions(field_name)
+                            ]
+                        else:
+                            values[field_name] = self._constraint_region_value(
+                                resolved.region(field_name), region_decl.terminator
+                            )
                     case FieldKind.SUCCESSOR:
                         values[field_name] = (
                             resolved.successors(field_name)
@@ -628,6 +645,42 @@ class ModuleVerifier:
             )
             return None
         return values
+
+    def _constraint_region_value(
+        self,
+        region: Region | None,
+        expected_terminator: str | None,
+    ) -> _ConstraintRegionValue:
+        """Resolves a region without hiding structural failures from its owner."""
+        if region is None or not region.blocks:
+            return _ConstraintRegionValue(None, None)
+        entry_block = region.blocks[0]
+        entry_args = tuple(
+            self.module.values[value_id]
+            if 0 <= value_id < len(self.module.values)
+            else None
+            for value_id in entry_block.arg_ids
+        )
+        if not entry_block.ops:
+            return _ConstraintRegionValue(entry_args, None)
+        terminator = entry_block.ops[-1]
+        terminator_decl = self.registry.op(terminator.name)
+        if (
+            terminator_decl is None
+            or not terminator_decl.is_terminator
+            or (
+                expected_terminator is not None
+                and terminator.name != expected_terminator
+            )
+        ):
+            return _ConstraintRegionValue(entry_args, None)
+        terminator_operands = tuple(
+            self.module.values[value_id]
+            if 0 <= value_id < len(self.module.values)
+            else None
+            for value_id in terminator.operands
+        )
+        return _ConstraintRegionValue(entry_args, terminator_operands)
 
     def _verify_symbol_refs(
         self,
@@ -1037,6 +1090,8 @@ def type_satisfies_constraint(value_type: Type, constraint: TypeConstraint) -> b
         return _encoding_role_is(value_type, EncodingRole.TRANSFORM)
     if constraint == TypeConstraint.I1:
         return _scalar_kind_is(value_type, ScalarTypeKind.I1)
+    if constraint == TypeConstraint.I32:
+        return _scalar_kind_is(value_type, ScalarTypeKind.I32)
 
     if isinstance(value_type, ScalarType):
         return _scalar_satisfies_constraint(value_type.kind, constraint)
@@ -1069,6 +1124,10 @@ def _scalar_satisfies_constraint(
         return scalar_kind in _INTEGER_SCALAR_KINDS
     if constraint == TypeConstraint.FLOAT:
         return scalar_kind in _FLOAT_SCALAR_KINDS
+    if constraint == TypeConstraint.BITWISE_SCALAR:
+        return scalar_kind in _BITWISE_SCALAR_KINDS
+    if constraint == TypeConstraint.BYTE_PATTERN_SCALAR:
+        return scalar_kind in _BYTE_PATTERN_SCALAR_KINDS
     if constraint == TypeConstraint.INDEX_OR_NON_I1_INTEGER_SCALAR:
         return scalar_kind in _INDEX_OR_NON_I1_INTEGER_SCALAR_KINDS
     return False
@@ -1100,6 +1159,8 @@ def _shaped_satisfies_constraint(
         return shaped_type.element_type.kind in _INTEGER_SCALAR_KINDS
     if constraint == TypeConstraint.FLOAT_ELEMENT:
         return shaped_type.element_type.kind in _FLOAT_SCALAR_KINDS
+    if constraint == TypeConstraint.BITWISE_ELEMENT:
+        return shaped_type.element_type.kind in _BITWISE_SCALAR_KINDS
     if constraint == TypeConstraint.INDEX_OR_NON_I1_INTEGER_ELEMENT:
         return shaped_type.element_type.kind in _INDEX_OR_NON_I1_INTEGER_SCALAR_KINDS
     if constraint == TypeConstraint.I1_ELEMENT:
@@ -1138,6 +1199,23 @@ _FLOAT_SCALAR_KINDS = frozenset(
         ScalarTypeKind.F64,
     }
 )
+
+_BYTE_PATTERN_SCALAR_KINDS = frozenset(
+    {
+        ScalarTypeKind.I8,
+        ScalarTypeKind.I16,
+        ScalarTypeKind.I32,
+        ScalarTypeKind.I64,
+        ScalarTypeKind.F8E4M3,
+        ScalarTypeKind.F8E5M2,
+        ScalarTypeKind.F16,
+        ScalarTypeKind.BF16,
+        ScalarTypeKind.F32,
+        ScalarTypeKind.F64,
+    }
+)
+
+_BITWISE_SCALAR_KINDS = frozenset({ScalarTypeKind.INDEX, *_BYTE_PATTERN_SCALAR_KINDS})
 
 _INDEX_OR_NON_I1_INTEGER_SCALAR_KINDS = frozenset(
     {

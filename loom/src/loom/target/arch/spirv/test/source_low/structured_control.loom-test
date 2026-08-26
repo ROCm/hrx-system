@@ -41,6 +41,9 @@ pass.pipeline<module> @__loom_check_source_low pipeline {
       linearize-view-accesses
       canonicalize
       cse
+      if changed {
+        canonicalize
+      }
     }
   }
   target-legalize(mode = "eager")

@@ -36,6 +36,7 @@ loom_target_contract_cc_libraries(
     loom::ops::buffer
     loom::ops::index
     loom::ops::scalar
+    loom::ops::scf
     loom::ops::view
 )
 endif()
@@ -51,6 +52,7 @@ loom_target_contract_cc_libraries(
     loom::ops::buffer
     loom::ops::index
     loom::ops::scalar
+    loom::ops::scf
     loom::ops::vector
     loom::ops::view
 )
@@ -67,6 +69,7 @@ loom_target_contract_cc_libraries(
     loom::ops::buffer
     loom::ops::index
     loom::ops::scalar
+    loom::ops::scf
     loom::ops::vector
     loom::ops::view
 )

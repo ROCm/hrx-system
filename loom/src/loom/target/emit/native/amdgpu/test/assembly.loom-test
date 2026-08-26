@@ -2785,6 +2785,21 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_ds_load_u16_d16_pai
 
 // ====
 
+// RUN: emit amdgpu-assembly @gfx11_ds_byte_roundtrip waits=none
+amdgpu.target<gfx1100> @gfx11_target
+low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_ds_byte_roundtrip(%addr: reg<amdgpu.vgpr>) asm {
+  %loaded = low.op<amdgpu.ds_read_u8>(%addr) {offset = 1} : (reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr>
+  low.op<amdgpu.ds_write_b8>(%addr, %loaded) {offset = 2} : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>)
+  return
+}
+
+// ----
+  ds_read_u8 v1, v0 offset:1
+  ds_write_b8 v0, v1 offset:2
+  s_endpgm
+
+// ====
+
 // RUN: emit amdgpu-assembly @gfx942_global_load_lds waits=none
 amdgpu.target<gfx942> @gfx942_target
 low.func.def target<amdgpu.cdna3.core>(@gfx942_target) @gfx942_global_load_lds(%addr64: reg<amdgpu.vgpr x2>, %addr32: reg<amdgpu.vgpr>, %saddr: reg<amdgpu.sgpr x2>, %m0: reg<amdgpu.m0>) {

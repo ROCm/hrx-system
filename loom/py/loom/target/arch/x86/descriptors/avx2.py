@@ -49,7 +49,9 @@ from .common import (
     _asm,
     _gpr32_operand,
     _gpr32_result,
+    _gpr64_operand,
     _gpr64_resource,
+    _gpr64_result,
     _load_effect,
     _low_subset_operand,
     _scalar_f32_binary_descriptor,
@@ -61,6 +63,7 @@ from .common import (
     _vector_result,
     _vector_splat_descriptor,
     _xmm_operand,
+    _xmm_result,
 )
 from .scalar import (
     X86_SCALAR_DESCRIPTOR_SET,
@@ -85,6 +88,58 @@ def _vex_descriptor(descriptor: Descriptor) -> Descriptor:
 
 
 _X86_AVX2_XMM_DESCRIPTORS = (
+    Descriptor(
+        key="x86.avx2.vmovd.gpr32.xmm",
+        mnemonic="vmovd",
+        semantic_tag="bitcast.f32.i32",
+        operands=(_gpr32_result(), _xmm_operand("input")),
+        asm_forms=_asm(
+            mnemonic="vmovd.gpr32.xmm",
+            results=("dst",),
+            operands=("input",),
+        ),
+        schedule_class=_SCHEDULE_VECTOR_I32_XMM,
+        flags=(DescriptorFlag.DEAD_REMOVABLE,),
+    ),
+    Descriptor(
+        key="x86.avx2.vmovd.xmm.gpr32",
+        mnemonic="vmovd",
+        semantic_tag="bitcast.i32.f32",
+        operands=(_xmm_result(), _gpr32_operand("input")),
+        asm_forms=_asm(
+            mnemonic="vmovd.xmm.gpr32",
+            results=("dst",),
+            operands=("input",),
+        ),
+        schedule_class=_SCHEDULE_VECTOR_I32_XMM,
+        flags=(DescriptorFlag.DEAD_REMOVABLE,),
+    ),
+    Descriptor(
+        key="x86.avx2.vmovq.gpr64.xmm",
+        mnemonic="vmovq",
+        semantic_tag="bitcast.f64.i64",
+        operands=(_gpr64_result(), _xmm_operand("input")),
+        asm_forms=_asm(
+            mnemonic="vmovq.gpr64.xmm",
+            results=("dst",),
+            operands=("input",),
+        ),
+        schedule_class=_SCHEDULE_VECTOR_I32_XMM,
+        flags=(DescriptorFlag.DEAD_REMOVABLE,),
+    ),
+    Descriptor(
+        key="x86.avx2.vmovq.xmm.gpr64",
+        mnemonic="vmovq",
+        semantic_tag="bitcast.i64.f64",
+        operands=(_xmm_result(), _gpr64_operand("input")),
+        asm_forms=_asm(
+            mnemonic="vmovq.xmm.gpr64",
+            results=("dst",),
+            operands=("input",),
+        ),
+        schedule_class=_SCHEDULE_VECTOR_I32_XMM,
+        flags=(DescriptorFlag.DEAD_REMOVABLE,),
+    ),
     _vector_splat_descriptor(
         vector_bit_width=128,
         key="x86.avx2.vpbroadcastd.xmm",

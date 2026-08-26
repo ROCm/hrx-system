@@ -107,12 +107,11 @@ class CfgConditionFactsTest : public ::testing::Test {
     return result;
   }
 
-  loom_value_id_t BuildIndexCompare(uint8_t predicate, loom_value_id_t left,
+  loom_value_id_t BuildIndexCompare(loom_index_cmp_predicate_t predicate,
+                                    loom_value_id_t left,
                                     loom_value_id_t right) {
     loom_op_t* op = nullptr;
     IREE_CHECK_OK(loom_index_cmp_build(&builder_, predicate, left, right,
-                                       loom_type_scalar(LOOM_SCALAR_TYPE_INDEX),
-                                       loom_type_scalar(LOOM_SCALAR_TYPE_I1),
                                        LOOM_LOCATION_UNKNOWN, &op));
     return loom_index_cmp_result(op);
   }

@@ -1099,9 +1099,8 @@ static iree_status_t loom_low_source_workload_gen_index_madd(
   }
 
   loom_op_t* op = NULL;
-  IREE_RETURN_IF_ERROR(loom_index_madd_build(
-      context->builder, a, b, c, loom_low_source_workload_index_type(),
-      LOOM_LOCATION_UNKNOWN, &op));
+  IREE_RETURN_IF_ERROR(loom_index_madd_build(context->builder, a, b, c,
+                                             LOOM_LOCATION_UNKNOWN, &op));
   loom_low_source_workload_values_add(context->values,
                                       loom_index_madd_result(op),
                                       loom_low_source_workload_index_type());

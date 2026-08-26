@@ -10,6 +10,7 @@ import re
 from collections.abc import Iterator
 from contextlib import contextmanager
 
+import loom.dsl as dsl
 import loom.ir as ir
 from loom.assembly import (
     COLON,
@@ -45,6 +46,7 @@ from loom.dsl import (
     ATTR_TYPE_SYMBOL_SET,
     BUFFER,
     BY_REFERENCE,
+    BYTE_PATTERN_SCALAR,
     COMMAND_EFFECT,
     COMMUTATIVE,
     COMPILE_TIME_ONLY,
@@ -257,6 +259,8 @@ class TestTypeConstraints:
         assert OFFSET == TypeConstraint.OFFSET
         assert ADDRESS == TypeConstraint.ADDRESS
         assert BUFFER == TypeConstraint.BUFFER
+        assert BYTE_PATTERN_SCALAR == TypeConstraint.BYTE_PATTERN_SCALAR
+        assert dsl.I32 == TypeConstraint.I32
         assert STORAGE == TypeConstraint.STORAGE
         assert ANY_ENCODING == TypeConstraint.ANY_ENCODING
         assert ENCODING_LAYOUT == TypeConstraint.ENCODING_LAYOUT
@@ -277,6 +281,8 @@ class TestTypeConstraints:
         assert OFFSET.value == "offset"
         assert ADDRESS.value == "address"
         assert STORAGE.value == "storage"
+        assert BYTE_PATTERN_SCALAR.value == "byte_pattern_scalar"
+        assert dsl.I32.value == "i32"
 
     def test_element_family_constraints_are_shaped_specific(self) -> None:
         element_family_constraints = {
@@ -1038,6 +1044,7 @@ class TestInterfaces:
         interface = MemoryAccessInterface()
 
         assert interface.view == "view"
+        assert interface.byte_offset == "byte_offset"
         assert interface.value == "value"
         assert interface.indices == "indices"
         assert interface.static_indices == "static_indices"
@@ -1112,9 +1119,6 @@ class TestConstraints:
         c = SameEncoding("a", "b")
         assert c.error is not None
         assert c.error.error_id == "ERR_ENCODING_001"
-        # No validate function — C-only check.
-        ok, _msg = c.check({})
-        assert ok
 
     def test_same_shape(self) -> None:
         c = SameShape("a", "b")

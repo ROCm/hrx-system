@@ -69,6 +69,7 @@ iree_execution_test_suite(
         "amdgpu_hal_actual.loom",
         "amdgpu_unused_kernargs.loom",
         "generated_tensor_cases.loom",
+        "//loom/src/loom/tooling/execution/hal:testdata/buffer_bulk_hal_actual.loom",
         "//loom/src/loom/tooling/execution/hal:testdata/dynamic_workgroup_hal_actual.loom",
         "//loom/src/loom/tooling/execution/hal:testdata/launch_schedule_hal_actual.loom",
     ],

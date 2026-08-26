@@ -192,6 +192,47 @@ static iree_status_t loom_x86_append_operand(
                                loom_op_const_operands(op)[operand_index]);
 }
 
+static iree_status_t loom_x86_append_gpr32_value(
+    const loom_native_assembly_packet_context_t* context,
+    loom_value_id_t value_id) {
+  const loom_low_allocation_assignment_t* assignment =
+      loom_x86_map_assignment(context, value_id);
+  if (assignment->location_count != 1) {
+    return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
+                            "x86 assembly multi-register i32 value %" PRIu32
+                            " is not supported",
+                            assignment->value_id);
+  }
+  loom_x86_register_class_t register_class_kind = 0;
+  IREE_RETURN_IF_ERROR(
+      loom_x86_register_class_kind(context, assignment, &register_class_kind));
+  if (register_class_kind != LOOM_X86_REGISTER_CLASS_GPR32 &&
+      register_class_kind != LOOM_X86_REGISTER_CLASS_GPR64) {
+    return iree_make_status(
+        IREE_STATUS_UNIMPLEMENTED,
+        "x86 assembly i32 projection requires a GPR allocation");
+  }
+  if (assignment->location_base >= IREE_ARRAYSIZE(kX86Gpr32Names)) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "x86 GPR index %" PRIu32 " is out of range",
+                            assignment->location_base);
+  }
+  return iree_string_builder_append_cstring(
+      context->builder, kX86Gpr32Names[assignment->location_base]);
+}
+
+static iree_status_t loom_x86_append_gpr32_operand(
+    const loom_native_assembly_packet_context_t* context,
+    iree_host_size_t operand_index) {
+  const loom_op_t* op = context->packet->node->op;
+  if (operand_index >= op->operand_count) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "x86 assembly operand index is out of range");
+  }
+  return loom_x86_append_gpr32_value(context,
+                                     loom_op_const_operands(op)[operand_index]);
+}
+
 static iree_status_t loom_x86_append_gpr8_value(
     const loom_native_assembly_packet_context_t* context,
     loom_value_id_t value_id) {
@@ -230,6 +271,18 @@ static iree_status_t loom_x86_append_gpr8_result(
   }
   return loom_x86_append_gpr8_value(context,
                                     loom_op_const_results(op)[result_index]);
+}
+
+static iree_status_t loom_x86_append_gpr8_operand(
+    const loom_native_assembly_packet_context_t* context,
+    iree_host_size_t operand_index) {
+  const loom_op_t* op = context->packet->node->op;
+  if (operand_index >= op->operand_count) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "x86 assembly operand index is out of range");
+  }
+  return loom_x86_append_gpr8_value(context,
+                                    loom_op_const_operands(op)[operand_index]);
 }
 
 static loom_named_attr_slice_t loom_x86_packet_attrs(
@@ -669,6 +722,58 @@ static iree_status_t loom_x86_append_cmp_setcc_packet(
   return loom_x86_append_gpr8_result(context, 0);
 }
 
+static iree_status_t loom_x86_append_truncate_packet(
+    const loom_native_assembly_packet_context_t* context) {
+  const loom_op_t* op = context->packet->node->op;
+  if (op->result_count != 1 || op->operand_count != 1) {
+    const iree_string_view_t key = loom_x86_descriptor_key(context);
+    return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
+                            "x86 truncate descriptor '%.*s' has an unsupported "
+                            "operand shape",
+                            (int)key.size, key.data);
+  }
+  IREE_RETURN_IF_ERROR(
+      iree_string_builder_append_cstring(context->builder, "mov "));
+  IREE_RETURN_IF_ERROR(loom_x86_append_result(context, 0));
+  IREE_RETURN_IF_ERROR(
+      iree_string_builder_append_cstring(context->builder, ", "));
+  return loom_x86_append_gpr32_operand(context, 0);
+}
+
+static iree_status_t loom_x86_append_select_packet(
+    const loom_native_assembly_packet_context_t* context) {
+  const loom_op_t* op = context->packet->node->op;
+  if (op->result_count != 1 || op->operand_count != 3) {
+    const iree_string_view_t key = loom_x86_descriptor_key(context);
+    return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
+                            "x86 select descriptor '%.*s' has an unsupported "
+                            "operand shape",
+                            (int)key.size, key.data);
+  }
+  const loom_low_allocation_assignment_t* result_assignment =
+      loom_x86_map_assignment(context, loom_op_const_results(op)[0]);
+  const loom_low_allocation_assignment_t* false_assignment =
+      loom_x86_map_assignment(context, loom_op_const_operands(op)[2]);
+  if (!loom_x86_assignments_match(result_assignment, false_assignment)) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "x86 select result must share the false-value physical register");
+  }
+
+  IREE_RETURN_IF_ERROR(
+      iree_string_builder_append_cstring(context->builder, "test "));
+  IREE_RETURN_IF_ERROR(loom_x86_append_operand(context, 0));
+  IREE_RETURN_IF_ERROR(
+      iree_string_builder_append_cstring(context->builder, ", "));
+  IREE_RETURN_IF_ERROR(loom_x86_append_operand(context, 0));
+  IREE_RETURN_IF_ERROR(
+      iree_string_builder_append_cstring(context->builder, "\n  cmovne "));
+  IREE_RETURN_IF_ERROR(loom_x86_append_result(context, 0));
+  IREE_RETURN_IF_ERROR(
+      iree_string_builder_append_cstring(context->builder, ", "));
+  return loom_x86_append_operand(context, 1);
+}
+
 static iree_status_t loom_x86_append_lea_packet(
     const loom_native_assembly_packet_context_t* context) {
   const loom_op_t* op = context->packet->node->op;
@@ -893,6 +998,15 @@ static iree_status_t loom_x86_append_load_packet(
   IREE_RETURN_IF_ERROR(loom_x86_append_result(context, 0));
   IREE_RETURN_IF_ERROR(
       iree_string_builder_append_cstring(context->builder, ", "));
+  const loom_low_descriptor_memory_effect_summary_t memory_effects =
+      loom_low_descriptor_memory_effect_summary(
+          context->schedule->target.descriptor_set,
+          context->packet->descriptor);
+  if (memory_effects.read_byte_count == 1 &&
+      memory_effects.read_unknown_width_count == 0) {
+    IREE_RETURN_IF_ERROR(
+        iree_string_builder_append_cstring(context->builder, "byte ptr "));
+  }
   return loom_x86_append_memory_operand(context, loom_op_const_operands(op)[0],
                                         index_value_id, scale, displacement);
 }
@@ -923,11 +1037,22 @@ static iree_status_t loom_x86_append_store_packet(
   IREE_RETURN_IF_ERROR(loom_x86_append_mnemonic(context));
   IREE_RETURN_IF_ERROR(
       iree_string_builder_append_cstring(context->builder, " "));
+  const loom_low_descriptor_memory_effect_summary_t memory_effects =
+      loom_low_descriptor_memory_effect_summary(
+          context->schedule->target.descriptor_set,
+          context->packet->descriptor);
+  const bool is_byte_store = memory_effects.write_byte_count == 1 &&
+                             memory_effects.write_unknown_width_count == 0;
+  if (is_byte_store) {
+    IREE_RETURN_IF_ERROR(
+        iree_string_builder_append_cstring(context->builder, "byte ptr "));
+  }
   IREE_RETURN_IF_ERROR(loom_x86_append_memory_operand(
       context, base_value_id, index_value_id, scale, displacement));
   IREE_RETURN_IF_ERROR(
       iree_string_builder_append_cstring(context->builder, ", "));
-  return loom_x86_append_operand(context, 0);
+  return is_byte_store ? loom_x86_append_gpr8_operand(context, 0)
+                       : loom_x86_append_operand(context, 0);
 }
 
 static iree_status_t loom_x86_append_const_packet(
@@ -1109,6 +1234,12 @@ static iree_status_t loom_x86_append_descriptor_packet(
   const iree_string_view_t mnemonic = loom_x86_descriptor_mnemonic(context);
   if (iree_string_view_starts_with(mnemonic, IREE_SV("cmp.set"))) {
     return loom_x86_append_cmp_setcc_packet(context);
+  }
+  if (iree_string_view_equal(mnemonic, IREE_SV("mov.trunc"))) {
+    return loom_x86_append_truncate_packet(context);
+  }
+  if (iree_string_view_equal(mnemonic, IREE_SV("select.cmovne"))) {
+    return loom_x86_append_select_packet(context);
   }
   if (iree_string_view_equal(mnemonic, IREE_SV("lea"))) {
     return loom_x86_append_lea_packet(context);

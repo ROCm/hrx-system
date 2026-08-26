@@ -1291,7 +1291,7 @@ TEST_F(WriterTest, ClosedEnumAttributeRejectsFutureOrdinal) {
       loom_region_entry_block(loom_func_like_body(func_like)), &body_builder);
   loom_op_t* cmp_op = nullptr;
   IREE_ASSERT_OK(loom_test_cmp_build(&body_builder, LOOM_TEST_CMP_PREDICATE_EQ,
-                                     arg_ids[0], arg_ids[0], i32_type, i32_type,
+                                     arg_ids[0], arg_ids[0],
                                      LOOM_LOCATION_UNKNOWN, &cmp_op));
   loom_op_attrs(cmp_op)[0] = loom_attr_enum(250);
   loom_value_id_t result_id = loom_test_cmp_result(cmp_op);

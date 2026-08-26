@@ -1,0 +1,18 @@
+// RUN: emit source-low output=low
+
+wasm.target<simd128> @target
+
+func.def target(@target) @raw_byte_roundtrip(%source: buffer, %source_offset: offset, %target: buffer, %target_offset: offset) -> (i32) {
+  %byte = buffer.load.i8.u %source[%source_offset]
+  buffer.store.i8 %byte, %target[%target_offset]
+  func.return %byte : i32
+}
+
+// ----
+low.func.def target<wasm.core.simd128>(@target) abi(wasm_function) @raw_byte_roundtrip(%source: reg<wasm.i32>, %source_offset: reg<wasm.i32>, %target: reg<wasm.i32>, %target_offset: reg<wasm.i32>) -> (reg<wasm.i32>) asm {
+  %11 = i32.add %source, %source_offset
+  %byte = i32.load8_u %11
+  %13 = i32.add %target, %target_offset
+  i32.store8 %13, %byte
+  return %byte
+}

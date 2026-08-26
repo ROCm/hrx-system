@@ -275,9 +275,8 @@ iree_status_t loom_vector_to_scalar_build_index_term_cmp(
       loom_vector_to_scalar_term_value(state, rhs, &rhs_value));
   loom_op_t* cmp_op = NULL;
   IREE_RETURN_IF_ERROR(loom_index_cmp_build(
-      &state->rewriter->builder, predicate, lhs_value, rhs_value,
-      loom_type_scalar(LOOM_SCALAR_TYPE_INDEX),
-      loom_type_scalar(LOOM_SCALAR_TYPE_I1), state->location, &cmp_op));
+      &state->rewriter->builder, (loom_index_cmp_predicate_t)predicate,
+      lhs_value, rhs_value, state->location, &cmp_op));
   *out_condition = loom_index_cmp_result(cmp_op);
   return iree_ok_status();
 }

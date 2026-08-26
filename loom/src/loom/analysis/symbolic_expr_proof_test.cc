@@ -165,7 +165,6 @@ TEST_F(SymbolicExprTest, SimplifiesDifferenceToExistingValue) {
   loom_value_id_t stride = loom_index_constant_result(BuildIndexConstant(16));
   loom_op_t* scaled_op = nullptr;
   IREE_ASSERT_OK(loom_index_mul_build(&builder_, row, stride,
-                                      loom_type_scalar(LOOM_SCALAR_TYPE_INDEX),
                                       LOOM_LOCATION_UNKNOWN, &scaled_op));
   loom_op_t* address_op = nullptr;
   IREE_ASSERT_OK(loom_index_add_build(&builder_,
@@ -293,12 +292,10 @@ TEST_F(SymbolicExprTest, ScaledStrictRelationProvesLessEqualWithUnitExtent) {
   loom_value_id_t four = loom_index_constant_result(BuildIndexConstant(4));
   loom_op_t* scaled_induction_op = nullptr;
   IREE_ASSERT_OK(loom_index_mul_build(&builder_, assumed_induction, four,
-                                      loom_type_scalar(LOOM_SCALAR_TYPE_INDEX),
                                       LOOM_LOCATION_UNKNOWN,
                                       &scaled_induction_op));
   loom_op_t* scaled_bound_op = nullptr;
   IREE_ASSERT_OK(loom_index_mul_build(&builder_, upper_bound, four,
-                                      loom_type_scalar(LOOM_SCALAR_TYPE_INDEX),
                                       LOOM_LOCATION_UNKNOWN, &scaled_bound_op));
 
   loom_symbolic_expr_t scaled_induction = {0};
@@ -448,9 +445,8 @@ TEST_F(SymbolicExprTest, ProvesFlattenedAddressFromDynamicAxisBounds) {
 
   loom_op_t* column_compare_op = nullptr;
   IREE_ASSERT_OK(loom_index_cmp_build(
-      &builder_, LOOM_INDEX_CMP_PREDICATE_ULT, column, column_count, index_type,
-      loom_type_scalar(LOOM_SCALAR_TYPE_I1), LOOM_LOCATION_UNKNOWN,
-      &column_compare_op));
+      &builder_, LOOM_INDEX_CMP_PREDICATE_ULT, column, column_count,
+      LOOM_LOCATION_UNKNOWN, &column_compare_op));
   loom_condition_integer_relation_t relation_storage[4];
   loom_condition_fact_set_t condition_facts;
   loom_condition_fact_set_initialize(
@@ -462,7 +458,7 @@ TEST_F(SymbolicExprTest, ProvesFlattenedAddressFromDynamicAxisBounds) {
   loom_symbolic_expr_context_reset(&expression_context_);
 
   loom_op_t* row_base_op = nullptr;
-  IREE_ASSERT_OK(loom_index_mul_build(&builder_, row, column_count, index_type,
+  IREE_ASSERT_OK(loom_index_mul_build(&builder_, row, column_count,
                                       LOOM_LOCATION_UNKNOWN, &row_base_op));
   loom_op_t* origin_op = nullptr;
   IREE_ASSERT_OK(loom_index_add_build(
@@ -470,7 +466,7 @@ TEST_F(SymbolicExprTest, ProvesFlattenedAddressFromDynamicAxisBounds) {
       LOOM_LOCATION_UNKNOWN, &origin_op));
   loom_op_t* element_count_op = nullptr;
   IREE_ASSERT_OK(loom_index_mul_build(&builder_, row_count, column_count,
-                                      index_type, LOOM_LOCATION_UNKNOWN,
+                                      LOOM_LOCATION_UNKNOWN,
                                       &element_count_op));
 
   loom_symbolic_expr_t origin = {};
@@ -494,8 +490,7 @@ TEST_F(SymbolicExprTest, ProvesFlattenedAddressFromDynamicAxisBounds) {
   loom_op_t* row_nonstrict_compare_op = nullptr;
   IREE_ASSERT_OK(loom_index_cmp_build(
       &builder_, LOOM_INDEX_CMP_PREDICATE_ULE, row_source, row_count_source,
-      index_type, loom_type_scalar(LOOM_SCALAR_TYPE_I1), LOOM_LOCATION_UNKNOWN,
-      &row_nonstrict_compare_op));
+      LOOM_LOCATION_UNKNOWN, &row_nonstrict_compare_op));
   ASSERT_TRUE(QueryConditionFacts(
       &expression_context_, &fact_table_,
       loom_index_cmp_result(row_nonstrict_compare_op), true, &condition_facts));
@@ -506,7 +501,7 @@ TEST_F(SymbolicExprTest, ProvesFlattenedAddressFromDynamicAxisBounds) {
 
   loom_op_t* nonstrict_row_base_op = nullptr;
   IREE_ASSERT_OK(loom_index_mul_build(&builder_, row_source, column_count,
-                                      index_type, LOOM_LOCATION_UNKNOWN,
+                                      LOOM_LOCATION_UNKNOWN,
                                       &nonstrict_row_base_op));
   loom_op_t* nonstrict_origin_op = nullptr;
   IREE_ASSERT_OK(loom_index_add_build(
@@ -514,7 +509,7 @@ TEST_F(SymbolicExprTest, ProvesFlattenedAddressFromDynamicAxisBounds) {
       index_type, LOOM_LOCATION_UNKNOWN, &nonstrict_origin_op));
   loom_op_t* nonstrict_element_count_op = nullptr;
   IREE_ASSERT_OK(loom_index_mul_build(&builder_, row_count_source, column_count,
-                                      index_type, LOOM_LOCATION_UNKNOWN,
+                                      LOOM_LOCATION_UNKNOWN,
                                       &nonstrict_element_count_op));
   IREE_ASSERT_OK(loom_symbolic_expr_from_value(
       &expression_context_, loom_index_add_result(nonstrict_origin_op),
@@ -589,7 +584,6 @@ TEST_F(SymbolicExprTest, ProvesIndexRemainderIsBelowDynamicDivisor) {
   DefineFacts(divisor, loom_value_facts_make(1, 512, 1));
   loom_op_t* remainder_op = nullptr;
   IREE_ASSERT_OK(loom_index_rem_build(&builder_, dividend, divisor,
-                                      loom_type_scalar(LOOM_SCALAR_TYPE_INDEX),
                                       LOOM_LOCATION_UNKNOWN, &remainder_op));
   loom_value_id_t remainder = loom_index_rem_result(remainder_op);
 
@@ -617,7 +611,6 @@ TEST_F(SymbolicExprTest, ProvesAssumedIndexRemainderIsBelowDynamicDivisor) {
   DefineFacts(divisor, loom_value_facts_make(1, 512, 1));
   loom_op_t* remainder_op = nullptr;
   IREE_ASSERT_OK(loom_index_rem_build(&builder_, dividend, divisor,
-                                      loom_type_scalar(LOOM_SCALAR_TYPE_INDEX),
                                       LOOM_LOCATION_UNKNOWN, &remainder_op));
   loom_value_id_t remainder = loom_index_rem_result(remainder_op);
 
@@ -650,7 +643,6 @@ TEST_F(SymbolicExprTest, RemainderBoundRequiresUnsignedInputFacts) {
   DefineFacts(divisor, loom_value_facts_make(1, 512, 1));
   loom_op_t* remainder_op = nullptr;
   IREE_ASSERT_OK(loom_index_rem_build(&builder_, dividend, divisor,
-                                      loom_type_scalar(LOOM_SCALAR_TYPE_INDEX),
                                       LOOM_LOCATION_UNKNOWN, &remainder_op));
   loom_value_id_t remainder = loom_index_rem_result(remainder_op);
 
@@ -693,9 +685,8 @@ TEST_F(SymbolicExprTest, ConditionRefinementMemoReusesPersistentStorage) {
 
   loom_op_t* condition_op = nullptr;
   IREE_ASSERT_OK(loom_index_cmp_build(&builder_, LOOM_INDEX_CMP_PREDICATE_ULT,
-                                      source, upper, index_type,
-                                      loom_type_scalar(LOOM_SCALAR_TYPE_I1),
-                                      LOOM_LOCATION_UNKNOWN, &condition_op));
+                                      source, upper, LOOM_LOCATION_UNKNOWN,
+                                      &condition_op));
   loom_value_id_t condition = loom_index_cmp_result(condition_op);
 
   // Each select references the preceding value twice. Condition-refined fact
@@ -752,9 +743,8 @@ TEST_F(SymbolicExprTest, SelectConditionProvesDynamicLoopLowerBound) {
 
   loom_op_t* edge_cmp_op = nullptr;
   IREE_ASSERT_OK(loom_index_cmp_build(&builder_, LOOM_INDEX_CMP_PREDICATE_EQ,
-                                      output, zero_value, index_type,
-                                      loom_type_scalar(LOOM_SCALAR_TYPE_I1),
-                                      LOOM_LOCATION_UNKNOWN, &edge_cmp_op));
+                                      output, zero_value, LOOM_LOCATION_UNKNOWN,
+                                      &edge_cmp_op));
   loom_op_t* lower_bound_op = nullptr;
   IREE_ASSERT_OK(loom_scf_select_build(
       &builder_, loom_index_cmp_result(edge_cmp_op), one_value, zero_value,
@@ -823,16 +813,14 @@ TEST_F(SymbolicExprTest, SelectConditionProvesDynamicLoopDivBounds) {
 
   loom_op_t* lane_op = nullptr;
   IREE_ASSERT_OK(loom_index_andi_build(&builder_, linear, last_lane_value,
-                                       index_type, LOOM_LOCATION_UNKNOWN,
-                                       &lane_op));
+                                       LOOM_LOCATION_UNKNOWN, &lane_op));
   loom_value_id_t lane = loom_index_andi_result(lane_op);
   DefineFacts(lane, loom_value_facts_make(0, 1023, 1));
 
   loom_op_t* left_edge_cmp_op = nullptr;
-  IREE_ASSERT_OK(loom_index_cmp_build(
-      &builder_, LOOM_INDEX_CMP_PREDICATE_EQ, lane, zero_value, index_type,
-      loom_type_scalar(LOOM_SCALAR_TYPE_I1), LOOM_LOCATION_UNKNOWN,
-      &left_edge_cmp_op));
+  IREE_ASSERT_OK(loom_index_cmp_build(&builder_, LOOM_INDEX_CMP_PREDICATE_EQ,
+                                      lane, zero_value, LOOM_LOCATION_UNKNOWN,
+                                      &left_edge_cmp_op));
   loom_op_t* lower_bound_op = nullptr;
   IREE_ASSERT_OK(loom_scf_select_build(
       &builder_, loom_index_cmp_result(left_edge_cmp_op), one_value, zero_value,
@@ -840,9 +828,8 @@ TEST_F(SymbolicExprTest, SelectConditionProvesDynamicLoopDivBounds) {
 
   loom_op_t* right_edge_cmp_op = nullptr;
   IREE_ASSERT_OK(loom_index_cmp_build(
-      &builder_, LOOM_INDEX_CMP_PREDICATE_EQ, lane, last_lane_value, index_type,
-      loom_type_scalar(LOOM_SCALAR_TYPE_I1), LOOM_LOCATION_UNKNOWN,
-      &right_edge_cmp_op));
+      &builder_, LOOM_INDEX_CMP_PREDICATE_EQ, lane, last_lane_value,
+      LOOM_LOCATION_UNKNOWN, &right_edge_cmp_op));
   loom_op_t* upper_bound_op = nullptr;
   IREE_ASSERT_OK(loom_scf_select_build(
       &builder_, loom_index_cmp_result(right_edge_cmp_op), two_value,
@@ -878,9 +865,9 @@ TEST_F(SymbolicExprTest, SelectConditionProvesDynamicLoopDivBounds) {
                                       one_value, index_type,
                                       LOOM_LOCATION_UNKNOWN, &source_lane_op));
   loom_op_t* input_lane_op = nullptr;
-  IREE_ASSERT_OK(loom_index_div_build(
-      &builder_, loom_index_sub_result(source_lane_op), two_value, index_type,
-      LOOM_LOCATION_UNKNOWN, &input_lane_op));
+  IREE_ASSERT_OK(
+      loom_index_div_build(&builder_, loom_index_sub_result(source_lane_op),
+                           two_value, LOOM_LOCATION_UNKNOWN, &input_lane_op));
 
   loom_symbolic_expr_t source_lane = {0};
   IREE_ASSERT_OK(loom_symbolic_expr_from_value(

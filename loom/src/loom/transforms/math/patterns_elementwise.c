@@ -162,6 +162,17 @@ static iree_status_t loom_math_legalize_vector_cmpf_build(
                                 operand_type, result_type, location, out_op);
 }
 
+static iree_status_t loom_math_legalize_scalar_cmpf_build(
+    loom_builder_t* builder, uint8_t instance_flags, uint8_t predicate,
+    loom_value_id_t lhs, loom_value_id_t rhs, loom_type_t operand_type,
+    loom_type_t result_type, loom_location_id_t location, loom_op_t** out_op) {
+  (void)operand_type;
+  (void)result_type;
+  return loom_scalar_cmpf_build(builder, instance_flags,
+                                (loom_scalar_cmpf_predicate_t)predicate, lhs,
+                                rhs, location, out_op);
+}
+
 static const loom_math_legalize_lane_builders_t kScalarLaneBuilders = {
     .constant = loom_scalar_constant_build,
     .addf = loom_scalar_addf_build,
@@ -170,7 +181,7 @@ static const loom_math_legalize_lane_builders_t kScalarLaneBuilders = {
     .divf = loom_scalar_divf_build,
     .fmaf = loom_scalar_fmaf_build,
     .clampf = loom_math_legalize_scalar_clampf_build,
-    .cmpf = loom_scalar_cmpf_build,
+    .cmpf = loom_math_legalize_scalar_cmpf_build,
     .cmpf_ordered_less_predicate = LOOM_SCALAR_CMPF_PREDICATE_OLT,
     .select = loom_scf_select_build,
     .absf = loom_scalar_absf_build,

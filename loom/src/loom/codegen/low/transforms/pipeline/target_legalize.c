@@ -26,6 +26,7 @@
 #include "loom/target/low_descriptor_registry.h"
 #include "loom/target/low_legality.h"
 #include "loom/target/reporting/report.h"
+#include "loom/transforms/buffer/target_legalization.h"
 #include "loom/transforms/scalar/target_legalization.h"
 #include "loom/transforms/vector/target_legalization.h"
 #include "loom/transforms/view/target_legalization.h"
@@ -1635,22 +1636,25 @@ static iree_status_t loom_low_target_legalize_compose_providers(
     iree_host_size_t* out_provider_count) {
   const loom_target_legalizer_provider_t* scalar_provider =
       loom_scalar_target_legalizer_provider();
+  const loom_target_legalizer_provider_t* buffer_provider =
+      loom_buffer_target_legalizer_provider();
   const loom_target_legalizer_provider_t* vector_provider =
       loom_vector_target_legalizer_provider();
   const loom_target_legalizer_provider_t* view_provider =
       loom_view_target_legalizer_provider();
   const iree_host_size_t target_provider_count =
       target_provider_list ? target_provider_list->count : 0;
-  const iree_host_size_t provider_count = target_provider_count + 3;
+  const iree_host_size_t provider_count = target_provider_count + 4;
   const loom_target_legalizer_provider_t** providers = NULL;
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
       arena, provider_count, sizeof(*providers), (void**)&providers));
   for (iree_host_size_t i = 0; i < target_provider_count; ++i) {
     providers[i] = target_provider_list->values[i];
   }
-  providers[target_provider_count] = scalar_provider;
-  providers[target_provider_count + 1] = vector_provider;
-  providers[target_provider_count + 2] = view_provider;
+  providers[target_provider_count] = buffer_provider;
+  providers[target_provider_count + 1] = scalar_provider;
+  providers[target_provider_count + 2] = vector_provider;
+  providers[target_provider_count + 3] = view_provider;
   *out_providers = providers;
   *out_provider_count = provider_count;
   return iree_ok_status();

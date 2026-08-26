@@ -456,6 +456,8 @@ loom_check_test_suite(
   SRCS
     "test/source_low/barrier.loom-test"
     "test/source_low/baseline.loom-test"
+    "test/source_low/buffer_bulk.loom-test"
+    "test/source_low/buffer_raw.loom-test"
     "test/source_low/corpus/index_addressing.loom-test"
     "test/source_low/corpus/memory_scalar_addressing.loom-test"
     "test/source_low/corpus/memory_workgroup_scalar_addressing.loom-test"

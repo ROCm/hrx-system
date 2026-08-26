@@ -51,8 +51,8 @@ func.def @vector_f32_clampf_ordered(%input: vector<2xf32>, %lower: vector<2xf32>
 // ====
 
 func.def @index_minmax_sgpr(%lhs0: index, %rhs0: index) -> (index) {
-  %lhs = index.assume %lhs0 [range(%lhs0, 0, 1024)] : index
-  %rhs = index.assume %rhs0 [range(%rhs0, 0, 1024)] : index
+  %lhs = index.assume %lhs0 [range(%lhs0, -1024, 1024)] : index
+  %rhs = index.assume %rhs0 [range(%rhs0, -1024, 1024)] : index
   %min = index.min %lhs, %rhs : index
   %max = index.max %lhs, %rhs : index
   %sum = index.add %min, %max : index

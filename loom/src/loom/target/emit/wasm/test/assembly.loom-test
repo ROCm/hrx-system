@@ -184,7 +184,7 @@ Disassembly of section CODE:
   end
 
 <for_with_iter_args>:
-        .local v128, v128
+        .local v128
   local.get  3
   local.set  5
   block
@@ -197,8 +197,6 @@ Disassembly of section CODE:
   local.get  5
   local.get  4
   i32x4.add
-  local.set  6
-  local.get  6
   local.set  5
   local.get  0
   local.get  2
@@ -208,8 +206,6 @@ Disassembly of section CODE:
   end
   end
   local.get  5
-  local.set  4
-  local.get  4
   local.get  3
   i32x4.add
   local.set  4
@@ -278,15 +274,15 @@ Disassembly of section CODE:
   local.get  4
   v128.bitselect
   local.set  3
-  local.get  3
-  local.set  1
   else
   local.get  1
   local.get  2
   i32x4.mul
   local.set  1
-  end
   local.get  1
+  local.set  3
+  end
+  local.get  3
   return
   end
 
@@ -431,11 +427,11 @@ Disassembly of section CODE:
   local.get  2
   i32.add
   local.set  2
-  local.get  2
-  local.set  1
   else
-  end
   local.get  1
+  local.set  2
+  end
+  local.get  2
   return
   end
 
@@ -489,5 +485,264 @@ Disassembly of section CODE:
   local.set  1
   local.get  0
   local.get  1
+  return
+  end
+
+// ====
+
+// RUN: emit wasm-dis
+// REQUIRES: wasm-objdump
+
+wasm.target<simd128> @target
+
+low.func.def public target<wasm.core.simd128>(@target) abi(wasm_function) @byte_roundtrip(%source: reg<wasm.i32>, %source_offset: reg<wasm.i32>, %target: reg<wasm.i32>, %target_offset: reg<wasm.i32>) -> (reg<wasm.i32>) asm {
+  %source_address = i32.add %source, %source_offset
+  %byte = i32.load8_u %source_address
+  %target_address = i32.add %target, %target_offset
+  i32.store8 %target_address, %byte
+  return %byte
+}
+
+// ----
+Disassembly of section CODE:
+
+<CODE>:
+        # 1 functions in section.
+
+<byte_roundtrip>:
+
+  local.get  0
+  local.get  1
+  i32.add
+  local.set  0
+  local.get  0
+  i32.load8_u  0
+  local.set  0
+  local.get  2
+  local.get  3
+  i32.add
+  local.set  1
+  local.get  1
+  local.get  0
+  i32.store8  0
+  local.get  0
+  return
+  end
+
+// ====
+
+// RUN: emit wasm-dis
+// REQUIRES: wasm-objdump
+
+wasm.target<simd128> @target
+
+low.func.def public target<wasm.core.simd128>(@target) abi(wasm_function) @bulk_scalar_primitives(%lhs: reg<wasm.i32>, %rhs: reg<wasm.i32>, %pattern: reg<wasm.f32>) -> (reg<wasm.i32>) asm {
+  %bits = i32.reinterpret_f32 %pattern
+  %masked = i32.and %lhs, %rhs
+  %combined = i32.or %masked, %rhs
+  %shifted_left = i32.shl %combined, %lhs
+  %shifted_right = i32.shr_u %bits, %rhs
+  %equal = i32.eq %shifted_left, %shifted_right
+  return %equal
+}
+
+// ----
+Disassembly of section CODE:
+
+<CODE>:
+        # 1 functions in section.
+
+<bulk_scalar_primitives>:
+        .local i32, i32
+  local.get  2
+  i32.reinterpret_f32
+  local.set  3
+  local.get  0
+  local.get  1
+  i32.and
+  local.set  4
+  local.get  4
+  local.get  1
+  i32.or
+  local.set  4
+  local.get  4
+  local.get  0
+  i32.shl
+  local.set  0
+  local.get  3
+  local.get  1
+  i32.shr_u
+  local.set  1
+  local.get  0
+  local.get  1
+  i32.eq
+  local.set  0
+  local.get  0
+  return
+  end
+
+// ====
+
+// RUN: emit wasm-dis
+// REQUIRES: wasm-objdump
+
+wasm.target<simd128> @target
+
+// llvm-objdump renders Wasm's untyped select opcode as f32.select even when
+// its stack operands are i32.
+low.func.def public target<wasm.core.simd128>(@target) abi(wasm_function) @scalar_select(%condition: reg<wasm.i32>, %true_value: reg<wasm.i32>, %false_value: reg<wasm.i32>) -> (reg<wasm.i32>) asm {
+  %result = i32.select %true_value, %false_value, %condition
+  return %result
+}
+
+// ----
+Disassembly of section CODE:
+
+<CODE>:
+        # 1 functions in section.
+
+<scalar_select>:
+
+  local.get  1
+  local.get  2
+  local.get  0
+  f32.select
+  local.set  0
+  local.get  0
+  return
+  end
+
+// ====
+
+// RUN: emit wasm-dis
+// REQUIRES: wasm-objdump
+
+wasm.target<simd128> @target
+
+low.func.def public target<wasm.core.simd128>(@target) abi(wasm_function) @bulk_wide_scalar_primitives(%pattern: reg<wasm.f64>) -> (reg<wasm.i32>) asm {
+  %bits = i64.reinterpret_f64 %pattern
+  %shift = i64.const 8
+  %negative = i64.const -1
+  %shifted_left = i64.shl %bits, %shift
+  %combined = i64.or %shifted_left, %negative
+  %shifted_right = i64.shr_u %combined, %shift
+  %result = i32.wrap_i64 %shifted_right
+  return %result
+}
+
+// ----
+Disassembly of section CODE:
+
+<CODE>:
+        # 1 functions in section.
+
+<bulk_wide_scalar_primitives>:
+        .local i64, i64, i64, i32
+  local.get  0
+  i64.reinterpret_f64
+  local.set  1
+  i64.const  8
+  local.set  2
+  i64.const  -1
+  local.set  3
+  local.get  1
+  local.get  2
+  i64.shl
+  local.set  1
+  local.get  1
+  local.get  3
+  i64.or
+  local.set  1
+  local.get  1
+  local.get  2
+  i64.shr_u
+  local.set  1
+  local.get  1
+  i32.wrap_i64
+  local.set  4
+  local.get  4
+  return
+  end
+
+// ====
+
+// RUN: emit wasm-dis
+// REQUIRES: wasm-objdump
+
+wasm.target<simd128> @target
+
+low.func.def public target<wasm.core.simd128>(@target) abi(wasm_function) @while_with_iter_arg(%limit: reg<wasm.i32>, %step: reg<wasm.i32>, %seed: reg<wasm.i32>) -> (reg<wasm.i32>) asm {
+  %result = low.scf.while(%before = %seed : reg<wasm.i32>) -> (reg<wasm.i32>) {
+    %keep_going = i32.lt_u %before, %limit
+    low.scf.condition %keep_going, %before : reg<wasm.i32>, reg<wasm.i32>
+  } do(%body: reg<wasm.i32>) {
+    %next = i32.add %body, %step
+    low.scf.yield %next : reg<wasm.i32>
+  }
+  return %result
+}
+
+low.func.def public target<wasm.core.simd128>(@target) abi(wasm_function) @while_swap(%condition: reg<wasm.i32>, %a: reg<wasm.i32>, %b: reg<wasm.i32>) -> (reg<wasm.i32>, reg<wasm.i32>) asm {
+  %c0 = i32.const 0
+  %ignored_condition, %result_a, %result_b = low.scf.while(%before_condition = %condition : reg<wasm.i32>, %before_a = %a : reg<wasm.i32>, %before_b = %b : reg<wasm.i32>) -> (reg<wasm.i32>, reg<wasm.i32>, reg<wasm.i32>) {
+    low.scf.condition %before_condition, %before_condition, %before_a, %before_b : reg<wasm.i32>, reg<wasm.i32>, reg<wasm.i32>, reg<wasm.i32>
+  } do(%body_condition: reg<wasm.i32>, %body_a: reg<wasm.i32>, %body_b: reg<wasm.i32>) {
+    low.scf.yield %c0, %body_b, %body_a : reg<wasm.i32>, reg<wasm.i32>, reg<wasm.i32>
+  }
+  return %result_a, %result_b
+}
+
+// ----
+Disassembly of section CODE:
+
+<CODE>:
+        # 2 functions in section.
+
+<while_with_iter_arg>:
+        .local i32
+  block
+  loop
+  local.get  2
+  local.get  0
+  i32.lt_u
+  local.set  3
+  local.get  3
+  i32.eqz
+  if
+  br        2
+  end
+  local.get  2
+  local.get  1
+  i32.add
+  local.set  2
+  br        0
+  end
+  end
+  local.get  2
+  return
+  end
+
+<while_swap>:
+        .local i32
+  i32.const  0
+  local.set  3
+  block
+  loop
+  local.get  0
+  i32.eqz
+  if
+  br        2
+  end
+  local.get  3
+  local.get  2
+  local.get  1
+  local.set  2
+  local.set  1
+  local.set  0
+  br        0
+  end
+  end
+  local.get  1
+  local.get  2
   return
   end

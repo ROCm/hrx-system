@@ -10,8 +10,14 @@ from loom.dialect.buffer.defs import (
     ALL_BUFFER_OPS,
     buffer_alloca,
     buffer_assume_memory_space,
+    buffer_compare,
+    buffer_copy,
+    buffer_fill,
+    buffer_length,
+    buffer_load_i8_u,
     buffer_ops,
     buffer_pack,
+    buffer_store_i8,
     buffer_view,
 )
 from loom.dialect.memory import MemorySpace
@@ -22,6 +28,12 @@ __all__ = [
     "MemorySpace",
     "buffer_alloca",
     "buffer_assume_memory_space",
+    "buffer_compare",
+    "buffer_copy",
+    "buffer_fill",
+    "buffer_length",
+    "buffer_load_i8_u",
     "buffer_pack",
+    "buffer_store_i8",
     "buffer_view",
 ]

@@ -26,6 +26,7 @@ const char* loom_type_constraint_name(loom_type_constraint_t constraint) {
       [LOOM_TYPE_CONSTRAINT_POOL] = "pool",
       [LOOM_TYPE_CONSTRAINT_REGISTER] = "register",
       [LOOM_TYPE_CONSTRAINT_I1] = "i1",
+      [LOOM_TYPE_CONSTRAINT_I32] = "i32",
       [LOOM_TYPE_CONSTRAINT_VECTOR] = "vector",
       [LOOM_TYPE_CONSTRAINT_RANK_ONE_VECTOR] = "rank-1 vector",
       [LOOM_TYPE_CONSTRAINT_ALL_STATIC_VECTOR] = "all-static vector shape",
@@ -50,6 +51,8 @@ const char* loom_type_constraint_name(loom_type_constraint_t constraint) {
       [LOOM_TYPE_CONSTRAINT_ENCODING_STORAGE] = "encoding<storage>",
       [LOOM_TYPE_CONSTRAINT_ENCODING_TRANSFORM] = "encoding<transform>",
       [LOOM_TYPE_CONSTRAINT_STORAGE] = "storage",
+      [LOOM_TYPE_CONSTRAINT_BYTE_PATTERN_SCALAR] =
+          "8/16/32/64-bit scalar pattern",
   };
   static_assert(IREE_ARRAYSIZE(names) == LOOM_TYPE_CONSTRAINT_COUNT_,
                 "constraint names out of sync with enum");
@@ -109,6 +112,13 @@ bool loom_type_satisfies_constraint(loom_type_t type,
               (loom_scalar_type_is_integer(scalar_type) ||
                loom_scalar_type_is_float(scalar_type)));
     }
+    case LOOM_TYPE_CONSTRAINT_BYTE_PATTERN_SCALAR: {
+      if (!loom_type_is_scalar(type)) return false;
+      const loom_scalar_type_t scalar_type = loom_type_element_type(type);
+      return loom_scalar_type_set_contains(
+          LOOM_SCALAR_TYPE_SET_INTEGER_PAYLOAD | LOOM_SCALAR_TYPE_SET_FLOAT,
+          scalar_type);
+    }
     case LOOM_TYPE_CONSTRAINT_INDEX_OR_NON_I1_INTEGER_SCALAR: {
       if (!loom_type_is_scalar(type)) return false;
       const loom_scalar_type_t scalar_type = loom_type_element_type(type);
@@ -141,6 +151,9 @@ bool loom_type_satisfies_constraint(loom_type_t type,
     case LOOM_TYPE_CONSTRAINT_I1:
       return loom_type_is_scalar(type) &&
              loom_type_element_type(type) == LOOM_SCALAR_TYPE_I1;
+    case LOOM_TYPE_CONSTRAINT_I32:
+      return loom_type_is_scalar(type) &&
+             loom_type_element_type(type) == LOOM_SCALAR_TYPE_I32;
     case LOOM_TYPE_CONSTRAINT_INTEGER_ELEMENT:
       return loom_type_is_shaped(type) &&
              loom_scalar_type_is_integer(loom_type_element_type(type));

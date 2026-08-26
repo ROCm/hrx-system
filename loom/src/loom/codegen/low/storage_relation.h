@@ -52,10 +52,12 @@ enum loom_low_storage_relation_cause_e {
   LOOM_LOW_STORAGE_RELATION_CAUSE_LOW_CONCAT = 5,
   // low.br edge payload source/block-argument affinity.
   LOOM_LOW_STORAGE_RELATION_CAUSE_LOW_BRANCH = 6,
-  // low.scf.for initial iter_arg/body-argument affinity.
-  LOOM_LOW_STORAGE_RELATION_CAUSE_LOW_SCF_FOR = 7,
+  // Structured-loop initial iter_arg/entry-argument affinity.
+  LOOM_LOW_STORAGE_RELATION_CAUSE_LOW_SCF_LOOP_ENTRY = 7,
   // low.scf.yield payload/result or backedge affinity.
   LOOM_LOW_STORAGE_RELATION_CAUSE_LOW_SCF_YIELD = 8,
+  // low.scf.condition payload/body-argument or result affinity.
+  LOOM_LOW_STORAGE_RELATION_CAUSE_LOW_SCF_CONDITION = 9,
 };
 typedef uint8_t loom_low_storage_relation_cause_t;
 

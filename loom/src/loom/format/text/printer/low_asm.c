@@ -90,9 +90,11 @@ static bool loom_print_low_asm_allows_canonical_op(loom_print_context_t* ctx,
   return iree_string_view_equal(op_name, IREE_SV("low.br")) ||
          iree_string_view_equal(op_name, IREE_SV("low.cond_br")) ||
          iree_string_view_equal(op_name, IREE_SV("low.func.call")) ||
+         iree_string_view_equal(op_name, IREE_SV("low.scf.condition")) ||
          iree_string_view_equal(op_name, IREE_SV("low.scf.yield")) ||
          iree_string_view_equal(op_name, IREE_SV("low.scf.if")) ||
-         iree_string_view_equal(op_name, IREE_SV("low.scf.for"));
+         iree_string_view_equal(op_name, IREE_SV("low.scf.for")) ||
+         iree_string_view_equal(op_name, IREE_SV("low.scf.while"));
 }
 
 static iree_status_t loom_print_low_asm_region_preflight(
@@ -185,6 +187,23 @@ static iree_status_t loom_print_low_asm_preflight_canonical_structural_op(
     }
     IREE_RETURN_IF_ERROR(loom_print_low_asm_region_preflight(
         ctx, loom_op_regions(op)[0], descriptor_set,
+        /*entry_args_declared_by_parent=*/true, out_failure, out_available));
+  } else if (iree_string_view_equal(op_name, IREE_SV("low.scf.while"))) {
+    if (op->region_count < 2 || loom_op_regions(op)[0] == NULL ||
+        loom_op_regions(op)[1] == NULL) {
+      *out_available = false;
+      loom_print_low_asm_record_operation_failure(ctx, descriptor_set,
+                                                  out_failure, block_index, op);
+      return iree_ok_status();
+    }
+    IREE_RETURN_IF_ERROR(loom_print_low_asm_region_preflight(
+        ctx, loom_op_regions(op)[0], descriptor_set,
+        /*entry_args_declared_by_parent=*/true, out_failure, out_available));
+    if (!*out_available) {
+      return iree_ok_status();
+    }
+    IREE_RETURN_IF_ERROR(loom_print_low_asm_region_preflight(
+        ctx, loom_op_regions(op)[1], descriptor_set,
         /*entry_args_declared_by_parent=*/true, out_failure, out_available));
   }
   return iree_ok_status();

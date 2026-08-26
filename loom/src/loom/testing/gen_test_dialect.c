@@ -122,13 +122,13 @@ static iree_status_t loom_test_gen_hook_test_simple(
         *out_result = LOOM_TEST_GEN_HOOK_SKIPPED;
         return iree_ok_status();
       }
-      uint8_t predicate = (uint8_t)loom_test_gen_next_range(
-          context->gen, LOOM_TEST_CMP_PREDICATE_COUNT_);
+      loom_test_cmp_predicate_t predicate =
+          (loom_test_cmp_predicate_t)loom_test_gen_next_range(
+              context->gen, LOOM_TEST_CMP_PREDICATE_COUNT_);
       loom_type_t i1_type = loom_type_scalar(LOOM_SCALAR_TYPE_I1);
       loom_op_t* op = NULL;
-      IREE_RETURN_IF_ERROR(loom_test_cmp_build(context->builder, predicate, lhs,
-                                               rhs, operand_type, i1_type,
-                                               LOOM_LOCATION_UNKNOWN, &op));
+      IREE_RETURN_IF_ERROR(loom_test_cmp_build(
+          context->builder, predicate, lhs, rhs, LOOM_LOCATION_UNKNOWN, &op));
       loom_test_gen_values_add(context->values, loom_op_results(op)[0],
                                i1_type);
       *out_result = LOOM_TEST_GEN_HOOK_EMITTED;

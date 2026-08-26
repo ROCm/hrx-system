@@ -146,10 +146,11 @@ iree_status_t loom_low_allocation_edge_alias_allows_counterpart_overlap(
   }
   switch (relation->cause) {
     case LOOM_LOW_PLACEMENT_CAUSE_LOW_SCF_YIELD:
+    case LOOM_LOW_PLACEMENT_CAUSE_LOW_SCF_CONDITION:
       *out_allows_overlap = true;
       return iree_ok_status();
     case LOOM_LOW_PLACEMENT_CAUSE_LOW_BRANCH:
-    case LOOM_LOW_PLACEMENT_CAUSE_LOW_SCF_FOR: {
+    case LOOM_LOW_PLACEMENT_CAUSE_LOW_SCF_LOOP_ENTRY: {
       if (!loom_low_allocation_edge_alias_destination_range_has_distinct_source(
               context, relation, destination_unit_offset,
               destination_unit_count)) {

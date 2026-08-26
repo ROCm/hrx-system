@@ -2491,3 +2491,86 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(1, 1, 1
 ^exit:
   return
 }
+
+// ====
+
+amdgpu.target<gfx11-generic> @target
+
+func.def target(@target) @divergent_select_carried_through_loop(%values: vector<2xi32>, %limit: i32, %output: buffer) {
+  %lane = vector.extract %values[0] : vector<2xi32> -> i32
+  %c0 = scalar.constant 0 : i32
+  %c1 = scalar.constant 1 : i32
+  %cm1 = scalar.constant -1 : i32
+  %start = scalar.constant 0 : i32
+  %stop = scalar.constant 2 : i32
+  %step = scalar.constant 1 : i32
+  %base = index.constant 0 : offset
+  %output_view = buffer.view %output[%base] : buffer -> view<1xi32>
+  cfg.br ^loop(%start: i32, %c0: i32)
+^loop(%i: i32, %order: i32):
+  %in_range = scalar.cmpi slt, %i, %stop : i32
+  cfg.cond_br %in_range, ^body, ^done
+^body:
+  %unresolved = scalar.cmpi eq, %order, %c0 : i32
+  cfg.cond_br %unresolved, ^resolve, ^keep
+^resolve:
+  %less = scalar.cmpi slt, %lane, %limit : i32
+  %next = scf.select %less, %cm1, %c1 : i32
+  cfg.br ^merge(%next: i32)
+^keep:
+  cfg.br ^merge(%order: i32)
+^merge(%merged: i32):
+  %next_i = scalar.addi %i, %step : i32
+  cfg.br ^loop(%next_i: i32, %merged: i32)
+^done:
+  view.store %order, %output_view[0] : i32, view<1xi32>
+  func.return
+}
+
+// ----
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @divergent_select_carried_through_loop(%values: reg<amdgpu.vgpr x2>, %limit: reg<amdgpu.sgpr>) asm {
+  %output_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 4} : reg<amdgpu.sgpr x2>
+  %lane = slice %values[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %c0 = s_mov_b32 0
+  %c1 = s_mov_b32 1
+  %stop = s_mov_b32 2
+  %33 = v_mov_b32 0
+  low.br ^loop(%c0: reg<amdgpu.sgpr>, %33: reg<amdgpu.vgpr>)
+^loop(%i: reg<amdgpu.sgpr>, %order: reg<amdgpu.vgpr>):
+  %in_range = s_cmp_lt_i32 %i, %stop
+  low.cond_br %in_range, ^body, ^done : reg<amdgpu.scc>
+^body:
+  %unresolved = v_cmp_eq_i32_src1_inline %order {rhs = 0}
+  %36, %37 = s_and_saveexec_b64 %unresolved
+  low.cond_br %37, ^resolve, ^_bb8 : reg<amdgpu.scc>
+^resolve:
+  %42 = v_mov_b32_copy %limit
+  %less = v_cmp_lt_i32 %lane, %42
+  %next = v_cndmask_b32_src1_lit_src0_inline %less {imm32 = 4294967295, false_value = 1}
+  low.br ^_bb7(%next: reg<amdgpu.vgpr>)
+^keep:
+  low.br ^_bb10
+^merge(%merged$24: reg<amdgpu.vgpr>):
+  %next_i = s_add_u32 %i, %c1
+  low.br ^loop(%next_i: reg<amdgpu.sgpr>, %merged$24: reg<amdgpu.vgpr>)
+^done:
+  %46 = v_mov_b32 0
+  global_store_b32_saddr %46, %order, %output_view
+  return
+^_bb7(%merged$25: reg<amdgpu.vgpr>):
+  s_mov_b64_exec %36
+  %40 = s_and_b64 %36, %unresolved
+  %41 = s_xor_b64_exec %40
+  low.cond_br %41, ^keep, ^_bb9 : reg<amdgpu.scc>
+^_bb8:
+  s_mov_b64_exec %36
+  %38 = v_mov_b32 0
+  low.br ^_bb7(%38: reg<amdgpu.vgpr>)
+^_bb9:
+  s_mov_b64_exec %36
+  low.br ^merge(%merged$25: reg<amdgpu.vgpr>)
+^_bb10:
+  s_mov_b64_exec %36
+  %39 = v_cndmask_b32 %order, %merged$25, %unresolved
+  low.br ^merge(%39: reg<amdgpu.vgpr>)
+}

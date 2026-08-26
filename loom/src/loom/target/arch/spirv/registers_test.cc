@@ -150,6 +150,10 @@ TEST(SpirvRegistersTest, StructuralIdPayloadsCoverCanonicalScalarTypes) {
        LOOM_SPIRV_SCALAR_TYPE_UNKNOWN},
       {LOOM_SCALAR_TYPE_I8, LOOM_SPIRV_VALUE_CLASS_SCALAR,
        LOOM_SPIRV_SCALAR_TYPE_S8},
+      {LOOM_SCALAR_TYPE_F8E4M3, LOOM_SPIRV_VALUE_CLASS_SCALAR,
+       LOOM_SPIRV_SCALAR_TYPE_S8},
+      {LOOM_SCALAR_TYPE_F8E5M2, LOOM_SPIRV_VALUE_CLASS_SCALAR,
+       LOOM_SPIRV_SCALAR_TYPE_S8},
       {LOOM_SCALAR_TYPE_I16, LOOM_SPIRV_VALUE_CLASS_SCALAR,
        LOOM_SPIRV_SCALAR_TYPE_S16},
       {LOOM_SCALAR_TYPE_I32, LOOM_SPIRV_VALUE_CLASS_SCALAR,
@@ -288,8 +292,6 @@ TEST(SpirvRegistersTest, StructuralMappingRejectsAmbiguousRegisterTypes) {
 
   static constexpr loom_scalar_type_t kUnsupportedPayloads[] = {
       LOOM_SCALAR_TYPE_OFFSET,
-      LOOM_SCALAR_TYPE_F8E4M3,
-      LOOM_SCALAR_TYPE_F8E5M2,
   };
   for (loom_scalar_type_t scalar_type : kUnsupportedPayloads) {
     const loom_register_type_data_t register_data = {

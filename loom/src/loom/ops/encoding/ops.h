@@ -389,7 +389,6 @@ iree_status_t loom_encoding_isa_build(
     loom_builder_t* builder,
     uint16_t spec,
     loom_value_id_t enc,
-    loom_type_t result_type,
     loom_location_id_t location,
     loom_op_t** out_op);
 iree_status_t loom_encoding_isa_facts(
@@ -476,7 +475,6 @@ iree_status_t loom_encoding_matches_build(
     loom_builder_t* builder,
     loom_attribute_t requirements,
     loom_value_id_t enc,
-    loom_type_t result_type,
     loom_location_id_t location,
     loom_op_t** out_op);
 iree_status_t loom_encoding_matches_facts(

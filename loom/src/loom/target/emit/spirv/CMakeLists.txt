@@ -169,6 +169,10 @@ loom_cc_library(
   HDRS
     "module_emitter.h"
   SRCS
+    "function_control.c"
+    "function_control.h"
+    "function_emitter.c"
+    "function_emitter.h"
     "module_emitter.c"
   DEPS
     ::binary_format
@@ -282,6 +286,7 @@ loom_check_test_suite(
     loom_check_file_test
   SRCS
     "test/barrier.loom-test"
+    "test/buffer_raw.loom-test"
     "test/emit.loom-test"
     "test/index_conversion.loom-test"
     "test/index_numeric.loom-test"

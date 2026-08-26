@@ -612,8 +612,7 @@ static iree_status_t loom_vector_to_scalar_build_mask_range_lane(
     loom_op_t* cmp_op = NULL;
     IREE_RETURN_IF_ERROR(loom_index_cmp_build(
         &state->rewriter->builder, LOOM_INDEX_CMP_PREDICATE_SLT, coordinate,
-        upper_bound, coordinate_type, loom_type_scalar(LOOM_SCALAR_TYPE_I1),
-        state->location, &cmp_op));
+        upper_bound, state->location, &cmp_op));
     *out_lane = loom_index_cmp_result(cmp_op);
     return iree_ok_status();
   }

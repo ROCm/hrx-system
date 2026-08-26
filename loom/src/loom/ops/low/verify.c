@@ -1708,6 +1708,13 @@ iree_status_t loom_low_scf_for_verify(const loom_module_t* module,
   return iree_ok_status();
 }
 
+iree_status_t loom_low_scf_while_verify(const loom_module_t* module,
+                                        const loom_op_t* op,
+                                        iree_diagnostic_emitter_t emitter) {
+  return loom_low_verify_nested_under_low_entry(
+      module, op, IREE_SV("low executable"), emitter, NULL);
+}
+
 iree_status_t loom_low_func_def_verify(const loom_module_t* module,
                                        const loom_op_t* op,
                                        iree_diagnostic_emitter_t emitter) {

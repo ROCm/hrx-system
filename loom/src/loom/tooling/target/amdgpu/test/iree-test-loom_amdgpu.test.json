@@ -24,6 +24,36 @@
       }
     },
     {
+      "name": "runs amdgpu bulk buffer operations",
+      "run": {
+        "tool": "iree-test-loom",
+        "args": [
+          "{srcdir}/../../../execution/hal/testdata/buffer_bulk_hal_actual.loom",
+          "--device=amdgpu"
+        ]
+      },
+      "stdout": {
+        "contains": {
+          "unordered": [
+            "\"format\":\"loom.test.v0\"",
+            {
+              "regex": "\"case\":\"buffer_copy_bytes_case\"[^}]*\"passed\":true"
+            },
+            {
+              "regex": "\"case\":\"buffer_fill_bytes_case\"[^}]*\"passed\":true"
+            },
+            {
+              "regex": "\"case\":\"buffer_compare_bytes_case\"[^}]*\"passed\":true"
+            },
+            {
+              "regex": "\"case\":\"buffer_zero_length_ranges_case\"[^}]*\"passed\":true"
+            },
+            "\"failed_sample_count\":0"
+          ]
+        }
+      }
+    },
+    {
       "name": "runs explicit serial amdgpu dispatch epochs",
       "run": {
         "tool": "iree-test-loom",

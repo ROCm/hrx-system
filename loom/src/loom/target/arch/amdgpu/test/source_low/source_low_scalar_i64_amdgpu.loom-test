@@ -1,0 +1,55 @@
+// RUN: emit source-low output=low
+
+amdgpu.target<gfx11-generic> @target
+
+func.def target(@target) @literal_logical_right_shifts(%values: vector<2xi64>) -> (i64, i64, i64, i64, i64, i64) {
+  %value = vector.extract %values[0] : vector<2xi64> -> i64
+  %c0 = scalar.constant 0 : i64
+  %c8 = scalar.constant 8 : i64
+  %c31 = scalar.constant 31 : i64
+  %c32 = scalar.constant 32 : i64
+  %c33 = scalar.constant 33 : i64
+  %c63 = scalar.constant 63 : i64
+  %s0 = scalar.shrui %value, %c0 : i64
+  %s8 = scalar.shrui %value, %c8 : i64
+  %s31 = scalar.shrui %value, %c31 : i64
+  %s32 = scalar.shrui %value, %c32 : i64
+  %s33 = scalar.shrui %value, %c33 : i64
+  %s63 = scalar.shrui %value, %c63 : i64
+  func.return %s0, %s8, %s31, %s32, %s33, %s63 : i64, i64, i64, i64, i64, i64
+}
+
+// ----
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @literal_logical_right_shifts(%values: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>) asm {
+  %27 = slice %values[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %28 = slice %values[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %value = concat(%27, %28) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %47 = v_lshrrev_b32_src0_inline %27, 8
+  %48 = v_lshlrev_b32_src0_inline %28, 24
+  %49 = v_or_b32 %47, %48
+  %50 = v_lshrrev_b32_src0_inline %28, 8
+  %s8 = concat(%49, %50) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %54 = v_lshrrev_b32_src0_inline %27, 31
+  %55 = v_lshlrev_b32_src0_inline %28, 1
+  %56 = v_or_b32 %54, %55
+  %57 = v_lshrrev_b32_src0_inline %28, 31
+  %s31 = concat(%56, %57) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %61 = v_mov_b32 0
+  %s32 = concat(%28, %61) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %65 = v_lshrrev_b32_src0_inline %28, 1
+  %s33 = concat(%65, %61) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %s63 = concat(%57, %61) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  return %value, %s8, %s31, %s32, %s33, %s63
+}
+
+// ====
+
+amdgpu.target<gfx11-generic> @target
+
+func.def target(@target) @dynamic_logical_right_shift(%values: vector<2xi64>, %shifts: vector<2xi64>) -> (i64) {
+  %value = vector.extract %values[0] : vector<2xi64> -> i64
+  %shift = vector.extract %shifts[0] : vector<2xi64> -> i64
+  // ERROR@+1: AMDGPU/023 {op_name="scalar.shrui", constraint_key="rhs.literal_shift_0_63"}
+  %result = scalar.shrui %value, %shift : i64
+  func.return %result : i64
+}

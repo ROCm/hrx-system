@@ -71,8 +71,9 @@ static bool loom_low_placement_cause_can_alias(
     case LOOM_LOW_PLACEMENT_CAUSE_LOW_SLICE:
     case LOOM_LOW_PLACEMENT_CAUSE_LOW_CONCAT:
     case LOOM_LOW_PLACEMENT_CAUSE_LOW_BRANCH:
-    case LOOM_LOW_PLACEMENT_CAUSE_LOW_SCF_FOR:
+    case LOOM_LOW_PLACEMENT_CAUSE_LOW_SCF_LOOP_ENTRY:
     case LOOM_LOW_PLACEMENT_CAUSE_LOW_SCF_YIELD:
+    case LOOM_LOW_PLACEMENT_CAUSE_LOW_SCF_CONDITION:
       return true;
     default:
       return false;
@@ -89,8 +90,9 @@ bool loom_low_placement_relation_can_alias(
 bool loom_low_placement_cause_is_edge(loom_low_placement_cause_t cause) {
   switch (cause) {
     case LOOM_LOW_PLACEMENT_CAUSE_LOW_BRANCH:
-    case LOOM_LOW_PLACEMENT_CAUSE_LOW_SCF_FOR:
+    case LOOM_LOW_PLACEMENT_CAUSE_LOW_SCF_LOOP_ENTRY:
     case LOOM_LOW_PLACEMENT_CAUSE_LOW_SCF_YIELD:
+    case LOOM_LOW_PLACEMENT_CAUSE_LOW_SCF_CONDITION:
       return true;
     default:
       return false;
@@ -261,10 +263,12 @@ loom_low_placement_collect_storage_relation_cause(
       }
       state->branch_unit_count += unit_count;
       return LOOM_LOW_PLACEMENT_CAUSE_LOW_BRANCH;
-    case LOOM_LOW_STORAGE_RELATION_CAUSE_LOW_SCF_FOR:
-      return LOOM_LOW_PLACEMENT_CAUSE_LOW_SCF_FOR;
+    case LOOM_LOW_STORAGE_RELATION_CAUSE_LOW_SCF_LOOP_ENTRY:
+      return LOOM_LOW_PLACEMENT_CAUSE_LOW_SCF_LOOP_ENTRY;
     case LOOM_LOW_STORAGE_RELATION_CAUSE_LOW_SCF_YIELD:
       return LOOM_LOW_PLACEMENT_CAUSE_LOW_SCF_YIELD;
+    case LOOM_LOW_STORAGE_RELATION_CAUSE_LOW_SCF_CONDITION:
+      return LOOM_LOW_PLACEMENT_CAUSE_LOW_SCF_CONDITION;
     case LOOM_LOW_STORAGE_RELATION_CAUSE_UNKNOWN:
       return LOOM_LOW_PLACEMENT_CAUSE_UNKNOWN;
   }

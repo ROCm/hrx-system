@@ -797,6 +797,7 @@ loom_cc_library(
     "source_memory_plan.h"
   SRCS
     "source_memory_plan.c"
+    "source_memory_plan_summary.c"
   DEPS
     ::memory_access
     iree::base
@@ -835,7 +836,9 @@ loom_cc_test(
   NAME
     source_memory_plan_test
   SRCS
+    "source_memory_plan_index_test.cc"
     "source_memory_plan_test.cc"
+    "source_memory_plan_test_fixture.h"
   DEPS
     ::source_memory_plan
     iree::base

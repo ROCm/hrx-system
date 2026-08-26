@@ -66,6 +66,7 @@ from loom.dsl import (
     EncodingAliasDef,
     EncodingFamilyDef,
     FuncLikeInterface,
+    LoopLikeInterface,
     Op,
     ParameterizedAttrDef,
     TypeConstraint,
@@ -88,6 +89,7 @@ from loom.ir import (
     ENCODING_TRANSFORM_TYPE,
     ENCODING_TYPE,
     I1,
+    I32,
     INDEX,
     NONE_TYPE,
     OFFSET,
@@ -116,7 +118,6 @@ from loom.ir import (
     Region,
     RegisterType,
     ScalarType,
-    ScalarTypeKind,
     ShapedType,
     SignedEnumSetAttr,
     StaticDim,
@@ -190,6 +191,8 @@ def _concrete_type_for_constraint(constraint: TypeConstraint) -> Type | None:
     match constraint:
         case TypeConstraint.I1:
             return I1
+        case TypeConstraint.I32:
+            return I32
         case TypeConstraint.INDEX:
             return INDEX
         case TypeConstraint.OFFSET:
@@ -1871,6 +1874,14 @@ def _func_like_body_field(op_decl: Op) -> str | None:
     return None
 
 
+def _loop_like_interface(op_decl: Op) -> LoopLikeInterface | None:
+    """Return the LoopLike interface for op_decl, if any."""
+    for interface in op_decl.interfaces:
+        if isinstance(interface, LoopLikeInterface):
+            return interface
+    return None
+
+
 def _region_def(op_decl: Op, name: str) -> Any | None:
     """Return the declared region matching name."""
     for region in op_decl.regions:
@@ -2782,13 +2793,11 @@ class Parser:
                 case Ref(field=name):
                     if name in ("iv",):
                         # Implicit region argument: create the value now, but
-                        # defer defining its name until RegionFmt pushes the
-                        # child scope.
+                        # defer its range-derived type and name until RegionFmt
+                        # pushes the child scope.
                         ssa_tok = tok.expect(TokenKind.SSA_VALUE)
                         value_id = self._module.add_value(
-                            Value(
-                                name=ssa_tok.text, type=ScalarType(ScalarTypeKind.INDEX)
-                            )
+                            Value(name=ssa_tok.text, type=NONE_TYPE)
                         )
                         parsed.implicit_values[ssa_tok.text] = value_id
                     else:
@@ -3000,6 +3009,26 @@ class Parser:
 
                 case RegionFmt(field=name, syntax=syntax):
                     implicit_terminator_decl = self._implicit_terminator_decl(op_decl)
+                    loop_like = _loop_like_interface(op_decl)
+                    if (
+                        loop_like is not None
+                        and loop_like.body == name
+                        and loop_like.iv is not None
+                    ):
+                        lower_bound_ids = parsed.operand_fields.get(
+                            loop_like.lower_bound or "", ()
+                        )
+                        if not lower_bound_ids or not parsed.implicit_values:
+                            raise ParseError(
+                                "counted loop is missing its lower bound or "
+                                "induction variable",
+                                tok.peek().location,
+                                tok._filename,
+                            )
+                        iv_value_id = next(iter(parsed.implicit_values.values()))
+                        self._module.values[iv_value_id].type = self._module.values[
+                            lower_bound_ids[0]
+                        ].type
                     implicit_arg_ids = (
                         parsed.implicit_values if parsed.implicit_values else None
                     )

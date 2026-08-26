@@ -44,6 +44,7 @@ from dataclasses import dataclass
 from enum import Enum, unique
 from typing import TYPE_CHECKING, Any, NamedTuple, cast
 
+from loom import constraint_validation
 from loom.assembly import FormatElement, OptionalGroup
 from loom.errors import ErrorDef
 
@@ -62,6 +63,7 @@ __all__ = [
     "VIEW",
     "BUFFER",
     "INTEGER",
+    "BYTE_PATTERN_SCALAR",
     "INDEX_OR_NON_I1_INTEGER_SCALAR",
     "INTEGER_ELEMENT",
     "INDEX_OR_NON_I1_INTEGER_ELEMENT",
@@ -86,6 +88,7 @@ __all__ = [
     "REGISTER",
     "STORAGE",
     "I1",
+    "I32",
     # Type constraint helpers.
     "type_constraint_name",
     # Field descriptors.
@@ -233,6 +236,8 @@ __all__ = [
     "BlockArgsSatisfy",
     "BlockArgsMatchTypes",
     "BlockArgsMatchElementTypes",
+    "ConditionForwardedCountMatchesBlockArgs",
+    "ConditionForwardedTypesMatchBlockArgs",
     "YieldCountMatchesResults",
     "YieldTypesMatchResults",
     "YieldElementTypesMatchResults",
@@ -306,6 +311,7 @@ class TypeConstraint(Enum):
       INTEGER  → ScalarType with kind in {I1, I8, I16, I32, I64}
       FLOAT    → ScalarType with kind in {F8*, F16, BF16, F32, F64}
       BITWISE_SCALAR → ScalarType index, non-i1 integer, or floating-point
+      BYTE_PATTERN_SCALAR → 8/16/32/64-bit integer or floating-point scalar
       INDEX_OR_NON_I1_INTEGER_SCALAR → ScalarType index or non-i1 integer
       INTEGER_ELEMENT → ShapedType with integer element type
       FLOAT_ELEMENT   → ShapedType with float element type
@@ -329,6 +335,8 @@ class TypeConstraint(Enum):
       POOL     → PoolType
       REGISTER → RegisterType
       STORAGE  → StorageType
+      I1       → ScalarType with kind=I1
+      I32      → ScalarType with kind=I32
 
     Element-qualified constraints are shaped-only: tile, tensor, vector,
     and view types can satisfy them, while scalar values continue to use
@@ -349,6 +357,7 @@ class TypeConstraint(Enum):
     INTEGER = "integer"
     FLOAT = "float"
     BITWISE_SCALAR = "bitwise_scalar"
+    BYTE_PATTERN_SCALAR = "byte_pattern_scalar"
     INDEX_OR_NON_I1_INTEGER_SCALAR = "index_or_non_i1_integer_scalar"
     INTEGER_ELEMENT = "integer_element"
     FLOAT_ELEMENT = "float_element"
@@ -373,6 +382,7 @@ class TypeConstraint(Enum):
     REGISTER = "register"
     STORAGE = "storage"
     I1 = "i1"
+    I32 = "i32"
 
 
 # Singletons for use in op declarations.
@@ -387,6 +397,7 @@ BUFFER = TypeConstraint.BUFFER
 INTEGER = TypeConstraint.INTEGER
 FLOAT = TypeConstraint.FLOAT
 BITWISE_SCALAR = TypeConstraint.BITWISE_SCALAR
+BYTE_PATTERN_SCALAR = TypeConstraint.BYTE_PATTERN_SCALAR
 INDEX_OR_NON_I1_INTEGER_SCALAR = TypeConstraint.INDEX_OR_NON_I1_INTEGER_SCALAR
 INTEGER_ELEMENT = TypeConstraint.INTEGER_ELEMENT
 FLOAT_ELEMENT = TypeConstraint.FLOAT_ELEMENT
@@ -411,6 +422,7 @@ POOL = TypeConstraint.POOL
 REGISTER = TypeConstraint.REGISTER
 STORAGE = TypeConstraint.STORAGE
 I1 = TypeConstraint.I1
+I32 = TypeConstraint.I32
 
 
 def type_constraint_name(constraint: TypeConstraint) -> str:
@@ -1622,7 +1634,8 @@ class Constraint:
       name: Identifier for code generation and diagnostics.
       args: Field names this constraint references.
       error: Structured error definition emitted on failure.
-      validate: Optional Python predicate for the oracle/validator.
+      validate: Python predicate for the oracle/validator. A missing predicate
+        is an invalid non-verifiable constraint and fails when checked.
       data: Optional small payload interpreted by the named constraint.
 
     Constraints are defined as module-level constructor functions
@@ -1653,7 +1666,9 @@ class Constraint:
     def check(self, fields: dict[str, Any]) -> tuple[bool, str]:
         """Run the validation predicate. Returns (ok, message)."""
         if self.validate is None:
-            return (True, "")
+            raise ValueError(
+                f"Constraint '{self.name}' has no Python validation predicate"
+            )
         return self.validate(fields)
 
     def __repr__(self) -> str:
@@ -1885,16 +1900,16 @@ def SameElementType(*fields: str) -> Constraint:
 def SameEncoding(*fields: str) -> Constraint:
     """All named fields must have the same encoding.
 
-    Encodings are a type-system concept not present in numpy arrays.
-    The Python validator is a no-op; the C verifier checks encoding
-    attributes on the actual types.
+    Scalars and unencoded shaped types carry the same absent encoding.
     """
+
     from loom.error.encoding import ERR_ENCODING_001
 
     return Constraint(
         "SameEncoding",
         fields,
         error=ERR_ENCODING_001,
+        validate=constraint_validation.same_encoding(fields),
     )
 
 
@@ -2766,22 +2781,25 @@ def LastAxisGroupedBy(source: str, result: str, group_size: int) -> Constraint:
     )
 
 
-# --- Region constraints (structural, no-op in Python validator) ---
+# --- Region constraints ---
 
 
 def BlockArgCount(region: str, inputs: str) -> Constraint:
     """Region block must have one argument per input or reference-region arg."""
+
     from loom.error.structure import ERR_STRUCTURE_007
 
     return Constraint(
         "BlockArgCount",
         (region, inputs),
         error=ERR_STRUCTURE_007,
+        validate=constraint_validation.block_arg_count(region, inputs),
     )
 
 
 def BlockArgsSatisfy(region: str, constraint: TypeConstraint) -> Constraint:
     """Each region entry block argument must satisfy a type constraint."""
+
     from loom.error.type import ERR_TYPE_014
 
     return Constraint(
@@ -2789,50 +2807,97 @@ def BlockArgsSatisfy(region: str, constraint: TypeConstraint) -> Constraint:
         (region,),
         error=ERR_TYPE_014,
         data=constraint,
+        validate=constraint_validation.block_args_satisfy(
+            region, constraint, _type_satisfies_field_constraint
+        ),
     )
 
 
 def BlockArgsMatchTypes(region: str, inputs: str) -> Constraint:
     """Each block argument type must match its input or reference-region type."""
+
     from loom.error.type import ERR_TYPE_013
 
     return Constraint(
         "BlockArgsMatchTypes",
         (region, inputs),
         error=ERR_TYPE_013,
+        validate=constraint_validation.block_args_match(region, inputs),
     )
 
 
 def BlockArgsMatchElementTypes(region: str, inputs: str) -> Constraint:
     """Each block argument type must match its input element type."""
+
     from loom.error.type import ERR_TYPE_008
 
     return Constraint(
         "BlockArgsMatchElementTypes",
         (region, inputs),
         error=ERR_TYPE_008,
+        validate=constraint_validation.block_args_match(
+            region, inputs, element_types=True
+        ),
+    )
+
+
+def ConditionForwardedCountMatchesBlockArgs(
+    condition_region: str, target_region: str, target_inputs: str
+) -> Constraint:
+    """Condition-forwarded value count must match valid target block args."""
+
+    from loom.error.structure import ERR_STRUCTURE_013
+
+    return Constraint(
+        "ConditionForwardedCountMatchesBlockArgs",
+        (condition_region, target_region, target_inputs),
+        error=ERR_STRUCTURE_013,
+        validate=constraint_validation.condition_forwarded_count(
+            condition_region, target_region, target_inputs
+        ),
+    )
+
+
+def ConditionForwardedTypesMatchBlockArgs(
+    condition_region: str, target_region: str, target_inputs: str
+) -> Constraint:
+    """Condition-forwarded value types must match valid target block args."""
+
+    from loom.error.type import ERR_TYPE_001
+
+    return Constraint(
+        "ConditionForwardedTypesMatchBlockArgs",
+        (condition_region, target_region, target_inputs),
+        error=ERR_TYPE_001,
+        validate=constraint_validation.condition_forwarded_types(
+            condition_region, target_region, target_inputs
+        ),
     )
 
 
 def YieldCountMatchesResults(region: str, results: str) -> Constraint:
     """Region terminator must yield the same number of values as results."""
+
     from loom.error.structure import ERR_STRUCTURE_008
 
     return Constraint(
         "YieldCountMatchesResults",
         (region, results),
         error=ERR_STRUCTURE_008,
+        validate=constraint_validation.yield_count(region, results),
     )
 
 
 def YieldTypesMatchResults(region: str, results: str) -> Constraint:
     """Yielded value types must match result types."""
+
     from loom.error.type import ERR_TYPE_009
 
     return Constraint(
         "YieldTypesMatchResults",
         (region, results),
         error=ERR_TYPE_009,
+        validate=constraint_validation.yield_types(region, results),
     )
 
 
@@ -2844,23 +2909,27 @@ def YieldElementTypesMatchResults(region: str, results: str) -> Constraint:
     This constraint checks that the element types match, not the full
     types.
     """
+
     from loom.error.type import ERR_TYPE_009
 
     return Constraint(
         "YieldElementTypesMatchResults",
         (region, results),
         error=ERR_TYPE_009,
+        validate=constraint_validation.yield_types(region, results, element_types=True),
     )
 
 
 def VariadicValuesMatch(lhs: str, rhs: str) -> Constraint:
     """Two variadic value fields must agree on count and per-position type."""
+
     from loom.error.structure import ERR_STRUCTURE_013
 
     return Constraint(
         "VariadicValuesMatch",
         (lhs, rhs),
         error=ERR_STRUCTURE_013,
+        validate=constraint_validation.variadic_values_match(lhs, rhs),
     )
 
 
@@ -2879,12 +2948,14 @@ def IterArgsMatchResults(iter_args: str, results: str) -> Constraint:
     A count mismatch produces a single ERR_STRUCTURE_013; per-position
     type mismatches each produce an ERR_TYPE_001.
     """
+
     from loom.error.structure import ERR_STRUCTURE_013
 
     return Constraint(
         "IterArgsMatchResults",
         (iter_args, results),
         error=ERR_STRUCTURE_013,
+        validate=constraint_validation.variadic_values_match(iter_args, results),
     )
 
 
@@ -5152,6 +5223,8 @@ class MemoryAccessInterface:
 
     # Operand naming the accessed view or memory object.
     view: str | None
+    # Operand naming a physical byte offset into the memory object.
+    byte_offset: str | None = None
     # Operand naming the value written or atomic update contribution.
     value: str | None = None
     # Operand naming the expected compare-exchange value.
@@ -5191,6 +5264,7 @@ class MemoryAccessInterface:
         self,
         *,
         view: str | None | object = _DEFAULT_INTERFACE_FIELD,
+        byte_offset: str | None | object = _DEFAULT_INTERFACE_FIELD,
         value: str | None | object = _DEFAULT_INTERFACE_FIELD,
         expected: str | None | object = _DEFAULT_INTERFACE_FIELD,
         replacement: str | None | object = _DEFAULT_INTERFACE_FIELD,
@@ -5226,6 +5300,11 @@ class MemoryAccessInterface:
             )
 
         object.__setattr__(self, "view", _resolve("view", view, "view"))
+        object.__setattr__(
+            self,
+            "byte_offset",
+            _resolve("byte_offset", byte_offset, "byte_offset"),
+        )
         object.__setattr__(self, "value", _resolve("value", value, "value"))
         object.__setattr__(self, "expected", _resolve("expected", expected, "expected"))
         object.__setattr__(
