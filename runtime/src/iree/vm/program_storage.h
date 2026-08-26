@@ -36,22 +36,21 @@ typedef struct iree_vm_program_bank_counts_t {
   uint16_t function_count;
 } iree_vm_program_bank_counts_t;
 
-// Program-linked execution plan for one module-local callable declaration.
-// Structurally equal declarations carry the same token; that token directly
-// indexes the first equal entry without a module walk or provider query.
+// Transient execution view of one structurally interned callable declaration.
+// The source-ordered type pointers borrow stable module-owned storage. Ordinary
+// invocation resolves this view once from a function token and keeps it only
+// for the active operation; programs do not retain one view per declaration.
 typedef struct iree_vm_program_callable_t {
   // Stable source-ordered argument types in the representative module.
   const iree_vm_module_signature_type_t* argument_types;
   // Stable source-ordered result types in the representative module.
   const iree_vm_module_signature_type_t* result_types;
-  // Representative linked module resolving ref and nested callable ordinals.
-  const iree_vm_linked_module_t* signature_module;
-  // Nonzero canonical token and this declaration's suspension permission.
-  uint32_t mapping;
   // Exact physical argument bank counts.
   iree_vm_program_bank_counts_t argument_counts;
   // Exact physical result bank counts.
   iree_vm_program_bank_counts_t result_counts;
+  // Program ordinal of the module resolving ref and nested callable ordinals.
+  uint16_t signature_module_ordinal;
   // Shared scalar result type, or INVALID for empty or heterogeneous results.
   iree_vm_scalar_type_t uniform_result_scalar_type;
 } iree_vm_program_callable_t;
@@ -60,8 +59,10 @@ typedef struct iree_vm_program_callable_t {
 typedef struct iree_vm_program_initializer_t {
   // Complete packed target bits, or zero when no initializer is exported.
   uint64_t target_bits;
-  // Direct canonical callable plan, or null when no initializer is exported.
-  const iree_vm_program_callable_t* callable;
+  // Stable source-ordered argument types in the executable module.
+  iree_vm_module_signature_type_span_t arguments;
+  // Exact physical argument bank counts.
+  iree_vm_program_bank_counts_t argument_counts;
 } iree_vm_program_initializer_t;
 
 // Immutable program-local view of one retained generic module.
@@ -70,7 +71,7 @@ struct iree_vm_linked_module_t {
   iree_vm_module_t* module;
   // Immutable module-local resolved import target words.
   const uint64_t* import_target_bits;
-  // First entry in the program's flat callable plan array.
+  // First entry in the program's flat callable mapping array.
   uint32_t callable_base;
   // Max-aligned process-state offset, or UINT32_MAX for no state.
   uint32_t process_storage_offset;
@@ -90,10 +91,10 @@ struct iree_vm_program_t {
   uint16_t executable_module_ordinal;
   // Selected executable initializer contract.
   iree_vm_program_initializer_t initializer;
-  // Flat module-local callable plans.
-  iree_vm_program_callable_t* callables;
-  // Total number of callable plans in |callables|.
-  uint32_t callable_count;
+  // Flat four-byte mapping words for module-local callable declarations.
+  uint32_t* callable_mappings;
+  // Total number of mapping words in |callable_mappings|.
+  uint32_t callable_mapping_count;
   // Total max-aligned opaque process-state bytes.
   iree_host_size_t process_storage_size;
 };
@@ -102,10 +103,14 @@ static_assert(sizeof(void*) != 8 || sizeof(iree_vm_linked_module_t) == 24,
               "64-bit linked modules must remain 24 bytes");
 static_assert(sizeof(void*) != 4 || sizeof(iree_vm_linked_module_t) == 16,
               "32-bit linked modules must remain 16 bytes");
-static_assert(sizeof(void*) != 8 || sizeof(iree_vm_program_callable_t) == 48,
-              "64-bit callable plans must remain 48 bytes");
-static_assert(sizeof(void*) != 8 || sizeof(iree_vm_program_initializer_t) == 16,
-              "64-bit initializer plans must remain 16 bytes");
+static_assert(sizeof(uint32_t) == 4,
+              "callable mappings must remain four bytes");
+static_assert(sizeof(void*) != 8 || sizeof(iree_vm_program_callable_t) == 32,
+              "64-bit transient callable views must remain 32 bytes");
+static_assert(sizeof(void*) != 8 || sizeof(iree_vm_program_initializer_t) == 32,
+              "64-bit initializer plans must remain 32 bytes");
+static_assert(sizeof(void*) != 8 || sizeof(iree_vm_program_t) <= 128,
+              "64-bit program headers must fit the persistent size budget");
 
 // Returns the nonzero structural token from one callable mapping.
 static inline uint32_t iree_vm_program_callable_token(uint32_t mapping) {
@@ -180,18 +185,28 @@ static inline bool iree_vm_program_callable_is_scalar_only(
          callable->result_counts.function_count == 0;
 }
 
-// Resolves one nonzero canonical token with a direct indexed load.
-static inline const iree_vm_program_callable_t*
-iree_vm_program_resolve_callable(const iree_vm_program_t* program,
-                                 uint32_t callable_token) {
-  if (callable_token == 0 || callable_token > program->callable_count) {
-    return NULL;
+// Returns whether one token names its canonical representative mapping.
+static inline bool iree_vm_program_callable_token_is_valid(
+    const iree_vm_program_t* program, uint32_t callable_token) {
+  if (callable_token == 0 || callable_token > program->callable_mapping_count) {
+    return false;
   }
-  const iree_vm_program_callable_t* callable =
-      &program->callables[callable_token - 1];
-  return iree_vm_program_callable_token(callable->mapping) == callable_token
-             ? callable
-             : NULL;
+  return iree_vm_program_callable_token(
+             program->callable_mappings[callable_token - 1]) == callable_token;
+}
+
+// Resolves one canonical token to a transient callable execution view. Returns
+// false without changing |out_callable| when the token is invalid.
+bool iree_vm_program_resolve_callable(const iree_vm_program_t* program,
+                                      uint32_t callable_token,
+                                      iree_vm_program_callable_t* out_callable);
+
+// Returns the linked module resolving one transient callable view.
+static inline const iree_vm_linked_module_t*
+iree_vm_program_callable_signature_module(
+    const iree_vm_program_t* program,
+    const iree_vm_program_callable_t* callable) {
+  return &program->linked_modules[callable->signature_module_ordinal];
 }
 
 // Returns whether |function_ref| is null or satisfies one linked callable
@@ -217,12 +232,12 @@ static inline bool iree_vm_program_function_ref_matches(
   }
   const uint32_t target_token =
       iree_vm_program_target_callable_token(function_ref.target_bits);
-  if (!iree_vm_program_resolve_callable(program, target_token)) return false;
+  if (!iree_vm_program_callable_token_is_valid(program, target_token)) {
+    return false;
+  }
   const uint32_t expected_mapping =
-      program
-          ->callables[signature_module->callable_base +
-                      expected_callable_type_ordinal]
-          .mapping;
+      program->callable_mappings[signature_module->callable_base +
+                                 expected_callable_type_ordinal];
   if (target_token != iree_vm_program_callable_token(expected_mapping)) {
     return false;
   }

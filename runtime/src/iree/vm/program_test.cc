@@ -29,6 +29,8 @@ struct CountingAllocator {
   iree_host_size_t allocation_count;
   // Number of free commands forwarded.
   iree_host_size_t free_count;
+  // One-based allocation command to fail, or zero to never fail.
+  iree_host_size_t fail_at_allocation;
 };
 
 iree_status_t CountingAllocatorControl(void* self,
@@ -40,6 +42,10 @@ iree_status_t CountingAllocatorControl(void* self,
     case IREE_ALLOCATOR_COMMAND_CALLOC:
     case IREE_ALLOCATOR_COMMAND_REALLOC:
       ++allocator->allocation_count;
+      if (allocator->allocation_count == allocator->fail_at_allocation) {
+        return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                                "injected allocation failure");
+      }
       break;
     case IREE_ALLOCATOR_COMMAND_FREE:
       ++allocator->free_count;
@@ -248,14 +254,14 @@ TEST(VMProgramTest, LinksOneImmutableSlabAndPrecomputesTargets) {
   beta.Create(&kBetaDefinition);
 
   iree_vm_module_t* libraries[] = {beta.module, alpha.module};
-  CountingAllocator allocator = {iree_allocator_system(), 0, 0};
+  CountingAllocator allocator = {iree_allocator_system(), 0, 0, 0};
   iree_vm_program_t* program = nullptr;
   IREE_ASSERT_OK(iree_vm_program_create(
       {app.module, iree_vm_module_span_from_array(libraries)},
       MakeCountingAllocator(&allocator), &program));
   ASSERT_NE(program, nullptr);
-  EXPECT_EQ(allocator.allocation_count, 1u);
-  EXPECT_EQ(allocator.free_count, 0u);
+  EXPECT_EQ(allocator.allocation_count, 2u);
+  EXPECT_EQ(allocator.free_count, 1u);
 
   ASSERT_EQ(program->linked_module_count, 3u);
   EXPECT_EQ(ToStringView(program->linked_modules[0].module->descriptor->name),
@@ -273,14 +279,14 @@ TEST(VMProgramTest, LinksOneImmutableSlabAndPrecomputesTargets) {
   EXPECT_EQ(program->linked_modules[2].process_storage_offset, app_offset);
   EXPECT_EQ(program->process_storage_size, app_offset + 17);
 
-  const uint32_t alpha_callback_mapping = program->callables[0].mapping;
-  const uint32_t alpha_work_mapping = program->callables[1].mapping;
-  const uint32_t beta_callback_mapping = program->callables[2].mapping;
-  const uint32_t app_callback_mapping = program->callables[3].mapping;
-  const uint32_t app_work_mapping = program->callables[4].mapping;
-  const uint32_t app_initialize_mapping = program->callables[5].mapping;
+  const uint32_t alpha_callback_mapping = program->callable_mappings[0];
+  const uint32_t alpha_work_mapping = program->callable_mappings[1];
+  const uint32_t beta_callback_mapping = program->callable_mappings[2];
+  const uint32_t app_callback_mapping = program->callable_mappings[3];
+  const uint32_t app_work_mapping = program->callable_mappings[4];
+  const uint32_t app_initialize_mapping = program->callable_mappings[5];
   const uint32_t app_permissive_callback_mapping =
-      program->callables[6].mapping;
+      program->callable_mappings[6];
   EXPECT_EQ(iree_vm_program_callable_token(app_callback_mapping),
             iree_vm_program_callable_token(alpha_callback_mapping));
   EXPECT_EQ(iree_vm_program_callable_token(app_callback_mapping),
@@ -320,13 +326,10 @@ TEST(VMProgramTest, LinksOneImmutableSlabAndPrecomputesTargets) {
       0u);
   EXPECT_TRUE(
       iree_vm_program_target_may_yield(program->initializer.target_bits));
-  ASSERT_NE(program->initializer.callable, nullptr);
-  EXPECT_EQ(iree_vm_program_callable_signature(program->initializer.callable)
-                .arguments.count,
-            3u);
-  EXPECT_EQ(program->initializer.callable->argument_counts.value_count, 1u);
-  EXPECT_EQ(program->initializer.callable->argument_counts.ref_count, 1u);
-  EXPECT_EQ(program->initializer.callable->argument_counts.function_count, 1u);
+  EXPECT_EQ(program->initializer.arguments.count, 3u);
+  EXPECT_EQ(program->initializer.argument_counts.value_count, 1u);
+  EXPECT_EQ(program->initializer.argument_counts.ref_count, 1u);
+  EXPECT_EQ(program->initializer.argument_counts.function_count, 1u);
 
   iree_vm_export_t run_export = {};
   iree_vm_export_t alias_export = {};
@@ -361,7 +364,7 @@ TEST(VMProgramTest, LinksOneImmutableSlabAndPrecomputesTargets) {
   EXPECT_EQ(alpha.destruction_count, 0);
   EXPECT_EQ(beta.destruction_count, 0);
   iree_vm_program_release(program);
-  EXPECT_EQ(allocator.free_count, 1u);
+  EXPECT_EQ(allocator.free_count, 2u);
   EXPECT_EQ(app.destruction_count, 1);
   EXPECT_EQ(alpha.destruction_count, 1);
   EXPECT_EQ(beta.destruction_count, 1);
@@ -386,7 +389,7 @@ void ExpectReverseOrderedComposition(iree_host_size_t module_count) {
   for (iree_host_size_t i = 0; i + 1 < module_count; ++i) {
     libraries[i] = modules[module_count - i - 2].module;
   }
-  CountingAllocator allocator = {iree_allocator_system(), 0, 0};
+  CountingAllocator allocator = {iree_allocator_system(), 0, 0, 0};
   iree_vm_program_t* program = nullptr;
   IREE_ASSERT_OK(iree_vm_program_create(
       {modules[module_count - 1].module,
@@ -409,6 +412,30 @@ void ExpectReverseOrderedComposition(iree_host_size_t module_count) {
 TEST(VMProgramTest, SortsInsertionAndHeapBoundariesWithoutTransientStorage) {
   ExpectReverseOrderedComposition(16);
   ExpectReverseOrderedComposition(17);
+}
+
+TEST(VMProgramTest, ReleasesSlabWhenCallableIndexAllocationFails) {
+  TestModule app;
+  TestModule alpha;
+  TestModule beta;
+  app.Create(&kAppDefinition);
+  alpha.Create(&kAlphaDefinition);
+  beta.Create(&kBetaDefinition);
+
+  iree_vm_module_t* libraries[] = {beta.module, alpha.module};
+  CountingAllocator allocator = {iree_allocator_system(), 0, 0, 2};
+  iree_vm_program_t* program = reinterpret_cast<iree_vm_program_t*>(1);
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_RESOURCE_EXHAUSTED,
+      iree_vm_program_create(
+          {app.module, iree_vm_module_span_from_array(libraries)},
+          MakeCountingAllocator(&allocator), &program));
+  EXPECT_EQ(program, nullptr);
+  EXPECT_EQ(allocator.allocation_count, 2u);
+  EXPECT_EQ(allocator.free_count, 1u);
+  EXPECT_EQ(app.destruction_count, 0);
+  EXPECT_EQ(alpha.destruction_count, 0);
+  EXPECT_EQ(beta.destruction_count, 0);
 }
 
 //===----------------------------------------------------------------------===//
@@ -527,7 +554,7 @@ TEST(VMProgramTest, RejectsMissingAndIncompatibleImports) {
   {
     TestModule source;
     source.Create(&kMissingDefinition);
-    CountingAllocator allocator = {iree_allocator_system(), 0, 0};
+    CountingAllocator allocator = {iree_allocator_system(), 0, 0, 0};
     iree_vm_program_t* program = reinterpret_cast<iree_vm_program_t*>(1);
     IREE_EXPECT_STATUS_IS(
         IREE_STATUS_NOT_FOUND,
@@ -667,7 +694,7 @@ TEST(VMProgramTest, RejectsNonLinkableModulesAndOversizeProcessStorage) {
   {
     TestModule module;
     module.Create(&kNonLinkableDefinition);
-    CountingAllocator allocator = {iree_allocator_system(), 0, 0};
+    CountingAllocator allocator = {iree_allocator_system(), 0, 0, 0};
     iree_vm_program_t* program = nullptr;
     IREE_EXPECT_STATUS_IS(
         IREE_STATUS_INVALID_ARGUMENT,
@@ -682,7 +709,7 @@ TEST(VMProgramTest, RejectsNonLinkableModulesAndOversizeProcessStorage) {
     large.Create(&kLargeStateDefinition);
     tail.Create(&kTailStateDefinition);
     iree_vm_module_t* libraries[] = {tail.module};
-    CountingAllocator allocator = {iree_allocator_system(), 0, 0};
+    CountingAllocator allocator = {iree_allocator_system(), 0, 0, 0};
     iree_vm_program_t* program = nullptr;
     IREE_EXPECT_STATUS_IS(
         IREE_STATUS_RESOURCE_EXHAUSTED,

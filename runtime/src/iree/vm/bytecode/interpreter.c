@@ -1143,10 +1143,9 @@ static iree_status_t iree_vm_bytecode_execute(
     const iree_vm_program_t* program = invocation->process->program;
     const iree_vm_linked_module_t* linked_module = execution->linked_module;
     if (record->target_kind_u8 == IREE_VM_ISA_CONTROL_CALL_TARGET_LOCAL) {
-      uint32_t mapping = program
-                             ->callables[linked_module->callable_base +
-                                         record->callable_type_ordinal_u16]
-                             .mapping;
+      uint32_t mapping =
+          program->callable_mappings[linked_module->callable_base +
+                                     record->callable_type_ordinal_u16];
       mapping &= ~IREE_VM_PROGRAM_CALLABLE_MAY_YIELD;
       if (iree_any_bit_set(
               module->layout.functions.rows[record->target_ordinal_u16]

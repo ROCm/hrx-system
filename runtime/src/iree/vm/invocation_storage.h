@@ -29,8 +29,8 @@ enum iree_vm_invocation_operation_e {
 };
 
 typedef struct iree_vm_root_call_t {
-  // Direct canonical callable plan retained by the borrowed process program.
-  const iree_vm_program_callable_t* callable;
+  // Transient callable view resolved once for the active root operation.
+  iree_vm_program_callable_t callable;
   // Canonical physical root call banks.
   iree_vm_call_packet_t packet;
   // First root staging byte rewound at terminal cleanup.
@@ -200,7 +200,7 @@ bool iree_vm_invocation_try_claim_completion(
 // are overwritten before the next provider entry.
 static inline void iree_vm_invocation_finish(iree_vm_invocation_t* invocation) {
   const uint16_t argument_ref_count =
-      invocation->root_call.callable->argument_counts.ref_count;
+      invocation->root_call.callable.argument_counts.ref_count;
   for (uint16_t i = 0; i < argument_ref_count; ++i) {
     iree_vm_ref_t* ref =
         i < 16 ? &invocation->root_call.packet.ref_arguments.direct[i]
@@ -208,7 +208,7 @@ static inline void iree_vm_invocation_finish(iree_vm_invocation_t* invocation) {
     iree_vm_ref_reset(ref);
   }
   const uint16_t result_ref_count =
-      invocation->root_call.callable->result_counts.ref_count;
+      invocation->root_call.callable.result_counts.ref_count;
   for (uint16_t i = 0; i < result_ref_count; ++i) {
     iree_vm_ref_t* ref =
         i < 16 ? &invocation->root_call.packet.ref_results.direct[i]

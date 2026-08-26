@@ -131,7 +131,7 @@ static iree_status_t iree_vm_process_bind_target(
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "function target is out of range");
   }
-  if (!iree_vm_program_resolve_callable(
+  if (!iree_vm_program_callable_token_is_valid(
           process->program,
           iree_vm_program_target_callable_token(target_bits))) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -275,16 +275,19 @@ IREE_API_EXPORT iree_status_t iree_vm_process_create_start(
   }
 
   if (program->initializer.target_bits) {
-    if (!program->initializer.callable) {
-      iree_vm_process_consume_arguments(arguments);
-      iree_vm_process_free_unpublished(process, 0);
-      return iree_make_status(IREE_STATUS_INTERNAL,
-                              "initializer callable token is invalid");
-    }
+    const iree_vm_program_callable_t initializer_callable = {
+        .argument_types = program->initializer.arguments.data,
+        .result_types = NULL,
+        .argument_counts = program->initializer.argument_counts,
+        .result_counts = {0},
+        .signature_module_ordinal = iree_vm_program_target_module_ordinal(
+            program->initializer.target_bits),
+        .uniform_result_scalar_type = IREE_VM_SCALAR_TYPE_INVALID,
+    };
     status = iree_vm_invocation_prepare_root(
         invocation, IREE_VM_INVOCATION_OPERATION_PROCESS_CREATE, process,
-        program->initializer.target_bits, program->initializer.callable,
-        arguments, iree_vm_variant_span_empty(), wake_callback);
+        program->initializer.target_bits, &initializer_callable, arguments,
+        iree_vm_variant_span_empty(), wake_callback);
     if (!iree_status_is_ok(status)) {
       iree_vm_process_free_unpublished(process, 0);
       return status;
