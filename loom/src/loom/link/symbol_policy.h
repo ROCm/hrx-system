@@ -36,6 +36,13 @@ bool loom_link_symbol_is_concrete_definition(const loom_symbol_t* symbol);
 bool loom_link_symbol_has_global_identity(const loom_module_t* module,
                                           const loom_symbol_t* symbol);
 
+// Internalizes |op|'s symbol definition within |module|.
+//
+// Public visibility, retention, and function export metadata are removed
+// together so the operation and symbol table continue to describe the same
+// private dependency. |op| must define a module-local symbol.
+void loom_link_symbol_internalize(loom_module_t* module, loom_op_t* op);
+
 #ifdef __cplusplus
 }
 #endif

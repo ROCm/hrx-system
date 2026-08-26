@@ -1437,43 +1437,6 @@ static iree_status_t loom_linker_replace_output_attr(
   return iree_ok_status();
 }
 
-static void loom_linker_internalize_symbol_output(loom_linker_t* linker,
-                                                  loom_op_t* target_op) {
-  const loom_op_vtable_t* target_vtable =
-      loom_op_vtable(linker->target_module, target_op);
-  const loom_symbol_definition_descriptor_t* target_definition =
-      target_vtable->symbol_def;
-  const uint8_t target_visibility_attr_index =
-      loom_symbol_definition_visibility_attr_index(target_definition);
-  const uint8_t target_retain_attr_index =
-      target_definition->retain_attr_index_plus_one
-          ? target_definition->retain_attr_index_plus_one - 1
-          : LOOM_ATTR_INDEX_NONE;
-
-  if (target_visibility_attr_index != LOOM_ATTR_INDEX_NONE) {
-    loom_op_attrs(target_op)[target_visibility_attr_index] = loom_attr_absent();
-  }
-  if (target_retain_attr_index != LOOM_ATTR_INDEX_NONE) {
-    loom_op_attrs(target_op)[target_retain_attr_index] = loom_attr_absent();
-  }
-  loom_func_like_t target_func =
-      loom_func_like_cast(linker->target_module, target_op);
-  if (loom_func_like_isa(target_func)) {
-    const uint8_t export_attr_indices[] = {
-        target_func.vtable->export_symbol_attr_index,
-        target_func.vtable->export_attrs_attr_index,
-        target_func.vtable->export_linkage_attr_index,
-    };
-    for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(export_attr_indices); ++i) {
-      if (export_attr_indices[i] != LOOM_ATTR_INDEX_NONE) {
-        loom_op_attrs(target_op)[export_attr_indices[i]] = loom_attr_absent();
-      }
-    }
-  }
-  loom_module_link_symbol_defining_op(linker->target_module, target_op,
-                                      target_vtable);
-}
-
 static iree_status_t loom_linker_apply_root_symbol_output(
     loom_linker_source_t* source, const loom_module_t* root_module,
     loom_op_t* root_op, loom_symbol_ref_t target_ref, loom_op_t* target_op) {
@@ -1572,7 +1535,7 @@ static iree_status_t loom_linker_apply_symbol_output(
     return iree_ok_status();
   }
   if (output == LOOM_LINKER_SYMBOL_OUTPUT_DEPENDENCY) {
-    loom_linker_internalize_symbol_output(source->linker, target_op);
+    loom_link_symbol_internalize(source->linker->target_module, target_op);
     return iree_ok_status();
   }
   return loom_linker_apply_root_symbol_output(source, root_module, root_op,
