@@ -22,8 +22,8 @@ alias(
 )
 
 alias(
-    name = "iree-dump-vm-module",
-    actual = "//runtime/src/iree/tools/iree-dump-vm-module",
+    name = "iree-dump-module",
+    actual = "//runtime/src/iree/tools/iree-dump-module",
 )
 
 alias(
