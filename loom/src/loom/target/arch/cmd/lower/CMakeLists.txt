@@ -220,4 +220,25 @@ loom_cc_test(
     loom::verify
 )
 
+loom_cc_benchmark(
+  NAME
+    program_plan_benchmark
+  SRCS
+    "program_plan_benchmark.cc"
+  DEPS
+    ::program_plan
+    iree::base
+    iree::base::internal::arena
+    iree::testing::benchmark_main
+    loom::format::text::parser
+    loom::ir
+    loom::link::module_index
+    loom::link::plan_materializer
+    loom::link::planner
+    loom::ops::op_registry
+    loom::pass::builtin_registry
+    loom::verify
+  TESTONLY
+)
+
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

@@ -6,6 +6,7 @@
 
 load(
     "//loom/build_tools/bazel:build_defs.bzl",
+    "loom_cc_benchmark",
     "loom_cc_library",
     "loom_cc_test",
 )
@@ -203,5 +204,24 @@ loom_cc_test(
         "//runtime/src/iree/base/internal:arena",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_benchmark(
+    name = "program_plan_benchmark",
+    srcs = ["program_plan_benchmark.cc"],
+    deps = [
+        ":program_plan",
+        "//loom/src/loom/format/text:parser",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/link:module_index",
+        "//loom/src/loom/link:plan_materializer",
+        "//loom/src/loom/link:planner",
+        "//loom/src/loom/ops:op_registry",
+        "//loom/src/loom/pass:builtin_registry",
+        "//loom/src/loom/verify",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:benchmark_main",
     ],
 )
