@@ -33,6 +33,9 @@ from model.isa.validation import (
     LOCAL_BYTES_RANGE_MEMORY_FORMAT,
     LOCAL_BYTES_REPEATED_BASE,
     LOCAL_BYTES_REPEATED_COUNT,
+    PACKED_SELECTOR_ALLOWED_PAIRS,
+    PACKED_SELECTOR_TARGET_SUPPORTED,
+    PACKED_SELECTORS,
     REF_SLOT,
     REGISTER_FUNCTION,
     REGISTER_REF,
@@ -144,6 +147,29 @@ def _validate_verification_form(
             1,
             REGISTER_REF.entity_id,
             result_or_operand,
+        )
+
+    def require_packed_selector(
+        offset: int,
+        zero_mask: int,
+        components: tuple[tuple[str, int, int, str, tuple[int, ...]], ...],
+    ) -> None:
+        normalized_components = tuple(
+            (
+                name,
+                bit_offset,
+                bit_length,
+                EntityReference(selector_table_id),
+                allowed_values,
+            )
+            for name, bit_offset, bit_length, selector_table_id, allowed_values in components
+        )
+        require_field(
+            offset,
+            1,
+            PACKED_SELECTORS.entity_id,
+            (InstructionFieldRole.IMMEDIATE,),
+            rule_arguments=(zero_mask, normalized_components),
         )
 
     def require_function(offset: int) -> None:
@@ -762,6 +788,135 @@ def _validate_verification_form(
         )
         require_zero(7, 1)
         require_lane_range(register_field, "format_u8")
+    elif verification_form in ("BUFFER_ATOMIC_REDUCE", "BUFFER_ATOMIC_RMW"):
+        if instruction.byte_length != 8:
+            raise ValueError(
+                f"{instruction.mnemonic}: buffer atomic apply is not 8 bytes"
+            )
+        is_reduce = verification_form == "BUFFER_ATOMIC_REDUCE"
+        register_offset = 1
+        if not is_reduce:
+            require_value(register_offset)
+            register_offset += 1
+        require_ref(register_offset)
+        require_value(register_offset + 1)
+        require_value(register_offset + 2)
+        require_packed_selector(
+            register_offset + 3,
+            0x70,
+            (
+                (
+                    "kind",
+                    0,
+                    4,
+                    "core.selector.buffer.atomic.kind",
+                    tuple(range(2, 16)) if is_reduce else (),
+                ),
+                (
+                    "carrier",
+                    7,
+                    1,
+                    "core.selector.buffer.atomic.carrier",
+                    (),
+                ),
+            ),
+        )
+        require_packed_selector(
+            register_offset + 4,
+            0xC0,
+            (
+                (
+                    "ordering",
+                    0,
+                    3,
+                    "core.selector.buffer.atomic.ordering",
+                    (),
+                ),
+                ("scope", 3, 3, "core.selector.buffer.atomic.scope", ()),
+            ),
+        )
+        require_zero(register_offset + 5, 2 if is_reduce else 1)
+        expected_constraint = RuleUse(
+            PACKED_SELECTOR_TARGET_SUPPORTED.entity_id,
+            (FieldReference("selector0_u8"), "carrier"),
+        )
+        if instruction.constraints != (expected_constraint,):
+            raise ValueError(
+                f"{instruction.mnemonic}: atomic carrier constraint does not "
+                "match its runtime verification form"
+            )
+    elif verification_form == "BUFFER_ATOMIC_CMPXCHG":
+        if instruction.byte_length != 8:
+            raise ValueError(
+                f"{instruction.mnemonic}: buffer atomic cmpxchg is not 8 bytes"
+            )
+        require_value(1)
+        require_ref(2)
+        require_value(3)
+        require_value(4)
+        require_value(5)
+        require_packed_selector(
+            6,
+            0x40,
+            (
+                (
+                    "success_ordering",
+                    0,
+                    3,
+                    "core.selector.buffer.atomic.ordering",
+                    (),
+                ),
+                (
+                    "failure_ordering",
+                    3,
+                    3,
+                    "core.selector.buffer.atomic.ordering",
+                    (),
+                ),
+                (
+                    "carrier",
+                    7,
+                    1,
+                    "core.selector.buffer.atomic.carrier",
+                    (),
+                ),
+            ),
+        )
+        require_packed_selector(
+            7,
+            0xF8,
+            (("scope", 0, 3, "core.selector.buffer.atomic.scope", ()),),
+        )
+        expected_constraints = (
+            RuleUse(
+                PACKED_SELECTOR_TARGET_SUPPORTED.entity_id,
+                (FieldReference("selector0_u8"), "carrier"),
+            ),
+            RuleUse(
+                PACKED_SELECTOR_ALLOWED_PAIRS.entity_id,
+                (
+                    FieldReference("selector0_u8"),
+                    "success_ordering",
+                    "failure_ordering",
+                    (
+                        (0, 0),
+                        (1, 0),
+                        (1, 1),
+                        (2, 0),
+                        (3, 0),
+                        (3, 1),
+                        (4, 0),
+                        (4, 1),
+                        (4, 4),
+                    ),
+                ),
+            ),
+        )
+        if instruction.constraints != expected_constraints:
+            raise ValueError(
+                f"{instruction.mnemonic}: atomic constraints do not match "
+                "its runtime verification form"
+            )
     elif verification_form == "BUFFER_FILL":
         if instruction.byte_length != 8:
             raise ValueError(f"{instruction.mnemonic}: buffer fill is not 8 bytes")

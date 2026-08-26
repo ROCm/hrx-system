@@ -56,6 +56,8 @@ iree_cc_library(
   SRCS
     "interpreter.c"
     "interpreter.h"
+    "interpreter_atomic.c"
+    "interpreter_atomic.h"
     "interpreter_buffer.h"
     "interpreter_call.c"
     "interpreter_call.h"
@@ -115,6 +117,23 @@ iree_cc_library(
     iree::vm
     iree::vm::bytecode::wire
   PUBLIC
+)
+
+iree_cc_test(
+  NAME
+    interpreter_atomic_test
+  SRCS
+    "interpreter_atomic.h"
+    "interpreter_atomic_test.cc"
+    "interpreter_buffer.h"
+  DEPS
+    ::bytecode
+    iree::base
+    iree::base::core_headers
+    iree::testing::gtest
+    iree::testing::gtest_main
+    iree::vm
+    iree::vm::bytecode::wire
 )
 
 iree_cc_test(
@@ -207,6 +226,7 @@ iree_cc_test(
   NAME
     module_buffer_test
   SRCS
+    "interpreter_atomic.h"
     "module_buffer_test.cc"
     "module_test_data.cc"
     "module_test_data.h"

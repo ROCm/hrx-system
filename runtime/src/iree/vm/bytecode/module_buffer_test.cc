@@ -14,6 +14,7 @@
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 #include "iree/vm/buffer_provider.h"
+#include "iree/vm/bytecode/interpreter_atomic.h"
 #include "iree/vm/bytecode/module.h"
 #include "iree/vm/bytecode/module_test_data.h"
 #include "iree/vm/bytecode/wire/core/buffer.h"
@@ -136,7 +137,43 @@ struct BufferExecutionHarness {
   }
 };
 
-TEST(VMBytecodeModuleBufferTest, RejectsMalformedBufferInstructions) {
+void RewriteI64RoundtripAsAtomicAdd(BufferExecutionHarness* harness) {
+  MutableFunctionImage function =
+      FindFunctionImage(&harness->image, kBufferRoundtripFunctionBase +
+                                             IREE_VM_ISA_MEMORY_FORMAT_I64_X1);
+  ASSERT_NE(function.row, nullptr);
+  ASSERT_EQ(function.row->bytecode_length_u32, 32u);
+
+  std::memset(function.bytecode, 0, function.row->bytecode_length_u32);
+  const iree_vm_isa_control_block_record_t block = {
+      IREE_VM_ISA_CORE_OPCODE_CONTROL_BLOCK, {0, 0, 0}};
+  std::memcpy(function.bytecode, &block, sizeof(block));
+  const iree_vm_isa_constant_zero_record_t offset = {
+      IREE_VM_ISA_CORE_OPCODE_CONSTANT_ZERO, 1, 0};
+  std::memcpy(function.bytecode + 4, &offset, sizeof(offset));
+  const iree_vm_isa_buffer_atomic_rmw_record_t atomic = {
+      IREE_VM_ISA_CORE_OPCODE_BUFFER_ATOMIC_RMW,
+      0,
+      0,
+      1,
+      0,
+      (uint8_t)(IREE_VM_ISA_BUFFER_ATOMIC_KIND_ADD_INTEGER |
+                (IREE_VM_ISA_BUFFER_ATOMIC_CARRIER_I64 << 7)),
+      (uint8_t)(IREE_VM_ISA_BUFFER_ATOMIC_SCOPE_SYSTEM << 3),
+      0,
+  };
+  std::memcpy(function.bytecode + 8, &atomic, sizeof(atomic));
+  const iree_vm_isa_constant_zero_record_t zero = {
+      IREE_VM_ISA_CORE_OPCODE_CONSTANT_ZERO, 2, 0};
+  std::memcpy(function.bytecode + 16, &zero, sizeof(zero));
+  std::memcpy(function.bytecode + 20, &zero, sizeof(zero));
+  std::memcpy(function.bytecode + 24, &zero, sizeof(zero));
+  const iree_vm_isa_control_return_record_t return_record = {
+      IREE_VM_ISA_CORE_OPCODE_CONTROL_RETURN, {0, 0, 0}};
+  std::memcpy(function.bytecode + 28, &return_record, sizeof(return_record));
+}
+
+TEST(VMBytecodeModuleBufferTest, VerifiesBufferInstructionRecords) {
   iree_vm_environment_t* environment = nullptr;
   IREE_ASSERT_OK(
       iree_vm_environment_allocate(iree_allocator_system(), &environment));
@@ -170,35 +207,70 @@ TEST(VMBytecodeModuleBufferTest, RejectsMalformedBufferInstructions) {
     EXPECT_EQ(module, nullptr);
     iree_vm_module_release(module);
   };
+  const auto write_record = [](MutableFunctionImage function,
+                               const auto& record) {
+    function.row->value_register_count_u16 = 6;
+    function.row->ref_register_count_u16 = 2;
+    uint8_t* cursor = function.bytecode;
+    const uint8_t* const end =
+        function.bytecode + function.row->bytecode_length_u32;
+    const iree_vm_isa_control_block_record_t block = {
+        IREE_VM_ISA_CORE_OPCODE_CONTROL_BLOCK, {0, 0, 0}};
+    std::memcpy(cursor, &block, sizeof(block));
+    cursor += sizeof(block);
+    ASSERT_LE(sizeof(record), static_cast<size_t>(end - cursor));
+    std::memcpy(cursor, &record, sizeof(record));
+    cursor += sizeof(record);
+    const iree_vm_isa_constant_zero_record_t zero = {
+        IREE_VM_ISA_CORE_OPCODE_CONSTANT_ZERO, 0, 0};
+    while (cursor < end - sizeof(iree_vm_isa_control_return_record_t)) {
+      std::memcpy(cursor, &zero, sizeof(zero));
+      cursor += sizeof(zero);
+    }
+    const iree_vm_isa_control_return_record_t return_record = {
+        IREE_VM_ISA_CORE_OPCODE_CONTROL_RETURN, {0, 0, 0}};
+    std::memcpy(cursor, &return_record, sizeof(return_record));
+    cursor += sizeof(return_record);
+    ASSERT_EQ(cursor, end);
+  };
+  const auto expect_record_status = [&](const char* label, const auto& record,
+                                        iree_status_code_t expected_code) {
+    SCOPED_TRACE(label);
+    std::vector<uint8_t> image = BuildBufferModuleImage();
+    MutableFunctionImage function =
+        FindFunctionImage(&image, kBufferRoundtripFunctionBase);
+    ASSERT_NE(function.row, nullptr);
+    write_record(function, record);
+    iree_vm_module_t* module = nullptr;
+    IREE_EXPECT_STATUS_IS(
+        expected_code,
+        iree_vm_bytecode_module_create(
+            environment, IREE_SV("buffer_record"),
+            {iree_make_const_byte_span(image.data(), image.size()),
+             iree_allocator_null()},
+            iree_allocator_system(), &module));
+    EXPECT_EQ(module, nullptr);
+    iree_vm_module_release(module);
+  };
   const auto expect_record_rejected = [&](const char* label,
                                           const auto& record) {
-    expect_rejected(
-        label, kBufferRoundtripFunctionBase,
-        [&](MutableFunctionImage function) {
-          function.row->value_register_count_u16 = 6;
-          function.row->ref_register_count_u16 = 2;
-          uint8_t* cursor = function.bytecode;
-          const uint8_t* const end =
-              function.bytecode + function.row->bytecode_length_u32;
-          const iree_vm_isa_control_block_record_t block = {
-              IREE_VM_ISA_CORE_OPCODE_CONTROL_BLOCK, {0, 0, 0}};
-          std::memcpy(cursor, &block, sizeof(block));
-          cursor += sizeof(block);
-          ASSERT_LE(sizeof(record), static_cast<size_t>(end - cursor));
-          std::memcpy(cursor, &record, sizeof(record));
-          cursor += sizeof(record);
-          const iree_vm_isa_constant_zero_record_t zero = {
-              IREE_VM_ISA_CORE_OPCODE_CONSTANT_ZERO, 0, 0};
-          while (cursor < end - sizeof(iree_vm_isa_control_return_record_t)) {
-            std::memcpy(cursor, &zero, sizeof(zero));
-            cursor += sizeof(zero);
-          }
-          const iree_vm_isa_control_return_record_t return_record = {
-              IREE_VM_ISA_CORE_OPCODE_CONTROL_RETURN, {0, 0, 0}};
-          std::memcpy(cursor, &return_record, sizeof(return_record));
-          cursor += sizeof(return_record);
-          ASSERT_EQ(cursor, end);
-        });
+    expect_record_status(label, record, IREE_STATUS_INVALID_ARGUMENT);
+  };
+  const auto expect_record_accepted = [&](const char* label,
+                                          const auto& record) {
+    SCOPED_TRACE(label);
+    std::vector<uint8_t> image = BuildBufferModuleImage();
+    MutableFunctionImage function =
+        FindFunctionImage(&image, kBufferRoundtripFunctionBase);
+    ASSERT_NE(function.row, nullptr);
+    write_record(function, record);
+    iree_vm_module_t* module = nullptr;
+    IREE_ASSERT_OK(iree_vm_bytecode_module_create(
+        environment, IREE_SV("valid_buffer_record"),
+        {iree_make_const_byte_span(image.data(), image.size()),
+         iree_allocator_null()},
+        iree_allocator_system(), &module));
+    iree_vm_module_release(module);
   };
 
   expect_rejected("allocate ref register", kBufferAllocateFunctionOrdinal,
@@ -310,6 +382,160 @@ TEST(VMBytecodeModuleBufferTest, RejectsMalformedBufferInstructions) {
                             function.bytecode + 4);
                     record->zero_padding_u8 = 1;
                   });
+
+  iree_vm_isa_buffer_atomic_reduce_record_t atomic_reduce = {};
+  atomic_reduce.opcode_u8 = IREE_VM_ISA_CORE_OPCODE_BUFFER_ATOMIC_REDUCE;
+  atomic_reduce.operand_v8 = 1;
+  atomic_reduce.selector0_u8 = IREE_VM_ISA_BUFFER_ATOMIC_KIND_ADD_INTEGER;
+  atomic_reduce.zero_padding_u16 = 1;
+  expect_record_rejected("atomic reduce padding", atomic_reduce);
+  atomic_reduce.zero_padding_u16 = 0;
+  atomic_reduce.selector0_u8 = IREE_VM_ISA_BUFFER_ATOMIC_KIND_EXCHANGE_INTEGER;
+  expect_record_rejected("atomic reduce exchange integer", atomic_reduce);
+  atomic_reduce.selector0_u8 = IREE_VM_ISA_BUFFER_ATOMIC_KIND_EXCHANGE_FLOAT;
+  expect_record_rejected("atomic reduce exchange float", atomic_reduce);
+  atomic_reduce.selector0_u8 =
+      IREE_VM_ISA_BUFFER_ATOMIC_KIND_ADD_INTEGER | 0x10u;
+  expect_record_rejected("atomic reduce selector0 reserved bits",
+                         atomic_reduce);
+  atomic_reduce.selector0_u8 = IREE_VM_ISA_BUFFER_ATOMIC_KIND_ADD_INTEGER;
+  atomic_reduce.selector1_u8 = 0x05u;
+  expect_record_rejected("atomic reduce ordering", atomic_reduce);
+  atomic_reduce.selector1_u8 = 0x28u;
+  expect_record_rejected("atomic reduce scope", atomic_reduce);
+  atomic_reduce.selector1_u8 = 0;
+  atomic_reduce.buffer_r8 = 2;
+  expect_record_rejected("atomic reduce ref register", atomic_reduce);
+  atomic_reduce.buffer_r8 = 0;
+  atomic_reduce.offset_v8 = 6;
+  expect_record_rejected("atomic reduce offset register", atomic_reduce);
+  atomic_reduce.offset_v8 = 0;
+  atomic_reduce.operand_v8 = 6;
+  expect_record_rejected("atomic reduce operand register", atomic_reduce);
+  atomic_reduce.operand_v8 = 1;
+
+  iree_vm_isa_buffer_atomic_rmw_record_t atomic_rmw = {};
+  atomic_rmw.opcode_u8 = IREE_VM_ISA_CORE_OPCODE_BUFFER_ATOMIC_RMW;
+  atomic_rmw.operand_v8 = 1;
+  atomic_rmw.zero_padding_u8 = 1;
+  expect_record_rejected("atomic rmw padding", atomic_rmw);
+  atomic_rmw.zero_padding_u8 = 0;
+  atomic_rmw.selector0_u8 = 0x10u;
+  expect_record_rejected("atomic rmw selector0 reserved bits", atomic_rmw);
+  atomic_rmw.selector0_u8 = 0;
+  atomic_rmw.selector1_u8 = 0x40u;
+  expect_record_rejected("atomic rmw selector1 reserved bits", atomic_rmw);
+  atomic_rmw.selector1_u8 = 0;
+  atomic_rmw.old_v8 = 6;
+  expect_record_rejected("atomic rmw result register", atomic_rmw);
+  atomic_rmw.old_v8 = 0;
+  atomic_rmw.buffer_r8 = 2;
+  expect_record_rejected("atomic rmw ref register", atomic_rmw);
+  atomic_rmw.buffer_r8 = 0;
+  atomic_rmw.offset_v8 = 6;
+  expect_record_rejected("atomic rmw offset register", atomic_rmw);
+  atomic_rmw.offset_v8 = 0;
+  atomic_rmw.operand_v8 = 6;
+  expect_record_rejected("atomic rmw operand register", atomic_rmw);
+  atomic_rmw.operand_v8 = 1;
+
+  iree_vm_isa_buffer_atomic_cmpxchg_record_t atomic_cmpxchg = {};
+  atomic_cmpxchg.opcode_u8 = IREE_VM_ISA_CORE_OPCODE_BUFFER_ATOMIC_CMPXCHG;
+  atomic_cmpxchg.expected_v8 = 1;
+  atomic_cmpxchg.replacement_v8 = 2;
+  atomic_cmpxchg.selector0_u8 = 0x40u;
+  expect_record_rejected("atomic cmpxchg selector0 reserved bits",
+                         atomic_cmpxchg);
+  atomic_cmpxchg.selector0_u8 = 0;
+  atomic_cmpxchg.selector1_u8 = 0x08u;
+  expect_record_rejected("atomic cmpxchg selector1 reserved bits",
+                         atomic_cmpxchg);
+  atomic_cmpxchg.selector1_u8 = 0;
+  atomic_cmpxchg.old_v8 = 6;
+  expect_record_rejected("atomic cmpxchg result register", atomic_cmpxchg);
+  atomic_cmpxchg.old_v8 = 0;
+  atomic_cmpxchg.buffer_r8 = 2;
+  expect_record_rejected("atomic cmpxchg ref register", atomic_cmpxchg);
+  atomic_cmpxchg.buffer_r8 = 0;
+  atomic_cmpxchg.offset_v8 = 6;
+  expect_record_rejected("atomic cmpxchg offset register", atomic_cmpxchg);
+  atomic_cmpxchg.offset_v8 = 0;
+  atomic_cmpxchg.expected_v8 = 6;
+  expect_record_rejected("atomic cmpxchg expected register", atomic_cmpxchg);
+  atomic_cmpxchg.expected_v8 = 1;
+  atomic_cmpxchg.replacement_v8 = 6;
+  expect_record_rejected("atomic cmpxchg replacement register", atomic_cmpxchg);
+  atomic_cmpxchg.replacement_v8 = 2;
+  atomic_cmpxchg.selector0_u8 = 0x05u;
+  expect_record_rejected("atomic cmpxchg success ordering", atomic_cmpxchg);
+  atomic_cmpxchg.selector0_u8 = 0x28u;
+  expect_record_rejected("atomic cmpxchg failure ordering", atomic_cmpxchg);
+  atomic_cmpxchg.selector0_u8 = 0;
+  atomic_cmpxchg.selector1_u8 = 0x05u;
+  expect_record_rejected("atomic cmpxchg scope", atomic_cmpxchg);
+  atomic_cmpxchg.selector1_u8 = 0;
+
+  const bool legal_ordering_pairs[5][5] = {
+      {true, false, false, false, false}, {true, true, false, false, false},
+      {true, false, false, false, false}, {true, true, false, false, false},
+      {true, true, false, false, true},
+  };
+  for (uint8_t carrier = IREE_VM_ISA_BUFFER_ATOMIC_CARRIER_I32;
+       carrier <= IREE_VM_ISA_BUFFER_ATOMIC_CARRIER_I64; ++carrier) {
+    SCOPED_TRACE(static_cast<int>(carrier));
+    if (!iree_vm_bytecode_atomic_carrier_is_supported(carrier)) {
+      atomic_rmw.selector0_u8 = (uint8_t)(carrier << 7);
+      atomic_rmw.selector1_u8 = 0;
+      expect_record_status("unsupported atomic carrier", atomic_rmw,
+                           IREE_STATUS_UNIMPLEMENTED);
+      continue;
+    }
+
+    for (uint8_t kind = IREE_VM_ISA_BUFFER_ATOMIC_KIND_ADD_INTEGER;
+         kind <= IREE_VM_ISA_BUFFER_ATOMIC_KIND_MAXNUM_FLOAT; ++kind) {
+      atomic_reduce.selector0_u8 = (uint8_t)(kind | (carrier << 7));
+      atomic_reduce.selector1_u8 = 0;
+      expect_record_accepted("atomic reduce kind", atomic_reduce);
+    }
+    for (uint8_t kind = IREE_VM_ISA_BUFFER_ATOMIC_KIND_EXCHANGE_INTEGER;
+         kind <= IREE_VM_ISA_BUFFER_ATOMIC_KIND_MAXNUM_FLOAT; ++kind) {
+      atomic_rmw.selector0_u8 = (uint8_t)(kind | (carrier << 7));
+      atomic_rmw.selector1_u8 = 0;
+      expect_record_accepted("atomic rmw kind", atomic_rmw);
+    }
+    for (uint8_t ordering = IREE_VM_ISA_BUFFER_ATOMIC_ORDERING_RELAXED;
+         ordering <= IREE_VM_ISA_BUFFER_ATOMIC_ORDERING_SEQ_CST; ++ordering) {
+      atomic_rmw.selector0_u8 = (uint8_t)(carrier << 7);
+      atomic_rmw.selector1_u8 = ordering;
+      expect_record_accepted("atomic rmw ordering", atomic_rmw);
+    }
+    for (uint8_t scope = IREE_VM_ISA_BUFFER_ATOMIC_SCOPE_THREAD;
+         scope <= IREE_VM_ISA_BUFFER_ATOMIC_SCOPE_SYSTEM; ++scope) {
+      atomic_rmw.selector0_u8 = (uint8_t)(carrier << 7);
+      atomic_rmw.selector1_u8 = (uint8_t)(scope << 3);
+      expect_record_accepted("atomic rmw scope", atomic_rmw);
+      atomic_cmpxchg.selector0_u8 = (uint8_t)(carrier << 7);
+      atomic_cmpxchg.selector1_u8 = scope;
+      expect_record_accepted("atomic cmpxchg scope", atomic_cmpxchg);
+    }
+    for (uint8_t success_ordering = 0; success_ordering < 5;
+         ++success_ordering) {
+      for (uint8_t failure_ordering = 0; failure_ordering < 5;
+           ++failure_ordering) {
+        atomic_cmpxchg.selector0_u8 =
+            (uint8_t)(success_ordering | (failure_ordering << 3) |
+                      (carrier << 7));
+        atomic_cmpxchg.selector1_u8 = 0;
+        if (legal_ordering_pairs[success_ordering][failure_ordering]) {
+          expect_record_accepted("atomic cmpxchg legal ordering pair",
+                                 atomic_cmpxchg);
+        } else {
+          expect_record_rejected("atomic cmpxchg illegal ordering pair",
+                                 atomic_cmpxchg);
+        }
+      }
+    }
+  }
 
   iree_vm_isa_buffer_fill_record_t fill = {};
   fill.opcode_u8 = IREE_VM_ISA_CORE_OPCODE_BUFFER_FILL;
@@ -546,6 +772,103 @@ TEST(VMBytecodeModuleBufferTest, AllocatesViewsAndTransfersEveryLaneFormat) {
   iree_vm_buffer_release(nested);
   iree_vm_buffer_release(whole);
   iree_vm_buffer_release(view);
+}
+
+TEST(VMBytecodeModuleBufferTest, AtomicRmwFailsBeforePublishingOrMutating) {
+  if (!iree_vm_bytecode_atomic_carrier_is_supported(
+          IREE_VM_ISA_BUFFER_ATOMIC_CARRIER_I64)) {
+    GTEST_SKIP() << "i64 atomics are unsupported by this target";
+  }
+
+  BufferExecutionHarness harness;
+  RewriteI64RoundtripAsAtomicAdd(&harness);
+  IREE_ASSERT_OK(harness.Initialize());
+  char function_name[32] = {};
+  const int function_name_length =
+      std::snprintf(function_name, sizeof(function_name), "roundtrip.%02u",
+                    static_cast<unsigned>(IREE_VM_ISA_MEMORY_FORMAT_I64_X1));
+  ASSERT_GT(function_name_length, 0);
+  const iree_string_view_t function_name_view =
+      iree_make_string_view(function_name, function_name_length);
+  const iree_vm_variant_t sentinel = VariantFromI64Bits(UINT64_C(0x1234));
+
+  const auto invoke = [&](iree_vm_buffer_t* buffer, iree_vm_variant_t* result) {
+    iree_vm_variant_t arguments[] = {
+        iree_vm_buffer_variant_from_ptr_borrowed(&harness.vm_types, buffer),
+        iree_vm_variant_from_i64(5),
+    };
+    return harness.Invoke(function_name_view,
+                          iree_vm_variant_span_from_array(arguments),
+                          iree_vm_variant_span_from_ptr(result, 1));
+  };
+
+  alignas(8) std::array<uint8_t, 8> aligned_storage = {};
+  const uint64_t initial_bits = 7;
+  std::memcpy(aligned_storage.data(), &initial_bits, sizeof(initial_bits));
+  iree_vm_buffer_t* aligned_buffer = nullptr;
+  IREE_ASSERT_OK(iree_vm_buffer_wrap(
+      IREE_VM_BUFFER_ACCESS_FLAG_READ | IREE_VM_BUFFER_ACCESS_FLAG_WRITE,
+      iree_make_byte_span(aligned_storage.data(), aligned_storage.size()),
+      iree_vm_buffer_release_callback_null(), iree_allocator_system(),
+      &aligned_buffer));
+  iree_vm_variant_t result = sentinel;
+  IREE_ASSERT_OK(invoke(aligned_buffer, &result));
+  int64_t old_value = 0;
+  IREE_ASSERT_OK(iree_vm_i64_from_variant(result, &old_value));
+  EXPECT_EQ(old_value, 7);
+  uint64_t updated_bits = 0;
+  std::memcpy(&updated_bits, aligned_storage.data(), sizeof(updated_bits));
+  EXPECT_EQ(updated_bits, 12u);
+  iree_vm_buffer_release(aligned_buffer);
+
+  alignas(8) std::array<uint8_t, 8> read_only_storage = {};
+  std::memcpy(read_only_storage.data(), &initial_bits, sizeof(initial_bits));
+  iree_vm_buffer_t* read_only_buffer = nullptr;
+  IREE_ASSERT_OK(iree_vm_buffer_wrap(
+      IREE_VM_BUFFER_ACCESS_FLAG_READ,
+      iree_make_byte_span(read_only_storage.data(), read_only_storage.size()),
+      iree_vm_buffer_release_callback_null(), iree_allocator_system(),
+      &read_only_buffer));
+  result = sentinel;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_PERMISSION_DENIED,
+                        invoke(read_only_buffer, &result));
+  ExpectVariantEqual(result, sentinel);
+  EXPECT_EQ(std::memcmp(read_only_storage.data(), &initial_bits,
+                        sizeof(initial_bits)),
+            0);
+  iree_vm_buffer_release(read_only_buffer);
+
+  alignas(8) std::array<uint8_t, 4> short_storage = {};
+  iree_vm_buffer_t* short_buffer = nullptr;
+  IREE_ASSERT_OK(iree_vm_buffer_wrap(
+      IREE_VM_BUFFER_ACCESS_FLAG_READ | IREE_VM_BUFFER_ACCESS_FLAG_WRITE,
+      iree_make_byte_span(short_storage.data(), short_storage.size()),
+      iree_vm_buffer_release_callback_null(), iree_allocator_system(),
+      &short_buffer));
+  result = sentinel;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_OUT_OF_RANGE,
+                        invoke(short_buffer, &result));
+  ExpectVariantEqual(result, sentinel);
+  EXPECT_EQ(short_storage, (std::array<uint8_t, 4>{}));
+  iree_vm_buffer_release(short_buffer);
+
+  alignas(8) std::array<uint8_t, 9> misaligned_storage = {};
+  std::memcpy(misaligned_storage.data() + 1, &initial_bits,
+              sizeof(initial_bits));
+  iree_vm_buffer_t* misaligned_buffer = nullptr;
+  IREE_ASSERT_OK(iree_vm_buffer_wrap(
+      IREE_VM_BUFFER_ACCESS_FLAG_READ | IREE_VM_BUFFER_ACCESS_FLAG_WRITE,
+      iree_make_byte_span(misaligned_storage.data() + 1, sizeof(initial_bits)),
+      iree_vm_buffer_release_callback_null(), iree_allocator_system(),
+      &misaligned_buffer));
+  result = sentinel;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_FAILED_PRECONDITION,
+                        invoke(misaligned_buffer, &result));
+  ExpectVariantEqual(result, sentinel);
+  EXPECT_EQ(std::memcmp(misaligned_storage.data() + 1, &initial_bits,
+                        sizeof(initial_bits)),
+            0);
+  iree_vm_buffer_release(misaligned_buffer);
 }
 
 TEST(VMBytecodeModuleBufferTest, CopiesBetweenBufferAndLocalStorage) {

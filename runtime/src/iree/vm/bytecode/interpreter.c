@@ -8,6 +8,7 @@
 
 #include <string.h>
 
+#include "iree/vm/bytecode/interpreter_atomic.h"
 #include "iree/vm/bytecode/interpreter_buffer.h"
 #include "iree/vm/bytecode/interpreter_call.h"
 #include "iree/vm/bytecode/interpreter_float.h"
@@ -1607,6 +1608,89 @@ static iree_status_t iree_vm_bytecode_execute(
     iree_vm_bytecode_stack_store_lanes(record->format_u8,
                                        values + record->src_v8, target.data);
     IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_isa_buffer_store_record_t);
+  }
+  // Host atomics operate at system scope. Verified thread through device
+  // scopes are conservatively strengthened and need no execution-time branch.
+  IREE_VM_BYTECODE_DISPATCH_CASE(BUFFER_ATOMIC_REDUCE, buffer_atomic_reduce) {
+    const iree_vm_isa_buffer_atomic_reduce_record_t* record =
+        (const iree_vm_isa_buffer_atomic_reduce_record_t*)record_data;
+    const uint64_t offset = values[record->offset_v8];
+    const uint64_t operand_bits = values[record->operand_v8];
+    const iree_vm_isa_buffer_atomic_kind_t kind = record->selector0_u8 & 0x0Fu;
+    const iree_vm_isa_buffer_atomic_carrier_t carrier =
+        record->selector0_u8 >> 7;
+    const iree_vm_isa_buffer_atomic_ordering_t ordering =
+        record->selector1_u8 & 0x07u;
+    iree_vm_buffer_t* buffer = NULL;
+    status = iree_vm_bytecode_buffer_check_deref(refs[record->buffer_r8],
+                                                 module->buffer_type, &buffer);
+    if (!iree_status_is_ok(status)) {
+      IREE_VM_BYTECODE_DISPATCH_TERMINATE();
+    }
+    uint8_t* address = NULL;
+    status = iree_vm_bytecode_buffer_map_atomic(
+        buffer, offset, (iree_host_size_t)4u << carrier, &address);
+    if (!iree_status_is_ok(status)) {
+      IREE_VM_BYTECODE_DISPATCH_TERMINATE();
+    }
+    (void)iree_vm_bytecode_atomic_apply(address, operand_bits, kind, carrier,
+                                        ordering);
+    IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_isa_buffer_atomic_reduce_record_t);
+  }
+  IREE_VM_BYTECODE_DISPATCH_CASE(BUFFER_ATOMIC_RMW, buffer_atomic_rmw) {
+    const iree_vm_isa_buffer_atomic_rmw_record_t* record =
+        (const iree_vm_isa_buffer_atomic_rmw_record_t*)record_data;
+    const uint64_t offset = values[record->offset_v8];
+    const uint64_t operand_bits = values[record->operand_v8];
+    const iree_vm_isa_buffer_atomic_kind_t kind = record->selector0_u8 & 0x0Fu;
+    const iree_vm_isa_buffer_atomic_carrier_t carrier =
+        record->selector0_u8 >> 7;
+    const iree_vm_isa_buffer_atomic_ordering_t ordering =
+        record->selector1_u8 & 0x07u;
+    iree_vm_buffer_t* buffer = NULL;
+    status = iree_vm_bytecode_buffer_check_deref(refs[record->buffer_r8],
+                                                 module->buffer_type, &buffer);
+    if (!iree_status_is_ok(status)) {
+      IREE_VM_BYTECODE_DISPATCH_TERMINATE();
+    }
+    uint8_t* address = NULL;
+    status = iree_vm_bytecode_buffer_map_atomic(
+        buffer, offset, (iree_host_size_t)4u << carrier, &address);
+    if (!iree_status_is_ok(status)) {
+      IREE_VM_BYTECODE_DISPATCH_TERMINATE();
+    }
+    values[record->old_v8] = iree_vm_bytecode_atomic_apply(
+        address, operand_bits, kind, carrier, ordering);
+    IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_isa_buffer_atomic_rmw_record_t);
+  }
+  IREE_VM_BYTECODE_DISPATCH_CASE(BUFFER_ATOMIC_CMPXCHG, buffer_atomic_cmpxchg) {
+    const iree_vm_isa_buffer_atomic_cmpxchg_record_t* record =
+        (const iree_vm_isa_buffer_atomic_cmpxchg_record_t*)record_data;
+    const uint64_t offset = values[record->offset_v8];
+    const uint64_t expected_bits = values[record->expected_v8];
+    const uint64_t replacement_bits = values[record->replacement_v8];
+    const iree_vm_isa_buffer_atomic_carrier_t carrier =
+        record->selector0_u8 >> 7;
+    const iree_vm_isa_buffer_atomic_ordering_t success_ordering =
+        record->selector0_u8 & 0x07u;
+    const iree_vm_isa_buffer_atomic_ordering_t failure_ordering =
+        (record->selector0_u8 >> 3) & 0x07u;
+    iree_vm_buffer_t* buffer = NULL;
+    status = iree_vm_bytecode_buffer_check_deref(refs[record->buffer_r8],
+                                                 module->buffer_type, &buffer);
+    if (!iree_status_is_ok(status)) {
+      IREE_VM_BYTECODE_DISPATCH_TERMINATE();
+    }
+    uint8_t* address = NULL;
+    status = iree_vm_bytecode_buffer_map_atomic(
+        buffer, offset, (iree_host_size_t)4u << carrier, &address);
+    if (!iree_status_is_ok(status)) {
+      IREE_VM_BYTECODE_DISPATCH_TERMINATE();
+    }
+    values[record->old_v8] = iree_vm_bytecode_atomic_compare_exchange(
+        address, expected_bits, replacement_bits, carrier, success_ordering,
+        failure_ordering);
+    IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_isa_buffer_atomic_cmpxchg_record_t);
   }
   IREE_VM_BYTECODE_DISPATCH_CASE(BUFFER_FILL, buffer_fill) {
     const iree_vm_isa_buffer_fill_record_t* record =

@@ -5,6 +5,7 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 #include "iree/base/alignment.h"
+#include "iree/vm/bytecode/interpreter_atomic.h"
 #include "iree/vm/bytecode/module_reader.h"
 #include "iree/vm/bytecode/verification.h"
 #include "iree/vm/bytecode/wire/core/abi.h"
@@ -92,6 +93,9 @@ typedef enum iree_vm_bytecode_verification_form_e {
   IREE_VM_BYTECODE_VERIFICATION_FORM_BUFFER_SUBSPAN,
   IREE_VM_BYTECODE_VERIFICATION_FORM_BUFFER_LOAD,
   IREE_VM_BYTECODE_VERIFICATION_FORM_BUFFER_STORE,
+  IREE_VM_BYTECODE_VERIFICATION_FORM_BUFFER_ATOMIC_REDUCE,
+  IREE_VM_BYTECODE_VERIFICATION_FORM_BUFFER_ATOMIC_RMW,
+  IREE_VM_BYTECODE_VERIFICATION_FORM_BUFFER_ATOMIC_CMPXCHG,
   IREE_VM_BYTECODE_VERIFICATION_FORM_BUFFER_FILL,
   IREE_VM_BYTECODE_VERIFICATION_FORM_BUFFER_COPY,
   IREE_VM_BYTECODE_VERIFICATION_FORM_BUFFER_COMPARE,
@@ -249,6 +253,63 @@ static bool iree_vm_bytecode_control_status_is_assigned(uint8_t status) {
   return (status >= IREE_VM_ISA_CONTROL_STATUS_CANCELLED &&
           status <= IREE_VM_ISA_CONTROL_STATUS_UNAUTHENTICATED) ||
          status == IREE_VM_ISA_CONTROL_STATUS_INCOMPATIBLE;
+}
+
+static iree_status_t iree_vm_bytecode_verify_atomic_carrier(uint8_t carrier) {
+  if (!iree_vm_bytecode_atomic_carrier_is_supported(carrier)) {
+    return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
+                            "atomic carrier is unsupported on this target");
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t iree_vm_bytecode_verify_atomic_apply_selectors(
+    uint8_t selector0, uint8_t selector1, uint8_t minimum_kind) {
+  const uint8_t kind = selector0 & 0x0Fu;
+  const uint8_t ordering = selector1 & 0x07u;
+  const uint8_t scope = (selector1 >> 3) & 0x07u;
+  if ((selector0 & 0x70u) != 0 || (selector1 & 0xC0u) != 0 ||
+      kind < minimum_kind ||
+      ordering > IREE_VM_ISA_BUFFER_ATOMIC_ORDERING_SEQ_CST ||
+      scope > IREE_VM_ISA_BUFFER_ATOMIC_SCOPE_SYSTEM) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "buffer atomic selectors are invalid");
+  }
+  return iree_ok_status();
+}
+
+static bool iree_vm_bytecode_atomic_ordering_pair_is_valid(
+    uint8_t success_ordering, uint8_t failure_ordering) {
+  switch (success_ordering) {
+    case IREE_VM_ISA_BUFFER_ATOMIC_ORDERING_RELAXED:
+    case IREE_VM_ISA_BUFFER_ATOMIC_ORDERING_RELEASE:
+      return failure_ordering == IREE_VM_ISA_BUFFER_ATOMIC_ORDERING_RELAXED;
+    case IREE_VM_ISA_BUFFER_ATOMIC_ORDERING_ACQUIRE:
+    case IREE_VM_ISA_BUFFER_ATOMIC_ORDERING_ACQ_REL:
+      return failure_ordering == IREE_VM_ISA_BUFFER_ATOMIC_ORDERING_RELAXED ||
+             failure_ordering == IREE_VM_ISA_BUFFER_ATOMIC_ORDERING_ACQUIRE;
+    case IREE_VM_ISA_BUFFER_ATOMIC_ORDERING_SEQ_CST:
+      return failure_ordering == IREE_VM_ISA_BUFFER_ATOMIC_ORDERING_RELAXED ||
+             failure_ordering == IREE_VM_ISA_BUFFER_ATOMIC_ORDERING_ACQUIRE ||
+             failure_ordering == IREE_VM_ISA_BUFFER_ATOMIC_ORDERING_SEQ_CST;
+    default:
+      return false;
+  }
+}
+
+static iree_status_t iree_vm_bytecode_verify_atomic_cmpxchg_selectors(
+    uint8_t selector0, uint8_t selector1) {
+  const uint8_t success_ordering = selector0 & 0x07u;
+  const uint8_t failure_ordering = (selector0 >> 3) & 0x07u;
+  const uint8_t scope = selector1 & 0x07u;
+  if ((selector0 & 0x40u) != 0 || (selector1 & 0xF8u) != 0 ||
+      !iree_vm_bytecode_atomic_ordering_pair_is_valid(success_ordering,
+                                                      failure_ordering) ||
+      scope > IREE_VM_ISA_BUFFER_ATOMIC_SCOPE_SYSTEM) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "buffer atomic cmpxchg selectors are invalid");
+  }
+  return iree_ok_status();
 }
 
 // Verifies the shared opcode/dst/lhs/rhs value-register layout.
@@ -1567,6 +1628,67 @@ static iree_status_t iree_vm_bytecode_function_verify(
             record->index_v8, function->value_register_count_u16));
         IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_lane_register_range(
             record->src_v8, record->format_u8, function));
+        break;
+      }
+      case IREE_VM_BYTECODE_VERIFICATION_FORM_BUFFER_ATOMIC_REDUCE: {
+        const iree_vm_isa_buffer_atomic_reduce_record_t* record =
+            (const iree_vm_isa_buffer_atomic_reduce_record_t*)record_data;
+        if (record->zero_padding_u16 != 0) {
+          return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                  "buffer.atomic.reduce padding is nonzero");
+        }
+        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_atomic_apply_selectors(
+            record->selector0_u8, record->selector1_u8,
+            IREE_VM_ISA_BUFFER_ATOMIC_KIND_ADD_INTEGER));
+        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_ref_register(
+            record->buffer_r8, function->ref_register_count_u16));
+        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_value_register(
+            record->offset_v8, function->value_register_count_u16));
+        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_value_register(
+            record->operand_v8, function->value_register_count_u16));
+        IREE_RETURN_IF_ERROR(
+            iree_vm_bytecode_verify_atomic_carrier(record->selector0_u8 >> 7));
+        break;
+      }
+      case IREE_VM_BYTECODE_VERIFICATION_FORM_BUFFER_ATOMIC_RMW: {
+        const iree_vm_isa_buffer_atomic_rmw_record_t* record =
+            (const iree_vm_isa_buffer_atomic_rmw_record_t*)record_data;
+        if (record->zero_padding_u8 != 0) {
+          return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                  "buffer.atomic.rmw padding is nonzero");
+        }
+        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_atomic_apply_selectors(
+            record->selector0_u8, record->selector1_u8,
+            IREE_VM_ISA_BUFFER_ATOMIC_KIND_EXCHANGE_INTEGER));
+        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_value_register(
+            record->old_v8, function->value_register_count_u16));
+        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_ref_register(
+            record->buffer_r8, function->ref_register_count_u16));
+        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_value_register(
+            record->offset_v8, function->value_register_count_u16));
+        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_value_register(
+            record->operand_v8, function->value_register_count_u16));
+        IREE_RETURN_IF_ERROR(
+            iree_vm_bytecode_verify_atomic_carrier(record->selector0_u8 >> 7));
+        break;
+      }
+      case IREE_VM_BYTECODE_VERIFICATION_FORM_BUFFER_ATOMIC_CMPXCHG: {
+        const iree_vm_isa_buffer_atomic_cmpxchg_record_t* record =
+            (const iree_vm_isa_buffer_atomic_cmpxchg_record_t*)record_data;
+        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_atomic_cmpxchg_selectors(
+            record->selector0_u8, record->selector1_u8));
+        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_value_register(
+            record->old_v8, function->value_register_count_u16));
+        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_ref_register(
+            record->buffer_r8, function->ref_register_count_u16));
+        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_value_register(
+            record->offset_v8, function->value_register_count_u16));
+        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_value_register(
+            record->expected_v8, function->value_register_count_u16));
+        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_value_register(
+            record->replacement_v8, function->value_register_count_u16));
+        IREE_RETURN_IF_ERROR(
+            iree_vm_bytecode_verify_atomic_carrier(record->selector0_u8 >> 7));
         break;
       }
       case IREE_VM_BYTECODE_VERIFICATION_FORM_BUFFER_FILL: {

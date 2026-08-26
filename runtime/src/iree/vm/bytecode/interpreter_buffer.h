@@ -59,6 +59,25 @@ static inline iree_status_t iree_vm_bytecode_buffer_map_range(
                                   (iree_host_size_t)length, out_span);
 }
 
+// Maps one naturally aligned READ|WRITE atomic carrier range. The address is
+// published only after range, liveness, rights, and concrete alignment checks
+// all succeed.
+static inline iree_status_t iree_vm_bytecode_buffer_map_atomic(
+    iree_vm_buffer_t* buffer, uint64_t offset,
+    iree_host_size_t carrier_byte_length, uint8_t** out_address) {
+  iree_byte_span_t span = iree_byte_span_empty();
+  IREE_RETURN_IF_ERROR(iree_vm_bytecode_buffer_map_range(
+      buffer,
+      IREE_VM_BUFFER_ACCESS_FLAG_READ | IREE_VM_BUFFER_ACCESS_FLAG_WRITE,
+      offset, carrier_byte_length, &span));
+  if (((uintptr_t)span.data & (carrier_byte_length - 1u)) != 0) {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "atomic buffer address is not naturally aligned");
+  }
+  *out_address = span.data;
+  return iree_ok_status();
+}
+
 // Resolves and maps one checked scaled lane range. Arithmetic remains u64
 // until host representability is proven. The mapped span is populated only
 // after arithmetic, bounds, liveness, and rights checks all succeed.
