@@ -2970,6 +2970,15 @@ static iree_status_t loom_scf_unroll_process_function_once(
                          },
                          context->pass->arena, &walk_result));
 
+  // Fact computation is proportional to the entire function and is only
+  // needed when at least one loop may be processed. In particular, avoid
+  // recomputing facts for the expanded function on the terminal convergence
+  // iteration after full unrolling removed every loop.
+  if (loops.count == 0) return iree_ok_status();
+  IREE_RETURN_IF_ERROR(loom_pass_value_facts_acquire(
+      context->pass, context->module,
+      loom_pass_value_fact_scope_function(function), &context->fact_table));
+
   for (iree_host_size_t i = 0;
        i < loops.count && !loom_pass_has_error_diagnostics(context->pass);
        ++i) {
@@ -3009,10 +3018,6 @@ iree_status_t loom_scf_unroll_run(loom_pass_t* pass, loom_module_t* module,
   while (iree_status_is_ok(status) && changed &&
          !loom_pass_has_error_diagnostics(pass)) {
     changed = false;
-    status = loom_pass_value_facts_acquire(
-        pass, module, loom_pass_value_fact_scope_function(function),
-        &context.fact_table);
-    if (!iree_status_is_ok(status)) break;
     status =
         loom_scf_unroll_process_function_once(&context, function, &changed);
     if (changed) {
