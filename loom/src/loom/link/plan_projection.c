@@ -43,6 +43,71 @@ static bool loom_link_plan_projection_retains_import_anchor(
          !loom_link_plan_symbol_imports_resolved(plan, symbol_ordinal);
 }
 
+static bool loom_link_plan_projection_symbol_is_partial(
+    const loom_link_plan_module_symbol_t* symbol) {
+  IREE_ASSERT_LE(symbol->plan_symbol->selected_facet_count,
+                 symbol->source_symbol->facets.schema.facet_count);
+  return symbol->plan_symbol->selected_facet_count !=
+         symbol->source_symbol->facets.schema.facet_count;
+}
+
+static void loom_link_plan_projection_assign_complete_symbol_ordinals(
+    loom_link_plan_module_selection_t* module) {
+  for (iree_host_size_t i = 0; i < module->symbols.count; ++i) {
+    const loom_link_plan_module_symbol_t* symbol = &module->symbols.values[i];
+    module->symbols.values[i].materialized_symbol_ordinal =
+        (uint32_t)(module->source_module->materialized_module
+                       ? symbol->source_symbol->module_symbol_ordinal
+                       : i);
+  }
+}
+
+// Assigns the source-symbol domain consumed by the incremental linker.
+//
+// Complete materialized modules link sparsely from their original symbol
+// tables. Selected bytecode modules are already compact in selection order.
+// A module containing partial semantic projections materializes complete
+// symbols first, then one source-facing symbol per partial selection. Synthetic
+// projection helpers follow the complete source-symbol domain. This lets the
+// selected bytecode reader populate the complete prefix without opening omitted
+// facets while reserving every authored symbol name before helper names are
+// chosen.
+static void loom_link_plan_projection_assign_materialized_symbol_ordinals(
+    const loom_link_plan_t* plan, loom_link_plan_module_selection_t* module) {
+  if (loom_link_plan_mode(plan) != LOOM_LINK_PLAN_SELECTIVE) {
+    module->projected_symbol_count = 0;
+    loom_link_plan_projection_assign_complete_symbol_ordinals(module);
+    return;
+  }
+
+  iree_host_size_t complete_symbol_count = 0;
+  for (iree_host_size_t i = 0; i < module->symbols.count; ++i) {
+    complete_symbol_count += !loom_link_plan_projection_symbol_is_partial(
+        &module->symbols.values[i]);
+  }
+  const iree_host_size_t partial_symbol_count =
+      module->symbols.count - complete_symbol_count;
+  module->projected_symbol_count =
+      partial_symbol_count == 0 ? 0
+                                : module->symbols.count + partial_symbol_count;
+
+  if (!loom_link_plan_module_requires_symbol_projection(module)) {
+    loom_link_plan_projection_assign_complete_symbol_ordinals(module);
+    return;
+  }
+
+  uint32_t complete_ordinal = 0;
+  uint32_t partial_ordinal = (uint32_t)complete_symbol_count;
+  for (iree_host_size_t i = 0; i < module->symbols.count; ++i) {
+    loom_link_plan_module_symbol_t* symbol = &module->symbols.values[i];
+    if (loom_link_plan_projection_symbol_is_partial(symbol)) {
+      symbol->materialized_symbol_ordinal = partial_ordinal++;
+    } else {
+      symbol->materialized_symbol_ordinal = complete_ordinal++;
+    }
+  }
+}
+
 iree_status_t loom_link_plan_project_modules(
     const loom_link_plan_t* plan, iree_arena_allocator_t* arena,
     loom_link_plan_module_projection_t* out_projection) {
@@ -116,6 +181,7 @@ iree_status_t loom_link_plan_project_modules(
               },
           .provider_imports = {0},
           .provider_import_anchors = {0},
+          .projected_symbol_count = 0,
       };
     }
     IREE_ASSERT_EQ(symbol_ordinal, symbol_count);
@@ -137,9 +203,31 @@ iree_status_t loom_link_plan_project_modules(
                 },
             .provider_imports = {0},
             .provider_import_anchors = {0},
+            .projected_symbol_count = 0,
         };
         first_symbol_index = i + 1;
       }
+    }
+  }
+
+  iree_host_size_t maximum_materialized_symbol_count = 0;
+  iree_host_size_t synthetic_symbol_count = 0;
+  for (iree_host_size_t i = 0; i < module_count; ++i) {
+    loom_link_plan_projection_assign_materialized_symbol_ordinals(plan,
+                                                                  &modules[i]);
+    const iree_host_size_t materialized_symbol_count =
+        loom_link_plan_module_requires_symbol_projection(&modules[i])
+            ? modules[i].projected_symbol_count
+            : modules[i].symbols.count;
+    maximum_materialized_symbol_count =
+        iree_max(maximum_materialized_symbol_count, materialized_symbol_count);
+    const iree_host_size_t module_synthetic_symbol_count =
+        materialized_symbol_count - modules[i].symbols.count;
+    if (!iree_host_size_checked_add(synthetic_symbol_count,
+                                    module_synthetic_symbol_count,
+                                    &synthetic_symbol_count)) {
+      return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                              "projected symbol count overflow");
     }
   }
 
@@ -249,6 +337,9 @@ iree_status_t loom_link_plan_project_modules(
     module->provider_import_anchors.count = module_import_anchor_count;
   }
 
+  out_projection->maximum_materialized_symbol_count =
+      maximum_materialized_symbol_count;
+  out_projection->synthetic_symbol_count = synthetic_symbol_count;
   out_projection->modules.values = modules;
   out_projection->modules.count = module_count;
   out_projection->symbols.values = symbols;
@@ -275,7 +366,7 @@ static uint32_t loom_link_plan_projection_find_compact_symbol_ordinal(
     } else if (candidate > source_symbol_ordinal) {
       upper_bound = middle;
     } else {
-      return (uint32_t)middle;
+      return module->symbols.values[middle].materialized_symbol_ordinal;
     }
   }
   IREE_ASSERT_UNREACHABLE(
@@ -331,7 +422,8 @@ iree_status_t loom_link_plan_project_linker_imports(
             module->provider_import_anchors
                 .values[projected_import->anchors.first + i];
         provider_import_anchors[anchor_ordinal++] =
-            module->source_module->materialized_module
+            module->source_module->materialized_module &&
+                    !loom_link_plan_module_requires_symbol_projection(module)
                 ? source_symbol_ordinal
                 : loom_link_plan_projection_find_compact_symbol_ordinal(
                       module, source_symbol_ordinal);

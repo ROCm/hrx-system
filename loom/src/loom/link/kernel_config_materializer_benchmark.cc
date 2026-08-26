@@ -18,8 +18,8 @@
 #include "loom/format/text/parser.h"
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
-#include "loom/link/kernel_config_materializer.h"
 #include "loom/link/module_index.h"
+#include "loom/link/plan_materializer.h"
 #include "loom/link/planner.h"
 #include "loom/ops/op_registry.h"
 #include "loom/verify/verify.h"
@@ -90,22 +90,31 @@ class KernelConfigFixture {
     iree_arena_block_pool_deinitialize(&block_pool_);
   }
 
-  loom_link_kernel_config_materialization_t Materialize() {
+  loom_link_plan_materialization_t MaterializePlan(
+      iree_arena_allocator_t* arena) {
     loom_link_plan_materialization_environment_t environment = {};
     environment.context = &context_;
     environment.block_pool = &block_pool_;
     environment.allocator = iree_allocator_system();
-    loom_link_kernel_config_materialization_t materialization = {};
-    CheckStatus(loom_link_plan_materialize_bytecode_kernel_config(
-        plan_, kernel_->ordinal, &environment, IREE_SV("projected"),
-        &materialization));
+    loom_link_plan_materialization_t materialization = {};
+    CheckStatus(loom_link_plan_materialize(
+        plan_, &environment, IREE_SV("projected"), arena, &materialization));
     return materialization;
   }
 
+  iree_arena_block_pool_t* block_pool() { return &block_pool_; }
+
   loom_link_plan_t* BuildPlan() const {
+    const loom_link_plan_root_facet_t root = {
+        /*.symbol_ordinal=*/kernel_->ordinal,
+        /*.kind=*/LOOM_LINK_SYMBOL_FACET_KERNEL_CONFIGURATION,
+    };
+    loom_link_plan_options_t options = {};
+    options.mode = LOOM_LINK_PLAN_SELECTIVE;
+    options.root_facets = {1, &root};
     loom_link_plan_t* plan = nullptr;
-    CheckStatus(loom_link_plan_build_kernel_configuration(
-        index_, kernel_->ordinal, iree_allocator_system(), &plan));
+    CheckStatus(
+        loom_link_plan_build(index_, &options, iree_allocator_system(), &plan));
     return plan;
   }
 
@@ -185,24 +194,6 @@ kernel.def target(@benchmark_target) @benchmark(%element_count: index) {
   iree_host_size_t implementation_payload_bytes_ = 0;
 };
 
-static void BM_MaterializeKernelConfig(benchmark::State& state) {
-  KernelConfigFixture fixture(static_cast<iree_host_size_t>(state.range(0)));
-  for (auto _ : state) {
-    loom_link_kernel_config_materialization_t materialization =
-        fixture.Materialize();
-    benchmark::DoNotOptimize(materialization.module);
-    state.PauseTiming();
-    loom_module_free(materialization.module);
-    state.ResumeTiming();
-  }
-  state.counters["configuration_payload_bytes"] =
-      static_cast<double>(fixture.config_payload_bytes());
-  state.counters["implementation_payload_bytes"] =
-      static_cast<double>(fixture.implementation_payload_bytes());
-  state.SetBytesProcessed(state.iterations() * fixture.config_payload_bytes());
-  state.SetComplexityN(fixture.implementation_payload_bytes());
-}
-
 static void BM_PlanKernelConfig(benchmark::State& state) {
   KernelConfigFixture fixture(static_cast<iree_host_size_t>(state.range(0)));
   iree_host_size_t selected_facet_count = 0;
@@ -226,14 +217,37 @@ static void BM_PlanKernelConfig(benchmark::State& state) {
   state.SetComplexityN(fixture.implementation_payload_bytes());
 }
 
+static void BM_MaterializeKernelConfigPlan(benchmark::State& state) {
+  KernelConfigFixture fixture(static_cast<iree_host_size_t>(state.range(0)));
+  for (auto _ : state) {
+    state.PauseTiming();
+    iree_arena_allocator_t arena;
+    iree_arena_initialize(fixture.block_pool(), &arena);
+    state.ResumeTiming();
+    loom_link_plan_materialization_t materialization =
+        fixture.MaterializePlan(&arena);
+    benchmark::DoNotOptimize(materialization.module);
+    state.PauseTiming();
+    loom_module_free(materialization.module);
+    iree_arena_deinitialize(&arena);
+    state.ResumeTiming();
+  }
+  state.counters["configuration_payload_bytes"] =
+      static_cast<double>(fixture.config_payload_bytes());
+  state.counters["implementation_payload_bytes"] =
+      static_cast<double>(fixture.implementation_payload_bytes());
+  state.SetBytesProcessed(state.iterations() * fixture.config_payload_bytes());
+  state.SetComplexityN(fixture.implementation_payload_bytes());
+}
+
 static void ImplementationPayloadScales(benchmark::Benchmark* benchmark) {
   benchmark->Arg(0)->Arg(4 * 1024)->Arg(64 * 1024)->Arg(1024 * 1024);
 }
 
-BENCHMARK(BM_MaterializeKernelConfig)
+BENCHMARK(BM_PlanKernelConfig)
     ->Apply(ImplementationPayloadScales)
     ->Complexity(benchmark::o1);
-BENCHMARK(BM_PlanKernelConfig)
+BENCHMARK(BM_MaterializeKernelConfigPlan)
     ->Apply(ImplementationPayloadScales)
     ->Complexity(benchmark::o1);
 

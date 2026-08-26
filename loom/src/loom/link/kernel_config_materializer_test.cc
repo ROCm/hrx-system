@@ -19,6 +19,8 @@
 #include "loom/format/text/parser.h"
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
+#include "loom/link/plan_materializer.h"
+#include "loom/ops/config/ops.h"
 #include "loom/ops/func/ops.h"
 #include "loom/ops/index/ops.h"
 #include "loom/ops/kernel/ops.h"
@@ -112,6 +114,20 @@ class KernelConfigMaterializerTest : public ::testing::Test {
     return nullptr;
   }
 
+  loom_symbol_ref_t TargetConfiguration(
+      const loom_link_plan_materialization_t& materialization,
+      iree_host_size_t source_symbol_ordinal) {
+    IREE_ASSERT_LT(source_symbol_ordinal, materialization.target_symbols.count);
+    const loom_symbol_ref_t target_symbol =
+        materialization.target_symbols.values[source_symbol_ordinal];
+    IREE_ASSERT(loom_symbol_ref_is_valid(target_symbol));
+    IREE_ASSERT_EQ(target_symbol.module_id, 0u);
+    IREE_ASSERT_LT(target_symbol.symbol_id,
+                   materialization.target_kernel_configurations.count);
+    return materialization.target_kernel_configurations
+        .values[target_symbol.symbol_id];
+  }
+
   void VerifyBytecodeRoundTrip(const loom_module_t* module) {
     const std::vector<uint8_t> bytecode = Write(module);
     loom_bytecode_read_options_t options = {};
@@ -151,9 +167,16 @@ class KernelConfigMaterializerTest : public ::testing::Test {
 
   PlanPtr BuildConfigPlan(loom_link_module_index_t* index,
                           iree_host_size_t kernel_symbol_ordinal) {
+    const loom_link_plan_root_facet_t root = {
+        /*.symbol_ordinal=*/kernel_symbol_ordinal,
+        /*.kind=*/LOOM_LINK_SYMBOL_FACET_KERNEL_CONFIGURATION,
+    };
+    loom_link_plan_options_t options = {};
+    options.mode = LOOM_LINK_PLAN_SELECTIVE;
+    options.root_facets = {1, &root};
     loom_link_plan_t* plan = nullptr;
-    IREE_CHECK_OK(loom_link_plan_build_kernel_configuration(
-        index, kernel_symbol_ordinal, iree_allocator_system(), &plan));
+    IREE_CHECK_OK(
+        loom_link_plan_build(index, &options, iree_allocator_system(), &plan));
     return PlanPtr(plan);
   }
 
@@ -330,6 +353,39 @@ kernel.def target(@dispatch_target) @dispatch_rows(%element_count: index) {
     environment.context = &context_;
     environment.block_pool = &block_pool_;
     environment.allocator = iree_allocator_system();
+
+    iree_arena_allocator_t configuration_arena;
+    iree_arena_initialize(&block_pool_, &configuration_arena);
+    loom_link_plan_materialization_t configuration_materialization = {};
+    IREE_ASSERT_OK(loom_link_plan_materialize(
+        config_plan.get(), &environment, IREE_SV("configuration"),
+        &configuration_arena, &configuration_materialization));
+    std::unique_ptr<loom_module_t, decltype(&loom_module_free)>
+        configuration_module(configuration_materialization.module,
+                             loom_module_free);
+    Verify(configuration_module.get());
+    ASSERT_EQ(configuration_module->symbols.count, 3u);
+    const loom_symbol_ref_t configuration_kernel =
+        configuration_materialization.target_symbols.values[kernel->ordinal];
+    const loom_symbol_ref_t configuration_function =
+        TargetConfiguration(configuration_materialization, kernel->ordinal);
+    ASSERT_TRUE(loom_symbol_ref_is_valid(configuration_kernel));
+    ASSERT_TRUE(loom_symbol_ref_is_valid(configuration_function));
+    EXPECT_TRUE(loom_kernel_decl_isa(
+        configuration_module->symbols.entries[configuration_kernel.symbol_id]
+            .defining_op));
+    EXPECT_TRUE(loom_func_def_isa(
+        configuration_module->symbols.entries[configuration_function.symbol_id]
+            .defining_op));
+    EXPECT_EQ(
+        configuration_module->symbols.entries[configuration_function.symbol_id]
+            .defining_op->result_count,
+        3u);
+    EXPECT_EQ(
+        FindSymbol(configuration_module.get(), IREE_SV("implementation_only")),
+        nullptr);
+    iree_arena_deinitialize(&configuration_arena);
+
     iree_arena_allocator_t materialization_arena;
     iree_arena_initialize(&block_pool_, &materialization_arena);
     loom_link_plan_materialization_t materialization = {};
@@ -391,9 +447,164 @@ kernel.def target(@dispatch_target) @dispatch_rows(%element_count: index) {
 }
 
 TEST_F(KernelConfigMaterializerTest,
+       ProjectsSharedConfigurationClosureOncePerSourceModule) {
+  const iree_string_view_t source = IREE_SV(R"(
+func.def public pure @dispatch_rows$config(%value: index) -> (index) {
+  func.return %value : index
+}
+
+func.def pure @rows_implementation(%value: index) -> (index) {
+  func.return %value : index
+}
+
+func.def pure @columns_implementation(%value: index) -> (index) {
+  func.return %value : index
+}
+
+kernel.def @dispatch_rows(%count: index) {
+  %one = index.constant 1 : index
+  %groups = func.call pure @dispatch_rows$config(%count) : (index) -> (index)
+  kernel.launch.config workgroups(%groups, %one, %one) workgroup_size(%one, %one, %one) : index
+} launch(%value: index) {
+  %unused = func.call @rows_implementation(%value) : (index) -> (index)
+  kernel.return
+}
+
+kernel.def @dispatch_columns(%count: index) {
+  %one = index.constant 1 : index
+  %groups = func.call pure @dispatch_rows$config(%count) : (index) -> (index)
+  kernel.launch.config workgroups(%groups, %one, %one) workgroup_size(%one, %one, %one) : index
+} launch(%value: index) {
+  %unused = func.call @columns_implementation(%value) : (index) -> (index)
+  kernel.return
+}
+)");
+  loom_module_t* source_module = Parse(source);
+  Verify(source_module);
+  const std::vector<uint8_t> bytecode = Write(source_module);
+
+  enum class ProviderForm {
+    kMaterialized,
+    kBytecode,
+  };
+  const ProviderForm provider_forms[] = {
+      ProviderForm::kMaterialized,
+      ProviderForm::kBytecode,
+  };
+  for (ProviderForm provider_form : provider_forms) {
+    IndexPtr index = CreateIndex();
+    if (provider_form == ProviderForm::kMaterialized) {
+      IREE_ASSERT_OK(loom_link_module_index_add_materialized(
+          index.get(), source_module, /*options=*/nullptr,
+          /*out_provider_ordinal=*/nullptr));
+    } else {
+      IREE_ASSERT_OK(loom_link_module_index_add_bytecode(
+          index.get(),
+          iree_make_const_byte_span(bytecode.data(), bytecode.size()),
+          IREE_SV("provider.loombc"), /*index_options=*/nullptr,
+          /*options=*/nullptr, /*out_provider_ordinal=*/nullptr));
+    }
+
+    const loom_link_module_index_symbol_t* rows =
+        loom_link_module_index_lookup_name(index.get(),
+                                           IREE_SV("dispatch_rows"));
+    const loom_link_module_index_symbol_t* columns =
+        loom_link_module_index_lookup_name(index.get(),
+                                           IREE_SV("dispatch_columns"));
+    const loom_link_module_index_symbol_t* shared =
+        loom_link_module_index_lookup_name(index.get(),
+                                           IREE_SV("dispatch_rows$config"));
+    const loom_link_module_index_symbol_t* rows_implementation =
+        loom_link_module_index_lookup_name(index.get(),
+                                           IREE_SV("rows_implementation"));
+    const loom_link_module_index_symbol_t* columns_implementation =
+        loom_link_module_index_lookup_name(index.get(),
+                                           IREE_SV("columns_implementation"));
+    ASSERT_NE(rows, nullptr);
+    ASSERT_NE(columns, nullptr);
+    ASSERT_NE(shared, nullptr);
+    ASSERT_NE(rows_implementation, nullptr);
+    ASSERT_NE(columns_implementation, nullptr);
+
+    const loom_link_plan_root_facet_t roots[] = {
+        {
+            /*.symbol_ordinal=*/rows->ordinal,
+            /*.kind=*/LOOM_LINK_SYMBOL_FACET_KERNEL_CONFIGURATION,
+        },
+        {
+            /*.symbol_ordinal=*/columns->ordinal,
+            /*.kind=*/LOOM_LINK_SYMBOL_FACET_KERNEL_CONFIGURATION,
+        },
+    };
+    loom_link_plan_options_t plan_options = {};
+    plan_options.mode = LOOM_LINK_PLAN_SELECTIVE;
+    plan_options.root_facets = {IREE_ARRAYSIZE(roots), roots};
+    loom_link_plan_t* plan_storage = nullptr;
+    IREE_ASSERT_OK(loom_link_plan_build(
+        index.get(), &plan_options, iree_allocator_system(), &plan_storage));
+    PlanPtr plan(plan_storage);
+    EXPECT_TRUE(loom_link_plan_contains_symbol(plan.get(), shared->ordinal));
+    EXPECT_FALSE(loom_link_plan_contains_symbol(plan.get(),
+                                                rows_implementation->ordinal));
+    EXPECT_FALSE(loom_link_plan_contains_symbol(
+        plan.get(), columns_implementation->ordinal));
+
+    loom_link_plan_materialization_environment_t environment = {};
+    environment.context = &context_;
+    environment.block_pool = &block_pool_;
+    environment.allocator = iree_allocator_system();
+    iree_arena_allocator_t materialization_arena;
+    iree_arena_initialize(&block_pool_, &materialization_arena);
+    loom_link_plan_materialization_t materialization = {};
+    IREE_ASSERT_OK(loom_link_plan_materialize(
+        plan.get(), &environment, IREE_SV("shared.config"),
+        &materialization_arena, &materialization));
+    std::unique_ptr<loom_module_t, decltype(&loom_module_free)> module(
+        materialization.module, loom_module_free);
+    Verify(module.get());
+    ASSERT_EQ(module->symbols.count, 5u);
+    const loom_symbol_t* shared_symbol =
+        FindSymbol(module.get(), IREE_SV("dispatch_rows$config"));
+    ASSERT_NE(shared_symbol, nullptr);
+    EXPECT_TRUE(loom_func_def_isa(shared_symbol->defining_op));
+    EXPECT_EQ(FindSymbol(module.get(), IREE_SV("rows_implementation")),
+              nullptr);
+    EXPECT_EQ(FindSymbol(module.get(), IREE_SV("columns_implementation")),
+              nullptr);
+
+    const loom_symbol_ref_t rows_config =
+        TargetConfiguration(materialization, rows->ordinal);
+    const loom_symbol_ref_t columns_config =
+        TargetConfiguration(materialization, columns->ordinal);
+    ASSERT_TRUE(loom_symbol_ref_is_valid(rows_config));
+    ASSERT_TRUE(loom_symbol_ref_is_valid(columns_config));
+    EXPECT_NE(rows_config.symbol_id, columns_config.symbol_id);
+    EXPECT_NE(rows_config.symbol_id,
+              (uint16_t)(shared_symbol - module->symbols.entries));
+    EXPECT_NE(columns_config.symbol_id,
+              (uint16_t)(shared_symbol - module->symbols.entries));
+    EXPECT_TRUE(loom_func_def_isa(
+        module->symbols.entries[rows_config.symbol_id].defining_op));
+    EXPECT_TRUE(loom_func_def_isa(
+        module->symbols.entries[columns_config.symbol_id].defining_op));
+    iree_arena_deinitialize(&materialization_arena);
+  }
+
+  loom_module_free(source_module);
+}
+
+TEST_F(KernelConfigMaterializerTest,
        ProjectsConfigurationWithoutReadingPoisonedImplementation) {
   loom_module_t* source_module = Parse(IREE_SV(R"(
 target.generic<reference> @dispatch_target
+
+config.def @configuration_bias = 63 : index
+
+func.def public pure @configuration_only(%value: index) -> (index) {
+  %bias = config.get @configuration_bias : index
+  %result = index.add %value, %bias : index
+  func.return %result : index
+}
 
 func.def pure @implementation_only(%value: index) -> (index) {
   func.return %value : index
@@ -401,11 +612,11 @@ func.def pure @implementation_only(%value: index) -> (index) {
 
 kernel.def target(@dispatch_target) @dispatch_rows(%element_count: index) {
   %one = index.constant 1 : index
-  %sixty_three = index.constant 63 : index
+  %two = index.constant 2 : index
   %subgroup_size = target.subgroup.size : index
-  %rounded_count = index.add %element_count, %sixty_three : index
+  %rounded_count = func.call pure @configuration_only(%element_count) : (index) -> (index)
   %workgroup_count = index.div %rounded_count, %subgroup_size : index
-  kernel.launch.config workgroups(%workgroup_count, %one, %one) workgroup_size(%subgroup_size, %one, %one) : index
+  kernel.launch.config workgroups(%workgroup_count, %two, %one) workgroup_size(%subgroup_size, %one, %one) cluster_size(%one, %two, %one) : index
 } launch(%stride: index, %rows: index, %source: tensor<[%rows]xi32>) where [mul(%rows, 16), mul(%stride, 4)] {
   %unused = func.call @implementation_only(%stride) : (index) -> (index)
   kernel.return
@@ -425,14 +636,26 @@ kernel.def target(@dispatch_target) @dispatch_rows(%element_count: index) {
     const loom_link_module_index_symbol_t* materialized_implementation_only =
         loom_link_module_index_lookup_name(materialized_index.get(),
                                            IREE_SV("implementation_only"));
+    const loom_link_module_index_symbol_t* materialized_configuration_only =
+        loom_link_module_index_lookup_name(materialized_index.get(),
+                                           IREE_SV("configuration_only"));
+    const loom_link_module_index_symbol_t* materialized_configuration_bias =
+        loom_link_module_index_lookup_name(materialized_index.get(),
+                                           IREE_SV("configuration_bias"));
     ASSERT_NE(materialized_kernel, nullptr);
     ASSERT_NE(materialized_implementation_only, nullptr);
+    ASSERT_NE(materialized_configuration_only, nullptr);
+    ASSERT_NE(materialized_configuration_bias, nullptr);
     PlanPtr materialized_plan =
         BuildConfigPlan(materialized_index.get(), materialized_kernel->ordinal);
     EXPECT_TRUE(loom_link_plan_contains_symbol(materialized_plan.get(),
                                                materialized_kernel->ordinal));
     EXPECT_FALSE(loom_link_plan_contains_symbol(
         materialized_plan.get(), materialized_implementation_only->ordinal));
+    EXPECT_TRUE(loom_link_plan_contains_symbol(
+        materialized_plan.get(), materialized_configuration_only->ordinal));
+    EXPECT_TRUE(loom_link_plan_contains_symbol(
+        materialized_plan.get(), materialized_configuration_bias->ordinal));
     EXPECT_TRUE(loom_link_plan_contains_facet(
         materialized_plan.get(), materialized_kernel->ordinal,
         LOOM_LINK_SYMBOL_FACET_KERNEL_CONTRACT));
@@ -442,6 +665,37 @@ kernel.def target(@dispatch_target) @dispatch_rows(%element_count: index) {
     EXPECT_FALSE(loom_link_plan_contains_facet(
         materialized_plan.get(), materialized_kernel->ordinal,
         LOOM_LINK_SYMBOL_FACET_KERNEL_IMPLEMENTATION));
+
+    loom_link_plan_materialization_environment_t environment = {};
+    environment.context = &context_;
+    environment.block_pool = &block_pool_;
+    environment.allocator = iree_allocator_system();
+    iree_arena_allocator_t materialization_arena;
+    iree_arena_initialize(&block_pool_, &materialization_arena);
+    loom_link_plan_materialization_t materialization = {};
+    IREE_ASSERT_OK(loom_link_plan_materialize(
+        materialized_plan.get(), &environment, IREE_SV("materialized.config"),
+        &materialization_arena, &materialization));
+    std::unique_ptr<loom_module_t, decltype(&loom_module_free)>
+        materialized_configuration(materialization.module, loom_module_free);
+    Verify(materialized_configuration.get());
+    EXPECT_EQ(materialized_configuration->symbols.count, 5u);
+    EXPECT_EQ(FindSymbol(materialized_configuration.get(),
+                         IREE_SV("implementation_only")),
+              nullptr);
+    const loom_symbol_ref_t projected_kernel =
+        materialization.target_symbols.values[materialized_kernel->ordinal];
+    const loom_symbol_ref_t projected_config =
+        TargetConfiguration(materialization, materialized_kernel->ordinal);
+    ASSERT_TRUE(loom_symbol_ref_is_valid(projected_kernel));
+    ASSERT_TRUE(loom_symbol_ref_is_valid(projected_config));
+    EXPECT_TRUE(loom_kernel_decl_isa(
+        materialized_configuration->symbols.entries[projected_kernel.symbol_id]
+            .defining_op));
+    EXPECT_TRUE(loom_func_def_isa(
+        materialized_configuration->symbols.entries[projected_config.symbol_id]
+            .defining_op));
+    iree_arena_deinitialize(&materialization_arena);
   }
   loom_module_free(source_module);
 
@@ -459,9 +713,21 @@ kernel.def target(@dispatch_target) @dispatch_rows(%element_count: index) {
   const loom_link_module_index_symbol_t* implementation_only =
       loom_link_module_index_lookup_name(index.get(),
                                          IREE_SV("implementation_only"));
+  const loom_link_module_index_symbol_t* configuration_only =
+      loom_link_module_index_lookup_name(index.get(),
+                                         IREE_SV("configuration_only"));
+  const loom_link_module_index_symbol_t* configuration_bias =
+      loom_link_module_index_lookup_name(index.get(),
+                                         IREE_SV("configuration_bias"));
   ASSERT_NE(implementation_only, nullptr);
+  ASSERT_NE(configuration_only, nullptr);
+  ASSERT_NE(configuration_bias, nullptr);
   EXPECT_FALSE(
       loom_link_plan_contains_symbol(plan.get(), implementation_only->ordinal));
+  EXPECT_TRUE(
+      loom_link_plan_contains_symbol(plan.get(), configuration_only->ordinal));
+  EXPECT_TRUE(
+      loom_link_plan_contains_symbol(plan.get(), configuration_bias->ordinal));
   EXPECT_TRUE(
       loom_link_plan_contains_facet(plan.get(), indexed_kernel->ordinal,
                                     LOOM_LINK_SYMBOL_FACET_KERNEL_CONTRACT));
@@ -500,20 +766,29 @@ kernel.def target(@dispatch_target) @dispatch_rows(%element_count: index) {
   environment.context = &context_;
   environment.block_pool = &block_pool_;
   environment.allocator = iree_allocator_system();
-  loom_link_kernel_config_materialization_t materialization = {};
-  IREE_ASSERT_OK(loom_link_plan_materialize_bytecode_kernel_config(
-      plan.get(), indexed_kernel->ordinal, &environment,
-      IREE_SV("projected.config"), &materialization));
+  iree_arena_allocator_t config_materialization_arena;
+  iree_arena_initialize(&block_pool_, &config_materialization_arena);
+  loom_link_plan_materialization_t materialization = {};
+  IREE_ASSERT_OK(loom_link_plan_materialize(
+      plan.get(), &environment, IREE_SV("projected.config"),
+      &config_materialization_arena, &materialization));
   std::unique_ptr<loom_module_t, decltype(&loom_module_free)> projected_module(
       materialization.module, loom_module_free);
   Verify(projected_module.get());
 
-  ASSERT_EQ(projected_module->symbols.count, 3u);
-  ASSERT_TRUE(loom_symbol_ref_is_valid(materialization.kernel_declaration));
-  ASSERT_TRUE(loom_symbol_ref_is_valid(materialization.configuration_function));
+  ASSERT_EQ(projected_module->symbols.count, 5u);
+  ASSERT_EQ(materialization.target_symbols.count,
+            loom_link_module_index_symbol_count(index.get()));
+  ASSERT_EQ(materialization.target_kernel_configurations.count,
+            projected_module->symbols.count);
+  const loom_symbol_ref_t projected_kernel_ref =
+      materialization.target_symbols.values[indexed_kernel->ordinal];
+  const loom_symbol_ref_t projected_helper_ref =
+      TargetConfiguration(materialization, indexed_kernel->ordinal);
+  ASSERT_TRUE(loom_symbol_ref_is_valid(projected_kernel_ref));
+  ASSERT_TRUE(loom_symbol_ref_is_valid(projected_helper_ref));
   loom_op_t* kernel_op =
-      projected_module->symbols
-          .entries[materialization.kernel_declaration.symbol_id]
+      projected_module->symbols.entries[projected_kernel_ref.symbol_id]
           .defining_op;
   ASSERT_TRUE(loom_kernel_decl_isa(kernel_op));
   loom_func_like_t kernel =
@@ -523,8 +798,29 @@ kernel.def target(@dispatch_target) @dispatch_rows(%element_count: index) {
   ASSERT_TRUE(loom_symbol_ref_is_valid(target_ref));
   ASSERT_EQ(target_ref.module_id, 0u);
   ASSERT_LT(target_ref.symbol_id, projected_module->symbols.count);
-  EXPECT_TRUE(loom_target_decl_isa(
+  EXPECT_TRUE(loom_target_generic_isa(
       projected_module->symbols.entries[target_ref.symbol_id].defining_op));
+  const loom_symbol_t* projected_configuration_bias =
+      FindSymbol(projected_module.get(), IREE_SV("configuration_bias"));
+  ASSERT_NE(projected_configuration_bias, nullptr);
+  EXPECT_TRUE(loom_config_def_isa(projected_configuration_bias->defining_op));
+  const loom_symbol_t* projected_configuration =
+      FindSymbol(projected_module.get(), IREE_SV("configuration_only"));
+  ASSERT_NE(projected_configuration, nullptr);
+  EXPECT_TRUE(loom_func_def_isa(projected_configuration->defining_op));
+  EXPECT_FALSE(iree_any_bit_set(projected_configuration->flags,
+                                LOOM_SYMBOL_FLAG_PUBLIC));
+  const loom_func_like_t configuration_function = loom_func_like_cast(
+      projected_module.get(), projected_configuration->defining_op);
+  EXPECT_EQ(loom_func_like_visibility(configuration_function), 0u);
+  loom_block_t* configuration_block =
+      loom_region_entry_block(loom_func_like_body(configuration_function));
+  bool configuration_reads_bias = false;
+  const loom_op_t* configuration_op = nullptr;
+  loom_block_for_each_op(configuration_block, configuration_op) {
+    configuration_reads_bias |= loom_config_get_isa(configuration_op);
+  }
+  EXPECT_TRUE(configuration_reads_bias);
   const loom_value_slice_t workloads =
       loom_kernel_workload_arg_ids(projected_module.get(), kernel_op);
   ASSERT_EQ(workloads.count, 1u);
@@ -541,8 +837,7 @@ kernel.def target(@dispatch_target) @dispatch_rows(%element_count: index) {
   EXPECT_EQ(kernel_predicate_count, 2u);
 
   loom_op_t* helper_op =
-      projected_module->symbols
-          .entries[materialization.configuration_function.symbol_id]
+      projected_module->symbols.entries[projected_helper_ref.symbol_id]
           .defining_op;
   ASSERT_TRUE(loom_func_def_isa(helper_op));
   loom_func_like_t helper =
@@ -562,13 +857,16 @@ kernel.def target(@dispatch_target) @dispatch_rows(%element_count: index) {
 
   loom_block_t* helper_block =
       loom_region_entry_block(loom_func_like_body(helper));
+  bool saw_configuration_call = false;
   bool saw_division = false;
   bool saw_target_query = false;
   const loom_op_t* op = nullptr;
   loom_block_for_each_op(helper_block, op) {
+    saw_configuration_call |= loom_func_call_isa(op);
     saw_division |= loom_index_div_isa(op);
     saw_target_query |= loom_target_subgroup_size_isa(op);
   }
+  EXPECT_TRUE(saw_configuration_call);
   EXPECT_TRUE(saw_division);
   EXPECT_TRUE(saw_target_query);
   ASSERT_TRUE(loom_func_return_isa(helper_block->last_op));
@@ -588,7 +886,7 @@ kernel.def target(@dispatch_target) @dispatch_rows(%element_count: index) {
       &read_result, &roundtrip_module, iree_allocator_system()));
   ASSERT_EQ(read_result.error_count, 0u);
   ASSERT_NE(roundtrip_module, nullptr);
-  EXPECT_EQ(roundtrip_module->symbols.count, 3u);
+  EXPECT_EQ(roundtrip_module->symbols.count, 5u);
   loom_module_free(roundtrip_module);
 
   iree_arena_allocator_t materialization_arena;
@@ -603,6 +901,8 @@ kernel.def target(@dispatch_target) @dispatch_rows(%element_count: index) {
   IREE_EXPECT_NOT_OK(full_status);
   loom_module_free(full_materialization.module);
   iree_arena_deinitialize(&materialization_arena);
+  projected_module.reset();
+  iree_arena_deinitialize(&config_materialization_arena);
 }
 
 }  // namespace

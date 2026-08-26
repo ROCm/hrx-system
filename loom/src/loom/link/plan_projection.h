@@ -24,6 +24,10 @@ typedef struct loom_link_plan_module_symbol_t {
   const loom_link_plan_symbol_t* plan_symbol;
   // Indexed source symbol consumed by materialization.
   const loom_link_module_index_symbol_t* source_symbol;
+  // Symbol ordinal used by the module presented to the incremental linker.
+  // Already-materialized complete modules retain sparse source ordinals;
+  // compact bytecode and facet-projected modules use dense projected ordinals.
+  uint32_t materialized_symbol_ordinal;
 } loom_link_plan_module_symbol_t;
 
 // One retained provider import projected into a source module's ordinal
@@ -65,10 +69,24 @@ typedef struct loom_link_plan_module_selection_t {
     // Number of retained anchors in this module.
     iree_host_size_t count;
   } provider_import_anchors;
+  // Dense symbol count produced when at least one selected source symbol must
+  // be reconstructed from a strict subset of its semantic facets. Includes one
+  // helper for every partial source symbol; zero selects ordinary
+  // materialization.
+  iree_host_size_t projected_symbol_count;
 } loom_link_plan_module_selection_t;
+
+static inline bool loom_link_plan_module_requires_symbol_projection(
+    const loom_link_plan_module_selection_t* selection) {
+  return selection->projected_symbol_count != 0;
+}
 
 // Module-local partition of one authoritative metadata link plan.
 typedef struct loom_link_plan_module_projection_t {
+  // Largest symbol domain presented by any projected source module.
+  iree_host_size_t maximum_materialized_symbol_count;
+  // Number of synthetic helper symbols added by semantic facet projection.
+  iree_host_size_t synthetic_symbol_count;
   // Source modules in increasing index ordinal order. Archive projections
   // include symbol-empty modules so their module-level metadata is retained.
   struct {

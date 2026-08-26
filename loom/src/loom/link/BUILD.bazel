@@ -176,11 +176,25 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "materialization_environment",
+    hdrs = ["materialization_environment.h"],
+    deps = [
+        ":module_index",
+        "//loom/src/loom/error:diagnostic",
+        "//loom/src/loom/format:low_repr",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
     name = "plan_materializer",
     srcs = ["plan_materializer.c"],
     hdrs = ["plan_materializer.h"],
     deps = [
+        ":kernel_config_materializer",
         ":linker",
+        ":materialization_environment",
         ":plan_projection",
         ":planner",
         "//loom/src/loom/error:diagnostic",
@@ -198,16 +212,21 @@ loom_cc_library(
     srcs = ["kernel_config_materializer.c"],
     hdrs = ["kernel_config_materializer.h"],
     deps = [
-        ":plan_materializer",
+        ":materialization_environment",
+        ":plan_projection",
+        ":planner",
         "//loom/src/loom/format/bytecode:function_projection_reader",
+        "//loom/src/loom/format/bytecode:selected_reader",
         "//loom/src/loom/ir",
+        "//loom/src/loom/ir:symbol_map",
         "//loom/src/loom/ops:op_defs",
         "//loom/src/loom/ops:type_registry",
         "//loom/src/loom/ops/func",
         "//loom/src/loom/ops/kernel",
-        "//loom/src/loom/ops/target",
+        "//loom/src/loom/rewrite:materialize",
         "//loom/src/loom/rewrite:remap",
         "//loom/src/loom/rewrite:rewriter",
+        "//loom/src/loom/util:adaptive_sort",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
     ],
@@ -226,6 +245,7 @@ loom_cc_test(
         "//loom/src/loom/format/text:parser",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:op_registry",
+        "//loom/src/loom/ops/config",
         "//loom/src/loom/ops/func",
         "//loom/src/loom/ops/index",
         "//loom/src/loom/ops/kernel",
@@ -384,8 +404,8 @@ loom_cc_benchmark(
     name = "kernel_config_materializer_benchmark",
     srcs = ["kernel_config_materializer_benchmark.cc"],
     deps = [
-        ":kernel_config_materializer",
         ":module_index",
+        ":plan_materializer",
         ":planner",
         "//loom/src/loom/format/bytecode:writer",
         "//loom/src/loom/format/text:parser",

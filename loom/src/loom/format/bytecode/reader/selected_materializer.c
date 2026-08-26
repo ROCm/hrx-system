@@ -160,6 +160,27 @@ static iree_status_t loom_bytecode_selected_module_allocate(
                               materializer->host_allocator, out_module);
 }
 
+static iree_status_t loom_bytecode_selected_module_materialize_prepared_into(
+    const loom_bytecode_selected_module_materializer_t* materializer,
+    const loom_bytecode_selected_module_preparation_t* preparation,
+    iree_host_size_t selected_symbol_count,
+    loom_bytecode_selected_symbol_resolver_t symbol_resolver,
+    loom_module_t* output_module) {
+  loom_bytecode_selected_table_materializer_t tables;
+  loom_bytecode_selected_table_materializer_initialize(
+      materializer->decoder, materializer->bytecode, materializer->context,
+      materializer->metadata, materializer->scratch_arena, output_module,
+      symbol_resolver, materializer->host_allocator, &tables);
+  loom_bytecode_selected_symbol_materializer_t symbols;
+  loom_bytecode_selected_symbol_materializer_initialize(
+      materializer->decoder, materializer->block_pool, &tables,
+      &materializer->low_repr_environment, &symbols);
+  const iree_status_t status = loom_bytecode_selected_symbols_materialize(
+      &symbols, preparation->symbols, selected_symbol_count);
+  loom_bytecode_selected_table_materializer_deinitialize(&tables);
+  return status;
+}
+
 iree_status_t loom_bytecode_selected_module_materialize(
     const loom_bytecode_selected_module_materializer_t* materializer,
     const iree_host_size_t* ordinals, iree_host_size_t ordinal_count,
@@ -172,20 +193,10 @@ iree_status_t loom_bytecode_selected_module_materialize(
   loom_module_t* output_module = NULL;
   iree_status_t status = loom_bytecode_selected_module_allocate(
       materializer, ordinal_count, &preparation, &output_module);
-  loom_bytecode_selected_table_materializer_t tables;
   if (iree_status_is_ok(status)) {
-    loom_bytecode_selected_table_materializer_initialize(
-        materializer->decoder, materializer->bytecode, materializer->context,
-        materializer->metadata, materializer->scratch_arena, output_module,
-        loom_bytecode_selected_symbol_resolver_empty(),
-        materializer->host_allocator, &tables);
-    loom_bytecode_selected_symbol_materializer_t symbols;
-    loom_bytecode_selected_symbol_materializer_initialize(
-        materializer->decoder, materializer->block_pool, &tables,
-        &materializer->low_repr_environment, &symbols);
-    status = loom_bytecode_selected_symbols_materialize(
-        &symbols, preparation.symbols, ordinal_count);
-    loom_bytecode_selected_table_materializer_deinitialize(&tables);
+    status = loom_bytecode_selected_module_materialize_prepared_into(
+        materializer, &preparation, ordinal_count,
+        loom_bytecode_selected_symbol_resolver_empty(), output_module);
   }
   if (iree_status_is_ok(status)) {
     *out_module = output_module;
@@ -193,4 +204,20 @@ iree_status_t loom_bytecode_selected_module_materialize(
   }
   loom_module_free(output_module);
   return status;
+}
+
+iree_status_t loom_bytecode_selected_module_materialize_into(
+    const loom_bytecode_selected_module_materializer_t* materializer,
+    const iree_host_size_t* ordinals, iree_host_size_t ordinal_count,
+    loom_bytecode_selected_symbol_resolver_t symbol_resolver,
+    loom_module_t* output_module) {
+  IREE_ASSERT_ARGUMENT(materializer);
+  IREE_ASSERT_ARGUMENT(output_module);
+  IREE_ASSERT(output_module->context == materializer->context);
+  loom_bytecode_selected_module_preparation_t preparation;
+  IREE_RETURN_IF_ERROR(loom_bytecode_selected_module_prepare(
+      materializer, ordinals, ordinal_count, &preparation));
+  return loom_bytecode_selected_module_materialize_prepared_into(
+      materializer, &preparation, ordinal_count, symbol_resolver,
+      output_module);
 }
