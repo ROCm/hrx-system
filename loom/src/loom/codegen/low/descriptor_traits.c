@@ -48,9 +48,11 @@ loom_trait_flags_t loom_low_descriptor_effective_traits(
         traits |= LOOM_TRAIT_TERMINATOR;
         break;
       case LOOM_LOW_EFFECT_KIND_CALL:
-      case LOOM_LOW_EFFECT_KIND_BARRIER:
       case LOOM_LOW_EFFECT_KIND_COUNTER:
         traits |= LOOM_TRAIT_UNKNOWN_EFFECTS;
+        break;
+      case LOOM_LOW_EFFECT_KIND_BARRIER:
+        traits |= LOOM_TRAIT_MEMORY_FENCE;
         break;
       case LOOM_LOW_EFFECT_KIND_CONVERGENT:
         traits |= LOOM_TRAIT_CONVERGENT;
@@ -79,10 +81,10 @@ loom_trait_flags_t loom_low_descriptor_effective_traits(
   }
   if (iree_any_bit_set(traits, LOOM_TRAIT_UNKNOWN_EFFECTS)) return traits;
 
-  if (!iree_any_bit_set(traits, LOOM_TRAIT_READS_MEMORY |
-                                    LOOM_TRAIT_WRITES_MEMORY |
-                                    LOOM_TRAIT_NON_DETERMINISTIC |
-                                    LOOM_TRAIT_UNIQUE_IDENTITY)) {
+  if (!iree_any_bit_set(
+          traits, LOOM_TRAIT_READS_MEMORY | LOOM_TRAIT_WRITES_MEMORY |
+                      LOOM_TRAIT_NON_DETERMINISTIC | LOOM_TRAIT_MEMORY_FENCE |
+                      LOOM_TRAIT_UNIQUE_IDENTITY)) {
     if (descriptor->effect_count == 0 &&
         iree_any_bit_set(descriptor->flags,
                          LOOM_LOW_DESCRIPTOR_FLAG_SIDE_EFFECTING)) {
